@@ -1,3 +1,6 @@
+import type { BeastCatalogEntry, BeastInterviewPrompt } from '../../lib/beast-api';
+import { findCatalogEntry, getPromptValue, isBlankCatalogValue } from './wizard-catalog';
+
 export const WIZARD_SECTION_LABELS = ['Identity', 'Workflow', 'LLM Targets', 'Modules', 'Skills', 'Prompts', 'Git', 'Review'] as const;
 
 export type WizardValidationErrors = Record<string, string>;
@@ -8,6 +11,7 @@ type WorkflowValues = {
   goal?: unknown;
   topic?: unknown;
   outputPath?: unknown;
+  designDocPath?: unknown;
   docPath?: unknown;
   outputDir?: unknown;
   provider?: unknown;
@@ -27,7 +31,38 @@ function isRepoRelativeMarkdownDesignDocPath(value: string): boolean {
   return /\.(?:md|mdx|markdown)$/i.test(value);
 }
 
-export function validateWizardStep(step: number, stepValues: WizardStepValues): WizardValidationErrors {
+function requiredMessage(prompt: BeastInterviewPrompt): string {
+  if (prompt.key === 'goal') return 'Design interview goal is required.';
+  if (prompt.key === 'outputPath') return 'Design interview output path is required.';
+  if (prompt.key === 'designDocPath') return 'Design doc path is required.';
+  if (prompt.key === 'outputDir') return 'Output directory is required.';
+  if (prompt.key === 'provider') return 'Provider is required.';
+  if (prompt.key === 'objective') return 'Objective is required.';
+  if (prompt.key === 'chunkDirectory') return 'Chunk directory path is required.';
+  return `${prompt.prompt.replace(/[?.!]+$/g, '')} is required.`;
+}
+
+function validateCatalogPrompt(
+  errors: WizardValidationErrors,
+  values: WorkflowValues,
+  prompt: BeastInterviewPrompt,
+): void {
+  const value = getPromptValue(values as Record<string, unknown>, prompt);
+  const errorKey = prompt.key === 'chunkDirectory' ? 'chunkDir' : prompt.key;
+  if (prompt.required && isBlankCatalogValue(value)) {
+    errors[errorKey] = requiredMessage(prompt);
+    return;
+  }
+  if (prompt.key === 'designDocPath' && typeof value === 'string' && !isRepoRelativeMarkdownDesignDocPath(value)) {
+    errors.designDocPath = 'Design doc path must be a repo-relative Markdown file without traversal.';
+  }
+}
+
+export function validateWizardStep(
+  step: number,
+  stepValues: WizardStepValues,
+  catalog?: readonly BeastCatalogEntry[],
+): WizardValidationErrors {
   const errors: WizardValidationErrors = {};
 
   if (step === 0) {
@@ -43,52 +78,20 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
       errors.workflowType = 'Workflow type is required.';
     }
 
-    if (values.workflowType === 'design-interview') {
-      if (isBlank(values.goal ?? values.topic)) {
-        errors.topic = 'Design interview goal is required.';
-      }
-      if (isBlank(values.outputPath)) {
-        errors.outputPath = 'Design interview output path is required.';
-      }
-    }
-
-    if (values.workflowType === 'chunk-plan') {
-      const docPath = values.docPath;
-      if (isBlank(docPath)) {
-        errors.docPath = 'Design doc path is required.';
-      } else if (typeof docPath !== 'string' || !isRepoRelativeMarkdownDesignDocPath(docPath)) {
-        errors.docPath = 'Design doc path must be a repo-relative Markdown file without traversal.';
-      }
-      if (isBlank(values.outputDir)) {
-        errors.outputDir = 'Output directory is required.';
-      }
-    }
-
-    if (values.workflowType === 'martin-loop') {
-      if (isBlank(values.provider)) {
-        errors.provider = 'Provider is required.';
-      }
-      if (isBlank(values.objective)) {
-        errors.objective = 'Objective is required.';
-      }
-      if (isBlank(values.chunkDirectory ?? values.chunkDir)) {
-        errors.chunkDir = 'Chunk directory path is required.';
-      }
-    }
-
-    if (
-      !isBlank(values.workflowType) &&
-      values.workflowType !== 'design-interview' &&
-      values.workflowType !== 'chunk-plan' &&
-      values.workflowType !== 'martin-loop'
-    ) {
+    const workflowType = typeof values.workflowType === 'string' ? values.workflowType : undefined;
+    const selectedDefinition = findCatalogEntry(catalog, workflowType);
+    if (workflowType && !selectedDefinition) {
       errors.workflowType = 'Choose a supported launch workflow.';
+    }
+
+    for (const prompt of selectedDefinition?.interviewPrompts ?? []) {
+      validateCatalogPrompt(errors, values, prompt);
     }
   }
 
   if (step === 7) {
     for (let i = 0; i < WIZARD_SECTION_LABELS.length - 1; i += 1) {
-      const stepErrors = validateWizardStep(i, stepValues);
+      const stepErrors = validateWizardStep(i, stepValues, catalog);
       for (const [field, message] of Object.entries(stepErrors)) {
         errors[`${i}.${field}`] = `${WIZARD_SECTION_LABELS[i]}: ${message}`;
       }
@@ -98,15 +101,22 @@ export function validateWizardStep(step: number, stepValues: WizardStepValues): 
   return errors;
 }
 
-export function getFirstInvalidWizardStep(stepValues: WizardStepValues): number | null {
+export function getFirstInvalidWizardStep(
+  stepValues: WizardStepValues,
+  catalog?: readonly BeastCatalogEntry[],
+): number | null {
   for (let i = 0; i < WIZARD_SECTION_LABELS.length - 1; i += 1) {
-    if (Object.keys(validateWizardStep(i, stepValues)).length > 0) {
+    if (Object.keys(validateWizardStep(i, stepValues, catalog)).length > 0) {
       return i;
     }
   }
   return null;
 }
 
-export function isWizardStepValid(step: number, stepValues: WizardStepValues): boolean {
-  return Object.keys(validateWizardStep(step, stepValues)).length === 0;
+export function isWizardStepValid(
+  step: number,
+  stepValues: WizardStepValues,
+  catalog?: readonly BeastCatalogEntry[],
+): boolean {
+  return Object.keys(validateWizardStep(step, stepValues, catalog)).length === 0;
 }

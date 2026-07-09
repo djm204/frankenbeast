@@ -10,6 +10,8 @@ export interface EvaluationInput {
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
+export const EVALUATOR_EXCEPTION_LOCATION = 'internal:evaluator-exception';
+
 /** A single finding from an evaluator. */
 export interface EvaluationFinding {
   /** Human-readable description of the issue. */
@@ -35,7 +37,7 @@ export interface EvaluationResult {
 }
 
 /** Aggregated result from all evaluators in the pipeline. */
-export interface CritiqueResult {
+export interface CritiquePipelineResult {
   /** Overall verdict (fail if any evaluator fails, warn if only warnings exist). */
   readonly verdict: Verdict;
   /** Average score across all evaluators. */
@@ -45,6 +47,13 @@ export interface CritiqueResult {
   /** Whether evaluation was short-circuited (e.g., safety failure). */
   readonly shortCircuited: boolean;
 }
+
+/**
+ * @deprecated Use CritiquePipelineResult for aggregate pipeline outcomes.
+ * @franken/types exports ProviderCritiqueFinding for individual provider
+ * critique findings.
+ */
+export type CritiqueResult = CritiquePipelineResult;
 
 /** An evaluator that can assess code or plans. */
 export interface Evaluator {

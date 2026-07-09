@@ -3,6 +3,12 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 export interface ApprovalResponseSignaturePayloadFields {
   readonly requestId: string;
   readonly decision: string;
+  readonly respondedBy: string;
+  readonly feedback?: string | undefined;
+}
+
+function formatOptionalField(value: string | undefined): string {
+  return value === undefined ? 'u' : `s:${encodeURIComponent(value)}`;
 }
 
 /**
@@ -14,7 +20,12 @@ export interface ApprovalResponseSignaturePayloadFields {
 export function formatApprovalResponseSignaturePayload(
   fields: ApprovalResponseSignaturePayloadFields,
 ): string {
-  return `requestId:${encodeURIComponent(fields.requestId)}|decision:${encodeURIComponent(fields.decision)}`;
+  return [
+    `requestId:${encodeURIComponent(fields.requestId)}`,
+    `decision:${encodeURIComponent(fields.decision)}`,
+    `respondedBy:${encodeURIComponent(fields.respondedBy)}`,
+    `feedback:${formatOptionalField(fields.feedback)}`,
+  ].join('|');
 }
 
 export class SignatureVerifier {

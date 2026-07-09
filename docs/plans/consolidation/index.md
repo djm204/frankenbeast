@@ -1,7 +1,7 @@
 # Architecture Consolidation — Design Specs
 
 **ADR:** [031-architecture-consolidation-provider-agnostic](../../adr/031-architecture-consolidation-provider-agnostic.md)
-**Implementation Plan:** [2026-03-18-architecture-consolidation-plan.md](../2026-03-18-architecture-consolidation-plan.md)
+**Implementation Plan:** See the phase index below and the [residuals master plan](residuals-master-plan.md) for the retained consolidation plan artifacts.
 **Date:** 2026-03-19
 **Status:** Design
 

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,18 @@ describe('hard-coded example secret scanner', () => {
     };
 
     expect(packageJson.scripts?.['lint:security']).toContain('node scripts/check-hardcoded-secrets.mjs');
+  });
+
+  it('keeps the issue 506 secret examples removed or env-backed', () => {
+    expect(existsSync(resolve(ROOT, 'packages/franken-mcp-suite/src/config/defaults.ts'))).toBe(false);
+    expect(existsSync(resolve(ROOT, 'packages/franken-web/src/lib/config.ts'))).toBe(false);
+
+    const envExample = readFileSync(resolve(ROOT, '.env.example'), 'utf8');
+    expect(envExample).not.toMatch(/^\s*SECRET_KEY\s*=/m);
+    expect(envExample).not.toMatch(/^\s*AWS_ACCESS_KEY_ID\s*=/m);
+    expect(envExample).not.toMatch(/^\s*JWT_SECRET\s*=/m);
+    expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
+    expect(envExample).toContain('# GRAFANA_PASSWORD=change-me-random-grafana-password');
   });
 
   it('passes the repository fixtures that keep secret examples commented or env-backed', () => {

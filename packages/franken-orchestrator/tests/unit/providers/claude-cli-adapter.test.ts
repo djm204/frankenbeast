@@ -17,7 +17,9 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
     stdin,
     stderr: new PassThrough(),
     pid: 1234,
-    kill: vi.fn(),
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
   });
   (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
 
@@ -27,7 +29,10 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
       stdout.write(line + '\n');
     }
     stdout.end();
-    setImmediate(() => proc.emit('close', exitCode));
+    setImmediate(() => {
+      proc.exitCode = exitCode;
+      proc.emit('close', exitCode);
+    });
   });
 
   return proc;
@@ -157,11 +162,12 @@ describe('ClaudeCliAdapter', () => {
     });
 
     it('reads top-level Claude result token totals', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({ type: 'result', result: 'Final answer', usage: {}, total_input_tokens: 21, total_output_tokens: 8 }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 21, outputTokens: 8, totalTokens: 29 } });
+      expect(proc.kill).not.toHaveBeenCalled();
     });
 
     it('treats Claude error result subtypes as failures', async () => {
@@ -316,11 +322,24 @@ describe('ClaudeCliAdapter', () => {
     });
 
     it('emits retryable error on rate limit', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({ type: 'error', error: { message: 'rate limit exceeded' } }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'rate limit exceeded', retryable: true });
+      expect(proc.kill).toHaveBeenCalledTimes(1);
+    });
+
+    it('kills the spawned Claude process when stream iteration stops early', async () => {
+      const proc = mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } }),
+      ]);
+      const iterator = adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] });
+
+      await expect(iterator.next()).resolves.toEqual({ value: { type: 'text', content: 'partial' }, done: false });
+      await iterator.return(undefined);
+
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     });
   });
 

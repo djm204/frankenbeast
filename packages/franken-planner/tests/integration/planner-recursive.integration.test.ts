@@ -190,7 +190,7 @@ describe('Integration — RecursivePlanner', () => {
     ]);
   });
 
-  it('rejects expanded tasks that depend on external tasks not completed yet', async () => {
+  it('returns a failed result when expanded tasks depend on external tasks not completed yet', async () => {
     const parent = makeTask('parent');
     const laterSibling = makeTask('later-sibling');
     const sub = makeTask('sub', { dependsOn: [createTaskId('later-sibling')] });
@@ -201,8 +201,10 @@ describe('Integration — RecursivePlanner', () => {
       return Promise.resolve(ok(t.id));
     });
 
-    await expect(buildRecursivePlanner(graph, executor).plan('...')).rejects.toThrow(
-      /unresolved external dependency 'later-sibling'/
-    );
+    const result = await buildRecursivePlanner(graph, executor).plan('...');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
   });
 });

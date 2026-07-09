@@ -16,14 +16,22 @@ describe('wizard validation', () => {
     });
 
     expect(errors).toEqual({
-      topic: 'Design interview goal is required.',
+      goal: 'Design interview goal is required.',
       outputPath: 'Design interview output path is required.',
     });
   });
 
   it('accepts repo-relative Markdown chunk-plan design docs', () => {
     const errors = validateWizardStep(1, {
-      1: { workflowType: 'chunk-plan', docPath: 'docs/design.md', outputDir: 'tasks/chunks' },
+      1: { workflowType: 'chunk-plan', designDocPath: 'docs/design.md', outputDir: 'tasks/chunks' },
+    });
+
+    expect(errors).toEqual({});
+  });
+
+  it('accepts legacy design-interview topic alias from restored wizard state', () => {
+    const errors = validateWizardStep(1, {
+      1: { workflowType: 'design-interview', topic: 'Legacy goal', outputPath: 'docs/design.md' },
     });
 
     expect(errors).toEqual({});
@@ -38,10 +46,10 @@ describe('wizard validation', () => {
     'docs/design.md\0',
   ])('rejects unsafe chunk-plan design doc path %s', (docPath) => {
     const errors = validateWizardStep(1, {
-      1: { workflowType: 'chunk-plan', docPath, outputDir: 'tasks/chunks' },
+      1: { workflowType: 'chunk-plan', designDocPath: docPath, outputDir: 'tasks/chunks' },
     });
 
-    expect(errors.docPath).toBe('Design doc path must be a repo-relative Markdown file without traversal.');
+    expect(errors.designDocPath).toBe('Design doc path must be a repo-relative Markdown file without traversal.');
   });
 
   it('accepts backend-aligned martin-loop fields', () => {

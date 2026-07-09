@@ -1,3 +1,5 @@
+import { isBuiltin } from 'node:module';
+
 import type {
   Evaluator,
   EvaluationInput,
@@ -36,8 +38,8 @@ export class GhostDependencyEvaluator implements Evaluator {
       // Skip relative imports
       if (specifier.startsWith('.')) continue;
 
-      // Skip node: built-ins
-      if (specifier.startsWith('node:')) continue;
+      // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
+      if (isNodeBuiltinSpecifier(specifier)) continue;
 
       // Extract package name (handle scoped packages and subpath imports)
       const packageName = specifier.startsWith('@')
@@ -65,6 +67,10 @@ export class GhostDependencyEvaluator implements Evaluator {
       findings,
     };
   }
+}
+
+function isNodeBuiltinSpecifier(specifier: string): boolean {
+  return isBuiltin(specifier);
 }
 
 function extractDependencySpecifiers(content: string): string[] {

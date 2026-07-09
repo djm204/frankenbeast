@@ -1,4 +1,6 @@
 import { Hono, type Context } from 'hono';
+import { createMiddleware } from 'hono/factory';
+import { z } from 'zod';
 import { ChatGateway } from '../../comms/gateway/chat-gateway.js';
 import { SessionMapper } from '../../comms/core/session-mapper.js';
 import { slackRouter } from '../../comms/channels/slack/slack-router.js';
@@ -11,7 +13,10 @@ import { TelegramAdapter } from '../../comms/channels/telegram/telegram-adapter.
 import { WhatsAppAdapter } from '../../comms/channels/whatsapp/whatsapp-adapter.js';
 import type { CommsConfig } from '../../comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../comms/core/comms-runtime-port.js';
-import { requestSizeLimit } from '../middleware.js';
+import type { ChannelInboundMessage } from '../../comms/core/types.js';
+import { errorHandler, HttpError, parseJsonBody, requestSizeLimit, validateBody } from '../middleware.js';
+import { requireOperatorAuth } from '../operator-auth.js';
+import { TransportSecurityService } from '../security/transport-security.js';
 
 import type { WebhookSignaturePolicy } from '../../middleware/security-profiles.js';
 
@@ -21,9 +26,30 @@ const DEFAULT_GENERIC_COMMS_BODY_SIZE = 16 * 1024;
 export interface CommsRoutesOptions {
   config: CommsConfig;
   runtime?: CommsRuntimePort;
+  operatorToken?: string | undefined;
+  security?: TransportSecurityService | undefined;
   webhookSignaturePolicy?: WebhookSignaturePolicy;
   getWebhookSignaturePolicy?: () => WebhookSignaturePolicy;
 }
+
+const ChannelTypeSchema = z.enum(['slack', 'discord', 'telegram', 'whatsapp']);
+
+const GenericCommsInboundBody = z.object({
+  channelType: ChannelTypeSchema,
+  externalUserId: z.string().min(1),
+  externalChannelId: z.string().min(1),
+  externalThreadId: z.string().min(1).optional(),
+  externalMessageId: z.string().min(1),
+  text: z.string().min(1),
+  rawEvent: z.custom<unknown>((value) => value !== undefined, { message: 'Required' }),
+  receivedAt: z.string().datetime({ offset: true }),
+}).strict();
+
+const GenericCommsActionBody = z.object({
+  channelType: ChannelTypeSchema,
+  sessionId: z.string().min(1),
+  actionId: z.string().min(1),
+}).strict();
 
 export function commsRoutes(options: CommsRoutesOptions): Hono {
   const { config, runtime } = options;
@@ -49,8 +75,12 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   const app = new Hono();
+  app.onError(errorHandler);
 
   app.get('/comms/health', (c) => c.json({ status: 'ok' }));
+  const genericCommsAuth = createGenericCommsAuth(options);
+  app.use('/v1/comms', genericCommsAuth);
+  app.use('/v1/comms/*', genericCommsAuth);
   app.use('/v1/comms', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
   app.use('/v1/comms/*', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
   app.use('/webhooks/*', requestSizeLimit(DEFAULT_GENERIC_COMMS_BODY_SIZE));
@@ -108,18 +138,38 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   app.post('/v1/comms/inbound', async (c) => {
-    const body = await c.req.json();
+    const body = validateBody(GenericCommsInboundBody, await parseJsonBody(c)) as unknown as ChannelInboundMessage;
     await gateway.handleInbound(body);
     return c.json({ accepted: true });
   });
 
   app.post('/v1/comms/action', async (c) => {
-    const { channelType, sessionId, actionId } = await c.req.json();
+    const { channelType, sessionId, actionId } = validateBody(GenericCommsActionBody, await parseJsonBody(c));
     await gateway.handleAction(channelType, sessionId, actionId);
     return c.json({ accepted: true });
   });
 
   return app;
+}
+
+function createGenericCommsAuth(options: CommsRoutesOptions) {
+  if (options.operatorToken) {
+    return requireOperatorAuth({
+      operatorToken: options.operatorToken,
+      security: options.security ?? new TransportSecurityService(),
+    });
+  }
+
+  return createMiddleware(async (c, next) => {
+    if (!isLoopbackWebhookRequest(c.req.raw)) {
+      throw new HttpError(
+        403,
+        'FORBIDDEN',
+        'Generic comms gateway requires operator authentication or a loopback-only request',
+      );
+    }
+    await next();
+  });
 }
 
 function isLoopbackWebhookRequest(request: Request): boolean {

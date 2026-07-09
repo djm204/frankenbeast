@@ -767,15 +767,17 @@ The package ships an extensive unit test suite. All adapters and integrations ar
 ## Building
 
 ```bash
-npm run build       # tsc → dist/ (ESM + DTS)
+npm run build       # tsc → dist/ (ESM, declarations, and maps)
 npm run typecheck   # tsc --noEmit
 ```
 
 Output:
 
 ```
-dist/index.js      # ESM
-dist/index.d.ts    # TypeScript declarations
+dist/index.js       # ESM entrypoint
+dist/index.js.map   # ESM source map
+dist/index.d.ts     # TypeScript declarations
+dist/index.d.ts.map # TypeScript declaration map
 ```
 
 The build is plain `tsc` and the output is **ESM-only** (`"type": "module"`). The `exports` map has `types` and `import` conditions but no `require` entry, so the package cannot be `require()`d from CommonJS — consumers must use `import` (or a dynamic `import()` from CJS).

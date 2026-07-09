@@ -2,6 +2,8 @@
 
 Generated from the 2026-03-08 codebase audit.
 
+> **Historical archive notice (2026-07-09):** This index points at issue writeups generated from the pre-consolidation 2026-03 audit. They are retained as historical evidence, not as the active backlog. Several entries intentionally mention removed package names (`franken-mcp`, `frankenfirewall`, `franken-comms`, `franken-heartbeat`) or obsolete root automation (`test:all`, directory-changing shell loops); rely on each status annotation, current GitHub issues, and the live root Turbo scripts for current work.
+
 > **Status annotations added 2026-07-04** after re-verifying each issue against the live code.
 
 1. `001-cli-config-surface-not-applied.md` — **PARTIALLY FIXED** (config flows into BeastLoop; budgets enforced; provider default honored; provider-override `extraArgs` are still dropped in the main execution path — `CliLlmAdapter.execute()` calls `buildArgs()` without them)

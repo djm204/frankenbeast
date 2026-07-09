@@ -86,15 +86,17 @@ export function createCritiqueAdapter(): CritiqueAdapter {
   };
 
   function resolveEvaluators(names?: string[]) {
-    const selected = (names && names.length > 0 ? names : defaultEvaluators())
-      .map((name) => evaluatorMap.get(name))
-      .filter((evaluator): evaluator is Evaluator => evaluator !== undefined);
+    const requestedNames = names && names.length > 0 ? names : defaultEvaluators();
+    const unknownNames = requestedNames.filter((name) => !evaluatorMap.has(name));
 
-    return selected.length > 0 ? selected : [
-      new LogicLoopEvaluator(),
-      new ComplexityEvaluator(),
-      new ConcisenessEvaluator(),
-    ];
+    if (unknownNames.length > 0) {
+      const noun = unknownNames.length === 1 ? 'evaluator' : 'evaluators';
+      throw new Error(
+        `Unknown critique ${noun}: ${unknownNames.join(', ')}. Expected one of: ${defaultEvaluators().join(', ')}`,
+      );
+    }
+
+    return requestedNames.map((name) => evaluatorMap.get(name)!);
   }
 }
 

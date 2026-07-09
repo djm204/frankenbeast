@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { CritiquePipeline } from '../../../src/pipeline/critique-pipeline.js';
+import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { Evaluator, EvaluationInput, EvaluationResult } from '../../../src/types/evaluation.js';
 
 function createInput(content: string): EvaluationInput {
@@ -24,7 +25,23 @@ function createMockEvaluator(
   };
 }
 
+function createThrowingEvaluator(
+  name: string,
+  category: 'deterministic' | 'heuristic',
+  error: unknown,
+): Evaluator {
+  return {
+    name,
+    category,
+    evaluate: vi.fn().mockRejectedValue(error),
+  };
+}
+
 describe('CritiquePipeline', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('returns pass with empty evaluator list', async () => {
     const pipeline = new CritiquePipeline([]);
     const result = await pipeline.run(createInput('code'));
@@ -129,7 +146,7 @@ describe('CritiquePipeline', () => {
   });
 
   it('short-circuits on safety evaluator failure', async () => {
-    const forbiddenInvocationName = 'unsafeCall';
+    const unsafeDynamicCallName = 'executeUntrustedCode';
 
     const safety = createMockEvaluator('safety', 'deterministic', {
       verdict: 'fail',
@@ -139,7 +156,7 @@ describe('CritiquePipeline', () => {
     const other = createMockEvaluator('other', 'heuristic');
 
     const pipeline = new CritiquePipeline([safety, other]);
-    const result = await pipeline.run(createInput(`${forbiddenInvocationName}("hack")`));
+    const result = await pipeline.run(createInput(`${unsafeDynamicCallName}("hack")`));
 
     expect(result.verdict).toBe('fail');
     expect(result.shortCircuited).toBe(true);
@@ -161,6 +178,69 @@ describe('CritiquePipeline', () => {
     expect(result.shortCircuited).toBe(false);
     expect(result.results).toHaveLength(2);
     expect(other.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates evaluator exceptions as structured failures and continues later evaluators', async () => {
+    const logged = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const backendError = new Error('memory backend unavailable');
+    const passing = createMockEvaluator('passing', 'deterministic', { score: 0.8 });
+    const throwing = createThrowingEvaluator('flaky-adr-check', 'heuristic', backendError);
+    const later = createMockEvaluator('later', 'heuristic', { score: 0.6 });
+
+    const pipeline = new CritiquePipeline([passing, throwing, later]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.shortCircuited).toBe(false);
+    expect(result.overallScore).toBeCloseTo((0.8 + 0 + 0.6) / 3);
+    expect(result.results).toHaveLength(3);
+    expect(result.results[0]).toMatchObject({ evaluatorName: 'passing', verdict: 'pass' });
+    expect(result.results[1]).toMatchObject({
+      evaluatorName: 'flaky-adr-check',
+      verdict: 'fail',
+      score: 0,
+      findings: [
+        {
+          severity: 'critical',
+          location: EVALUATOR_EXCEPTION_LOCATION,
+          message: expect.stringContaining('flaky-adr-check'),
+          suggestion: expect.stringContaining('trusted evaluator logs'),
+        },
+      ],
+    });
+    expect(result.results[1]?.findings[0]?.message).not.toContain('memory backend unavailable');
+    expect(result.results[2]).toMatchObject({ evaluatorName: 'later', verdict: 'pass' });
+    expect(later.evaluate).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalledWith('Critique evaluator threw during evaluation', {
+      evaluatorName: 'flaky-adr-check',
+      error: backendError,
+    });
+  });
+
+  it('short-circuits after converting a safety evaluator exception into a structured failure', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const safety = createThrowingEvaluator('safety', 'deterministic', new Error('guardrails unavailable'));
+    const other = createMockEvaluator('other', 'heuristic');
+
+    const pipeline = new CritiquePipeline([safety, other]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.shortCircuited).toBe(true);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]).toMatchObject({
+      evaluatorName: 'safety',
+      verdict: 'fail',
+      score: 0,
+      findings: [
+        {
+          severity: 'critical',
+          location: EVALUATOR_EXCEPTION_LOCATION,
+          message: expect.stringContaining('internal evaluator error'),
+        },
+      ],
+    });
+    expect(other.evaluate).not.toHaveBeenCalled();
   });
 
   it('calculates average score across all evaluators', async () => {

@@ -324,7 +324,7 @@ describe('fbeast init', () => {
     expect(config).toContain(`[mcp_servers.${codexServerName(root, 'memory')}]`);
     expect(config).toContain(`[mcp_servers.${codexServerName(root, 'governor')}]`);
     expect(config).not.toContain('[mcp_servers.fbeast-memory]');
-    expect(config).toContain(`args = ["--db", "${join(root, '.fbeast', 'beast.db')}"]`);
+    expect(config).toContain(`args = ["--db", "${join(root, '.fbeast', 'beast.db')}", "--config", "${join(root, '.fbeast', 'config.json')}"]`);
   });
 
   it('uses distinct Codex MCP server names for distinct project roots', () => {
@@ -433,7 +433,15 @@ describe('fbeast init', () => {
     const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
     const keys = Object.keys(mcpConfig.mcpServers);
     expect(keys).toEqual(['fbeast-proxy']);
-    expect(mcpConfig.mcpServers['fbeast-proxy']).toEqual({ command: 'fbeast-proxy', args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'] });
+    expect(mcpConfig.mcpServers['fbeast-proxy']).toEqual({
+      command: 'fbeast-proxy',
+      args: [
+        '--db',
+        '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db',
+        '--config',
+        '${CLAUDE_PROJECT_DIR}/.fbeast/config.json',
+      ],
+    });
     expect(mcpConfig.mcpServers['fbeast-memory']).toBeUndefined();
   });
 
@@ -459,7 +467,19 @@ describe('fbeast init', () => {
 
     const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
     expect(Object.keys(mcpConfig.mcpServers).length).toBe(7);
-    expect(mcpConfig.mcpServers['fbeast-memory']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-memory']).toEqual({
+      command: 'fbeast-memory',
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'],
+    });
+    expect(mcpConfig.mcpServers['fbeast-firewall']).toEqual({
+      command: 'fbeast-firewall',
+      args: [
+        '--db',
+        '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db',
+        '--config',
+        '${CLAUDE_PROJECT_DIR}/.fbeast/config.json',
+      ],
+    });
     expect(mcpConfig.mcpServers['fbeast-proxy']).toBeUndefined();
   });
 
@@ -479,7 +499,7 @@ describe('fbeast init', () => {
     const config = readFileSync(join(root, '.codex', 'config.toml'), 'utf-8');
     expect(config.match(/^\[mcp_servers\.[^\]]+]/gm)).toEqual([`[mcp_servers.${codexServerName(root, 'proxy')}]`]);
     expect(config).toContain('command = "fbeast-proxy"');
-    expect(config).toContain(`args = ["--db", "${join(root, '.fbeast', 'beast.db')}", "--root", "${root}"]`);
+    expect(config).toContain(`args = ["--db", "${join(root, '.fbeast', 'beast.db')}", "--root", "${root}", "--config", "${join(root, '.fbeast', 'config.json')}"]`);
     expect(config).not.toContain('fbeast-memory');
   });
 

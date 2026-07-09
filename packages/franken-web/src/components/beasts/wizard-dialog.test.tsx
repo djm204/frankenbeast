@@ -49,12 +49,12 @@ describe('WizardDialog validation', () => {
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('alert').textContent).toContain('Workflow type is required');
 
-    fireEvent.click(screen.getByRole('button', { name: /Chunk Design Doc/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Design Doc -> Chunk Creation/ }));
     expect(screen.getByRole('alert').textContent).toContain('Design doc path is required');
     expect(screen.getByRole('alert').textContent).toContain('Output directory is required');
 
-    fireEvent.change(screen.getByLabelText('Design Doc Path'), { target: { value: 'docs/design.md' } });
-    fireEvent.change(screen.getByLabelText('Output Directory'), { target: { value: 'tasks/chunks' } });
+    fireEvent.change(screen.getByLabelText(/design document should be chunked/i), { target: { value: 'docs/design.md' } });
+    fireEvent.change(screen.getByLabelText(/chunk plan be written/i), { target: { value: 'tasks/chunks' } });
 
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', false);
   });
@@ -91,6 +91,6 @@ describe('WizardDialog validation', () => {
 
     expect(reviewHeading.compareDocumentPosition(launchButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Reviewable Agent')).toBeTruthy();
-    expect(screen.getByText('design-interview')).toBeTruthy();
+    expect(screen.getAllByText('Design Interview').length).toBeGreaterThan(0);
   });
 });

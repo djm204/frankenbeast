@@ -1,7 +1,7 @@
 # Frankenbeast Implementation Progress
 
 > This document tracks PR-by-PR progress for Phases 2–7. Updated as each PR is completed.
-> Reference: [Implementation Plan](/home/pfk/.claude/plans/graceful-gathering-owl.md)
+> Reference: original local implementation plan (retired; not stored in this repository)
 
 ## Current State (2026-07-04)
 

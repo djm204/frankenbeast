@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatRuntimeResult, ChatRuntimeState } from '../../../src/chat/runtime.js';
 import { ChatRuntimeCommsAdapter } from '../../../src/comms/core/chat-runtime-comms-adapter.js';
+import { InMemoryRateLimiter } from '../../../src/beasts/http/beast-rate-limit.js';
 
 function mockRuntime() {
   return {
@@ -132,6 +133,30 @@ describe('ChatRuntimeCommsAdapter', () => {
 
     expect(result.text).toBe('Hello from runtime');
     expect(result.status).toBe('reply');
+  });
+
+  it('rate limits comms chat turns by channel user before invoking runtime', async () => {
+    adapter = new ChatRuntimeCommsAdapter(runtime as any, store as any, {
+      chatRateLimiter: new InMemoryRateLimiter({ windowMs: 60_000, max: 1 }),
+    });
+
+    const first = await adapter.processInbound({
+      sessionId: 'sess-1',
+      channelType: 'slack',
+      text: 'first',
+      externalUserId: 'U123',
+    });
+    const second = await adapter.processInbound({
+      sessionId: 'sess-1',
+      channelType: 'slack',
+      text: 'second',
+      externalUserId: 'U123',
+    });
+
+    expect(first.text).toBe('Hello from runtime');
+    expect(second.text).toContain('Rate limit exceeded');
+    expect(second.status).toBe('reply');
+    expect(runtime.run).toHaveBeenCalledTimes(1);
   });
 
   it('returns empty text when no display messages', async () => {

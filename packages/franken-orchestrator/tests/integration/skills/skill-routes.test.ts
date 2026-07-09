@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Hono } from 'hono';
@@ -177,6 +177,66 @@ describe('Skill API routes', () => {
         body: JSON.stringify({}),
       });
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('GET /api/skills/:name/health', () => {
+    it('returns passive health status for an installed skill', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'claude-cli',
+        installConfig: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] },
+        authFields: [],
+      });
+
+      const res = await app.request('/api/skills/github/health');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.health).toEqual({
+        name: 'github',
+        status: 'unknown',
+        serverStatuses: [
+          {
+            serverName: 'github',
+            status: 'unknown',
+            error: 'MCP health check command was not executed because the skill is not trusted',
+          },
+        ],
+      });
+    });
+
+    it('routes health for a skill named catalog instead of provider catalog lookup', async () => {
+      await manager.install({
+        name: 'catalog', description: 'Catalog skill', provider: 'cli',
+        installConfig: { command: 'npx' }, authFields: [],
+      });
+
+      const res = await app.request('/api/skills/catalog/health');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.health.name).toBe('catalog');
+      expect(body.health.serverStatuses[0].serverName).toBe('catalog');
+    });
+
+    it('returns 404 for missing skill health', async () => {
+      const res = await app.request('/api/skills/missing/health');
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toContain("Skill 'missing' not found");
+    });
+
+    it('reports malformed skill config as an operator-visible error', async () => {
+      await manager.install({
+        name: 'broken', description: 'Broken', provider: 'cli',
+        installConfig: { command: 'npx' }, authFields: [],
+      });
+      writeFileSync(join(skillsDir, 'broken', 'mcp.json'), '{"mcpServers":{"broken":{"args":[123]}}}');
+
+      const res = await app.request('/api/skills/broken/health');
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toBe("Failed to read MCP config for skill 'broken'");
     });
   });
 

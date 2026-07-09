@@ -5,10 +5,12 @@
 export type { Severity, Verdict, Score, SessionId, TaskId } from './types/common.js';
 
 // Types — evaluation
+export { EVALUATOR_EXCEPTION_LOCATION } from './types/evaluation.js';
 export type {
   EvaluationInput,
   EvaluationFinding,
   EvaluationResult,
+  CritiquePipelineResult,
   CritiqueResult,
   Evaluator,
 } from './types/evaluation.js';
@@ -35,6 +37,7 @@ export type {
   CorrectionRequest,
   CritiqueLoopResult,
   CritiqueLoopPass,
+  CritiqueLoopWarn,
   CritiqueLoopFail,
   CritiqueLoopHalted,
   CritiqueLoopEscalated,

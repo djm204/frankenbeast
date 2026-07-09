@@ -48,7 +48,7 @@ export class PlanGraph {
     for (const task of tasks) {
       for (const depId of task.dependsOn) {
         if (!nodes.has(depId)) {
-          throw new Error(`Dependency '${depId}' not found in graph`);
+          throw new TaskNotFoundError(depId);
         }
       }
       edges.set(task.id, new Set(task.dependsOn));

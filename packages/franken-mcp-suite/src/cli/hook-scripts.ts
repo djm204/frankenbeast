@@ -6,6 +6,10 @@
 import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 
+function shellSingleQuote(value: string): string {
+  return `'${value.split(`'`).join(`'\\''`)}'`;
+}
+
 export interface HookScriptPaths {
   preTool: string;
   postTool: string;
@@ -54,7 +58,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
   exit 0
 fi
 
-DB_PATH=${JSON.stringify(dbPath)}
+DB_PATH=${shellSingleQuote(dbPath)}
 if [[ "$DB_PATH" != /* ]]; then
   SEARCH_DIR="$PWD"
   while true; do
@@ -121,7 +125,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
   exit 0
 fi
 
-DB_PATH=${JSON.stringify(dbPath)}
+DB_PATH=${shellSingleQuote(dbPath)}
 if [[ "$DB_PATH" != /* ]]; then
   SEARCH_DIR="$PWD"
   while true; do
@@ -180,7 +184,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
   exit 0
 fi
 
-DB_PATH=${JSON.stringify(dbPath)}
+DB_PATH=${shellSingleQuote(dbPath)}
 if [[ "$DB_PATH" != /* ]]; then
   SEARCH_DIR="$PWD"
   while true; do
@@ -246,7 +250,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
   exit 0
 fi
 
-DB_PATH=${JSON.stringify(dbPath)}
+DB_PATH=${shellSingleQuote(dbPath)}
 if [[ "$DB_PATH" != /* ]]; then
   SEARCH_DIR="$PWD"
   while true; do
@@ -305,7 +309,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
   exit 0
 fi
 
-DB_PATH=${JSON.stringify(dbPath)}
+DB_PATH=${shellSingleQuote(dbPath)}
 if [[ "$DB_PATH" != /* ]]; then
   SEARCH_DIR="$PWD"
   while true; do
@@ -372,7 +376,7 @@ if [ "\${FRANKENBEAST_SPAWNED:-}" = "1" ] || [ "\${FBEAST_DISABLE_HOOKS:-}" = "1
   exit 0
 fi
 
-DB_PATH=${JSON.stringify(dbPath)}
+DB_PATH=${shellSingleQuote(dbPath)}
 if [[ "$DB_PATH" != /* ]]; then
   SEARCH_DIR="$PWD"
   while true; do

@@ -453,9 +453,17 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return;
     }
 
-    void clientRef.current.getSession(sessionId)
-      .then((refreshed) => {
-        setSocketToken(refreshed.socketToken);
+    const capturedSessionId = sessionId;
+    void clientRef.current.getSession(capturedSessionId)
+      .then(async (refreshed) => {
+        if (!sessionStillCurrent(capturedSessionId) || refreshed.id !== capturedSessionId) {
+          return;
+        }
+        const ticket = await clientRef.current.createSocketTicket(refreshed.id);
+        if (!sessionStillCurrent(refreshed.id)) {
+          return;
+        }
+        setSocketToken(ticket);
         setMessages((current) => reconcileRecoveryMessages(current, refreshed.transcript));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setSessionState(refreshed.state);
@@ -466,6 +474,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setSocketGeneration((current) => current + 1);
       })
       .catch((error) => {
+        if (!sessionStillCurrent(capturedSessionId)) {
+          return;
+        }
         setStatus('error');
         setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
         addErrorBanner(makeBanner(
@@ -522,13 +533,14 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         const session = opts.sessionId
           ? await client.getSession(opts.sessionId)
           : await client.createSession(opts.projectId);
+        const ticket = await client.createSocketTicket(session.id);
 
         if (cancelled) {
           return;
         }
 
         activeSessionIdRef.current = session.id;
-        setSocketToken(session.socketToken);
+        setSocketToken(ticket);
         setSessionId(session.id);
         setSessionState(session.state);
         setProjectId(session.projectId);

@@ -237,9 +237,11 @@ export function buildInitAction(
     const workflow = config.workflow as Record<string, unknown> | undefined;
     const designDocPath = typeof config.designDocPath === 'string'
       ? config.designDocPath
-      : typeof workflow?.docPath === 'string'
-        ? workflow.docPath
-        : '';
+      : typeof workflow?.designDocPath === 'string'
+        ? workflow.designDocPath
+        : typeof workflow?.docPath === 'string'
+          ? workflow.docPath
+          : '';
 
     return {
       kind: 'chunk-plan',

@@ -229,6 +229,40 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('ignores bare Node built-ins and built-in subpath imports', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `
+      import fs from 'fs';
+      import { join } from 'path';
+      import { readFile } from 'fs/promises';
+      const platform = require('os').platform();
+    `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('still detects packages with names similar to Node built-ins', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `
+      import fsExtra from 'fs-extra';
+      import test from 'test';
+      import customFsTool from 'fs/foo';
+    `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings.map((finding) => finding.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('fs-extra'),
+        expect.stringContaining('test'),
+        expect.stringContaining('fs'),
+      ]),
+    );
+  });
+
   it('detects require() calls with unknown packages', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const x = require('unknown-lib');`;

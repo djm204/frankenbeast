@@ -22,6 +22,30 @@ cp .env.example .env
 # For fbeast mcp beast --provider=anthropic-api, set ANTHROPIC_API_KEY.
 ```
 
+### Ollama endpoint variable status
+
+`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable, not a currently supported local setup requirement. The current orchestrator provider config accepts `claude-cli`, `codex-cli`, `gemini-cli`, `anthropic-api`, `openai-api`, and `gemini-api`, and the `fbeast mcp beast --provider=...` activation shim accepts only the Beast presets documented below. Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build.
+
+If an Ollama-compatible provider is added back in a future build or a custom fork, the usual local daemon endpoint would be:
+
+```bash
+export OLLAMA_BASE_URL=http://localhost:11434
+```
+
+For a non-default daemon in such a build, the value would point at that endpoint instead, for example:
+
+```bash
+export OLLAMA_BASE_URL=http://ollama.internal:11434
+```
+
+The root `.env.example` intentionally leaves `OLLAMA_BASE_URL` out because the default local setup, the current provider schema, and the current `fbeast mcp beast` presets do not consume it.
+
+Endpoint-only verification, useful only when you are working with a build that actually supports an Ollama-compatible provider:
+
+```bash
+curl "$OLLAMA_BASE_URL/api/tags"
+```
+
 ---
 
 ## 1. Install and link the CLIs
@@ -193,6 +217,19 @@ frankenbeast beasts-daemon     # Standalone Beast API/control plane (port 4050)
 ```
 
 The Beast daemon owns `/v1/beasts/*` state, logs, lifecycle, SSE tickets/events, and PID-file protection at `.frankenbeast/beasts-daemon.pid`. The chat server remains the chat/WebSocket backend and can proxy `/v1/beasts/*` to the daemon for gateway compatibility. Use `--port` and `--host` to override defaults.
+
+To attach `chat-server` to a standalone daemon, start both processes with the same Beast operator token and point the chat server at the daemon URL:
+
+```bash
+FRANKENBEAST_BEAST_OPERATOR_TOKEN="$BEAST_OPERATOR_TOKEN" \
+  frankenbeast beasts-daemon
+
+FRANKENBEAST_BEAST_OPERATOR_TOKEN="$BEAST_OPERATOR_TOKEN" \
+FRANKENBEAST_BEAST_DAEMON_URL=http://127.0.0.1:4050 \
+  frankenbeast chat-server
+```
+
+`FRANKENBEAST_BEAST_DAEMON_URL` is the explicit external-daemon selector. If it is absent and an operator token is configured, `chat-server` first tries to detect a healthy local `beasts-daemon` from `.frankenbeast/beasts-daemon.pid`; when no daemon is detected, it falls back to local in-process Beast services.
 
 ---
 

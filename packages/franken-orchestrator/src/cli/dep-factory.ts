@@ -767,6 +767,18 @@ function createIssueDeps(
   };
 }
 
+function readExistingReplayManifest(replayManifestPath: string): unknown[] {
+  if (!existsSync(replayManifestPath)) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(replayManifestPath, 'utf8')) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function appendAuditFinalize(
   finalize: () => Promise<void>,
   observer: ObserverDepsBundle,
@@ -787,13 +799,7 @@ function appendAuditFinalize(
         }
         for (const [manifestRunId, records] of manifestsByRunId) {
           const replayManifestPath = join(observer.replayAuditRoot, `${manifestRunId}.replay.json`);
-          let existingManifest: unknown[] = [];
-          if (existsSync(replayManifestPath)) {
-            const parsed = JSON.parse(readFileSync(replayManifestPath, 'utf8')) as unknown;
-            if (Array.isArray(parsed)) {
-              existingManifest = parsed;
-            }
-          }
+          const existingManifest = readExistingReplayManifest(replayManifestPath);
           writeFileSync(
             replayManifestPath,
             JSON.stringify([...existingManifest, ...records], null, 2),
