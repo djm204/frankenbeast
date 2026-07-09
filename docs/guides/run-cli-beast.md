@@ -194,6 +194,19 @@ frankenbeast beasts-daemon     # Standalone Beast API/control plane (port 4050)
 
 The Beast daemon owns `/v1/beasts/*` state, logs, lifecycle, SSE tickets/events, and PID-file protection at `.frankenbeast/beasts-daemon.pid`. The chat server remains the chat/WebSocket backend and can proxy `/v1/beasts/*` to the daemon for gateway compatibility. Use `--port` and `--host` to override defaults.
 
+To attach `chat-server` to a standalone daemon, start both processes with the same Beast operator token and point the chat server at the daemon URL:
+
+```bash
+FRANKENBEAST_BEAST_OPERATOR_TOKEN="$BEAST_OPERATOR_TOKEN" \
+  frankenbeast beasts-daemon
+
+FRANKENBEAST_BEAST_OPERATOR_TOKEN="$BEAST_OPERATOR_TOKEN" \
+FRANKENBEAST_BEAST_DAEMON_URL=http://127.0.0.1:4050 \
+  frankenbeast chat-server
+```
+
+`FRANKENBEAST_BEAST_DAEMON_URL` is the explicit external-daemon selector. If it is absent and an operator token is configured, `chat-server` first tries to detect a healthy local `beasts-daemon` from `.frankenbeast/beasts-daemon.pid`; when no daemon is detected, it falls back to local in-process Beast services.
+
 ---
 
 ## 8. Skills
