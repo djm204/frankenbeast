@@ -1,3 +1,5 @@
+import { builtinModules } from 'node:module';
+
 import type {
   Evaluator,
   EvaluationInput,
@@ -7,6 +9,9 @@ import type {
 
 const IDENTIFIER_PATTERN = /[A-Za-z0-9_$]/;
 const QUOTE_CHARS = new Set(["'", '"', '`']);
+const NODE_BUILTIN_MODULES = new Set(
+  builtinModules.map((moduleName) => moduleName.replace(/^node:/, '')),
+);
 
 interface StringLiteralRead {
   value: string;
@@ -36,8 +41,8 @@ export class GhostDependencyEvaluator implements Evaluator {
       // Skip relative imports
       if (specifier.startsWith('.')) continue;
 
-      // Skip node: built-ins
-      if (specifier.startsWith('node:')) continue;
+      // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
+      if (isNodeBuiltinSpecifier(specifier)) continue;
 
       // Extract package name (handle scoped packages and subpath imports)
       const packageName = specifier.startsWith('@')
@@ -65,6 +70,13 @@ export class GhostDependencyEvaluator implements Evaluator {
       findings,
     };
   }
+}
+
+function isNodeBuiltinSpecifier(specifier: string): boolean {
+  const normalized = specifier.replace(/^node:/, '');
+  const packageName = normalized.split('/')[0]!;
+
+  return NODE_BUILTIN_MODULES.has(normalized) || NODE_BUILTIN_MODULES.has(packageName);
 }
 
 function extractDependencySpecifiers(content: string): string[] {
