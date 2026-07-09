@@ -92,6 +92,52 @@ For Beast controls, set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.e
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
 
+### Skill health endpoint
+
+When the dashboard backend is started with a configured skill manager, the skills API exposes a per-skill health probe at:
+
+```text
+GET /api/skills/:name/health
+```
+
+Example against the local chat server:
+
+```bash
+curl http://127.0.0.1:3737/api/skills/github/health
+```
+
+Response shape:
+
+```json
+{
+  "health": {
+    "name": "github",
+    "status": "unknown",
+    "serverStatuses": [
+      {
+        "serverName": "github",
+        "status": "unknown",
+        "error": "MCP health check command was not executed because the skill is not trusted"
+      }
+    ]
+  }
+}
+```
+
+`status` is an aggregate of the per-server statuses:
+
+- `connected`: every probed MCP server exited cleanly during the short health probe.
+- `error`: at least one trusted probe failed to spawn or exited non-zero.
+- `unknown`: the server could not be safely or conclusively probed. This includes the default passive API behavior, where Frankenbeast does not execute commands from skill manifests, and long-running MCP servers that stay alive without a readiness signal.
+
+The endpoint is passive by default. To execute the configured MCP server command for an authenticated, trusted skill, add `?trustMcpServerCommands=true`:
+
+```bash
+curl 'http://127.0.0.1:3737/api/skills/github/health?trustMcpServerCommands=true'
+```
+
+Only use the trusted probe for skill directories you control. Custom adapters can consume the same JSON shape (`health.name`, aggregate `health.status`, and `health.serverStatuses[]`) to render status badges or block automation when a required server is `error`.
+
 ### Central audit session ids
 
 The server-side central audit path records dispatched MCP tool calls even when

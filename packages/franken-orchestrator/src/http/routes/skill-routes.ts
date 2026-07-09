@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
 import type { SkillManager } from '../../skills/skill-manager.js';
+import { SkillHealthChecker } from '../../skills/skill-health-checker.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
 
 function isSkillInstallValidationError(err: unknown): boolean {
@@ -20,8 +21,10 @@ function skillInstallErrorMessage(err: unknown): string {
 export function createSkillRoutes(deps: {
   skillManager: SkillManager;
   providerRegistry: ProviderRegistry;
+  healthChecker?: SkillHealthChecker;
 }): Hono {
   const app = new Hono();
+  const healthChecker = deps.healthChecker ?? new SkillHealthChecker();
 
   app.get('/', (c) => {
     const skills = deps.skillManager.listInstalled();
@@ -72,6 +75,27 @@ export function createSkillRoutes(deps: {
     }
 
     return c.json({ error: 'Must provide catalogEntry or custom' }, 400);
+  });
+
+  app.get('/:name/health', async (c) => {
+    const name = c.req.param('name');
+    let mcpConfig;
+    try {
+      mcpConfig = deps.skillManager.readMcpConfig(name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      return c.json({ error: message }, 404);
+    }
+
+    if (!mcpConfig) {
+      return c.json({ error: `Skill '${name}' not found` }, 404);
+    }
+
+    const trustMcpServerCommands = c.req.query('trustMcpServerCommands') === 'true';
+    const health = await healthChecker.getStatus(name, mcpConfig, {
+      trustMcpServerCommands,
+    });
+    return c.json({ health });
   });
 
   app.patch('/:name', async (c) => {

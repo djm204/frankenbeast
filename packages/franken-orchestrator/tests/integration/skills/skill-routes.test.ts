@@ -7,6 +7,7 @@ import { SkillManager } from '../../../src/skills/skill-manager.js';
 import { createSkillRoutes } from '../../../src/http/routes/skill-routes.js';
 import { errorHandler } from '../../../src/http/middleware.js';
 import type { ProviderRegistry } from '../../../src/providers/provider-registry.js';
+import type { SkillHealthChecker } from '../../../src/skills/skill-health-checker.js';
 
 function mockProviderRegistry(): ProviderRegistry {
   return {
@@ -177,6 +178,71 @@ describe('Skill API routes', () => {
         body: JSON.stringify({}),
       });
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('GET /api/skills/:name/health', () => {
+    it('returns passive health status for an installed skill', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'claude-cli',
+        installConfig: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] },
+        authFields: [],
+      });
+
+      const res = await app.request('/api/skills/github/health');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.health).toEqual({
+        name: 'github',
+        status: 'unknown',
+        serverStatuses: [
+          {
+            serverName: 'github',
+            status: 'unknown',
+            error: 'MCP health check command was not executed because the skill is not trusted',
+          },
+        ],
+      });
+    });
+
+    it('can opt in to trusted command probes for health checks', async () => {
+      const healthChecker = {
+        getStatus: vi.fn().mockResolvedValue({
+          name: 'github',
+          status: 'connected',
+          serverStatuses: [{ serverName: 'github', status: 'connected' }],
+        }),
+      };
+      const trustedRoutes = createSkillRoutes({
+        skillManager: manager,
+        providerRegistry: mockProviderRegistry(),
+        healthChecker: healthChecker as unknown as SkillHealthChecker,
+      });
+      const trustedApp = new Hono();
+      trustedApp.route('/api/skills', trustedRoutes);
+      await manager.install({
+        name: 'github', description: 'GH', provider: 'cli',
+        installConfig: { command: 'npx' }, authFields: [],
+      });
+
+      const res = await trustedApp.request('/api/skills/github/health?trustMcpServerCommands=true');
+      expect(res.status).toBe(200);
+      expect(healthChecker.getStatus).toHaveBeenCalledWith(
+        'github',
+        expect.objectContaining({ mcpServers: expect.any(Object) }),
+        { trustMcpServerCommands: true },
+      );
+      const body = await res.json();
+      expect(body.health.status).toBe('connected');
+    });
+
+    it('returns 404 for missing skill health', async () => {
+      const res = await app.request('/api/skills/missing/health');
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toContain("Skill 'missing' not found");
     });
   });
 
