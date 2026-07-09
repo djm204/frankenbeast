@@ -17,10 +17,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function requireStringField(record: Record<string, unknown>, field: keyof AuditEvent, context: string): void {
+const AUDIT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/;
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+function requireStringField(record: Record<string, unknown>, field: keyof AuditEvent, context: string): string {
   if (typeof record[field] !== 'string' || record[field].length === 0) {
     throw new Error(`Invalid audit event at ${context}: ${String(field)} must be a non-empty string`);
   }
+  return record[field];
 }
 
 function requireOptionalStringField(
@@ -33,13 +37,30 @@ function requireOptionalStringField(
   }
 }
 
+function requireOptionalHashField(record: Record<string, unknown>, field: keyof AuditEvent, context: string): void {
+  if (record[field] === undefined) {
+    return;
+  }
+  if (typeof record[field] !== 'string' || !AUDIT_HASH_PATTERN.test(record[field])) {
+    throw new Error(`Invalid audit event at ${context}: ${String(field)} must be a sha256 hash when present`);
+  }
+}
+
+function requireIsoTimestamp(record: Record<string, unknown>, context: string): void {
+  const timestamp = requireStringField(record, 'timestamp', context);
+  const parsed = Date.parse(timestamp);
+  if (!ISO_TIMESTAMP_PATTERN.test(timestamp) || Number.isNaN(parsed)) {
+    throw new Error(`Invalid audit event at ${context}: timestamp must be an ISO timestamp`);
+  }
+}
+
 export function assertAuditEvent(value: unknown, context = 'event'): asserts value is AuditEvent {
   if (!isRecord(value)) {
     throw new Error(`Invalid audit event at ${context}: expected object`);
   }
 
   requireStringField(value, 'eventId', context);
-  requireStringField(value, 'timestamp', context);
+  requireIsoTimestamp(value, context);
   requireStringField(value, 'phase', context);
   requireStringField(value, 'provider', context);
   requireStringField(value, 'type', context);
@@ -48,8 +69,8 @@ export function assertAuditEvent(value: unknown, context = 'event'): asserts val
     throw new Error(`Invalid audit event at ${context}: payload is required`);
   }
 
-  requireOptionalStringField(value, 'inputHash', context);
-  requireOptionalStringField(value, 'outputHash', context);
+  requireOptionalHashField(value, 'inputHash', context);
+  requireOptionalHashField(value, 'outputHash', context);
   requireOptionalStringField(value, 'parentEventId', context);
 }
 
@@ -123,7 +144,10 @@ export class AuditTrail {
   }
 
   toJSON(): AuditEvent[] {
-    return [...this.events];
+    return this.events.map((event) => ({
+      ...event,
+      payload: event.payload === undefined ? null : event.payload,
+    }));
   }
 
   static fromJSON(events: unknown): AuditTrail {

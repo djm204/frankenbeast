@@ -122,6 +122,33 @@ describe('AuditTrailStore', () => {
     expect(() => store.load('run-1')).toThrow(/events\[0\]: payload is required/i);
   });
 
+  it('round-trips events whose original payload was undefined', () => {
+    const trail = new AuditTrail();
+    trail.append(createAuditEvent('payload.undefined', undefined, { phase: 'planning', provider: 'claude-cli' }));
+
+    store.save('run-1', trail);
+
+    expect(store.load('run-1').getAll()[0]!.payload).toBeNull();
+  });
+
+  it('rejects persisted events with malformed hashes', () => {
+    const filePath = store.save('run-1', sampleTrail());
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    raw.events[0].inputHash = '';
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    expect(() => store.load('run-1')).toThrow(/events\[0\]: inputHash must be a sha256 hash/i);
+  });
+
+  it('rejects persisted events with malformed timestamps', () => {
+    const filePath = store.save('run-1', sampleTrail());
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    raw.events[0].timestamp = 'not-a-date';
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    expect(() => store.load('run-1')).toThrow(/events\[0\]: timestamp must be an ISO timestamp/i);
+  });
+
   it('writes a replay manifest next to the audit trail when provided', () => {
     store.save('run-1', sampleTrail(), [
       { version: 1, kind: 'llm.response', runId: 'run-1', timestamp: 't', contentRef: 'abc123' },
