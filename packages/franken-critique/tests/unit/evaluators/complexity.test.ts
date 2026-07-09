@@ -147,6 +147,47 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('flags typed function declarations with too many parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(a: string, b: number, c: boolean, d: Date, e: RegExp, f: URL): Promise<void> { return Promise.resolve(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('flags typed arrow functions with generic return annotations and too many parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const complex = (a: string, b: number, c: boolean, d: Date, e: RegExp, f: URL): Promise<void> => { return Promise.resolve(); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('does not split nested generic parameter annotations as top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function ok(value: Record<string, number>, next: Map<string, number>, result: Result<string, number>) { return value; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('flags very long typed function declarations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = `function longFn(): Result<string | number> {\n${lines.join('\n')}\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('long'))).toBe(true);
+  });
+
   it('flags deeply nested code', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
