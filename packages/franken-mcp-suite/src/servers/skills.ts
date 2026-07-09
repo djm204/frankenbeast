@@ -5,6 +5,7 @@ import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseArgs } from 'node:util';
+import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export interface SkillsServerDeps {
   skills: SkillsAdapter;
@@ -19,8 +20,9 @@ if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const skills = createSkillsAdapter(values['db']!);
-  const server = createSkillsServer({ skills }, createCentralOptions(values['db']!));
+  const dbPath = resolveProjectDbPath(values['db']!);
+  const skills = createSkillsAdapter(dbPath);
+  const server = createSkillsServer({ skills }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-skills failed to start:', err);
     process.exit(1);

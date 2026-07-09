@@ -5,6 +5,7 @@ import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createFirewallAdapter, type FirewallAdapter } from '../adapters/firewall-adapter.js';
 import { parseArgs } from 'node:util';
+import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export interface FirewallServerDeps {
   firewall: FirewallAdapter;
@@ -23,10 +24,10 @@ if (isMain(import.meta.url)) {
     },
   });
   const tier = values['tier'] === 'strict' ? 'strict' : 'standard';
-  const firewall = createFirewallAdapter(values['db']!, tier, {
-    root: process.env['FBEAST_ROOT'] ?? process.cwd(),
-  });
-  const server = createFirewallServer({ firewall }, createCentralOptions(values['db']!));
+  const dbPath = resolveProjectDbPath(values['db']!);
+  const root = process.env['FBEAST_ROOT'] ?? deriveProjectRootFromDbPath(values['db']!) ?? process.cwd();
+  const firewall = createFirewallAdapter(dbPath, tier, { root });
+  const server = createFirewallServer({ firewall }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-firewall failed to start:', err);
     process.exit(1);

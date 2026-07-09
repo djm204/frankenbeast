@@ -5,6 +5,7 @@ import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { parseArgs } from 'node:util';
+import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export interface ObserverServerDeps {
   observer: ObserverAdapter;
@@ -19,8 +20,9 @@ if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const observer = createObserverAdapter(values['db']!);
-  const server = createObserverServer({ observer }, createCentralOptions(values['db']!));
+  const dbPath = resolveProjectDbPath(values['db']!);
+  const observer = createObserverAdapter(dbPath);
+  const server = createObserverServer({ observer }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-observer failed to start:', err);
     process.exit(1);

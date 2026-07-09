@@ -5,6 +5,7 @@ import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import { parseArgs } from 'node:util';
+import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export interface GovernorServerDeps {
   governor: GovernorAdapter;
@@ -19,8 +20,9 @@ if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const governor = createGovernorAdapter(values['db']!);
-  const server = createGovernorServer({ governor }, createCentralOptions(values['db']!));
+  const dbPath = resolveProjectDbPath(values['db']!);
+  const governor = createGovernorAdapter(dbPath);
+  const server = createGovernorServer({ governor }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-governor failed to start:', err);
     process.exit(1);

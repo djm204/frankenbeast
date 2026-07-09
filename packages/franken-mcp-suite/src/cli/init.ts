@@ -95,10 +95,12 @@ function initJsonClient(options: {
     settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
   }
 
-  // Add MCP server entries
+  // Add MCP server entries. Claude/Gemini settings.json can be global, so keep
+  // project paths cwd-relative instead of pinning the first initialized checkout
+  // into every future client session.
   const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
-  const dbPath = join(root, '.fbeast', 'beast.db');
-  const proxyArgs = ['--db', dbPath, '--root', root];
+  const dbPath = join('.fbeast', 'beast.db');
+  const proxyArgs = ['--db', dbPath];
   if (mode === 'proxy') {
     mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: proxyArgs };
   } else {

@@ -5,6 +5,7 @@ import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { parseArgs } from 'node:util';
+import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export interface PlannerServerDeps {
   planner: PlannerAdapter;
@@ -19,8 +20,9 @@ if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const planner = createPlannerAdapter(values['db']!);
-  const server = createPlannerServer({ planner }, createCentralOptions(values['db']!));
+  const dbPath = resolveProjectDbPath(values['db']!);
+  const planner = createPlannerAdapter(dbPath);
+  const server = createPlannerServer({ planner }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-planner failed to start:', err);
     process.exit(1);
