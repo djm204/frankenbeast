@@ -53,6 +53,58 @@ describe('createStreamProgressHandler', () => {
     expect(writeLines[0]).toContain('foo.ts');
   });
 
+  it('accumulates split input JSON deltas before showing a tool file path once', () => {
+    const lines: string[] = [];
+    const handler = createStreamProgressHandler((t) => lines.push(t));
+
+    handler(JSON.stringify({
+      type: 'content_block_start',
+      content_block: { type: 'tool_use', id: 'toolu_1', name: 'Write', input: {} },
+    }));
+
+    handler(JSON.stringify({
+      type: 'content_block_delta',
+      delta: { type: 'input_json_delta', partial_json: '{"file_' },
+    }));
+    handler(JSON.stringify({
+      type: 'content_block_delta',
+      delta: { type: 'input_json_delta', partial_json: 'path": "/home/user/project/src/split.ts"' },
+    }));
+    handler(JSON.stringify({
+      type: 'content_block_delta',
+      delta: { type: 'input_json_delta', partial_json: ', "content": "extra"}' },
+    }));
+
+    const writeLines = lines.filter(l => l.includes('Writing'));
+    expect(writeLines).toHaveLength(1);
+    expect(writeLines[0]).toContain('split.ts');
+  });
+
+  it('resets split input JSON buffering between tool uses', () => {
+    const lines: string[] = [];
+    const handler = createStreamProgressHandler((t) => lines.push(t));
+
+    handler(JSON.stringify({
+      type: 'content_block_start',
+      content_block: { type: 'tool_use', id: 'toolu_1', name: 'Write', input: {} },
+    }));
+    handler(JSON.stringify({
+      type: 'content_block_delta',
+      delta: { type: 'input_json_delta', partial_json: '{"file_' },
+    }));
+
+    handler(JSON.stringify({
+      type: 'content_block_start',
+      content_block: { type: 'tool_use', id: 'toolu_2', name: 'Edit', input: {} },
+    }));
+    handler(JSON.stringify({
+      type: 'content_block_delta',
+      delta: { type: 'input_json_delta', partial_json: 'path": "/home/user/project/src/leaked.ts"' },
+    }));
+
+    expect(lines.filter(l => l.includes('Writing') || l.includes('Editing'))).toHaveLength(0);
+  });
+
   it('shows completion stats on result event', () => {
     const lines: string[] = [];
     const handler = createStreamProgressHandler((t) => lines.push(t));
