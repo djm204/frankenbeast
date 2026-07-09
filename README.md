@@ -322,7 +322,7 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 ### Optional
 
 - **ChromaDB** — required for semantic memory (MOD-03). Not needed for unit/integration tests.
-- **LLM API key** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for runtime use. Not needed for tests (mocked).
+- **LLM provider credentials** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for API-backed providers. Ollama-compatible provider registry entries use `OLLAMA_BASE_URL` instead of an API key; the local default is `http://localhost:11434`.
 - **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
 
 ### Beast project-root override
@@ -636,6 +636,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `OPENAI_API_KEY` | MOD-01 | Runtime only | OpenAI adapter API key |
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
+| `OLLAMA_BASE_URL` | Provider registry | Only when using an Ollama-compatible provider entry | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons. It is intentionally absent from `.env.example` because the default local setup and current `fbeast mcp beast` presets do not consume it. |
 | `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 | `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |
