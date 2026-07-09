@@ -129,6 +129,8 @@ vi.mock('../../../src/cli/args.js', () => ({
 vi.mock('../../../src/cli/project-root.js', () => ({
   resolveProjectRoot: vi.fn((dir: string) => dir),
   generatePlanName: vi.fn(() => 'plan-2026-03-08'),
+  readActivePlanName: vi.fn(() => undefined),
+  writeActivePlanName: vi.fn(),
   getProjectPaths: vi.fn((root: string, planName?: string) => {
     const plansDir = planName ? `${root}/.fbeast/plans/${planName}` : `${root}/.fbeast/plans`;
     return {
@@ -145,6 +147,7 @@ vi.mock('../../../src/cli/project-root.js', () => ({
     logFile: `${root}/.fbeast/.build/build.log`,
     designDocFile: `${plansDir}/design.md`,
     configFile: `${root}/.fbeast/config.json`,
+    activePlanFile: `${root}/.fbeast/active-plan`,
     llmResponseFile: `${plansDir}/llm-response.json`,
   };
   }),
@@ -245,7 +248,7 @@ vi.mock('node:readline', () => ({
 
 import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
-import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
+import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
 import { createInterface } from 'node:readline';
 
@@ -845,6 +848,107 @@ describe('main() execution', () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('records the implicit active plan name for chained interactive subcommands', async () => {
+    await main();
+
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
+  });
+
+  it('starts a fresh interview plan even when an active plan exists', async () => {
+    const baseArgs = mockParseArgs() as Record<string, unknown>;
+    mockParseArgs.mockReturnValue({ ...baseArgs, subcommand: 'interview' } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith('/mock/project', 'plan-2026-03-08');
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
+  });
+
+  it('persists active plan names when execution fails after the plan is established', async () => {
+    mockSessionStart.mockResolvedValueOnce({ status: 'failed' } as unknown as Awaited<ReturnType<typeof mockSessionStart>>);
+    const originalExitCode = process.exitCode;
+
+    await expect(main()).rejects.toThrow('process.exit unexpectedly called with "1"');
+
+    expect(writeActivePlanName).toHaveBeenCalledWith(
+      expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+      'plan-2026-03-08',
+    );
+    process.exitCode = originalExitCode;
+  });
+
+  it('persists active plan names before an interrupted execution exits', async () => {
+    mockSessionStart.mockImplementationOnce(() => {
+      expect(writeActivePlanName).toHaveBeenCalledWith(
+        expect.objectContaining({ activePlanFile: '/mock/project/.fbeast/active-plan' }),
+        'plan-2026-03-08',
+      );
+      process.exit(0);
+    });
+
+    await expect(main()).rejects.toThrow('process.exit unexpectedly called with "0"');
+  });
+
+  it('does not mark issue batches as the active plan', async () => {
+    const baseArgs = mockParseArgs() as Record<string, unknown>;
+    mockParseArgs.mockReturnValue({ ...baseArgs, subcommand: 'issues', planName: 'batch-13' } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(writeActivePlanName).not.toHaveBeenCalled();
+  });
+
+  it('reuses the recorded active plan for an implicit run across date rollover', async () => {
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.mocked(readActivePlanName).mockReturnValueOnce('plan-2026-03-07');
+    mockParseArgs.mockReturnValue({
+      subcommand: 'run',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      beastAction: undefined,
+      beastTarget: undefined,
+    });
+
+    await main();
+
+    expect(getProjectPaths).toHaveBeenCalledWith('/mock/project', 'plan-2026-03-07');
+    expect(logSpy).toHaveBeenCalledWith(
+      'No runnable default run plan chunks found under /mock/project/.fbeast/plans/plan-2026-03-07. Create it with `frankenbeast plan --design-doc <file> --plan-name plan-2026-03-07`, or run `frankenbeast interview` first and then plan the generated design before running.',
+    );
+    expect(writeActivePlanName).not.toHaveBeenCalled();
+    logSpy.mockRestore();
   });
 
   it('prints actionable guidance before provider preflight when no plan chunks exist', async () => {
