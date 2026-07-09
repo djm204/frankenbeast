@@ -219,7 +219,7 @@ function formatStreamedLogLine(event: { eventId?: string; stream?: string; line:
   return event.line;
 }
 
-function buildInitAction(
+export function buildInitAction(
   definitionId: string,
   config: Record<string, unknown>,
   chatSessionId: string | undefined,
@@ -234,9 +234,16 @@ function buildInitAction(
   }
 
   if (definitionId === 'chunk-plan') {
+    const workflow = config.workflow as Record<string, unknown> | undefined;
+    const designDocPath = typeof config.designDocPath === 'string'
+      ? config.designDocPath
+      : typeof workflow?.docPath === 'string'
+        ? workflow.docPath
+        : '';
+
     return {
       kind: 'chunk-plan',
-      command: `/plan --design-doc ${String(config.designDocPath ?? '')}`,
+      command: `/plan --design-doc ${designDocPath}`,
       config,
       ...(chatSessionId ? { chatSessionId } : {}),
     };
