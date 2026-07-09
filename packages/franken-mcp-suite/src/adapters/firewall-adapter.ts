@@ -51,10 +51,9 @@ export function createFirewallAdapter(
 
   const store = createSqliteStore(dbPathOrDeps);
   const root = realpathSync(resolve(options.root ?? process.env['FBEAST_ROOT'] ?? process.cwd()));
-  const configPath = resolveConfigPath(
-    options.configPath ?? process.env['FBEAST_CONFIG'] ?? join(dirname(dbPathOrDeps), 'config.json'),
-    root,
-  );
+  const explicitConfigPath = options.configPath ?? process.env['FBEAST_CONFIG'];
+  const configPath = resolveConfigPath(explicitConfigPath ?? join(dirname(dbPathOrDeps), 'config.json'), root);
+  const requireConfig = explicitConfigPath !== undefined;
 
   function resolveContained(requested: string): string {
     const target = resolve(root, requested);
@@ -70,7 +69,7 @@ export function createFirewallAdapter(
 
   return {
     async scanText(input) {
-      const result = scanWithConfig(input, loadFirewallScanConfig(configPath, tier));
+      const result = scanWithConfig(input, loadFirewallScanConfig(configPath, tier, requireConfig));
       logScan(input, result);
       return result;
     },
@@ -78,7 +77,7 @@ export function createFirewallAdapter(
     async scanFile(path) {
       const safePath = resolveContained(path);
       const content = readFileSync(safePath, 'utf8');
-      const result = scanWithConfig(content, loadFirewallScanConfig(configPath, tier));
+      const result = scanWithConfig(content, loadFirewallScanConfig(configPath, tier, requireConfig));
       logScan(content, result);
       return result;
     },
@@ -97,9 +96,12 @@ function resolveConfigPath(configPath: string, root: string): string {
   return isAbsolute(configPath) ? configPath : resolve(root, configPath);
 }
 
-function loadFirewallScanConfig(configPath: string, fallbackTier: InjectionTier): FirewallScanConfig {
+function loadFirewallScanConfig(configPath: string, fallbackTier: InjectionTier, requireConfig = false): FirewallScanConfig {
   const fallbackProfile: SecurityProfile = fallbackTier === 'strict' ? 'strict' : 'standard';
   if (!existsSync(configPath)) {
+    if (requireConfig) {
+      throw new Error(`Firewall config file does not exist: ${configPath}`);
+    }
     return { profile: fallbackProfile, injectionDetection: true, customRules: [] };
   }
 
@@ -160,7 +162,7 @@ function parseCustomRule(rule: unknown, index: number, configPath: string): Cust
 }
 
 function assertSafeCustomRulePattern(pattern: string, index: number, configPath: string): void {
-  if (pattern.length > 256 || hasUnsafeQuantifiedGroup(pattern)) {
+  if (pattern.length > 256 || hasUnsafeQuantifiedGroup(pattern) || hasRepeatedQuantifiedAtom(pattern)) {
     throw new Error(`Unsafe security.customRules[${index}].pattern in firewall config: ${configPath}`);
   }
   try {
@@ -173,8 +175,65 @@ function assertSafeCustomRulePattern(pattern: string, index: number, configPath:
 function hasUnsafeQuantifiedGroup(pattern: string): boolean {
   const simpleGroup = String.raw`\((?:[^()\\]|\\.)*`;
   const groupEndWithOuterQuantifier = String.raw`(?:[^()\\]|\\.)*\)\s*[+*?{]`;
-  return new RegExp(`${simpleGroup}[+*]${groupEndWithOuterQuantifier}`).test(pattern)
-    || new RegExp(`${simpleGroup}\|${groupEndWithOuterQuantifier}`).test(pattern);
+  return new RegExp(`(?:${simpleGroup}[+*]${groupEndWithOuterQuantifier})`).test(pattern)
+    || new RegExp(`(?:${simpleGroup}[|]${groupEndWithOuterQuantifier})`).test(pattern);
+}
+
+function hasRepeatedQuantifiedAtom(pattern: string): boolean {
+  let previousQuantifiedAtom: string | undefined;
+  for (let i = 0; i < pattern.length; i++) {
+    const atomStart = i;
+    const ch = pattern[i];
+    if (ch === '^' || ch === '$') continue;
+    if (ch === '(') {
+      previousQuantifiedAtom = undefined;
+      let depth = 1;
+      while (++i < pattern.length && depth > 0) {
+        if (pattern[i] === '\\') i++;
+        else if (pattern[i] === '(') depth++;
+        else if (pattern[i] === ')') depth--;
+      }
+      if (isQuantifierStart(pattern[i + 1])) previousQuantifiedAtom = undefined;
+      continue;
+    }
+    if (ch === '[') {
+      while (++i < pattern.length) {
+        if (pattern[i] === '\\') i++;
+        else if (pattern[i] === ']') break;
+      }
+    } else if (ch === '\\') {
+      i++;
+    }
+    const atom = pattern.slice(atomStart, i + 1);
+    const quantifierStart = i + 1;
+    if (!isQuantifierStart(pattern[quantifierStart])) {
+      previousQuantifiedAtom = undefined;
+      continue;
+    }
+    const quantifier = readQuantifier(pattern, quantifierStart);
+    i = quantifier.end;
+    if (!quantifier.isBacktrackingRisk) {
+      previousQuantifiedAtom = undefined;
+      continue;
+    }
+    if (previousQuantifiedAtom === atom) return true;
+    previousQuantifiedAtom = atom;
+  }
+  return false;
+}
+
+function isQuantifierStart(ch: string | undefined): boolean {
+  return ch === '*' || ch === '+' || ch === '?' || ch === '{';
+}
+
+function readQuantifier(pattern: string, start: number): { end: number; isBacktrackingRisk: boolean } {
+  const ch = pattern[start];
+  if (ch === '*' || ch === '+') return { end: start, isBacktrackingRisk: true };
+  if (ch === '?') return { end: start, isBacktrackingRisk: false };
+  const close = pattern.indexOf('}', start + 1);
+  if (ch !== '{' || close === -1) return { end: start, isBacktrackingRisk: false };
+  const body = pattern.slice(start + 1, close);
+  return { end: close, isBacktrackingRisk: body.endsWith(',') || /,\s*\d+$/.test(body) };
 }
 
 function parseRequiredString(value: unknown, field: string, configPath: string): string {

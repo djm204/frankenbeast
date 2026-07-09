@@ -166,4 +166,45 @@ describe('Firewall Server', () => {
 
     await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
   });
+
+  it('allows safe custom firewall alternation without an outer quantifier', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-safe-alt-'));
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    writeFileSync(join(root, '.fbeast', 'config.json'), JSON.stringify({
+      security: {
+        customRules: [
+          { name: 'credential-term', pattern: '(password|token)', action: 'block', target: 'request' },
+        ],
+      },
+    }));
+    const adapter = createFirewallAdapter(join(root, '.fbeast', 'fw.db'), 'standard', { root });
+
+    await expect(adapter.scanText('contains token')).resolves.toMatchObject({ verdict: 'flagged' });
+  });
+
+  it('rejects repeated quantified atoms before scanning', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-unsafe-atom-'));
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    writeFileSync(join(root, '.fbeast', 'config.json'), JSON.stringify({
+      security: {
+        customRules: [
+          { name: 'repeated-atom', pattern: '^a*a*a*a*a*a*a*a*a*a*b$', action: 'block', target: 'request' },
+        ],
+      },
+    }));
+    const adapter = createFirewallAdapter(join(root, '.fbeast', 'fw.db'), 'standard', { root });
+
+    await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
+  });
+
+  it('fails closed when an explicit firewall config path is missing', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-missing-config-'));
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    const adapter = createFirewallAdapter(join(root, '.fbeast', 'fw.db'), 'standard', {
+      root,
+      configPath: join(root, '.fbeast', 'missing-config.json'),
+    });
+
+    await expect(adapter.scanText('plain text')).rejects.toThrow(/Firewall config file does not exist/);
+  });
 });
