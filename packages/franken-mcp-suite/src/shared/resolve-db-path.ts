@@ -7,8 +7,12 @@ export function deriveProjectRootFromDbPath(dbPath: string, explicitRoot?: strin
     return resolve(explicitRoot);
   }
 
+  if (isAbsolute(dbPath)) {
+    return projectRootFromDb(dbPath);
+  }
+
   const projectRelativePath = dbPathFromProjectRoot(dbPath);
-  const envRoot = process.env['CLAUDE_PROJECT_DIR'] ?? process.env['GEMINI_PROJECT_ROOT'] ?? process.env['FBEAST_ROOT'];
+  const envRoot = projectRootEnvForDbPath(dbPath);
   if (projectRelativePath && envRoot) {
     return resolve(envRoot);
   }
@@ -31,14 +35,19 @@ export function deriveProjectRootFromDbPath(dbPath: string, explicitRoot?: strin
 }
 
 export function resolveProjectDbPath(dbPath: string, explicitRoot?: string | undefined): string {
+  if (isAbsolute(dbPath)) {
+    return dbPath;
+  }
+
+  const projectRelativePath = dbPathFromProjectRoot(dbPath);
+  if (projectRelativePath && explicitRoot) {
+    return resolve(explicitRoot, projectRelativePath);
+  }
+
   const expandedDbPath = expandProjectRootEnv(dbPath);
   if (expandedDbPath !== dbPath) {
     return expandedDbPath;
   }
-  if (isAbsolute(dbPath)) {
-    return dbPath;
-  }
-  const projectRelativePath = dbPathFromProjectRoot(dbPath);
   if (!projectRelativePath) {
     return dbPath;
   }
@@ -47,16 +56,26 @@ export function resolveProjectDbPath(dbPath: string, explicitRoot?: string | und
 }
 
 function expandProjectRootEnv(dbPath: string): string {
-  const root = process.env['CLAUDE_PROJECT_DIR'] ?? process.env['GEMINI_PROJECT_ROOT'] ?? process.env['FBEAST_ROOT'];
-  if (!root) return dbPath;
-
   return dbPath
-    .replace(/^\$\{CLAUDE_PROJECT_DIR}/, root)
-    .replace(/^\$CLAUDE_PROJECT_DIR/, root)
-    .replace(/^\$\{GEMINI_PROJECT_ROOT}/, root)
-    .replace(/^\$GEMINI_PROJECT_ROOT/, root)
-    .replace(/^\$\{FBEAST_ROOT}/, root)
-    .replace(/^\$FBEAST_ROOT/, root);
+    .replace(/^\$\{CLAUDE_PROJECT_DIR}/, process.env['CLAUDE_PROJECT_DIR'] ?? '${CLAUDE_PROJECT_DIR}')
+    .replace(/^\$CLAUDE_PROJECT_DIR/, process.env['CLAUDE_PROJECT_DIR'] ?? '$CLAUDE_PROJECT_DIR')
+    .replace(/^\$\{GEMINI_PROJECT_ROOT}/, process.env['GEMINI_PROJECT_ROOT'] ?? '${GEMINI_PROJECT_ROOT}')
+    .replace(/^\$GEMINI_PROJECT_ROOT/, process.env['GEMINI_PROJECT_ROOT'] ?? '$GEMINI_PROJECT_ROOT')
+    .replace(/^\$\{FBEAST_ROOT}/, process.env['FBEAST_ROOT'] ?? '${FBEAST_ROOT}')
+    .replace(/^\$FBEAST_ROOT/, process.env['FBEAST_ROOT'] ?? '$FBEAST_ROOT');
+}
+
+function projectRootEnvForDbPath(dbPath: string): string | undefined {
+  if (/^\$\{CLAUDE_PROJECT_DIR}/.test(dbPath) || /^\$CLAUDE_PROJECT_DIR/.test(dbPath)) {
+    return process.env['CLAUDE_PROJECT_DIR'];
+  }
+  if (/^\$\{GEMINI_PROJECT_ROOT}/.test(dbPath) || /^\$GEMINI_PROJECT_ROOT/.test(dbPath)) {
+    return process.env['GEMINI_PROJECT_ROOT'];
+  }
+  if (/^\$\{FBEAST_ROOT}/.test(dbPath) || /^\$FBEAST_ROOT/.test(dbPath)) {
+    return process.env['FBEAST_ROOT'];
+  }
+  return process.env['CLAUDE_PROJECT_DIR'] ?? process.env['GEMINI_PROJECT_ROOT'] ?? process.env['FBEAST_ROOT'];
 }
 
 function projectRootFromDb(dbPath: string): string | undefined {
