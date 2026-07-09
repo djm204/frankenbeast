@@ -1,27 +1,26 @@
 import { useEffect } from 'react';
 import { useBeastStore } from '../../../stores/beast-store';
 import { PresetCardGroup } from '../shared/preset-card';
-import type { BeastContainerRuntimeStatus, BeastExecutionMode } from '../../../lib/beast-api';
-
-const WORKFLOWS = [
-  { id: 'design-interview', title: 'Design Interview', description: 'Launch interactive design session' },
-  { id: 'chunk-plan', title: 'Chunk Design Doc', description: 'Break a design doc into implementation chunks' },
-  { id: 'martin-loop', title: 'Run Chunked Project', description: 'Execute an already-chunked plan' },
-];
+import type { BeastCatalogEntry, BeastContainerRuntimeStatus, BeastExecutionMode, BeastInterviewPrompt } from '../../../lib/beast-api';
+import { getEffectiveCatalog, getPromptLabel, getPromptValue } from '../wizard-catalog';
 
 interface StepWorkflowProps {
+  catalog?: readonly BeastCatalogEntry[];
   containerRuntime?: BeastContainerRuntimeStatus;
 }
 
 const DEFAULT_CONTAINER_UNAVAILABLE_REASON = 'Container runtime availability has not been reported by the backend.';
 
-export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
+export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
   const { stepValues, setStepValues } = useBeastStore();
   const values = (stepValues[1] ?? {}) as { workflowType?: string; executionMode?: BeastExecutionMode; [key: string]: unknown };
-  const selectedExecutionMode = values.executionMode ?? 'process';
-  const containerUnavailableReason = containerRuntime?.available === true
+  const workflows = getEffectiveCatalog(catalog);
+  const selectedWorkflow = workflows.find((entry) => entry.id === values.workflowType);
+  const selectedExecutionMode = values.executionMode ?? selectedWorkflow?.executionModeDefault ?? 'process';
+  const containerStatus = selectedWorkflow?.containerRuntime ?? containerRuntime;
+  const containerUnavailableReason = containerStatus?.available === true
     ? null
-    : (containerRuntime?.reason ?? DEFAULT_CONTAINER_UNAVAILABLE_REASON);
+    : (containerStatus?.reason ?? DEFAULT_CONTAINER_UNAVAILABLE_REASON);
   const effectiveExecutionMode = selectedExecutionMode === 'container' && containerUnavailableReason
     ? 'process'
     : selectedExecutionMode;
@@ -33,10 +32,17 @@ export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
   }, [containerUnavailableReason, selectedExecutionMode, setStepValues, values]);
 
   function handleSelect(id: string) {
-    setStepValues(1, { ...values, workflowType: id });
+    if (id === values.workflowType) {
+      setStepValues(1, { ...values, workflowType: id });
+      return;
+    }
+
+    const nextWorkflow = workflows.find((entry) => entry.id === id);
+    const executionMode = values.executionMode ?? nextWorkflow?.executionModeDefault;
+    setStepValues(1, { workflowType: id, ...(executionMode ? { executionMode } : {}) });
   }
 
-  function updateField(field: string, value: string) {
+  function updateField(field: string, value: string | boolean) {
     setStepValues(1, { ...values, [field]: value });
   }
 
@@ -49,7 +55,11 @@ export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
 
   return (
     <div className="p-8 space-y-6">
-      <PresetCardGroup presets={WORKFLOWS} selected={values.workflowType ?? ''} onSelect={handleSelect} />
+      <PresetCardGroup
+        presets={workflows.map((entry) => ({ id: entry.id, title: entry.label, description: entry.description }))}
+        selected={values.workflowType ?? ''}
+        onSelect={handleSelect}
+      />
 
       <fieldset className="space-y-3 rounded-xl border border-beast-border bg-beast-panel p-4">
         <legend className="px-1 text-sm font-medium text-beast-text">Execution mode</legend>
@@ -93,102 +103,109 @@ export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
         )}
       </fieldset>
 
-      {values.workflowType === 'design-interview' && (
+      {selectedWorkflow && (
         <div className="space-y-4">
-          <div>
-            <label htmlFor="wf-goal" className="block text-sm font-medium text-beast-text mb-1.5">Goal</label>
-            <textarea
-              id="wf-goal"
-              value={(values.goal as string) ?? (values.topic as string) ?? ''}
-              onChange={(e) => updateField('goal', e.target.value)}
-              placeholder="Describe what the design interview should produce..."
-              rows={3}
-              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent resize-y"
+          {selectedWorkflow.interviewPrompts.map((prompt) => (
+            <CatalogPromptField
+              key={prompt.key}
+              prompt={prompt}
+              value={getPromptValue(values, prompt)}
+              onChange={(value) => updateField(prompt.key, value)}
             />
-          </div>
-          <div>
-            <label htmlFor="wf-output-path" className="block text-sm font-medium text-beast-text mb-1.5">Output Path</label>
-            <input
-              id="wf-output-path"
-              type="text"
-              value={(values.outputPath as string) ?? ''}
-              onChange={(e) => updateField('outputPath', e.target.value)}
-              placeholder="docs/design.md"
-              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-            />
-          </div>
-        </div>
-      )}
-
-      {values.workflowType === 'chunk-plan' && (
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="wf-file" className="block text-sm font-medium text-beast-text mb-1.5">Design Doc Path</label>
-            <input
-              id="wf-file"
-              type="text"
-              value={(values.docPath as string) ?? ''}
-              onChange={(e) => updateField('docPath', e.target.value)}
-              placeholder="docs/design-doc.md"
-              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-            />
-            <p className="mt-1 text-xs text-beast-muted">Use a repo-relative Markdown path; absolute paths and ../ traversal are rejected.</p>
-          </div>
-          <div>
-            <label htmlFor="wf-output-dir" className="block text-sm font-medium text-beast-text mb-1.5">Output Directory</label>
-            <input
-              id="wf-output-dir"
-              type="text"
-              value={(values.outputDir as string) ?? ''}
-              onChange={(e) => updateField('outputDir', e.target.value)}
-              placeholder="/path/to/chunks"
-              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-            />
-          </div>
-        </div>
-      )}
-
-      {values.workflowType === 'martin-loop' && (
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="wf-provider" className="block text-sm font-medium text-beast-text mb-1.5">Provider</label>
-            <select
-              id="wf-provider"
-              value={(values.provider as string) ?? ''}
-              onChange={(e) => updateField('provider', e.target.value)}
-              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-            >
-              <option value="">Select provider...</option>
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-              <option value="gemini">Gemini</option>
-              <option value="aider">Aider</option>
-            </select>
-          </div>
-          <div>
-            <label htmlFor="wf-objective" className="block text-sm font-medium text-beast-text mb-1.5">Objective</label>
-            <input
-              id="wf-objective"
-              type="text"
-              value={(values.objective as string) ?? ''}
-              onChange={(e) => updateField('objective', e.target.value)}
-              placeholder="Describe what the Martin Loop should accomplish..."
-              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-            />
-          </div>
-          <div>
-            <label htmlFor="wf-dir" className="block text-sm font-medium text-beast-text mb-1.5">Chunk Directory Path</label>
-            <input
-              id="wf-dir"
-              type="text"
-              value={(values.chunkDirectory as string) ?? (values.chunkDir as string) ?? ''}
-              onChange={(e) => updateField('chunkDirectory', e.target.value)}
-              placeholder="/path/to/chunks/"
-              className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
-            />
-          </div>
+          ))}
         </div>
       )}
     </div>
   );
+}
+
+function CatalogPromptField({
+  prompt,
+  value,
+  onChange,
+}: {
+  prompt: BeastInterviewPrompt;
+  value: unknown;
+  onChange: (value: string | boolean) => void;
+}) {
+  const label = getPromptLabel(prompt);
+  const id = `wf-${prompt.key}`;
+
+  if (prompt.kind === 'boolean') {
+    return (
+      <label className="flex items-center gap-3 rounded-lg border border-beast-border bg-beast-control px-4 py-3 text-sm text-beast-text">
+        <input
+          id={id}
+          type="checkbox"
+          checked={value === true}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-4 w-4 rounded border-beast-border bg-beast-panel text-beast-accent focus:ring-beast-accent"
+        />
+        <span>{label}{prompt.required ? ' *' : ''}</span>
+      </label>
+    );
+  }
+
+  if (prompt.options?.length) {
+    return (
+      <div>
+        <label htmlFor={id} className="block text-sm font-medium text-beast-text mb-1.5">{label}{prompt.required ? ' *' : ''}</label>
+        <select
+          id={id}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+        >
+          <option value="">Select...</option>
+          {prompt.options.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      </div>
+    );
+  }
+
+  const placeholder = buildPlaceholder(prompt);
+  const inputType = prompt.kind === 'file' || prompt.kind === 'directory' ? 'text' : undefined;
+  const rows = prompt.kind === 'string' && !isSingleLinePathPrompt(prompt) ? 3 : undefined;
+
+  return (
+    <div>
+      <label htmlFor={id} className="block text-sm font-medium text-beast-text mb-1.5">{label}{prompt.required ? ' *' : ''}</label>
+      {rows ? (
+        <textarea
+          id={id}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          rows={rows}
+          className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent resize-y"
+        />
+      ) : (
+        <input
+          id={id}
+          type={inputType ?? 'text'}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
+        />
+      )}
+      {prompt.kind === 'file' && (
+        <p className="mt-1 text-xs text-beast-muted">Use a repo-relative Markdown path when required by the selected Beast.</p>
+      )}
+    </div>
+  );
+}
+
+function isSingleLinePathPrompt(prompt: BeastInterviewPrompt): boolean {
+  const key = prompt.key.toLowerCase();
+  return prompt.kind === 'file' || prompt.kind === 'directory' || key.includes('path') || key.includes('dir') || key.includes('directory');
+}
+
+function buildPlaceholder(prompt: BeastInterviewPrompt): string {
+  if (prompt.key === 'goal') return 'Describe what the design interview should produce...';
+  if (prompt.key === 'outputPath') return 'docs/design.md';
+  if (prompt.key === 'designDocPath') return 'docs/design-doc.md';
+  if (prompt.key === 'outputDir') return 'tasks/chunks';
+  if (prompt.key === 'chunkDirectory') return 'tasks/chunks/';
+  return prompt.prompt;
 }

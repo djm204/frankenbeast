@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { BeastCatalogEntry } from '../../lib/beast-api';
 import { buildWizardLaunchConfig } from './wizard-launch-config';
 
 describe('buildWizardLaunchConfig', () => {
@@ -51,7 +52,40 @@ describe('buildWizardLaunchConfig', () => {
     });
   });
 
+  it('flattens backend catalog prompt keys into launch config for custom definitions', () => {
+    const catalog: BeastCatalogEntry[] = [{
+      id: 'custom-beast',
+      label: 'Custom Backend Beast',
+      description: 'Served by backend catalog',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'objective', prompt: 'What should it do?', kind: 'string', required: true },
+        { key: 'provider', prompt: 'Which provider?', kind: 'string', required: true },
+      ],
+    }];
+
+    expect(buildWizardLaunchConfig({
+      1: { workflowType: 'custom-beast', objective: 'Ship catalog UX', provider: 'codex' },
+    }, catalog)).toMatchObject({
+      workflow: { workflowType: 'custom-beast', objective: 'Ship catalog UX', provider: 'codex' },
+      objective: 'Ship catalog UX',
+      provider: 'codex',
+    });
+  });
+
   it('keeps legacy wizard aliases compatible while preferring backend field names', () => {
+    expect(buildWizardLaunchConfig({
+      1: {
+        workflowType: 'chunk-plan',
+        docPath: 'legacy/design.md',
+        designDocPath: 'docs/design.md',
+        outputDir: 'tasks/chunks',
+      },
+    })).toMatchObject({
+      designDocPath: 'docs/design.md',
+      outputDir: 'tasks/chunks',
+    });
+
     expect(buildWizardLaunchConfig({
       1: {
         workflowType: 'martin-loop',
