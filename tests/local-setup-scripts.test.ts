@@ -144,6 +144,9 @@ describe('local setup scripts', () => {
       expect(doc).toContain('GEMINI_API_KEY');
     }
 
+    expect(readme).toContain('CHROMA_URL');
+    expect(readme).toContain('http://localhost:8000');
+    expect(readme).toContain('Override it only when ChromaDB runs at a different local port/host or a remote');
     expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
     expect(readme).toContain('maxCritiqueIterations * 10000');
     for (const frankenOverride of [
