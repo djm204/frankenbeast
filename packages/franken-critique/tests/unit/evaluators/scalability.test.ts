@@ -60,7 +60,9 @@ describe('ScalabilityEvaluator', () => {
     ['hyphenated bracket notation assignment', 'config["server-port"] = 8080;'],
     ['class field initializer', 'class ServerConfig { port = 8080; static defaultPort = 8443; }'],
     ['modified class field initializer', 'class ServerConfig { private port = 8080; readonly serverPort = 8443; public static defaultPort = 9090; }'],
+    ['private class field initializer', 'class ServerConfig { #port = 8080; #serverPorts = 8443; }'],
     ['plural port declaration and property', 'const ports = 8080; const cfg = { serverPorts: 8443 };'],
+    ['plural port container array', 'const cfg = { ports: [8080, 8443] };'],
     ['numeric separator config literal', 'const cfg = { port: 8_080 };'],
     ['template interpolation assignment', 'const text = `${config.port = 8080}`;'],
     ['template interpolation object literal', 'const text = `${{ port: 8080 }}`;'],
@@ -108,7 +110,11 @@ interface MultilineListenerConfig
   port: 3000;
 }
 const cfg: { port: 8080 } = createCfg();
+export const exportedCfg: { port: 8080 } = createCfg();
+declare const declaredCfg: { port: 8080 };
 function bind(opts: { port: 8080 }) {}
+function bindLater(host: string, opts: { port: 8080 }) {}
+function bindOptional(host: string, opts?: { port: 8080 }) {}
 const castCfg = {} as { port: 8080 };
 function getConfig(): { port: 8080 } {
   return createCfg();

@@ -18,6 +18,13 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\[[^\]]*?${PORT_NUMBER_PATTERN}\b`,
+      'g',
+    ),
+    suggestion: CONFIG_PORT_SUGGESTION,
+  },
+  {
+    pattern: new RegExp(
       String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
@@ -34,7 +41,7 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[;{\n])${PORT_PROPERTY_GAP_PATTERN}(?:(?:public|private|protected|readonly|override|declare|accessor|static)\s+)*${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;,\n]+)?\s*=\s*${PORT_NUMBER_PATTERN}\b`,
+      String.raw`(?:^|[;{\n])${PORT_PROPERTY_GAP_PATTERN}(?:(?:public|private|protected|readonly|override|declare|accessor|static)\s+)*#?${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;,\n]+)?\s*=\s*${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
@@ -229,8 +236,9 @@ export class ScalabilityEvaluator implements Evaluator {
     return /^\s*(?:(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*|(?:export\s+|declare\s+)*interface\s+\w+[\s\S]*)$/s.test(statementPrefix) ||
       /(?:^|[;\n])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}\n]+)?\s*$/s.test(prefix) ||
       /\b(?:as\s*|satisfies\s*)$/s.test(prefix) ||
-      /(?:^|[\n;])\s*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
-      /\(\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
+      /(?:^|[\n;])\s*(?:export\s+|declare\s+)*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
+      /\(\s*\w+\??\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
+      /\([^({}]*?(?:\(|,)\s*\w+\??\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\)\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
       /(?:<|\bextends)\s*$/s.test(prefix) ||
