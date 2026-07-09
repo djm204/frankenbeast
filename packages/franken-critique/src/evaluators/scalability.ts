@@ -4,7 +4,7 @@ const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
 const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b)\w*))\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
 const PORT_CONFIG_KEY_PATTERN = String.raw`(?<![\w$])(?!(?:[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b|[Rr]eports?\b|[Ii]mport(?:s|ant)?\b|[Ee]xports?\b)\w*))\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
-const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv][Ii][Ee][Ww]-[Pp][Oo][Rr][Tt])[^"']*))(?:[A-Za-z0-9_]+-)*[Pp][Oo][Rr][Tt](?:-[A-Za-z0-9_]+)*["']`;
+const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv][Ii][Ee][Ww][-.][Pp][Oo][Rr][Tt])[^"']*))(?:[A-Za-z0-9_]+[-.])*[Pp][Oo][Rr][Tt](?:[-.][A-Za-z0-9_]+)*["']`;
 const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
 const PORT_TYPE_ANNOTATION_PATTERN = String.raw`(?:\s*:\s*(?:[^=;,\n<>]+|[^=;\n]*<[^=;\n]*>[^=;\n]*))?`;
@@ -35,11 +35,11 @@ const HARDCODED_PORT_PATTERNS = [
     skipTypeOnly: true,
   },
   {
-    pattern: new RegExp(String.raw`\.\s*${PORT_IDENTIFIER_PATTERN}\s*(?:=|\?\?=|\|\|=|&&=)\s*${PORT_NUMBER_PATTERN}\b`, 'g'),
+    pattern: new RegExp(String.raw`\.\s*#?${PORT_CONFIG_KEY_PATTERN}\s*(?:=|\?\?=|\|\|=|&&=)\s*${PORT_NUMBER_PATTERN}\b`, 'g'),
     suggestion: CONFIG_PORT_SUGGESTION,
   },
   {
-    pattern: new RegExp(String.raw`\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\]\s*(?:=|\?\?=|\|\|=|&&=)\s*${PORT_NUMBER_PATTERN}\b`, 'g'),
+    pattern: new RegExp(String.raw`\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\]\s*(?:=|\?\?=|\|\|=|&&=)\s*${PORT_NUMBER_PATTERN}\b`, 'g'),
     suggestion: CONFIG_PORT_SUGGESTION,
   },
   {
@@ -48,14 +48,6 @@ const HARDCODED_PORT_PATTERNS = [
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
-  },
-  {
-    pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\{[^{}]*?:${PORT_PROPERTY_GAP_PATTERN}${PORT_NUMBER_PATTERN}\b`,
-      'g',
-    ),
-    suggestion: CONFIG_PORT_SUGGESTION,
-    skipTypeOnly: true,
   },
 ];
 
@@ -113,7 +105,9 @@ export class ScalabilityEvaluator implements Evaluator {
     for (const { pattern, suggestion, skipTypeOnly } of HARDCODED_PORT_PATTERNS) {
       for (const match of content.matchAll(pattern)) {
         const portNumberIndex = this.findPortNumberIndex(match);
-        if (this.isInTypeOnlyRange(ignoredRanges, portNumberIndex)) {
+        const matchIndex = match.index ?? 0;
+        const startsInIgnoredRange = this.isInTypeOnlyRange(ignoredRanges, matchIndex);
+        if ((startsInIgnoredRange && !/^\s*["']/.test(match[0])) || this.isInTypeOnlyRange(ignoredRanges, portNumberIndex)) {
           continue;
         }
 
@@ -223,9 +217,16 @@ export class ScalabilityEvaluator implements Evaluator {
     if (!/:\s*$/.test(valuePrefix)) {
       return false;
     }
-
     const keyPrefix = valuePrefix.replace(/:\s*$/, '').trim();
-    return !new RegExp(String.raw`^(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])$`).test(keyPrefix);
+    const nestedContainerPrefix = prefix.slice(0, valueStart);
+    const isPortKey = new RegExp(String.raw`^(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])$`).test(keyPrefix);
+    if (/Options\s*:\s*$/i.test(content.slice(Math.max(0, containerStart - 120), containerStart))) {
+      return !isPortKey;
+    }
+    if (!/[\[{]/.test(nestedContainerPrefix)) {
+      return false;
+    }
+    return !isPortKey;
   }
 
   private isInTypeOnlyRange(ranges: Array<[number, number]>, matchIndex: number): boolean {

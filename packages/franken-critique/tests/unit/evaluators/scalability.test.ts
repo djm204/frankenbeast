@@ -315,6 +315,62 @@ class NestedGenericBaseConfig extends Base<Record<string, unknown>, { port: 9000
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
   });
 
+  it('applies config key exclusions to property assignment names', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `module.exports = 3000;
+metrics.report = 8080;
+metrics.important = 8443;
+config.port = 5000;
+this.#port = 9000;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 5000. Use environment variables or config.',
+      'Found hardcoded port number: 9000. Use environment variables or config.',
+    ]);
+  });
+
+  it('requires nested object values under port options to be port-shaped', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { portOptions: { timeoutMs: 5000, retryCount: 3, port: 8080 } };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('reports every value in flat plural port maps', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('const cfg = { ports: { http: 8080, https: 8443 } };'));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8443. Use environment variables or config.',
+    ]);
+  });
+
+  it('includes dotted quoted port keys', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { "server.port": 8080 };
+config['admin.port'] = 8443;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8443. Use environment variables or config.',
+    ]);
+  });
+
+  it('ignores matches that start inside comments', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const x = 1; // { port:
+const y = 8080;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
   it('does not scan comments or strings for port-shaped assignments', async () => {
     const evaluator = new ScalabilityEvaluator();
     const content = `// const port = 8080
