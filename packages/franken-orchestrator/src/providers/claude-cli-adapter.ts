@@ -326,6 +326,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
             (error?.['message'] as string) ?? 'Unknown error';
           const retryable =
             message.includes('rate') || message.includes('overloaded');
+          streamCompleted = true;
           yield { type: 'error', error: message, retryable };
           return;
         }

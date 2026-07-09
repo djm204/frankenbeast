@@ -322,11 +322,12 @@ describe('ClaudeCliAdapter', () => {
     });
 
     it('emits retryable error on rate limit', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({ type: 'error', error: { message: 'rate limit exceeded' } }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'rate limit exceeded', retryable: true });
+      expect(proc.kill).not.toHaveBeenCalled();
     });
 
     it('kills the spawned Claude process when stream iteration stops early', async () => {
