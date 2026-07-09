@@ -101,6 +101,27 @@ describe('SpanLifecycle', () => {
       ).not.toThrow()
     })
 
+    it.each([
+      ['negative prompt tokens', { promptTokens: -1, completionTokens: 0 }],
+      ['negative completion tokens', { promptTokens: 0, completionTokens: -1 }],
+      ['fractional prompt tokens', { promptTokens: 1.5, completionTokens: 0 }],
+      ['fractional completion tokens', { promptTokens: 0, completionTokens: 1.5 }],
+      ['NaN prompt tokens', { promptTokens: Number.NaN, completionTokens: 0 }],
+      ['NaN completion tokens', { promptTokens: 0, completionTokens: Number.NaN }],
+      ['infinite prompt tokens', { promptTokens: Number.POSITIVE_INFINITY, completionTokens: 0 }],
+      ['infinite completion tokens', { promptTokens: 0, completionTokens: Number.NEGATIVE_INFINITY }],
+      ['unsafe prompt tokens', { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 }],
+      ['unsafe completion tokens', { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 }],
+      ['overflowing total tokens', { promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 1 }],
+    ])('rejects no-counter %s without mutating span metadata', (_name, usage) => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+      SpanLifecycle.setMetadata(span, { existing: 'kept' })
+
+      expect(() => SpanLifecycle.recordTokenUsage(span, usage)).toThrow(RangeError)
+      expect(span.metadata).toEqual({ existing: 'kept' })
+    })
+
     it('rejects an ended span before touching the counter (no poisoned totals)', () => {
       const trace = TraceContext.createTrace('goal')
       const span = TraceContext.startSpan(trace, { name: 'llm-call' })
