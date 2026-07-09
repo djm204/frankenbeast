@@ -3,6 +3,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { useChatSession } from '../../src/hooks/use-chat-session';
 
 const mockCreateSession = vi.fn();
+const mockCreateSocketTicket = vi.fn();
 const mockGetSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockApprove = vi.fn();
@@ -12,6 +13,7 @@ const mockSocketProtocols = vi.fn();
 vi.mock('../../src/lib/api', () => ({
   ChatApiClient: vi.fn(function (this: {
     createSession: typeof mockCreateSession;
+    createSocketTicket: typeof mockCreateSocketTicket;
     getSession: typeof mockGetSession;
     sendMessage: typeof mockSendMessage;
     approve: typeof mockApprove;
@@ -19,6 +21,7 @@ vi.mock('../../src/lib/api', () => ({
     socketProtocols: typeof mockSocketProtocols;
   }) {
     this.createSession = mockCreateSession;
+    this.createSocketTicket = mockCreateSocketTicket;
     this.getSession = mockGetSession;
     this.sendMessage = mockSendMessage;
     this.approve = mockApprove;
@@ -81,6 +84,7 @@ describe('useChatSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateSession.mockReset();
+    mockCreateSocketTicket.mockReset();
     mockGetSession.mockReset();
     mockSendMessage.mockReset();
     mockApprove.mockReset();
@@ -111,6 +115,7 @@ describe('useChatSession', () => {
       createdAt: '2026-03-09T00:00:00Z',
       updatedAt: '2026-03-09T00:00:00Z',
     });
+    mockCreateSocketTicket.mockResolvedValue('signed-token');
     mockSendMessage.mockResolvedValue({
       outcome: { kind: 'reply', content: 'Fallback reply', modelTier: 'cheap' },
       tier: 'cheap',

@@ -54,13 +54,17 @@ export const ChatSessionResponseSchema = z.object({
   pendingApproval: PendingApprovalSchema.nullable().optional(),
   beastContext: ChatBeastContextSchema.nullable().optional(),
   routingMetadata: z.record(z.unknown()).optional(),
-  socketToken: z.string(),
   tokenTotals: TokenTotalsSchema,
   costUsd: z.number().nonnegative(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type ChatSessionResponse = z.infer<typeof ChatSessionResponseSchema>;
+
+export const ChatSocketTicketResponseSchema = z.object({
+  ticket: z.string(),
+});
+export type ChatSocketTicketResponse = z.infer<typeof ChatSocketTicketResponseSchema>;
 
 export const ChatSessionSummarySchema = z.object({
   id: z.string(),
