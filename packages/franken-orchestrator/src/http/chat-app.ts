@@ -246,7 +246,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     operatorToken: effectiveOperatorToken,
     streamTicketStore: chatStreamTicketStore,
     chatRateLimiter,
-    issueSocketToken: (sessionId) => issueSessionToken({
+    issueSocketTicket: (sessionId) => issueSessionToken({
       expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS,
       secret: sessionTokenSecret,
       sessionId,

@@ -41,5 +41,5 @@ export type { ChatBeastContext, TranscriptMessage, TurnOutcome };
 
 export { ChatBeastContextSchema, TranscriptMessageSchema, TokenTotalsSchema };
 
-export const ChatSessionSchema = ChatSessionResponseSchema.omit({ socketToken: true });
-export type ChatSession = Omit<ChatSessionResponse, 'socketToken'>;
+export const ChatSessionSchema = ChatSessionResponseSchema;
+export type ChatSession = ChatSessionResponse;
