@@ -307,11 +307,15 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
-    this.flushWorkingMemory?.();
-    const result = this.db
-      .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
-      .run(JSON.stringify(state), state.timestamp);
-    return { id: String(result.lastInsertRowid) };
+    const tx = this.db.transaction(() => {
+      this.flushWorkingMemory?.();
+      const result = this.db
+        .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
+        .run(JSON.stringify(state), state.timestamp);
+      return { id: String(result.lastInsertRowid) };
+    });
+
+    return tx() as { id: string };
   }
 
   lastCheckpoint(): ExecutionState | null {

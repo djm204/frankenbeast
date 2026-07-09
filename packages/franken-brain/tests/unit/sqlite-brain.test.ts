@@ -287,6 +287,31 @@ describe('SqliteBrain', () => {
       expect(row?.value).toBe('"value1"');
     });
 
+    it('checkpoint() rolls back working memory flush when checkpoint insert fails', () => {
+      const db = (brain as unknown as {
+        db: {
+          exec: (sql: string) => void;
+          prepare: (sql: string) => { get: (key: string) => { value: string } | undefined };
+        };
+      }).db;
+
+      brain.working.set('key1', 'value1');
+      db.exec(`
+        CREATE TRIGGER fail_checkpoint_insert
+        BEFORE INSERT ON checkpoints
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated checkpoint insert failure');
+        END;
+      `);
+
+      expect(() => brain.recovery.checkpoint(makeState())).toThrow(
+        'simulated checkpoint insert failure',
+      );
+
+      const row = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
+      expect(row).toBeUndefined();
+    });
+
     it('lastCheckpoint() returns most recent', () => {
       brain.recovery.checkpoint(makeState({ step: 1 }));
       brain.recovery.checkpoint(makeState({ step: 2 }));
