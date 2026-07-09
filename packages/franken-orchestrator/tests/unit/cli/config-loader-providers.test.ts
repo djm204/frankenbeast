@@ -1,18 +1,23 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFile, unlink } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, unlink } from 'node:fs/promises';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import type { CliArgs } from '../../../src/cli/args.js';
 
 describe('Config loader providers passthrough', () => {
   const tmpFiles: string[] = [];
+  const tmpDirs: string[] = [];
 
   afterEach(async () => {
     for (const f of tmpFiles) {
       try { await unlink(f); } catch { /* ignore */ }
     }
+    for (const dir of tmpDirs) {
+      try { await rm(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
     tmpFiles.length = 0;
+    tmpDirs.length = 0;
   });
 
   function makeArgs(overrides: Partial<CliArgs> = {}): CliArgs {
@@ -97,6 +102,30 @@ describe('Config loader providers passthrough', () => {
     }));
 
     await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
+  });
+
+  it('requires CLI approval before a repository-local config can trust an allowed provider binary', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beast-repo-config-json-'));
+    const filePath = join(root, 'config.json');
+    tmpDirs.push(root);
+    await writeFile(filePath, JSON.stringify({
+      providers: {
+        overrides: {
+          claude: {
+            command: 'claude',
+            trustCommandOverride: true,
+          },
+        },
+      },
+    }));
+
+    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
+
+    const approved = await loadConfig(makeArgs({ trustProviderCommandOverrides: true }), filePath);
+    expect(approved.providers.overrides['claude']).toEqual({
+      command: 'claude',
+      trustCommandOverride: true,
+    });
   });
 
   it('honors CLI approval for trusted overrides in the default config path', async () => {

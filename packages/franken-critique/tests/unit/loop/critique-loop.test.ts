@@ -34,6 +34,20 @@ function createPassingPipeline(): CritiquePipeline {
   return new CritiquePipeline([evaluator]);
 }
 
+function createWarningPipeline(): CritiquePipeline {
+  const evaluator: Evaluator = {
+    name: 'warning-rule',
+    category: 'deterministic',
+    evaluate: vi.fn().mockResolvedValue({
+      evaluatorName: 'warning-rule',
+      verdict: 'warn',
+      score: 0.7,
+      findings: [{ message: 'review before shipping', severity: 'warning' }],
+    }),
+  };
+  return new CritiquePipeline([evaluator]);
+}
+
 interface FailingPipelineOptions {
   readonly evaluatorName?: string;
   readonly findings?: readonly EvaluationFinding[];
@@ -72,6 +86,15 @@ describe('CritiqueLoop', () => {
 
     expect(result.verdict).toBe('pass');
     expect(result.iterations).toHaveLength(1);
+  });
+
+  it('returns warn on first iteration when pipeline passes with warnings', async () => {
+    const loop = new CritiqueLoop(createWarningPipeline(), []);
+    const result = await loop.run(createInput('warning-bearing code'), createConfig());
+
+    expect(result.verdict).toBe('warn');
+    expect(result.iterations).toHaveLength(1);
+    expect(result.iterations[0]!.result.verdict).toBe('warn');
   });
 
   it('returns fail with correction when pipeline fails', async () => {

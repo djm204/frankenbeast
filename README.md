@@ -296,7 +296,7 @@ graph TB
 | `@franken/governor` | Trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers for HITL decisions. |
 | `@franken/types` | Shared TypeScript types plus runtime Zod schemas. |
 | `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
-| `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
+| `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim; see the [MCP suite README](packages/franken-mcp-suite/README.md#skill-health-endpoint) for skill health endpoint usage. |
 | `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
 | `@franken/live-bench` | Live CLI benchmark tooling. |
 
@@ -322,7 +322,7 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 ### Optional
 
 - **ChromaDB** — required for semantic memory (MOD-03). Not needed for unit/integration tests.
-- **LLM API key** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for runtime use. Not needed for tests (mocked).
+- **LLM provider credentials** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for API-backed providers. `OLLAMA_BASE_URL` is documented for legacy/future Ollama-compatible builds, but it is not consumed by the current provider schema or Beast activation presets; the conventional local Ollama endpoint is `http://localhost:11434`.
 - **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
 
 ### Beast project-root override
@@ -389,7 +389,7 @@ npm --workspace @franken/web run dev:chat
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard talks to the chat server through TLS-preferred API defaults and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
 
-If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend:
+If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend. Leave `VITE_API_URL` unset for local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` continue flowing through the dev proxy.
 
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
@@ -552,6 +552,11 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # image versions and mounts ./tempo.yaml so local tracing starts deterministically.
 docker compose up -d
 
+# Local Tempo exposes OTLP/HTTP writes on http://localhost:4318 for TempoAdapter
+# and readiness on http://localhost:3200/ready for verify-setup. The root
+# .env.example intentionally does not define a TEMPO_ENDPOINT override; pass
+# custom Tempo endpoints through TempoAdapter options instead.
+
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npx tsx scripts/seed.ts
 
@@ -595,12 +600,15 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
 
 **1Password / Bitwarden:**
-```bash
-frankenbeast init --backend 1password
-# or
-frankenbeast init --backend bitwarden
+```json
+{ "network": { "secureBackend": "1password" } }
 ```
-You can also set the backend in `.fbeast/config.json` with `{ "network": { "secureBackend": "1password" } }` before running `frankenbeast init`. For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+```json
+{ "network": { "secureBackend": "bitwarden" } }
+```
+Set one of those values in `.fbeast/config.json`, then run `frankenbeast init`. You can also use the current CLI shortcut `frankenbeast init --backend 1password` or `frankenbeast init --backend bitwarden`; it applies the same `network.secureBackend` choice before the wizard writes `.fbeast/config.json`.
+
+For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
@@ -609,6 +617,32 @@ You can also set the backend in `.fbeast/config.json` with `{ "network": { "secu
 1. Run `frankenbeast init` — it prints the token once after generation.
 2. Keep the token server-side: use the configured secret store or set `FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token>` in a local, uncommitted env file.
 3. Run the dashboard through same-origin backend routes. In Vite dev mode, use `VITE_API_PROXY_TARGET`/`VITE_BEAST_API_PROXY_TARGET` so the Vite server attaches the token to proxy requests without exposing it to the browser bundle.
+
+### Init backend setup flow
+
+`frankenbeast init` configures the orchestrator/backend control plane. It is separate from `fbeast mcp init`, which only registers MCP servers and optional hooks for an AI client in the current project. Run `frankenbeast init` before enabling Beast controls in the dashboard so the backend has module settings, a secret backend, and `network.operatorTokenRef` ready for the Vite proxy or production BFF.
+
+Common forms:
+
+```bash
+frankenbeast init                  # interactive setup wizard
+frankenbeast init --verify         # validate .fbeast/config.json and .fbeast/init-state.json
+frankenbeast init --repair         # re-run repair wizard paths; review token prompts carefully
+frankenbeast init --non-interactive       # safe only after config and init state are complete
+```
+
+Choose the secret backend before the first init run by writing `network.secureBackend` in `.fbeast/config.json`, for example `{ "network": { "secureBackend": "os-keychain" } }`. Keeping the config choice ahead of init ensures the generated operator token is written to the same backend that later runtime and dashboard processes will read.
+
+During the interactive wizard, expect prompts for the Chat, Dashboard, and Comms modules; the default provider; the `secure`/`insecure` network mode; optional Slack, Discord, Telegram, or WhatsApp credentials when Comms is enabled; and an operator token prompt that can be left blank to auto-generate a token. Sensitive values are stored in the selected secret backend and referenced from `.fbeast/config.json`; the raw operator token is printed once when auto-generated so you can copy it into a local server-side `.env` if you are not resolving it through the configured backend.
+
+For the default `local-encrypted` backend, interactive init needs a passphrase to create or update the encrypted vault. In CI or other headless runtime paths, export only that variable before commands that actually resolve stored secrets, such as a run or dashboard backend process:
+
+```bash
+export FRANKENBEAST_PASSPHRASE=<passphrase>
+frankenbeast run --config .fbeast/config.json
+```
+
+Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It checks the config/init-state files and selected ref fields, but it does not prove every completed step, create a fresh vault, answer wizard prompts, decrypt the secret vault, or resolve secret refs. Likewise, `frankenbeast init --verify` validates init config and state files but does not resolve secret refs, so keep a runtime smoke check in CI when you need to prove operator-token resolution works. During `--repair`, review the operator-token prompt before accepting defaults; leaving it blank can generate a replacement token and rotate the dashboard/control-plane credential.
 
 ### Non-interactive / CI usage
 
@@ -636,6 +670,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 | `OPENAI_API_KEY` | MOD-01 | Runtime only | OpenAI adapter API key |
 | `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
 | `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
+| `OLLAMA_BASE_URL` | Provider registry | Not consumed by the current provider schema; legacy/future Ollama-compatible builds only | Ollama daemon base URL, usually `http://localhost:11434`; set a different HTTP(S) endpoint for remote or non-default daemons only in builds that actually support an Ollama provider. It is intentionally absent from `.env.example` because the default local setup, current provider schema, and current `fbeast mcp beast` presets do not consume it. |
 | `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 | `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |
@@ -691,7 +726,7 @@ Tasks execute in topological order from the DAG. High-stakes tasks pause for hum
 
 **Modules:** MOD-05 (Observer) + MOD-08 (Heartbeat)
 
-The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `@franken/orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
+The trace is closed and token spend summarised. In the current local CLI path, `@franken/orchestrator/src/cli/create-beast-deps.ts` builds a real `ReflectionHeartbeatAdapter`: it wires the provider registry through the middleware chain and runs the reflection evaluator when dependency config keeps reflection enabled. The lower-level adapter can fall back to a static summary when constructed without a reflection function, but the legacy CLI bridge currently passes `reflection: true`; treat heartbeat-driven self-improvement beyond that per-run reflection adapter as target architecture rather than a fully verified end-to-end local learning loop.
 
 ### Circuit Breakers
 

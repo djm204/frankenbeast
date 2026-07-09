@@ -129,7 +129,6 @@ describe('parseArgs', () => {
     expect(args.port).toBe(4242);
     expect(args.allowOrigin).toBe('http://localhost:5173');
   });
-
   it('parses bare network subcommand', () => {
     const args = parseArgs(['network']);
     expect(args.subcommand).toBe('network');
@@ -325,7 +324,6 @@ describe('parseArgs', () => {
       expect(args.subcommand).toBe('issues');
       expect(args.issueLimit).toBe(50);
     });
-
     it('parses --repo', () => {
       const args = parseArgs(['issues', '--repo', 'djm204/frankenbeast']);
       expect(args.subcommand).toBe('issues');
@@ -537,11 +535,7 @@ describe('parseArgs', () => {
       expect(issueArgs.issueLimit).toBe(50);
     });
 
-    it.each([
-      ['NaN'],
-      ['Infinity'],
-      ['12abc'],
-    ])('rejects invalid budget value %s', (value) => {
+    it.each(['NaN', 'Infinity', '12abc'])('rejects invalid budget value %s', (value) => {
       expect(() => parseArgs(['--budget', value])).toThrow(/Invalid --budget/);
     });
 
@@ -550,12 +544,7 @@ describe('parseArgs', () => {
       expect(() => parseArgs(['--budget=-0.01'])).toThrow(/Invalid --budget/);
     });
 
-    it.each([
-      ['NaN'],
-      ['8080abc'],
-      ['3.5'],
-      ['65536'],
-    ])('rejects invalid port value %s', (value) => {
+    it.each(['abc', 'NaN', '3737abc', '8080abc', '3.5', '', '65536'])('rejects invalid port value %s', (value) => {
       expect(() => parseArgs(['chat-server', '--port', value])).toThrow(/Invalid --port/);
     });
 
@@ -563,12 +552,7 @@ describe('parseArgs', () => {
       expect(() => parseArgs(['chat-server', '--port=-1'])).toThrow(/Invalid --port/);
     });
 
-    it.each([
-      ['NaN'],
-      ['10abc'],
-      ['2.5'],
-      ['0'],
-    ])('rejects invalid issue limit value %s', (value) => {
+    it.each(['abc', 'NaN', '10abc', '2.5', '', '0'])('rejects invalid issue limit value %s', (value) => {
       expect(() => parseArgs(['issues', '--limit', value])).toThrow(/Invalid --limit/);
     });
 

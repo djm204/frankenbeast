@@ -8,6 +8,7 @@ import type { TurnRunner } from '../../chat/turn-runner.js';
 import type {
   ApiDataEnvelope,
   ApproveResult,
+  ChatSocketTicketResponse,
   ChatSessionResponse,
   ChatSessionSummary,
   MessageResult,
@@ -16,8 +17,8 @@ import type {
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
-import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
-import { hashChatRateLimitPrincipal } from '../chat-rate-limit.js';
+import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { chatClientKey } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -37,10 +38,10 @@ export interface ChatRoutesDeps {
   engine: ConversationEngine;
   runtime: ChatRuntime;
   turnRunner: TurnRunner;
-  issueSocketToken: (sessionId: string) => string;
+  issueSocketTicket: (sessionId: string) => string;
   operatorToken?: string | undefined;
   streamTicketStore?: SseConnectionTicketStore | undefined;
-  chatRateLimit: BeastRateLimitOptions;
+  chatRateLimiter: InMemoryRateLimiter;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -53,9 +54,8 @@ function getSessionOrThrow(store: ISessionStore, id: string) {
 
 function sessionResponse(
   session: NonNullable<ReturnType<ISessionStore['get']>>,
-  socketToken: string,
 ): ChatSessionResponse {
-  return { ...session, socketToken };
+  return { ...session };
 }
 
 function firstForwardedAddress(header: string | undefined): string | undefined {
@@ -70,25 +70,14 @@ function requestAddress(c: Context): string {
     || 'unknown';
 }
 
-function hashPrincipal(value: string): string {
-  return hashChatRateLimitPrincipal(value);
-}
-
-function chatPrincipalKey(c: Context, operatorToken: string | undefined): string {
-  if (operatorToken) {
-    return `operator:${hashPrincipal(operatorToken)}`;
-  }
-  return `ip:${hashPrincipal(requestAddress(c))}`;
-}
-
 function chatMutationKey(sessionId: string): string {
   return `session:${sessionId}`;
 }
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore } = deps;
+  const { sessionStore, runtime, turnRunner, issueSocketTicket, operatorToken, streamTicketStore } = deps;
   const app = new Hono();
-  const limiter = new InMemoryRateLimiter(deps.chatRateLimit);
+  const limiter = deps.chatRateLimiter;
   const inFlightMutations = new Set<string>();
 
   async function withChatMutationAdmission<T>(
@@ -96,9 +85,12 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     sessionId: string,
     run: () => Promise<T>,
   ): Promise<T> {
-    const principalKey = chatPrincipalKey(c, operatorToken);
     const mutationKey = chatMutationKey(sessionId);
-    const result = limiter.take(`chat:principal:${principalKey}`);
+    const result = limiter.take(chatClientKey({
+      action: 'message',
+      operatorToken,
+      remoteAddress: requestAddress(c),
+    }));
     if (!result.allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
@@ -125,7 +117,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { projectId } = validateBody(CreateSessionBody, body);
     const session = sessionStore.create(projectId);
     const response = {
-      data: sessionResponse(session, issueSocketToken(session.id)),
+      data: sessionResponse(session),
     } satisfies ApiDataEnvelope<ChatSessionResponse>;
     return c.json(response, 201);
   });
@@ -149,8 +141,16 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const id = c.req.param('id');
     const session = getSessionOrThrow(sessionStore, id);
     return c.json({
-      data: sessionResponse(session, issueSocketToken(session.id)),
+      data: sessionResponse(session),
     } satisfies ApiDataEnvelope<ChatSessionResponse>);
+  });
+
+  app.post('/v1/chat/sessions/:id/socket-ticket', (c) => {
+    const id = c.req.param('id');
+    getSessionOrThrow(sessionStore, id);
+    return c.json({
+      data: { ticket: issueSocketTicket(id) },
+    } satisfies ApiDataEnvelope<ChatSocketTicketResponse>);
   });
 
   // Submit message

@@ -54,7 +54,7 @@ npm --workspace @franken/web run dev:chat
 
 That proxies same-origin browser requests to `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
-If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target:
+If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target. Leave `VITE_API_URL` unset in local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` stay on the Vite origin while the dev server forwards them to the backend.
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev

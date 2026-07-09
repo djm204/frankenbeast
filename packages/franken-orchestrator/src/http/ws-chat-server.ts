@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { approvalRuntimeInput } from '../chat/approval-input.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
@@ -16,8 +16,8 @@ import {
   type ClientSocketEvent,
   type ServerSocketEvent,
 } from '@franken/types';
-import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
-import { DEFAULT_CHAT_RATE_LIMIT, chatRateLimitPrincipalFromAddress } from './chat-rate-limit.js';
+import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
+import { chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;
@@ -35,8 +35,10 @@ export interface ChatSocketControllerOptions {
   sessionStore: ISessionStore;
   ticketStore?: ChatSocketSessionTicketStore;
   tokenSecret: string;
-  chatRateLimit?: BeastRateLimitOptions;
+  operatorToken?: string | undefined;
+  chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
+  maxMessageBytes?: number;
 }
 
 export interface ChatSocketConnectRequest {
@@ -53,6 +55,7 @@ export interface AttachChatWebSocketServerOptions extends ChatSocketControllerOp
 
 export const CHAT_SOCKET_PROTOCOL = 'franken.chat.v1';
 export const CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX = 'franken.chat.token.';
+export const DEFAULT_CHAT_SOCKET_MAX_MESSAGE_BYTES = 64 * 1024;
 
 interface ChatSocketProtocolAuth {
   hasChatProtocol: boolean;
@@ -106,7 +109,9 @@ export class ChatSocketController {
   private readonly sessionStore: ISessionStore;
   private readonly ticketStore: ChatSocketSessionTicketStore;
   private readonly tokenSecret: string;
+  private readonly operatorToken: string | undefined;
   private readonly chatRateLimiter: InMemoryRateLimiter;
+  private readonly maxMessageBytes: number;
 
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
@@ -114,7 +119,9 @@ export class ChatSocketController {
     this.sessionStore = options.sessionStore;
     this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
-    this.chatRateLimiter = options.chatRateLimiter ?? new InMemoryRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+    this.operatorToken = options.operatorToken;
+    this.chatRateLimiter = options.chatRateLimiter ?? createChatRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+    this.maxMessageBytes = options.maxMessageBytes ?? DEFAULT_CHAT_SOCKET_MAX_MESSAGE_BYTES;
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -187,6 +194,17 @@ export class ChatSocketController {
         message: 'Socket is not bound to a chat session.',
         timestamp: nowIso(),
       });
+      return;
+    }
+
+    if (Buffer.byteLength(raw, 'utf8') > this.maxMessageBytes) {
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'MESSAGE_TOO_LARGE',
+        message: `Websocket chat event exceeds the ${this.maxMessageBytes} byte limit.`,
+        timestamp: nowIso(),
+      });
+      peer.close(1009, 'Message too large');
       return;
     }
 
@@ -351,8 +369,11 @@ export class ChatSocketController {
     peer: ChatSocketPeer,
     connection: ConnectionState,
   ): boolean {
-    const principal = chatRateLimitPrincipalFromAddress(connection.remoteAddress);
-    const result = this.chatRateLimiter.take(`chat:ws:principal:${principal}`);
+    const result = this.chatRateLimiter.take(chatClientKey({
+      action: 'message',
+      operatorToken: this.operatorToken,
+      remoteAddress: connection.remoteAddress,
+    }));
     if (result.allowed) {
       return true;
     }
@@ -515,10 +536,28 @@ function closeUnauthorized(
   socket.destroy();
 }
 
+function rawPayloadByteLength(payload: RawData): number {
+  if (Array.isArray(payload)) {
+    return payload.reduce((total, chunk) => total + chunk.byteLength, 0);
+  }
+  return payload.byteLength;
+}
+
+function rawPayloadToString(payload: RawData): string {
+  if (Array.isArray(payload)) {
+    return Buffer.concat(payload).toString('utf8');
+  }
+  if (Buffer.isBuffer(payload)) {
+    return payload.toString('utf8');
+  }
+  return Buffer.from(payload).toString('utf8');
+}
+
 export function attachChatWebSocketServer(options: AttachChatWebSocketServerOptions) {
   const path = options.path ?? '/v1/chat/ws';
+  const maxMessageBytes = options.maxMessageBytes ?? DEFAULT_CHAT_SOCKET_MAX_MESSAGE_BYTES;
   const controller = new ChatSocketController(options);
-  const server = new WebSocketServer({ noServer: true });
+  const server = new WebSocketServer({ noServer: true, maxPayload: maxMessageBytes });
 
   const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const url = new URL(request.url ?? '', 'http://localhost');
@@ -559,9 +598,14 @@ export function attachChatWebSocketServer(options: AttachChatWebSocketServerOpti
         return;
       }
 
-      ws.on('message', async (payload: Buffer | ArrayBuffer | Buffer[]) => {
-        await controller.receive(peer, payload.toString());
+      ws.on('message', async (payload: RawData) => {
+        if (rawPayloadByteLength(payload) > maxMessageBytes) {
+          peer.close(1009, 'Message too large');
+          return;
+        }
+        await controller.receive(peer, rawPayloadToString(payload));
       });
+      ws.on('error', () => controller.disconnect(peer));
       ws.on('close', () => controller.disconnect(peer));
     });
   };

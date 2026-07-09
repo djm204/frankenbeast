@@ -78,7 +78,10 @@ export class ParallelPlanner implements PlanningStrategy {
     // Validate the DAG up front so cyclic plans fail loudly instead of
     // deadlocking the wave scheduler and returning partial success.
     const tasks = graph.topoSort();
-    const completedIds = new Set<TaskId>();
+    const taskIds = new Set(tasks.map((task) => task.id));
+    const completedIds = new Set<TaskId>(
+      Array.from(context.completedTaskIds ?? []).filter((taskId) => taskIds.has(taskId))
+    );
     const allResults: TaskResult[] = [];
 
     while (completedIds.size < tasks.length) {
@@ -129,10 +132,11 @@ export class ParallelPlanner implements PlanningStrategy {
         throw result.reason;
       });
 
-      allResults.push(...waveResults);
-
       const failures = waveResults.filter((r) => r.status === 'failure');
       if (failures.length > 0) {
+        allResults.push(
+          ...waveResults.filter((r) => r.status === 'failure' || r.expand !== true)
+        );
         const first = failures[0]!;
         if (first.status === 'failure') {
           return {
@@ -143,6 +147,8 @@ export class ParallelPlanner implements PlanningStrategy {
           };
         }
       }
+
+      allResults.push(...waveResults.filter((r) => r.status === 'success' && r.expand !== true));
 
       const settledExpansionResults = await Promise.allSettled(
         waveResults
@@ -176,6 +182,11 @@ export class ParallelPlanner implements PlanningStrategy {
         throw result.reason;
       });
 
+      const expandingResultsByTaskId = new Map(
+        waveResults
+          .filter((result) => result.status === 'success' && result.expand === true)
+          .map((result) => [result.taskId, result])
+      );
       let firstExpansionFailure: { taskId: TaskId; error: Error } | undefined;
       for (const { parentTaskId, subResult } of expansionResults) {
         if (subResult.status === 'failed') {
@@ -185,6 +196,10 @@ export class ParallelPlanner implements PlanningStrategy {
         }
         if (subResult.status !== 'completed') {
           return subResult;
+        }
+        const parentResult = expandingResultsByTaskId.get(parentTaskId);
+        if (parentResult) {
+          allResults.push(parentResult);
         }
         allResults.push(...subResult.taskResults);
       }

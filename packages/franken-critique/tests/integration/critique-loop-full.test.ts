@@ -4,16 +4,16 @@ import type { GuardrailsPort, MemoryPort, ObservabilityPort } from '../../src/ty
 import type { EvaluationInput } from '../../src/types/evaluation.js';
 import type { LoopConfig } from '../../src/types/loop.js';
 
-const forbiddenInvocationName = 'unsafeCall';
-const forbiddenInvocationPattern = `${forbiddenInvocationName}\\(`;
+const unsafeDynamicCallName = 'executeUntrustedCode';
+const unsafeDynamicCallPattern = `${unsafeDynamicCallName}\\(`;
 
 function createMockGuardrailsPort(): GuardrailsPort {
   return {
     getSafetyRules: vi.fn().mockResolvedValue([
       {
-        id: `no-${forbiddenInvocationName}`,
-        description: `no ${forbiddenInvocationName}`,
-        pattern: forbiddenInvocationPattern,
+        id: `no-${unsafeDynamicCallName}`,
+        description: `no ${unsafeDynamicCallName}`,
+        pattern: unsafeDynamicCallPattern,
         severity: 'block',
       },
     ]),
@@ -87,7 +87,7 @@ describe('Full Critique Loop Integration', () => {
     });
 
     const result = await reviewer.review(
-      createInput(`${forbiddenInvocationName}("malicious code")`),
+      createInput(`${unsafeDynamicCallName}("malicious code")`),
       createLoopConfig({ maxIterations: 1 }),
     );
 

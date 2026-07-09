@@ -6,6 +6,7 @@ import { execSync } from 'node:child_process';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
+const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
@@ -68,13 +69,38 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
     });
 
+    it('runs the deterministic root Vitest suite separately from Turbo', () => {
+      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
+      expect(content).toContain('npm run test:root');
+      expect(content).not.toMatch(/npm run test:root --/);
+      expect(content.indexOf('npm run test:root')).toBeLessThan(content.indexOf('npx turbo run test'));
+    });
+
+    it('documents the root-suite and package-Turbo CI split in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build and lint/);
+      expect(content).toMatch(/name:\s*Run package tests/);
+      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
+    });
+
+    it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {
+      expect(existsSync(WORKFLOW_LINT_PATH)).toBe(true);
+      const workflowLint = readFileSync(WORKFLOW_LINT_PATH, 'utf-8');
+      expect(workflowLint).toContain('Lint GitHub Actions workflows');
+      expect(workflowLint).toContain('raven-actions/actionlint@v2.1.2');
+      expect(workflowLint).toContain('version: 1.7.12');
+      expect(workflowLint).toContain("'.github/workflows/**'");
+      expect(content).not.toContain('actions/bin/check-yaml');
+      expect(content).not.toContain('raven-actions/actionlint');
+    });
+
     it('uses actions/setup-node with npm cache', () => {
       expect(content).toContain('actions/setup-node');
       expect(content).toMatch(/cache.*npm/);
     });
 
-    it('uses actions/checkout', () => {
+    it('uses actions/checkout with full history for root verification tests', () => {
       expect(content).toContain('actions/checkout');
+      expect(content).toMatch(/actions\/checkout@v4[\s\S]*fetch-depth:\s*0/);
     });
 
     it('runs on ubuntu-latest', () => {

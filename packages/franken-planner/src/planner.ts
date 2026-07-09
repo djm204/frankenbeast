@@ -2,12 +2,16 @@ import { applyModifications } from './hitl/plan-modifier.js';
 import { PlanExporter } from './hitl/plan-exporter.js';
 import { buildCoTExecutor } from './cot/cot-gate.js';
 import {
+  CyclicDependencyError,
+  DuplicateTaskError,
   RationaleRejectedError,
   MaxRecoveryAttemptsError,
+  RecursionDepthExceededError,
+  TaskNotFoundError,
   UnknownErrorEscalatedError,
 } from './core/errors.js';
 import { createTaskId } from './core/types.js';
-import type { PlanResult, TaskId } from './core/types.js';
+import type { PlanResult, TaskId, TaskResult } from './core/types.js';
 import type { PlanGraph } from './core/dag.js';
 import type { GuardrailsModule } from './modules/mod01.js';
 import type { SelfCritiqueModule } from './modules/mod07.js';
@@ -68,20 +72,30 @@ export class Planner {
     // 5. Execute with self-correction loop (ADR-007)
     let currentGraph = graph;
     const recoveryAttemptsByTask = new Map<TaskId, number>();
+    const completedTaskIds = new Set<TaskId>();
+    const completedTaskResults = new Map<TaskId, TaskResult>();
 
     for (;;) {
       let result: PlanResult;
       try {
-        result = await this.strategy.execute(currentGraph, { executor });
+        result = await this.strategy.execute(currentGraph, { executor, completedTaskIds });
       } catch (err) {
         if (err instanceof RationaleRejectedError) {
           return { status: 'rationale_rejected', taskId: createTaskId(err.taskId) };
         }
+        if (Planner.isStrategyDomainError(err)) {
+          return Planner.toStrategyDomainFailure(err);
+        }
         throw err;
       }
 
-      if (result.status === 'completed') return result;
+      if (result.status === 'completed') {
+        Planner.recordCompletedTasks(result.taskResults, completedTaskIds, completedTaskResults);
+        return { status: 'completed', taskResults: Array.from(completedTaskResults.values()) };
+      }
       if (result.status !== 'failed') return result; // defensive: unexpected status
+
+      Planner.recordCompletedTasks(result.taskResults, completedTaskIds, completedTaskResults);
 
       // result.status === 'failed' — attempt recovery
       const failedTaskLineage = Planner.getRecoveryLineageRoot(result.failedTaskId);
@@ -99,11 +113,32 @@ export class Planner {
           recoveryErr instanceof MaxRecoveryAttemptsError ||
           recoveryErr instanceof UnknownErrorEscalatedError
         ) {
-          return result;
+          return Planner.mergeCompletedIntoFailedResult(result, completedTaskResults);
         }
         throw recoveryErr;
       }
     }
+  }
+
+  private static readonly STRATEGY_DOMAIN_FAILURE_TASK_ID = createTaskId('planner-domain-error');
+
+  private static isStrategyDomainError(err: unknown): err is Error {
+    return (
+      err instanceof CyclicDependencyError ||
+      err instanceof DuplicateTaskError ||
+      err instanceof RecursionDepthExceededError ||
+      err instanceof TaskNotFoundError
+    );
+  }
+
+  private static toStrategyDomainFailure(error: Error): PlanResult {
+    const failedTaskId = Planner.STRATEGY_DOMAIN_FAILURE_TASK_ID;
+    return {
+      status: 'failed',
+      taskResults: [{ status: 'failure', taskId: failedTaskId, error }],
+      failedTaskId,
+      error,
+    };
   }
 
   /**
@@ -125,5 +160,28 @@ export class Planner {
     }
 
     return current;
+  }
+
+  private static recordCompletedTasks(
+    taskResults: TaskResult[],
+    completedTaskIds: Set<TaskId>,
+    completedTaskResults: Map<TaskId, TaskResult>
+  ): void {
+    for (const taskResult of taskResults) {
+      if (taskResult.status !== 'success') continue;
+      completedTaskIds.add(taskResult.taskId);
+      completedTaskResults.set(taskResult.taskId, taskResult);
+    }
+  }
+
+  private static mergeCompletedIntoFailedResult(
+    result: Extract<PlanResult, { status: 'failed' }>,
+    completedTaskResults: Map<TaskId, TaskResult>
+  ): Extract<PlanResult, { status: 'failed' }> {
+    const taskResultsById = new Map<TaskId, TaskResult>(completedTaskResults);
+    for (const taskResult of result.taskResults) {
+      taskResultsById.set(taskResult.taskId, taskResult);
+    }
+    return { ...result, taskResults: Array.from(taskResultsById.values()) };
   }
 }

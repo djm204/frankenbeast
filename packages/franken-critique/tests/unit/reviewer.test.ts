@@ -118,14 +118,14 @@ describe('createReviewer', () => {
   });
 
   it('handles safety failure with short-circuit', async () => {
-    const forbiddenInvocationName = 'unsafeCall';
+    const unsafeDynamicCallName = 'executeUntrustedCode';
 
     const guardrails: GuardrailsPort = {
       getSafetyRules: vi.fn().mockResolvedValue([
         {
-          id: `no-${forbiddenInvocationName}`,
-          description: `no ${forbiddenInvocationName}`,
-          pattern: `${forbiddenInvocationName}\\(`,
+          id: `no-${unsafeDynamicCallName}`,
+          description: `no ${unsafeDynamicCallName}`,
+          pattern: `${unsafeDynamicCallName}\\(`,
           severity: 'block' as const,
         },
       ]),
@@ -134,7 +134,7 @@ describe('createReviewer', () => {
       }),
     };
     const reviewer = createReviewer(makeConfig({ guardrails }));
-    const input = makeInput(`${forbiddenInvocationName}("dangerous")`);
+    const input = makeInput(`${unsafeDynamicCallName}("dangerous")`);
     const result = await reviewer.review(input, makeLoopConfig());
     expect(result.verdict).toBe('fail');
   });

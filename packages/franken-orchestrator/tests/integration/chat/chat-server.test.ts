@@ -56,6 +56,15 @@ function waitForSocketClose(socket: WebSocket): Promise<void> {
   });
 }
 
+async function mintSocketTicket(baseUrl: string, sessionId: string): Promise<string> {
+  const ticketRes = await fetch(`${baseUrl}/v1/chat/sessions/${encodeURIComponent(sessionId)}/socket-ticket`, {
+    method: 'POST',
+  });
+  expect(ticketRes.status).toBe(200);
+  const ticketBody = await ticketRes.json() as { data: { ticket: string } };
+  return ticketBody.data.ticket;
+}
+
 describe('chat server bootstrap', () => {
   afterEach(() => {
     rmSync(TMP, { recursive: true, force: true });
@@ -83,13 +92,13 @@ describe('chat server bootstrap', () => {
       const body = await createRes.json() as {
         data: {
           id: string;
-          socketToken: string;
         };
       };
+      const ticket = await mintSocketTicket(server.url, body.data.id);
 
       const socket = new WebSocket(
         `${server.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
-        [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${body.data.socketToken}`],
+        [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${ticket}`],
       );
       await new Promise<void>((resolve, reject) => {
         socket.addEventListener('open', () => resolve(), { once: true });
@@ -133,12 +142,12 @@ describe('chat server bootstrap', () => {
     const body = await createRes.json() as {
       data: {
         id: string;
-        socketToken: string;
       };
     };
+    const ticket = await mintSocketTicket(server.url, body.data.id);
     const socket = new WebSocket(
       `${server.wsUrl}?sessionId=${encodeURIComponent(body.data.id)}`,
-      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${body.data.socketToken}`],
+      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${ticket}`],
     );
     await new Promise<void>((resolve, reject) => {
       socket.addEventListener('open', () => resolve(), { once: true });

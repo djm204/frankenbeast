@@ -1,3 +1,6 @@
+import type { BeastCatalogEntry } from '../../lib/beast-api';
+import { findCatalogEntry, getPromptValue, isBlankCatalogValue } from './wizard-catalog';
+
 export const WIZARD_SECTION_KEYS = ['identity', 'workflow', 'llm', 'modules', 'skills', 'prompts', 'git'] as const;
 
 type WizardStepValues = Record<number, Record<string, unknown> | undefined>;
@@ -26,7 +29,10 @@ function buildPromptFrontload(prompts: Record<string, unknown> | undefined): str
   return parts.length > 0 ? parts.join('\n\n---\n\n') : undefined;
 }
 
-export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<string, unknown> {
+export function buildWizardLaunchConfig(
+  stepValues: WizardStepValues,
+  catalog?: readonly BeastCatalogEntry[],
+): Record<string, unknown> {
   const config: Record<string, unknown> = {};
 
   for (let i = 0; i < WIZARD_SECTION_KEYS.length; i += 1) {
@@ -36,6 +42,9 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
   }
 
   const workflow = config.workflow as Record<string, unknown> | undefined;
+  const selectedWorkflow = typeof workflow?.workflowType === 'string'
+    ? findCatalogEntry(catalog, workflow.workflowType)
+    : undefined;
   const promptFrontload = buildPromptFrontload(config.prompts as Record<string, unknown> | undefined);
   if (promptFrontload) {
     config.promptConfig = { text: promptFrontload };
@@ -45,6 +54,15 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
     config.executionMode = workflow.executionMode;
   } else {
     config.executionMode = 'process';
+  }
+
+  if (selectedWorkflow && workflow) {
+    for (const prompt of selectedWorkflow.interviewPrompts) {
+      const value = getPromptValue(workflow, prompt);
+      if (!isBlankCatalogValue(value)) {
+        config[prompt.key] = value;
+      }
+    }
   }
 
   if (workflow?.workflowType === 'design-interview') {
@@ -57,12 +75,14 @@ export function buildWizardLaunchConfig(stepValues: WizardStepValues): Record<st
     }
   }
 
-  if (workflow?.workflowType === 'chunk-plan' && typeof workflow.docPath === 'string') {
-    config.designDocPath = workflow.docPath;
-  }
-
-  if (workflow?.workflowType === 'chunk-plan' && typeof workflow.outputDir === 'string') {
-    config.outputDir = workflow.outputDir;
+  if (workflow?.workflowType === 'chunk-plan') {
+    const designDocPath = typeof workflow.designDocPath === 'string' ? workflow.designDocPath : workflow.docPath;
+    if (typeof designDocPath === 'string') {
+      config.designDocPath = designDocPath;
+    }
+    if (typeof workflow.outputDir === 'string') {
+      config.outputDir = workflow.outputDir;
+    }
   }
 
   if (workflow?.workflowType === 'martin-loop') {

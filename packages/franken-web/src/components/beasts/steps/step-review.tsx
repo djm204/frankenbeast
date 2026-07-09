@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
+import type { BeastCatalogEntry } from '../../../lib/beast-api';
 import { useBeastStore } from '../../../stores/beast-store';
+import { findCatalogEntry, getPromptLabel, getPromptValue } from '../wizard-catalog';
 import { validateWizardStep } from '../wizard-validation';
 
 type WorkflowReviewValues = {
@@ -7,6 +9,7 @@ type WorkflowReviewValues = {
   goal?: string;
   topic?: string;
   outputPath?: string;
+  designDocPath?: string;
   docPath?: string;
   outputDir?: string;
   provider?: string;
@@ -15,7 +18,7 @@ type WorkflowReviewValues = {
   chunkDir?: string;
 };
 
-export function StepReview() {
+export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[] }) {
   const { stepValues, setWizardStep } = useBeastStore();
 
   const identity = stepValues[0] as { name?: string; description?: string } | undefined;
@@ -34,7 +37,7 @@ export function StepReview() {
       </ReviewSection>
 
       <ReviewSection title="Workflow" stepIndex={1} onEdit={setWizardStep}>
-        <WorkflowReview workflow={workflow} stepValues={stepValues} />
+        <WorkflowReview workflow={workflow} stepValues={stepValues} catalog={catalog} />
       </ReviewSection>
 
       <ReviewSection title="LLM Targets" stepIndex={2} onEdit={setWizardStep}>
@@ -88,16 +91,18 @@ export function StepReview() {
   );
 }
 
-function WorkflowReview({ workflow, stepValues }: {
+function WorkflowReview({ workflow, stepValues, catalog }: {
   workflow: WorkflowReviewValues | undefined;
   stepValues: Record<number, Record<string, unknown> | undefined>;
+  catalog?: readonly BeastCatalogEntry[];
 }) {
-  const workflowErrors = validateWizardStep(1, stepValues);
-  const rows = buildWorkflowReviewRows(workflow);
+  const workflowErrors = validateWizardStep(1, stepValues, catalog);
+  const rows = buildWorkflowReviewRows(workflow, catalog);
+  const selectedDefinition = findCatalogEntry(catalog, workflow?.workflowType);
 
   return (
     <div className="space-y-2">
-      <p className="text-sm text-beast-text">{workflow?.workflowType ?? '(not set)'}</p>
+      <p className="text-sm text-beast-text">{selectedDefinition?.label ?? workflow?.workflowType ?? '(not set)'}</p>
       {rows.length > 0 && (
         <dl className="grid gap-1 text-xs text-beast-muted sm:grid-cols-[max-content_1fr]">
           {rows.map(({ label, value }) => (
@@ -120,28 +125,16 @@ function WorkflowReview({ workflow, stepValues }: {
   );
 }
 
-function buildWorkflowReviewRows(workflow: WorkflowReviewValues | undefined): Array<{ label: string; value: string }> {
+function buildWorkflowReviewRows(
+  workflow: WorkflowReviewValues | undefined,
+  catalog?: readonly BeastCatalogEntry[],
+): Array<{ label: string; value: string }> {
   if (!workflow?.workflowType) return [];
-  if (workflow.workflowType === 'design-interview') {
-    return [
-      { label: 'Goal', value: workflow.goal ?? workflow.topic ?? '(missing)' },
-      { label: 'Output path', value: workflow.outputPath ?? '(missing)' },
-    ];
-  }
-  if (workflow.workflowType === 'chunk-plan') {
-    return [
-      { label: 'Design doc', value: workflow.docPath ?? '(missing)' },
-      { label: 'Output directory', value: workflow.outputDir ?? '(missing)' },
-    ];
-  }
-  if (workflow.workflowType === 'martin-loop') {
-    return [
-      { label: 'Provider', value: workflow.provider ?? '(missing)' },
-      { label: 'Objective', value: workflow.objective ?? '(missing)' },
-      { label: 'Chunk directory', value: workflow.chunkDirectory ?? workflow.chunkDir ?? '(missing)' },
-    ];
-  }
-  return [];
+  const definition = findCatalogEntry(catalog, workflow.workflowType);
+  return (definition?.interviewPrompts ?? []).map((prompt) => ({
+    label: getPromptLabel(prompt),
+    value: String(getPromptValue(workflow as Record<string, unknown>, prompt) ?? '(missing)'),
+  }));
 }
 
 function ReviewSection({ title, stepIndex, onEdit, children }: {

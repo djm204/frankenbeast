@@ -142,12 +142,19 @@ export interface CritiqueContext {
   objective?: string;
 }
 
-export interface CritiqueResult {
+export interface ProviderCritiqueFinding {
   evaluator: string;
   severity: number;
   message: string;
   suggestion?: string;
 }
+
+/**
+ * @deprecated Use ProviderCritiqueFinding for provider/evaluator findings.
+ * The @franken/critique package uses CritiquePipelineResult for aggregate
+ * pipeline outcomes.
+ */
+export type CritiqueResult = ProviderCritiqueFinding;
 
 // --- Skill Loading Types (used by Phase 5 SkillManager + Phase 8 Beast Loop) ---
 
@@ -168,11 +175,38 @@ export const ToolDefinitionSchema = z.object({
   requiresHitl: z.boolean().optional(),
 });
 
-export const TokenUsageSchema = z.object({
-  inputTokens: z.number().nonnegative(),
-  outputTokens: z.number().nonnegative(),
-  totalTokens: z.number().nonnegative(),
-});
+const TokenCountSchema = z
+  .number()
+  .finite()
+  .int()
+  .nonnegative()
+  .refine(Number.isSafeInteger, 'Token counts must be safe integers');
+
+export const TokenUsageSchema = z
+  .object({
+    inputTokens: TokenCountSchema,
+    outputTokens: TokenCountSchema,
+    totalTokens: TokenCountSchema,
+  })
+  .superRefine((usage, ctx) => {
+    const expectedTotal = usage.inputTokens + usage.outputTokens;
+    if (!Number.isSafeInteger(expectedTotal)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['totalTokens'],
+        message: `inputTokens + outputTokens must not exceed Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
+      });
+      return;
+    }
+
+    if (usage.totalTokens !== expectedTotal) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['totalTokens'],
+        message: 'totalTokens must equal inputTokens + outputTokens',
+      });
+    }
+  });
 
 export const McpServerConfigSchema = z.object({
   command: z.string().min(1),

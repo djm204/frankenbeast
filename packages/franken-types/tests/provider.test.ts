@@ -19,6 +19,7 @@ import {
   type ToolDefinition,
   type ImageSource,
   type CritiqueContext,
+  type ProviderCritiqueFinding,
   type CritiqueResult,
   type ProviderSkillConfig,
 } from '../src/index.js';
@@ -44,6 +45,64 @@ describe('TokenUsageSchema', () => {
   it('rejects negative totalTokens', () => {
     expect(() =>
       TokenUsageSchema.parse({ inputTokens: 0, outputTokens: 0, totalTokens: -1 }),
+    ).toThrow();
+  });
+
+  it('rejects fractional token counts', () => {
+    expect(() =>
+      TokenUsageSchema.parse({ inputTokens: 1.5, outputTokens: 0, totalTokens: 1.5 }),
+    ).toThrow();
+    expect(() =>
+      TokenUsageSchema.parse({ inputTokens: 1, outputTokens: 0.5, totalTokens: 1.5 }),
+    ).toThrow();
+    expect(() =>
+      TokenUsageSchema.parse({ inputTokens: 1, outputTokens: 1, totalTokens: 2.5 }),
+    ).toThrow();
+  });
+
+  it('rejects non-finite token counts', () => {
+    expect(() =>
+      TokenUsageSchema.parse({ inputTokens: Number.NaN, outputTokens: 0, totalTokens: 0 }),
+    ).toThrow();
+    expect(() =>
+      TokenUsageSchema.parse({
+        inputTokens: Number.POSITIVE_INFINITY,
+        outputTokens: 0,
+        totalTokens: Number.POSITIVE_INFINITY,
+      }),
+    ).toThrow();
+    expect(() =>
+      TokenUsageSchema.parse({
+        inputTokens: 0,
+        outputTokens: Number.POSITIVE_INFINITY,
+        totalTokens: Number.POSITIVE_INFINITY,
+      }),
+    ).toThrow();
+    expect(() =>
+      TokenUsageSchema.parse({ inputTokens: 0, outputTokens: 0, totalTokens: Number.POSITIVE_INFINITY }),
+    ).toThrow();
+  });
+
+  it('rejects unsafe token counts and overflow totals', () => {
+    expect(() =>
+      TokenUsageSchema.parse({
+        inputTokens: Number.MAX_SAFE_INTEGER + 1,
+        outputTokens: 0,
+        totalTokens: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      TokenUsageSchema.parse({
+        inputTokens: Number.MAX_SAFE_INTEGER,
+        outputTokens: 1,
+        totalTokens: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects token usage records with inconsistent totals', () => {
+    expect(() =>
+      TokenUsageSchema.parse({ inputTokens: 10, outputTokens: 5, totalTokens: 999 }),
     ).toThrow();
   });
 });
@@ -228,21 +287,22 @@ describe('Provider interfaces (type-level)', () => {
     expect(provider.discoverSkills).toBeDefined();
   });
 
-  it('CritiqueContext and CritiqueResult have required shape', () => {
+  it('CritiqueContext and ProviderCritiqueFinding have required shape', () => {
     const ctx: CritiqueContext = {
       phase: 'execution',
       stepsCompleted: 3,
       workSummary: 'Implemented auth',
       objective: 'Add user login',
     };
-    const result: CritiqueResult = {
+    const result: ProviderCritiqueFinding = {
       evaluator: 'reflection',
       severity: 7,
       message: 'Missing error handling',
       suggestion: 'Add try/catch around API calls',
     };
+    const deprecatedAlias: CritiqueResult = result;
     expect(ctx.phase).toBe('execution');
-    expect(result.severity).toBe(7);
+    expect(deprecatedAlias.severity).toBe(7);
   });
 
   it('ProviderSkillConfig has required shape', () => {

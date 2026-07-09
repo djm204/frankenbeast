@@ -38,14 +38,14 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
   return parsed.length > 0 ? parsed : fallback;
 }
 
-export function createAdapterSet(dbPath: string, options: { root?: string | undefined } = {}): AdapterSet {
+export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
   return {
     brain: createBrainAdapter(dbPath),
     observer: createObserverAdapter(dbPath),
     governor: createGovernorAdapter(dbPath),
     planner: createPlannerAdapter(dbPath),
     critique: createCritiqueAdapter(),
-    firewall: createFirewallAdapter(dbPath, 'standard', { root: options.root }),
+    firewall: createFirewallAdapter(dbPath, 'standard', { root: options.root, configPath: options.configPath }),
     skills: createSkillsAdapter(dbPath),
   };
 }
@@ -216,7 +216,7 @@ const TOOLS: ToolFull[] = [
       properties: {
         content: { type: 'string', description: 'Code or text to evaluate' },
         criteria: { type: 'string', description: 'Comma-separated criteria: correctness, readability, security, complexity' },
-        evaluators: { type: 'string', description: 'Comma-separated evaluator names (e.g. logic-loop, complexity)' },
+        evaluators: { type: 'string', description: 'Comma-separated evaluator names. Supported values: logic-loop, complexity, conciseness. Unknown names are rejected.' },
       },
       required: ['content'],
     },

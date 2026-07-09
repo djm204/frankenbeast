@@ -38,7 +38,6 @@ describe('Phase 2: Planning — Critique Pipeline', () => {
       knownPackages: ['express', 'zod'],
     });
 
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
 
     const input: EvaluationInput = {
       content: `
@@ -67,7 +66,6 @@ describe('Phase 2: Planning — Critique Pipeline', () => {
       knownPackages: ['express'],
     });
 
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
 
     const input: EvaluationInput = {
       content: `
@@ -97,12 +95,11 @@ describe('Phase 2: Planning — Critique Pipeline', () => {
       knownPackages: ['express'],
     });
 
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
 
     const input: EvaluationInput = {
       content: `
         const userInput = req.body.code;
-        ${unsafeDynamicCallName}(userInput);
+        executeUntrustedCode(userInput);
       `.trim(),
       source: 'handler.ts',
       metadata: { projectId: 'test' },
@@ -121,7 +118,6 @@ describe('Phase 2: Planning — Critique Pipeline', () => {
       knownPackages: [],
     });
 
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
 
     const input: EvaluationInput = {
       content: `

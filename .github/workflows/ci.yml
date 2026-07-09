@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -29,7 +31,11 @@ jobs:
 
       - run: npm run audit:security
 
-      - run: npm run test:root -- tests/workspaces.test.ts tests/unit/web-dev-server-dependency-policy.test.ts tests/unit/todo-markers.test.ts
+      - name: Run deterministic root Vitest suite
+        run: npm run test:root
+
+      - name: Run Docker sandbox build smoke test
+        run: npm run test:docker:sandbox
 
       - run: npm run lint:security
 
@@ -39,9 +45,11 @@ jobs:
       - name: Workspace dependency hygiene (no wildcard internal deps)
         run: node scripts/check-workspace-deps.mjs
 
-      - run: |
-          npx turbo run build lint
-          npx turbo run test
+      - name: Run package build and lint
+        run: npx turbo run build lint
+
+      - name: Run package tests
+        run: npx turbo run test
 
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs
