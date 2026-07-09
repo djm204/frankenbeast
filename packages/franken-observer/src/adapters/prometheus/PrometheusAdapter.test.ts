@@ -131,6 +131,40 @@ describe('PrometheusAdapter', () => {
       )
     })
 
+    it('prunes oldest span ids without dropping newly flushed spans from the same trace', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 3 })
+      const first = TraceContext.createTrace('first')
+      const firstSpan = TraceContext.startSpan(first, { name: 'llm-call' })
+      SpanLifecycle.recordTokenUsage(firstSpan, {
+        promptTokens: 100,
+        completionTokens: 0,
+        model: 'claude-sonnet-4-6',
+      })
+      TraceContext.endSpan(firstSpan)
+      const second = makeTrace('claude-sonnet-4-6', 200, 0)
+      const third = makeTrace('claude-sonnet-4-6', 300, 0)
+
+      await adapter.flush(first)
+      await adapter.flush(second)
+
+      const appended = TraceContext.startSpan(first, { name: 'llm-call-appended' })
+      SpanLifecycle.recordTokenUsage(appended, {
+        promptTokens: 400,
+        completionTokens: 0,
+        model: 'claude-sonnet-4-6',
+      })
+      TraceContext.endSpan(appended)
+      TraceContext.endTrace(first)
+      await adapter.flush(first)
+      await adapter.flush(third)
+      await adapter.flush(first)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+1100/,
+      )
+    })
+
     it('tracks multiple models independently', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTrace('claude-sonnet-4-6', 100, 50))

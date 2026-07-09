@@ -15,6 +15,11 @@ interface TokenCounts {
   completion: number
 }
 
+interface FlushedSpanEntry {
+  traceId: string
+  spanId: string
+}
+
 function escapePrometheusLabelValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"')
 }
@@ -35,6 +40,7 @@ export class PrometheusAdapter implements ExportAdapter {
   private spanCounters = new Map<string, number>()
   private costCounters = new Map<string, number>()
   private flushedSpanIdsByTrace = new Map<string, Set<string>>()
+  private flushedSpanInsertionOrder = new Map<string, FlushedSpanEntry>()
   private flushedSpanIdCount = 0
 
   constructor(options: PrometheusAdapterOptions = {}) {
@@ -99,7 +105,9 @@ export class PrometheusAdapter implements ExportAdapter {
 
     for (const spanId of spanIds) {
       if (flushedSpanIds.has(spanId)) continue
+      const spanKey = `${traceId}\u0000${spanId}`
       flushedSpanIds.add(spanId)
+      this.flushedSpanInsertionOrder.set(spanKey, { traceId, spanId })
       this.flushedSpanIdCount += 1
     }
 
@@ -108,25 +116,28 @@ export class PrometheusAdapter implements ExportAdapter {
 
   private pruneFlushedSpans(currentTraceId: string): void {
     while (this.flushedSpanIdCount > this.maxDedupeSpans) {
-      const oldestTraceId = this.flushedSpanIdsByTrace.keys().next().value as string | undefined
-      if (oldestTraceId === undefined) break
+      let pruned = false
 
-      // Keep the trace currently being flushed intact so a retry of a large
-      // trace does not evict the next span immediately before it is checked and
-      // double-count the trace. Older traces are pruned first; a single large
-      // trace may temporarily exceed the configured cap until another trace is
-      // flushed.
-      if (oldestTraceId === currentTraceId) {
-        if (this.flushedSpanIdsByTrace.size === 1) break
-        const current = this.flushedSpanIdsByTrace.get(oldestTraceId)
-        this.flushedSpanIdsByTrace.delete(oldestTraceId)
-        this.flushedSpanIdsByTrace.set(oldestTraceId, current ?? new Set<string>())
-        continue
+      for (const [spanKey, entry] of this.flushedSpanInsertionOrder) {
+        // Keep the trace currently being flushed intact so a retry of a large
+        // trace does not evict the next span immediately before it is checked and
+        // double-count the trace. Older individual span ids from other traces are
+        // pruned first; a single large current trace may temporarily exceed the
+        // configured cap until another trace is flushed.
+        if (entry.traceId === currentTraceId) continue
+
+        this.flushedSpanInsertionOrder.delete(spanKey)
+        const traceSpanIds = this.flushedSpanIdsByTrace.get(entry.traceId)
+        traceSpanIds?.delete(entry.spanId)
+        if (traceSpanIds?.size === 0) {
+          this.flushedSpanIdsByTrace.delete(entry.traceId)
+        }
+        this.flushedSpanIdCount -= 1
+        pruned = true
+        break
       }
 
-      const pruned = this.flushedSpanIdsByTrace.get(oldestTraceId)
-      this.flushedSpanIdCount -= pruned?.size ?? 0
-      this.flushedSpanIdsByTrace.delete(oldestTraceId)
+      if (!pruned) break
     }
   }
 
@@ -178,6 +189,7 @@ export class PrometheusAdapter implements ExportAdapter {
     this.spanCounters.clear()
     this.costCounters.clear()
     this.flushedSpanIdsByTrace.clear()
+    this.flushedSpanInsertionOrder.clear()
     this.flushedSpanIdCount = 0
   }
 
