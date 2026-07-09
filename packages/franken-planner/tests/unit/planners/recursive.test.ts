@@ -110,6 +110,24 @@ describe('RecursivePlanner — happy path', () => {
     expect(result.taskResults).toHaveLength(2);
   });
 
+  it('skips tasks already completed by an earlier recovery iteration', async () => {
+    const graph = PlanGraph.empty()
+      .addTask(makeTask('t-1'))
+      .addTask(makeTask('t-2'), [createTaskId('t-1')]);
+    const executor = vi.fn().mockImplementation((task: Task) => Promise.resolve(success(task.id)));
+
+    const result = await new RecursivePlanner().execute(graph, {
+      executor,
+      completedTaskIds: new Set([createTaskId('t-1')]),
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledOnce();
+    expect(executor).toHaveBeenCalledWith(expect.objectContaining({ id: createTaskId('t-2') }));
+    if (result.status !== 'completed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([createTaskId('t-2')]);
+  });
+
   it('sub-tasks respect their own dependency order', async () => {
     const sub1 = makeTask('sub-1');
     const sub2: Task = {

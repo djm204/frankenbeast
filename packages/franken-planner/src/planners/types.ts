@@ -1,4 +1,4 @@
-import type { Task, TaskResult, PlanResult, PlanningStrategyName, Intent } from '../core/types.js';
+import type { Task, TaskId, TaskResult, PlanResult, PlanningStrategyName, Intent } from '../core/types.js';
 import type { PlanGraph } from '../core/dag.js';
 
 /**
@@ -13,6 +13,13 @@ export type TaskExecutor = (task: Task) => Promise<TaskResult>;
  */
 export interface PlanContext {
   executor: TaskExecutor;
+
+  /**
+   * Tasks already completed by an earlier strategy execution in the same
+   * Planner self-correction loop. Strategies must treat these ids as satisfied
+   * dependencies and skip re-executing them on recovery retries.
+   */
+  completedTaskIds?: ReadonlySet<TaskId>;
 }
 
 /**

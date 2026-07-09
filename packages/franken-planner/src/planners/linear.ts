@@ -26,6 +26,10 @@ export class LinearPlanner implements PlanningStrategy {
     const taskResults: TaskResult[] = [];
 
     for (const task of tasks) {
+      if (context.completedTaskIds?.has(task.id)) {
+        continue;
+      }
+
       let result: TaskResult;
       try {
         result = await context.executor(task);
@@ -39,9 +43,9 @@ export class LinearPlanner implements PlanningStrategy {
           error: err instanceof Error ? err : new Error(String(err)),
         };
       }
-      taskResults.push(result);
 
       if (result.status === 'failure') {
+        taskResults.push(result);
         return {
           status: 'failed',
           taskResults,
@@ -64,8 +68,11 @@ export class LinearPlanner implements PlanningStrategy {
         if (subResult.status !== 'completed') {
           return subResult;
         }
-        taskResults.push(...subResult.taskResults);
+        taskResults.push(result, ...subResult.taskResults);
+        continue;
       }
+
+      taskResults.push(result);
     }
 
     return { status: 'completed', taskResults };
