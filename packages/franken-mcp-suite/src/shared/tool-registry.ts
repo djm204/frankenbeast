@@ -216,7 +216,7 @@ const TOOLS: ToolFull[] = [
       properties: {
         content: { type: 'string', description: 'Code or text to evaluate' },
         criteria: { type: 'string', description: 'Comma-separated criteria: correctness, readability, security, complexity' },
-        evaluators: { type: 'string', description: 'Comma-separated evaluator names (e.g. logic-loop, complexity)' },
+        evaluators: { type: 'string', description: 'Comma-separated evaluator names. Supported values: logic-loop, complexity, conciseness. Unknown names are rejected.' },
       },
       required: ['content'],
     },

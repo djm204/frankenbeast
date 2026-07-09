@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createCritiqueAdapter } from '../adapters/critique-adapter.js';
 import { createCritiqueServer } from './critique.js';
 
 describe('Critique Server', () => {
@@ -50,6 +51,31 @@ describe('Critique Server', () => {
     const compareResult = await compareTool.handler({ original: 'var x = 1', revised: 'const x = 1' });
     expect(critique.compare).toHaveBeenCalledWith({ original: 'var x = 1', revised: 'const x = 1' });
     expect(compareResult.content[0]!.text).toContain('improved');
+  });
+
+  it('rejects unknown critique evaluators instead of falling back to defaults', async () => {
+    const server = createCritiqueServer({ critique: createCritiqueAdapter() });
+
+    const result = await server.callTool('fbeast_critique_evaluate', {
+      content: 'x',
+      evaluators: 'logicloop',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('Unknown critique evaluator: logicloop');
+    expect(result.content[0]!.text).toContain('logic-loop, complexity, conciseness');
+  });
+
+  it('rejects partially unknown critique evaluator lists deterministically', async () => {
+    const server = createCritiqueServer({ critique: createCritiqueAdapter() });
+
+    const result = await server.callTool('fbeast_critique_evaluate', {
+      content: 'x',
+      evaluators: 'logic-loop,missing-one,complexity,stale-two',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('Unknown critique evaluators: missing-one, stale-two');
   });
 
   it('serves critique tools when lazy audit DB setup fails', async () => {
