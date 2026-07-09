@@ -296,7 +296,7 @@ graph TB
 | `@franken/governor` | Trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers for HITL decisions. |
 | `@franken/types` | Shared TypeScript types plus runtime Zod schemas. |
 | `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
-| `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
+| `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim; see the [MCP suite README](packages/franken-mcp-suite/README.md#skill-health-endpoint) for skill health endpoint usage. |
 | `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
 | `@franken/live-bench` | Live CLI benchmark tooling. |
 
