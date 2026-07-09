@@ -927,7 +927,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   }).catch(() => undefined);
                 }}
                 resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`}
-                retryDisabled={status !== 'idle' && status !== 'error'}
+                retryDisabled={Boolean(pendingApproval) || (status !== 'idle' && status !== 'error')}
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer

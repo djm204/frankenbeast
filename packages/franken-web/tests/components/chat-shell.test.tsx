@@ -202,6 +202,15 @@ vi.mock('../../src/hooks/use-chat-session.js', () => ({
         modelTier: 'cheap',
         streaming: false,
       },
+      {
+        id: 'user-failed',
+        role: 'user',
+        content: 'Retry this failed request',
+        timestamp: '2026-03-09T00:00:02Z',
+        receipt: 'failed',
+        error: 'network failed',
+        canRetry: true,
+      },
     ],
     status: 'idle' as const,
     connectionStatus: 'connected' as const,
@@ -492,6 +501,7 @@ describe('ChatShell', () => {
     const input = screen.getByRole('textbox');
     expect(input.getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByRole('button', { name: 'Dispatch' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Resend failed message' })).toHaveProperty('disabled', true);
     expect(screen.getByText('Dispatch is disabled while an approval request is pending. Approve or reject it before sending another message.')).toBeDefined();
   });
 

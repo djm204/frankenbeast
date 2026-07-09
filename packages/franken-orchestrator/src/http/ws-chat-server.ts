@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { approvalRuntimeInput } from '../chat/approval-input.js';
-import { ChatRuntime } from '../chat/runtime.js';
+import { ChatRuntime, pendingApprovalRuntimeState } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
 import type { TurnEvent } from '../chat/turn-runner.js';
@@ -272,7 +272,7 @@ export class ChatSocketController {
 
     const result = await this.runtime.run(content, {
       sessionId: session.id,
-      pendingApproval: Boolean(session.pendingApproval),
+      ...pendingApprovalRuntimeState(session.pendingApproval),
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
@@ -406,7 +406,7 @@ export class ChatSocketController {
     try {
       result = await this.runtime.run(runtimeInput, {
         sessionId: session.id,
-        pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
+        pendingApproval: !pendingApproval?.command,
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),

@@ -128,20 +128,46 @@ describe('chat runtime parity', () => {
     expect(engine.processTurn).not.toHaveBeenCalled();
   });
 
-  it('still allows slash commands while approval is pending', async () => {
+  it('blocks mutating slash commands while approval is pending', async () => {
     const runtime = createChatRuntime({
-      chatLlm: { complete: vi.fn().mockResolvedValue('ignored') },
+      chatLlm: { complete: vi.fn().mockResolvedValue('chat ignored') },
+      executionLlm: { complete: vi.fn().mockResolvedValue('execution ignored') },
       projectName: 'test-project',
     });
 
-    const result = await runtime.runtime.run('/status', {
+    const result = await runtime.runtime.run('/run deploy something else', {
       sessionId: 'session-1',
       pendingApproval: true,
+      pendingApprovalDescription: 'deploy staging',
+      pendingApprovalContext: { tool: 'execution', command: 'deploy staging', sessionId: 'session-1' },
       projectId: 'test-project',
       transcript: [],
     });
 
-    expect(result.displayMessages[0]?.content).toContain('project=test-project');
-    expect(result.state).toBe('active');
+    expect(result.state).toBe('pending_approval');
+    expect(result.pendingApproval).toBe(true);
+    expect(result.pendingApprovalDescription).toBe('deploy staging');
+    expect(result.pendingApprovalContext).toEqual(expect.objectContaining({ command: 'deploy staging' }));
+    expect(result.displayMessages[0]?.content).toContain('Approval is pending');
+  });
+
+  it('maps comms rejection action text to a rejected approval state', async () => {
+    const runtime = createChatRuntime({
+      chatLlm: { complete: vi.fn().mockResolvedValue('chat ignored') },
+      projectName: 'test-project',
+    });
+
+    const result = await runtime.runtime.run('Action rejected by user: reject', {
+      sessionId: 'session-1',
+      pendingApproval: true,
+      pendingApprovalDescription: 'deploy staging',
+      pendingApprovalContext: { tool: 'execution', command: 'deploy staging', sessionId: 'session-1' },
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    expect(result.state).toBe('rejected');
+    expect(result.pendingApproval).toBe(false);
+    expect(result.displayMessages[0]).toMatchObject({ kind: 'approval', content: 'Rejected.' });
   });
 });

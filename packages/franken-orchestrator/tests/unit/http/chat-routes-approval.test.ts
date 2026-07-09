@@ -75,4 +75,38 @@ describe('chat approval route persistence', () => {
     expect(stored?.state).toBe('rejected');
     expect(stored?.pendingApproval).toBeNull();
   });
+
+  it('preserves pending approval metadata when a stale HTTP message is blocked', async () => {
+    const app = createChatApp({
+      sessionStore,
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'chat-approval-route-test',
+    });
+    const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.pendingApproval = {
+      ...session.pendingApproval!,
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: 'Requires approval.',
+      sessionId: session.id,
+    };
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'start something else' }),
+    });
+
+    expect(response.status).toBe(200);
+    const stored = sessionStore.get(session.id);
+    expect(stored?.state).toBe('pending_approval');
+    expect(stored?.pendingApproval).toEqual(expect.objectContaining({
+      description: 'Deploy the generated fix',
+      tool: 'execution',
+      command: 'deploy staging',
+      risk: 'Requires approval.',
+      sessionId: session.id,
+    }));
+  });
 });
