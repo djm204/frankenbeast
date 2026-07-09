@@ -723,7 +723,7 @@ Tasks execute in topological order from the DAG. High-stakes tasks pause for hum
 
 **Modules:** MOD-05 (Observer) + MOD-08 (Heartbeat)
 
-The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `@franken/orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
+The trace is closed and token spend summarised. In the current local CLI path, `@franken/orchestrator/src/cli/create-beast-deps.ts` builds a real `ReflectionHeartbeatAdapter`: it wires the provider registry through the middleware chain, runs the reflection evaluator when `config.reflection !== false`, and falls back to a static heartbeat summary when reflection is disabled. Treat heartbeat-driven self-improvement beyond that per-run reflection adapter as target architecture rather than a fully verified end-to-end local learning loop.
 
 ### Circuit Breakers
 
