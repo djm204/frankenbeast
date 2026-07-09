@@ -113,6 +113,47 @@ describe('fbeast-uninstall entrypoint', () => {
     expect(homeSettings.mcpServers['other-server']).toBeDefined();
   });
 
+  it('prunes legacy home Claude entries when no project-scoped fbeast config exists', async () => {
+    const root = tmpDir();
+    const home = tmpDir();
+    dirs.push(root, home);
+    process.env.HOME = home;
+
+    const projectClaudeDir = join(root, '.claude');
+    mkdirSync(projectClaudeDir, { recursive: true });
+    writeFileSync(join(projectClaudeDir, 'settings.json'), JSON.stringify({
+      mcpServers: {
+        'project-server': { command: 'project-server' },
+      },
+    }));
+
+    const homeClaudeDir = join(home, '.claude');
+    mkdirSync(homeClaudeDir, { recursive: true });
+    writeFileSync(join(homeClaudeDir, 'settings.json'), JSON.stringify({
+      mcpServers: {
+        'fbeast-memory': { command: 'fbeast-memory' },
+        'other-server': { command: 'other-server' },
+      },
+      hooks: {
+        PreToolUse: [{ hooks: [{ type: 'command', command: 'fbeast-hook pre' }] }],
+      },
+    }));
+
+    vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    process.chdir(root);
+    process.argv = ['node', 'fbeast-uninstall', '--client=claude', '--purge'];
+
+    await import('./uninstall.js');
+
+    const projectSettings = JSON.parse(readFileSync(join(projectClaudeDir, 'settings.json'), 'utf-8'));
+    expect(projectSettings.mcpServers['project-server']).toBeDefined();
+    const homeSettings = JSON.parse(readFileSync(join(homeClaudeDir, 'settings.json'), 'utf-8'));
+    expect(homeSettings.mcpServers['fbeast-memory']).toBeUndefined();
+    expect(homeSettings.mcpServers['other-server']).toBeDefined();
+    expect(homeSettings.hooks.PreToolUse).toEqual([]);
+  });
+
   it('honors an explicit Codex client argument', async () => {
     const root = tmpDir();
     dirs.push(root);

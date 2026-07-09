@@ -96,8 +96,9 @@ function initJsonClient(options: {
   }
 
   // Add MCP server entries. Claude project-scoped MCP registrations belong in
-  // .mcp.json; Gemini uses .gemini/settings.json. Keep paths cwd-relative so a
-  // config file never pins one checkout's absolute database path into another.
+  // .mcp.json; Gemini uses .gemini/settings.json. Claude may launch project
+  // MCP servers from outside the workspace, so anchor its relative database path
+  // with CLAUDE_PROJECT_DIR instead of relying on the launcher cwd.
   const mcpConfigPath = client === 'claude' ? join(root, '.mcp.json') : settingsPath;
   let mcpConfig: Record<string, unknown> = client === 'claude' ? {} : settings;
   if (client === 'claude' && existsSync(mcpConfigPath)) {
@@ -108,7 +109,7 @@ function initJsonClient(options: {
   }
   pruneFbeastMcpServerEntries(mcpConfig);
   const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
-  const dbPath = join('.fbeast', 'beast.db');
+  const dbPath = client === 'claude' ? '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db' : join('.fbeast', 'beast.db');
   const proxyArgs = ['--db', dbPath];
   if (mode === 'proxy') {
     mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: proxyArgs };
