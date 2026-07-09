@@ -580,8 +580,17 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     let shouldReconnect = true;
+    let reconnectRefreshInFlight = false;
     setConnectionStatus('connecting');
     readyRef.current = false;
+
+    function refreshBeforeReconnect() {
+      if (reconnectRefreshInFlight) {
+        return;
+      }
+      reconnectRefreshInFlight = true;
+      refreshSession();
+    }
 
     const socket = new WebSocket(
       clientRef.current.socketUrl(sessionId, socketToken),
@@ -749,6 +758,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       if (socketRef.current !== socket) {
         return;
       }
+      const hadPendingSends = pendingSendsRef.current.size > 0;
       failAllPendingSends(new Error('WebSocket send failed before the server acknowledged the message.'));
       if (approvalResolvingRef.current) {
         updateApprovalResolving(false);
@@ -763,6 +773,15 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         'Reconnect',
         'socket_error',
       ));
+      if (!shouldReconnect || hadPendingSends) {
+        return;
+      }
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setConnectionStatus('offline');
+        return;
+      }
+      setConnectionStatus('reconnecting');
+      refreshBeforeReconnect();
     };
 
     socket.onclose = () => {
@@ -781,7 +800,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           return;
         }
         setConnectionStatus('reconnecting');
-        refreshSession();
+        refreshBeforeReconnect();
       } else {
         setConnectionStatus('disconnected');
       }
