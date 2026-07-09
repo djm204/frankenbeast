@@ -14,12 +14,23 @@ import { spawn } from 'node:child_process';
 function mockSpawn(stdoutLines: string[], exitCode = 0) {
   const stdout = new PassThrough();
   const stdin = new PassThrough();
-  const proc = Object.assign(new EventEmitter(), { stdout, stdin, stderr: new PassThrough(), pid: 1, kill: vi.fn() });
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    pid: 1,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
+  });
   (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
   setImmediate(() => {
     for (const line of stdoutLines) stdout.write(line + '\n');
     stdout.end();
-    setImmediate(() => proc.emit('close', exitCode));
+    setImmediate(() => {
+      proc.exitCode = exitCode;
+      proc.emit('close', exitCode);
+    });
   });
   return proc;
 }
@@ -439,6 +450,18 @@ describe('GeminiCliAdapter', () => {
         type: 'error',
         error: expect.stringContaining('gemini process exited with code 2'),
       });
+    });
+
+    it('kills the spawned Gemini process when stream iteration stops early', async () => {
+      const proc = mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } }),
+      ]);
+      const iterator = adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] });
+
+      await expect(iterator.next()).resolves.toEqual({ value: { type: 'text', content: 'partial' }, done: false });
+      await iterator.return(undefined);
+
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     });
   });
 

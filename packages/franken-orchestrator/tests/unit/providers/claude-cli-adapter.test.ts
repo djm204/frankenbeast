@@ -17,7 +17,9 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
     stdin,
     stderr: new PassThrough(),
     pid: 1234,
-    kill: vi.fn(),
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
   });
   (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
 
@@ -27,7 +29,10 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
       stdout.write(line + '\n');
     }
     stdout.end();
-    setImmediate(() => proc.emit('close', exitCode));
+    setImmediate(() => {
+      proc.exitCode = exitCode;
+      proc.emit('close', exitCode);
+    });
   });
 
   return proc;
@@ -321,6 +326,18 @@ describe('ClaudeCliAdapter', () => {
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'rate limit exceeded', retryable: true });
+    });
+
+    it('kills the spawned Claude process when stream iteration stops early', async () => {
+      const proc = mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } }),
+      ]);
+      const iterator = adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] });
+
+      await expect(iterator.next()).resolves.toEqual({ value: { type: 'text', content: 'partial' }, done: false });
+      await iterator.return(undefined);
+
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     });
   });
 
