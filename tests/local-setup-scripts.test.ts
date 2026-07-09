@@ -160,6 +160,14 @@ describe('local setup scripts', () => {
     expect(readme).toContain('intentionally absent from `.env.example`');
     expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
     expect(readme).toContain('maxCritiqueIterations * 10000');
+    expect(readme).toContain('`frankenbeast init` configures the orchestrator/backend control plane');
+    expect(readme).toContain('It is separate from `fbeast mcp init`');
+    expect(readme).toContain('frankenbeast init --verify');
+    expect(readme).toContain('frankenbeast init --repair');
+    expect(readme).toContain('frankenbeast init --non-interactive');
+    expect(readme).toContain('Chat, Dashboard, and Comms modules');
+    expect(readme).toContain('export FRANKENBEAST_PASSPHRASE=<passphrase>');
+    expect(readme).toContain('fails closed if setup is incomplete');
     for (const frankenOverride of [
       'FRANKEN_MAX_TOTAL_TOKENS',
       'FRANKEN_MAX_DURATION_MS',

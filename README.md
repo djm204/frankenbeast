@@ -615,6 +615,31 @@ You can also set the backend in `.fbeast/config.json` with `{ "network": { "secu
 2. Keep the token server-side: use the configured secret store or set `FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token>` in a local, uncommitted env file.
 3. Run the dashboard through same-origin backend routes. In Vite dev mode, use `VITE_API_PROXY_TARGET`/`VITE_BEAST_API_PROXY_TARGET` so the Vite server attaches the token to proxy requests without exposing it to the browser bundle.
 
+### Init backend setup flow
+
+`frankenbeast init` configures the orchestrator/backend control plane. It is separate from `fbeast mcp init`, which only registers MCP servers and optional hooks for an AI client in the current project. Run `frankenbeast init` before enabling Beast controls in the dashboard so the backend has module settings, a secret backend, and `network.operatorTokenRef` ready for the Vite proxy or production BFF.
+
+Common forms:
+
+```bash
+frankenbeast init                  # interactive setup wizard
+frankenbeast init --verify         # validate .fbeast/config.json and .fbeast/init-state.json
+frankenbeast init --repair         # re-run missing or failed init steps only
+frankenbeast init --backend os-keychain   # choose a secret backend for this run
+frankenbeast init --non-interactive       # safe only after config and init state are complete
+```
+
+During the interactive wizard, expect prompts for the Chat, Dashboard, and Comms modules; the default provider; the `secure`/`insecure` network mode; optional Slack, Discord, Telegram, or WhatsApp credentials when Comms is enabled; and an operator token prompt that can be left blank to auto-generate a token. Sensitive values are stored in the selected secret backend and referenced from `.fbeast/config.json`; the raw operator token is printed once when auto-generated so you can copy it into a local server-side `.env` if you are not resolving it through the configured backend.
+
+For the default `local-encrypted` backend, init needs a passphrase. In a terminal run, enter it at the prompt; in CI or other headless verification paths, export only that variable before the command that needs to read the vault:
+
+```bash
+export FRANKENBEAST_PASSPHRASE=<passphrase>
+frankenbeast init --verify
+```
+
+Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It verifies existing state and fails closed if setup is incomplete; it does not create a fresh vault or answer wizard prompts.
+
 ### Non-interactive / CI usage
 
 ```bash
