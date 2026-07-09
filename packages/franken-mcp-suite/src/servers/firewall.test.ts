@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createFirewallServer } from './firewall.js';
+import { createFirewallServer, resolveFirewallConfigPath } from './firewall.js';
 import { createFirewallAdapter } from '../adapters/firewall-adapter.js';
 
 describe('Firewall Server', () => {
@@ -46,6 +46,12 @@ describe('Firewall Server', () => {
     const fileResult = await scanFileTool.handler({ path: '/tmp/prompt.txt' });
     expect(firewall.scanFile).toHaveBeenCalledWith('/tmp/prompt.txt');
     expect(fileResult.content[0]!.text).toContain('clean');
+  });
+
+  it('expands Claude project placeholders in explicit firewall config paths', () => {
+    expect(resolveFirewallConfigPath('${CLAUDE_PROJECT_DIR}/.fbeast/config.json', '/project-a')).toBe(
+      join('/project-a', '.fbeast', 'config.json'),
+    );
   });
 
   it('rejects scanning a path outside the project root', async () => {

@@ -16,6 +16,10 @@ export function createFirewallServer(deps: FirewallServerDeps, options: CreateMc
   return createMcpServer('fbeast-firewall', '0.1.0', tools, options);
 }
 
+export function resolveFirewallConfigPath(configPath: string | undefined, root: string): string | undefined {
+  return configPath ? resolveProjectDbPath(configPath, root) : undefined;
+}
+
 if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: {
@@ -27,7 +31,8 @@ if (isMain(import.meta.url)) {
   const tier = values['tier'] === 'strict' ? 'strict' : 'standard';
   const dbPath = resolveProjectDbPath(values['db']!);
   const root = process.env['FBEAST_ROOT'] ?? deriveProjectRootFromDbPath(values['db']!) ?? process.cwd();
-  const firewall = createFirewallAdapter(dbPath, tier, { root, configPath: values['config'] });
+  const configPath = resolveFirewallConfigPath(values['config'], root);
+  const firewall = createFirewallAdapter(dbPath, tier, { root, configPath });
   const server = createFirewallServer({ firewall }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-firewall failed to start:', err);
