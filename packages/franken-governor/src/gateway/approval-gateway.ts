@@ -99,6 +99,8 @@ export class ApprovalGateway {
     const payload = formatApprovalResponseSignaturePayload({
       requestId: response.requestId,
       decision: response.decision,
+      respondedBy: response.respondedBy,
+      feedback: response.feedback,
     });
 
     if (!signatureVerifier || !response.signature || !signatureVerifier.verify(payload, response.signature)) {
