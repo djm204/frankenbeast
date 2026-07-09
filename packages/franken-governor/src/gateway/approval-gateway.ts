@@ -30,20 +30,21 @@ export class ApprovalGateway {
   private readonly channel: ApprovalChannel;
   private readonly auditRecorder: AuditRecorder;
   private readonly config: GovernorConfig;
-  private readonly signatureVerifier: SignatureVerifier | undefined;
+  private readonly configuredSignatureVerifier: SignatureVerifier | undefined;
+  private configSignatureVerifier: SignatureVerifier | undefined;
+  private configSignatureVerifierSecret: string | undefined;
   private readonly sessionTokenStore: SessionTokenStore | undefined;
 
   constructor(deps: ApprovalGatewayDeps) {
     this.channel = deps.channel;
     this.auditRecorder = deps.auditRecorder;
     this.config = deps.config;
-    this.signatureVerifier = deps.signatureVerifier
-      ?? (deps.config.signingSecret ? new SignatureVerifier(deps.config.signingSecret) : undefined);
+    this.configuredSignatureVerifier = deps.signatureVerifier;
     this.sessionTokenStore = deps.sessionTokenStore;
   }
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalOutcome> {
-    if (this.config.requireSignedApprovals && !this.signatureVerifier) {
+    if (this.config.requireSignedApprovals && !this.resolveSignatureVerifier()) {
       throw new ApprovalConfigurationError(
         'Signed approvals are required but no signature verifier is configured. Provide config.signingSecret or ApprovalGatewayDeps.signatureVerifier.',
       );
@@ -71,7 +72,7 @@ export class ApprovalGateway {
   }
 
   private verifySignature(response: ApprovalResponse): void {
-    const signatureVerifier = this.signatureVerifier;
+    const signatureVerifier = this.resolveSignatureVerifier();
     const payload = formatApprovalResponseSignaturePayload({
       requestId: response.requestId,
       decision: response.decision,
@@ -80,6 +81,26 @@ export class ApprovalGateway {
     if (!signatureVerifier || !response.signature || !signatureVerifier.verify(payload, response.signature)) {
       throw new SignatureVerificationError(response.requestId);
     }
+  }
+
+  private resolveSignatureVerifier(): SignatureVerifier | undefined {
+    if (this.configuredSignatureVerifier) {
+      return this.configuredSignatureVerifier;
+    }
+
+    const signingSecret = this.config.signingSecret;
+    if (!signingSecret) {
+      this.configSignatureVerifier = undefined;
+      this.configSignatureVerifierSecret = undefined;
+      return undefined;
+    }
+
+    if (this.configSignatureVerifierSecret !== signingSecret) {
+      this.configSignatureVerifier = new SignatureVerifier(signingSecret);
+      this.configSignatureVerifierSecret = signingSecret;
+    }
+
+    return this.configSignatureVerifier;
   }
 
   private async withTimeout(
