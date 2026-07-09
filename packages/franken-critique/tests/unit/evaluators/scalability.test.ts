@@ -73,9 +73,11 @@ describe('ScalabilityEvaluator', () => {
     ['parenthesized runtime config', 'const cfg = ({ host: "x", port: 8080, secure: true });'],
     ['nested runtime config object', 'const cfg = { host: "x", server: { port: 8080 } };'],
     ['lowercase compound port declaration', 'const serverport = 8080; const apiport = 8443;'],
+    ['service-named compound port declarations', 'const supportPort = 8080; const transportPort = 8443; const portalPort = 9000;'],
     ['plural port container object map', 'const cfg = { ports: { http: 8080, https: 8443 } };'],
     ['plural port container array after ignored string', 'const cfg = { ports: ["8080", 8443] };'],
     ['typed declaration with generic comma annotation', 'const port: Brand<number, "Port"> = 8080;'],
+    ['typed declaration with nested generic annotation', 'const port: Promise<Brand<number, "Port">> = 8080;'],
     ['logical property assignment default', 'config.port ??= 8080; config.serverPort ||= 8443;'],
     ['top-level quoted port key fragment', '"server-port": 8080'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
@@ -160,6 +162,9 @@ class Server { bind(host: string, port: 8080) {} }
 const tupleArgs: [host: string, port: 8080] = value;
 const tupleLiteralArgs: [protocol: 'http', port: 8080] = value;
 const tupleInsideGeneric: Array<[host: string, port: 8080]> = [];
+function bindPorts(host: string, ports: [8080, 8443]) {}
+const nestedGenericArgs = makeConfig<Record<string, unknown>, { port: 8080 }>();
+class NestedGenericBaseConfig extends Base<Record<string, unknown>, { port: 8080 }> {}
 const inlineUnion: Base | { port: 8080 } = makeCfg();
 const inlineIntersection = {} as Base & { port: 8080 };
 type ComplexConfig<T extends Record<string, unknown>> = { port: 8080 };

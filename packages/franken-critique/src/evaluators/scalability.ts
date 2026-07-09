@@ -2,11 +2,11 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!\w*(?:(?<!pre)[Vv]iew[Pp]orts?|VIEW_PORTS?|view_ports?|[Tt]ransport|[Ss]upport|[Pp]ortal|[Pp]ortfolio)\w*)\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b)\w*))\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
 const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv][Ii][Ee][Ww]-[Pp][Oo][Rr][Tt])[^"']*))(?:[A-Za-z0-9_]+-)*[Pp][Oo][Rr][Tt](?:-[A-Za-z0-9_]+)*["']`;
 const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
-const PORT_TYPE_ANNOTATION_PATTERN = String.raw`(?:\s*:\s*(?:[^=;,\n<>]+|<[^>\n]*>)+)?`;
+const PORT_TYPE_ANNOTATION_PATTERN = String.raw`(?:\s*:\s*(?:[^=;,\n<>]+|[^=;\n]*<[^=;\n]*>[^=;\n]*))?`;
 const DECLARATION_PORT_SUGGESTION = 'Use process.env.PORT or a config object instead';
 const CONFIG_PORT_SUGGESTION = 'Move port to environment variable or external configuration';
 const HARDCODED_PORT_PATTERNS = [
@@ -107,6 +107,7 @@ export class ScalabilityEvaluator implements Evaluator {
     const scanContent = this.maskCommentsAndStrings(content);
     const typeOnlyRanges = this.findTypeOnlyBraceRanges(scanContent);
     const ignoredRanges = this.findCommentAndStringRanges(content);
+    const seenPortNumberIndexes = new Set<number>();
 
     for (const { pattern, suggestion, skipTypeOnly } of HARDCODED_PORT_PATTERNS) {
       for (const match of content.matchAll(pattern)) {
@@ -131,6 +132,11 @@ export class ScalabilityEvaluator implements Evaluator {
           continue;
         }
 
+        if (seenPortNumberIndexes.has(portNumberIndex)) {
+          continue;
+        }
+        seenPortNumberIndexes.add(portNumberIndex);
+
         findings.push({
           message: `Found hardcoded port number: ${match[1]}. Use environment variables or config.`,
           severity: 'warning',
@@ -139,7 +145,7 @@ export class ScalabilityEvaluator implements Evaluator {
       }
     }
 
-    this.checkPluralPortContainers(content, findings, ignoredRanges, typeOnlyRanges);
+    this.checkPluralPortContainers(content, findings, ignoredRanges, typeOnlyRanges, seenPortNumberIndexes);
   }
 
   private checkPluralPortContainers(
@@ -147,6 +153,7 @@ export class ScalabilityEvaluator implements Evaluator {
     findings: EvaluationFinding[],
     ignoredRanges: Array<[number, number]>,
     typeOnlyRanges: Array<[number, number]>,
+    seenPortNumberIndexes: Set<number>,
   ): void {
     const containerPattern = new RegExp(
       String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}([\[{])`,
@@ -156,7 +163,9 @@ export class ScalabilityEvaluator implements Evaluator {
     for (const match of content.matchAll(containerPattern)) {
       const matchIndex = match.index ?? 0;
       const containerStart = matchIndex + match[0].lastIndexOf(match[1] ?? '');
-      if (this.isInTypeOnlyRange(typeOnlyRanges, matchIndex) || this.isInTypeOnlySignature(content, matchIndex)) {
+      if (this.isInTypeOnlyRange(typeOnlyRanges, matchIndex) ||
+        this.isInTypeOnlySignature(content, matchIndex) ||
+        this.isParameterContainerLiteralType(content, matchIndex, containerStart)) {
         continue;
       }
 
@@ -169,9 +178,10 @@ export class ScalabilityEvaluator implements Evaluator {
       for (const numberMatch of body.matchAll(new RegExp(String.raw`(?<![\w$])${PORT_NUMBER_PATTERN}\b`, 'g'))) {
         const portNumber = numberMatch[1];
         const portNumberIndex = containerStart + 1 + (numberMatch.index ?? 0);
-        if (this.isInTypeOnlyRange(ignoredRanges, portNumberIndex)) {
+        if (this.isInTypeOnlyRange(ignoredRanges, portNumberIndex) || seenPortNumberIndexes.has(portNumberIndex)) {
           continue;
         }
+        seenPortNumberIndexes.add(portNumberIndex);
         findings.push({
           message: `Found hardcoded port number: ${portNumber}. Use environment variables or config.`,
           severity: 'warning',
@@ -234,6 +244,25 @@ export class ScalabilityEvaluator implements Evaluator {
       return false;
     }
     return /(?:\bfunction\b|=>\s*$|=\s*$|\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$|\b\w+\s*$)/s.test(beforeParen) && /\b\w+\??\s*:\s*[^,]+$/s.test(beforeMatchInParams);
+  }
+
+  private isParameterContainerLiteralType(content: string, matchIndex: number, containerStart: number): boolean {
+    if (content[matchIndex] !== ',') {
+      return false;
+    }
+
+    const prefix = content.slice(Math.max(0, matchIndex - 300), matchIndex);
+    const openParen = prefix.lastIndexOf('(');
+    if (openParen === -1) {
+      return false;
+    }
+
+    const beforeParen = prefix.slice(0, openParen);
+    const beforeMatchInParams = prefix.slice(openParen + 1);
+    const annotationPrefix = content.slice(matchIndex, containerStart);
+    return /(?:\bfunction\b|=>\s*$|=\s*$|\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$|\b\w+\s*$)/s.test(beforeParen) &&
+      !/[{[]/.test(beforeMatchInParams) &&
+      /^,\s*\w+\??\s*:\s*$/.test(annotationPrefix);
   }
 
   private isTupleElementLiteralType(content: string, matchIndex: number, portNumberIndex: number): boolean {
@@ -318,6 +347,7 @@ export class ScalabilityEvaluator implements Evaluator {
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
       /(?:<|\bextends)\s*$/s.test(prefix) ||
       /<[^<>{}();]*(?:=|,)\s*$/s.test(prefix) ||
+      /<[\s\S]*,\s*$/s.test(prefix) ||
       (/(?:^|[^&])&\s*$/s.test(prefix) || /(?:^|[^|])\|\s*$/s.test(prefix)) ||
       (typeAliasContext && /(?:=|&|\||<|,|\()\s*$/s.test(prefix));
   }
