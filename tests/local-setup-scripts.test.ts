@@ -242,4 +242,43 @@ describe('local setup scripts', () => {
       expect(doc).not.toMatch(/Re-run to update:/i);
     }
   });
+
+  it('keeps CLAUDE.md workspace package map aligned with live package manifests', () => {
+    const claudeGuide = read('CLAUDE.md');
+    const packageDirs = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((dir) => existsSync(join(ROOT, 'packages', dir, 'package.json')))
+      .sort();
+
+    const packageScopes = packageDirs.map((dir) => {
+      const manifest = JSON.parse(read(`packages/${dir}/package.json`)) as { name: string };
+      return manifest.name;
+    });
+
+    expect(packageDirs).toEqual([
+      'franken-brain',
+      'franken-critique',
+      'franken-governor',
+      'franken-mcp-suite',
+      'franken-observer',
+      'franken-orchestrator',
+      'franken-planner',
+      'franken-types',
+      'franken-web',
+      'live-bench',
+    ]);
+
+    for (const dir of packageDirs) {
+      expect(claudeGuide).toContain(`${dir}/`);
+    }
+    for (const scope of packageScopes) {
+      expect(claudeGuide).toContain(scope);
+    }
+
+    expect(claudeGuide).toContain('The root `package.json` declares `packages/*`');
+    expect(claudeGuide).toContain('@franken/types');
+    expect(claudeGuide).not.toContain('@frankenbeast/types');
+    expect(claudeGuide).toContain('not standalone workspaces anymore');
+  });
 });
