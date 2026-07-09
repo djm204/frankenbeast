@@ -1,4 +1,4 @@
-import type { TaskId } from './common.js';
+import type { SessionId, TaskId } from './common.js';
 import type { TokenSpend } from '@franken/types';
 
 export type { TokenSpend };
@@ -50,7 +50,7 @@ export interface EscalationRequest {
   readonly iterationCount: number;
   readonly lastCritiqueResults: readonly string[];
   readonly taskId: TaskId;
-  readonly sessionId: string;
+  readonly sessionId: SessionId;
 }
 
 // --- Port Interfaces (Hexagonal Architecture) ---
@@ -70,7 +70,7 @@ export interface MemoryPort {
 
 /** What MOD-06 needs from MOD-05 (Observer). */
 export interface ObservabilityPort {
-  getTokenSpend(sessionId: string): Promise<TokenSpend>;
+  getTokenSpend(sessionId: SessionId): Promise<TokenSpend>;
 }
 
 /** What MOD-06 emits to MOD-07 (Governor). */

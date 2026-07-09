@@ -142,12 +142,19 @@ export interface CritiqueContext {
   objective?: string;
 }
 
-export interface CritiqueResult {
+export interface ProviderCritiqueFinding {
   evaluator: string;
   severity: number;
   message: string;
   suggestion?: string;
 }
+
+/**
+ * @deprecated Use ProviderCritiqueFinding for provider/evaluator findings.
+ * The @franken/critique package uses CritiquePipelineResult for aggregate
+ * pipeline outcomes.
+ */
+export type CritiqueResult = ProviderCritiqueFinding;
 
 // --- Skill Loading Types (used by Phase 5 SkillManager + Phase 8 Beast Loop) ---
 

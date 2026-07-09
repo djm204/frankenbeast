@@ -19,6 +19,7 @@ import {
   type ToolDefinition,
   type ImageSource,
   type CritiqueContext,
+  type ProviderCritiqueFinding,
   type CritiqueResult,
   type ProviderSkillConfig,
 } from '../src/index.js';
@@ -286,21 +287,22 @@ describe('Provider interfaces (type-level)', () => {
     expect(provider.discoverSkills).toBeDefined();
   });
 
-  it('CritiqueContext and CritiqueResult have required shape', () => {
+  it('CritiqueContext and ProviderCritiqueFinding have required shape', () => {
     const ctx: CritiqueContext = {
       phase: 'execution',
       stepsCompleted: 3,
       workSummary: 'Implemented auth',
       objective: 'Add user login',
     };
-    const result: CritiqueResult = {
+    const result: ProviderCritiqueFinding = {
       evaluator: 'reflection',
       severity: 7,
       message: 'Missing error handling',
       suggestion: 'Add try/catch around API calls',
     };
+    const deprecatedAlias: CritiqueResult = result;
     expect(ctx.phase).toBe('execution');
-    expect(result.severity).toBe(7);
+    expect(deprecatedAlias.severity).toBe(7);
   });
 
   it('ProviderSkillConfig has required shape', () => {
