@@ -151,10 +151,14 @@ function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
   const registry = options.registry ?? new ApprovalWaiterRegistry();
-  const sessionTokenStore = options.sessionTokenStore
-    ?? (options.sessionTokenStorePath
-      ? new SessionTokenStore({ persistenceFile: options.sessionTokenStorePath })
-      : undefined);
+  let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
+  if (!sessionTokenStore && options.sessionTokenStorePath) {
+    try {
+      sessionTokenStore = new SessionTokenStore({ persistenceFile: options.sessionTokenStorePath });
+    } catch {
+      sessionTokenStore = undefined;
+    }
+  }
 
   // Health check
   app.get('/health', (c) => {

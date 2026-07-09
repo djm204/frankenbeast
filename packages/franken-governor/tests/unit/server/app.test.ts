@@ -428,7 +428,34 @@ describe('Governor Hono Server', () => {
       expect(body.error.message).toBe('Session token validation unavailable');
     });
 
-    it('fails closed when persisted token storage becomes unreadable', async () => {
+    it('fails closed when persisted token storage is malformed before app startup', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'governor-app-session-store-'));
+      const persistenceFile = join(dir, 'tokens.json');
+      try {
+        writeFileSync(persistenceFile, '{not-json');
+        const app = createGovernorApp({
+          sessionTokenStorePath: persistenceFile,
+          allowUnsignedApprovalsForTests: true,
+        });
+
+        const health = await app.request('/health');
+        expect(health.status).toBe(200);
+
+        const res = await app.request('/v1/approval/session/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: 'token-from-bad-store' }),
+        });
+
+        expect(res.status).toBe(503);
+        const body = await res.json();
+        expect(body.error.message).toBe('Session token validation unavailable');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails closed when persisted token storage becomes unreadable after app startup', async () => {
       const dir = mkdtempSync(join(tmpdir(), 'governor-app-session-store-'));
       const persistenceFile = join(dir, 'tokens.json');
       try {
