@@ -1,16 +1,64 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createBeastServices } from '../../../src/beasts/create-beast-services.js';
+import { createBeastServices, type BeastServiceBundle } from '../../../src/beasts/create-beast-services.js';
+import type { BeastRun, BeastRunStatus } from '../../../src/beasts/types.js';
 import { createBeastDaemonApp } from '../../../src/http/beast-daemon-app.js';
-import { startBeastDaemon } from '../../../src/http/beast-daemon-server.js';
+import { BeastDaemonShutdownError, startBeastDaemon } from '../../../src/http/beast-daemon-server.js';
 
 import { testCredential } from '../../support/test-credentials.js';
 
 const TEST_DAEMON_OPERATOR_TOKEN = testCredential('TEST_DAEMON_OPERATOR_TOKEN');
 const operatorToken = TEST_DAEMON_OPERATOR_TOKEN;
+
+function makeRun(id: string, status: BeastRunStatus): BeastRun {
+  return {
+    id,
+    definitionId: 'martin-loop',
+    definitionVersion: 1,
+    status,
+    executionMode: 'process',
+    configSnapshot: {},
+    dispatchedBy: 'api',
+    dispatchedByUser: 'test',
+    createdAt: '2026-07-02T00:00:00.000Z',
+    attemptCount: 1,
+    currentAttemptId: `attempt-${id}`,
+  };
+}
+
+function makeDaemonServices(runs: BeastRun[], options: {
+  stop?: (runId: string) => Promise<BeastRun>;
+  kill?: (runId: string) => Promise<BeastRun>;
+} = {}): {
+  services: BeastServiceBundle;
+  stop: ReturnType<typeof vi.fn>;
+  kill: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+} {
+  const stop = vi.fn(async (runId: string) => options.stop?.(runId) ?? makeRun(runId, 'stopped'));
+  const kill = vi.fn(async (runId: string) => options.kill?.(runId) ?? makeRun(runId, 'stopped'));
+  const dispose = vi.fn();
+  const services = {
+    agents: { listAgents: vi.fn(() => []) },
+    catalog: {},
+    dispatch: {},
+    runs: {
+      listRuns: vi.fn(() => runs),
+      stop,
+      kill,
+    },
+    interviews: {},
+    metrics: {},
+    eventBus: {},
+    ticketStore: { destroy: vi.fn() },
+    dispose,
+  } as unknown as BeastServiceBundle;
+
+  return { services, stop, kill, dispose };
+}
 
 describe('beast daemon', () => {
   const tempDirs: string[] = [];
@@ -180,6 +228,82 @@ describe('beast daemon', () => {
     }
 
     expect(existsSync(paths.pidFile)).toBe(false);
+  });
+
+  it('stops live child runs before releasing the daemon pid file', async () => {
+    const paths = await makePaths();
+    const run = makeRun('run-stop', 'running');
+    const { services, stop, kill, dispose } = makeDaemonServices([run]);
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+      services,
+    });
+
+    await daemon.close();
+
+    expect(stop).toHaveBeenCalledWith('run-stop', 'beasts-daemon-shutdown');
+    expect(kill).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(existsSync(paths.pidFile)).toBe(false);
+  });
+
+  it('falls back to killing live child runs when graceful stop fails', async () => {
+    const paths = await makePaths();
+    const run = makeRun('run-kill', 'pending_approval');
+    const { services, stop, kill, dispose } = makeDaemonServices([run], {
+      stop: async () => { throw new Error('stop failed'); },
+    });
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+      services,
+    });
+
+    await daemon.close();
+
+    expect(stop).toHaveBeenCalledWith('run-kill', 'beasts-daemon-shutdown');
+    expect(kill).toHaveBeenCalledWith('run-kill', 'beasts-daemon-shutdown');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(existsSync(paths.pidFile)).toBe(false);
+  });
+
+  it('surfaces child run shutdown failures and keeps the daemon pid file claimed', async () => {
+    const paths = await makePaths();
+    const failedRun = makeRun('run-failed-shutdown', 'running');
+    const stoppedRun = makeRun('run-terminal', 'stopped');
+    const { services, stop, kill, dispose } = makeDaemonServices([failedRun, stoppedRun], {
+      stop: async () => { throw new Error('stop failed'); },
+      kill: async () => { throw new Error('kill failed'); },
+    });
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+      services,
+    });
+
+    let caught: unknown;
+    try {
+      await daemon.close();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(BeastDaemonShutdownError);
+    expect((caught as Error).message).toContain('stop failed');
+    expect((caught as Error).message).toContain('kill failed');
+    expect((caught as BeastDaemonShutdownError).failures).toMatchObject([
+      { runId: 'run-failed-shutdown' },
+    ]);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledWith('run-failed-shutdown', 'beasts-daemon-shutdown');
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith('run-failed-shutdown', 'beasts-daemon-shutdown');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(existsSync(paths.pidFile)).toBe(true);
   });
 
   it('force-closes active SSE clients on shutdown', async () => {
