@@ -14,7 +14,7 @@ export interface BeastEventBusListenerError {
 
 export interface BeastEventBusOptions {
   maxBufferSize?: number;
-  onListenerError?: (failure: BeastEventBusListenerError) => void;
+  onListenerError?: (failure: BeastEventBusListenerError) => void | Promise<void>;
 }
 
 function reportDefaultListenerError({ event, error }: BeastEventBusListenerError): void {
@@ -30,7 +30,7 @@ export class BeastEventBus {
   private readonly listeners = new Set<EventListener>();
   private readonly buffer: BeastSseEvent[] = [];
   private readonly maxBufferSize: number;
-  private readonly onListenerError: (failure: BeastEventBusListenerError) => void;
+  private readonly onListenerError: (failure: BeastEventBusListenerError) => void | Promise<void>;
 
   constructor(maxBufferSizeOrOptions: number | BeastEventBusOptions = 1000) {
     const options = typeof maxBufferSizeOrOptions === 'number'
@@ -75,7 +75,12 @@ export class BeastEventBus {
 
   private reportListenerError(event: BeastSseEvent, error: unknown, listener: EventListener): void {
     try {
-      this.onListenerError({ event, error, listener });
+      const result = this.onListenerError({ event, error, listener });
+      if (result && typeof result.catch === 'function') {
+        result.catch((handlerError: unknown) => {
+          reportDefaultListenerError({ event, error: handlerError, listener });
+        });
+      }
     } catch (handlerError) {
       reportDefaultListenerError({ event, error: handlerError, listener });
     }

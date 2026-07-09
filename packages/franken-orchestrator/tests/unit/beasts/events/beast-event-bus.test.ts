@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   BeastEventBus,
   type BeastEventBusListenerError,
@@ -81,6 +81,35 @@ describe('BeastEventBus', () => {
     expect(received).toHaveLength(1);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ event: received[0], error: rejected, listener: failingListener });
+  });
+
+  it('handles async listener error reporter rejections', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const listenerError = new Error('listener failed');
+    const reporterError = new Error('reporter failed');
+    const bus = new BeastEventBus({
+      onListenerError: async () => {
+        throw reporterError;
+      },
+    });
+
+    try {
+      bus.subscribe(async () => {
+        throw listenerError;
+      });
+
+      bus.publish({ type: 'run.log', data: { runId: 'r1', line: 'hello' } });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(consoleError).toHaveBeenCalledWith('[BeastEventBus] Listener failed', {
+        eventId: 1,
+        eventType: 'run.log',
+        error: reporterError,
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('replays events from a given sequence ID', () => {
