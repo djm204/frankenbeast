@@ -291,6 +291,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     const commsRoutesOpts: Parameters<typeof commsRoutes>[0] = {
       config: opts.commsConfig,
       runtime: opts.commsRuntime,
+      security: operatorSecurity,
+      ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
     };
     if (opts.securityConfig) {
       commsRoutesOpts.getWebhookSignaturePolicy = () => opts.securityConfig!.getSecurityConfig().webhookSignaturePolicy;
