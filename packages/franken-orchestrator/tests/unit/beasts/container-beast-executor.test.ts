@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, statSync } from 'node:fs';
+import { chownSync, mkdirSync, statSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -57,7 +57,7 @@ describe('ContainerBeastExecutor', () => {
       label: 'Test Beast',
       description: 'Test beast',
       executionModeDefault: 'container' as const,
-      configSchema: { parse: (value: unknown) => value },
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
       interviewPrompts: [],
       telemetryLabels: {},
       buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workDir, env: { FRANKENBEAST_RUN_CONFIG: '/workspace/config.json' } }),
@@ -113,18 +113,28 @@ describe('ContainerBeastExecutor', () => {
       stop: vi.fn(async () => undefined),
       kill: vi.fn(async () => undefined),
     };
+    const eventualWorkspaceUid = typeof process.getuid === 'function' && process.getuid() === 0
+      ? 10001
+      : (typeof process.getuid === 'function' ? process.getuid() : 1000);
+    const eventualWorkspaceGid = typeof process.getgid === 'function' && process.getuid?.() !== 0
+      ? process.getgid()
+      : 10001;
+    const fallbackUser = eventualWorkspaceUid === 12345 ? '23456:23456' : '12345:12345';
     const executor = new ContainerBeastExecutor({
       repository,
       logStore,
       supervisorFactory: () => fakeSupervisor,
       policy: {
         ...DEFAULT_SANDBOX_POLICY,
-        user: '12345:12345',
+        user: fallbackUser,
         image: 'fbeast/sandbox:test',
         workspaceHostPath,
       },
     });
     mkdirSync(workspaceHostPath, { recursive: true });
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      chownSync(workspaceHostPath, eventualWorkspaceUid, eventualWorkspaceGid);
+    }
     const run = repository.createRun({
       definitionId: 'test-beast',
       definitionVersion: 1,
@@ -140,7 +150,7 @@ describe('ContainerBeastExecutor', () => {
       label: 'Test Beast',
       description: 'Test beast',
       executionModeDefault: 'container',
-      configSchema: { parse: (value: unknown) => value },
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
       interviewPrompts: [],
       telemetryLabels: {},
       buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workspaceHostPath, env: {} }),
@@ -151,7 +161,7 @@ describe('ContainerBeastExecutor', () => {
     const userFlag = spawned[0].args.indexOf('--user');
     const containerUser = spawned[0].args[userFlag + 1]!;
     const [expectedUid, expectedGid] = containerUser.split(':').map((part) => Number.parseInt(part, 10));
-    expect(containerUser).not.toBe('12345:12345');
+    expect(containerUser).not.toBe(fallbackUser);
     const configPath = join(workspaceHostPath, '.fbeast', '.build', 'run-configs', `${run.id}.json`);
     expect(statSync(configPath).uid).toBe(expectedUid);
     expect(statSync(configPath).gid).toBe(expectedGid);
@@ -193,7 +203,7 @@ describe('ContainerBeastExecutor', () => {
       label: 'Test Beast',
       description: 'Test beast',
       executionModeDefault: 'container' as const,
-      configSchema: { parse: (value: unknown) => value },
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
       interviewPrompts: [],
       telemetryLabels: {},
       buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workDir, env: {} }),
