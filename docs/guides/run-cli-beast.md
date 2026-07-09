@@ -33,6 +33,8 @@ npm install
 npm run local:link
 ```
 
+`local:link` is the supported local-checkout path. It builds the repo and links the package-name workspaces declared in `package.json`, so you do not need to run path-style `npm link --workspace=packages/...` commands manually.
+
 Verify:
 ```bash
 npm run local:verify-cli
@@ -267,12 +269,16 @@ The matrix covers parser/config truthfulness, `run` and `run --resume`, required
 ## Troubleshooting
 
 **`frankenbeast: command not found`**
+
+From the repo root, refresh the supported local links and verify both CLIs:
 ```bash
 npm run local:link
 npm run local:verify-cli
 ```
 
 **`fbeast-proxy` / `fbeast-memory` not found after `fbeast mcp init`**
+
+Use the same repo-root repair path; `local:link` links the workspace that owns the `fbeast-*` binaries before `local:verify-cli` checks them:
 ```bash
 npm run local:link
 npm run local:verify-cli
