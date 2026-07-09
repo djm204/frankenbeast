@@ -73,7 +73,7 @@ describe('fbeast-uninstall entrypoint', () => {
     expect(hasFbeast(after)).toBe(false);
   });
 
-  it('prunes legacy home Claude settings as well as project settings on uninstall', async () => {
+  it('keeps uninstall scoped to project Claude settings when home settings also exist', async () => {
     const root = tmpDir();
     const home = tmpDir();
     dirs.push(root, home);
@@ -109,7 +109,7 @@ describe('fbeast-uninstall entrypoint', () => {
     expect(projectMcp.mcpServers['fbeast-memory']).toBeUndefined();
     expect(projectMcp.mcpServers['project-server']).toBeDefined();
     const homeSettings = JSON.parse(readFileSync(join(homeClaudeDir, 'settings.json'), 'utf-8'));
-    expect(homeSettings.mcpServers['fbeast-planner']).toBeUndefined();
+    expect(homeSettings.mcpServers['fbeast-planner']).toBeDefined();
     expect(homeSettings.mcpServers['other-server']).toBeDefined();
   });
 

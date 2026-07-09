@@ -103,6 +103,10 @@ function initJsonClient(options: {
   if (client === 'claude' && existsSync(mcpConfigPath)) {
     mcpConfig = parseJsonObjectWithComments(readFileSync(mcpConfigPath, 'utf-8'));
   }
+  if (client === 'claude') {
+    pruneFbeastMcpServerEntries(settings);
+  }
+  pruneFbeastMcpServerEntries(mcpConfig);
   const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
   const dbPath = join('.fbeast', 'beast.db');
   const proxyArgs = ['--db', dbPath];
@@ -124,7 +128,7 @@ function initJsonClient(options: {
     } else {
       // Gemini: write shell scripts, reference project-relative paths in BeforeTool/AfterTool
       writeHookScripts(root, 'gemini');
-      settings['hooks'] = mergeGeminiHooks(settings['hooks'], projectRelativeHookScripts('gemini'));
+      settings['hooks'] = mergeGeminiHooks(settings['hooks'], projectRootHookScripts('gemini'));
       config.hooks = true;
       config.save();
     }
@@ -255,15 +259,32 @@ function tomlString(value: string): string {
 
 // ─── Hook config builders ─────────────────────────────────────────────────────
 
-function projectRelativeHookScripts(client: 'claude' | 'gemini'): { preTool: string; postTool: string } {
+function projectRootHookCommand(scriptPath: string): string {
+  const normalizedPath = scriptPath.split('\\').join('/');
+  const executablePath = `./${normalizedPath}`;
+  const lookup = [
+    `p=\${CLAUDE_PROJECT_DIR:-\${GEMINI_PROJECT_ROOT:-}}`,
+    `if [ -n "$p" ] && [ -x "$p/${normalizedPath}" ]; then cd "$p" && exec "${executablePath}"; fi`,
+    'd=$PWD',
+    'while [ "$d" != / ]; do '
+      + `if [ -x "$d/${normalizedPath}" ]; then cd "$d" && exec "${executablePath}"; fi; `
+      + 'd=$(dirname "$d")',
+    'done',
+    `echo "fbeast hook script not found: ${normalizedPath}" >&2`,
+    'exit 127',
+  ].join('; ');
+  return `sh -c ${shellQuote(lookup)}`;
+}
+
+function projectRootHookScripts(client: 'claude' | 'gemini'): { preTool: string; postTool: string } {
   return client === 'claude'
     ? {
-        preTool: join('.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh'),
-        postTool: join('.fbeast', 'hooks', 'fbeast-claude-post-tool.sh'),
+        preTool: projectRootHookCommand(join('.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')),
+        postTool: projectRootHookCommand(join('.fbeast', 'hooks', 'fbeast-claude-post-tool.sh')),
       }
     : {
-        preTool: join('.fbeast', 'hooks', 'gemini-before-tool.sh'),
-        postTool: join('.fbeast', 'hooks', 'gemini-after-tool.sh'),
+        preTool: projectRootHookCommand(join('.fbeast', 'hooks', 'gemini-before-tool.sh')),
+        postTool: projectRootHookCommand(join('.fbeast', 'hooks', 'gemini-after-tool.sh')),
       };
 }
 
@@ -275,10 +296,10 @@ function mergeClaudeHooks(
   root: string,
 ): Record<string, unknown[]> {
   writeHookScripts(root, 'claude');
-  const scripts = projectRelativeHookScripts('claude');
+  const scripts = projectRootHookScripts('claude');
   const fbeastHooks: Record<string, unknown[]> = {
-    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.preTool) }] }],
-    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.postTool) }] }],
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.preTool }] }],
+    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.postTool }] }],
   };
 
   const hooks: Record<string, unknown[]> = {};
@@ -458,6 +479,15 @@ function isFbeastHook(value: unknown): boolean {
   return inner.some(
     (h) => isObjectRecord(h) && typeof h['command'] === 'string' && h['command'].includes('fbeast'),
   );
+}
+
+function pruneFbeastMcpServerEntries(config: Record<string, unknown>): void {
+  const mcpServers = config['mcpServers'];
+  if (!isObjectRecord(mcpServers)) return;
+  for (const key of Object.keys(mcpServers)) {
+    if (key.startsWith('fbeast-')) delete mcpServers[key];
+  }
+  config['mcpServers'] = mcpServers;
 }
 
 function shellQuote(value: string): string {

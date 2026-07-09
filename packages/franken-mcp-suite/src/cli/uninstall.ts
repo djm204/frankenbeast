@@ -351,14 +351,7 @@ function pruneFbeastFromEntry(entry: unknown): unknown | null {
 
 function resolveUninstallClientConfigDirs(client: McpClient, root: string): string[] {
   const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
-  if (client === 'codex') return [projectDir];
-
-  const homeDir = join(homedir(), client === 'claude' ? '.claude' : '.gemini');
-  const dirs = [projectDir];
-  if (existsSync(join(homeDir, 'settings.json')) && homeDir !== projectDir) {
-    dirs.push(homeDir);
-  }
-  return dirs;
+  return [projectDir];
 }
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);

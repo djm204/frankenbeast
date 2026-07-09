@@ -6,7 +6,7 @@ function printLine(...args: unknown[]): void {
 
 import { existsSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
@@ -99,14 +99,7 @@ function resolveClient(): McpClient {
 
 function resolveUninstallClientConfigDirs(client: McpClient, root: string): string[] {
   const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
-  if (client === 'codex') return [projectDir];
-
-  const homeDir = join(homedir(), client === 'claude' ? '.claude' : '.gemini');
-  const dirs = [projectDir];
-  if (existsSync(join(homeDir, 'settings.json')) && homeDir !== projectDir) {
-    dirs.push(homeDir);
-  }
-  return dirs;
+  return [projectDir];
 }
 
 function reportMcpInitError(error: unknown): never {

@@ -81,16 +81,27 @@ describe('fbeast init', () => {
       // Existing user-managed MCP server.
       "mcpServers": {
         "my-other-server": { "command": "other" },
+        "fbeast-planner": { "command": "legacy-planner" },
       },
       "customKey": true,
     }`);
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({
+      mcpServers: {
+        'fbeast-memory': { command: 'legacy-memory' },
+        'other-settings-server': { command: 'other-settings-server' },
+      },
+    }));
 
     runInit({ root, claudeDir, hooks: false });
 
     const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf-8'));
     expect(mcpConfig.mcpServers['my-other-server']).toBeDefined();
     expect(mcpConfig.mcpServers['fbeast-memory']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-planner'].command).toBe('fbeast-planner');
     expect(mcpConfig.customKey).toBe(true);
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
+    expect(settings.mcpServers['other-settings-server']).toBeDefined();
   });
 
   it('respects pick list', () => {
@@ -141,8 +152,16 @@ describe('fbeast init', () => {
     const preCmd = (settings.hooks.PreToolUse[0] as any).hooks[0].command as string;
     const postCmd = (settings.hooks.PostToolUse[0] as any).hooks[0].command as string;
 
-    expect(preCmd).toBe(`'${join('.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')}'`);
-    expect(postCmd).toBe(`'${join('.fbeast', 'hooks', 'fbeast-claude-post-tool.sh')}'`);
+    expect(preCmd).toContain('sh -c');
+    expect(preCmd).toContain('CLAUDE_PROJECT_DIR');
+    expect(preCmd).toContain('cd "$p"');
+    expect(preCmd).not.toContain('do;');
+    expect(preCmd).toContain(join('.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh').split('\\').join('/'));
+    expect(postCmd).toContain('sh -c');
+    expect(postCmd).toContain('CLAUDE_PROJECT_DIR');
+    expect(postCmd).toContain('cd "$p"');
+    expect(postCmd).not.toContain('do;');
+    expect(postCmd).toContain(join('.fbeast', 'hooks', 'fbeast-claude-post-tool.sh').split('\\').join('/'));
   });
 
   it('uses project config dir instead of mutating home settings when no project-level dir exists yet', () => {
@@ -197,7 +216,13 @@ describe('fbeast init', () => {
     expect(Array.isArray(afterHooks)).toBe(true);
     const beforeCmd = (beforeHooks[0] as any).hooks[0].command as string;
     const afterCmd = (afterHooks[0] as any).hooks[0].command as string;
+    expect(beforeCmd).toContain('GEMINI_PROJECT_ROOT');
+    expect(beforeCmd).toContain('cd "$p"');
+    expect(beforeCmd).not.toContain('do;');
     expect(beforeCmd).toContain('gemini-before-tool.sh');
+    expect(afterCmd).toContain('GEMINI_PROJECT_ROOT');
+    expect(afterCmd).toContain('cd "$p"');
+    expect(afterCmd).not.toContain('do;');
     expect(afterCmd).toContain('gemini-after-tool.sh');
   });
 
@@ -392,6 +417,7 @@ describe('fbeast init', () => {
     const root = tmpDir();
     dirs.push(root);
 
+    runInit({ root, claudeDir: join(root, '.claude'), hooks: false, mode: 'standard' });
     runInit({ root, claudeDir: join(root, '.claude'), hooks: false, mode: 'proxy' });
 
     const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
