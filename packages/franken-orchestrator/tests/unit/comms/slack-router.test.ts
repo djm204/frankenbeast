@@ -1,7 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { Hono } from 'hono';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { slackRouter } from '../../../src/comms/channels/slack/slack-router.js';
-import { SlackInteractionSchema } from '../../../src/comms/channels/slack/slack-schemas.js';
 import { createHmac } from 'node:crypto';
 import type { ChatGateway } from '../../../src/comms/gateway/chat-gateway.js';
 import type { SessionMapper } from '../../../src/comms/core/session-mapper.js';
@@ -20,6 +18,10 @@ describe('slackRouter', () => {
     gateway,
     sessionMapper,
     signingSecret: secret,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   function getSignature(body: string, timestamp: string) {
@@ -79,27 +81,31 @@ describe('slackRouter', () => {
     }));
   });
 
+  it('returns 400 for invalid event payloads without invoking handlers', async () => {
+    const appWithoutSig = slackRouter({
+      gateway,
+      sessionMapper,
+      signingSecret: secret,
+      verifySignature: false,
+    });
+
+    const res = await appWithoutSig.request('/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'event_callback', event: 'not-an-object' }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid payload' });
+    expect(gateway.handleInbound).not.toHaveBeenCalled();
+  });
+
   it('handles interactive button clicks', async () => {
-    // Create a version of the router WITHOUT signature verification just for this test
-    // to bypass the undici/Hono body parsing issues in the test environment.
-    // Signature verification is already verified in slack-signature.test.ts.
-    const appWithoutSig = new Hono();
-    appWithoutSig.post('/interactive', async (c) => {
-      const formData = await c.req.formData();
-      const payloadRaw = formData.get('payload');
-      if (typeof payloadRaw !== 'string') return c.json({ error: 'Missing payload' }, 400);
-      const body = JSON.parse(payloadRaw);
-      const parsed = SlackInteractionSchema.parse(body);
-      const sessionId = sessionMapper.mapToSessionId({
-        channelType: 'slack',
-        externalUserId: parsed.user.id,
-        externalChannelId: parsed.channel.id,
-        externalThreadId: parsed.container.thread_ts || parsed.container.message_ts,
-      });
-      for (const action of parsed.actions) {
-        await gateway.handleAction('slack', sessionId, action.action_id);
-      }
-      return c.json({ ok: true });
+    const appWithoutSig = slackRouter({
+      gateway,
+      sessionMapper,
+      signingSecret: secret,
+      verifySignature: false,
     });
 
     const payload = JSON.stringify({
@@ -121,6 +127,50 @@ describe('slackRouter', () => {
 
     expect(res.status).toBe(200);
     expect(gateway.handleAction).toHaveBeenCalledWith('slack', 'session-123', 'approve');
+  });
+
+  it('returns 400 for malformed interactive JSON without invoking handlers', async () => {
+    const appWithoutSig = slackRouter({
+      gateway,
+      sessionMapper,
+      signingSecret: secret,
+      verifySignature: false,
+    });
+
+    const formData = new FormData();
+    formData.append('payload', '{not-json');
+
+    const res = await appWithoutSig.request('/interactive', {
+      method: 'POST',
+      body: formData,
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Malformed Slack payload' });
+    expect(sessionMapper.mapToSessionId).not.toHaveBeenCalled();
+    expect(gateway.handleAction).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for unexpected interactive payload shapes without invoking handlers', async () => {
+    const appWithoutSig = slackRouter({
+      gateway,
+      sessionMapper,
+      signingSecret: secret,
+      verifySignature: false,
+    });
+
+    const formData = new FormData();
+    formData.append('payload', JSON.stringify({ type: 'block_actions', actions: 'approve' }));
+
+    const res = await appWithoutSig.request('/interactive', {
+      method: 'POST',
+      body: formData,
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'Invalid payload' });
+    expect(sessionMapper.mapToSessionId).not.toHaveBeenCalled();
+    expect(gateway.handleAction).not.toHaveBeenCalled();
   });
 
   it('verifySignature: false allows request without valid signature', async () => {

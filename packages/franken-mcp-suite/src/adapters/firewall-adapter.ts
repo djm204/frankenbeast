@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { createSqliteStore } from '../shared/sqlite-store.js';
-import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from 'franken-orchestrator';
-import type { InjectionTier } from 'franken-orchestrator';
+import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from '@franken/orchestrator';
+import type { InjectionTier } from '@franken/orchestrator';
 
 export interface FirewallScanResult {
   verdict: 'clean' | 'flagged';

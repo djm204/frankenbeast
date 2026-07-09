@@ -2,6 +2,11 @@ import { z } from 'zod';
 import type { BeastDefinition } from '../types.js';
 import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
+const promptConfigSchema = z.object({
+  text: z.string().optional(),
+  files: z.array(z.string()).optional(),
+}).strict();
+
 export const martinLoopDefinition: BeastDefinition = {
   id: 'martin-loop',
   version: 1,
@@ -13,6 +18,7 @@ export const martinLoopDefinition: BeastDefinition = {
     objective: z.string().min(1),
     chunkDirectory: z.string().min(1),
     projectRoot: z.string().optional(),
+    promptConfig: promptConfigSchema.optional(),
   }).strict(),
   interviewPrompts: [
     {

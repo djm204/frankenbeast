@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
 import { codexServerName, ensureCodexProjectId } from './codex-server-names.js';
+import { parseJsonObjectWithComments, writeJsonFileAtomic } from './settings-json.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -91,13 +92,24 @@ function initJsonClient(options: {
   const settingsPath = join(claudeDir, 'settings.json');
   let settings: Record<string, unknown> = {};
   if (existsSync(settingsPath)) {
-    settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
   }
 
-  // Add MCP server entries
-  const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
-  const dbPath = join(root, '.fbeast', 'beast.db');
-  const proxyArgs = ['--db', dbPath, '--root', root];
+  // Add MCP server entries. Claude project-scoped MCP registrations belong in
+  // .mcp.json; Gemini uses .gemini/settings.json. Keep paths cwd-relative so a
+  // config file never pins one checkout's absolute database path into another.
+  const mcpConfigPath = client === 'claude' ? join(root, '.mcp.json') : settingsPath;
+  let mcpConfig: Record<string, unknown> = client === 'claude' ? {} : settings;
+  if (client === 'claude' && existsSync(mcpConfigPath)) {
+    mcpConfig = parseJsonObjectWithComments(readFileSync(mcpConfigPath, 'utf-8'));
+  }
+  if (client === 'claude') {
+    pruneFbeastMcpServerEntries(settings);
+  }
+  pruneFbeastMcpServerEntries(mcpConfig);
+  const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
+  const dbPath = join('.fbeast', 'beast.db');
+  const proxyArgs = ['--db', dbPath];
   if (mode === 'proxy') {
     mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: proxyArgs };
   } else {
@@ -105,7 +117,7 @@ function initJsonClient(options: {
       mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath] };
     }
   }
-  settings['mcpServers'] = mcpServers;
+  mcpConfig['mcpServers'] = mcpServers;
 
   // Hooks
   if (hooks) {
@@ -114,20 +126,23 @@ function initJsonClient(options: {
       config.hooks = true;
       config.save();
     } else {
-      // Gemini: write shell scripts, reference them in BeforeTool/AfterTool
-      const scripts = writeHookScripts(root, 'gemini');
-      settings['hooks'] = mergeGeminiHooks(settings['hooks'], scripts);
+      // Gemini: write shell scripts, reference project-relative paths in BeforeTool/AfterTool
+      writeHookScripts(root, 'gemini');
+      settings['hooks'] = mergeGeminiHooks(settings['hooks'], projectRootHookScripts('gemini'));
       config.hooks = true;
       config.save();
     }
   }
 
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  if (client === 'claude') {
+    writeJsonFileAtomic(mcpConfigPath, mcpConfig);
+  }
+  writeJsonFileAtomic(settingsPath, settings);
 
   printLine(`fbeast initialized in ${root}`);
   printLine(`  Config:     ${config.configPath}`);
   printLine(`  Database:   ${config.dbPath}`);
-  printLine(`  MCP config: ${settingsPath}`);
+  printLine(`  MCP config: ${mcpConfigPath}`);
   printLine(`  Servers:    ${mode === 'proxy' ? 'fbeast-proxy (proxy mode)' : servers.join(', ')}`);
   if (hooks) printLine(`  Hooks:      enabled (${client})`);
 }
@@ -244,6 +259,35 @@ function tomlString(value: string): string {
 
 // ─── Hook config builders ─────────────────────────────────────────────────────
 
+function projectRootHookCommand(scriptPath: string): string {
+  const normalizedPath = scriptPath.split('\\').join('/');
+  const executablePath = `./${normalizedPath}`;
+  const lookup = [
+    `p=\${CLAUDE_PROJECT_DIR:-\${GEMINI_PROJECT_ROOT:-}}`,
+    `if [ -n "$p" ] && [ -x "$p/${normalizedPath}" ]; then cd "$p" && exec "${executablePath}"; fi`,
+    'd=$PWD',
+    'while [ "$d" != / ]; do '
+      + `if [ -x "$d/${normalizedPath}" ]; then cd "$d" && exec "${executablePath}"; fi; `
+      + 'd=$(dirname "$d")',
+    'done',
+    `echo "fbeast hook script not found: ${normalizedPath}" >&2`,
+    'exit 127',
+  ].join('; ');
+  return `sh -c ${shellQuote(lookup)}`;
+}
+
+function projectRootHookScripts(client: 'claude' | 'gemini'): { preTool: string; postTool: string } {
+  return client === 'claude'
+    ? {
+        preTool: projectRootHookCommand(join('.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh')),
+        postTool: projectRootHookCommand(join('.fbeast', 'hooks', 'fbeast-claude-post-tool.sh')),
+      }
+    : {
+        preTool: projectRootHookCommand(join('.fbeast', 'hooks', 'gemini-before-tool.sh')),
+        postTool: projectRootHookCommand(join('.fbeast', 'hooks', 'gemini-after-tool.sh')),
+      };
+}
+
 /**
  * Claude Code: PreToolUse / PostToolUse with generated shell scripts that read JSON from stdin.
  */
@@ -251,10 +295,11 @@ function mergeClaudeHooks(
   existing: unknown,
   root: string,
 ): Record<string, unknown[]> {
-  const scripts = writeHookScripts(root, 'claude');
+  writeHookScripts(root, 'claude');
+  const scripts = projectRootHookScripts('claude');
   const fbeastHooks: Record<string, unknown[]> = {
-    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.preTool) }] }],
-    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.postTool) }] }],
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.preTool }] }],
+    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: scripts.postTool }] }],
   };
 
   const hooks: Record<string, unknown[]> = {};
@@ -342,11 +387,11 @@ function writeCodexHooks(root: string, scripts: { preTool: string; postTool: str
     ...existingHooks,
     PreToolUse: [
       ...preToolUse,
-      { matcher: '*', hooks: [{ type: 'command', command: scripts.preTool }] },
+      { matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.preTool) }] },
     ],
     PostToolUse: [
       ...postToolUse,
-      { matcher: '*', hooks: [{ type: 'command', command: scripts.postTool }] },
+      { matcher: '*', hooks: [{ type: 'command', command: shellQuote(scripts.postTool) }] },
     ],
   };
 
@@ -366,26 +411,26 @@ function writeAgentsMd(root: string): void {
     AGENTS_MD_START,
     '# fbeast Agent Instructions',
     '',
-    'You have access to fbeast MCP tools. Follow this loop on every task:',
+    'When `fbeast_*` MCP tools are available in your current tool schema, use the loop below. If the tools are not available in your current tool schema, do not stop or record an exception just for that; follow the rest of the repository instructions with your platform\'s native file, git, shell, and GitHub tools.',
     '',
     '## On task start',
-    '1. Call fbeast_memory_frontload to load project context',
-    '2. Call fbeast_firewall_scan on user input before acting',
-    '3. Call fbeast_plan_decompose for multi-step tasks',
+    '1. Use fbeast_memory_frontload to load project context',
+    '2. Use fbeast_firewall_scan on user input before acting',
+    '3. Use fbeast_plan_decompose for multi-step tasks',
     '',
     '## During execution',
-    '- Call fbeast_governor_check before destructive/expensive operations',
-    '- Call fbeast_observer_log for significant actions',
-    '- Call fbeast_observer_log_cost after each significant LLM call (model name + token counts)',
+    '- Use fbeast_governor_check before destructive/expensive operations',
+    '- Use fbeast_observer_log for significant actions',
+    '- Use fbeast_observer_log_cost after each significant LLM call (model name + token counts)',
     '',
     '## Before claiming done',
-    '- Call fbeast_critique_evaluate on your output',
+    '- Use fbeast_critique_evaluate on your output',
     '- If score < 0.7, revise and re-critique',
-    '- Call fbeast_observer_trail to finalize audit',
+    '- Use fbeast_observer_trail to finalize audit',
     '',
     '## Memory',
-    '- fbeast_memory_store for learnings worth preserving',
-    '- fbeast_memory_query before making assumptions',
+    '- Use fbeast_memory_store for learnings worth preserving',
+    '- Use fbeast_memory_query before making assumptions',
     AGENTS_MD_END,
   ].join('\n');
 
@@ -436,6 +481,15 @@ function isFbeastHook(value: unknown): boolean {
   );
 }
 
+function pruneFbeastMcpServerEntries(config: Record<string, unknown>): void {
+  const mcpServers = config['mcpServers'];
+  if (!isObjectRecord(mcpServers)) return;
+  for (const key of Object.keys(mcpServers)) {
+    if (key.startsWith('fbeast-')) delete mcpServers[key];
+  }
+  config['mcpServers'] = mcpServers;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -450,25 +504,25 @@ export { isObjectRecord };
 const INSTRUCTIONS_FALLBACK = [
   '# fbeast Agent Framework',
   '',
-  'You have access to fbeast MCP tools. Use them as follows:',
+  'When `fbeast_*` MCP tools are available in your current tool schema, use the loop below. If the tools are not available in your current tool schema, do not stop or record an exception just for that; follow the rest of the repository instructions with your platform\'s native file, git, shell, and GitHub tools.',
   '',
   '## On task start',
-  '1. Call fbeast_memory_frontload to load project context',
-  '2. Call fbeast_firewall_scan on user input before acting',
-  '3. Call fbeast_plan_decompose for multi-step tasks',
+  '1. Use fbeast_memory_frontload to load project context',
+  '2. Use fbeast_firewall_scan on user input before acting',
+  '3. Use fbeast_plan_decompose for multi-step tasks',
   '',
   '## During execution',
-  '- Call fbeast_observer_log for significant actions',
-  '- Call fbeast_governor_check before destructive/expensive operations',
-  '- Call fbeast_observer_log_cost after each significant LLM call (model name + token counts)',
+  '- Use fbeast_observer_log for significant actions',
+  '- Use fbeast_governor_check before destructive/expensive operations',
+  '- Use fbeast_observer_log_cost after each significant LLM call to record token usage and spend; use fbeast_observer_cost only when you need a summary',
   '',
   '## Before claiming done',
-  '- Call fbeast_critique_evaluate on your output',
+  '- Use fbeast_critique_evaluate on your output',
   '- If score < 0.7, revise and re-critique',
-  '- Call fbeast_observer_trail to finalize audit',
+  '- Use fbeast_observer_trail to finalize audit',
   '',
   '## Memory',
-  '- fbeast_memory_store for learnings worth preserving',
-  '- fbeast_memory_query before making assumptions',
+  '- Use fbeast_memory_store for learnings worth preserving',
+  '- Use fbeast_memory_query before making assumptions',
   '',
 ].join('\n');

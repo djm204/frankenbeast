@@ -1,6 +1,6 @@
 # Beast Verification Matrix
 
-This matrix is the release gate for the live `franken-orchestrator` beast surface. Each entry maps to a shipped command family or a required runtime contract that the surface depends on.
+This matrix is the release gate for the live `@franken/orchestrator` beast surface. Each entry maps to a shipped command family or a required runtime contract that the surface depends on.
 
 ## Focused Proof Set
 

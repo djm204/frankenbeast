@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { PlanGraph, createTaskId } from 'franken-planner';
+import { PlanGraph, createTaskId } from '@franken/planner';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
 export interface PlannerTask {
@@ -40,7 +40,7 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
   return {
     async decompose(input) {
       // Returns a scaffold DAG — not LLM-generated decomposition.
-      // franken-planner is a graph library (validate, visualize, cycle detection),
+      // @franken/planner is a graph library (validate, visualize, cycle detection),
       // not a planning engine. Real decomposition requires an LLM, and since this
       // MCP tool is called BY an LLM (Claude Code), injecting a second LLM call
       // here would be circular. The caller refines this scaffold as needed.

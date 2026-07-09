@@ -26,7 +26,7 @@ describe('fbeast uninstall', () => {
     dirs.length = 0;
   });
 
-  it('removes fbeast MCP entries from settings.json', async () => {
+  it('removes fbeast Claude MCP entries from project .mcp.json', async () => {
     const root = tmpDir();
     dirs.push(root);
     const claudeDir = join(root, '.claude');
@@ -34,22 +34,25 @@ describe('fbeast uninstall', () => {
     runInit({ root, claudeDir, hooks: false });
     await runUninstall({ root, claudeDir, purge: false });
 
-    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
-    expect(settings.mcpServers['fbeast-memory']).toBeUndefined();
-    expect(settings.mcpServers['fbeast-planner']).toBeUndefined();
+    const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
+    expect(mcpConfig.mcpServers['fbeast-memory']).toBeUndefined();
+    expect(mcpConfig.mcpServers['fbeast-planner']).toBeUndefined();
   });
 
-  it('preserves non-fbeast MCP entries', async () => {
+  it('preserves non-fbeast Claude MCP entries in .mcp.json with comments and trailing commas', async () => {
     const root = tmpDir();
     dirs.push(root);
     const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
 
-    runInit({ root, claudeDir, hooks: false });
-
-    const settingsPath = join(claudeDir, 'settings.json');
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    settings.mcpServers['my-server'] = { command: 'my-cmd' };
-    writeFileSync(settingsPath, JSON.stringify(settings));
+    const settingsPath = join(root, '.mcp.json');
+    writeFileSync(settingsPath, `{
+      "mcpServers": {
+        "fbeast-memory": { "command": "fbeast-memory" },
+        // User-managed server must survive uninstall.
+        "my-server": { "command": "my-cmd" },
+      },
+    }`);
 
     await runUninstall({ root, claudeDir, purge: false });
 

@@ -10,7 +10,7 @@ Pick one — or stack them — depending on where you want traces to land.
 Zero-dependency, in-process store. Good for tests and local prototyping.
 
 ```ts
-import { InMemoryAdapter, TraceContext } from '@frankenbeast/observer'
+import { InMemoryAdapter, TraceContext } from '@franken/observer'
 
 const adapter = new InMemoryAdapter()
 const trace   = TraceContext.createTrace('my goal')
@@ -29,7 +29,7 @@ Persists traces to a local SQLite file using WAL mode and transactional span wri
 Requires `better-sqlite3` (already a package dependency).
 
 ```ts
-import { SQLiteAdapter } from '@frankenbeast/observer'
+import { SQLiteAdapter } from '@franken/observer'
 
 const adapter = new SQLiteAdapter('./traces.db')
 
@@ -51,7 +51,7 @@ Posts OTEL-formatted trace payloads to a [Langfuse](https://langfuse.com) (or co
 Phoenix) ingest endpoint. **Write-only** — `queryByTraceId` returns `null`.
 
 ```ts
-import { LangfuseAdapter } from '@frankenbeast/observer'
+import { LangfuseAdapter } from '@franken/observer'
 
 const adapter = new LangfuseAdapter({
   publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
@@ -77,10 +77,10 @@ await adapter.flush(trace) // throws on non-2xx response
 
 ```ts
 import { vi } from 'vitest'
-import { LangfuseAdapter } from '@frankenbeast/observer'
+import { LangfuseAdapter } from '@franken/observer'
 
 const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
-const adapter   = new LangfuseAdapter({ publicKey: 'pk', secretKey: 'sk', fetch: mockFetch })
+const adapter   = new LangfuseAdapter({ publicKey: process.env.LANGFUSE_PUBLIC_KEY!, secretKey: process.env.LANGFUSE_SECRET_KEY!, fetch: mockFetch })
 
 await adapter.flush(trace)
 expect(mockFetch).toHaveBeenCalledOnce()
@@ -95,7 +95,7 @@ exposes them in [Prometheus text format](https://prometheus.io/docs/instrumentin
 via `scrape()`. **Write-only** — `queryByTraceId` returns `null`.
 
 ```ts
-import { PrometheusAdapter, DEFAULT_PRICING } from '@frankenbeast/observer'
+import { PrometheusAdapter, DEFAULT_PRICING } from '@franken/observer'
 import http from 'node:http'
 
 const adapter = new PrometheusAdapter({ pricingTable: DEFAULT_PRICING })
@@ -141,7 +141,7 @@ Posts OTEL-formatted trace payloads to a [Grafana Tempo](https://grafana.com/oss
 endpoint (local or Grafana Cloud) over OTLP/HTTP. **Write-only** — `queryByTraceId` returns `null`.
 
 ```ts
-import { TempoAdapter } from '@frankenbeast/observer'
+import { TempoAdapter } from '@franken/observer'
 
 // Local Tempo / OpenTelemetry Collector (no auth)
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
@@ -179,7 +179,7 @@ await cloud.flush(trace)
 
 ```ts
 import { vi } from 'vitest'
-import { TempoAdapter } from '@frankenbeast/observer'
+import { TempoAdapter } from '@franken/observer'
 
 const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
 const adapter   = new TempoAdapter({ endpoint: 'http://localhost:4318', fetch: mockFetch })
@@ -197,7 +197,7 @@ const [url, init] = mockFetch.mock.calls[0]
 You can flush to multiple sinks by calling `flush` on each adapter in parallel:
 
 ```ts
-import { SQLiteAdapter, LangfuseAdapter, TempoAdapter, PrometheusAdapter, DEFAULT_PRICING } from '@frankenbeast/observer'
+import { SQLiteAdapter, LangfuseAdapter, TempoAdapter, PrometheusAdapter, DEFAULT_PRICING } from '@franken/observer'
 
 const sqlite    = new SQLiteAdapter('./traces.db')
 const langfuse  = new LangfuseAdapter({ publicKey: '…', secretKey: '…' })

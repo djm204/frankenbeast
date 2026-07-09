@@ -52,7 +52,7 @@ describe('chunkPlanDefinition', () => {
       expect(spec.cwd).toBe('/home/user/project');
     });
 
-    it('rejects designDocPath values that escape projectRoot', () => {
+    it('rejects designDocPath values with parent-directory traversal before resolving projectRoot', () => {
       const config = {
         ...validConfig,
         projectRoot: '/home/user/project',
@@ -60,8 +60,49 @@ describe('chunkPlanDefinition', () => {
       };
 
       expect(() => chunkPlanDefinition.buildProcessSpec(config)).toThrow(
-        /designDocPath.*outside project root/,
+        /designDocPath.*parent-directory traversal/,
       );
+    });
+
+    it('rejects absolute designDocPath values before CLI argument construction', () => {
+      expect(() => chunkPlanDefinition.buildProcessSpec({
+        ...validConfig,
+        designDocPath: '/tmp/design.md',
+      })).toThrow(/designDocPath.*repo-relative/);
+    });
+
+    it('rejects drive-letter designDocPath values before CLI argument construction', () => {
+      expect(() => chunkPlanDefinition.buildProcessSpec({
+        ...validConfig,
+        designDocPath: 'C:\\tmp\\design.md',
+      })).toThrow(/designDocPath.*repo-relative/);
+    });
+
+    it('rejects non-markdown designDocPath values before CLI argument construction', () => {
+      expect(() => chunkPlanDefinition.buildProcessSpec({
+        ...validConfig,
+        designDocPath: 'docs/design.txt',
+      })).toThrow(/designDocPath.*Markdown design document/);
+    });
+
+    it('rejects symlinked designDocPath values that resolve to non-markdown files', () => {
+      const testDir = mkdtempSync(resolve(tmpdir(), 'fb-chunk-plan-'));
+      const projectRoot = resolve(testDir, 'project');
+      const docsDir = resolve(projectRoot, 'docs');
+
+      try {
+        mkdirSync(docsDir, { recursive: true });
+        writeFileSync(resolve(docsDir, 'design.txt'), '# Not actually Markdown');
+        symlinkSync('design.txt', resolve(docsDir, 'design.md'));
+
+        expect(() => chunkPlanDefinition.buildProcessSpec({
+          ...validConfig,
+          projectRoot,
+          designDocPath: 'docs/design.md',
+        })).toThrow(/designDocPath.*resolve to a Markdown design document/);
+      } finally {
+        rmSync(testDir, { recursive: true, force: true });
+      }
     });
 
     it('allows designDocPath values inside a symlinked projectRoot', () => {
@@ -78,7 +119,7 @@ describe('chunkPlanDefinition', () => {
         const spec = chunkPlanDefinition.buildProcessSpec({
           ...validConfig,
           projectRoot: linkRoot,
-          designDocPath: designPath,
+          designDocPath: 'docs/design.md',
         });
 
         expect(spec.args[spec.args.indexOf('--design-doc') + 1]).toBe(designPath);
@@ -112,10 +153,37 @@ describe('chunkPlanDefinition', () => {
       expect(result.success).toBe(true);
     });
 
+    it('keeps promptConfig for dashboard frontloaded prompts', () => {
+      const result = chunkPlanDefinition.configSchema.safeParse({
+        ...validConfig,
+        promptConfig: { text: 'attached context' },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.promptConfig?.text).toBe('attached context');
+      }
+    });
+
     it('rejects missing designDocPath', () => {
       const result = chunkPlanDefinition.configSchema.safeParse({
         outputDir: '/tmp',
       });
+      expect(result.success).toBe(false);
+    });
+
+    it.each([
+      ['/tmp/design.md'],
+      ['C:\\tmp\\design.md'],
+      ['..\\secret.md'],
+      ['docs/../secret.md'],
+      ['docs/design.txt'],
+      ['docs/design.md\0'],
+    ])('rejects unsafe designDocPath %s', (designDocPath) => {
+      const result = chunkPlanDefinition.configSchema.safeParse({
+        ...validConfig,
+        designDocPath,
+      });
+
       expect(result.success).toBe(false);
     });
   });

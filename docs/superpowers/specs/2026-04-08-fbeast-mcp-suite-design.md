@@ -21,7 +21,7 @@ Both modes share `.fbeast/beast.db` — data carries across modes.
 
 ## Architecture
 
-### Package: `@fbeast/mcp-suite`
+### Package: `@franken/mcp-suite`
 
 Single package, multiple entry points. Each server wraps existing frankenbeast module as MCP tools via `@modelcontextprotocol/sdk`.
 
@@ -33,7 +33,7 @@ packages/franken-mcp-suite/
 │   │   ├── planner.ts         # wraps @frankenbeast/planner
 │   │   ├── critique.ts        # wraps @frankenbeast/critique
 │   │   ├── firewall.ts        # wraps orchestrator middleware
-│   │   ├── observer.ts        # wraps @frankenbeast/observer
+│   │   ├── observer.ts        # wraps @franken/observer
 │   │   ├── governor.ts        # wraps @frankenbeast/governor
 │   │   └── skills.ts          # wraps orchestrator skill-manager
 │   ├── shared/
@@ -162,10 +162,10 @@ Single database: `.fbeast/beast.db`, WAL mode.
 ### `fbeast-init`
 
 ```
-npx @fbeast/mcp-suite init              # all servers + instructions
-npx @fbeast/mcp-suite init --pick       # interactive module picker
-npx @fbeast/mcp-suite init --hooks      # also add Claude Code hooks
-npx @fbeast/mcp-suite init --pick --hooks
+npx @franken/mcp-suite init              # all servers + instructions
+npx @franken/mcp-suite init --pick       # interactive module picker
+npx @franken/mcp-suite init --hooks      # also add Claude Code hooks
+npx @franken/mcp-suite init --pick --hooks
 ```
 
 Steps:
@@ -193,7 +193,7 @@ Steps:
 ### `fbeast-uninstall`
 
 ```
-npx @fbeast/mcp-suite uninstall
+npx @franken/mcp-suite uninstall
 ```
 
 Steps:
@@ -321,14 +321,14 @@ If yes: sets `acknowledged_cli_risk: true` in config. No repeat nag.
 ### Marketing Funnel
 
 1. **Discovery** — "supercharge Claude Code with structured reasoning" (MCP angle)
-2. **Install** — `npx @fbeast/mcp-suite init` (one command)
+2. **Install** — `npx @franken/mcp-suite init` (one command)
 3. **Value** — memory, planning, critique improve Claude Code output immediately
 4. **Upgrade** — user wants more control → Beast mode with API provider
 5. **Power user** — Beast mode with CLI provider (risk acknowledged)
 
 ### npm Publishing
 
-- Package: `@fbeast/mcp-suite`
+- Package: `@franken/mcp-suite`
 - Contains all servers, CLI tools, instructions
 - User installs one package, runs what they need
 - No separate packages to manage
@@ -371,12 +371,12 @@ If yes: sets `acknowledged_cli_risk: true` in config. No repeat nag.
 - `@frankenbeast/planner` → fbeast-planner
 - `@frankenbeast/critique` → fbeast-critique
 - `@frankenbeast/governor` → fbeast-governor
-- `@frankenbeast/observer` → fbeast-observer
-- `franken-orchestrator` middleware → fbeast-firewall
-- `franken-orchestrator` skill-manager → fbeast-skills
+- `@franken/observer` → fbeast-observer
+- `@franken/orchestrator` middleware → fbeast-firewall
+- `@franken/orchestrator` skill-manager → fbeast-skills
 
 ### New dependencies:
 
 - `@modelcontextprotocol/sdk` — MCP server implementation
-- `better-sqlite3` — shared SQLite layer (already used by franken-brain)
+- `better-sqlite3` — shared SQLite layer (already used by @franken/brain)
 - `inquirer` or `prompts` — interactive picker for `init --pick`

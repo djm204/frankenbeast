@@ -1,313 +1,890 @@
+import { Parser, parse } from 'acorn';
+import { tsPlugin } from 'acorn-typescript';
+import type { Node } from 'acorn';
 import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } from './evaluator.js';
-
-// Loop headers we treat as unconditional: while(true){ and for(;;){.
-// We only match up to the opening brace; the body is extracted with a
-// brace-balanced scan so nested `{ ... }` blocks (if/try/switch) are preserved.
-const INFINITE_LOOP_HEADERS = [
-  /while\s*\(\s*true\s*\)\s*\{/g,
-  /for\s*\(\s*;;\s*\)\s*\{/g,
-];
-
-// Matches function name() { ... } — body captured lazily; recursion detection
-// works on the sanitized body (comments/strings removed, interpolations kept).
-const SELF_RECURSION_PATTERN =
-  /function\s+(\w+)\s*\([^)]*\)\s*\{([\s\S]*?)\}/g;
 
 // Keywords that legitimately exit (or suspend) a loop. `await`/`yield` cover
 // intentional async event loops such as `while (true) { await queue.next(); }`.
-const LOOP_EXIT_KEYWORDS = new Set(['break', 'return', 'throw', 'await', 'yield']);
+const LOOP_EXIT_NODE_TYPES = new Set([
+  'ReturnStatement',
+  'ThrowStatement',
+  'AwaitExpression',
+  'YieldExpression',
+]);
 
-// Keywords that open a nested loop or switch. A `break` inside one of these is
-// captured by it, not by the outer loop, so it does not count as an outer exit.
-const LOOP_OR_SWITCH_KEYWORDS = new Set(['for', 'while', 'do', 'switch']);
+const FUNCTION_NODE_TYPES = new Set([
+  'FunctionDeclaration',
+  'FunctionExpression',
+  'ArrowFunctionExpression',
+]);
 
-/**
- * Returns true if a `/` at this position can legally start a regex literal,
- * based on the previous significant character. A `/` after a value (identifier,
- * number, closing bracket, or string) is division; anywhere an expression is
- * expected it begins a regex. This is the standard JS lexer heuristic.
- */
-function regexCanStart(prevSignificant: string): boolean {
-  if (prevSignificant === '') return true;
-  return !/[A-Za-z0-9_$)\]}'"`]/.test(prevSignificant);
+const LOOP_OR_SWITCH_NODE_TYPES = new Set([
+  'ForInStatement',
+  'ForOfStatement',
+  'ForStatement',
+  'DoWhileStatement',
+  'WhileStatement',
+  'SwitchStatement',
+]);
+
+type AstNode = Node & Record<string, unknown>;
+type Range = { start: number; end: number };
+
+type AcornPlugin = (BaseParser: typeof Parser) => typeof Parser;
+
+const TypeScriptParser = Parser.extend(tsPlugin({ jsx: { allowNamespaces: true } }) as unknown as AcornPlugin);
+
+function isNode(value: unknown): value is AstNode {
+  return Boolean(value && typeof value === 'object' && typeof (value as AstNode).type === 'string');
 }
 
-/**
- * Removes comments, string literals, and regex literals from a code snippet so
- * that keyword detection operates on real code, not on prose or data. Template
- * literals are special-cased: the literal text is dropped but the code inside
- * `${ ... }` interpolations is preserved (and recursively sanitized) so that
- * real expressions like `` `${loop()}` `` remain visible to recursion detection.
- *
- * Implemented as a single left-to-right scan so whichever construct opens first
- * wins. A naive replace-comments-then-strings ordering would treat the `//`
- * inside `log("http://x"); break;` or `/\/\//.test(x); break;` as a line comment
- * and delete the real `break`, producing a false infinite-loop finding.
- */
-function sanitize(code: string): string {
-  let out = '';
-  let i = 0;
-  const n = code.length;
-  let prevSignificant = '';
+function childNodes(node: AstNode): AstNode[] {
+  const children: AstNode[] = [];
 
-  while (i < n) {
-    const c = code[i]!;
-    const next = code[i + 1];
-
-    // Line comment: skip to end of line.
-    if (c === '/' && next === '/') {
-      i += 2;
-      while (i < n && code[i] !== '\n') i++;
-      out += ' ';
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'type' || key === 'start' || key === 'end' || key === 'loc' || key === 'range') {
       continue;
     }
 
-    // Block comment: skip to closing */.
-    if (c === '/' && next === '*') {
-      i += 2;
-      while (i < n && !(code[i] === '*' && code[i + 1] === '/')) i++;
-      i += 2;
-      out += ' ';
+    if (isNode(value)) {
+      children.push(value);
       continue;
     }
 
-    // String literal: skip to matching unescaped quote.
-    if (c === '"' || c === "'") {
-      const quote = c;
-      i++;
-      while (i < n) {
-        if (code[i] === '\\') {
-          i += 2;
-          continue;
-        }
-        if (code[i] === quote) {
-          i++;
-          break;
-        }
-        i++;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isNode(item)) children.push(item);
       }
-      out += ' ';
-      prevSignificant = ')';
-      continue;
     }
-
-    // Template literal: drop literal text, keep & sanitize ${...} code.
-    if (c === '`') {
-      i++;
-      out += ' ';
-      while (i < n) {
-        if (code[i] === '\\') {
-          i += 2;
-          continue;
-        }
-        if (code[i] === '`') {
-          i++;
-          break;
-        }
-        if (code[i] === '$' && code[i + 1] === '{') {
-          i += 2;
-          let depth = 1;
-          let inner = '';
-          while (i < n && depth > 0) {
-            const cc = code[i];
-            if (cc === '{') depth++;
-            else if (cc === '}') {
-              depth--;
-              if (depth === 0) {
-                i++;
-                break;
-              }
-            }
-            inner += cc;
-            i++;
-          }
-          out += ` ${sanitize(inner)} `;
-          continue;
-        }
-        i++;
-      }
-      prevSignificant = ')';
-      continue;
-    }
-
-    // Regex literal: skip to closing unescaped `/` (respecting char classes).
-    if (c === '/' && regexCanStart(prevSignificant)) {
-      i++;
-      let inClass = false;
-      let terminated = false;
-      while (i < n) {
-        const ch = code[i];
-        if (ch === '\\') {
-          i += 2;
-          continue;
-        }
-        if (ch === '\n') break; // unterminated — not a regex, bail
-        if (ch === '[') inClass = true;
-        else if (ch === ']') inClass = false;
-        else if (ch === '/' && !inClass) {
-          i++;
-          terminated = true;
-          break;
-        }
-        i++;
-      }
-      if (terminated) {
-        out += ' ';
-        prevSignificant = ')';
-        continue;
-      }
-      // Not a regex after all: fall through and treat `/` as a normal char.
-      out += c;
-      prevSignificant = c;
-      i++;
-      continue;
-    }
-
-    out += c;
-    if (!/\s/.test(c)) prevSignificant = c;
-    i++;
   }
 
-  return out;
+  return children;
 }
 
-/**
- * Extracts the brace-balanced block starting at `openBraceIdx` (which must point
- * at a `{`). Returns the content between the outer braces. If the block is never
- * closed (truncated input), returns everything after the opening brace.
- * Assumes the code has already been sanitized so all braces are real.
- */
-function extractBlock(code: string, openBraceIdx: number): string {
+function mergeRanges(ranges: Range[]): Range[] {
+  const sorted = ranges.slice().sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Range[] = [];
+
+  for (const range of sorted) {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+
+  return merged;
+}
+
+function isIndexInRanges(ranges: Range[], index: number): boolean {
+  return ranges.some((range) => index >= range.start && index < range.end);
+}
+
+function fenceRanges(code: string): Range[] {
+  return Array.from(code.matchAll(/```(?:[\w-]+)?\s*\n([\s\S]*?)```/g), (match) => ({
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+}
+
+const REGEX_PREFIX_KEYWORDS = new Set([
+  'case',
+  'delete',
+  'else',
+  'in',
+  'instanceof',
+  'new',
+  'of',
+  'return',
+  'throw',
+  'typeof',
+  'void',
+  'yield',
+  'await',
+]);
+
+const CONTEXTUAL_REGEX_PREFIX_KEYWORDS = new Set(['await', 'yield', 'of']);
+
+function previousToken(code: string, beforeIndex: number): string | null {
+  let cursor = beforeIndex;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  const end = cursor + 1;
+  while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
+  return end === cursor + 1 ? null : code.slice(cursor + 1, end);
+}
+
+function contextualKeywordCanPrefixRegex(code: string, tokenStart: number, token: string): boolean {
+  // `of` is only a keyword inside `for (… of …)`; a `/` following `of` is
+  // division in all realistic code (`of` as an identifier, or the pathological
+  // `for (x of /re/)`), so it never introduces a regex here.
+  if (token === 'of') return false;
+
+  // `await`/`yield` are unary operators: a regex can follow them at an
+  // expression position — after an operator or opening bracket, after a block
+  // open `{`, or after another regex-prefix keyword (e.g. `return await /re/`).
+  //
+  // `;` is deliberately excluded: after a statement terminator these words may
+  // be plain identifiers in malformed/sloppy snippets (e.g.
+  // `var await = 1; await / loop() / 2`), where the `/` is division. Since a
+  // recursion detector must not hide a self-call, the ambiguous statement-start
+  // case is treated as division rather than masking it as a regex operand.
+  let cursor = tokenStart - 1;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  if (cursor < 0) return true;
+  if ('([{=,:!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+
+  const previous = previousToken(code, cursor);
+  return previous != null && REGEX_PREFIX_KEYWORDS.has(previous);
+}
+
+function isRegexLiteralStart(code: string, index: number): boolean {
+  let cursor = index - 1;
+  while (cursor >= 0 && /\s/.test(code[cursor]!)) cursor -= 1;
+  if (cursor < 0) return true;
+
+  if ('([{=,:;!&|?+-*%^~<>'.includes(code[cursor]!)) return true;
+
+  const tokenEnd = cursor + 1;
+  while (cursor >= 0 && /[A-Za-z0-9_$]/.test(code[cursor]!)) cursor -= 1;
+  if (tokenEnd === cursor + 1 || code[cursor] === '.') return false;
+  // The token scan above is ASCII-only. If the run is preceded by a Unicode
+  // identifier character, the apparent keyword is really the tail of a longer
+  // identifier (e.g. `πreturn`), so the following `/` is division, not a regex.
+  if (cursor >= 0 && /[\p{ID_Continue}\u200C\u200D]/u.test(code[cursor]!)) return false;
+
+  const token = code.slice(cursor + 1, tokenEnd);
+  if (!REGEX_PREFIX_KEYWORDS.has(token)) return false;
+  if (CONTEXTUAL_REGEX_PREFIX_KEYWORDS.has(token)) {
+    return contextualKeywordCanPrefixRegex(code, cursor + 1, token);
+  }
+  return true;
+}
+
+function scanQuotedRange(code: string, index: number, ranges: Range[]): number {
+  const quote = code[index];
+  const start = index;
+  index += 1;
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+    if (code[index] === quote) {
+      index += 1;
+      break;
+    }
+    index += 1;
+  }
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanLineCommentRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  index = code.indexOf('\n', index + 2);
+  if (index < 0) index = code.length;
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanBlockCommentRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  const end = code.indexOf('*/', index + 2);
+  index = end < 0 ? code.length : end + 2;
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanRegexRange(code: string, index: number, ranges: Range[]): number {
+  const start = index;
+  index += 1;
+  let inCharacterClass = false;
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+    if (code[index] === '[') inCharacterClass = true;
+    if (code[index] === ']') inCharacterClass = false;
+    if (code[index] === '/' && !inCharacterClass) {
+      index += 1;
+      while (/[a-z]/i.test(code[index] ?? '')) index += 1;
+      break;
+    }
+    index += 1;
+  }
+  ranges.push({ start, end: index });
+  return index;
+}
+
+function scanTemplateRange(code: string, index: number, ranges: Range[]): number {
+  let segmentStart = index;
+  index += 1;
+
+  while (index < code.length) {
+    if (code[index] === '\\') {
+      index += 2;
+      continue;
+    }
+
+    if (code[index] === '$' && code[index + 1] === '{') {
+      ranges.push({ start: segmentStart, end: index + 2 });
+      index += 2;
+      let expressionDepth = 1;
+
+      while (index < code.length && expressionDepth > 0) {
+        const char = code[index];
+        const next = code[index + 1];
+
+        if (char === '\\') {
+          index += 2;
+          continue;
+        }
+        if (char === '\'' || char === '"') {
+          index = scanQuotedRange(code, index, ranges);
+          continue;
+        }
+        if (char === '`') {
+          index = scanTemplateRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && next === '/') {
+          index = scanLineCommentRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && next === '*') {
+          index = scanBlockCommentRange(code, index, ranges);
+          continue;
+        }
+        if (char === '/' && isRegexLiteralStart(code, index)) {
+          index = scanRegexRange(code, index, ranges);
+          continue;
+        }
+        if (char === '{') expressionDepth += 1;
+        if (char === '}') expressionDepth -= 1;
+        index += 1;
+      }
+
+      segmentStart = index - 1;
+      continue;
+    }
+
+    if (code[index] === '`') {
+      index += 1;
+      break;
+    }
+    index += 1;
+  }
+
+  ranges.push({ start: segmentStart, end: index });
+  return index;
+}
+
+function ignoredSyntaxRanges(code: string, includeFences = false): Range[] {
+  const ranges: Range[] = includeFences ? fenceRanges(code) : [];
+  let index = 0;
+
+  while (index < code.length) {
+    const fenced = includeFences ? ranges.find((range) => range.start === index) : undefined;
+    if (fenced) {
+      index = fenced.end;
+      continue;
+    }
+    if (isIndexInRanges(ranges, index)) {
+      index += 1;
+      continue;
+    }
+
+    const char = code[index];
+    const next = code[index + 1];
+
+    if (char === '\'' || char === '"') {
+      index = scanQuotedRange(code, index, ranges);
+      continue;
+    }
+
+    if (char === '`') {
+      index = scanTemplateRange(code, index, ranges);
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      index = scanLineCommentRange(code, index, ranges);
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      index = scanBlockCommentRange(code, index, ranges);
+      continue;
+    }
+
+    if (char === '/' && isRegexLiteralStart(code, index)) {
+      index = scanRegexRange(code, index, ranges);
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return mergeRanges(ranges);
+}
+
+function trimToBalancedSnippet(candidate: string): string {
+  const ignoredRanges = ignoredSyntaxRanges(candidate);
+  const firstOpen = candidate.indexOf('{');
+  if (firstOpen < 0) return candidate;
+
   let depth = 0;
-  for (let i = openBraceIdx; i < code.length; i++) {
-    const ch = code[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) return code.slice(openBraceIdx + 1, i);
+  for (let index = firstOpen; index < candidate.length; index += 1) {
+    if (isIndexInRanges(ignoredRanges, index)) continue;
+
+    const char = candidate[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return candidate.slice(0, index + 1);
     }
   }
-  return code.slice(openBraceIdx + 1);
+
+  return candidate;
 }
 
-/**
- * Word-boundary keyword check. Matches `break` but not `breakPoint`, and
- * `return` but not `returnValue`, eliminating identifier-based false matches.
- */
-function hasKeyword(code: string, keyword: string): boolean {
-  return new RegExp(`\\b${keyword}\\b`).test(code);
+function hasKeywordBoundary(code: string, keyword: string, index: number): boolean {
+  const before = code[index - 1] ?? '';
+  const after = code[index + keyword.length] ?? '';
+  return !/[A-Za-z0-9_$]/.test(before) && !/[A-Za-z0-9_$]/.test(after);
 }
 
-/**
- * Detects whether a (sanitized, brace-balanced) loop body contains a real
- * loop-level exit/suspend keyword.
- *
- * A bare keyword match anywhere in the body is not enough. An exit counts only
- * when it executes as part of the loop's own control flow, so this scan rejects:
- *   - member accesses (`timer.await()` — `await` is a method name),
- *   - keywords inside a nested function (braced `() => { return; }` or concise
- *     `() => await work(...)` arrow bodies, and `function` declarations), and
- *   - a `break` captured by a nested loop or `switch` rather than the outer loop.
- *
- * `return`/`throw`/`await`/`yield` inside plain blocks (`if`/`try`) still count,
- * which is why brace-balanced extraction matters: an exit inside `if (x) { ... }`
- * is a legitimate loop exit.
- */
-function hasLoopExit(body: string): boolean {
-  const tokenPattern = /=>|function\b|[{}()[\];,]|\.\s*[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*/g;
+function isPlausibleSnippetStart(code: string, keyword: string, index: number): boolean {
+  const rest = code.slice(index + keyword.length).trimStart();
+  if (keyword === 'while' || keyword === 'for') return rest.startsWith('(');
+  if (keyword === 'function' || keyword === 'async function') return /^[*\s]*[A-Za-z_$({]/.test(rest);
+  if (keyword === 'class') return /^[A-Za-z_$]/.test(rest);
+  return true;
+}
 
-  // Semantic stack of `{ ... }` frames; brackets ()[]{} all bump `bracketDepth`,
-  // which positions concise-arrow markers.
-  const braceStack: Array<{ isFunc: boolean; loopOrSwitch: boolean }> = [];
-  const conciseMarkers: number[] = []; // bracketDepth at each open concise arrow
-  let bracketDepth = 0;
-  let pendingFunc = false; // next `{` opens a function body
-  let pendingLoopOrSwitch = false; // next `{` opens a loop/switch body
-  let arrowPending = false; // we just saw `=>`, awaiting its body
+function pushCandidate(candidates: string[], seen: Set<string>, candidate: string): void {
+  const normalized = candidate.trim();
+  if (!normalized || seen.has(normalized)) return;
+  seen.add(normalized);
+  candidates.push(normalized);
+}
 
-  const isInsideNestedCallable = (): boolean =>
-    conciseMarkers.length > 0 || braceStack.some((f) => f.isFunc);
-  const insideNestedLoopOrSwitch = (): boolean =>
-    braceStack.some((f) => f.loopOrSwitch);
+function codeCandidates(code: string): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const fences = Array.from(code.matchAll(/```(?:[\w-]+)?\s*\n([\s\S]*?)```/g));
+  for (const match of fences) {
+    const block = match[1];
+    if (typeof block === 'string' && block.trim().length > 0) pushCandidate(candidates, seen, block);
+  }
+  pushCandidate(candidates, seen, code);
 
-  for (const match of body.matchAll(tokenPattern)) {
-    const token = match[0];
+  const ignoredRanges = ignoredSyntaxRanges(code, true);
+  const maxFallbackSnippets = 200;
+  let fallbackSnippetCount = 0;
 
-    // Resolve a concise-vs-braced arrow body the moment we see the next token.
-    if (arrowPending) {
-      arrowPending = false;
-      if (token === '{') {
-        pendingFunc = true; // braced arrow body; fall through to `{` handling
-      } else {
-        conciseMarkers.push(bracketDepth); // concise body; keep scanning token
+  for (const keyword of ['async function', 'function', 'while', 'for', 'class']) {
+    let index = code.indexOf(keyword);
+    while (index >= 0) {
+      if (
+        fallbackSnippetCount < maxFallbackSnippets &&
+        hasKeywordBoundary(code, keyword, index) &&
+        isPlausibleSnippetStart(code, keyword, index) &&
+        !isIndexInRanges(ignoredRanges, index)
+      ) {
+        const snippet = code.slice(index);
+        const trimmed = trimToBalancedSnippet(snippet);
+        pushCandidate(candidates, seen, trimmed);
+        if (trimmed === snippet) pushCandidate(candidates, seen, snippet);
+        fallbackSnippetCount += 1;
+      }
+      index = code.indexOf(keyword, index + keyword.length);
+    }
+  }
+
+  return candidates.flatMap((candidate) => [candidate, `${candidate}\n}`, `${candidate}\n}}`, `${candidate}\n}}}`]);
+}
+
+function parseJavaScript(code: string): AstNode[] {
+  const asts: AstNode[] = [];
+  const seen = new Set<string>();
+  const baseOptions = {
+    ecmaVersion: 'latest' as const,
+    allowAwaitOutsideFunction: true,
+    allowReturnOutsideFunction: true,
+    allowHashBang: true,
+  };
+
+  const parseCandidate = (candidate: string, sourceType: 'module' | 'script'): AstNode | null => {
+    try {
+      try {
+        return TypeScriptParser.parse(candidate, {
+          ...baseOptions,
+          sourceType,
+          locations: true,
+        }) as unknown as AstNode;
+      } catch {
+        return parse(candidate, { ...baseOptions, sourceType }) as unknown as AstNode;
+      }
+    } catch {
+      return null;
+    }
+  };
+
+  if (!code.trimStart().startsWith('```')) {
+    for (const sourceType of ['module', 'script'] as const) {
+      const ast = parseCandidate(code, sourceType);
+      if (ast) return [ast];
+    }
+  }
+
+  for (const candidate of codeCandidates(code)) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    for (const sourceType of ['module', 'script'] as const) {
+      const ast = parseCandidate(candidate, sourceType);
+      if (ast) {
+        asts.push(ast);
+        break;
       }
     }
+  }
 
-    if (token === '{') {
-      braceStack.push({
-        isFunc: pendingFunc,
-        loopOrSwitch: !pendingFunc && pendingLoopOrSwitch,
-      });
-      bracketDepth++;
-      pendingFunc = false;
-      pendingLoopOrSwitch = false;
-      continue;
-    }
-    if (token === '(' || token === '[') {
-      bracketDepth++;
-      continue;
-    }
-    if (token === '}') {
-      braceStack.pop();
-      bracketDepth = Math.max(0, bracketDepth - 1);
-      while (conciseMarkers.length && conciseMarkers[conciseMarkers.length - 1]! > bracketDepth) {
-        conciseMarkers.pop();
-      }
-      pendingLoopOrSwitch = false;
-      pendingFunc = false;
-      continue;
-    }
-    if (token === ')' || token === ']') {
-      bracketDepth = Math.max(0, bracketDepth - 1);
-      while (conciseMarkers.length && conciseMarkers[conciseMarkers.length - 1]! > bracketDepth) {
-        conciseMarkers.pop();
-      }
-      continue;
-    }
-    if (token === ';' || token === ',') {
-      // A statement/argument boundary at the arrow's own depth ends a concise body.
-      while (conciseMarkers.length && conciseMarkers[conciseMarkers.length - 1]! >= bracketDepth) {
-        conciseMarkers.pop();
-      }
-      pendingLoopOrSwitch = false;
-      pendingFunc = false;
-      continue;
-    }
-    if (token === '=>') {
-      arrowPending = true;
-      continue;
-    }
-    if (token === 'function') {
-      pendingFunc = true;
-      continue;
-    }
-    if (token.startsWith('.')) {
-      continue; // member access — never a loop keyword
-    }
+  return asts;
+}
 
-    if (LOOP_OR_SWITCH_KEYWORDS.has(token)) {
-      pendingLoopOrSwitch = true;
-      continue;
-    }
+function parsesAsJavaScript(code: string): boolean {
+  if (code.trimStart().startsWith('```')) return false;
+  const baseOptions = {
+    ecmaVersion: 'latest' as const,
+    allowAwaitOutsideFunction: true,
+    allowReturnOutsideFunction: true,
+    allowHashBang: true,
+  };
 
-    if (LOOP_EXIT_KEYWORDS.has(token)) {
-      if (isInsideNestedCallable()) continue;
-      if (token === 'break' && insideNestedLoopOrSwitch()) continue;
+  for (const sourceType of ['module', 'script'] as const) {
+    try {
+      TypeScriptParser.parse(code, { ...baseOptions, sourceType, locations: true });
       return true;
+    } catch {
+      try {
+        parse(code, { ...baseOptions, sourceType });
+        return true;
+      } catch {
+        // Try the next source type.
+      }
     }
   }
 
   return false;
+}
+
+function isFunctionLike(node: AstNode): boolean {
+  return FUNCTION_NODE_TYPES.has(node.type);
+}
+
+function isInfiniteWhile(node: AstNode): boolean {
+  if (node.type !== 'WhileStatement') return false;
+  const test = node.test;
+  return isNode(test) && test.type === 'Literal' && test.value === true;
+}
+
+function isInfiniteFor(node: AstNode): boolean {
+  return (
+    node.type === 'ForStatement' &&
+    node.init == null &&
+    node.test == null &&
+    node.update == null
+  );
+}
+
+function hasLoopExit(body: AstNode): boolean {
+  const visit = (node: AstNode, nestedLoopOrSwitchDepth: number): boolean => {
+    if (isFunctionLike(node)) return false;
+
+    if (node.type === 'ForOfStatement' && node.await === true) return true;
+
+    if (LOOP_EXIT_NODE_TYPES.has(node.type)) return true;
+
+    if (node.type === 'BreakStatement') {
+      return nestedLoopOrSwitchDepth === 0;
+    }
+
+    const nextDepth = LOOP_OR_SWITCH_NODE_TYPES.has(node.type)
+      ? nestedLoopOrSwitchDepth + 1
+      : nestedLoopOrSwitchDepth;
+
+    for (const child of childNodes(node)) {
+      if (visit(child, nextDepth)) return true;
+    }
+
+    return false;
+  };
+
+  if (body.type === 'BlockStatement' && Array.isArray(body.body)) {
+    return body.body.some((statement) => isNode(statement) && visit(statement, 0));
+  }
+
+  return visit(body, 0);
+}
+
+function invokedFunctionCallee(callee: AstNode): AstNode | null {
+  if (isFunctionLike(callee)) return callee;
+  if (callee.type !== 'MemberExpression') return null;
+
+  const property = callee.property;
+  const object = callee.object;
+  const propertyName = isNode(property) ? identifierName(property) : undefined;
+  if ((propertyName === 'call' || propertyName === 'apply') && isNode(object) && isFunctionLike(object)) {
+    return object;
+  }
+
+  return null;
+}
+
+function containsIfStatement(
+  node: AstNode,
+  enterFunction = false,
+  beforePosition = Number.POSITIVE_INFINITY,
+  targetName?: string,
+): boolean {
+  const enteredHelpers = new Set<string>();
+  const visit = (current: AstNode, allowFunctionBody = false, activePosition = beforePosition): boolean => {
+    if (
+      current !== node &&
+      !allowFunctionBody &&
+      typeof current.start === 'number' &&
+      current.start > activePosition
+    ) {
+      return false;
+    }
+    if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
+    if (current.type === 'IfStatement' && current.start < activePosition) return true;
+    if (current.type === 'CallExpression' && isNode(current.callee)) {
+      const callee = current.callee;
+      if (callee.type === 'Identifier') {
+        const callName = identifierName(callee);
+        if (callName && !enteredHelpers.has(callName)) {
+          const helper = localFunctionDeclaration(node, callName, current.start);
+          if (helper) {
+            const helperPosition = targetName ? findRecursiveCallStart(helper, targetName) ?? activePosition : activePosition;
+            enteredHelpers.add(callName);
+            if (visit(helper, true, helperPosition)) return true;
+            enteredHelpers.delete(callName);
+          }
+        }
+      }
+      const invokedFunction = invokedFunctionCallee(callee);
+      if (invokedFunction) return visit(invokedFunction, true, activePosition);
+    }
+    return childNodes(current).some((child) => visit(child, false, activePosition));
+  };
+
+  return visit(node, enterFunction);
+}
+
+function containsIfInRecursivePath(node: AstNode, position: number): boolean {
+  const visit = (current: AstNode): boolean => {
+    if (current.type === 'IfStatement' && current.start < position) return true;
+    if (
+      current !== node &&
+      typeof current.start === 'number' &&
+      typeof current.end === 'number' &&
+      (current.start > position || current.end < position)
+    ) {
+      return false;
+    }
+    return childNodes(current).some((child) => visit(child));
+  };
+
+  return visit(node);
+}
+
+function identifierName(node: AstNode): string | undefined {
+  const name = node.name;
+  return typeof name === 'string' ? name : undefined;
+}
+
+function functionBodyStatements(root: AstNode): AstNode[] {
+  const body = root.body;
+  if (isNode(body) && body.type === 'BlockStatement' && Array.isArray(body.body)) {
+    return body.body.filter(isNode);
+  }
+  if (root.type === 'BlockStatement' && Array.isArray(body)) return body.filter(isNode);
+  if (Array.isArray(body)) return body.filter(isNode);
+  return [];
+}
+
+function containsPosition(node: AstNode, position: number): boolean {
+  return typeof node.start === 'number' && typeof node.end === 'number' && node.start <= position && position <= node.end;
+}
+
+function lexicalScopesAt(root: AstNode, position: number): AstNode[] {
+  const scopes: AstNode[] = [];
+  const visit = (current: AstNode): void => {
+    if (!containsPosition(current, position)) return;
+    if (functionBodyStatements(current).length > 0) scopes.push(current);
+    for (const child of childNodes(current)) visit(child);
+  };
+
+  visit(root);
+  return scopes;
+}
+
+function localFunctionDeclaration(root: AstNode, name: string, callStart = Number.POSITIVE_INFINITY): AstNode | null {
+  const scopes = lexicalScopesAt(root, callStart).reverse();
+
+  for (const scope of scopes) {
+    for (const statement of functionBodyStatements(scope)) {
+      if (statement.type === 'FunctionDeclaration') {
+        const id = statement.id;
+        if (isNode(id) && id.type === 'Identifier' && identifierName(id) === name) return statement;
+        continue;
+      }
+
+      if (statement.start > callStart) continue;
+
+      const declarations = statement.type === 'VariableDeclaration' && Array.isArray(statement.declarations)
+        ? statement.declarations
+        : [];
+      for (const declaration of declarations) {
+        if (!isNode(declaration)) continue;
+        if (isNode(declaration.id) && identifierName(declaration.id) === name) {
+          const init = declaration.init;
+          if (isNode(init) && isFunctionLike(init)) return init;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function findRecursiveCallStart(node: AstNode, fnName: string): number | null {
+  const enteredHelpers = new Set<string>();
+  const visit = (current: AstNode, enterFunction = false): number | null => {
+    if (current !== node && !enterFunction && isFunctionLike(current)) {
+      return null;
+    }
+
+    if (current.type === 'CallExpression') {
+      const callee = current.callee;
+      if (isNode(callee) && callee.type === 'Identifier') {
+        const callName = identifierName(callee);
+        if (callName === fnName) {
+          return current.start;
+        }
+
+        if (callName && !enteredHelpers.has(callName)) {
+          const helper = localFunctionDeclaration(node, callName, current.start);
+          if (helper) {
+            enteredHelpers.add(callName);
+            const found = visit(helper, true);
+            enteredHelpers.delete(callName);
+            if (found != null) return found;
+          }
+        }
+      }
+
+      if (isNode(callee)) {
+        const invokedFunction = invokedFunctionCallee(callee);
+        if (invokedFunction) {
+          const found = visit(invokedFunction, true);
+          if (found != null) return found;
+        }
+      }
+    }
+
+    for (const child of childNodes(current)) {
+      const found = visit(child);
+      if (found != null) return found;
+    }
+
+    return null;
+  };
+
+  return visit(node);
+}
+
+function hasReturnBefore(node: AstNode, position: number, enterFunction = false, targetName?: string): boolean {
+  const enteredHelpers = new Set<string>();
+  const visit = (current: AstNode, allowFunctionBody = false, activePosition = position): boolean => {
+    if (
+      current !== node &&
+      !allowFunctionBody &&
+      typeof current.start === 'number' &&
+      current.start > activePosition
+    ) {
+      return false;
+    }
+    if (current !== node && !allowFunctionBody && isFunctionLike(current)) return false;
+    if (current.type === 'ReturnStatement' && current.start < activePosition) return true;
+    if (current.type === 'CallExpression' && isNode(current.callee)) {
+      const callee = current.callee;
+      if (callee.type === 'Identifier') {
+        const callName = identifierName(callee);
+        if (callName && !enteredHelpers.has(callName)) {
+          const helper = localFunctionDeclaration(node, callName, current.start);
+          if (helper) {
+            const helperPosition = targetName ? findRecursiveCallStart(helper, targetName) ?? activePosition : activePosition;
+            enteredHelpers.add(callName);
+            if (visit(helper, true, helperPosition)) return true;
+            enteredHelpers.delete(callName);
+          }
+        }
+      }
+      const invokedFunction = invokedFunctionCallee(callee);
+      if (invokedFunction) return visit(invokedFunction, true, activePosition);
+    }
+    return childNodes(current).some((child) => visit(child, false, activePosition));
+  };
+
+  return visit(node, enterFunction);
+}
+
+function syntaxMaskedText(code: string): string {
+  const chars = code.split('');
+  for (const range of ignoredSyntaxRanges(code, false)) {
+    for (let index = range.start; index < range.end && index < chars.length; index += 1) {
+      chars[index] = ' ';
+    }
+  }
+  return chars.join('');
+}
+
+function hasFallbackLoopExit(snippet: string): boolean {
+  const firstOpen = snippet.indexOf('{');
+  if (firstOpen < 0) return /\b(await|yield)\b/.test(snippet);
+
+  const nestedScopeDepths: number[] = [];
+  let pendingNestedScope = false;
+  let conciseArrowDepth: number | null = null;
+  let depth = 0;
+
+  const startsKeyword = (keyword: string, index: number): boolean =>
+    snippet.startsWith(keyword, index) && hasKeywordBoundary(snippet, keyword, index);
+
+  for (let index = firstOpen; index < snippet.length; index += 1) {
+    const char = snippet[index];
+
+    if (char === '}') {
+      if (nestedScopeDepths.at(-1) === depth) nestedScopeDepths.pop();
+      if (conciseArrowDepth === depth) conciseArrowDepth = null;
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+      if (pendingNestedScope && depth > 1) nestedScopeDepths.push(depth);
+      pendingNestedScope = false;
+      continue;
+    }
+
+    if (depth <= 0) continue;
+
+    if (char === ';' && conciseArrowDepth === depth) {
+      conciseArrowDepth = null;
+      continue;
+    }
+
+    if (snippet.startsWith('=>', index)) {
+      const next = snippet.slice(index + 2).trimStart()[0];
+      if (next === '{') {
+        pendingNestedScope = true;
+      } else {
+        conciseArrowDepth = depth;
+      }
+      index += 1;
+      continue;
+    }
+
+    let consumedNestedKeyword = false;
+    for (const keyword of ['function', 'class', 'while', 'for', 'switch']) {
+      if (startsKeyword(keyword, index)) {
+        pendingNestedScope = true;
+        index += keyword.length - 1;
+        consumedNestedKeyword = true;
+        break;
+      }
+    }
+    if (consumedNestedKeyword) continue;
+
+    if (nestedScopeDepths.length > 0 || conciseArrowDepth != null) continue;
+
+    for (const keyword of ['break', 'return', 'throw', 'await', 'yield']) {
+      if (startsKeyword(keyword, index)) return true;
+    }
+  }
+
+  return false;
+}
+
+function escapeRegExpLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function fallbackRecursionFindings(code: string): EvaluationFinding[] {
+  const masked = syntaxMaskedText(code.replace(/^```[^\n]*$/gm, ''));
+  const findings: EvaluationFinding[] = [];
+
+  for (const match of masked.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g)) {
+    const fnName = match[1];
+    const start = match.index ?? 0;
+    if (!fnName) continue;
+    const snippet = trimToBalancedSnippet(masked.slice(start));
+    const selfCall = new RegExp(`\\b${escapeRegExpLiteral(fnName)}\\s*\\(`).exec(snippet.slice(match[0].length));
+    if (!selfCall) continue;
+    const beforeCall = snippet.slice(0, match[0].length + selfCall.index);
+    // Unicode-aware keyword boundaries: ASCII `\b` treats a non-ASCII letter as
+    // a word boundary, so `\breturn\b` would false-match inside an identifier
+    // like `πreturn` and wrongly treat it as a base-case guard. Require the
+    // keyword not to be adjacent to any identifier-continue character.
+    if (/(?<![\p{ID_Continue}$])(?:if|return|throw)(?![\p{ID_Continue}$])/u.test(beforeCall)) continue;
+    findings.push({
+      message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
+      severity: 'critical',
+      suggestion: `Add a base case (if/return) before the recursive call to "${fnName}"`,
+    });
+    break;
+  }
+
+  return findings;
+}
+
+function dedupeFindings(findings: EvaluationFinding[]): EvaluationFinding[] {
+  const seen = new Set<string>();
+  return findings.filter((finding) => {
+    const key = `${finding.severity}\0${finding.message}\0${finding.suggestion ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function fallbackInfiniteLoopFindings(code: string): EvaluationFinding[] {
+  const withoutFenceDelimiters = code.replace(/^```[^\n]*$/gm, '');
+  const masked = syntaxMaskedText(withoutFenceDelimiters);
+  const findings: EvaluationFinding[] = [];
+  const loopHeaders = [/while\s*\(\s*true\s*\)/g, /for\s*\(\s*;\s*;\s*\)/g];
+
+  for (const loopHeader of loopHeaders) {
+    for (const match of masked.matchAll(loopHeader)) {
+      const start = match.index ?? 0;
+      const snippet = trimToBalancedSnippet(masked.slice(start));
+      if (hasFallbackLoopExit(snippet)) continue;
+      findings.push({
+        message: 'Potential infinite loop detected: loop has no break or return statement',
+        severity: 'critical',
+        suggestion: 'Add a break condition or return statement inside the loop',
+      });
+      break;
+    }
+  }
+
+  return findings;
 }
 
 export class LogicLoopEvaluator implements Evaluator {
@@ -316,64 +893,78 @@ export class LogicLoopEvaluator implements Evaluator {
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
     const findings: EvaluationFinding[] = [];
-    const sanitized = sanitize(input.content);
+    const fullSourceParses = parsesAsJavaScript(input.content);
+    const asts = parseJavaScript(input.content);
 
-    this.checkInfiniteLoops(sanitized, findings);
-    this.checkUnguardedRecursion(sanitized, findings);
+    for (const ast of asts) {
+      this.checkInfiniteLoops(ast, findings);
+      this.checkUnguardedRecursion(ast, findings);
+    }
 
-    const score = findings.length === 0 ? 1 : 0;
+    if (!fullSourceParses && !findings.some((finding) => finding.message.includes('infinite loop'))) {
+      findings.push(...fallbackInfiniteLoopFindings(input.content));
+    }
+    if (!fullSourceParses && !findings.some((finding) => finding.message.includes('recursion'))) {
+      findings.push(...fallbackRecursionFindings(input.content));
+    }
+
+    const uniqueFindings = dedupeFindings(findings);
+    const score = uniqueFindings.length === 0 ? 1 : 0;
 
     return {
       evaluatorName: this.name,
-      verdict: findings.length === 0 ? 'pass' : 'fail',
+      verdict: uniqueFindings.length === 0 ? 'pass' : 'fail',
       score,
-      findings,
+      findings: uniqueFindings,
     };
   }
 
-  private checkInfiniteLoops(sanitized: string, findings: EvaluationFinding[]): void {
-    for (const header of INFINITE_LOOP_HEADERS) {
-      for (const match of sanitized.matchAll(header)) {
-        const braceIdx = match.index! + match[0].length - 1; // position of `{`
-        const body = extractBlock(sanitized, braceIdx);
-        if (!hasLoopExit(body)) {
-          findings.push({
-            message: 'Potential infinite loop detected: loop has no break or return statement',
-            severity: 'critical',
-            suggestion: 'Add a break condition or return statement inside the loop',
-          });
-        }
-      }
-    }
-  }
-
-  private checkUnguardedRecursion(sanitized: string, findings: EvaluationFinding[]): void {
-    for (const match of sanitized.matchAll(SELF_RECURSION_PATTERN)) {
-      const fnName = match[1];
-      const body = match[2] ?? '';
-
-      if (!fnName) continue;
-
-      // Check if the function calls itself.
-      const callPattern = new RegExp(`\\b${fnName}\\s*\\(`, 'g');
-      if (!callPattern.test(body)) continue;
-
-      // Check for a guard: a conditional, or a return before the recursive call.
-      // Word-boundary matching avoids treating identifiers like `notify` or
-      // `returnValue` as guards.
-      const returnIdx = body.search(/\breturn\b/);
-      const recursiveCallIdx = body.search(new RegExp(`\\b${fnName}\\s*\\(`));
-      const hasGuard =
-        hasKeyword(body, 'if') ||
-        (returnIdx !== -1 && recursiveCallIdx !== -1 && returnIdx < recursiveCallIdx);
-
-      if (!hasGuard) {
+  private checkInfiniteLoops(ast: AstNode, findings: EvaluationFinding[]): void {
+    const visit = (node: AstNode): void => {
+      if ((isInfiniteWhile(node) || isInfiniteFor(node)) && isNode(node.body) && !hasLoopExit(node.body)) {
         findings.push({
-          message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
+          message: 'Potential infinite loop detected: loop has no break or return statement',
           severity: 'critical',
-          suggestion: `Add a base case (if/return) before the recursive call to "${fnName}"`,
+          suggestion: 'Add a break condition or return statement inside the loop',
         });
       }
-    }
+
+      for (const child of childNodes(node)) visit(child);
+    };
+
+    visit(ast);
+  }
+
+  private checkUnguardedRecursion(ast: AstNode, findings: EvaluationFinding[]): void {
+    const visit = (node: AstNode): void => {
+      const namedFunction =
+        (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression') && isNode(node.id)
+          ? node.id
+          : null;
+
+      if (namedFunction?.type === 'Identifier') {
+        const fnName = identifierName(namedFunction);
+        if (fnName) {
+          const recursiveCallStart = findRecursiveCallStart(node, fnName);
+          if (recursiveCallStart != null) {
+            const hasGuard =
+              containsIfStatement(node, false, recursiveCallStart, fnName) ||
+              containsIfInRecursivePath(node, recursiveCallStart) ||
+              hasReturnBefore(node, recursiveCallStart, false, fnName);
+            if (!hasGuard) {
+              findings.push({
+                message: `Potential unguarded recursion detected: "${fnName}" calls itself without a visible base case`,
+                severity: 'critical',
+                suggestion: `Add a base case (if/return) before the recursive call to "${fnName}"`,
+              });
+            }
+          }
+        }
+      }
+
+      for (const child of childNodes(node)) visit(child);
+    };
+
+    visit(ast);
   }
 }

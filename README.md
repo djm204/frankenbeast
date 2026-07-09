@@ -11,7 +11,7 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## Modes
 
-- `MCP mode`: Claude Code plugin/tool-provider surface via `@fbeast/mcp-suite`
+- `MCP mode`: Claude Code plugin/tool-provider surface via `@franken/mcp-suite`
 - `Beast mode`: standalone orchestrator path with dashboard-first control and CLI parity
 
 Both modes share `.fbeast/beast.db`.
@@ -24,7 +24,7 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Architecture
 
-Frankenbeast is currently organized as 10 npm workspace packages under `packages/*`. Several originally separate MOD packages have been consolidated into the orchestrator or MCP suite: firewall/security middleware, skills/provider loading, heartbeat/reflection, external comms, and MCP registration are current implementation surfaces inside `franken-orchestrator` and `@fbeast/mcp-suite`, not standalone package directories.
+Frankenbeast is currently organized as 10 npm workspace packages under `packages/*`. Several originally separate MOD packages have been consolidated into the orchestrator or MCP suite: firewall/security middleware, skills/provider loading, heartbeat/reflection, external comms, and MCP registration are current implementation surfaces inside `@franken/orchestrator` and `@franken/mcp-suite`, not standalone package directories.
 
 The diagrams below describe the Beast-loop model and still use MOD labels as capability names. For the exact current package map, treat the package inventory table as authoritative.
 
@@ -289,30 +289,30 @@ graph TB
 
 | Package | Current role |
 |---------|--------------|
-| `franken-brain` | SQLite-backed working memory, episodic event recall, recovery checkpoints, serialization/hydration. |
-| `franken-planner` | Intent-to-DAG planning primitives, linear/parallel/recursive strategies, HITL plan export, recovery task insertion. |
-| `@frankenbeast/observer` | Trace/span lifecycle, token and cost tracking, circuit breaker, loop detection, export adapters, local trace viewing. |
+| `@franken/brain` | SQLite-backed working memory, episodic event recall, recovery checkpoints, serialization/hydration. |
+| `@franken/planner` | Intent-to-DAG planning primitives, linear/parallel/recursive strategies, HITL plan export, recovery task insertion. |
+| `@franken/observer` | Trace/span lifecycle, token and cost tracking, circuit breaker, loop detection, export adapters, local trace viewing. |
 | `@franken/critique` | Deterministic/heuristic critique pipeline and correction-request loop; it evaluates and returns feedback for callers to apply. |
 | `@franken/governor` | Trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers for HITL decisions. |
 | `@franken/types` | Shared TypeScript types plus runtime Zod schemas. |
-| `franken-orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
-| `@fbeast/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
-| `@frankenbeast/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
-| `@fbeast/live-bench` | Live CLI benchmark tooling. |
+| `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
+| `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
+| `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
+| `@franken/live-bench` | Live CLI benchmark tooling. |
 
 Historical docs and ADRs may still mention removed packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Current code paths for those capabilities live in the packages above.
 
 ### Core Principles
 
 - **Determinism over probabilism.** Regex-based injection scanning, schema validation, HMAC verification — these do not hallucinate.
-- **LLM-agnostic.** The firewall is a model-agnostic proxy. Adding a new provider means implementing one `IAdapter` interface.
+- **LLM-agnostic.** Provider extension is split by surface: CLI execution/chat providers implement `ICliProvider` in `@franken/orchestrator`, while API-backed clients live in the provider registry and config loading paths.
 - **Immutable safety constraints.** Guardrails live in the firewall pipeline, not in the LLM prompt. They cannot be compressed or forgotten.
 - **Human-in-the-loop as a first-class primitive.** High-stakes actions require cryptographically signed human approval.
 - **Full auditability.** Every decision is traced, costed, and exportable.
 
 ## HTTP surface
 
-The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). The `frankenbeast chat-server` runtime always mounts chat (with WebSocket chat on `/v1/chat/ws`), network, and analytics routes; tracked Beast agents/SSE (`/v1/beasts/*`) routes mount only when an operator token resolves (loopback dev mode run without a token omits them), and skills/dashboard routes activate when a provider registry is configured. When comms channels are enabled, the CLI resolves comms secrets, passes `commsConfig` to `startChatServer()`, and auto-wires a `ChatRuntimeCommsAdapter`, which mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes on the chat server. Security routes (`/api/security`) mount when `securityConfig` is supplied. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
+The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat server (`packages/franken-orchestrator/src/http/chat-app.ts` and `chat-server.ts`). The `frankenbeast chat-server` runtime always mounts chat (with WebSocket chat on `/v1/chat/ws`), network, and analytics routes; tracked Beast agents/SSE (`/v1/beasts/*`) routes mount only when an operator token resolves (loopback dev mode run without a token omits them), and skills/dashboard routes activate when a provider registry is configured. When comms channels are enabled, the CLI resolves comms secrets, passes `commsConfig` to `startChatServer()`, and auto-wires a `ChatRuntimeCommsAdapter`, which mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes on the chat server. Security routes (`/api/security`) mount when `securityConfig` is supplied. The old standalone Firewall/Critique/Governor service table is historical rather than the current local runtime shape.
 
 ## Prerequisites
 
@@ -322,8 +322,17 @@ The shipped Hono HTTP surface is integrated in `franken-orchestrator`'s chat ser
 ### Optional
 
 - **ChromaDB** — required for semantic memory (MOD-03). Not needed for unit/integration tests.
-- **LLM API key** — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for runtime use. Not needed for tests (mocked).
+- **LLM API key** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` for runtime use. Not needed for tests (mocked).
 - **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
+
+### Beast project-root override
+
+Beast runtime code has two related project-root decisions:
+
+- **Service root:** `createBeastServices()` resolves `paths.root ?? process.env.FBEAST_ROOT ?? process.cwd()`. This root controls Beast service construction, host-process `cwd` containment, container `workspaceHostPath` mounts, worktree isolation, and run-config snapshots under `.fbeast/.build/run-configs`.
+- **Per-run child working directory:** built-in Beast definitions resolve `config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()` for the child process `cwd` when the run config omits `projectRoot`.
+
+For CLI entrypoints such as `frankenbeast chat-server`, `frankenbeast network`, and `frankenbeast beasts-daemon`, prefer passing the explicit project root (`--base-dir /absolute/path/to/project`) because the CLI parses `--base-dir` with a `process.cwd()` default before constructing services. Use `FBEAST_ROOT=/absolute/path/to/project` only for callers that construct Beast services or dispatch built-in Beast runs without an explicit `paths.root`/`config.projectRoot`, and keep it aligned with `--base-dir` when both are present so the service root and child `cwd` stay inside the same checkout. Historical ADRs and plan documents may mention `FBEAST_ROOT`, but this section is the operator-facing supported configuration reference.
 
 ## Quick Start
 
@@ -349,7 +358,7 @@ See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup gu
 
 ## Run the Dashboard with MCP Mode
 
-Use this path when you installed `@fbeast/mcp-suite` and ran `fbeast mcp init`, and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
+Use this path when you installed `@franken/mcp-suite` and ran `fbeast mcp init`, and want a browser view of the same project telemetry. MCP servers, hooks, Beast mode, and the dashboard share the `.fbeast/beast.db` under the project root you point the backend at.
 
 From the project where you initialized MCP:
 
@@ -358,7 +367,7 @@ From the project where you initialized MCP:
 # binaries stay on PATH. A one-shot `npx` won't work here: `mcp init` registers
 # servers as bare `fbeast-memory`/`fbeast-proxy` commands the AI client spawns
 # later, so those binaries must remain installed after setup.
-npm install -g @fbeast/mcp-suite
+npm install -g @franken/mcp-suite
 
 # One-time MCP setup. Add --hooks if you want tool-call governance and audit logs.
 fbeast mcp init --hooks
@@ -367,7 +376,7 @@ fbeast mcp init --hooks
 From this Frankenbeast repo, start the dashboard backend against that same project root:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project
 ```
 
 If you initialized MCP in this repo, omit `--base-dir`.
@@ -375,7 +384,7 @@ If you initialized MCP in this repo, omit `--base-dir`.
 In a second terminal, start the web UI:
 
 ```bash
-npm --workspace @frankenbeast/web run dev:chat
+npm --workspace @franken/web run dev:chat
 ```
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard talks to the chat server through TLS-preferred API defaults and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
@@ -383,8 +392,8 @@ Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard ta
 If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend:
 
 ```bash
-npm --workspace franken-orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @frankenbeast/web run dev
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 
 For Beast controls, set the operator token once in the repo root `.env` so the backend and Vite dev proxy can read it server-side:
@@ -474,6 +483,28 @@ frankenbeast issues --label bug --repo owner/repo
 --allow-origin <url>    CORS origin for dashboard
 ```
 
+### Runtime config and environment overrides
+
+`frankenbeast run` loads orchestrator config from defaults, an optional JSON config file (`--config <path>` or the project-local `.fbeast/config.json`), `FRANKEN_*` environment variables, and CLI flags. When the same field is set in more than one place, precedence is: CLI flags > `FRANKEN_*` env vars > config file > built-in defaults.
+
+| Environment variable | Config field | Type and accepted values | Default / validation |
+|----------------------|--------------|--------------------------|----------------------|
+| `FRANKEN_MAX_TOTAL_TOKENS` | `maxTotalTokens` | integer token budget | default `100000`; must be at least `10000` |
+| `FRANKEN_MAX_DURATION_MS` | `maxDurationMs` | integer milliseconds | default `300000`; must be at least `1000` and at least `maxCritiqueIterations * 10000` |
+| `FRANKEN_MAX_CRITIQUE_ITERATIONS` | `maxCritiqueIterations` | integer critique passes | default `3`; valid range `1` through `10` |
+| `FRANKEN_ENABLE_HEARTBEAT` | `enableHeartbeat` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_ENABLE_TRACING` | `enableTracing` | boolean string; only `true` enables it | default `false`; `--verbose` also enables tracing and wins over env/config |
+| `FRANKEN_ENABLE_REFLECTION` | `enableReflection` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_MIN_CRITIQUE_SCORE` | `minCritiqueScore` | numeric score | default `0.7`; must be `>= 0` and `< 1` |
+
+Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present; set the value to `true` to enable the field, and any other present value disables it.
+
+### Operator environment variables
+
+Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain ASCII fallback instead of the image-rendered graphic banner. This is useful for CI logs, terminals with limited image rendering support, and log processors that should receive a text-only banner layout. The fallback banner may still include ANSI color codes; leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
+
+`FRANKENBEAST_NETWORK_MANAGED=1` is an internal child-process marker owned by `frankenbeast network`. The supervisor sets it for managed services such as `chat-server`; operators normally should not export it for standalone local debugging. Managed children suppress the normal CLI startup banner, and managed `chat-server` fails closed without an operator token even on loopback. If a standalone `chat-server` run unexpectedly asks for an operator token on `127.0.0.1` or `localhost`, unset `FRANKENBEAST_NETWORK_MANAGED`; if you intentionally exercise managed semantics, provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` or the configured secret-store token reference.
+
 ### Project Layout
 
 Running `frankenbeast` in any project creates:
@@ -507,14 +538,24 @@ cd packages/franken-orchestrator && npm run test:e2e
 ## Local Dev Environment
 
 ```bash
-# Start supporting services (ChromaDB, Grafana, Tempo)
+# Configure local services. Generate a unique Grafana password before starting
+# the full compose stack; Grafana requires GRAFANA_USER=admin with a non-default password.
 cp .env.example .env
+$EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and adjust CHROMA_URL if needed
+
+# .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.
+# Override it only when ChromaDB runs at a different local port/host or a remote
+# TLS-terminated endpoint, then export that same endpoint before seed/verify.
+# export CHROMA_URL=https://chromadb.example.com
+
+# Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
+# image versions and mounts ./tempo.yaml so local tracing starts deterministically.
 docker compose up -d
 
-# Seed ChromaDB with initial collections
+# Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npx tsx scripts/seed.ts
 
-# Verify everything is running
+# Verify everything is running. This probes the same CHROMA_URL endpoint.
 npx tsx scripts/verify-setup.ts
 ```
 
@@ -554,10 +595,12 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
 
 **1Password / Bitwarden:**
-```json
-{ "network": { "secureBackend": "1password" } }
+```bash
+frankenbeast init --backend 1password
+# or
+frankenbeast init --backend bitwarden
 ```
-Set the backend in `.fbeast/config.json`, then run `frankenbeast init` (there is no `--backend` CLI flag). For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
+You can also set the backend in `.fbeast/config.json` with `{ "network": { "secureBackend": "1password" } }` before running `frankenbeast init`. For 1Password, create or use a vault literally named `frankenbeast`; init-created items use titles like `frankenbeast/network.operatorTokenRef`. For Bitwarden, run `bw login`/`bw unlock` and export `BW_SESSION` first; init-created secure notes use the same `frankenbeast/` title prefix. The CLI uses the official 1Password/Bitwarden CLI under the hood.
 
 ### Operator token setup
 
@@ -591,22 +634,35 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 |----------|--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | MOD-01 | Runtime only | Claude adapter API key |
 | `OPENAI_API_KEY` | MOD-01 | Runtime only | OpenAI adapter API key |
-| `CHROMA_HOST` | MOD-03 | If using semantic memory | ChromaDB server host (default: `localhost`) |
-| `CHROMA_PORT` | MOD-03 | If using semantic memory | ChromaDB server port (default: `8000`) |
+| `GOOGLE_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (Google AI Studio name) |
+| `GEMINI_API_KEY` | MOD-01 | Runtime only | Gemini adapter API key (alternative name) |
+| `CHROMA_URL` | MOD-03 | If using semantic memory | ChromaDB base URL used by `scripts/seed.ts` and `scripts/verify-setup.ts` (default: `http://localhost:8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
+| `FRANKENBEAST_MODULE_MEMORY` | MOD-03 | Optional | Memory module config fallback and Beast child-env toggle. Only the literal value `false` records it as disabled when the `memory` config key is unset; current local CLI wiring still constructs the real memory adapter. |
+| `FRANKENBEAST_MODULE_PLANNER` | MOD-04 | Optional | Planner module config fallback and Beast child-env toggle. Only literal `false` records it as disabled when the `planner` config key is unset; current local CLI wiring still uses the graph-builder path. |
+| `FRANKENBEAST_MODULE_CRITIQUE` | MOD-06 | Optional | Active critique safety-module toggle. Only literal `false` disables critique when the `critique` config key is unset; otherwise it is enabled by default. |
+| `FRANKENBEAST_MODULE_GOVERNOR` | MOD-07 | Optional | Active governor safety-module toggle. Only literal `false` disables governor when the `governor` config key is unset; otherwise it is enabled by default. |
+| `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES` | MOD-06/MOD-07 | Unsafe override | Set to literal `1` to allow enabled critique/governor packages that are not installed to fall back to all-pass stubs. Leave unset unless intentionally accepting degraded safety in local/debug runs. |
+| `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL` | MOD-07 | Trusted CI/headless only | Set to literal `1` to allow required HITL approvals in non-interactive runs. Without it, required HITL gates fail closed outside an interactive TTY. |
 
-See [.env.example](.env.example) for the full list.
+See [.env.example](.env.example) for the full local-development list. Keep `.env.example` and this table aligned when adding operator-facing environment controls.
 
 ### Module Configuration
 
-All modules use **dependency injection** — configuration is passed via constructor arguments, not globals or environment variables.
+Runtime modules use **dependency injection** first: explicit constructor, CLI, or run-config inputs win over environment variables. For the local CLI path, selected operator controls then fall back to environment variables, and defaults apply last. Module enablement precedence is:
+
+1. Explicit value for that module key (`modules.memory`, `modules.planner`, `modules.critique`, or `modules.governor`) in run config or CLI dependency options.
+2. The matching environment fallback (`FRANKENBEAST_MODULE_MEMORY`, `FRANKENBEAST_MODULE_PLANNER`, `FRANKENBEAST_MODULE_CRITIQUE`, or `FRANKENBEAST_MODULE_GOVERNOR`) when that specific module key is unset.
+3. Enabled-by-default behavior when neither the module key nor a literal `false` env toggle is provided.
+
+Safety-critical critique/governor imports fail closed when the module is enabled but its package is missing. `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` is the explicit unsafe escape hatch that keeps the run going with passthrough stubs; prefer installing the package or setting an explicit module config instead.
 
 ```typescript
 // Orchestrator — via config file or CLI flags
 frankenbeast plan --design-doc docs/my-feature-design.md --config frankenbeast.config.json
 
 // Orchestrator chat/dashboard HTTP server
-npm --workspace franken-orchestrator run chat-server -- --port 3737
+npm --workspace @franken/orchestrator run chat-server -- --port 3737
 ```
 
 ## The Beast Loop
@@ -635,7 +691,7 @@ Tasks execute in topological order from the DAG. High-stakes tasks pause for hum
 
 **Modules:** MOD-05 (Observer) + MOD-08 (Heartbeat)
 
-The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `franken-orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
+The trace is closed and token spend summarised. In the current local CLI path, heartbeat is a thin reflection adapter (`ReflectionHeartbeatAdapter`, wired in `@franken/orchestrator/src/cli/create-beast-deps.ts`), so heartbeat-driven self-improvement beyond per-run reflection should be treated as target architecture rather than a verified end-to-end local flow.
 
 ### Circuit Breakers
 
@@ -657,7 +713,7 @@ Frankenbeast is LLM-agnostic through the orchestrator provider registry. CLI pro
 
 ## Wrapping External Agents
 
-The currently shipped integration path is to call the orchestrator runtime, use `@fbeast/mcp-suite` tools/hooks, or implement BeastLoop dependencies around your agent components. The old standalone firewall HTTP proxy guide is historical; see [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) for current options and caveats.
+The currently shipped integration path is to call the orchestrator runtime, use `@franken/mcp-suite` tools/hooks, or implement BeastLoop dependencies around your agent components. The old standalone firewall HTTP proxy guide is historical; see [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) for current options and caveats.
 
 ## Examples
 
@@ -692,7 +748,7 @@ The `frankenbeast chat-server` exposes the same runtime over HTTP + WebSocket fo
 
 ## Communications Gateway
 
-External communications are implemented in `franken-orchestrator` under `packages/franken-orchestrator/src/comms`; there is no current standalone `franken-comms` workspace package. The gateway keeps deterministic session mapping for supported channels:
+External communications are implemented in `@franken/orchestrator` under `packages/franken-orchestrator/src/comms`; there is no current standalone `franken-comms` workspace package. The gateway keeps deterministic session mapping for supported channels:
 
 | Channel | Transport | Security |
 |---------|-----------|----------|
@@ -771,7 +827,7 @@ frankenbeast/
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
 │   ├── adr/                     # Architecture Decision Records
-│   ├── guides/                  # Quickstart, add-provider, wrap-agent, run-dashboard-chat
+│   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
 ├── scripts/                     # seed.ts, verify-setup.ts
@@ -796,7 +852,7 @@ frankenbeast/
 - [Quickstart Guide](docs/guides/quickstart.md) — get running in 7 steps
 - [Run the Dashboard Chat](docs/guides/run-dashboard-chat.md) — start the WebSocket chat server and dashboard locally
 - [Run the Network Operator](docs/guides/run-network-operator.md) — start Frankenbeast request-serving services through `frankenbeast network`
-- [Add an LLM Provider](docs/guides/add-llm-provider.md) — implement `IAdapter` in 4 steps
+- [Add an LLM Provider](docs/guides/add-llm-provider.md) — add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry
 - [Wrap an External Agent](docs/guides/wrap-external-agent.md) — firewall-as-proxy or full orchestration
 - [Contract Matrix](docs/CONTRACT_MATRIX.md) — all port interfaces documented
 - [ADRs](docs/adr/) — architectural decisions and rationale
@@ -804,4 +860,4 @@ frankenbeast/
 
 ## License
 
-ISC
+MIT

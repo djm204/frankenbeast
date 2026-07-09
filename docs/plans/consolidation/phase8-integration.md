@@ -19,7 +19,7 @@ New consolidation components implement the existing `BeastLoopDeps` port interfa
 | BeastLoopDeps Port | Old Implementation (deleted in Phase 1) | New Adapter |
 |--------------------|----------------------------------------|-------------|
 | `firewall: IFirewallModule` | `frankenfirewall` | `MiddlewareChainFirewallAdapter` wraps `MiddlewareChain` |
-| `memory: IMemoryModule` | `franken-brain` old API | `SqliteBrainMemoryAdapter` wraps `SqliteBrain` |
+| `memory: IMemoryModule` | `@franken/brain` old API | `SqliteBrainMemoryAdapter` wraps `SqliteBrain` |
 | `heartbeat: IHeartbeatModule` | `franken-heartbeat` | `ReflectionHeartbeatAdapter` wraps `CritiqueChain` |
 | `skills: ISkillsModule` | `franken-skills` | `SkillManagerAdapter` wraps `SkillManager` + `ProviderRegistry` |
 | `mcp: IMcpModule` | `franken-mcp` | `McpSdkAdapter` wraps `@modelcontextprotocol/sdk` |

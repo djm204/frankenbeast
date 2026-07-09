@@ -1,5 +1,5 @@
-import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve, join, sep } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { BeastLoop } from '../beast-loop.js';
@@ -18,7 +18,7 @@ import type { ProjectPaths } from './project-root.js';
 import type { ReviewIO } from '../issues/issue-review.js';
 import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
 import { createCliDeps, type CliDepOptions } from './dep-factory.js';
-import { loadRunConfigFromEnv } from './run-config-loader.js';
+import { PromptConfigSchema, RunConfigSchema, type RunConfig } from './run-config-loader.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
 import { isNoOpDesign } from './noop-detector.js';
@@ -35,16 +35,27 @@ function printLine(...args: unknown[]): void {
 }
 export type SessionPhase = 'interview' | 'plan' | 'execute';
 
-function resolveContainedExistingPath(projectRoot: string, requestedPath: string, fieldName: string): string {
-  const root = realpathSync(resolve(projectRoot));
-  const requested = isAbsolute(requestedPath) ? requestedPath : resolve(process.cwd(), requestedPath);
-  const target = realpathSync(requested);
-  const rel = relative(root, target);
-  if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || rel.startsWith('..\\') || isAbsolute(rel)) {
-    throw new Error(`${fieldName} resolves outside project root: ${requestedPath}`);
-  }
+function appendPromptContext(value: string, promptText: string | undefined): string {
+  if (!promptText || promptText.trim().length === 0) return value;
+  return `${value}\n\nAdditional prompt context:\n${promptText.trim()}`;
+}
 
-  return target;
+function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
+  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
+  if (!filePath) return undefined;
+  const raw = readFileSync(filePath, 'utf-8');
+  const parsed = JSON.parse(raw) as { promptConfig?: unknown };
+  if (!parsed.promptConfig) return undefined;
+  return PromptConfigSchema.parse(parsed.promptConfig);
+}
+
+function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {
+  const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
+  if (!filePath) return undefined;
+  const raw = readFileSync(filePath, 'utf-8');
+  const parsed = JSON.parse(raw) as unknown;
+  const result = RunConfigSchema.safeParse(parsed);
+  return result.success ? result.data : undefined;
 }
 
 export interface SessionConfig {
@@ -54,6 +65,7 @@ export interface SessionConfig {
   provider: string;
   providers?: string[] | undefined;
   providersConfig?: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
+  trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -243,8 +255,9 @@ export class Session {
         },
       };
 
+      const promptConfig = loadPromptConfigFromEnv();
       const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
-      await capturingInterview.build({ goal: 'Gather requirements' });
+      await capturingInterview.build({ goal: appendPromptContext('Gather requirements', promptConfig?.text) });
 
       const displayDesignCard = (designDoc: string): string => {
         const designPath = writeDesignDoc(paths, designDoc);
@@ -309,13 +322,18 @@ export class Session {
     let designContent: string;
     if (designDocPath) {
       try {
-        const safeDesignDocPath = resolveContainedExistingPath(paths.root, designDocPath, 'designDocPath');
+        const safeDesignDocPath = resolveContainedExistingPath(paths.root, designDocPath, 'designDocPath', {
+          relativeTo: process.cwd(),
+        });
         designContent = readFileSync(safeDesignDocPath, 'utf-8');
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
           throw new Error(
             `No design document found at ${designDocPath}. Check the path, run "frankenbeast interview" first, or provide --design-doc.`,
           );
+        }
+        if ((err as Error).message === 'designDocPath resolves outside base directory') {
+          throw new Error('designDocPath resolves outside project root');
         }
         throw err;
       }
@@ -326,6 +344,9 @@ export class Session {
       }
       designContent = stored;
     }
+
+    const promptConfig = loadPromptConfigFromEnv();
+    designContent = appendPromptContext(designContent, promptConfig?.text);
 
     const inferredPlanName = paths.plansDir.split('/').filter(Boolean).pop() ?? 'plans';
     const planName = this.config.planDirOverride
@@ -470,10 +491,11 @@ export class Session {
     loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
 
     try {
+      const promptConfig = loadPromptConfigFromEnv();
       const result = await new BeastLoop(fullDeps, loopConfig).run({
         projectId,
         sessionId: runSessionId,
-        userInput: `Process chunks in ${chunkDir}`,
+        userInput: appendPromptContext(`Process chunks in ${chunkDir}`, promptConfig?.text),
       });
 
       this.displaySummary(result);
@@ -515,6 +537,12 @@ export class Session {
         ? statusBadge('neutral')
         : statusBadge(result.status === 'completed');
     printLine(`  ${A.dim}Status:${A.reset}    ${statusDisplay}`);
+    if (result.error) {
+      printLine(`  ${A.dim}Warning:${A.reset}   ${result.error.message}`);
+    }
+    if (result.prUrl) {
+      printLine(`  ${A.dim}PR:${A.reset}        ${result.prUrl}`);
+    }
     if (result.taskResults?.length) {
       printLine(`\n  ${A.dim}Chunks:${A.reset}`);
       for (const t of result.taskResults) {
@@ -527,7 +555,9 @@ export class Session {
     }
     const passed = result.taskResults?.filter((t) => t.status === 'success').length ?? 0;
     const skipped = result.taskResults?.filter((t) => t.status === 'skipped').length ?? 0;
-    const failed = result.taskResults?.filter((t) => t.status !== 'success' && t.status !== 'skipped').length ?? 0;
+    const failedTasks = result.taskResults?.filter((t) => t.status !== 'success' && t.status !== 'skipped').length ?? 0;
+    const runFailed = result.status === 'failed' && failedTasks === 0 ? 1 : 0;
+    const failed = failedTasks + runFailed;
     const parts = [`${passed} passed`, `${failed} failed`];
     if (skipped > 0) parts.push(`${skipped} skipped`);
     printLine(`\n  ${failed === 0 ? A.green : A.red}${A.bold}Result: ${parts.join(', ')}${A.reset}\n`);
@@ -558,6 +588,9 @@ export class Session {
       printLine(
         `  ${String(o.issueNumber).padStart(5)}  ${title.padEnd(TITLE_MAX)}  ${badge.padEnd(8)}  ${pr}`,
       );
+      if (o.error) {
+        printLine(`  ${''.padStart(5)}  ${A.dim}Error: ${o.error}${A.reset}`);
+      }
     }
 
     const fixed = outcomes.filter((o) => o.status === 'fixed').length;
@@ -576,12 +609,13 @@ export class Session {
       provider: this.config.provider,
       providers: this.config.providers,
       providersConfig: this.config.providersConfig,
+      trustProviderCommandOverrides: this.config.trustProviderCommandOverrides,
       noPr: this.config.noPr,
       verbose: this.config.verbose,
       reset: this.config.reset,
       resume: this.config.resume ?? false,
       planDirOverride: this.config.planDirOverride,
-      runConfig: loadRunConfigFromEnv(),
+      runConfig: loadCompatibleRunConfigFromEnv(),
       orchestratorConfig: this.config.orchestratorConfig,
     };
   }

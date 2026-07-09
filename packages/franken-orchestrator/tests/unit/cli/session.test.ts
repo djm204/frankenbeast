@@ -266,6 +266,38 @@ describe('Session', () => {
       expect(result).toBeDefined();
       expect(result!.status).toBe('completed');
     });
+
+    it('does not double-count failed task outcomes in the build summary footer', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      mockBeastRun.mockResolvedValueOnce({
+        ...mockBeastResult,
+        status: 'failed',
+        taskResults: [
+          { taskId: 'impl:auth', status: 'success' as const },
+          { taskId: 'harden:auth', status: 'failure' as const, error: 'boom' },
+        ],
+      });
+      const config = makeConfig({ entryPhase: 'execute' });
+
+      await new Session(config).start();
+
+      expect(console.info).toHaveBeenCalledWith(expect.stringContaining('Result: 1 passed, 1 failed'));
+    });
+
+    it('prints the created PR URL in the build summary when present', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      mockBeastRun.mockResolvedValueOnce({
+        ...mockBeastResult,
+        prUrl: 'https://github.com/org/repo/pull/123',
+      });
+      const config = makeConfig({ entryPhase: 'execute' });
+
+      await new Session(config).start();
+
+      expect(console.info).toHaveBeenCalledWith(
+        expect.stringContaining('PR:        https://github.com/org/repo/pull/123'),
+      );
+    });
   });
 
   describe('phase chaining', () => {

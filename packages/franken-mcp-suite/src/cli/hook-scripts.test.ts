@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -64,7 +64,18 @@ function installFakeHook(root: string): string {
     'fi',
     '',
     'if [ "$PHASE" = "post-tool" ]; then',
-    '  TOOL_NAME="${3:-}"',
+    '  TOOL_NAME="${5:-}"',
+    '  PAYLOAD=$(cat)',
+    '  if [ "${FBEAST_EXPECT_STDIN_PAYLOAD:-}" = "1" ]; then',
+    "    if [ \"$#\" -ne 5 ]; then",
+    "      printf 'post-tool payload should not be passed as argv; saw %s args\\n' \"$#\" >&2",
+    '      exit 98',
+    '    fi',
+    '    if [ ${#PAYLOAD} -lt 300000 ]; then',
+    "      printf 'post-tool payload was not streamed on stdin\\n' >&2",
+    '      exit 97',
+    '    fi',
+    '  fi',
     '  if [ "$TOOL_NAME" = "hang" ]; then',
     '    sleep 10',
     '    exit 0',
@@ -363,6 +374,43 @@ describe('Codex hook scripts', () => {
     expect(result.stdout).toBe('');
   });
 
+  it('streams large post-tool responses to fbeast-hook stdin instead of argv', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'read_file',
+      tool_response: { output: 'x'.repeat(300_000) },
+      session_id: 'sess-1',
+    }, binDir, {
+      FBEAST_EXPECT_STDIN_PAYLOAD: '1',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('fails open when post-tool payload staging cannot create temp files', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const pythonPath = join(binDir, 'python3');
+    writeFileSync(pythonPath, '#!/bin/sh\nexit 42\n');
+    chmodSync(pythonPath, 0o755);
+    const { postTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(postTool, {
+      tool_name: 'read_file',
+      tool_response: { output: 'x'.repeat(300_000) },
+      session_id: 'sess-1',
+    }, binDir);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it('bypasses pre-tool hooks for spawned child processes', () => {
     const root = makeTempRoot();
     tempRoots.push(root);
@@ -582,6 +630,17 @@ describe('Claude Code hook scripts', () => {
       }
     }
     tempRoots.length = 0;
+  });
+
+  it('uses cwd-relative DB paths in global Claude hook scripts', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const { preTool, postTool } = writeHookScripts(root, 'claude');
+
+    expect(readFileSync(preTool, 'utf8')).toContain(`DB_PATH=${JSON.stringify(join('.fbeast', 'beast.db'))}`);
+    expect(readFileSync(postTool, 'utf8')).toContain(`DB_PATH=${JSON.stringify(join('.fbeast', 'beast.db'))}`);
+    expect(readFileSync(preTool, 'utf8')).not.toContain(root);
+    expect(readFileSync(postTool, 'utf8')).not.toContain(root);
   });
 
   it('returns Claude block reason on stderr with exit 2 when the pre-tool hook blocks an action', () => {

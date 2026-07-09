@@ -1,5 +1,102 @@
 # Changelog
 
+## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.8.0...franken-types-v0.8.1) (2026-07-08)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.7...franken-types-v0.8.0) (2026-07-07)
+
+
+### Features
+
+* **orchestrator:** wire container chat dispatch ([#468](https://github.com/djm204/frankenbeast/issues/468)) ([94d0f5e](https://github.com/djm204/frankenbeast/commit/94d0f5e7a55a09e8aa540ce0f9832b975af2e9de))
+* Phase 3 — Provider Registry + Adapters ([0ceb582](https://github.com/djm204/frankenbeast/commit/0ceb582f95a7ac7cac877adeb6b08bbe4aa9efd1))
+* Phase 5 — Skill Loading ([bc99631](https://github.com/djm204/frankenbeast/commit/bc99631f27cd2ea1b4072e19998b3fc89eb389b0))
+* **types:** add brain interfaces and BrainSnapshot types (Phase 2.1) ([5167997](https://github.com/djm204/frankenbeast/commit/5167997c99954fd37d66822ad8efb87913f0b432))
+* **types:** add provider interfaces, types, and Zod schemas (Phase 3.1) ([7f8c728](https://github.com/djm204/frankenbeast/commit/7f8c728a4320f798a8795875a05b8a45d0d0d7d8))
+* **types:** add skill directory schemas (Phase 5.1) ([bb55f53](https://github.com/djm204/frankenbeast/commit/bb55f532a653988122d86f00f61d0b55b2c001a4))
+* **types:** brain interfaces + BrainSnapshot types (Phase 2.1) ([f2ed2fd](https://github.com/djm204/frankenbeast/commit/f2ed2fd52257c8fc44f1005bddc924af16d24177))
+
+
+### Bug Fixes
+
+* **api:** share web DTO contracts ([#544](https://github.com/djm204/frankenbeast/issues/544)) ([ec1e29a](https://github.com/djm204/frankenbeast/commit/ec1e29ae21bed03d156f0a58c0f27964566e5e80))
+* **chat:** emit execution events after approval ([#877](https://github.com/djm204/frankenbeast/issues/877)) ([752f8ef](https://github.com/djm204/frankenbeast/commit/752f8ef2c56215d9c9cfb7cefe9f96a4a31cc49c))
+* **cli:** show network help before root resolution ([71ebc60](https://github.com/djm204/frankenbeast/commit/71ebc60bcb292f228098759ffe22ba295cd7f34c)), closes [#414](https://github.com/djm204/frankenbeast/issues/414)
+* **critique:** align warning evaluator verdicts ([#492](https://github.com/djm204/frankenbeast/issues/492)) ([2a0d7a0](https://github.com/djm204/frankenbeast/commit/2a0d7a001f285c6703c422edc3d959a94b95ba18))
+* **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
+* **network:** track in-process comms gateway ([#487](https://github.com/djm204/frankenbeast/issues/487)) ([b3d7a3b](https://github.com/djm204/frankenbeast/commit/b3d7a3be68dabbfcf3ff6e967ab73b4c0d29677f))
+* **observer,types:** guard token counters against overflow & bad input ([#341](https://github.com/djm204/frankenbeast/issues/341)) ([0a7c6b4](https://github.com/djm204/frankenbeast/commit/0a7c6b4852e959489fbb389971b56f0c64278e5b))
+* **orchestrator:** address Phase 3 review gaps + document residuals ([bfc84ee](https://github.com/djm204/frankenbeast/commit/bfc84ee3f4afa95957100635381a1cbc33fe16f7))
+* **orchestrator:** preserve MCP tool HITL metadata ([#552](https://github.com/djm204/frankenbeast/issues/552)) ([2008c70](https://github.com/djm204/frankenbeast/commit/2008c707c9297958c498ba3cc30cb898c1a46018))
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* **publish:** add files allowlist to governor/planner/types so dist actually ships ([#844](https://github.com/djm204/frankenbeast/issues/844)) ([46cb1a1](https://github.com/djm204/frankenbeast/commit/46cb1a1f1517da3cf88d589894fdc30b863b8e99))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+* **types:** add recovery fields to FrankenContext ([#312](https://github.com/djm204/frankenbeast/issues/312)) ([34c251a](https://github.com/djm204/frankenbeast/commit/34c251a62ea1eb054d08105beb1cbf659617698e))
+* **types:** move orchestration contracts to canonical package ([#819](https://github.com/djm204/frankenbeast/issues/819)) ([e2e860e](https://github.com/djm204/frankenbeast/commit/e2e860e5576de1cc091dc3f3b59c9c06cd060fb9)), closes [#374](https://github.com/djm204/frankenbeast/issues/374)
+* **web:** improve approval pending UX ([397aad6](https://github.com/djm204/frankenbeast/commit/397aad66ed038e7329447866e54c327c73952e3b)), closes [#654](https://github.com/djm204/frankenbeast/issues/654)
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+* release main ([50717e2](https://github.com/djm204/frankenbeast/commit/50717e2e2f6bd7c1dcc209e60d1b2cafed6af550))
+* release main ([78d8495](https://github.com/djm204/frankenbeast/commit/78d849528ab990a50b2ed6859d98d10cab92b09f))
+* release main ([48548f3](https://github.com/djm204/frankenbeast/commit/48548f32209176d6d9a1562fdb4725742ecb9515))
+* release main ([1e760f3](https://github.com/djm204/frankenbeast/commit/1e760f3dde475636378bdba15afe4cbc13381239))
+* release main ([d428ecd](https://github.com/djm204/frankenbeast/commit/d428ecd6e627d5c3c48cd0ef98c45a8eeca56d3e))
+* release main ([55f726e](https://github.com/djm204/frankenbeast/commit/55f726e1af6e84f3401fd5ad14f452e7ac727f22))
+* release main ([#309](https://github.com/djm204/frankenbeast/issues/309)) ([9dadfae](https://github.com/djm204/frankenbeast/commit/9dadfae67be6686e3a7962c5fd9e21ed8b6b525b))
+* release main ([#378](https://github.com/djm204/frankenbeast/issues/378)) ([33629c1](https://github.com/djm204/frankenbeast/commit/33629c1b937e63a97fb06fdb32417ac19323b85d))
+* release main ([#448](https://github.com/djm204/frankenbeast/issues/448)) ([8c9934f](https://github.com/djm204/frankenbeast/commit/8c9934f4adbd05b1ebae48081a3b3406746a1bc3))
+* release main ([#524](https://github.com/djm204/frankenbeast/issues/524)) ([0481cad](https://github.com/djm204/frankenbeast/commit/0481cadf1a5cc49b32e01ca6337bc84c6488bb92))
+* release main ([#537](https://github.com/djm204/frankenbeast/issues/537)) ([41d70dd](https://github.com/djm204/frankenbeast/commit/41d70dde60bbbc0983702fc2ebfb63ee0528aa53))
+* release main ([#545](https://github.com/djm204/frankenbeast/issues/545)) ([fb5a692](https://github.com/djm204/frankenbeast/commit/fb5a6920da9e053deba737d88f3c515f7d4ad798))
+* release main ([#554](https://github.com/djm204/frankenbeast/issues/554)) ([660250e](https://github.com/djm204/frankenbeast/commit/660250e5a21616955b05386eea741f17363c9198))
+* release main ([#723](https://github.com/djm204/frankenbeast/issues/723)) ([767f8e2](https://github.com/djm204/frankenbeast/commit/767f8e2d347d1c4757db921e8689170f7fa9a9f1))
+* release main ([#818](https://github.com/djm204/frankenbeast/issues/818)) ([2e22e95](https://github.com/djm204/frankenbeast/commit/2e22e9535df3fb40370c141d40394b99416b31d8))
+
+
+### Documentation
+
+* refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
+
+
+### Tests
+
+* delete 26 fluff test files (~283 tests) identified by audit ([03358d4](https://github.com/djm204/frankenbeast/commit/03358d4cdc745197e48b61855ed77571a37a2939))
+
+## [0.7.6](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.5...franken-types-v0.7.6) (2026-07-06)
+
+
+### Bug Fixes
+
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+* **types:** move orchestration contracts to canonical package ([#819](https://github.com/djm204/frankenbeast/issues/819)) ([e2e860e](https://github.com/djm204/frankenbeast/commit/e2e860e5576de1cc091dc3f3b59c9c06cd060fb9)), closes [#374](https://github.com/djm204/frankenbeast/issues/374)
+
+## [0.7.5](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.4...franken-types-v0.7.5) (2026-07-06)
+
+
+### Bug Fixes
+
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
 ## [0.7.4](https://github.com/djm204/frankenbeast/compare/franken-types-v0.7.3...franken-types-v0.7.4) (2026-07-05)
 
 
@@ -90,8 +187,8 @@
 
 * **main:** release franken-governor 0.4.0 ([c1cb8f3](https://github.com/djm204/frankenbeast/commit/c1cb8f341abc745cf2a94a627e665ef961550433))
 * **main:** release franken-governor 0.4.0 ([c252078](https://github.com/djm204/frankenbeast/commit/c252078a6e951748b06996b54f0ab006283af0b3))
-* **main:** release franken-orchestrator 0.14.0 ([bc15bce](https://github.com/djm204/frankenbeast/commit/bc15bcec9fd1463a3931c43fc5d64e32ecbfe7ea))
-* **main:** release franken-orchestrator 0.14.0 ([967383d](https://github.com/djm204/frankenbeast/commit/967383d73814fc01aa58f623df994130d444c353))
+* **main:** release @franken/orchestrator 0.14.0 ([bc15bce](https://github.com/djm204/frankenbeast/commit/bc15bcec9fd1463a3931c43fc5d64e32ecbfe7ea))
+* **main:** release @franken/orchestrator 0.14.0 ([967383d](https://github.com/djm204/frankenbeast/commit/967383d73814fc01aa58f623df994130d444c353))
 * **main:** release franken-types 0.3.2 ([5d88dcb](https://github.com/djm204/frankenbeast/commit/5d88dcb63d5c43f7a66e79b4fd5c976c795df164))
 * **main:** release franken-types 0.3.2 ([64381db](https://github.com/djm204/frankenbeast/commit/64381db3ca76cd36107dfb5a44e6b8c3a278561f))
 * **main:** release franken-types 0.3.2 ([1f7bb59](https://github.com/djm204/frankenbeast/commit/1f7bb596d6b7b9fbcd8c865365e657a2ea4fb04f))

@@ -21,7 +21,7 @@ The dep-factory (Chunk 8.1) will construct new components and wrap them as adapt
 | BeastLoopDeps Port | Old Implementation | New Implementation |
 |--------------------|-------------------|-------------------|
 | `firewall: IFirewallModule` | `frankenfirewall` package (deleted Phase 1) | `MiddlewareChainFirewallAdapter` — wraps `MiddlewareChain.processRequest()` to satisfy `IFirewallModule.runPipeline()` |
-| `memory: IMemoryModule` | `franken-brain` old API | `SqliteBrainMemoryAdapter` — wraps `SqliteBrain` to satisfy `IMemoryModule.frontload()`/`getContext()`/`recordTrace()` |
+| `memory: IMemoryModule` | `@franken/brain` old API | `SqliteBrainMemoryAdapter` — wraps `SqliteBrain` to satisfy `IMemoryModule.frontload()`/`getContext()`/`recordTrace()` |
 | `heartbeat: IHeartbeatModule` | `franken-heartbeat` package (deleted Phase 1) | `ReflectionHeartbeatAdapter` — wraps `CritiqueChain` with reflection evaluator to satisfy `IHeartbeatModule.pulse()` |
 | `skills: ISkillsModule` | `franken-skills` package (deleted Phase 1) | `SkillManagerAdapter` — wraps `SkillManager` to satisfy `ISkillsModule.hasSkill()`/`execute()`/`getAvailableSkills()` |
 | `mcp: IMcpModule` | `franken-mcp` package (deleted Phase 1) | `McpSdkAdapter` — wraps `@modelcontextprotocol/sdk` client to satisfy `IMcpModule.callTool()`/`getAvailableTools()` |
@@ -263,7 +263,7 @@ The existing `IObserverModule` has `startTrace()`, `startSpan()`, `getTokenSpend
 // packages/franken-orchestrator/src/adapters/audit-observer-adapter.ts
 
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
-import type { AuditTrail } from '@frankenbeast/observer';
+import type { AuditTrail } from '@franken/observer';
 
 export class AuditTrailObserverAdapter implements IObserverModule {
   private spans = new Map<string, { start: number }>();

@@ -5,10 +5,33 @@ import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
 import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
 
+export interface PrCreationRequiredActionErrorOptions {
+  readonly message: string;
+  readonly action: string;
+  readonly branch?: string | undefined;
+  readonly details?: unknown | undefined;
+}
+
+export class PrCreationRequiredActionError extends Error {
+  readonly action: string;
+  readonly branch?: string | undefined;
+  readonly details?: unknown | undefined;
+
+  constructor(options: PrCreationRequiredActionErrorOptions) {
+    super(options.message);
+    this.name = 'PrCreationRequiredActionError';
+    this.action = options.action;
+    this.branch = options.branch;
+    this.details = options.details;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 export interface PrCreatorConfig {
   readonly targetBranch: string;
   readonly disabled: boolean;
   readonly remote: string;
+  readonly disableBranding?: boolean;
 }
 
 export interface PrCreateOptions {
@@ -87,12 +110,17 @@ export class PrCreator {
       targetBranch: config.targetBranch ?? 'main',
       disabled: config.disabled ?? false,
       remote: config.remote ?? 'origin',
+      disableBranding: config.disableBranding ?? false,
     };
     this.exec = exec;
     this.llm = llm;
   }
 
-  async generateCommitMessage(diffStat: string, chunkObjective: string): Promise<string | null> {
+  async generateCommitMessage(
+    diffStat: string,
+    chunkObjective: string,
+    logger?: ILogger,
+  ): Promise<string | null> {
     if (!this.llm) return null;
     try {
       const scope = detectScopeFromDiffStat(diffStat);
@@ -119,13 +147,14 @@ export class PrCreator {
         stablePrefix: 'surface:commit-message',
         workPrefix: chunkObjective,
       });
-      const msg = cleanCommitMessage(raw);
+      const msg = cleanCommitMessage(raw, this.config.disableBranding);
       const subject = msg.split('\n')[0] ?? '';
       if (!CONVENTIONAL_SUBJECT_RE.test(subject)) {
-        return buildFallbackCommitMessage(chunkObjective, scope);
+        return buildFallbackCommitMessage(chunkObjective, scope, this.config.disableBranding);
       }
       return msg;
-    } catch {
+    } catch (error) {
+      logger?.warn('PrCreator: generateCommitMessage failed', formatCaughtError(error));
       return null;
     }
   }
@@ -136,6 +165,7 @@ export class PrCreator {
     result: BeastResult,
     issueNumber?: number,
     cacheWorkId?: string,
+    logger?: ILogger,
   ): Promise<{ title: string; body: string } | null> {
     if (!this.llm) return null;
     try {
@@ -174,8 +204,9 @@ export class PrCreator {
         stablePrefix: 'surface:pr-description',
         workPrefix: issueNumber != null ? `issue:${issueNumber}` : result.projectId,
       });
-      return parsePrDescription(raw);
-    } catch {
+      return parsePrDescription(raw, this.config.disableBranding);
+    } catch (error) {
+      logger?.warn('PrCreator: generatePrDescription failed', formatCaughtError(error));
       return null;
     }
   }
@@ -254,7 +285,7 @@ export class PrCreator {
       body = llmResult.body;
     } else {
       title = buildTitle(result.projectId, outcomes);
-      body = buildBody(result, outcomes, gitContext);
+      body = buildBody(result, outcomes, gitContext, this.config.disableBranding);
     }
 
     // Append issue reference if provided and not already present
@@ -281,7 +312,11 @@ export class PrCreator {
         logger?.warn('PrCreator: gh CLI not installed');
         return null;
       }
-      logger?.error('PrCreator: failed to create PR', this.commandFailure('gh', 'gh pr create', error, { rawCommand: 'gh pr create' }));
+      const failure = this.commandFailure('gh', 'gh pr create', error, { rawCommand: 'gh pr create' });
+      if (isGhAuthFailure(error, failure)) {
+        throw buildGhAuthRequiredAction(branch, failure);
+      }
+      logger?.error('PrCreator: failed to create PR', failure);
       return null;
     }
   }
@@ -320,9 +355,13 @@ export class PrCreator {
         logger?.warn('PrCreator: gh CLI not installed');
         return null;
       }
-      logger?.error('PrCreator: failed to list PRs', this.commandFailure('gh', 'gh pr list', error, {
+      const failure = this.commandFailure('gh', 'gh pr list', error, {
         rawCommand: formatCommand('gh', args),
-      }));
+      });
+      if (isGhAuthFailure(error, failure)) {
+        throw buildGhAuthRequiredAction(branch, failure);
+      }
+      logger?.error('PrCreator: failed to list PRs', failure);
       return null;
     }
   }
@@ -365,8 +404,10 @@ export class PrCreator {
         result,
         issueNumber,
         branch ? `pr:${branch}` : undefined,
+        logger,
       );
-    } catch {
+    } catch (error) {
+      logger?.warn('PrCreator: tryGeneratePrFromLlm failed', formatCaughtError(error));
       return null;
     }
   }
@@ -382,6 +423,13 @@ export class PrCreator {
 
     return { diffStat, logOutput, shortstat: shortstat.trim() };
   }
+}
+
+function formatCaughtError(error: unknown): { error: string; name?: string | undefined } {
+  if (error instanceof Error) {
+    return { error: error.message, name: error.name };
+  }
+  return { error: String(error) };
 }
 
 interface GitContext {
@@ -420,6 +468,7 @@ function buildBody(
   result: BeastResult,
   outcomes: readonly TaskOutcome[],
   gitContext?: GitContext,
+  disableBranding = false,
 ): string {
   const succeeded = outcomes.filter(o => o.status === 'success').length;
   const failed = outcomes.filter(o => o.status === 'failure').length;
@@ -520,8 +569,10 @@ function buildBody(
     }
   }
 
-  lines.push('---');
-  lines.push(BRANDING);
+  if (!disableBranding) {
+    lines.push('---');
+    lines.push(BRANDING);
+  }
 
   return lines.join('\n');
 }
@@ -612,12 +663,56 @@ function isGhMissing(error: unknown): boolean {
   return message.includes('gh: command not found') || message.includes('ENOENT') || message.includes('not found');
 }
 
+const GH_AUTH_FAILURE_RE = /gh auth login|not (?:logged in|authenticated)|authentication (?:required|failed)|requires authentication|bad credentials|http 401|resource not accessible by (?:integration|personal access token)|GitHub Actions is not permitted to create or approve pull requests|to get started with github cli|set the GH_TOKEN environment variable|GH_TOKEN/i;
+
+function isGhAuthFailure(error: unknown, failure: { stdout?: string; stderr?: string }): boolean {
+  const text = [
+    stringifyError(error),
+    failure.stderr ?? '',
+    failure.stdout ?? '',
+    readErrorText((error as { stderr?: unknown }).stderr),
+    readErrorText((error as { stdout?: unknown }).stdout),
+  ].filter(Boolean).join('\n');
+  return GH_AUTH_FAILURE_RE.test(text);
+}
+
+function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreationRequiredActionError {
+  const detailText = [
+    stringifyError(details),
+    readErrorText((details as { stderr?: unknown }).stderr),
+    readErrorText((details as { stdout?: unknown }).stdout),
+    readErrorText((details as { summary?: unknown }).summary),
+  ].filter(Boolean).join('\n');
+  const isActionsTokenFailure = /GH_TOKEN|GitHub Actions workflow/i.test(detailText);
+  const isIntegrationPermissionFailure = /resource not accessible by (?:integration|personal access token)/i.test(detailText);
+  const isActionsPrPermissionFailure = /GitHub Actions is not permitted to create or approve pull requests/i.test(detailText);
+  const action = isActionsTokenFailure || isIntegrationPermissionFailure || isActionsPrPermissionFailure
+    ? 'Set the `GH_TOKEN` environment variable with pull-request permissions, then retry PR creation for the pushed branch.'
+    : 'Run `gh auth login`, then retry PR creation for the pushed branch.';
+  const message = isActionsTokenFailure || isIntegrationPermissionFailure || isActionsPrPermissionFailure
+    ? `PR not created: set \`GH_TOKEN\` with pull-request permissions for GitHub CLI; branch ${branch} is pushed.`
+    : `PR not created: run \`gh auth login\`; branch ${branch} is pushed.`;
+
+  return new PrCreationRequiredActionError({
+    message,
+    action,
+    branch,
+    details,
+  });
+}
+
+function readErrorText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('utf8');
+  return '';
+}
+
 function stringifyError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }
 
-function parsePrDescription(raw: string): { title: string; body: string } | null {
+function parsePrDescription(raw: string, disableBranding = false): { title: string; body: string } | null {
   const titleMatch = raw.match(/^TITLE:\s*(.+)$/m);
   const bodyMatch = raw.match(/^BODY:\s*\n?([\s\S]+)$/m);
   if (!titleMatch || !bodyMatch) return null;
@@ -627,7 +722,7 @@ function parsePrDescription(raw: string): { title: string; body: string } | null
   const body = bodyMatch[1]!.trim();
   if (!body) return null;
 
-  return { title, body: `${body}\n\n${BRANDING}` };
+  return { title, body: disableBranding ? body : `${body}\n\n${BRANDING}` };
 }
 
 const BRANDING = 'made with Frankenbeast 🧟';
@@ -635,10 +730,11 @@ const BRANDING = 'made with Frankenbeast 🧟';
 /** Matches a valid conventional commit subject: type(scope): description */
 const CONVENTIONAL_SUBJECT_RE = /^[a-z]+(\([^)]+\))?: \S/;
 
-function buildFallbackCommitMessage(chunkObjective: string, scope?: string): string {
+function buildFallbackCommitMessage(chunkObjective: string, scope?: string, disableBranding = false): string {
   const slug = chunkObjective.trim().slice(0, 50).replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').toLowerCase();
   const scopePart = scope ? `(${scope})` : '';
-  return `chore${scopePart}: implement ${slug || 'changes'}\n\n${BRANDING}`;
+  const subject = `chore${scopePart}: implement ${slug || 'changes'}`;
+  return disableBranding ? subject : `${subject}\n\n${BRANDING}`;
 }
 
 /**
@@ -665,7 +761,7 @@ function appendIssueRef(body: string, issueNumber: number): string {
   return `${body}\n\nFixes #${issueNumber}`;
 }
 
-function cleanCommitMessage(raw: string): string {
+function cleanCommitMessage(raw: string, disableBranding = false): string {
   let msg = raw.trim();
   // Strip markdown code fences
   msg = msg.replace(/^```[^\n]*\n?/, '').replace(/\n?```\s*$/, '').trim();
@@ -673,5 +769,5 @@ function cleanCommitMessage(raw: string): string {
   const firstLine = msg.split('\n').find(l => l.trim().length > 0) ?? msg;
   // Truncate to 72 chars
   const subject = firstLine.length > 72 ? firstLine.slice(0, 72) : firstLine;
-  return `${subject}\n\n${BRANDING}`;
+  return disableBranding ? subject : `${subject}\n\n${BRANDING}`;
 }

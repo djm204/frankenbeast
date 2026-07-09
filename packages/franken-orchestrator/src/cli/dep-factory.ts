@@ -45,6 +45,7 @@ export interface CliDepOptions {
   provider: string;
   providers?: string[] | undefined;
   providersConfig?: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
+  trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -165,6 +166,7 @@ interface EffectiveCliConfig {
   budget: number;
   branchPattern: string;
   prCreation?: 'auto' | 'manual' | 'disabled' | undefined;
+  disableBranding: boolean;
   mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;
   skills?: string[] | undefined;
   enableTracing: boolean;
@@ -222,6 +224,7 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
     budget: options.budget,
     branchPattern: options.runConfig?.gitConfig?.branchPattern ?? 'feat/',
     prCreation: options.runConfig?.gitConfig?.prCreation,
+    disableBranding: options.runConfig?.gitConfig?.disableBranding ?? false,
     mergeStrategy: options.runConfig?.gitConfig?.mergeStrategy,
     skills: options.runConfig?.skills,
     enableTracing: options.orchestratorConfig?.enableTracing ?? false,
@@ -261,23 +264,57 @@ function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
   };
 }
 
+type CleanupWarningLogger = Pick<BeastLogger, 'warn'> | ((message: string, scope?: string) => void);
+
+type SessionArtifactRemover = (targetPath: string) => void;
+
+function warnSessionArtifactCleanupFailure(
+  artifactPath: string,
+  error: unknown,
+  warn: CleanupWarningLogger,
+): void {
+  const message = `Failed to remove session artifact ${artifactPath}: ${errorMessage(error)}`;
+  if (typeof warn === 'function') {
+    warn(message, 'dep-factory');
+    return;
+  }
+  warn.warn(message, 'dep-factory');
+}
+
+export function removeSessionArtifactIfPresent(
+  artifactPath: string,
+  remove: SessionArtifactRemover,
+  warn: CleanupWarningLogger = console.warn,
+): boolean {
+  try {
+    if (!existsSync(artifactPath)) return false;
+    remove(artifactPath);
+    return true;
+  } catch (error) {
+    warnSessionArtifactCleanupFailure(artifactPath, error, warn);
+    return false;
+  }
+}
+
 function clearSessionArtifacts(options: CliDepOptions, artifacts: SessionArtifacts): void {
   const { paths } = options;
   const checkpointOutputDir = `${artifacts.checkpointFile}.outputs`;
+  const removeFile = (targetPath: string) => unlinkSync(targetPath);
+  const removeDir = (targetPath: string) => rmSync(targetPath, { recursive: true, force: true });
   if (options.reset) {
     const memoryDbPath = resolve(paths.buildDir, 'memory.db');
     for (const f of [artifacts.checkpointFile, paths.tracesDb, memoryDbPath]) {
-      try { if (existsSync(f)) unlinkSync(f); } catch {}
+      removeSessionArtifactIfPresent(f, removeFile);
     }
-    try { if (existsSync(checkpointOutputDir)) rmSync(checkpointOutputDir, { recursive: true, force: true }); } catch {}
+    removeSessionArtifactIfPresent(checkpointOutputDir, removeDir);
     for (const dir of [resolve(paths.buildDir, 'issues'), paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
-      try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
+      removeSessionArtifactIfPresent(dir, removeDir);
     }
   } else if (!options.resume) {
-    try { if (existsSync(artifacts.checkpointFile)) unlinkSync(artifacts.checkpointFile); } catch {}
-    try { if (existsSync(checkpointOutputDir)) rmSync(checkpointOutputDir, { recursive: true, force: true }); } catch {}
+    removeSessionArtifactIfPresent(artifacts.checkpointFile, removeFile);
+    removeSessionArtifactIfPresent(checkpointOutputDir, removeDir);
     for (const dir of [paths.chunkSessionsDir, paths.chunkSessionSnapshotsDir]) {
-      try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch {}
+      removeSessionArtifactIfPresent(dir, removeDir);
     }
   }
 }
@@ -576,12 +613,17 @@ function createCliExecutorDeps(
 ): CliExecutorDeps {
   const prDisabled = options.noPr || config.prCreation === 'disabled';
   const prCreator = prDisabled ? undefined : new PrCreator(
-    { targetBranch: config.baseBranch, disabled: false, remote: 'origin' },
+    {
+      targetBranch: config.baseBranch,
+      disabled: false,
+      remote: 'origin',
+      disableBranding: config.disableBranding,
+    },
     undefined,
     llm.cachedLlm,
   );
   const commitMessageFn = prCreator
-    ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective)
+    ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective, observer.logger)
     : undefined;
 
   const override = options.providersConfig?.[config.provider];
@@ -776,15 +818,24 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const config = resolveEffectiveConfig(options);
-  assertTrustedProviderCommandOverrides(options.providersConfig);
+  const commandOverridePolicy = {
+    allowTrustedCommandOverrides: options.trustProviderCommandOverrides,
+  };
+  assertTrustedProviderCommandOverrides(options.providersConfig, commandOverridePolicy);
   const artifacts = createSessionArtifacts(options);
   clearSessionArtifacts(options, artifacts);
 
   const observer = await createObserverDeps(options, config, artifacts);
-  assertTrustedProviderCommandOverrides(options.providersConfig, { logger: observer.logger });
+  assertTrustedProviderCommandOverrides(options.providersConfig, {
+    ...commandOverridePolicy,
+    logger: observer.logger,
+  });
   assertTrustedProviderCommandOverrideEntries(
     consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders),
-    { logger: observer.logger },
+    {
+      ...commandOverridePolicy,
+      logger: observer.logger,
+    },
   );
   let finalize = createObserverFinalize(observer);
 

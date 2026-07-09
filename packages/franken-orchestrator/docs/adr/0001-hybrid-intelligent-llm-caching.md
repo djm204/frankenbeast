@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`franken-orchestrator` repeatedly sends structurally similar prompts through CLI-backed providers during planning, issue triage, issue decomposition, PR generation, commit-message generation, and chunk-session compaction. That repeated work increases token spend and makes cross-session recovery expensive.
+`@franken/orchestrator` repeatedly sends structurally similar prompts through CLI-backed providers during planning, issue triage, issue decomposition, PR generation, commit-message generation, and chunk-session compaction. That repeated work increases token spend and makes cross-session recovery expensive.
 
 Provider support is uneven:
 

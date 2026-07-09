@@ -4,9 +4,9 @@
 
 **Goal:** Build a recurring real-client benchmark runner that compares Codex CLI and Gemini CLI behavior in baseline mode versus Frankenbeast-enabled mode across a stable, versioned task corpus.
 
-**Architecture:** Add a dedicated workspace package, `@fbeast/live-bench`, above `@fbeast/mcp-suite`; the suite remains the system under test and does not own benchmark orchestration. The package defines versioned corpus files, isolated workspace provisioning, client adapters for real Codex/Gemini processes, deterministic-first scoring, append-only SQLite history, run evidence directories, reports, and gate decisions.
+**Architecture:** Add a dedicated workspace package, `@franken/live-bench`, above `@franken/mcp-suite`; the suite remains the system under test and does not own benchmark orchestration. The package defines versioned corpus files, isolated workspace provisioning, client adapters for real Codex/Gemini processes, deterministic-first scoring, append-only SQLite history, run evidence directories, reports, and gate decisions.
 
-**Tech Stack:** TypeScript, Node `child_process`/`fs`/`path`, `better-sqlite3`, Vitest, existing `@frankenbeast/observer` deterministic evals, real Codex CLI and Gemini CLI binaries.
+**Tech Stack:** TypeScript, Node `child_process`/`fs`/`path`, `better-sqlite3`, Vitest, existing `@franken/observer` deterministic evals, real Codex CLI and Gemini CLI binaries.
 
 ---
 
@@ -27,7 +27,7 @@ Each chunk must have tests, typecheck, and its own commit. Do not add broad real
 
 ---
 
-## Task 1: Create `@fbeast/live-bench` Package Skeleton
+## Task 1: Create `@franken/live-bench` Package Skeleton
 
 **Objective:** Add the benchmark package without changing product runtime packages.
 
@@ -44,7 +44,7 @@ Create `packages/live-bench/package.json`:
 
 ```json
 {
-  "name": "@fbeast/live-bench",
+  "name": "@franken/live-bench",
   "version": "0.1.0",
   "description": "Live Codex/Gemini CLI benchmark runner for Frankenbeast MCP suite A/B comparisons",
   "type": "module",
@@ -61,7 +61,7 @@ Create `packages/live-bench/package.json`:
     "test:live": "FBEAST_LIVE_BENCH_E2E=1 vitest run tests/live"
   },
   "dependencies": {
-    "@frankenbeast/observer": "*",
+    "@franken/observer": "*",
     "better-sqlite3": "^12.6.2",
     "zod": "^3.24.0"
   },
@@ -412,7 +412,7 @@ git commit -m "feat(live-bench): define client adapter harness"
 Tests should assert:
 
 - baseline config contains no fbeast MCP registration or hooks
-- fbeast `proxy` config includes `fbeast-proxy` / `@fbeast/mcp-suite` registration metadata
+- fbeast `proxy` config includes `fbeast-proxy` / `@franken/mcp-suite` registration metadata
 - fbeast `split` config includes separate MCP server entries
 - generated config roots are under the run evidence directory
 
@@ -429,7 +429,7 @@ If exact CLI config paths are uncertain, implement the file plan and leave one t
 
 `fbeast-install.ts` should expose a dry-run-friendly plan:
 
-- npm package spec (`@fbeast/mcp-suite` or local workspace dist)
+- npm package spec (`@franken/mcp-suite` or local workspace dist)
 - topology (`proxy` or `split`)
 - environment variables required
 - generated config files
@@ -489,6 +489,8 @@ Each adapter should:
 **Step 3: Add live tests guarded by env**
 
 `tests/live/*.live.test.ts` should skip unless `FBEAST_LIVE_BENCH_E2E=1` and the required binary exists. Live tests should run a tiny fixture with a short timeout and assert evidence files exist, not exact model output.
+
+The package-local `test:live` target currently discovers checked-in smoke coverage under `packages/live-bench/tests/live/`; keep that directory populated whenever the script remains published, and extend it with the Codex/Gemini adapter live tests as those adapters land.
 
 **Step 4: Verify default suite**
 
@@ -792,7 +794,7 @@ git commit -m "feat(live-bench): add report and gate CLI"
 
 Document:
 
-- product boundary: benchmark runner above `@fbeast/mcp-suite`
+- product boundary: benchmark runner above `@franken/mcp-suite`
 - required CLIs: Codex CLI, Gemini CLI
 - baseline/fbeast fairness rules
 - corpus tiers and task contract
@@ -827,7 +829,7 @@ git commit -m "docs(live-bench): document live CLI benchmark operations"
 
 ## Acceptance Criteria
 
-- The benchmark runner is a dedicated package above `@fbeast/mcp-suite`, not benchmark logic embedded in the suite.
+- The benchmark runner is a dedicated package above `@franken/mcp-suite`, not benchmark logic embedded in the suite.
 - The core corpus is versioned and validates fairness with `baselineSupported`.
 - Baseline runs have no fbeast MCP registration/hooks/runtime setup.
 - Fbeast runs explicitly choose `proxy` or `split` topology.

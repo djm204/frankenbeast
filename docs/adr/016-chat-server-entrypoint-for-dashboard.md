@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-`franken-web` had a dashboard chat UI and `franken-orchestrator` already had HTTP chat routes plus WebSocket transport primitives, but there was no checked-in command that started a real backend for the UI to connect to.
+`franken-web` had a dashboard chat UI and `@franken/orchestrator` already had HTTP chat routes plus WebSocket transport primitives, but there was no checked-in command that started a real backend for the UI to connect to.
 
 That left the web chat in an awkward state:
 
@@ -13,7 +13,7 @@ That left the web chat in an awkward state:
 - web chat risked diverging from `frankenbeast chat` behavior if it grew its own runtime wiring
 
 ## Decision
-Add a first-class `frankenbeast chat-server` subcommand in `franken-orchestrator` and make the dashboard chat use it as its backend surface.
+Add a first-class `frankenbeast chat-server` subcommand in `@franken/orchestrator` and make the dashboard chat use it as its backend surface.
 
 The server entrypoint:
 

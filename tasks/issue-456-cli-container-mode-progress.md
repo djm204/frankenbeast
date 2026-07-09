@@ -14,4 +14,4 @@ Notes:
 - fbeast MCP tools referenced in AGENTS.md are not available in this Hermes session/toolset.
 - #455 may add richer container metadata fields later; this issue should remain logically separate and render those fields defensively if present.
 - Standalone `codex` CLI review was attempted but blocked by `codex doctor`: no Codex credentials found. Used a Codex-model Hermes review loop instead; first pass found two issues, both fixed; second pass returned `No issues found`.
-- Checks passed: `npm --workspace franken-orchestrator test -- tests/unit/cli/args.test.ts tests/unit/cli/beast-cli.test.ts`, `npm run typecheck`, `npm run build`.
+- Checks passed: `npm --workspace @franken/orchestrator test -- tests/unit/cli/args.test.ts tests/unit/cli/beast-cli.test.ts`, `npm run typecheck`, `npm run build`.

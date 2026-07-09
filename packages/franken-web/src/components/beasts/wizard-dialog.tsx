@@ -50,6 +50,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
   const currentStepIsValid = Object.keys(currentValidationErrors).length === 0;
   const formValidationErrors = validateWizardStep(STEP_LABELS.length - 1, stepValues);
   const formIsValid = Object.keys(formValidationErrors).length === 0;
+  const promptFilesLoading = Boolean(stepValues[5]?.filesLoading);
   const stepStatuses = buildStepStatuses(wizardStep, highestCompleted, stepValues);
 
   function syncValidationErrors(step: number, errors: WizardValidationErrors) {
@@ -61,6 +62,14 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
   }
 
   function buildAndLaunch() {
+    if (promptFilesLoading) {
+      setValidationErrors(5, { files: 'Wait for selected files to finish loading before launching.' });
+      if (wizardMode === 'wizard') {
+        setWizardStep(5);
+      }
+      return;
+    }
+
     const firstInvalidStep = getFirstInvalidWizardStep(stepValues);
     if (firstInvalidStep !== null) {
       for (let i = 0; i < STEP_LABELS.length - 1; i += 1) {
@@ -103,10 +112,10 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
     }
   }
 
-  const primaryActionDisabled = Boolean(launching) || !currentStepIsValid;
+  const primaryActionDisabled = Boolean(launching) || promptFilesLoading || !currentStepIsValid;
 
   return (
-    <Dialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog.Root open={isOpen} onOpenChange={(open) => { if (!open && !promptFilesLoading) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/60 z-[70]" />
         <Dialog.Content
@@ -121,6 +130,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               <button
                 type="button"
                 onClick={toggleWizardMode}
+                disabled={promptFilesLoading}
                 aria-label="Toggle form mode"
                 className="text-xs px-4 py-2 rounded-lg border border-beast-border text-beast-muted
                   hover:text-beast-text hover:bg-beast-elevated transition-colors"
@@ -130,6 +140,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               <Dialog.Close asChild>
                 <button
                   type="button"
+                  disabled={promptFilesLoading}
                   className="p-2.5 rounded-lg text-beast-subtle hover:text-beast-text hover:bg-beast-elevated transition-colors"
                   aria-label="Close"
                 >
@@ -148,7 +159,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               currentStep={wizardStep}
               highestCompleted={highestCompleted}
               stepStatuses={stepStatuses}
-              onStepClick={setWizardStep}
+              onStepClick={promptFilesLoading ? () => undefined : setWizardStep}
             />
           )}
 
@@ -176,13 +187,18 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
               aria-atomic="true"
               className="sr-only"
             >
-              {launching ? 'Launching agent. Please wait.' : ''}
+              {launching ? 'Launching agent. Please wait.' : promptFilesLoading ? 'Reading selected files. Please wait.' : ''}
             </div>
             {wizardMode === 'wizard' && !launchError && !currentStepIsValid && (
               <ValidationSummary stepLabel={STEP_LABELS[wizardStep] ?? 'Current step'} errors={currentValidationErrors} />
             )}
             {wizardMode === 'form' && !launchError && !formIsValid && (
               <ValidationSummary stepLabel="Form View" errors={formValidationErrors} />
+            )}
+            {promptFilesLoading && !launchError && (
+              <div role="status" className="px-4 py-3 rounded-lg bg-beast-elevated border border-beast-border text-beast-muted text-sm">
+                Reading selected files… launch will be available when loading finishes.
+              </div>
             )}
             {launchError && (
               <div
@@ -198,7 +214,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
                   <button
                     type="button"
                     onClick={prevStep}
-                    disabled={isFirstStep || launching}
+                    disabled={isFirstStep || launching || promptFilesLoading}
                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-beast-muted hover:text-beast-text
                       hover:bg-beast-elevated border border-beast-border disabled:opacity-50 disabled:cursor-not-allowed
                       transition-colors"
@@ -221,7 +237,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, containerRuntime, laun
                   <button
                     type="button"
                     onClick={buildAndLaunch}
-                    disabled={launching}
+                    disabled={Boolean(launching) || promptFilesLoading}
                     className="px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors
                       bg-beast-accent text-beast-bg hover:bg-beast-accent-strong disabled:opacity-50"
                   >

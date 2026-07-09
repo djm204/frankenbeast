@@ -1,7 +1,7 @@
 # Issue: `--resume` Is Parsed And Documented But Has No Behavior
 
 Severity: medium
-Area: `franken-orchestrator` CLI
+Area: `@franken/orchestrator` CLI
 
 ## Summary
 
@@ -18,9 +18,9 @@ The CLI advertises `--resume`, but the flag is not consumed anywhere after argum
 
 ## Evidence
 
-- `franken-orchestrator/src/cli/args.ts:17-18`
-- `franken-orchestrator/src/cli/args.ts:45-56`
-- `franken-orchestrator/src/cli/args.ts:87-114`
+- `@franken/orchestrator/src/cli/args.ts:17-18`
+- `@franken/orchestrator/src/cli/args.ts:45-56`
+- `@franken/orchestrator/src/cli/args.ts:87-114`
 - `docs/ARCHITECTURE.md:55-56`
 - `docs/RAMP_UP.md:127-128`
 

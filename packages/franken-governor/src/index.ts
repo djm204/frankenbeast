@@ -40,7 +40,7 @@ export type {
 
 export type { ApprovalChannel } from './gateway/index.js';
 export { ApprovalGateway } from './gateway/index.js';
-export type { AuditRecorder, ApprovalGatewayDeps } from './gateway/index.js';
+export type { AuditRecorder, AuditRecordOptions, ApprovalGatewayDeps } from './gateway/index.js';
 export { GovernorCritiqueAdapter } from './gateway/index.js';
 export type {
   BudgetStateSource,
@@ -61,7 +61,7 @@ export { GovernorAuditRecorder } from './audit/index.js';
 export { formatApprovalResponseSignaturePayload, SignatureVerifier } from './security/index.js';
 export type { ApprovalResponseSignaturePayloadFields } from './security/index.js';
 export { createSessionToken, SessionTokenStore } from './security/index.js';
-export type { CreateSessionTokenParams } from './security/index.js';
+export type { CreateSessionTokenParams, SessionTokenStoreOptions } from './security/index.js';
 
 export { CliChannel } from './channels/index.js';
 export type { ReadlineAdapter, CliChannelDeps } from './channels/index.js';

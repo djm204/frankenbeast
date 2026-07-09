@@ -3,6 +3,14 @@ import { SecretResolver } from '../../../src/network/secret-store.js';
 import type { ISecretStore, SecretStoreDetection } from '../../../src/network/secret-store.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
+const TEST_SLACK_SIGNING_SECRET = testCredential('TEST_SLACK_SIGNING_SECRET');
+const TEST_TELEGRAM_BOT_TOKEN = testCredential('TEST_TELEGRAM_BOT_TOKEN');
+const TEST_WHATSAPP_ACCESS_TOKEN = testCredential('TEST_WHATSAPP_ACCESS_TOKEN');
+const TEST_WHATSAPP_APP_SECRET = testCredential('TEST_WHATSAPP_APP_SECRET');
+const TEST_WHATSAPP_VERIFY_TOKEN = testCredential('TEST_WHATSAPP_VERIFY_TOKEN');
 function createInMemoryStore(secrets: Record<string, string>): ISecretStore {
   const data = new Map(Object.entries(secrets));
   return {
@@ -17,10 +25,10 @@ function createInMemoryStore(secrets: Record<string, string>): ISecretStore {
 
 describe('SecretResolver', () => {
   it('resolves a single secret', async () => {
-    const store = createInMemoryStore({ 'comms.slack.botTokenRef': 'xoxb-test' });
+    const store = createInMemoryStore({ 'comms.slack.botTokenRef': TEST_SLACK_BOT_TOKEN });
     const resolver = new SecretResolver(store);
     const value = await resolver.resolve('comms.slack.botTokenRef');
-    expect(value).toBe('xoxb-test');
+    expect(value).toBe(TEST_SLACK_BOT_TOKEN);
   });
 
   it('returns undefined for missing optional secret', async () => {
@@ -33,12 +41,12 @@ describe('SecretResolver', () => {
   it('resolves all secrets from config using config field values as lookup keys', async () => {
     const store = createInMemoryStore({
       'my-operator-key': 'op-token',
-      'my-slack-bot-key': 'xoxb-test',
-      'my-slack-signing-key': 'signing-test',
-      'my-telegram-bot-key': 'telegram-token',
-      'my-wa-access-key': 'wa-access-token',
-      'my-wa-app-key': 'wa-app-secret',
-      'my-wa-verify-key': 'wa-verify-token',
+      'my-slack-bot-key': TEST_SLACK_BOT_TOKEN,
+      'my-slack-signing-key': TEST_SLACK_SIGNING_SECRET,
+      'my-telegram-bot-key': TEST_TELEGRAM_BOT_TOKEN,
+      'my-wa-access-key': TEST_WHATSAPP_ACCESS_TOKEN,
+      'my-wa-app-key': TEST_WHATSAPP_APP_SECRET,
+      'my-wa-verify-key': TEST_WHATSAPP_VERIFY_TOKEN,
     });
     const resolver = new SecretResolver(store);
     const config = defaultConfig();
@@ -57,13 +65,13 @@ describe('SecretResolver', () => {
 
     const resolved = await resolver.resolveAll(config);
     expect(resolved.operatorToken).toBe('op-token');
-    expect(resolved.slackBotToken).toBe('xoxb-test');
-    expect(resolved.slackSigningSecret).toBe('signing-test');
-    expect(resolved.telegramBotToken).toBe('telegram-token');
-    expect(resolved.whatsappAccessToken).toBe('wa-access-token');
+    expect(resolved.slackBotToken).toBe(TEST_SLACK_BOT_TOKEN);
+    expect(resolved.slackSigningSecret).toBe(TEST_SLACK_SIGNING_SECRET);
+    expect(resolved.telegramBotToken).toBe(TEST_TELEGRAM_BOT_TOKEN);
+    expect(resolved.whatsappAccessToken).toBe(TEST_WHATSAPP_ACCESS_TOKEN);
     expect(resolved.whatsappPhoneNumberId).toBe('wa-phone-number-id');
-    expect(resolved.whatsappAppSecret).toBe('wa-app-secret');
-    expect(resolved.whatsappVerifyToken).toBe('wa-verify-token');
+    expect(resolved.whatsappAppSecret).toBe(TEST_WHATSAPP_APP_SECRET);
+    expect(resolved.whatsappVerifyToken).toBe(TEST_WHATSAPP_VERIFY_TOKEN);
   });
 
   it('returns undefined for disabled transport secrets', async () => {

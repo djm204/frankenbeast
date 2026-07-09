@@ -9,6 +9,6 @@
   - [x] Green check: `npm test -- --run src/cli/main.test.ts src/cli/uninstall-entrypoint.test.ts`.
   - [x] `npm run typecheck`.
   - [x] `npm test`.
-  - [x] `npx turbo run build test lint --filter=@fbeast/mcp-suite`.
+  - [x] `npx turbo run build test lint --filter=@franken/mcp-suite`.
 - [ ] Commit only review-comment changes and push `fix/launch-parity-gaps`.
 - [ ] Record final verification evidence.

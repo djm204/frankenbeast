@@ -2,7 +2,7 @@ import type { BeastContext } from '../context/franken-context.js';
 import type { IObserverModule, IHeartbeatModule, ILogger } from '../deps.js';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
-import type { PrCreator } from '../closure/pr-creator.js';
+import { PrCreationRequiredActionError, type PrCreator } from '../closure/pr-creator.js';
 import { NullLogger } from '../logger.js';
 
 /**
@@ -77,7 +77,7 @@ export async function runClosure(
       ? 'completed'
       : 'failed';
 
-  const result: BeastResult = {
+  let result: BeastResult = {
     sessionId: ctx.sessionId,
     projectId: ctx.projectId,
     phase: 'closure',
@@ -94,9 +94,25 @@ export async function runClosure(
     try {
       const pr = await prCreator.create(result, logger);
       if (pr) {
-        (result as any).prUrl = pr.url;
+        result = {
+          ...result,
+          prUrl: pr.url,
+        };
       }
     } catch (error) {
+      if (error instanceof PrCreationRequiredActionError) {
+        logger.warn('Closure: PR creation requires user action', {
+          message: error.message,
+          action: error.action,
+          branch: error.branch,
+        });
+        result = {
+          ...result,
+          status: 'failed',
+          error,
+        };
+        return result;
+      }
       logger.error('Closure: PR creation failed', {
         error: error instanceof Error ? error.message : String(error),
       });

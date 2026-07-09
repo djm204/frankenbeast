@@ -1,11 +1,11 @@
-# @frankenbeast/observer
+# @franken/observer
 
 **MOD-05 of the Frankenbeast system** — the "Flight Data Recorder."
 
 Captures every trace and span your agent executes, monitors token burn in real-time, runs Agent Evals to catch regressions, detects infinite loops, and ships data to Langfuse, Grafana Tempo, Prometheus, or a local SQLite file. Zero mandatory side-effects at import time — nothing starts until you construct it.
 
 ```
-npm install @frankenbeast/observer
+npm install @franken/observer
 ```
 
 **Requirements:** Node.js `>=22.13.0 <23 || >=24.0.0 <26`. The only runtime dependency is `better-sqlite3` (for `SQLiteAdapter`). All other adapters use Node's built-in `fetch`.
@@ -55,7 +55,7 @@ import {
   CircuitBreaker,
   LoopDetector,
   DEFAULT_PRICING,
-} from '@frankenbeast/observer'
+} from '@franken/observer'
 
 // 1. Create a trace for the user's goal
 const trace = TraceContext.createTrace('Research quantum computing papers')
@@ -86,7 +86,7 @@ await db.flush(trace)
 Static object for creating and managing traces and spans.
 
 ```ts
-import { TraceContext } from '@frankenbeast/observer'
+import { TraceContext } from '@franken/observer'
 
 // Create a root trace
 const trace = TraceContext.createTrace('Summarise customer feedback')
@@ -118,7 +118,7 @@ TraceContext.endTrace(trace)
 Enriches active spans with metadata, thought blocks, and token usage.
 
 ```ts
-import { SpanLifecycle } from '@frankenbeast/observer'
+import { SpanLifecycle } from '@franken/observer'
 
 // Attach arbitrary key/value metadata
 SpanLifecycle.setMetadata(span, { tool: 'web-search', query: 'LLM benchmarks' })
@@ -141,7 +141,7 @@ All `SpanLifecycle` methods throw if called on a non-active span.
 ### Core types
 
 ```ts
-import type { Trace, Span, SpanStatus, TraceStatus } from '@frankenbeast/observer'
+import type { Trace, Span, SpanStatus, TraceStatus } from '@franken/observer'
 
 // SpanStatus: 'active' | 'completed' | 'error'
 // TraceStatus: 'active' | 'completed' | 'error'
@@ -156,7 +156,7 @@ import type { Trace, Span, SpanStatus, TraceStatus } from '@frankenbeast/observe
 Accumulates per-model token usage across multiple spans.
 
 ```ts
-import { TokenCounter } from '@frankenbeast/observer'
+import { TokenCounter } from '@franken/observer'
 
 const counter = new TokenCounter()
 
@@ -186,7 +186,7 @@ SpanLifecycle.recordTokenUsage(span, { promptTokens: 500, completionTokens: 200,
 Calculates USD cost from token records using a configurable pricing table.
 
 ```ts
-import { CostCalculator, DEFAULT_PRICING } from '@frankenbeast/observer'
+import { CostCalculator, DEFAULT_PRICING } from '@franken/observer'
 
 const calc = new CostCalculator(DEFAULT_PRICING)
 
@@ -227,7 +227,7 @@ Default pricing (USD, 2025-Q4):
 Non-blocking budget guard. Emits an event when cumulative spend exceeds the limit — never throws, never blocks the agent.
 
 ```ts
-import { CircuitBreaker } from '@frankenbeast/observer'
+import { CircuitBreaker } from '@franken/observer'
 
 const breaker = new CircuitBreaker({ limitUsd: 5.0 })
 
@@ -248,7 +248,7 @@ if (result.tripped) {
 Tracks cost vs success rate per model — useful for comparing models in production.
 
 ```ts
-import { ModelAttribution, DEFAULT_PRICING } from '@frankenbeast/observer'
+import { ModelAttribution, DEFAULT_PRICING } from '@franken/observer'
 
 const attribution = new ModelAttribution(DEFAULT_PRICING)
 
@@ -281,7 +281,7 @@ interface ExportAdapter {
 Zero-dependency, in-process store. Good for tests and prototyping.
 
 ```ts
-import { InMemoryAdapter } from '@frankenbeast/observer'
+import { InMemoryAdapter } from '@franken/observer'
 
 const adapter = new InMemoryAdapter()
 await adapter.flush(trace)
@@ -295,7 +295,7 @@ const allIds    = await adapter.listTraceIds()
 Persists traces to a local `.db` file. Uses WAL mode and transactional span writes. Survives process restarts.
 
 ```ts
-import { SQLiteAdapter } from '@frankenbeast/observer'
+import { SQLiteAdapter } from '@franken/observer'
 
 const adapter = new SQLiteAdapter('./traces.db')
 await adapter.flush(trace)
@@ -325,7 +325,7 @@ await Promise.all([
 Converts a `Trace` to an OpenTelemetry `ResourceSpans` payload.
 
 ```ts
-import { OTELSerializer } from '@frankenbeast/observer'
+import { OTELSerializer } from '@franken/observer'
 
 const payload = OTELSerializer.serializeTrace(trace)
 // → { resourceSpans: [{ resource: {...}, scopeSpans: [{ scope: {...}, spans: [...] }] }] }
@@ -342,7 +342,7 @@ Metadata values are typed as OTEL attributes (`intValue`, `doubleValue`, `string
 Runs any eval safely, catching thrown errors as `fail` results.
 
 ```ts
-import { EvalRunner } from '@frankenbeast/observer'
+import { EvalRunner } from '@franken/observer'
 
 const result  = await EvalRunner.run(myEval, input)
 const results = await EvalRunner.runAll([eval1, eval2, eval3], input)
@@ -365,7 +365,7 @@ const results = await EvalRunner.runAll([eval1, eval2, eval3], input)
 Detects wrong tool names, missing required parameters, and ghost (hallucinated) parameters.
 
 ```ts
-import { ToolCallAccuracyEval, EvalRunner } from '@frankenbeast/observer'
+import { ToolCallAccuracyEval, EvalRunner } from '@franken/observer'
 
 const eval_ = new ToolCallAccuracyEval()
 
@@ -388,7 +388,7 @@ const result = await EvalRunner.run(eval_, {
 Validates generated code or text against a set of Architecture Decision Record (ADR) rules.
 
 ```ts
-import { ArchitecturalAdherenceEval, EvalRunner } from '@frankenbeast/observer'
+import { ArchitecturalAdherenceEval, EvalRunner } from '@franken/observer'
 
 const eval_ = new ArchitecturalAdherenceEval()
 
@@ -415,7 +415,7 @@ const result = await EvalRunner.run(eval_, {
 Regression eval — compares the actual trace's span sequence against a recorded golden fixture. Only span names are compared; latency and token counts are allowed to vary.
 
 ```ts
-import { GoldenTraceEval, EvalRunner } from '@frankenbeast/observer'
+import { GoldenTraceEval, EvalRunner } from '@franken/observer'
 
 const eval_ = new GoldenTraceEval()
 
@@ -441,7 +441,7 @@ const result = await EvalRunner.run(eval_, { actual: trace, golden })
 LLM-as-a-Judge eval with a configurable, mockable judge function.
 
 ```ts
-import { LLMJudgeEval, EvalRunner } from '@frankenbeast/observer'
+import { LLMJudgeEval, EvalRunner } from '@franken/observer'
 import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic()
@@ -482,7 +482,7 @@ const eval_ = new LLMJudgeEval({ name: 'test', buildPrompt: s => s, judge: mockJ
 Detects repeating span-name patterns using a sliding-window comparison. Non-blocking — fires events, never throws.
 
 ```ts
-import { LoopDetector } from '@frankenbeast/observer'
+import { LoopDetector } from '@franken/observer'
 
 const detector = new LoopDetector({
   windowSize: 3,       // spans in one repeating unit
@@ -507,7 +507,7 @@ detector.reset() // clear history between traces
 Delivers `InterruptSignal` objects to registered handlers with error isolation — one broken handler never silences the others.
 
 ```ts
-import { InterruptEmitter } from '@frankenbeast/observer'
+import { InterruptEmitter } from '@franken/observer'
 
 const emitter = new InterruptEmitter()
 
@@ -527,7 +527,7 @@ detector.on('loop-detected', result => {
 Generates a Markdown post-mortem report when a loop is detected.
 
 ```ts
-import { PostMortemGenerator } from '@frankenbeast/observer'
+import { PostMortemGenerator } from '@franken/observer'
 
 const generator = new PostMortemGenerator({ outputDir: './post-mortems' })
 
@@ -536,13 +536,13 @@ const markdown = generator.generateContent(trace, signal)
 
 // Write to disk — returns the file path
 const filePath = await generator.generate(trace, signal)
-// → './post-mortems/post-mortem-<traceId>-<timestamp>.md'
+// → './post-mortems/post-mortem-<sha256-trace-id>-<timestamp>.md'
 ```
 
 **Full incident pipeline:**
 
 ```ts
-import { LoopDetector, InterruptEmitter, PostMortemGenerator, TraceContext } from '@frankenbeast/observer'
+import { LoopDetector, InterruptEmitter, PostMortemGenerator, TraceContext } from '@franken/observer'
 
 const detector  = new LoopDetector()
 const emitter   = new InterruptEmitter()
@@ -576,7 +576,7 @@ All HTTP adapters are **write-only** — `queryByTraceId` returns `null`, `listT
 Posts OTEL payloads to [Langfuse](https://langfuse.com) or a compatible Phoenix instance.
 
 ```ts
-import { LangfuseAdapter } from '@frankenbeast/observer'
+import { LangfuseAdapter } from '@franken/observer'
 
 const adapter = new LangfuseAdapter({
   publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
@@ -593,7 +593,7 @@ await adapter.flush(trace)
 Posts OTEL payloads to [Grafana Tempo](https://grafana.com/oss/tempo/) over OTLP/HTTP.
 
 ```ts
-import { TempoAdapter } from '@frankenbeast/observer'
+import { TempoAdapter } from '@franken/observer'
 
 // Local Tempo / OpenTelemetry Collector
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
@@ -616,7 +616,7 @@ await cloud.flush(trace)
 Accumulates token, span, and cost counters from flushed traces and exposes them in [Prometheus text format](https://prometheus.io/docs/instrumenting/exposition_formats/) via `scrape()`.
 
 ```ts
-import { PrometheusAdapter, DEFAULT_PRICING } from '@frankenbeast/observer'
+import { PrometheusAdapter, DEFAULT_PRICING } from '@franken/observer'
 import http from 'node:http'
 
 const prom = new PrometheusAdapter({ pricingTable: DEFAULT_PRICING })
@@ -651,7 +651,7 @@ prom.reset() // clear accumulators between scrape windows
 `WebhookNotifier` delivers HITL signals (circuit-breaker trips, loop detections) to external systems over HTTP. Any JSON-serialisable payload is accepted.
 
 ```ts
-import { WebhookNotifier, CircuitBreaker, LoopDetector } from '@frankenbeast/observer'
+import { WebhookNotifier, CircuitBreaker, LoopDetector } from '@franken/observer'
 
 const notifier = new WebhookNotifier({
   url: process.env.SLACK_WEBHOOK_URL!,
@@ -683,7 +683,7 @@ detector.on('loop-detected', result => {
 `TraceServer` serves a self-contained HTML trace viewer over a local HTTP server (Node built-ins only, no external dependencies).
 
 ```ts
-import { TraceServer, SQLiteAdapter } from '@frankenbeast/observer'
+import { TraceServer, SQLiteAdapter } from '@franken/observer'
 
 const adapter = new SQLiteAdapter('./traces.db')
 const server  = new TraceServer({ adapter, port: 4040 })
@@ -713,7 +713,7 @@ Works with any `ExportAdapter` — pass an `InMemoryAdapter` for ephemeral sessi
 `generateGrafanaDashboard()` returns a ready-to-import Grafana dashboard JSON covering all three `PrometheusAdapter` metric families.
 
 ```ts
-import { generateGrafanaDashboard } from '@frankenbeast/observer'
+import { generateGrafanaDashboard } from '@franken/observer'
 import { writeFileSync } from 'node:fs'
 
 const dashboard = generateGrafanaDashboard({

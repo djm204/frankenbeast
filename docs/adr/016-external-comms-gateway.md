@@ -27,4 +27,4 @@ Each channel integration MUST implement platform-native request verification at 
 ## Consequences
 - **Positive**: Low-latency, streaming feedback on Slack/Discord; shared business logic in `ConversationEngine`; horizontal scalability of the gateway.
 - **Negative**: Increased architectural complexity (Gateway -> Orchestrator bridge); requires the orchestrator to be reachable by the gateway (via internal or external networking).
-- **Security**: Reduces the attack surface by centralizing webhook verification and PII sanitization (via `franken-brain` downstream) before execution occurs.
+- **Security**: Reduces the attack surface by centralizing webhook verification and PII sanitization (via `@franken/brain` downstream) before execution occurs.

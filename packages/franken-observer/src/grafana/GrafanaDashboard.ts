@@ -87,7 +87,7 @@ export interface GrafanaDashboardOptions {
  * to a `.json` file, then import via Grafana → Dashboards → Import.
  *
  * ```ts
- * import { generateGrafanaDashboard } from '@frankenbeast/observer'
+ * import { generateGrafanaDashboard } from '@franken/observer'
  * import { writeFileSync } from 'node:fs'
  *
  * writeFileSync('dashboard.json', JSON.stringify(generateGrafanaDashboard(), null, 2))

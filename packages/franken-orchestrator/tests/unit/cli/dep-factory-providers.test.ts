@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
-import { OrchestratorConfigSchema } from '../../../src/config/orchestrator-config.js';
+import { parseOrchestratorConfig } from '../../../src/config/orchestrator-config.js';
 import type { CliDepOptions } from '../../../src/cli/dep-factory.js';
 
 // ── Mock heavy dependencies to isolate provider wiring ──
@@ -189,7 +189,7 @@ vi.mock('../../../src/issues/issue-runner.js', () => ({
   IssueRunner: vi.fn(function () {}),
 }));
 
-vi.mock('franken-brain', () => ({
+vi.mock('@franken/brain', () => ({
   MemoryOrchestrator: vi.fn(function () {}),
   EpisodicMemoryStore: vi.fn(function () {}),
   SemanticMemoryStore: vi.fn(function () {}),
@@ -253,6 +253,32 @@ describe('dep-factory provider wiring', () => {
     optionalModuleMocks.governorError = undefined;
     traceViewerMocks.stop.mockClear();
     mockBridgeReplayManifest.length = 0;
+  });
+
+  it('reports session artifact cleanup failures instead of swallowing them', async () => {
+    const { removeSessionArtifactIfPresent } = await import('../../../src/cli/dep-factory.js');
+    const testDir = resolve(tmpdir(), `fb-cleanup-warning-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const artifactPath = resolve(testDir, 'session.checkpoint');
+    const warn = vi.fn();
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(artifactPath, 'checkpoint data');
+
+    try {
+      const removed = removeSessionArtifactIfPresent(
+        artifactPath,
+        () => { throw new Error('permission denied'); },
+        warn,
+      );
+
+      expect(removed).toBe(false);
+      expect(existsSync(artifactPath)).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(`Failed to remove session artifact ${artifactPath}: permission denied`),
+        'dep-factory',
+      );
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('throws descriptive error for unknown provider name', async () => {
@@ -369,6 +395,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
+      trustProviderCommandOverrides: true,
       providersConfig: {
         claude: { command: '/tmp/malicious-shell', trustCommandOverride: true },
       },
@@ -381,6 +408,7 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'claude',
+      trustProviderCommandOverrides: true,
       providersConfig: {
         claude: {
           command: '/usr/local/bin/claude',
@@ -400,7 +428,8 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const { BeastLogger } = await import('../../../src/logging/beast-logger.js');
     const opts = makeOpts({
-      orchestratorConfig: OrchestratorConfigSchema.parse({
+      trustProviderCommandOverrides: true,
+      orchestratorConfig: parseOrchestratorConfig({
         consolidatedProviders: [
           {
             name: 'local-claude',
@@ -410,7 +439,7 @@ describe('dep-factory provider wiring', () => {
             trustedCommandPaths: ['/usr/local/bin/'],
           },
         ],
-      }),
+      }, { allowTrustedProviderCommandOverrides: true }),
     });
 
     await createCliDeps(opts);
@@ -437,6 +466,30 @@ describe('dep-factory provider wiring', () => {
     expect(result.deps.cliExecutor).toBeDefined();
   }, 10_000);
 
+  it('passes the CLI logger into PrCreator commit message generation', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { BeastLogger } = await import('../../../src/logging/beast-logger.js');
+    const { PrCreator } = await import('../../../src/closure/pr-creator.js');
+    const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+
+    await createCliDeps(makeOpts({ noPr: false }));
+
+    const cliExecutorCalls = (CliSkillExecutor as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const commitMessageFn = cliExecutorCalls.at(-1)?.[4] as (diffStat: string, objective: string) => Promise<string | null>;
+    const prCreatorResults = (PrCreator as unknown as { mock: { results: Array<{ value: { generateCommitMessage: ReturnType<typeof vi.fn> } }> } }).mock.results;
+    const prCreator = prCreatorResults.at(-1)?.value;
+    const loggerInstances = (BeastLogger as unknown as { mock: { instances: unknown[] } }).mock.instances;
+    const logger = loggerInstances.at(-1);
+
+    await commitMessageFn(' src/auth.ts | 1 +', 'fix auth');
+
+    expect(prCreator?.generateCommitMessage).toHaveBeenCalledWith(
+      ' src/auth.ts | 1 +',
+      'fix auth',
+      logger,
+    );
+  }, 10_000);
+
   it('wires disabled observer deps to cached LLM when tracing is disabled', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     await createCliDeps(makeOpts({ orchestratorConfig: { enableTracing: false } as never }));
@@ -460,6 +513,7 @@ describe('dep-factory provider wiring', () => {
     const opts = makeOpts({
       provider: 'codex',
       providers: ['codex'],
+      trustProviderCommandOverrides: true,
       providersConfig: {
         codex: {
           command: '/usr/local/bin/codex',

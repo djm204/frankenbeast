@@ -1,6 +1,6 @@
 # franken-governor (MOD-07) Ramp-Up
 
-**Status**: **GHOST** — This module is currently **unwired** from the primary `franken-orchestrator` production path. The orchestrator uses a `stubGovernor` adapter in `dep-factory.ts`.
+**Status**: **GHOST** — This module is currently **unwired** from the primary `@franken/orchestrator` production path. The orchestrator uses a `stubGovernor` adapter in `dep-factory.ts`.
 
 ## Module Overview
 `franken-governor` is the Human-in-the-loop (HITL) gateway. It pauses agent execution for human approval on high-stakes actions, such as budget breaches, destructive commands, or low-confidence plans.
@@ -17,7 +17,7 @@
 - **Security**: HMCS-SHA256 signing for secure approval responses.
 
 ## Integration Gap
-The `franken-orchestrator` currently auto-approves all tasks and budget increases because it uses a no-op governor stub. **Phase 8 Focus**: Wire the `CliChannel` and `BudgetTrigger` into the orchestrator's `runExecution` phase.
+The `@franken/orchestrator` currently auto-approves all tasks and budget increases because it uses a no-op governor stub. **Phase 8 Focus**: Wire the `CliChannel` and `BudgetTrigger` into the orchestrator's `runExecution` phase.
 
 ## Key API
 - `ApprovalGateway`: Central point for requesting approvals.

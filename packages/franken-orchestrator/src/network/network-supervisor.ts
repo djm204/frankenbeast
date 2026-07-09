@@ -192,7 +192,7 @@ export class NetworkSupervisor {
 
         if (preflight.action === 'reuse') {
           const existingService = existingState?.services.find((candidate) => candidate.id === service.id);
-          services.push({
+          const reusedService: ManagedNetworkServiceState = {
             id: existingService?.id ?? service.id,
             pid: existingService?.pid ?? 0,
             detached: existingService?.detached ?? options.detached,
@@ -206,7 +206,11 @@ export class NetworkSupervisor {
             ...(service.runtimeConfig.channels ? { channels: service.runtimeConfig.channels } : existingService?.channels ? { channels: existingService.channels } : {}),
             ...(service.runtimeConfig.hostServiceId ? { hostServiceId: service.runtimeConfig.hostServiceId } : existingService?.hostServiceId ? { hostServiceId: existingService.hostServiceId } : {}),
             ...(existingService?.inProcess ? { inProcess: existingService.inProcess } : {}),
-          });
+          };
+          services.push(reusedService);
+          if (!await this.waitForHealthy(reusedService)) {
+            throw new Error(`Service ${service.id} failed healthcheck during startup`);
+          }
           continue;
         }
 

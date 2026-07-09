@@ -4,11 +4,11 @@
 
 ## Port Interfaces
 
-Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package consolidation there are no standalone firewall (MOD-01), skills (MOD-02), or heartbeat (MOD-08) packages — those capabilities live inside `franken-orchestrator`. The orchestrator's Beast Loop ports (`IFirewallModule`, `ISkillsModule`, `IMemoryModule`, `IPlannerModule`, `IObserverModule`, `ICritiqueModule`, `IGovernorModule`, `IHeartbeatModule`, `IMcpModule`) are all defined in `packages/franken-orchestrator/src/deps.ts`. (`IObservabilityModule` and `IHitlGateway` do not exist; the observer and governor ports are `IObserverModule` and `IGovernorModule`.) The current source imports Zod from `zod`; no separate Zod import-path split is tracked here.
+Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package consolidation there are no standalone firewall (MOD-01), skills (MOD-02), or heartbeat (MOD-08) packages — those capabilities live inside `@franken/orchestrator`. The orchestrator's Beast Loop ports (`IFirewallModule`, `ISkillsModule`, `IMemoryModule`, `IPlannerModule`, `IObserverModule`, `ICritiqueModule`, `IGovernorModule`, `IHeartbeatModule`, `IMcpModule`) are all defined in `packages/franken-orchestrator/src/deps.ts`. (`IObservabilityModule` and `IHitlGateway` do not exist; the observer and governor ports are `IObserverModule` and `IGovernorModule`.) The current source imports Zod from `zod`; no separate Zod import-path split is tracked here.
 
 | Port Interface | Defining Module | Consuming Module(s) | Structural Match? |
 |---|---|---|---|
-| `IAdapter` | Orchestrator (`franken-orchestrator/src/adapters/adapter-llm-client.ts`) | Orchestrator LLM wiring (`CliLlmAdapter`, `AdapterLlmClient`) | Yes |
+| `IAdapter` | Orchestrator (`@franken/orchestrator/src/adapters/adapter-llm-client.ts`) | Orchestrator LLM wiring (`CliLlmAdapter`, `AdapterLlmClient`) | Yes |
 | `ILlmClient` | `@franken/types` (`src/llm.ts`) | Orchestrator planning/closure/adapters | Yes |
 | `IResultLlmClient` | `@franken/types` (`src/llm.ts`) | Result-shaped LLM callers | Yes |
 | `GuardrailsModule` | MOD-04 planner (`src/modules/mod01.ts`) | Firewall-capability impl (orchestrator security middleware) | Needs adapter |
@@ -23,7 +23,7 @@ Module numbers (MOD-01..MOD-08) refer to logical capabilities. Since the package
 | `ApprovalChannel` | MOD-07 governor (`src/gateway/approval-channel.ts`) | `CliChannel` (CLI impl) | Yes |
 | `IFirewallModule` | Orchestrator (`src/deps.ts`) | `MiddlewareChainFirewallAdapter` | Yes — adapter shipped |
 | `ISkillsModule` | Orchestrator (`src/deps.ts`) | `SkillManagerAdapter` | Yes — adapter shipped |
-| `IMemoryModule` | Orchestrator (`src/deps.ts`) | `SqliteBrainMemoryAdapter` (over `franken-brain`) | Yes — adapter shipped |
+| `IMemoryModule` | Orchestrator (`src/deps.ts`) | `SqliteBrainMemoryAdapter` (over `@franken/brain`) | Yes — adapter shipped |
 | `IPlannerModule` | Orchestrator (`src/deps.ts`) | `stubPlanner` in the default local CLI graph-builder path; shipped implementations include `LlmPlanner` and `PlannerPortAdapter` | Stubbed in default CLI graph-builder wiring; adapters shipped |
 | `IObserverModule` | Orchestrator (`src/deps.ts`) | `AuditTrailObserverAdapter` / observer bridge | Yes — adapter shipped |
 | `ICritiqueModule` | Orchestrator (`src/deps.ts`) | `CritiquePortAdapter` (over `@franken/critique`) | Yes — adapter shipped |

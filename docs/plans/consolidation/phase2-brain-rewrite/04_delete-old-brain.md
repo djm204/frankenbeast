@@ -1,6 +1,6 @@
 # Chunk 2.4: Delete Old Brain Code
 
-**Phase:** 2 — Rewrite franken-brain
+**Phase:** 2 — Rewrite @franken/brain
 **Depends on:** Chunks 2.2 + 2.3 (new implementation complete)
 **Estimated size:** Small (deletion + package.json cleanup)
 
@@ -8,7 +8,7 @@
 
 ## Purpose
 
-Remove all existing franken-brain implementation files that are not part of the new design. The old brain is overengineered — the new `SqliteBrain` is ~300 lines and covers all required functionality.
+Remove all existing @franken/brain implementation files that are not part of the new design. The old brain is overengineered — the new `SqliteBrain` is ~300 lines and covers all required functionality.
 
 ## What to Do
 
@@ -83,7 +83,7 @@ npm run build
 npm run typecheck
 ```
 
-Check that no other package imports anything from `franken-brain` that no longer exists.
+Check that no other package imports anything from `@franken/brain` that no longer exists.
 
 ## Files
 

@@ -2,7 +2,7 @@
 
 > Methodology: TDD · Tracer Bullets · Atomic Commits · Logically-grouped PRs
 
-> Status note (2026-06-28): this is a historical implementation plan, not a current status report. Many phases described below have since been implemented. Use `README.md`, `src/index.ts`, package tests, and live `npm --workspace @frankenbeast/observer test` output for current API/status.
+> Status note (2026-06-28): this is a historical implementation plan, not a current status report. Many phases described below have since been implemented. Use `README.md`, `src/index.ts`, package tests, and live `npm --workspace @franken/observer test` output for current API/status.
 
 ---
 

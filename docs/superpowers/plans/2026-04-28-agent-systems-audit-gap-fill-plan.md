@@ -6,7 +6,7 @@
 
 **Architecture:** Land the work in priority order. First close boundary bugs that can be fixed without a new runtime (`chat` HTTP auth, HITL fail-closed behavior, MCP input validation, firewall path containment). Then add an explicit sandbox abstraction with a real Docker/no-network container backend and tighter process defaults. Finally extend observer/orchestrator persistence so replay uses saved LLM/tool inputs and outputs instead of timeline-only summaries.
 
-**Tech Stack:** TypeScript, Hono, Vitest, Node child process APIs, existing SQLite stores, existing Zod usage in `franken-orchestrator`, MCP SDK request handlers, Docker CLI as the first concrete container backend.
+**Tech Stack:** TypeScript, Hono, Vitest, Node child process APIs, existing SQLite stores, existing Zod usage in `@franken/orchestrator`, MCP SDK request handlers, Docker CLI as the first concrete container backend.
 
 ---
 
@@ -139,7 +139,7 @@ Run:
 ```bash
 cd packages/franken-governor
 npm test -- --run tests/unit/gateway/approval-gateway-security.test.ts tests/unit/server/app.test.ts
-cd ../franken-orchestrator
+cd ../@franken/orchestrator
 npm test -- --run tests/unit/cli/run.test.ts tests/integration/cli/dep-factory-wiring.test.ts
 ```
 

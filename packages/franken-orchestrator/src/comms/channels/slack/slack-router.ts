@@ -25,8 +25,17 @@ export function slackRouter(options: SlackRouterOptions) {
 
   // Events API: https://api.slack.com/events-api
   app.post('/events', async (c) => {
-    const body = await c.req.json();
-    const parsed = SlackEventBaseSchema.parse(body);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Malformed Slack payload' }, 400);
+    }
+    const eventPayload = SlackEventBaseSchema.safeParse(body);
+    if (!eventPayload.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    const parsed = eventPayload.data;
 
     // Handle Slack challenge (url_verification)
     if (parsed.type === 'url_verification') {
@@ -75,8 +84,18 @@ export function slackRouter(options: SlackRouterOptions) {
       return c.json({ error: 'Missing payload' }, 400);
     }
 
-    const body = JSON.parse(payloadRaw);
-    const parsed = SlackInteractionSchema.parse(body);
+    let body: unknown;
+    try {
+      body = JSON.parse(payloadRaw);
+    } catch {
+      return c.json({ error: 'Malformed Slack payload' }, 400);
+    }
+
+    const interaction = SlackInteractionSchema.safeParse(body);
+    if (!interaction.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    const parsed = interaction.data;
 
     const sessionId = sessionMapper.mapToSessionId({
       channelType: 'slack',

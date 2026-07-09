@@ -4,7 +4,11 @@ import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { createBeastSseRoutes } from '../../../src/http/routes/beast-sse-routes.js';
 
-const OPERATOR_TOKEN = 'secret-token';
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_SECRET_TOKEN = testCredential('TEST_SECRET_TOKEN');
+const OPERATOR_TOKEN = TEST_SECRET_TOKEN;
+const INVALID_OPERATOR_TOKEN = `${OPERATOR_TOKEN}-invalid`;
 
 function createSseApp(options?: { getSnapshot?: () => Record<string, unknown> }) {
   const bus = new BeastEventBus();
@@ -107,7 +111,7 @@ describe('Beast SSE routes', () => {
 
     const res = await ctx.app.request('/v1/beasts/events/ticket', {
       method: 'POST',
-      headers: { Authorization: 'Bearer wrong-token' },
+      headers: { Authorization: `Bearer ${INVALID_OPERATOR_TOKEN}` },
     });
 
     expect(res.status).toBe(401);

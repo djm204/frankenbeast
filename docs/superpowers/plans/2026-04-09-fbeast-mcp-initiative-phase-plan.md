@@ -4,9 +4,9 @@
 
 **Goal:** Turn `franken-mcp-suite` from solid scaffold into product-complete MCP initiative that matches design spec: real wrappers, working hooks, Beast Mode activation, integration coverage, and coherent install/release story.
 
-**Architecture:** Keep `packages/franken-mcp-suite` as thin MCP transport and install surface. Push domain behavior into adapters that wrap existing franken packages and orchestrator modules instead of local stand-in logic. Do not reimplement core engines that already exist in `franken-brain`, `franken-planner`, `franken-critique`, `franken-governor`, `franken-observer`, or `franken-orchestrator`; only remove MCP-local stand-ins and wire those real modules. Validate each phase with focused unit tests first, then package integration tests, then end-to-end smoke checks around generated Claude config and spawned binaries.
+**Architecture:** Keep `packages/franken-mcp-suite` as thin MCP transport and install surface. Push domain behavior into adapters that wrap existing franken packages and orchestrator modules instead of local stand-in logic. Do not reimplement core engines that already exist in `@franken/brain`, `@franken/planner`, `franken-critique`, `franken-governor`, `franken-observer`, or `@franken/orchestrator`; only remove MCP-local stand-ins and wire those real modules. Validate each phase with focused unit tests first, then package integration tests, then end-to-end smoke checks around generated Claude config and spawned binaries.
 
-**Tech Stack:** TypeScript, npm workspaces, `@modelcontextprotocol/sdk`, `better-sqlite3`, `vitest`, `gh`, franken-brain, franken-planner, franken-critique, franken-governor, franken-observer, franken-orchestrator
+**Tech Stack:** TypeScript, npm workspaces, `@modelcontextprotocol/sdk`, `better-sqlite3`, `vitest`, `gh`, @franken/brain, @franken/planner, franken-critique, franken-governor, franken-observer, @franken/orchestrator
 
 ---
 
@@ -55,9 +55,9 @@
 ### New files to create
 
 - Create: `packages/franken-mcp-suite/src/adapters/brain-adapter.ts`
-  Reason: isolate `franken-brain` integration and DB path translation
+  Reason: isolate `@franken/brain` integration and DB path translation
 - Create: `packages/franken-mcp-suite/src/adapters/planner-adapter.ts`
-  Reason: isolate `franken-planner` DAG generation/validation/export
+  Reason: isolate `@franken/planner` DAG generation/validation/export
 - Create: `packages/franken-mcp-suite/src/adapters/critique-adapter.ts`
   Reason: isolate evaluator wiring and result normalization
 - Create: `packages/franken-mcp-suite/src/adapters/governor-adapter.ts`
@@ -150,7 +150,7 @@ export async function confirmYesNo(
 
 ```ts
 // package.json
-"name": "@fbeast/mcp-suite",
+"name": "@franken/mcp-suite",
 "bin": {
   "fbeast": "./dist/cli/main.js",
   "fbeast-mcp": "./dist/beast.js",
@@ -242,7 +242,7 @@ Expected: FAIL with missing adapters and constructor changes
 
 ```ts
 // brain-adapter.ts
-import { SqliteBrain } from 'franken-brain';
+import { SqliteBrain } from '@franken/brain';
 
 export function createBrainAdapter(dbPath: string) {
   const brain = new SqliteBrain({ dbPath });
@@ -349,7 +349,7 @@ Expected: FAIL with missing adapters and fixed-template assumptions
 
 ```ts
 // planner-adapter.ts
-import { Planner, PlanExporter } from 'franken-planner';
+import { Planner, PlanExporter } from '@franken/planner';
 
 export function createPlannerAdapter() {
   const planner = new Planner();
@@ -451,8 +451,8 @@ Expected: FAIL with missing adapters and missing `fbeast-hook`
 - [ ] **Step 3: Implement adapters over orchestrator middleware and skill manager**
 
 ```ts
-import { MiddlewareFirewallAdapter } from 'franken-orchestrator';
-import { SkillManagerAdapter } from 'franken-orchestrator';
+import { MiddlewareFirewallAdapter } from '@franken/orchestrator';
+import { SkillManagerAdapter } from '@franken/orchestrator';
 
 export function createFirewallAdapter() {
   const firewall = new MiddlewareFirewallAdapter();
@@ -607,7 +607,7 @@ Expected: FAIL until built binaries and harness exist
 ## MCP Mode
 
 ```bash
-npx @fbeast/mcp-suite init --pick --hooks
+npx @franken/mcp-suite init --pick --hooks
 ```
 
 - installs selected MCP servers into `.claude/settings.json`
@@ -670,7 +670,7 @@ git commit -m "docs(mcp-suite): add end-to-end coverage and release readiness up
 
 ## Success Criteria
 
-- `@fbeast/mcp-suite` install story and actual package surface match
+- `@franken/mcp-suite` install story and actual package surface match
 - all 7 MCP servers use real franken/orchestrator integrations
 - `fbeast-hook` exists and works with `--hooks`
 - Beast Mode activation works with provider-risk acknowledgment

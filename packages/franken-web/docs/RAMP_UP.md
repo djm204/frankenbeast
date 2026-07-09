@@ -1,6 +1,6 @@
-# @frankenbeast/web Ramp-Up
+# @franken/web Ramp-Up
 
-**Status**: **INTEGRATED (Frontend)** — This is the primary human-facing dashboard for the Frankenbeast framework. It connects to the `franken-orchestrator` via WebSockets and HTTP.
+**Status**: **INTEGRATED (Frontend)** — This is the primary human-facing dashboard for the Frankenbeast framework. It connects to the `@franken/orchestrator` via WebSockets and HTTP.
 
 ## Module Overview
 A React-based single-page application (SPA) that provides a "Control Plane" for the agent. It allows users to chat with the agent, view live execution traces, manage tracked agents, and monitor system costs.
@@ -13,7 +13,7 @@ A React-based single-page application (SPA) that provides a "Control Plane" for 
 - **Cost Analytics**: View real-time spend across projects and sessions.
 
 ## Integration Details
-- **Backend**: Communicates with the `franken-orchestrator` HTTP server (default port 3737).
+- **Backend**: Communicates with the `@franken/orchestrator` HTTP server (default port 3737).
 - **Authentication**: Uses a shared `FRANKENBEAST_BEAST_OPERATOR_TOKEN` defined in the root `.env`.
 - **Protocol**: Uses standard REST for agent management and WebSockets for the live chat feed.
 

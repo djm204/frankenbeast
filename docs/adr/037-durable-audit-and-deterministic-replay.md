@@ -63,7 +63,7 @@ cd packages/franken-observer
 npm test -- --run src/replay/replay-content-store.test.ts src/replay/deterministic-replayer.test.ts src/audit-trail-store.test.ts src/execution-replayer.test.ts
 npm run typecheck
 
-cd ../franken-orchestrator
+cd ../@franken/orchestrator
 npm test -- --run tests/unit/beast-loop-state-persistence.test.ts tests/unit/beast-loop.test.ts tests/unit/adapters/audit-observer-adapter.test.ts tests/unit/adapters/cli-observer-bridge.test.ts tests/unit/cli/create-beast-deps.test.ts tests/unit/adapters/cli-llm-adapter.test.ts tests/unit/skills/cli-skill-executor.test.ts
 npm run typecheck
 ```

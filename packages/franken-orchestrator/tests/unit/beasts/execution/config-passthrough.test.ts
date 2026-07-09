@@ -23,9 +23,9 @@ describe('Config file passthrough', () => {
   let configFilePaths: string[] = [];
 
   afterEach(async () => {
-    // Clean up any config files written to cwd
+    // Clean up any config files written to cwd; fail loudly if cleanup itself breaks.
     for (const p of configFilePaths) {
-      try { if (existsSync(p)) { const { unlinkSync } = await import('node:fs'); unlinkSync(p); } } catch {}
+      await rm(p, { force: true });
     }
     configFilePaths = [];
     if (workDir) {
@@ -160,7 +160,7 @@ describe('Config file passthrough', () => {
     expect(parsed.modules).toEqual({ firewall: true, skills: false });
   });
 
-  it('round-trip: validates model, maxDurationMs, and skills fields from spec', async () => {
+  it('round-trip: validates model, maxDurationMs, skills, and git branding fields from spec', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'config-passthrough-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -173,6 +173,7 @@ describe('Config file passthrough', () => {
       model: 'claude-sonnet-4-6',
       maxDurationMs: 300_000,
       skills: ['code-review', 'testing'],
+      gitConfig: { disableBranding: true },
     };
 
     const run = repo.createRun({
@@ -198,6 +199,7 @@ describe('Config file passthrough', () => {
     expect(parsed.model).toBe('claude-sonnet-4-6');
     expect(parsed.maxDurationMs).toBe(300_000);
     expect(parsed.skills).toEqual(['code-review', 'testing']);
+    expect(parsed.gitConfig?.disableBranding).toBe(true);
   });
 
   it('cleans up config file after process exits with failure', async () => {

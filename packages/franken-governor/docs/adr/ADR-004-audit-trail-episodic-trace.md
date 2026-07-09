@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Every HITL decision must be logged to franken-brain (MOD-03) for governance and learning. The `MemoryOrchestrator.recordToolResult(trace)` method accepts `EpisodicTrace` records. Approved patterns should be recorded as "Preferred Pattern" and rejections should store the reason to prevent repeat proposals.
+Every HITL decision must be logged to @franken/brain (MOD-03) for governance and learning. The `MemoryOrchestrator.recordToolResult(trace)` method accepts `EpisodicTrace` records. Approved patterns should be recorded as "Preferred Pattern" and rejections should store the reason to prevent repeat proposals.
 
 ## Decision
 

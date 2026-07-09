@@ -1,18 +1,32 @@
-import { cpSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastExecutor, StopOptions } from './beast-executor.js';
-import { createBeastWorktree, removeBeastWorktree, type GitWorktreeIsolationConfig } from './git-worktree-isolation.js';
+import {
+  createBeastWorktree,
+  removeBeastWorktree,
+  type BeastWorktreeAllocation,
+  type GitWorktreeIsolationConfig,
+} from './git-worktree-isolation.js';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
 const STDERR_BUFFER_SIZE = 50;
 const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
+const RUN_CONFIG_DIR_MODE = 0o700;
+const RUN_CONFIG_FILE_MODE = 0o600;
 
-const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhookurl)/i;
+export interface RunConfigSnapshotOwner {
+  readonly uid: number;
+  readonly gid: number;
+}
+
+type RunConfigSnapshotOwnerProvider = () => RunConfigSnapshotOwner | undefined;
+
+const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhook)/i;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -91,6 +105,47 @@ function redactFailureStderrTail(stderrTail: readonly string[], configuredSecret
   return stderrTail.map(line => redactBeastLogLine(line, configuredSecrets));
 }
 
+function redactRunConfigValue(
+  input: unknown,
+  configuredSecrets: readonly string[],
+  path: readonly string[] = [],
+): unknown {
+  if (path.length > 0 && isConfiguredSecretKey(path.join('.'))) {
+    // Non-string scalar config values (e.g. numeric token budgets like
+    // `maxTotalTokens`, which matches the generic `token` key pattern) cannot
+    // carry string secrets and must keep their original type so the spawned
+    // CLI's RunConfigSchema validation still passes. Redact everything else —
+    // strings, objects, and arrays — wholesale. See PR #1064 Codex review.
+    if (input !== null && typeof input !== 'object' && typeof input !== 'string') {
+      return input;
+    }
+    return REDACTED_SECRET;
+  }
+
+  if (typeof input === 'string') {
+    return redactConfiguredSecretValues(input, configuredSecrets);
+  }
+
+  if (Array.isArray(input)) {
+    return input.map(item => redactRunConfigValue(item, configuredSecrets, path));
+  }
+
+  if (!input || typeof input !== 'object') return input;
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    redacted[key] = redactRunConfigValue(value, configuredSecrets, [...path, key]);
+  }
+  return redacted;
+}
+
+function redactRunConfigSnapshot(
+  configSnapshot: Readonly<Record<string, unknown>>,
+  configuredSecrets: readonly string[],
+): Readonly<Record<string, unknown>> {
+  return redactRunConfigValue(configSnapshot, configuredSecrets) as Readonly<Record<string, unknown>>;
+}
+
 function moduleConfigToEnv(config?: ModuleConfig): Record<string, string> {
   if (!config) return {};
   const env: Record<string, string> = {};
@@ -156,6 +211,8 @@ export interface ProcessBeastExecutorOptions {
   eventBus?: BeastEventBus;
   defaultStopTimeoutMs?: number;
   runConfigDir?: string;
+  runConfigRoot?: string;
+  runConfigOwner?: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider;
   transformSpec?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -170,9 +227,78 @@ export interface ProcessBeastExecutorOptions {
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
 }
 
+function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
+  if (!owner) {
+    return;
+  }
+  const currentUid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  if (currentUid === owner.uid) {
+    return;
+  }
+  chownSync(path, owner.uid, owner.gid);
+}
+
+function resolveRunConfigOwner(
+  owner: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider | undefined,
+): RunConfigSnapshotOwner | undefined {
+  return typeof owner === 'function' ? owner() : owner;
+}
+
+function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
+  const root = resolve(rootDir);
+  const target = resolve(configDir);
+  try {
+    const rootStat = lstatSync(root);
+    if (rootStat.isSymbolicLink()) {
+      throw new Error(`Refusing to use symlinked run config root: ${root}`);
+    }
+    if (!rootStat.isDirectory()) {
+      throw new Error(`Run config root is not a directory: ${root}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+    mkdirSync(root, { recursive: true, mode: RUN_CONFIG_DIR_MODE });
+    applyRunConfigOwnership(root, owner);
+    chmodSync(root, RUN_CONFIG_DIR_MODE);
+  }
+
+  const relativeTarget = relative(root, target);
+  const dirs = relativeTarget !== '' && !relativeTarget.startsWith('..') && !isAbsolute(relativeTarget)
+    ? relativeTarget.split(/[\\/]+/).reduce<string[]>((acc, part) => {
+      const parent = acc.at(-1) ?? root;
+      acc.push(join(parent, part));
+      return acc;
+    }, [])
+    : [target];
+
+  for (const dir of dirs) {
+    try {
+      const stat = lstatSync(dir);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Refusing to use symlinked run config directory: ${dir}`);
+      }
+      if (!stat.isDirectory()) {
+        throw new Error(`Run config path is not a directory: ${dir}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      mkdirSync(dir, { mode: RUN_CONFIG_DIR_MODE });
+    }
+    applyRunConfigOwnership(dir, owner);
+    chmodSync(dir, RUN_CONFIG_DIR_MODE);
+  }
+}
+
 export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
-  private readonly configFilePaths = new Map<string, string>();
+  private readonly stoppingAttempts = new Set<string>();
+  private readonly pendingConfigFilePaths = new Map<string, string>();
+  private readonly attemptConfigFilePaths = new Map<string, string>();
+  private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
 
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -192,6 +318,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
           processSpec.cwd,
         )
       : undefined;
+    if (worktree) {
+      this.worktreeAllocations.set(run.id, worktree);
+    }
     const isolatedConfigSnapshot = worktree
       ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
       : run.configSnapshot;
@@ -209,14 +338,20 @@ export class ProcessBeastExecutor implements BeastExecutor {
       : processSpec;
 
     // Write configSnapshot to a JSON file for the spawned process to load
-    const configDir = resolve(
-      this.options.runConfigDir ??
-      join(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd(), '.fbeast', '.build', 'run-configs'),
-    );
-    mkdirSync(configDir, { recursive: true });
+    const runConfigRoot = resolve(this.options.runConfigRoot ?? isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
+    const configDir = resolve(this.options.runConfigDir ?? join(runConfigRoot, '.fbeast', '.build', 'run-configs'));
+    const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
+    ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
     const configFilePath = join(configDir, `${run.id}.json`);
-    writeFileSync(configFilePath, JSON.stringify(isolatedConfigSnapshot, null, 2));
-    this.configFilePaths.set(run.id, configFilePath);
+    try {
+      lstatSync(configFilePath);
+      unlinkSync(configFilePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+    this.pendingConfigFilePaths.set(run.id, configFilePath);
 
     const mergedSpec = {
       ...isolatedSpec,
@@ -234,6 +369,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
       mergedSpec.env,
       spawnedSpec.env,
     );
+    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
+    writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
+    applyRunConfigOwnership(configFilePath, runConfigOwner);
+    chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -309,14 +448,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
 
       // Clean up config file and worktree allocation written before spawn
-      const configPath = this.configFilePaths.get(run.id);
-      if (configPath) {
-        try { unlinkSync(configPath); } catch { /* already removed */ }
-        this.configFilePaths.delete(run.id);
-      }
-      if (worktree?.created) {
-        try { removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit); } catch { /* best effort */ }
-      }
+      this.cleanupRunResources(run.id);
 
       this.options.eventBus?.publish({
         type: 'run.status',
@@ -349,6 +481,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
           : {}),
       },
     });
+
+    // Once an attempt owns the worktree, preserve it for PR/merge or debugging per ADR-028.
+    // The pending allocation map is only for pre-attempt spawn failures.
+    this.worktreeAllocations.delete(run.id);
+    this.pendingConfigFilePaths.delete(run.id);
+    this.attemptConfigFilePaths.set(attempt.id, configFilePath);
 
     attemptId = attempt.id;
 
@@ -410,15 +548,22 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async stop(runId: string, attemptId: string, options?: StopOptions): Promise<BeastRunAttempt> {
     const attempt = this.requireAttempt(attemptId);
     if (attempt.pid !== undefined) {
-      await this.supervisor.stop(attempt.pid);
+      const timeoutMs = options?.timeoutMs ?? this.options.defaultStopTimeoutMs ?? 10_000;
+      const pid = attempt.pid;
+      const exitPromise = new Promise<boolean>((resolve) => {
+        this.exitPromises.set(attemptId, { resolve: () => resolve(true) });
+      });
+
+      this.stoppingAttempts.add(attemptId);
+      try {
+        await this.supervisor.stop(attempt.pid);
+      } catch (error) {
+        this.exitPromises.delete(attemptId);
+        this.stoppingAttempts.delete(attemptId);
+        throw error;
+      }
 
       {
-        const timeoutMs = options?.timeoutMs ?? this.options.defaultStopTimeoutMs ?? 10_000;
-        const pid = attempt.pid;
-        const exitPromise = new Promise<boolean>((resolve) => {
-          this.exitPromises.set(attemptId, { resolve: () => resolve(true) });
-        });
-
         let timer: ReturnType<typeof setTimeout>;
         const timeoutPromise = new Promise<boolean>((resolve) => {
           timer = setTimeout(() => resolve(false), timeoutMs);
@@ -429,15 +574,17 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
         if (!exited && this.exitPromises.has(attemptId)) {
           this.exitPromises.delete(attemptId);
+          this.stoppingAttempts.delete(attemptId);
           await this.supervisor.kill(pid);
         }
 
-        // If process exited naturally, handleProcessExit already updated status — don't overwrite
+        // If process exited after an operator stop, handleProcessExit already updated status — don't overwrite
         if (exited) {
           return this.repository.getAttempt(attemptId) ?? attempt;
         }
       }
     }
+    this.stoppingAttempts.delete(attemptId);
     return this.finishAttempt(runId, attempt, 'stopped', 'operator_stop');
   }
 
@@ -466,16 +613,23 @@ export class ProcessBeastExecutor implements BeastExecutor {
         this.exitPromises.delete(attemptId);
         exitEntry.resolve();
       }
-      // Still clean up config file
-      const configPath = this.configFilePaths.get(runId);
-      if (configPath) {
-        try { unlinkSync(configPath); } catch { /* already removed */ }
-        this.configFilePaths.delete(runId);
-      }
+      // Still clean up this attempt's config file; completed/failed worktrees are preserved for PRs/debugging.
+      this.cleanupAttemptConfig(attemptId);
       return;
     }
 
     const status: BeastRunStatus = code === 0 ? 'completed' : 'failed';
+    if (this.stoppingAttempts.delete(attemptId)) {
+      this.finishAttempt(runId, currentAttempt ?? this.requireAttempt(attemptId), 'stopped', 'operator_stop');
+      const exitEntry = this.exitPromises.get(attemptId);
+      if (exitEntry) {
+        this.exitPromises.delete(attemptId);
+        exitEntry.resolve();
+      }
+      this.cleanupAttemptConfig(attemptId);
+      return;
+    }
+
     const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : code != null ? `exit_code_${code}` : 'unknown_exit';
     const finishedAt = new Date().toISOString();
 
@@ -522,12 +676,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       exitEntry.resolve();
     }
 
-    // Clean up config file
-    const configPath = this.configFilePaths.get(runId);
-    if (configPath) {
-      try { unlinkSync(configPath); } catch { /* already removed */ }
-      this.configFilePaths.delete(runId);
-    }
+    this.cleanupAttemptConfig(attemptId);
 
     this.options.eventBus?.publish({
       type: 'run.status',
@@ -543,6 +692,36 @@ export class ProcessBeastExecutor implements BeastExecutor {
       throw new Error(`Unknown Beast attempt: ${attemptId}`);
     }
     return attempt;
+  }
+
+  private cleanupRunResources(runId: string): void {
+    this.cleanupPendingRunConfig(runId);
+
+    const worktree = this.worktreeAllocations.get(runId);
+    if (worktree) {
+      try {
+        if (worktree.created) {
+          removeBeastWorktree(worktree, this.options.worktreeIsolation?.runGit);
+        }
+      } catch { /* best effort */ }
+      finally { this.worktreeAllocations.delete(runId); }
+    }
+  }
+
+  private cleanupPendingRunConfig(runId: string): void {
+    const configPath = this.pendingConfigFilePaths.get(runId);
+    if (configPath) {
+      try { unlinkSync(configPath); } catch { /* already removed */ }
+      this.pendingConfigFilePaths.delete(runId);
+    }
+  }
+
+  private cleanupAttemptConfig(attemptId: string): void {
+    const configPath = this.attemptConfigFilePaths.get(attemptId);
+    if (configPath) {
+      try { unlinkSync(configPath); } catch { /* already removed */ }
+      this.attemptConfigFilePaths.delete(attemptId);
+    }
   }
 
   private finishAttempt(
@@ -578,6 +757,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
       type: 'run.log',
       data: { runId, attemptId: attempt.id, stream: 'stderr', line: stopReason, createdAt: finishedAt },
     });
+
+    this.cleanupAttemptConfig(attempt.id);
 
     this.options.eventBus?.publish({
       type: 'run.status',

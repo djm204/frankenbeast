@@ -35,7 +35,7 @@ Add `lastStderrLines: this.stderrRingBuffer.getLines()` (or equivalent) to the `
 
 Run the specific test:
 ```bash
-npx turbo run test --filter=franken-orchestrator -- --grep "agent-failure-flow"
+npx turbo run test --filter=@franken/orchestrator -- --grep "agent-failure-flow"
 ```
 
 Then run the full suite:

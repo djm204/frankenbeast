@@ -1,6 +1,6 @@
 {
   "name": "@franken/types",
-  "version": "0.7.4",
+  "version": "0.8.1",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,8 +8,15 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./path-containment": {
+      "import": "./dist/path-containment.js",
+      "types": "./dist/path-containment.d.ts"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -27,5 +34,6 @@
   },
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
-  }
+  },
+  "license": "MIT"
 }

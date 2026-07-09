@@ -1,4 +1,4 @@
-// @frankenbeast/observer — public API
+// @franken/observer — public API
 
 export { TraceContext } from './core/TraceContext.js'
 export { SpanLifecycle } from './core/SpanLifecycle.js'
@@ -47,6 +47,7 @@ export type { LoopDetectionResult, LoopDetectorOptions } from './incident/LoopDe
 export type { InterruptSignal } from './incident/InterruptEmitter.js'
 export type { PostMortemOptions } from './incident/PostMortemGenerator.js'
 export type { LangfuseAdapterOptions, FetchFn } from './adapters/langfuse/LangfuseAdapter.js'
+export type { SQLiteAdapterOptions } from './adapters/sqlite/SQLiteAdapter.js'
 export type { PrometheusAdapterOptions } from './adapters/prometheus/PrometheusAdapter.js'
 export type { TempoAdapterOptions, TempoBasicAuth } from './adapters/tempo/TempoAdapter.js'
 export type { WebhookNotifierOptions, WebhookRetryOptions } from './notify/WebhookNotifier.js'

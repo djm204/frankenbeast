@@ -1,7 +1,7 @@
 # Issue: CLI Config Surface Is Not Applied End-to-End
 
 Severity: high
-Area: `franken-orchestrator` CLI
+Area: `@franken/orchestrator` CLI
 
 ## Summary
 
@@ -21,12 +21,12 @@ The CLI loads and stores orchestrator config, but execution does not actually ap
 
 ## Evidence
 
-- `franken-orchestrator/src/cli/run.ts:120-141`
-- `franken-orchestrator/src/cli/session.ts:21-51`
-- `franken-orchestrator/src/cli/session.ts:239-242`
-- `franken-orchestrator/src/cli/args.ts:96-114`
-- `franken-orchestrator/src/cli/dep-factory.ts:129-160`
-- `franken-orchestrator/src/config/orchestrator-config.ts:18-39`
+- `@franken/orchestrator/src/cli/run.ts:120-141`
+- `@franken/orchestrator/src/cli/session.ts:21-51`
+- `@franken/orchestrator/src/cli/session.ts:239-242`
+- `@franken/orchestrator/src/cli/args.ts:96-114`
+- `@franken/orchestrator/src/cli/dep-factory.ts:129-160`
+- `@franken/orchestrator/src/config/orchestrator-config.ts:18-39`
 
 ## Impact
 

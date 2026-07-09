@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { OrchestratorConfigSchema, type OrchestratorConfig } from '../config/orchestrator-config.js';
+import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
 
@@ -61,12 +61,50 @@ function deepMerge<T extends Record<string, unknown>>(...layers: Array<Partial<T
   return result as Partial<T>;
 }
 
+function removeTrustFields(value: unknown): void {
+  if (!isRecord(value)) return;
+
+  delete value['trustCommandOverride'];
+  delete value['trustedCommandPaths'];
+}
+
+/**
+ * Repository-local config is an untrusted input from the checked-out project.
+ * It may request provider command overrides, but it must not be able to
+ * self-approve them by also supplying the trust gate fields. Operators can
+ * still opt in deliberately by passing an explicit --config file.
+ */
+function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig>): Partial<OrchestratorConfig> {
+  const sanitized = JSON.parse(JSON.stringify(fileConfig)) as Partial<OrchestratorConfig>;
+  const root = sanitized as Record<string, unknown>;
+
+  const providers = root['providers'];
+  if (isRecord(providers) && isRecord(providers['overrides'])) {
+    for (const override of Object.values(providers['overrides'])) {
+      removeTrustFields(override);
+    }
+  }
+
+  const consolidatedProviders = root['consolidatedProviders'];
+  if (Array.isArray(consolidatedProviders)) {
+    for (const provider of consolidatedProviders) {
+      removeTrustFields(provider);
+    }
+  }
+
+  return sanitized;
+}
+
 /** Extract config overrides from CLI args. */
 function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
   const cli: Partial<OrchestratorConfig> = {};
 
   if (args.verbose) {
     cli.enableTracing = true;
+  }
+
+  if (args.initBackend) {
+    cli.network = { secureBackend: args.initBackend } as Partial<OrchestratorConfig['network']> as OrchestratorConfig['network'];
   }
 
   return cli;
@@ -82,6 +120,9 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
   if (configPath) {
     try {
       fileConfig = await fromFile(configPath);
+      if (!args.config && !args.trustProviderCommandOverrides) {
+        fileConfig = stripRepositoryLocalCommandTrust(fileConfig);
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || args.config) {
         throw error;
@@ -102,5 +143,7 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
     merged = applyNetworkConfigSets(merged, args.networkSet);
   }
 
-  return OrchestratorConfigSchema.parse(merged);
+  return parseOrchestratorConfig(merged, {
+    allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+  });
 }

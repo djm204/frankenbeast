@@ -27,8 +27,17 @@ export function telegramRouter(options: TelegramRouterOptions) {
     if (!isTelegramSecretTokenValid(c.req.header(TELEGRAM_SECRET_TOKEN_HEADER), webhookSecretToken)) {
       return c.json({ error: 'Not found' }, 404);
     }
-    const body = await c.req.json();
-    const update = TelegramUpdateSchema.parse(body);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Malformed Telegram payload' }, 400);
+    }
+    const updatePayload = TelegramUpdateSchema.safeParse(body);
+    if (!updatePayload.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    const update = updatePayload.data;
 
     // 1. Handle incoming message
     if (update.message?.text) {

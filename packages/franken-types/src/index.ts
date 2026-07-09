@@ -43,6 +43,9 @@ export { makeTokenSpend } from './token.js';
 // Context
 export type { FrankenContext } from './context.js';
 
+// Core orchestration contracts
+export type { BeastPhase, BeastInput, BeastResult, TaskOutcome } from './orchestration.js';
+
 // Comms
 export * from './comms.js';
 
@@ -92,6 +95,7 @@ export {
 
 // Web/API contract DTOs
 export * from './api-contracts.js';
+
 
 // Skill schemas
 export type { McpConfig, SkillInfo, SkillToolManifest } from './skill.js';

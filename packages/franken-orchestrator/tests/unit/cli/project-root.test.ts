@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
+import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 
 describe('project-root', () => {
   const testDir = resolve(tmpdir(), 'fb-test-project-root');
@@ -56,6 +56,7 @@ describe('project-root', () => {
       expect(paths.designDocFile).toBe(resolve(testDir, '.fbeast/plans/design.md'));
       expect(paths.llmResponseFile).toBe(resolve(testDir, '.fbeast/plans/llm-response.json'));
       expect(paths.configFile).toBe(resolve(testDir, '.fbeast/config.json'));
+      expect(paths.activePlanFile).toBe(resolve(testDir, '.fbeast/active-plan'));
     });
 
     it('scopes plans dir by plan name when provided', () => {
@@ -87,6 +88,28 @@ describe('project-root', () => {
     it('falls back to date-based name when no path provided', () => {
       const name = generatePlanName();
       expect(name).toMatch(/^plan-\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  describe('active plan pointer', () => {
+    it('persists and reads the active plan name for implicit follow-up commands', () => {
+      const paths = getProjectPaths(testDir, 'plan-2026-03-07');
+
+      writeActivePlanName(paths, 'plan-2026-03-07');
+
+      expect(readActivePlanName(testDir)).toBe('plan-2026-03-07');
+    });
+
+    it('ignores absent or unsafe active plan pointers', () => {
+      expect(readActivePlanName(testDir)).toBeUndefined();
+
+      const paths = getProjectPaths(testDir, 'plan-2026-03-07');
+      writeActivePlanName(paths, '../outside');
+      expect(readActivePlanName(testDir)).toBeUndefined();
+
+      mkdirSync(paths.frankenbeastDir, { recursive: true });
+      writeFileSync(paths.activePlanFile, '/tmp/outside\n');
+      expect(readActivePlanName(testDir)).toBeUndefined();
     });
   });
 

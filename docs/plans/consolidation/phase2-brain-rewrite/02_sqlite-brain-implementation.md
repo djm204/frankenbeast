@@ -1,6 +1,6 @@
 # Chunk 2.2: SqliteBrain Implementation
 
-**Phase:** 2 — Rewrite franken-brain
+**Phase:** 2 — Rewrite @franken/brain
 **Depends on:** Chunk 2.1 (brain interfaces in franken-types)
 **Estimated size:** Medium (~200 lines implementation + ~200 lines tests)
 

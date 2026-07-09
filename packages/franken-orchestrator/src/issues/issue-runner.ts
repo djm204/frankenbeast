@@ -355,6 +355,7 @@ export class IssueRunner {
         status,
         tokensUsed,
         prUrl,
+        error: result.error?.message,
       };
     } catch (err) {
       appendIssueLog(logFile, `Issue #${issue.number} failed: ${err instanceof Error ? err.message : String(err)}`);

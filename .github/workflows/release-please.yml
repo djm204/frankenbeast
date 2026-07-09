@@ -20,13 +20,22 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Enable packageManager-pinned npm
+        run: |
+          corepack enable npm
+          corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+
+      - name: Verify npm matches packageManager
+        run: node scripts/check-package-manager.mjs
+
       - run: npm ci
 
       - name: Validate release before creating tags
         run: |
-          npm run test:root -- tests/workspaces.test.ts tests/unit/release-please-config.test.ts tests/unit/ci-workflow.test.ts
+          npm run test:root -- tests/workspaces.test.ts tests/unit/release-please-config.test.ts tests/unit/ci-workflow.test.ts tests/unit/web-dev-server-dependency-policy.test.ts
           npm run lint:security
-          npx turbo run build typecheck test lint
+          npx turbo run build typecheck lint
+          npx turbo run test
 
   release-please:
     needs: validate-release
@@ -91,6 +100,14 @@ jobs:
           node-version: '22'
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: Enable packageManager-pinned npm
+        run: |
+          corepack enable npm
+          corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+
+      - name: Verify npm matches packageManager
+        run: node scripts/check-package-manager.mjs
 
       - run: npm ci
 

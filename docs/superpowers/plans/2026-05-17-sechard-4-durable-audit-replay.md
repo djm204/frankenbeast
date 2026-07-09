@@ -4,7 +4,7 @@
 
 **Goal:** Persist hash-addressed replay records for LLM/tool calls and persist the Beast phase state machine after every phase, so a run can be deterministically replayed and resumed from durable state rather than in-memory timeline analysis.
 
-**Architecture:** Add a content-addressed blob store and versioned replay record types in `franken-observer`, persisted next to existing audit trails. Add a deterministic replay path that consumes saved records and verifies hashes. In `franken-orchestrator`, capture LLM/tool inputs/outputs through the audit observer adapter, and snapshot the `BeastContext` phase FSM after each phase to `.fbeast/state/<runId>.jsonl`. Structurally independent of Chunks 1–3; sequence last.
+**Architecture:** Add a content-addressed blob store and versioned replay record types in `franken-observer`, persisted next to existing audit trails. Add a deterministic replay path that consumes saved records and verifies hashes. In `@franken/orchestrator`, capture LLM/tool inputs/outputs through the audit observer adapter, and snapshot the `BeastContext` phase FSM after each phase to `.fbeast/state/<runId>.jsonl`. Structurally independent of Chunks 1–3; sequence last.
 
 **Tech Stack:** TypeScript, Node `crypto` (sha256), Node `fs`, existing `AuditTrailStore`/`ExecutionReplayer`/`BeastContext`, Vitest.
 
@@ -28,7 +28,7 @@
 - Modify `packages/franken-orchestrator/src/adapters/audit-observer-adapter.ts`, `src/adapters/cli-llm-adapter.ts`, `src/skills/cli-skill-executor.ts` — emit replay records.
 - Create `packages/franken-orchestrator/src/context/state-snapshot-store.ts` — `.fbeast/state/<runId>.jsonl` appender.
 - Modify `packages/franken-orchestrator/src/beast-loop.ts`, `src/context/franken-context.ts` — snapshot after each phase.
-- Tests: `franken-observer/src/replay/replay-content-store.test.ts`, `…/deterministic-replayer.test.ts`; `franken-orchestrator/tests/unit/beast-loop-state-persistence.test.ts`, plus modified adapter/skill tests.
+- Tests: `franken-observer/src/replay/replay-content-store.test.ts`, `…/deterministic-replayer.test.ts`; `@franken/orchestrator/tests/unit/beast-loop-state-persistence.test.ts`, plus modified adapter/skill tests.
 
 ---
 
@@ -391,7 +391,7 @@ Map Pillar-2 gaps: "Replay is timeline analysis, not deterministic execution rep
 
 ```bash
 cd packages/franken-observer && npm test -- --run src/replay/replay-content-store.test.ts src/replay/deterministic-replayer.test.ts src/audit-trail-store.test.ts src/execution-replayer.test.ts && npm run typecheck
-cd ../franken-orchestrator && npm test -- --run tests/unit/beast-loop-state-persistence.test.ts tests/unit/beast-loop.test.ts tests/unit/adapters/cli-llm-adapter.test.ts tests/unit/skills/cli-skill-executor.test.ts && npm run typecheck
+cd ../@franken/orchestrator && npm test -- --run tests/unit/beast-loop-state-persistence.test.ts tests/unit/beast-loop.test.ts tests/unit/adapters/cli-llm-adapter.test.ts tests/unit/skills/cli-skill-executor.test.ts && npm run typecheck
 ```
 Expected: all exit `0`.
 

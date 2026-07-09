@@ -1,6 +1,6 @@
 {
-  "name": "@fbeast/mcp-suite",
-  "version": "0.1.0",
+  "name": "@franken/mcp-suite",
+  "version": "0.2.4",
   "description": "MCP server suite exposing frankenbeast capabilities as Claude Code tools",
   "type": "module",
   "main": "dist/index.js",
@@ -36,13 +36,13 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "0.7.4",
-    "franken-brain": "0.6.5",
-    "@franken/critique": "0.6.9",
-    "@franken/governor": "0.5.7",
-    "@frankenbeast/observer": "0.7.9",
-    "franken-orchestrator": "0.39.0",
-    "franken-planner": "0.4.7",
+    "@franken/types": "0.8.1",
+    "@franken/brain": "0.7.3",
+    "@franken/critique": "0.6.14",
+    "@franken/governor": "0.5.12",
+    "@franken/observer": "0.7.14",
+    "@franken/orchestrator": "0.42.0",
+    "@franken/planner": "0.4.12",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.6.2"
   },
@@ -55,5 +55,6 @@
   },
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
-  }
+  },
+  "license": "MIT"
 }

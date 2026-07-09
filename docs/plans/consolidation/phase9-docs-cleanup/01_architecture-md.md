@@ -20,13 +20,13 @@ The existing ARCHITECTURE.md describes the 13-package layout with packages that 
 
 ```mermaid
 graph TD
-    CLI["CLI (frankenbeast)"] --> Orchestrator["franken-orchestrator"]
+    CLI["CLI (frankenbeast)"] --> Orchestrator["@franken/orchestrator"]
     Dashboard["franken-web"] --> Orchestrator
     Orchestrator --> ProviderRegistry["ProviderRegistry"]
-    Orchestrator --> Brain["franken-brain (SqliteBrain)"]
+    Orchestrator --> Brain["@franken/brain (SqliteBrain)"]
     Orchestrator --> Skills["SkillManager"]
     Orchestrator --> Security["LlmMiddleware"]
-    Orchestrator --> Planner["franken-planner"]
+    Orchestrator --> Planner["@franken/planner"]
     Orchestrator --> Critique["franken-critique"]
     Orchestrator --> Observer["franken-observer (AuditTrail)"]
     Orchestrator --> Governor["franken-governor"]
@@ -42,13 +42,13 @@ graph TD
 ```
 packages/
 ├── franken-types/           # Shared type definitions + Zod schemas
-├── franken-brain/           # SQLite-based memory (working, episodic, recovery)
-├── franken-planner/         # DAG planning
+├── @franken/brain/           # SQLite-based memory (working, episodic, recovery)
+├── @franken/planner/         # DAG planning
 ├── franken-observer/        # Audit trail + execution replay
 ├── franken-critique/        # Self-critique + ReflectionEvaluator
 ├── franken-governor/        # HITL governance
 ├── franken-web/             # Dashboard (simple/advanced modes)
-└── franken-orchestrator/    # Beast Loop, CLI, providers, skills, security
+└── @franken/orchestrator/    # Beast Loop, CLI, providers, skills, security
 ```
 
 Each package gets a brief description of its role, public API surface, and key types.

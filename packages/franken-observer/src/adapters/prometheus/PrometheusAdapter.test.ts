@@ -24,6 +24,47 @@ function makeTraceNoModel() {
   return trace
 }
 
+function makeTraceWithMetadata(metadata: Record<string, unknown>) {
+  const trace = TraceContext.createTrace('metadata')
+  const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+  SpanLifecycle.setMetadata(span, metadata)
+  TraceContext.endSpan(span)
+  TraceContext.endTrace(trace)
+  return trace
+}
+
+function makeTraceWithTwoMetadataSpans(...metadataEntries: Record<string, unknown>[]) {
+  const trace = TraceContext.createTrace('metadata-batch')
+  for (const metadata of metadataEntries) {
+    const span = TraceContext.startSpan(trace, { name: 'llm-call' })
+    SpanLifecycle.setMetadata(span, metadata)
+    TraceContext.endSpan(span)
+  }
+  TraceContext.endTrace(trace)
+  return trace
+}
+
+function expectNoInvalidPrometheusNumbers(out: string) {
+  expect(out).not.toMatch(/\s(?:NaN|Infinity|-Infinity)(?:\n|$)/)
+  expect(out).not.toMatch(/franken_observer_tokens_total\{[^}]+\}\s+-/)
+  expect(out).not.toMatch(/franken_observer_cost_usd_total\{[^}]+\}\s+-/)
+}
+
+function makeMultiSpanTrace(tokenCounts: number[]) {
+  const trace = TraceContext.createTrace('multi')
+  for (const [index, promptTokens] of tokenCounts.entries()) {
+    const span = TraceContext.startSpan(trace, { name: `llm-call-${index}` })
+    SpanLifecycle.recordTokenUsage(span, {
+      promptTokens,
+      completionTokens: 0,
+      model: 'claude-sonnet-4-6',
+    })
+    TraceContext.endSpan(span)
+  }
+  TraceContext.endTrace(trace)
+  return trace
+}
+
 describe('PrometheusAdapter', () => {
   describe('scrape() — token metrics', () => {
     it('returns a non-empty string after a flush', async () => {
@@ -73,6 +114,83 @@ describe('PrometheusAdapter', () => {
       )
     })
 
+    it('does not count the same trace span twice when a trace is flushed repeatedly', async () => {
+      const adapter = new PrometheusAdapter()
+      const trace = makeTrace('claude-sonnet-4-6', 100, 50)
+      await adapter.flush(trace)
+      await adapter.flush(trace)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+100/,
+      )
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="completion"\}\s+50/,
+      )
+    })
+
+    it('bounds repeated-flush dedupe memory with a recent-span cap', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 1 })
+      const first = makeTrace('claude-sonnet-4-6', 100, 0)
+      const second = makeTrace('claude-sonnet-4-6', 200, 0)
+
+      await adapter.flush(first)
+      await adapter.flush(second)
+      await adapter.flush(second)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+300/,
+      )
+    })
+
+    it('does not evict the next cached span while retrying a large trace', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 2 })
+      const trace = makeMultiSpanTrace([100, 200, 300])
+
+      await adapter.flush(trace)
+      await adapter.flush(trace)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+600/,
+      )
+    })
+
+    it('prunes oldest span ids without dropping newly flushed spans from the same trace', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 3 })
+      const first = TraceContext.createTrace('first')
+      const firstSpan = TraceContext.startSpan(first, { name: 'llm-call' })
+      SpanLifecycle.recordTokenUsage(firstSpan, {
+        promptTokens: 100,
+        completionTokens: 0,
+        model: 'claude-sonnet-4-6',
+      })
+      TraceContext.endSpan(firstSpan)
+      const second = makeTrace('claude-sonnet-4-6', 200, 0)
+      const third = makeTrace('claude-sonnet-4-6', 300, 0)
+
+      await adapter.flush(first)
+      await adapter.flush(second)
+
+      const appended = TraceContext.startSpan(first, { name: 'llm-call-appended' })
+      SpanLifecycle.recordTokenUsage(appended, {
+        promptTokens: 400,
+        completionTokens: 0,
+        model: 'claude-sonnet-4-6',
+      })
+      TraceContext.endSpan(appended)
+      TraceContext.endTrace(first)
+      await adapter.flush(first)
+      await adapter.flush(third)
+      await adapter.flush(first)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+1100/,
+      )
+    })
+
     it('tracks multiple models independently', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTrace('claude-sonnet-4-6', 100, 50))
@@ -97,6 +215,60 @@ describe('PrometheusAdapter', () => {
       // Token section should be absent when no token data recorded
       expect(out).not.toContain('franken_observer_tokens_total')
     })
+
+    it.each([
+      ['promptTokens', Number.NaN],
+      ['promptTokens', Number.POSITIVE_INFINITY],
+      ['promptTokens', Number.NEGATIVE_INFINITY],
+      ['promptTokens', -1],
+      ['promptTokens', 1.5],
+      ['promptTokens', Number.MAX_SAFE_INTEGER + 1],
+      ['completionTokens', Number.NaN],
+      ['completionTokens', Number.POSITIVE_INFINITY],
+      ['completionTokens', Number.NEGATIVE_INFINITY],
+      ['completionTokens', -1],
+      ['completionTokens', 1.5],
+      ['completionTokens', Number.MAX_SAFE_INTEGER + 1],
+    ])('rejects invalid %s metadata value %s without mutating counters', async (field, value) => {
+      const adapter = new PrometheusAdapter({
+        pricingTable: { 'claude-sonnet-4-6': { promptPerMillion: 3, completionPerMillion: 15 } },
+      })
+      await adapter.flush(makeTrace('claude-sonnet-4-6', 10, 5))
+      const before = adapter.scrape()
+
+      await expect(
+        adapter.flush(
+          makeTraceWithMetadata({
+            model: 'claude-sonnet-4-6',
+            promptTokens: field === 'promptTokens' ? value : 1,
+            completionTokens: field === 'completionTokens' ? value : 1,
+          }),
+        ),
+      ).rejects.toThrow(RangeError)
+
+      const after = adapter.scrape()
+      expect(after).toBe(before)
+      expectNoInvalidPrometheusNumbers(after)
+    })
+
+    it('rejects a batch atomically when later token metadata would overflow totals', async () => {
+      const adapter = new PrometheusAdapter()
+
+      await expect(
+        adapter.flush(
+          makeTraceWithTwoMetadataSpans(
+            {
+              model: 'claude-sonnet-4-6',
+              promptTokens: Number.MAX_SAFE_INTEGER,
+              completionTokens: 0,
+            },
+            { model: 'claude-sonnet-4-6', promptTokens: 1, completionTokens: 0 },
+          ),
+        ),
+      ).rejects.toThrow(RangeError)
+
+      expect(adapter.scrape()).toBe('')
+    })
   })
 
   describe('scrape() — span metrics', () => {
@@ -111,6 +283,16 @@ describe('PrometheusAdapter', () => {
     it('counts completed spans', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTrace())
+      const out = adapter.scrape()
+      expect(out).toMatch(/franken_observer_spans_total\{status="completed"\}\s+1/)
+    })
+
+    it('does not double-count spans when the same trace is flushed repeatedly', async () => {
+      const adapter = new PrometheusAdapter()
+      const trace = makeTrace()
+      await adapter.flush(trace)
+      await adapter.flush(trace)
+      await adapter.flush(trace)
       const out = adapter.scrape()
       expect(out).toMatch(/franken_observer_spans_total\{status="completed"\}\s+1/)
     })

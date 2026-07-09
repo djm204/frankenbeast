@@ -411,5 +411,26 @@ describe('IssueRunner', () => {
       expect(outcome.prUrl).toBe('https://github.com/org/repo/pull/42');
       expect(outcome.error).toBeUndefined();
     });
+
+    it('propagates BeastResult errors into failed IssueOutcome summaries', async () => {
+      mockRun.mockResolvedValueOnce({
+        status: 'failed',
+        tokenSpend: { totalTokens: 123 },
+        taskResults: [{ taskId: 'impl:dummy', status: 'success' }],
+        error: new Error('PR not created: run `gh auth login`; branch feature/auth-warning is pushed.'),
+      } as unknown as BeastResult);
+      const issues = [makeIssue({ number: 746, title: 'Fix PR auth warning' })];
+      const triages = [makeTriage(746)];
+      const config = makeConfig({ issues, triageResults: triages });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 746,
+        status: 'failed',
+        tokensUsed: 123,
+        error: 'PR not created: run `gh auth login`; branch feature/auth-warning is pushed.',
+      });
+    });
   });
 });

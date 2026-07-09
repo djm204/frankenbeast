@@ -1,5 +1,135 @@
 # Changelog
 
+## [0.4.12](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.11...@franken/planner-v0.4.12) (2026-07-08)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.0 to 0.8.1
+
+## [0.4.11](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.10...@franken/planner-v0.4.11) (2026-07-08)
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
+## [0.4.10](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.9...@franken/planner-v0.4.10) (2026-07-07)
+
+
+### Bug Fixes
+
+* **planner:** detect cycles in parallel planner ([b6102c3](https://github.com/djm204/frankenbeast/commit/b6102c3f6fc1f2c12e35599ac2fc6e83929e8cf0)), closes [#687](https://github.com/djm204/frankenbeast/issues/687)
+* **planner:** isolate recovery attempts per task ([#890](https://github.com/djm204/frankenbeast/issues/890)) ([c0f0b4d](https://github.com/djm204/frankenbeast/commit/c0f0b4d9d197d40e5cb4492e824445d3c397542c))
+* **planner:** preserve recursive subgraph dependencies ([#893](https://github.com/djm204/frankenbeast/issues/893)) ([999b6a2](https://github.com/djm204/frankenbeast/commit/999b6a2dd0ccd7709dbb5760518cdfbc7c18a9f2))
+* **planner:** reject dangling raw DAG edges ([fcb271d](https://github.com/djm204/frankenbeast/commit/fcb271d444ed439baa32533cc6faa44e9d7a6260)), closes [#847](https://github.com/djm204/frankenbeast/issues/847)
+* **planner:** support dynamic expansions in planners ([#924](https://github.com/djm204/frankenbeast/issues/924)) ([482ca64](https://github.com/djm204/frankenbeast/commit/482ca64aa9e205a85b921a2ad64f519088b192c1))
+* **publish:** add files allowlist to governor/planner/types so dist actually ships ([#844](https://github.com/djm204/frankenbeast/issues/844)) ([46cb1a1](https://github.com/djm204/frankenbeast/commit/46cb1a1f1517da3cf88d589894fdc30b863b8e99))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Tests
+
+* **planner:** cover missing raw DAG dependencies ([#921](https://github.com/djm204/frankenbeast/issues/921)) ([02ec022](https://github.com/djm204/frankenbeast/commit/02ec0224b85aa010dbee6725b6cf8c8b8b56ed7e)), closes [#916](https://github.com/djm204/frankenbeast/issues/916)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
+## [0.4.9](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.8...@franken/planner-v0.4.9) (2026-07-06)
+
+
+### Bug Fixes
+
+* **deps:** resolve npm audit vulnerabilities ([6dbbf99](https://github.com/djm204/frankenbeast/commit/6dbbf99940b08a39397ff5ac588357b58cb87932)), closes [#517](https://github.com/djm204/frankenbeast/issues/517)
+* **franken-planner:** error on cyclic sub-graph instead of dropping tasks ([#384](https://github.com/djm204/frankenbeast/issues/384)) ([06f7b19](https://github.com/djm204/frankenbeast/commit/06f7b19125900b832da8ab44fb1ce2470191ac7d)), closes [#54](https://github.com/djm204/frankenbeast/issues/54)
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* **planner:** escape markdown in plan exports ([#311](https://github.com/djm204/frankenbeast/issues/311)) ([98d63b5](https://github.com/djm204/frankenbeast/commit/98d63b5bb78fc05c224090cc24fe1aecb0145ff7))
+* **planner:** guard insertFixItTask against duplicate task IDs ([#379](https://github.com/djm204/frankenbeast/issues/379)) ([5d222cc](https://github.com/djm204/frankenbeast/commit/5d222cc5d68a5ed70edf65c8aa1d3a5e8481944b)), closes [#358](https://github.com/djm204/frankenbeast/issues/358)
+* **planner:** keep stub HITL gate test-only ([0b898b1](https://github.com/djm204/frankenbeast/commit/0b898b1a9dff2e761941c3945dac3099984147af)), closes [#412](https://github.com/djm204/frankenbeast/issues/412)
+* **planner:** preserve governance rejection in parallel strategy ([#480](https://github.com/djm204/frankenbeast/issues/480)) ([f98a453](https://github.com/djm204/frankenbeast/commit/f98a4535f8fcaa3ad5ed06bc7a4c2a4eb086329b))
+* **planner:** reject trivial error patterns ([#314](https://github.com/djm204/frankenbeast/issues/314)) ([1a67f64](https://github.com/djm204/frankenbeast/commit/1a67f648ea115aa18af06cc44593a5826ee09292))
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+
+
+### Refactoring
+
+* **planner:** extract fix-it injection logic ([fb2579c](https://github.com/djm204/frankenbeast/commit/fb2579c4f1980a1fb6572d16b89c8a1424ba5e63)), closes [#642](https://github.com/djm204/frankenbeast/issues/642)
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+* release main ([d428ecd](https://github.com/djm204/frankenbeast/commit/d428ecd6e627d5c3c48cd0ef98c45a8eeca56d3e))
+* release main ([55f726e](https://github.com/djm204/frankenbeast/commit/55f726e1af6e84f3401fd5ad14f452e7ac727f22))
+* release main ([#309](https://github.com/djm204/frankenbeast/issues/309)) ([9dadfae](https://github.com/djm204/frankenbeast/commit/9dadfae67be6686e3a7962c5fd9e21ed8b6b525b))
+* release main ([#389](https://github.com/djm204/frankenbeast/issues/389)) ([24e5428](https://github.com/djm204/frankenbeast/commit/24e5428cc009a1ed497e25a94c0a0911b45eb8e0))
+* release main ([#448](https://github.com/djm204/frankenbeast/issues/448)) ([8c9934f](https://github.com/djm204/frankenbeast/commit/8c9934f4adbd05b1ebae48081a3b3406746a1bc3))
+* release main ([#482](https://github.com/djm204/frankenbeast/issues/482)) ([66f5641](https://github.com/djm204/frankenbeast/commit/66f56417de1252b572fba1f11db008c0a21a34df))
+* release main ([#537](https://github.com/djm204/frankenbeast/issues/537)) ([41d70dd](https://github.com/djm204/frankenbeast/commit/41d70dde60bbbc0983702fc2ebfb63ee0528aa53))
+* release main ([#554](https://github.com/djm204/frankenbeast/issues/554)) ([660250e](https://github.com/djm204/frankenbeast/commit/660250e5a21616955b05386eea741f17363c9198))
+* release main ([#723](https://github.com/djm204/frankenbeast/issues/723)) ([767f8e2](https://github.com/djm204/frankenbeast/commit/767f8e2d347d1c4757db921e8689170f7fa9a9f1))
+
+
+### Documentation
+
+* refresh accuracy against implementation ([#393](https://github.com/djm204/frankenbeast/issues/393)) ([e5a6088](https://github.com/djm204/frankenbeast/commit/e5a6088cddec35b5ac9c55b60323ff0c55663486))
+* update RAMP_UP files across all packages to reflect current integration status ([a6f9f62](https://github.com/djm204/frankenbeast/commit/a6f9f627373e426278eaa98471d3f78da8064d26))
+* update RAMP_UP for all packages with accurate integration status ([78220d6](https://github.com/djm204/frankenbeast/commit/78220d6ffb22720eae325f2f3f94823e6a29a463))
+
+
+### Tests
+
+* delete 26 fluff test files (~283 tests) identified by audit ([03358d4](https://github.com/djm204/frankenbeast/commit/03358d4cdc745197e48b61855ed77571a37a2939))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.5 to 0.7.6
+
+## [0.4.8](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.7...franken-planner-v0.4.8) (2026-07-06)
+
+
+### Bug Fixes
+
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+
+
+### Refactoring
+
+* **planner:** extract fix-it injection logic ([fb2579c](https://github.com/djm204/frankenbeast/commit/fb2579c4f1980a1fb6572d16b89c8a1424ba5e63)), closes [#642](https://github.com/djm204/frankenbeast/issues/642)
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.4 to 0.7.5
+
 ## [0.4.7](https://github.com/djm204/frankenbeast/compare/franken-planner-v0.4.6...franken-planner-v0.4.7) (2026-07-05)
 
 

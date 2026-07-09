@@ -1,5 +1,96 @@
 # Changelog
 
+## [0.7.14](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.13...franken-observer-v0.7.14) (2026-07-08)
+
+
+### Tests
+
+* **ci:** exercise minimum supported Node version in CI ([#1057](https://github.com/djm204/frankenbeast/issues/1057)) ([26debe4](https://github.com/djm204/frankenbeast/commit/26debe4feb5221422680988a4a3bb1d112bb8adb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.0 to 0.8.1
+
+## [0.7.13](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.12...franken-observer-v0.7.13) (2026-07-08)
+
+
+### Documentation
+
+* refresh package project outlines ([#1145](https://github.com/djm204/frankenbeast/issues/1145)) ([390aefd](https://github.com/djm204/frankenbeast/commit/390aefdc5bd51da421d7f412d82ec781a8579cb0))
+
+
+### Tests
+
+* **observer:** cover replay blob symlink reads ([#897](https://github.com/djm204/frankenbeast/issues/897)) ([851417e](https://github.com/djm204/frankenbeast/commit/851417e53af4a639cb52963f3d06d869f6937034))
+
+## [0.7.12](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.11...franken-observer-v0.7.12) (2026-07-07)
+
+
+### Bug Fixes
+
+* **observer:** bind trace server to loopback ([#837](https://github.com/djm204/frankenbeast/issues/837)) ([f0ab367](https://github.com/djm204/frankenbeast/commit/f0ab3678e197a77882ed7fe34c8071401b2e29a5))
+* **observer:** contain post-mortem report paths ([b647be6](https://github.com/djm204/frankenbeast/commit/b647be6d53cc62167b48d12b4a34df888e873782))
+* **observer:** hash trace ids in post-mortem filenames ([#874](https://github.com/djm204/frankenbeast/issues/874)) ([0aa2791](https://github.com/djm204/frankenbeast/commit/0aa27914af7fbafcf5e02ce53e39360e315f2501))
+* **observer:** retain batch queue on drain failure ([#855](https://github.com/djm204/frankenbeast/issues/855)) ([ec0e505](https://github.com/djm204/frankenbeast/commit/ec0e5053e3747f9a873a0fd26364238c6e4e9c34))
+* **observer:** set SQLite busy timeout ([50c5536](https://github.com/djm204/frankenbeast/commit/50c55361ed6515361707ce194c6e38b54fa94653))
+* **security:** share realpath containment checks ([#875](https://github.com/djm204/frankenbeast/issues/875)) ([eb1ad94](https://github.com/djm204/frankenbeast/commit/eb1ad94736ead647df2f7840c0fad9555f86a73f))
+
+
+### Refactoring
+
+* **tests:** alias Vitest configs to package sources ([#845](https://github.com/djm204/frankenbeast/issues/845)) ([454b526](https://github.com/djm204/frankenbeast/commit/454b526e509d5762bde3ec5102d7521367f0c1a7))
+
+
+### Tests
+
+* externalize credential fixtures ([#910](https://github.com/djm204/frankenbeast/issues/910)) ([84ff583](https://github.com/djm204/frankenbeast/commit/84ff5830a23095a32339a1970a3e2d6d0a443dca)), closes [#519](https://github.com/djm204/frankenbeast/issues/519)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.7.7 to 0.8.0
+
+## [0.7.11](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.10...franken-observer-v0.7.11) (2026-07-06)
+
+
+### Bug Fixes
+
+* **observer:** remove replay test mutator from production class ([#820](https://github.com/djm204/frankenbeast/issues/820)) ([f00094b](https://github.com/djm204/frankenbeast/commit/f00094b1464c0d80fdefa545f56e35bb084ce0d4))
+* standardize package namespace strategy ([#825](https://github.com/djm204/frankenbeast/issues/825)) ([a2c236f](https://github.com/djm204/frankenbeast/commit/a2c236f9c7d46ab8fea079b85b3df3e4a7383e9b))
+
+## [0.7.10](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.9...franken-observer-v0.7.10) (2026-07-06)
+
+
+### Bug Fixes
+
+* **observer:** optimize trace summaries ([#781](https://github.com/djm204/frankenbeast/issues/781)) ([447ef1c](https://github.com/djm204/frankenbeast/commit/447ef1c9041c6256ac64b3d25aba131f2c79eb9f))
+* **observer:** validate replay content refs ([5f8c120](https://github.com/djm204/frankenbeast/commit/5f8c1201da8dee267486dde3f0ebb7799a0e4ff7)), closes [#618](https://github.com/djm204/frankenbeast/issues/618)
+* **packaging:** pin internal package deps ([#763](https://github.com/djm204/frankenbeast/issues/763)) ([3603eac](https://github.com/djm204/frankenbeast/commit/3603eac5e23e2e95ee9c622c162fdd72b8ab33bb))
+* replace console log statements ([#797](https://github.com/djm204/frankenbeast/issues/797)) ([ef5225f](https://github.com/djm204/frankenbeast/commit/ef5225f7e61196945d481ed40181f86aaea0f40d))
+* **test:** validate Vitest environment flags ([1479dce](https://github.com/djm204/frankenbeast/commit/1479dcefc5bedfd065667fba75e2bd48b7a1ba5e)), closes [#557](https://github.com/djm204/frankenbeast/issues/557)
+
+
+### Refactoring
+
+* **observer:** unify content hashing and cache token totals ([#789](https://github.com/djm204/frankenbeast/issues/789)) ([0fe0c02](https://github.com/djm204/frankenbeast/commit/0fe0c02cf35d2f71b19436dbddef7d217f6e0a0e))
+
+
+### Miscellaneous
+
+* **node:** align workspace engine constraints ([dcf5c4e](https://github.com/djm204/frankenbeast/commit/dcf5c4e90ca594f4ff282ea37c0a0d14000a39af)), closes [#757](https://github.com/djm204/frankenbeast/issues/757)
+* **packages:** align publishable package licenses ([#783](https://github.com/djm204/frankenbeast/issues/783)) ([398d37c](https://github.com/djm204/frankenbeast/commit/398d37c552954a94d08d90fce9ff76573b9ec664))
+
+
+### Tests
+
+* replace secret-looking fixture literals ([#787](https://github.com/djm204/frankenbeast/issues/787)) ([e9b5d8a](https://github.com/djm204/frankenbeast/commit/e9b5d8af10d7144290ce0e513658c3b41b8f9597))
+* **security:** avoid password literals in fixtures ([#788](https://github.com/djm204/frankenbeast/issues/788)) ([f411648](https://github.com/djm204/frankenbeast/commit/f41164879b1b35152d7bdc02b5e83dd586dd2344))
+
 ## [0.7.9](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.8...franken-observer-v0.7.9) (2026-07-05)
 
 

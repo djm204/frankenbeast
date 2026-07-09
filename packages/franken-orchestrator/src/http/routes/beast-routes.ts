@@ -13,7 +13,13 @@ import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { BeastMetrics } from '../../beasts/telemetry/beast-metrics.js';
-import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
+import {
+  BEAST_CONTROL_MAX_BODY_SIZE,
+  HttpError,
+  parseJsonBody,
+  requestSizeLimit,
+  validateBody,
+} from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 import type { BeastRun, BeastRunAttempt } from '../../beasts/types.js';
 
@@ -116,6 +122,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   );
 
   app.use('/v1/beasts/*', auth);
+  app.use('/v1/beasts/*', requestSizeLimit(BEAST_CONTROL_MAX_BODY_SIZE));
   app.use('/v1/beasts/runs', rateLimit);
   app.use('/v1/beasts/interviews/*', rateLimit);
 

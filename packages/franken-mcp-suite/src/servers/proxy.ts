@@ -4,20 +4,12 @@ import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
-  if (explicitRoot) {
-    return resolve(explicitRoot);
-  }
-
-  const dbDir = dirname(resolve(dbPath));
-  if (basename(dbDir) === '.fbeast') {
-    return dirname(dbDir);
-  }
-
-  return undefined;
+  return deriveProjectRootFromDbPath(dbPath, explicitRoot);
 }
 
 export interface ProxyServerDeps {
@@ -31,8 +23,8 @@ export interface ProxyServerDeps {
 }
 
 export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
-  const { dbPath } = deps;
-  const root = deriveProxyRoot(dbPath, deps.root);
+  const root = deriveProxyRoot(deps.dbPath, deps.root);
+  const dbPath = resolveProjectDbPath(deps.dbPath, root);
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so
   // policy and audit are keyed by the real high-risk action (ADR-035, finding

@@ -1,6 +1,6 @@
-# Phase 2: Rewrite franken-brain — Portable Memory
+# Phase 2: Rewrite @franken/brain — Portable Memory
 
-**Goal:** Replace the current overengineered franken-brain with a ~300-line SQLite-backed implementation that supports `serialize()`/`hydrate()` for cross-provider memory handoff.
+**Goal:** Replace the current overengineered @franken/brain with a ~300-line SQLite-backed implementation that supports `serialize()`/`hydrate()` for cross-provider memory handoff.
 
 **Dependencies:** Phase 1 (clean 8-package monorepo with no broken imports)
 
@@ -73,7 +73,7 @@ For v1, episodic recall uses keyword matching + recency:
 
 ## Success Criteria
 
-- `franken-brain` is ~300 lines (excluding tests)
+- `@franken/brain` is ~300 lines (excluding tests)
 - `serialize()` produces a valid `BrainSnapshot` JSON
 - `hydrate(snapshot)` creates a new `SqliteBrain` with the same state
 - Round-trip test: `serialize() → hydrate() → serialize()` produces identical output

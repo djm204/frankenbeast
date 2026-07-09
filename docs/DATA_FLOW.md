@@ -90,7 +90,7 @@ That means the current path is:
 
 - real ingestion sanitization through `MiddlewareChainFirewallAdapter` (the security middleware chain)
 - real local skill discovery through `SkillManagerAdapter`; `cli:*` execution is dispatched by `CliSkillExecutor`, MCP execution requires an `IMcpModule`, and non-CLI `function`/`llm` execution still requires an `ISkillsModule.execute(...)` implementation outside `SkillManagerAdapter`
-- real episodic memory persistence through `SqliteBrainMemoryAdapter` (`franken-brain`)
+- real episodic memory persistence through `SqliteBrainMemoryAdapter` (`@franken/brain`)
 - graph-builder-driven planning for chunk files or design-doc decomposition; the planner port itself is `stubPlanner`, which throws if invoked
 - real plan critique through `CritiquePortAdapter` over `@franken/critique`, and real HITL approval through `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (non-TTY runs default to reject). If either safety module is enabled but not installed, the dep factory fails closed unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1`
 - real reflection heartbeat through `ReflectionHeartbeatAdapter`; `McpSdkAdapter` is always constructed but fails closed until an MCP transport is configured
@@ -436,7 +436,7 @@ flowchart TD
     Dashboard["franken-web"]
     CLI["frankenbeast CLI"]
     Comms["franken-comms"]
-    Orchestrator["franken-orchestrator"]
+    Orchestrator["@franken/orchestrator"]
     Firewall["MOD-01 firewall"]
     Skills["MOD-02 skills"]
     Brain["MOD-03 brain"]
@@ -445,7 +445,7 @@ flowchart TD
     Critique["MOD-06 critique"]
     Governor["MOD-07 governor"]
     Heartbeat["MOD-08 heartbeat"]
-    MCP["MCP suite (@fbeast/mcp-suite)"]
+    MCP["MCP suite (@franken/mcp-suite)"]
 
     User --> Dashboard --> Orchestrator
     User --> CLI --> Orchestrator

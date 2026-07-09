@@ -1,47 +1,75 @@
 version: '3.8'
 
 services:
-  # ChromaDB — vector store for franken-brain episodic memory
+  # ChromaDB — vector store for @franken/brain episodic memory
   chromadb:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:1.3.7
     ports:
       - '8000:8000'
     volumes:
-      - chromadb-data:/chroma/chroma
+      - chromadb-data:/data
     environment:
       - IS_PERSISTENT=TRUE
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8000/api/v2/heartbeat']
+      test:
+        [
+          'CMD',
+          'bash',
+          '-ec',
+          'exec 3<>/dev/tcp/127.0.0.1/8000 && printf "GET /api/v2/heartbeat HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "200 OK" <&3',
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
 
   # Grafana — dashboards for observability
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:12.3.8
     ports:
       - '3000:3000'
     volumes:
       - grafana-data:/var/lib/grafana
+    entrypoint: ['/bin/sh', '-ec']
+    command: >
+      if [ -z "$${GF_SECURITY_ADMIN_USER:-}" ] || [ -z "$${GF_SECURITY_ADMIN_PASSWORD:-}" ]; then
+        echo 'Set GRAFANA_USER and GRAFANA_PASSWORD before starting Grafana.' >&2;
+        exit 1;
+      fi;
+      if [ "$${GF_SECURITY_ADMIN_USER}" = 'admin' ] && [ "$${GF_SECURITY_ADMIN_PASSWORD}" = 'admin' ]; then
+        echo 'Refusing to start Grafana with admin/admin credentials.' >&2;
+        exit 1;
+      fi;
+      if [ "$${GF_SECURITY_ADMIN_USER}" != 'admin' ]; then
+        echo 'Local Grafana compose uses the admin user with a generated non-default password so existing volumes can be reset safely.' >&2;
+        exit 1;
+      fi;
+      grafana cli \
+        --homepath "$${GF_PATHS_HOME:-/usr/share/grafana}" \
+        --config "$${GF_PATHS_CONFIG:-/etc/grafana/grafana.ini}" \
+        admin reset-admin-password "$${GF_SECURITY_ADMIN_PASSWORD}" >/tmp/grafana-admin-reset.log 2>&1 || true;
+      exec /run.sh
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}
       - GF_AUTH_ANONYMOUS_ENABLED=true
     depends_on:
       - tempo
 
   # Tempo — distributed tracing backend for franken-observer
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.9.3
     ports:
       - '3200:3200'   # Tempo query API
       - '4317:4317'   # OTLP gRPC
       - '4318:4318'   # OTLP HTTP
     command: ['-config.file=/etc/tempo.yaml']
     volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/tmp/tempo
 
 volumes:
   chromadb-data:
+  # The Grafana startup guard resets the persisted admin password to GRAFANA_PASSWORD.
+  # Recreate this volume if you intentionally need to discard old local dashboard state.
   grafana-data:
   tempo-data:

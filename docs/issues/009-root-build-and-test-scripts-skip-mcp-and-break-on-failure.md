@@ -15,7 +15,7 @@ Root `build` and `test:all` should cover every package and fail cleanly without 
 
 - `package.json` omits `franken-mcp` from both the build and test loops.
 - The loops use `cd $d && ... && cd ..`; if a command fails, the shell remains in the failed package directory.
-- After `franken-observer` test failure, `test:all` continued from the wrong directory and produced `can't cd to franken-planner`, `franken-skills`, `frankenfirewall`, and `franken-orchestrator`.
+- After `franken-observer` test failure, `test:all` continued from the wrong directory and produced `can't cd to @franken/planner`, `franken-skills`, `frankenfirewall`, and `@franken/orchestrator`.
 
 ## Evidence
 

@@ -17,6 +17,9 @@ describe('local setup scripts', () => {
 
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
+    expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
+    expect(read('docs/guides/quickstart.md')).toContain('corepack enable npm');
+    expect(read('docs/guides/quickstart.md')).toContain('npm run check:package-manager');
 
     for (const packagePath of packagePaths) {
       const manifest = JSON.parse(read(packagePath)) as { engines?: { node?: string } };
@@ -49,12 +52,50 @@ describe('local setup scripts', () => {
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {
     const compose = read('docker-compose.yml');
 
-    expect(compose).toContain('http://localhost:8000/api/v2/heartbeat');
+    expect(compose).toContain('/api/v2/heartbeat');
+    expect(compose).toContain("'bash',");
+    expect(compose).toContain('/dev/tcp/127.0.0.1/8000');
+    expect(compose).not.toContain("'curl'");
     expect(compose).not.toContain('http://localhost:8000/api/v1/heartbeat');
+  });
+
+  it('pins local compose images and mounts an explicit Tempo config', () => {
+    const compose = read('docker-compose.yml');
+    const tempoConfig = read('tempo.yaml');
+
+    expect(compose).toContain('image: chromadb/chroma:1.3.7');
+    expect(compose).toContain('- chromadb-data:/data');
+    expect(compose).toContain('image: grafana/grafana:12.3.8');
+    expect(compose).toContain('image: grafana/tempo:2.9.3');
+    expect(compose).not.toContain(':latest');
+    expect(compose).toContain('- ./tempo.yaml:/etc/tempo.yaml:ro');
+    expect(compose).toContain("command: ['-config.file=/etc/tempo.yaml']");
+
+    expect(tempoConfig).toContain('http_listen_port: 3200');
+    expect(tempoConfig).toContain('endpoint: 0.0.0.0:4317');
+    expect(tempoConfig).toContain('endpoint: 0.0.0.0:4318');
+    expect(tempoConfig).toContain('path: /tmp/tempo/wal');
+    expect(tempoConfig).toContain('path: /tmp/tempo/blocks');
+  });
+
+  it('requires explicit non-default Grafana admin credentials for local compose', () => {
+    const compose = read('docker-compose.yml');
+
+    expect(compose).toContain('Set GRAFANA_USER and GRAFANA_PASSWORD before starting Grafana.');
+    expect(compose).toContain('Refusing to start Grafana with admin/admin credentials.');
+    expect(compose).toContain('admin reset-admin-password "$${GF_SECURITY_ADMIN_PASSWORD}"');
+    expect(compose).toContain('GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-}');
+    expect(compose).toContain('GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}');
+    expect(compose).not.toContain('${GRAFANA_USER:-admin}');
+    expect(compose).not.toContain('${GRAFANA_PASSWORD:-admin}');
+    expect(compose).toContain('startup guard resets the persisted admin password');
   });
 
   it('.env.example documents current local env vars without removed service knobs', () => {
     const envExample = read('.env.example');
+    const readme = read('README.md');
+    const quickstart = read('docs/guides/quickstart.md');
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
 
     for (const required of [
       'ANTHROPIC_API_KEY',
@@ -87,6 +128,85 @@ describe('local setup scripts', () => {
 
     for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'FIREWALL_PORT']) {
       expect(envExample).not.toContain(removed);
+    }
+    expect(envExample).not.toMatch(/^# ── Firewall Server ──$/m);
+    expect(envExample).not.toMatch(/^#?\s*FIREWALL_PORT\s*=/m);
+    expect(envExample).not.toMatch(/frankenfirewall|firewall proxy|port 9090/i);
+
+    expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
+    expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
+    expect(envExample).toContain('Grafana\'s built-in admin/admin default is insecure');
+    expect(envExample).toContain('Generate a unique local password before uncommenting');
+    expect(envExample).toContain('Do not use VITE_BEAST_OPERATOR_TOKEN');
+    expect(envExample).not.toMatch(/^#?\s*VITE_BEAST_OPERATOR_TOKEN=/m);
+
+    for (const doc of [readme, quickstart, runCliBeastGuide]) {
+      expect(doc).toContain('ANTHROPIC_API_KEY');
+      expect(doc).toContain('OPENAI_API_KEY');
+      expect(doc).toContain('GOOGLE_API_KEY');
+      expect(doc).toContain('GEMINI_API_KEY');
+    }
+
+    expect(readme).toContain('CHROMA_URL');
+    expect(readme).toContain('http://localhost:8000');
+    expect(readme).toContain('Override it only when ChromaDB runs at a different local port/host or a remote');
+    expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
+    expect(readme).toContain('maxCritiqueIterations * 10000');
+    for (const frankenOverride of [
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+    ]) {
+      expect(readme).toContain(frankenOverride);
+    }
+  });
+
+  it('keeps the CLI Beast guide aligned with supported Beast activation providers', () => {
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
+
+    expect(runCliBeastGuide).not.toContain('OLLAMA_BASE_URL');
+    expect(runCliBeastGuide).not.toMatch(/local\s+Ollama/i);
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
+
+    const providersMatch = beastModeSource.match(/SUPPORTED_BEAST_PROVIDERS = new Set\(\[([^\]]+)\]\)/);
+    expect(providersMatch).not.toBeNull();
+    const supportedProviders = providersMatch?.[1] ?? '';
+    for (const provider of ['anthropic-api', 'codex-cli', 'claude-cli']) {
+      expect(supportedProviders).toContain(provider);
+      expect(runCliBeastGuide).toContain(`--provider=${provider}`);
+    }
+    expect(supportedProviders).not.toContain('ollama');
+  });
+
+  it('keeps the root README provider-extension guidance on current provider surfaces', () => {
+    const readme = read('README.md');
+
+    expect(readme).not.toContain('Adding a new provider means implementing one `IAdapter` interface');
+    expect(readme).not.toContain('implement `IAdapter` in 4 steps');
+    expect(readme).not.toMatch(/firewall is a model-agnostic proxy/i);
+    expect(readme).toContain('CLI execution/chat providers implement `ICliProvider`');
+    expect(readme).toContain('API-backed clients live in the provider registry and config loading paths');
+    expect(readme).toContain(
+      'add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry',
+    );
+  });
+
+  it('keeps root AI assistant rule regeneration guidance on the supported workflow source', () => {
+    for (const docPath of ['CLAUDE.md', 'GEMINI.md']) {
+      const doc = read(docPath);
+
+      expect(doc).toContain('djm204/agent-workflow-skills');
+      expect(doc).toContain('package-level `project-outline.md` cleanup is tracked separately');
+      expect(doc).toContain('Do not regenerate the root `.cursor/rules/*.mdc` files');
+      expect(doc).not.toContain('npx @djm204/agent-skills');
+      expect(doc).not.toMatch(/Re-run to update:/i);
     }
   });
 });

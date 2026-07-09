@@ -1,4 +1,4 @@
-import { SqliteBrain } from 'franken-brain';
+import { SqliteBrain } from '@franken/brain';
 import { ProviderRegistry } from '../providers/provider-registry.js';
 import {
   createLlmProvider,
@@ -13,7 +13,7 @@ import {
 } from '../middleware/security-profiles.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { SkillConfigStore } from '../skills/skill-config-store.js';
-import { AuditTrail, AuditTrailStore, createAuditEvent } from '@frankenbeast/observer';
+import { AuditTrail, AuditTrailStore, createAuditEvent } from '@franken/observer';
 import { ReplayContentStore } from '../replay/replay-content-store.js';
 import { join, basename, dirname } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';

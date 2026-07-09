@@ -6,27 +6,27 @@ Frankenbeast is a deterministic guardrails framework for AI agents, organized as
 
 This document mixes two views:
 
-- **Current implementation**: what is actually wired in `franken-orchestrator`, `@fbeast/mcp-suite`, and the current workspaces today
+- **Current implementation**: what is actually wired in `@franken/orchestrator`, `@franken/mcp-suite`, and the current workspaces today
 - **Target / historical architecture**: broader MOD diagrams and pre-consolidation service boundaries that remain useful as design vocabulary, but are not necessarily current package names
 
 Unless a section explicitly says otherwise, diagrams should be read as target architecture and the prose should call out current local limitations where they matter.
 
 | Package | Role |
 |---------|------|
-| `franken-brain` | SQLite-backed working memory, episodic recall, recovery checkpoints, serialization/hydration. |
-| `franken-planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
-| `@frankenbeast/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
+| `@franken/brain` | SQLite-backed working memory, episodic recall, recovery checkpoints, serialization/hydration. |
+| `@franken/planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
+| `@franken/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
 | `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |
 | `@franken/governor` | HITL trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers. |
 | `@franken/types` | Shared type definitions and runtime Zod schemas. |
-| `franken-orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
-| `@fbeast/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
-| `@frankenbeast/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
-| `@fbeast/live-bench` | Live CLI benchmark tooling. |
+| `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
+| `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
+| `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
+| `@franken/live-bench` | Live CLI benchmark tooling. |
 
-Removed package directories from the pre-consolidation architecture include `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Their capabilities now live mostly inside `franken-orchestrator` or `@fbeast/mcp-suite`.
+Removed package directories from the pre-consolidation architecture include `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms`. Their capabilities now live mostly inside `@franken/orchestrator` or `@franken/mcp-suite`.
 
-## The Beast Loop (franken-orchestrator)
+## The Beast Loop (@franken/orchestrator)
 
 The orchestrator runs 4 sequential phases:
 
@@ -57,7 +57,7 @@ The current local CLI path defaults to real adapters for every enabled module ex
 - Stubbed: the planner port (`stubPlanner` in `src/cli/dep-factory.ts` throws if invoked; planning is graph-builder driven). Critique/governor use all-pass/all-approve stubs only when disabled by run config or `FRANKENBEAST_MODULE_CRITIQUE=false` / `FRANKENBEAST_MODULE_GOVERNOR=false`, or when `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe missing-package fallbacks
 - `--resume` is parsed but not wired as a distinct resume mode in `run.ts`
 - PR creation is wired; the dep factory resolves target branch from CLI args/config via `baseBranch`
-- The CLI path imports concrete observer classes from `@frankenbeast/observer`, so it is not purely ports-only today
+- The CLI path imports concrete observer classes from `@franken/observer`, so it is not purely ports-only today
 
 ## Orchestrator Internals
 
@@ -449,13 +449,13 @@ The issues pipeline runs through `IssueRunner`, which imports `BeastLoop`, build
 
 ## HTTP Services (Hono)
 
-The shipped HTTP server is integrated in `franken-orchestrator`:
+The shipped HTTP server is integrated in `@franken/orchestrator`:
 
 | Surface | Location | Notes |
 |---------|----------|-------|
 | Chat server | `packages/franken-orchestrator/src/http/chat-server.ts` | Default port `3737`; WebSocket path `/v1/chat/ws`; loopback dev mode can run without an operator token. |
 | Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Always mounts chat (+ WebSocket) and analytics; mounts Beast agents/SSE, network, and skills/dashboard routes when their deps are supplied. When comms channels are enabled, the `chat-server` CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/*`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) mounts when `securityConfig` is passed. |
-| Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @frankenbeast/web run dev:chat`. |
+| Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @franken/web run dev:chat`. |
 
 The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
 
@@ -471,7 +471,7 @@ Canonical type definitions shared across all modules:
 
 ## Module Interconnections
 
-This diagram shows the logical/target module topology. The `franken-mcp` subgraph depicts the pre-consolidation MCP design; the current implementation is `@fbeast/mcp-suite` (see the [@fbeast/mcp-suite](#fbeastmcp-suite) section for what does and does not exist today).
+This diagram shows the logical/target module topology. The `franken-mcp` subgraph depicts the pre-consolidation MCP design; the current implementation is `@franken/mcp-suite` (see the [@franken/mcp-suite](#fbeastmcp-suite) section for what does and does not exist today).
 
 ```mermaid
     graph TB
@@ -570,7 +570,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
             HB_DET --> HB_REFL --> HB_DISP --> HB_BRIEF
         end
 
-        subgraph "franken-mcp (target design — current: @fbeast/mcp-suite)"
+        subgraph "franken-mcp (target design — current: @franken/mcp-suite)"
             direction TB
             MCP_CFG["Config Loader<br/>Zod-validated mcp-servers.json"]
             MCP_REG["McpRegistry<br/>IMcpRegistry<br/>Tool → Client routing"]
@@ -732,13 +732,13 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
 
 ## Port Interfaces (Hexagonal Architecture)
 
-Most inter-module communication uses typed port interfaces defined in each module. The BeastLoop contracts are still port-oriented, but the current local CLI path is not purely abstracted because `CliObserverBridge` imports concrete classes from `@frankenbeast/observer`. See [CONTRACT_MATRIX.md](CONTRACT_MATRIX.md) for the full compatibility matrix.
+Most inter-module communication uses typed port interfaces defined in each module. The BeastLoop contracts are still port-oriented, but the current local CLI path is not purely abstracted because `CliObserverBridge` imports concrete classes from `@franken/observer`. See [CONTRACT_MATRIX.md](CONTRACT_MATRIX.md) for the full compatibility matrix.
 
 | Port | Defined In | Consumed By |
 |------|-----------|-------------|
-| `ICliProvider` / provider registry | `franken-orchestrator/src/skills/providers` | CLI LLM execution and fallback chains; also backs `frankenbeast chat`/dashboard chat via `CliLlmAdapter` (resolved from `createDefaultRegistry()`) |
-| API provider registry | `franken-orchestrator/src/providers` | Beast-mode deps and HTTP skill/dashboard route dependencies (not the chat-turn provider path) |
-| `SqliteBrain` / brain interfaces | franken-brain, @franken/types | Working/episodic/recovery memory |
+| `ICliProvider` / provider registry | `@franken/orchestrator/src/skills/providers` | CLI LLM execution and fallback chains; also backs `frankenbeast chat`/dashboard chat via `CliLlmAdapter` (resolved from `createDefaultRegistry()`) |
+| API provider registry | `@franken/orchestrator/src/providers` | Beast-mode deps and HTTP skill/dashboard route dependencies (not the chat-turn provider path) |
+| `SqliteBrain` / brain interfaces | @franken/brain, @franken/types | Working/episodic/recovery memory |
 | `GuardrailsPort` | franken-critique | Critique evaluators |
 | `MemoryPort` | franken-critique | Critique evaluators |
 | `ObservabilityPort` | franken-critique | Critique circuit breakers |
@@ -746,7 +746,7 @@ Most inter-module communication uses typed port interfaces defined in each modul
 | `ApprovalChannel` | franken-governor | Orchestrator (execution) |
 | `TriggerEvaluator` | franken-governor | Governor gateway |
 | `ILlmClient` | @franken/types | Provider-facing abstractions |
-| MCP tool registry | @fbeast/mcp-suite | MCP servers, proxy dispatch, hooks, shared `.fbeast/beast.db` |
+| MCP tool registry | @franken/mcp-suite | MCP servers, proxy dispatch, hooks, shared `.fbeast/beast.db` |
 
 ## Deployment Modes
 
@@ -760,7 +760,7 @@ These are toolkit deployment modes: ways to run or embed Frankenbeast surfaces. 
 
 ┌─────────────────────────────────────────────────────┐
 │  Mode 2: MCP + Hook Governance                      │
-│  Client tools → @fbeast/mcp-suite → shared DB       │
+│  Client tools → @franken/mcp-suite → shared DB       │
 │  (optional pre/post-tool hook enforcement)           │
 └─────────────────────────────────────────────────────┘
 
@@ -786,9 +786,9 @@ Raw CLI/API Beast runs support execution-mode selection per run. Dashboard track
 
 See [ADR-036](adr/036-sandboxed-beast-execution.md) and [Deploy Beasts from the Dashboard](guides/deploy-beasts.md) for the current operator flow and sprint-status caveats.
 
-## @fbeast/mcp-suite
+## @franken/mcp-suite
 
-The current MCP implementation is `@fbeast/mcp-suite`, not a standalone `franken-mcp` workspace. It provides the `fbeast` CLI, individual MCP servers, the combined/proxy server modes, generated hooks, and shared `.fbeast/beast.db` adapters.
+The current MCP implementation is `@franken/mcp-suite`, not a standalone `franken-mcp` workspace. It provides the `fbeast` CLI, individual MCP servers, the combined/proxy server modes, generated hooks, and shared `.fbeast/beast.db` adapters.
 
 The current exact MCP tool names are defined in `packages/franken-mcp-suite/src/shared/tool-registry.ts`; docs should use those names rather than shorthand aliases.
 
@@ -799,7 +799,7 @@ fbeast mcp init / client config
     │
     ▼
 ┌──────────────────────────────────────────┐
-│  @fbeast/mcp-suite tool registry        │
+│  @franken/mcp-suite tool registry        │
 │  ┌─────────────┐  ┌─────────────┐       │
 │  │ fbeast-*     │  │ fbeast-mcp   │ ...  │
 │  │ server       │  │ / proxy      │      │

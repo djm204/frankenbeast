@@ -72,9 +72,9 @@ export function parseDirtySubmodules(porcelain: string): string[] {
 }
 
 /**
- * Extract package component names from a list of file paths.
+ * Extract package directory names from a list of file paths.
  * Maps `packages/franken-brain/src/foo.ts` → `franken-brain`.
- * Returns sorted, deduplicated component names.
+ * Returns sorted, deduplicated package directory names.
  */
 export function detectAffectedPackages(filePaths: string[]): string[] {
   const packages = new Set<string>();

@@ -11,11 +11,13 @@ import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
 import { codexProjectIds, codexServerNamesForProjectIds } from './codex-server-names.js';
+import { parseJsonObjectWithComments, writeJsonFileAtomic } from './settings-json.js';
 import type { FbeastServer } from '../shared/config.js';
 
 export interface UninstallOptions {
   root: string;
   claudeDir: string;
+  jsonConfigDirs?: string[];
   client?: McpClient;
   purge?: boolean | undefined;
   ask?: (question: string) => Promise<string>;
@@ -34,7 +36,10 @@ export async function runUninstall(options: UninstallOptions): Promise<void> {
   if (client === 'codex') {
     uninstallCodex({ root, spawnFn });
   } else {
-    uninstallJsonClient({ root, claudeDir, client });
+    const dirs = options.jsonConfigDirs ?? [claudeDir];
+    for (const dir of [...new Set(dirs)]) {
+      uninstallJsonClient({ root, claudeDir: dir, client });
+    }
   }
 
   const fbeastDir = join(root, '.fbeast');
@@ -57,14 +62,7 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
   const settingsPath = join(claudeDir, 'settings.json');
 
   if (existsSync(settingsPath)) {
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-
-    // Remove fbeast MCP servers
-    const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
-    for (const key of Object.keys(mcpServers)) {
-      if (key.startsWith('fbeast-')) delete mcpServers[key];
-    }
-    settings['mcpServers'] = mcpServers;
+    const settings = pruneFbeastMcpServers(settingsPath);
 
     if (client === 'gemini') {
       // Gemini: prune fbeast hooks from BeforeTool/AfterTool, keep entries with remaining hooks
@@ -95,17 +93,31 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
       }
     }
 
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writeJsonFileAtomic(settingsPath, settings);
   }
 
   const instrPath = join(claudeDir, 'fbeast-instructions.md');
   if (existsSync(instrPath)) unlinkSync(instrPath);
 
   if (client === 'claude') {
+    pruneFbeastMcpServers(join(root, '.mcp.json'));
     removeGeneratedHookScripts(root, 'claude');
   } else if (client === 'gemini') {
     removeGeneratedHookScripts(root, 'gemini');
   }
+}
+
+function pruneFbeastMcpServers(settingsPath: string): Record<string, unknown> {
+  if (!existsSync(settingsPath)) return {};
+
+  const settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
+  const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
+  for (const key of Object.keys(mcpServers)) {
+    if (key.startsWith('fbeast-')) delete mcpServers[key];
+  }
+  settings['mcpServers'] = mcpServers;
+  writeJsonFileAtomic(settingsPath, settings);
+  return settings;
 }
 
 // ─── Codex ────────────────────────────────────────────────────────────────────
@@ -337,14 +349,20 @@ function pruneFbeastFromEntry(entry: unknown): unknown | null {
   return entry;
 }
 
+function resolveUninstallClientConfigDirs(client: McpClient, root: string): string[] {
+  const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+  return [projectDir];
+}
+
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
   const root = process.cwd();
   const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
   const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
-  const claudeDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+  const jsonConfigDirs = resolveUninstallClientConfigDirs(client, root);
+  const claudeDir = jsonConfigDirs[0] ?? resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const purge = process.argv.includes('--purge') ? true : undefined;
-  runUninstall({ root, claudeDir, client, purge }).catch((err) => {
+  runUninstall({ root, claudeDir, jsonConfigDirs, client, purge }).catch((err) => {
     console.error('fbeast-uninstall failed:', err);
     process.exit(1);
   });

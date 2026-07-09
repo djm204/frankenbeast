@@ -6,7 +6,7 @@ import type {
   BrainSnapshot,
 } from '@franken/types';
 import { ProviderRegistry } from '../../../src/providers/provider-registry.js';
-import { AuditTrail, createAuditEvent } from '@frankenbeast/observer';
+import { AuditTrail, createAuditEvent } from '@franken/observer';
 
 function mockProvider(
   name: string,

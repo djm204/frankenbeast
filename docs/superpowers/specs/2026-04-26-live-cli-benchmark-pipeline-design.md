@@ -2,14 +2,14 @@
 
 **Date:** 2026-04-26
 **Status:** Approved
-**Scope:** Recurring real-client benchmark pipeline for `Codex CLI` and `Gemini CLI`, comparing baseline runs against `@fbeast/mcp-suite` runs over time.
+**Scope:** Recurring real-client benchmark pipeline for `Codex CLI` and `Gemini CLI`, comparing baseline runs against `@franken/mcp-suite` runs over time.
 
 ## Goal
 
 Build a recurring benchmark pipeline that proves how Frankenbeast changes real client behavior when the same tasks are run:
 
 1. without Frankenbeast
-2. with `@fbeast/mcp-suite` installed
+2. with `@franken/mcp-suite` installed
 
 The benchmark must use real `Codex CLI` and real `Gemini CLI`, not a synthetic harness that simulates those clients. The result should be a defensible A/B dataset that tracks accuracy, latency, token/cost behavior, and workflow quality over time.
 
@@ -26,7 +26,7 @@ The benchmark is successful when it can:
 
 ## Product Boundary
 
-This system is a benchmark runner above `@fbeast/mcp-suite`, not a benchmark implementation inside the suite itself.
+This system is a benchmark runner above `@franken/mcp-suite`, not a benchmark implementation inside the suite itself.
 
 Responsibilities of the benchmark runner:
 
@@ -39,7 +39,7 @@ Responsibilities of the benchmark runner:
 - persist normalized history
 - generate reports and gate decisions
 
-Non-responsibilities of `@fbeast/mcp-suite`:
+Non-responsibilities of `@franken/mcp-suite`:
 
 - it should not own benchmark orchestration
 - it should not accumulate benchmark-specific storage concerns
@@ -128,7 +128,7 @@ Per run, the benchmark runner must:
 
 1. create a fresh workspace from a versioned fixture
 2. prepare client-specific config for either `baseline` or `fbeast`
-3. install `@fbeast/mcp-suite` only for `fbeast` runs
+3. install `@franken/mcp-suite` only for `fbeast` runs
 4. launch the real client in a scripted non-interactive mode
 5. wait for completion, timeout, or explicit failure
 6. capture raw outputs, artifacts, and telemetry

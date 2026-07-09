@@ -2,6 +2,9 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from '../../../src/http/routes/dashboard-routes.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DASHBOARD_TOKEN = testCredential('TEST_DASHBOARD_TOKEN');
 let ticketStore: SseConnectionTicketStore | undefined;
 
 function createMockDeps(): DashboardRouteDeps {
@@ -35,7 +38,7 @@ function createMockDeps(): DashboardRouteDeps {
     getProviders: vi.fn().mockReturnValue([
       { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]),
-    operatorToken: 'dashboard-token',
+    operatorToken: TEST_DASHBOARD_TOKEN,
     ticketStore: ticketStore = new SseConnectionTicketStore(),
   };
 }
@@ -142,7 +145,7 @@ describe('dashboard routes', () => {
       await res.body?.cancel();
     });
 
-    it('rejects a reused stream ticket', async () => {
+    it('rejects a reused stream ticket so EventSource stops retries', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
       const ticketRes = await app.request('/events/ticket', { method: 'POST' });
@@ -153,7 +156,19 @@ describe('dashboard routes', () => {
       await first.body?.cancel();
 
       const second = await app.request(`/events?ticket=${ticket}`);
-      expect(second.status).toBe(401);
+      expect(second.status).toBe(204);
+      expect(await second.text()).toBe('');
+    });
+
+    it('rejects invalid stream tickets', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events?ticket=bogus');
+
+      expect(res.status).toBe(401);
+      const body = await res.json() as { error: { message: string } };
+      expect(body.error.message).toBe('Invalid or expired ticket');
     });
 
     it('sends initial snapshot event in the stream', async () => {

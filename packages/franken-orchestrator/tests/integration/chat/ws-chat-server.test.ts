@@ -15,6 +15,7 @@ import {
   attachChatWebSocketServer,
 } from '../../../src/http/ws-chat-server.js';
 import {
+  CHAT_SOCKET_TOKEN_TTL_MS,
   createSessionTokenSecret,
   issueSessionToken,
 } from '../../../src/http/ws-chat-auth.js';
@@ -41,7 +42,7 @@ function createTestRuntime(): ChatRuntime {
     }),
     turnRunner: new TurnRunner({
       execute: vi.fn().mockResolvedValue({
-        status: 'success',
+        status: 'success' as const,
         summary: 'Done',
         filesChanged: [],
         testsRun: 0,
@@ -75,7 +76,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const httpServer = createServer();
     attachChatWebSocketServer({
       runtime: createTestRuntime(),
@@ -98,12 +99,47 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('rejects replayed socket tokens after the first successful upgrade', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const httpServer = createServer();
+    attachChatWebSocketServer({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const url = `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`;
+    const protocols = [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`];
+    const firstSocket = new WebSocket(url, protocols);
+
+    await expect(onceSocket(firstSocket, 'open')).resolves.toEqual([]);
+
+    const replaySocket = new WebSocket(url, protocols);
+    await onceSocket(replaySocket, 'error');
+    expect(replaySocket.readyState).toBe(WebSocket.CLOSED);
+    expect(warn).toHaveBeenCalledWith(
+      'Rejected reused websocket chat session ticket',
+      { sessionId: session.id },
+    );
+
+    firstSocket.close();
+    httpServer.close();
+    warn.mockRestore();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('does not negotiate token pseudo-protocols when clients send them first', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const httpServer = createServer();
     attachChatWebSocketServer({
       runtime: createTestRuntime(),
@@ -131,7 +167,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const httpServer = createServer();
     attachChatWebSocketServer({
       runtime: createTestRuntime(),
@@ -156,7 +192,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const runtime = new ChatRuntime({
       engine: new ConversationEngine({
         llm: { complete: vi.fn().mockResolvedValue('Working on it right now.') },
@@ -164,7 +200,7 @@ describe('ws chat server', () => {
       }),
       turnRunner: new TurnRunner({
         execute: vi.fn().mockResolvedValue({
-          status: 'success',
+          status: 'success' as const,
           summary: 'Done',
           filesChanged: [],
           testsRun: 0,
@@ -205,7 +241,7 @@ describe('ws chat server', () => {
     const store = new FileSessionStore(TMP);
     const session = store.create('proj');
     const secret = createSessionTokenSecret();
-    const token = issueSessionToken({ secret, sessionId: session.id });
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
     const engine = {
       processTurn: vi.fn().mockResolvedValue({
         tier: 'premium_execution',
@@ -259,6 +295,645 @@ describe('ws chat server', () => {
       risk: 'Requires explicit approval before execution.',
       sessionId: session.id,
     }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('does not acknowledge websocket messages rejected by pending approval', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute: vi.fn() }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-stale',
+      content: 'start another task',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events.map((event) => event.type)).not.toContain('message.accepted');
+    expect(events.map((event) => event.type)).not.toContain('message.delivered');
+    expect(events.map((event) => event.type)).not.toContain('message.read');
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_PENDING',
+    }));
+    expect(store.get(session.id)?.transcript).toEqual([]);
+    expect(store.get(session.id)?.pendingApproval).toEqual(expect.objectContaining({
+      requestedAt: '2026-03-09T00:00:00Z',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('acknowledges accepted websocket messages before the runtime turn completes', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    type RunResult = {
+      displayMessages: { kind: 'reply'; content: string }[];
+      events: unknown[];
+      pendingApproval: false;
+      state: 'active';
+      tier: 'cheap';
+      transcript: typeof session.transcript;
+    };
+    let resolveRun!: (value: RunResult) => void;
+    const runPromise = new Promise<RunResult>((resolve) => {
+      resolveRun = resolve;
+    });
+    const runtime = {
+      run: vi.fn(() => runPromise),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    const receivePromise = controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-long-turn',
+      content: 'run a long task',
+    }));
+
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(sent.map((raw) => JSON.parse(raw) as { type: string })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'message.accepted' }),
+      expect.objectContaining({ type: 'message.delivered' }),
+      expect.objectContaining({ type: 'message.read' }),
+    ]));
+
+    resolveRun({
+      displayMessages: [{ kind: 'reply', content: 'ok' }],
+      events: [],
+      pendingApproval: false,
+      state: 'active',
+      tier: 'cheap',
+      transcript: session.transcript,
+    });
+    await receivePromise;
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('emits execution events after an approved action runs', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn().mockResolvedValue({
+      status: 'success' as const,
+      summary: 'Done',
+      filesChanged: [],
+      testsRun: 0,
+      errors: [],
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    const connect = controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    });
+    expect(connect.ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+
+    expect(execute).toHaveBeenCalledWith({ userInput: 'deploy staging' });
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+      approved: true,
+    }));
+    expect(events.findIndex((event) => event.type === 'turn.approval.resolved'))
+      .toBeLessThan(events.findIndex((event) => event.type === 'turn.execution.start'));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.start',
+      data: { taskDescription: 'deploy staging' },
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.complete',
+      data: { status: 'success' },
+    }));
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('does not execute the same approved action twice for duplicate approval frames', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    let finishExecution!: () => void;
+    const executionStarted = new Promise<void>((resolve) => {
+      finishExecution = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await executionStarted;
+      return {
+        status: 'success' as const,
+        summary: 'Done',
+        filesChanged: [],
+        testsRun: 0,
+        errors: [],
+      };
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    const first = controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+    const second = controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+    finishExecution();
+    await Promise.all([first, second]);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const executionStarts = sent
+      .map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'turn.execution.start');
+    expect(executionStarts).toHaveLength(1);
+    const approvalResolved = sent
+      .map((raw) => JSON.parse(raw) as { type: string })
+      .filter((event) => event.type === 'turn.approval.resolved');
+    expect(approvalResolved).toHaveLength(2);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('restores pending approval and notifies clients when approved execution throws', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn(async () => {
+      throw new Error('executor offline');
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(store.get(session.id)?.state).toBe('pending_approval');
+    expect(store.get(session.id)?.pendingApproval?.command).toBe('deploy staging');
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_EXECUTION_FAILED',
+      message: 'executor offline',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.approval.requested',
+      command: 'deploy staging',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('does not retry approved work when live event delivery fails', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn().mockResolvedValue({
+      status: 'success' as const,
+      summary: 'Done',
+      filesChanged: [],
+      testsRun: 0,
+      errors: [],
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const sent: Record<string, unknown>[] = [];
+    const peer = {
+      close: vi.fn(),
+      send: (data: string) => {
+        const event = JSON.parse(data) as Record<string, unknown>;
+        sent.push(event);
+        if (event.type === 'turn.execution.start') {
+          throw new Error('socket closed');
+        }
+      },
+    };
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }))).resolves.toBeUndefined();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.get(session.id)?.state).toBe('approved');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: 'turn.execution.start',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('uses the legacy approve command for approvals without executable commands', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'Approve deployment?',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn();
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+
+    expect(execute).not.toHaveBeenCalled();
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'assistant.message.complete',
+      content: 'Approved.',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('rate limits websocket message turns after allowing below-limit execution', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'ok' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      })),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'run expensive work',
+    }));
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+    expect(sent.map((raw) => JSON.parse(raw) as { type: string })).toContainEqual(expect.objectContaining({
+      type: 'assistant.message.complete',
+    }));
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-2',
+      content: 'run more expensive work',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('shares websocket rate limits across sessions for the same client address', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const firstSession = store.create('proj');
+    const secondSession = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const firstToken = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: firstSession.id });
+    const secondToken = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: secondSession.id });
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'ok' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      })),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+      chatRateLimit: { windowMs: 60_000, max: 1 },
+    });
+    const first = createPeer();
+    const second = createPeer();
+    const remoteAddress = '198.51.100.20';
+
+    expect(controller.connect(first.peer, {
+      origin: null,
+      sessionId: firstSession.id,
+      token: firstToken,
+      remoteAddress,
+    }).ok).toBe(true);
+    expect(controller.connect(second.peer, {
+      origin: null,
+      sessionId: secondSession.id,
+      token: secondToken,
+      remoteAddress,
+    }).ok).toBe(true);
+
+    await controller.receive(first.peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'run expensive work',
+    }));
+    await controller.receive(second.peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-2',
+      content: 'run more expensive work',
+    }));
+
+    const secondEvents = second.sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(secondEvents).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('uses the REST chat default rate limit for websocket messages', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'ok' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      })),
+    };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+      remoteAddress: '198.51.100.21',
+    }).ok).toBe(true);
+
+    for (let index = 0; index < 20; index += 1) {
+      await controller.receive(peer, JSON.stringify({
+        type: 'message.send',
+        clientMessageId: `client-${index}`,
+        content: `run expensive work ${index}`,
+      }));
+    }
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-over-limit',
+      content: 'run too much expensive work',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).toHaveBeenCalledTimes(20);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('rate limits websocket approvals before mutating approval state', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = { run: vi.fn() };
+    const rateLimiter = { take: vi.fn(() => ({ allowed: false, remaining: 0 })) };
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+      chatRateLimiter: rateLimiter as never,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).not.toHaveBeenCalled();
+    expect(store.get(session.id)?.state).toBe('pending_approval');
+    expect(store.get(session.id)?.pendingApproval).toEqual(expect.objectContaining({ command: 'deploy staging' }));
 
     rmSync(TMP, { recursive: true, force: true });
   });

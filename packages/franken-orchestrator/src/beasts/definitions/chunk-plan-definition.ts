@@ -4,6 +4,31 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { BeastDefinition } from '../types.js';
 import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
 
+const promptConfigSchema = z.object({
+  text: z.string().optional(),
+  files: z.array(z.string()).optional(),
+}).strict();
+
+function hasMarkdownDesignDocExtension(path: string): boolean {
+  return /\.(?:md|mdx|markdown)$/i.test(path);
+}
+
+const markdownDesignDocPathSchema = z.string().min(1)
+  .refine((value) => !value.includes('\0'), 'designDocPath must not contain NUL bytes')
+  .refine((value) => !isAbsolute(value) && !value.startsWith('\\') && !/^[a-zA-Z]:/.test(value), {
+    message: 'designDocPath must be a repo-relative path',
+  })
+  .refine((value) => !value.split(/[\\/]+/).includes('..'), {
+    message: 'designDocPath must not contain parent-directory traversal',
+  })
+  .refine(hasMarkdownDesignDocExtension, {
+    message: 'designDocPath must point to a Markdown design document',
+  });
+
+function validateDesignDocPath(requested: string): string {
+  return markdownDesignDocPathSchema.parse(requested);
+}
+
 function canonicalPath(path: string): string {
   try {
     return realpathSync(path);
@@ -27,6 +52,14 @@ function resolveContainedConfigPath(fieldName: string, projectRoot: string | und
   return target;
 }
 
+function resolveMarkdownDesignDocPath(fieldName: string, projectRoot: string | undefined, requested: string): string {
+  const target = resolveContainedConfigPath(fieldName, projectRoot, requested);
+  if (!hasMarkdownDesignDocExtension(target)) {
+    throw new Error(`${fieldName} must resolve to a Markdown design document: ${requested}`);
+  }
+  return target;
+}
+
 export const chunkPlanDefinition: BeastDefinition = {
   id: 'chunk-plan',
   version: 1,
@@ -34,9 +67,10 @@ export const chunkPlanDefinition: BeastDefinition = {
   description: 'Turn a design document into chunked implementation artifacts through the tracked init workflow.',
   executionModeDefault: 'process',
   configSchema: z.object({
-    designDocPath: z.string().min(1),
+    designDocPath: markdownDesignDocPathSchema,
     outputDir: z.string().min(1),
     projectRoot: z.string().optional(),
+    promptConfig: promptConfigSchema.optional(),
   }).strict(),
   interviewPrompts: [
     {
@@ -54,10 +88,11 @@ export const chunkPlanDefinition: BeastDefinition = {
   ],
   buildProcessSpec: (config) => {
     const projectRoot = String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd());
-    const designDocPath = resolveContainedConfigPath(
+    const requestedDesignDocPath = validateDesignDocPath(String(config.designDocPath));
+    const designDocPath = resolveMarkdownDesignDocPath(
       'designDocPath',
       projectRoot,
-      String(config.designDocPath),
+      requestedDesignDocPath,
     );
 
     return {

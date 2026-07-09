@@ -1,6 +1,6 @@
 import type { BeastDefinition, BeastRun } from '../types.js';
 import { BeastLogStore } from '../events/beast-log-store.js';
-import type { BeastEventBus } from '../events/beast-event-bus.js';
+import type { BeastEventBus, BeastSseEvent } from '../events/beast-event-bus.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import type { BeastExecutors } from './beast-dispatch-service.js';
@@ -145,7 +145,8 @@ export class BeastRunService {
     if (!run.trackedAgentId) {
       return;
     }
-    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    const trackedAgentId: string = run.trackedAgentId;
+    const trackedAgent = this.repository.getTrackedAgent(trackedAgentId);
     if (!trackedAgent || trackedAgent.status === 'deleted') {
       return;
     }
@@ -164,41 +165,49 @@ export class BeastRunService {
     }
 
     const updatedAt = new Date().toISOString();
-    this.repository.updateTrackedAgent(run.trackedAgentId, {
-      status,
-      ...(run.id ? { dispatchRunId: run.id } : {}),
-      updatedAt,
-    });
-
-    this.serviceOptions.eventBus?.publish({
-      type: 'agent.status',
-      data: { agentId: run.trackedAgentId, status, updatedAt },
-    });
-
-    if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')) {
-      const level: 'error' | 'info' = run.status === 'failed' ? 'error' : 'info';
-      const type = `agent.run.${run.status}`;
-      const message = run.status === 'failed'
-        ? `Run ${run.id} failed with exit code ${run.latestExitCode ?? 'unknown'}`
-        : run.status === 'completed'
-          ? `Run ${run.id} completed successfully`
-          : `Run ${run.id} stopped`;
-      const agentEvent = {
-        level,
-        type,
-        message,
-        payload: {
-          runId: run.id,
-          ...(run.latestExitCode !== undefined ? { exitCode: run.latestExitCode } : {}),
-          ...(run.stopReason ? { stopReason: run.stopReason } : {}),
-        },
-        createdAt: new Date().toISOString(),
-      };
-      this.repository.appendTrackedAgentEvent(run.trackedAgentId, agentEvent);
-      this.serviceOptions.eventBus?.publish({
-        type: 'agent.event',
-        data: { agentId: run.trackedAgentId, event: agentEvent },
+    const publications = this.repository.transaction(() => {
+      this.repository.updateTrackedAgent(trackedAgentId, {
+        status,
+        dispatchRunId: run.id,
+        updatedAt,
       });
+
+      const pendingPublications: Array<Omit<BeastSseEvent, 'id'>> = [{
+        type: 'agent.status',
+        data: { agentId: trackedAgentId, status, updatedAt },
+      }];
+
+      if ((run.status === 'failed' || run.status === 'completed' || run.status === 'stopped')) {
+        const level: 'error' | 'info' = run.status === 'failed' ? 'error' : 'info';
+        const type = `agent.run.${run.status}`;
+        const message = run.status === 'failed'
+          ? `Run ${run.id} failed with exit code ${run.latestExitCode ?? 'unknown'}`
+          : run.status === 'completed'
+            ? `Run ${run.id} completed successfully`
+            : `Run ${run.id} stopped`;
+        const agentEvent = {
+          level,
+          type,
+          message,
+          payload: {
+            runId: run.id,
+            ...(run.latestExitCode !== undefined ? { exitCode: run.latestExitCode } : {}),
+            ...(run.stopReason ? { stopReason: run.stopReason } : {}),
+          },
+          createdAt: new Date().toISOString(),
+        };
+        this.repository.appendTrackedAgentEvent(trackedAgentId, agentEvent);
+        pendingPublications.push({
+          type: 'agent.event',
+          data: { agentId: trackedAgentId, event: agentEvent },
+        });
+      }
+
+      return pendingPublications;
+    });
+
+    for (const publication of publications) {
+      this.serviceOptions.eventBus?.publish(publication);
     }
   }
 }

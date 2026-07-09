@@ -18,6 +18,9 @@ import { TransportSecurityService } from '../../../src/http/security/transport-s
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_SUPER_SECRET_OPERATOR_TOKEN = testCredential('TEST_SUPER_SECRET_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/agent-routes');
 
@@ -109,7 +112,7 @@ function createIntegratedBeastApp(opts?: { rateLimitMax?: number }) {
   const interviews = new BeastInterviewService(repository, catalog);
   const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
   const security = new TransportSecurityService();
-  const operatorToken = 'super-secret-operator-token';
+  const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
 
   const app = createChatApp({
     sessionStoreDir: join(TMP, 'chat'),
@@ -150,7 +153,7 @@ function createStandaloneAgentApp() {
       kill: vi.fn(),
       restart: vi.fn(),
     } as never,
-    operatorToken: 'super-secret-operator-token',
+    operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
     security: new TransportSecurityService(),
   }));
 
@@ -219,6 +222,94 @@ describe('agent routes integration', () => {
         message: 'Malformed JSON body',
       },
     });
+  });
+
+  it('rejects unauthenticated large wizard launch payloads before buffering up to the beast cap', async () => {
+    const { app } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Start later',
+            chunkDirectory: 'docs/chunks',
+            promptConfig: { text: 'x'.repeat(20 * 1024) },
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Start later',
+          chunkDirectory: 'docs/chunks',
+          promptConfig: { text: 'x'.repeat(20 * 1024) },
+        },
+        autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('allows wizard launch payloads above the small control API body cap', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Start later',
+            chunkDirectory: 'docs/chunks',
+            promptConfig: { text: 'x'.repeat(20 * 1024) },
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Start later',
+          chunkDirectory: 'docs/chunks',
+          promptConfig: { text: 'x'.repeat(20 * 1024) },
+        },
+        autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+  });
+
+  it('rejects unauthenticated large beast payloads before applying the large body cap', async () => {
+    const { app } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+        },
+        initConfig: { promptConfig: { text: 'x'.repeat(2 * 1024 * 1024) } },
+        autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(401);
   });
 
   it('creates, dispatches, and lists tracked agents for authorized operators', async () => {
@@ -532,7 +623,7 @@ describe('agent routes integration', () => {
 
   it('stops initializing tracked agents without a linked run', async () => {
     const { app } = createStandaloneAgentApp();
-    const operatorToken = 'super-secret-operator-token';
+    const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',
@@ -795,7 +886,7 @@ describe('agent routes integration', () => {
 
   it('returns 409 when killing a tracked agent that has no linked run', async () => {
     const { app } = createStandaloneAgentApp();
-    const operatorToken = 'super-secret-operator-token';
+    const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
     const headers = {
       authorization: `Bearer ${operatorToken}`,
       'content-type': 'application/json',

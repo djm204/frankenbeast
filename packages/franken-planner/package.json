@@ -1,6 +1,6 @@
 {
-  "name": "franken-planner",
-  "version": "0.4.7",
+  "name": "@franken/planner",
+  "version": "0.4.12",
   "description": "MOD-04: Planning and Decomposition module for the Frankenbeast AI agent system",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,6 +11,9 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -23,7 +26,7 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "0.7.4"
+    "@franken/types": "0.8.1"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
@@ -36,5 +39,6 @@
   },
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
-  }
+  },
+  "license": "MIT"
 }

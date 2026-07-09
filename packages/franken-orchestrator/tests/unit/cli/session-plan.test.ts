@@ -174,7 +174,7 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
   stripAnsi: vi.fn((s: string) => s),
 }));
 
-vi.mock('franken-brain', () => ({
+vi.mock('@franken/brain', () => ({
   MemoryOrchestrator: vi.fn(function () {}),
   EpisodicMemoryStore: vi.fn(function () {}),
   SemanticMemoryStore: vi.fn(function () {}),

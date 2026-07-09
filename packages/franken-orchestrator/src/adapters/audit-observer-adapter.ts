@@ -1,6 +1,6 @@
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
-import type { AuditTrail } from '@frankenbeast/observer';
-import { createAuditEvent } from '@frankenbeast/observer';
+import type { AuditTrail } from '@franken/observer';
+import { createAuditEvent } from '@franken/observer';
 import type { ReplayContentStoreLike, ReplayRecord, ReplayRecordKind } from '../replay/replay-content-store.js';
 
 export interface ReplayCaptureRecord {

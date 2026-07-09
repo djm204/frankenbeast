@@ -36,6 +36,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
     setLoading,
   } = useDashboardStore();
   const mountedRef = useRef(false);
+  const previousClientRef = useRef<DashboardApiClient | null>(null);
   const clientGenerationRef = useRef(0);
   const loadSequenceRef = useRef(0);
   const issuedSkillMutationSequenceRef = useRef(new Map<string, number>());
@@ -51,6 +52,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [skillErrors, setSkillErrors] = useState<Record<string, SkillMutationError>>({});
   const [securityError, setSecurityError] = useState<SecurityMutationError | null>(null);
+  const [dashboardConnectionRetry, setDashboardConnectionRetry] = useState(0);
 
   const setConfirmedSnapshot = useCallback((snapshot: DashboardSnapshot) => {
     confirmedSnapshotRef.current = snapshot;
@@ -145,42 +147,56 @@ export function DashboardPage({ client }: DashboardPageProps) {
   }, [applyServerSnapshot, client, setLoading]);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
     // Note: SSE snapshot events replace full store state. If the server pushes
     // a snapshot while an optimistic update is in-flight, the server state wins.
     // Currently only the initial snapshot is pushed (heartbeats carry no data).
-    mountedRef.current = true;
-    clientGenerationRef.current += 1;
-    skillMutationSequenceRef.current.clear();
-    securityMutationSequenceRef.current = 0;
-    failedSkillMutationSequenceRef.current.clear();
-    failedSecurityMutationSequenceRef.current = null;
-    setSkillErrors({});
-    setSecurityError(null);
+    const clientChanged = previousClientRef.current !== client;
+    previousClientRef.current = client;
+    if (clientChanged) {
+      clientGenerationRef.current += 1;
+      skillMutationSequenceRef.current.clear();
+      securityMutationSequenceRef.current = 0;
+      failedSkillMutationSequenceRef.current.clear();
+      failedSecurityMutationSequenceRef.current = null;
+      setSkillErrors({});
+      setSecurityError(null);
+    }
     const subscriptionGeneration = clientGenerationRef.current;
     if (!confirmedSnapshotRef.current && security) {
       setConfirmedSnapshot({ skills, security, providers });
     }
     loadSnapshot();
     let unsub: (() => void) | undefined;
+    let streamActive = true;
     client.subscribeToDashboard((snap) => {
       if (!mountedRef.current) return;
+      if (!streamActive) return;
       if (clientGenerationRef.current !== subscriptionGeneration) return;
       setLoadError(null);
       applyServerSnapshot(snap);
     })
       .then((nextUnsub) => {
-        if (!mountedRef.current) {
+        if (!mountedRef.current || !streamActive || clientGenerationRef.current !== subscriptionGeneration) {
           nextUnsub();
           return;
         }
         unsub = nextUnsub;
       })
       .catch((error) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || !streamActive || clientGenerationRef.current !== subscriptionGeneration) return;
         setLoadError(`Unable to stream dashboard updates. ${describeError(error)}`);
       });
-    return () => { mountedRef.current = false; unsub?.(); };
-  }, [applyServerSnapshot, client, loadSnapshot, setConfirmedSnapshot]);
+    return () => { streamActive = false; unsub?.(); };
+  }, [applyServerSnapshot, client, dashboardConnectionRetry, loadSnapshot, setConfirmedSnapshot]);
+
+  const retryDashboardConnection = useCallback(() => {
+    setDashboardConnectionRetry((retry) => retry + 1);
+  }, []);
 
   const handleToggleSkill = useCallback((name: string, enabled: boolean) => {
     const sequence = (issuedSkillMutationSequenceRef.current.get(name) ?? 0) + 1;
@@ -295,7 +311,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
           {loadError && (
             <div className="analytics-alert dashboard-alert" role="alert">
               <span>{loadError}</span>
-              <button type="button" onClick={loadSnapshot}>Retry loading dashboard</button>
+              <button type="button" onClick={retryDashboardConnection}>Retry loading dashboard</button>
             </div>
           )}
           {Object.values(skillErrors).map((skillError) => (
