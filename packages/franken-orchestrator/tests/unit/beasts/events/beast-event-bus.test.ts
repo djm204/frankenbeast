@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { BeastEventBus, type BeastSseEvent } from '../../../../src/beasts/events/beast-event-bus.js';
+import {
+  BeastEventBus,
+  type BeastEventBusListenerError,
+  type BeastSseEvent,
+} from '../../../../src/beasts/events/beast-event-bus.js';
 
 describe('BeastEventBus', () => {
   it('delivers events to subscribers', () => {
@@ -38,6 +42,45 @@ describe('BeastEventBus', () => {
     bus.publish({ type: 'agent.status', data: { agentId: 'a2', status: 'running', updatedAt: '' } });
 
     expect(received).toHaveLength(1);
+  });
+
+  it('reports sync listener errors without stopping later listeners', () => {
+    const errors: BeastEventBusListenerError[] = [];
+    const bus = new BeastEventBus({ onListenerError: (failure) => errors.push(failure) });
+    const received: BeastSseEvent[] = [];
+    const thrown = new Error('listener exploded');
+    const failingListener = () => {
+      throw thrown;
+    };
+
+    bus.subscribe(failingListener);
+    bus.subscribe((event) => received.push(event));
+
+    bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running', updatedAt: '' } });
+
+    expect(received).toHaveLength(1);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ event: received[0], error: thrown, listener: failingListener });
+  });
+
+  it('reports async listener rejections without stopping later listeners', async () => {
+    const errors: BeastEventBusListenerError[] = [];
+    const bus = new BeastEventBus({ onListenerError: (failure) => errors.push(failure) });
+    const received: BeastSseEvent[] = [];
+    const rejected = new Error('stream write failed');
+    const failingListener = async () => {
+      throw rejected;
+    };
+
+    bus.subscribe(failingListener);
+    bus.subscribe((event) => received.push(event));
+
+    bus.publish({ type: 'run.log', data: { runId: 'r1', line: 'hello' } });
+    await Promise.resolve();
+
+    expect(received).toHaveLength(1);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ event: received[0], error: rejected, listener: failingListener });
   });
 
   it('replays events from a given sequence ID', () => {

@@ -6,14 +6,39 @@ export interface BeastSseEvent {
 
 type EventListener = (event: BeastSseEvent) => void | Promise<void>;
 
+export interface BeastEventBusListenerError {
+  event: BeastSseEvent;
+  error: unknown;
+  listener: EventListener;
+}
+
+export interface BeastEventBusOptions {
+  maxBufferSize?: number;
+  onListenerError?: (failure: BeastEventBusListenerError) => void;
+}
+
+function reportDefaultListenerError({ event, error }: BeastEventBusListenerError): void {
+  console.error('[BeastEventBus] Listener failed', {
+    eventId: event.id,
+    eventType: event.type,
+    error,
+  });
+}
+
 export class BeastEventBus {
   private sequence = 0;
   private readonly listeners = new Set<EventListener>();
   private readonly buffer: BeastSseEvent[] = [];
   private readonly maxBufferSize: number;
+  private readonly onListenerError: (failure: BeastEventBusListenerError) => void;
 
-  constructor(maxBufferSize = 1000) {
-    this.maxBufferSize = maxBufferSize;
+  constructor(maxBufferSizeOrOptions: number | BeastEventBusOptions = 1000) {
+    const options = typeof maxBufferSizeOrOptions === 'number'
+      ? { maxBufferSize: maxBufferSizeOrOptions }
+      : maxBufferSizeOrOptions;
+
+    this.maxBufferSize = options.maxBufferSize ?? 1000;
+    this.onListenerError = options.onListenerError ?? reportDefaultListenerError;
   }
 
   publish(event: Omit<BeastSseEvent, 'id'>): void {
@@ -29,10 +54,10 @@ export class BeastEventBus {
       try {
         const result = listener(stamped);
         if (result && typeof result.catch === 'function') {
-          result.catch(() => {});
+          result.catch((error: unknown) => this.reportListenerError(stamped, error, listener));
         }
-      } catch {
-        // Don't let a failing sync listener break others
+      } catch (error) {
+        this.reportListenerError(stamped, error, listener);
       }
     }
   }
@@ -46,5 +71,13 @@ export class BeastEventBus {
 
   replaySince(lastEventId: number): BeastSseEvent[] {
     return this.buffer.filter((e) => e.id !== undefined && e.id > lastEventId);
+  }
+
+  private reportListenerError(event: BeastSseEvent, error: unknown, listener: EventListener): void {
+    try {
+      this.onListenerError({ event, error, listener });
+    } catch (handlerError) {
+      reportDefaultListenerError({ event, error: handlerError, listener });
+    }
   }
 }
