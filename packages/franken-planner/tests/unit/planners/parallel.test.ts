@@ -46,6 +46,22 @@ function cyclicGraph(): PlanGraph {
   return PlanGraph.createWithRawEdges(nodes, edges);
 }
 
+function danglingDependencyGraph(): PlanGraph {
+  const ready = makeTask('ready');
+  const blocked = makeTask('blocked');
+  const missing = createTaskId('missing');
+  const nodes = new Map<TaskId, Task>([
+    [ready.id, ready],
+    [blocked.id, blocked],
+  ]);
+  const edges = new Map<TaskId, Set<TaskId>>([
+    [ready.id, new Set<TaskId>()],
+    [blocked.id, new Set<TaskId>([missing])],
+  ]);
+
+  return PlanGraph.createWithRawEdges(nodes, edges);
+}
+
 // ─── Happy path ───────────────────────────────────────────────────────────────
 
 describe('ParallelPlanner — happy path', () => {
@@ -351,6 +367,23 @@ describe('ParallelPlanner — cycle handling', () => {
     await expect(new ParallelPlanner().execute(cyclicGraph(), { executor })).rejects.toBeInstanceOf(
       CyclicDependencyError
     );
+    expect(executor).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Dangling dependency handling ─────────────────────────────────────────────
+
+describe('ParallelPlanner — dangling dependency handling', () => {
+  it('returns failed before executing tasks when a task depends on a missing task', async () => {
+    const executor = vi.fn().mockResolvedValue(success('ready'));
+
+    const result = await new ParallelPlanner().execute(danglingDependencyGraph(), { executor });
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('blocked'));
+    expect(result.error.message).toContain("depends on unknown dependency node 'missing'");
+    expect(result.taskResults).toEqual([]);
     expect(executor).not.toHaveBeenCalled();
   });
 });
