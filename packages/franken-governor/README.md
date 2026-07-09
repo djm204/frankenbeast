@@ -736,13 +736,13 @@ All I/O is injected — tests use fakes/mocks, no real network or terminal requi
 
 | ADR | Title |
 |-----|-------|
-| [ADR-001](docs/adr/001-typescript-strict-nodenext.md) | TypeScript Strict + NodeNext Resolution |
-| [ADR-002](docs/adr/002-approval-channel-strategy.md) | Approval Channel Strategy Pattern |
-| [ADR-003](docs/adr/003-composable-trigger-evaluators.md) | Composable Trigger Evaluators |
-| [ADR-004](docs/adr/004-audit-trail-episodic-trace.md) | Audit Trail via EpisodicTrace to MOD-03 |
-| [ADR-005](docs/adr/005-signed-approvals-hmac.md) | Signed Approvals with HMAC-SHA256 |
-| [ADR-006](docs/adr/006-custom-error-hierarchy.md) | Custom Error Hierarchy |
-| [ADR-007](docs/adr/007-session-token-activation.md) | Session Token Activation Model |
+| [ADR-001](docs/adr/ADR-001-typescript-strict-nodenext.md) | TypeScript Strict + NodeNext Resolution |
+| [ADR-002](docs/adr/ADR-002-approval-channel-strategy.md) | Approval Channel Strategy Pattern |
+| [ADR-003](docs/adr/ADR-003-composable-trigger-evaluators.md) | Composable Trigger Evaluators |
+| [ADR-004](docs/adr/ADR-004-audit-trail-episodic-trace.md) | Audit Trail via EpisodicTrace to MOD-03 |
+| [ADR-005](docs/adr/ADR-005-signed-approvals-hmac.md) | Signed Approvals with HMAC-SHA256 |
+| [ADR-006](docs/adr/ADR-006-custom-error-hierarchy.md) | Custom Error Hierarchy |
+| [ADR-007](docs/adr/ADR-007-session-token-activation.md) | Session Token Activation Model |
 
 ## License
 

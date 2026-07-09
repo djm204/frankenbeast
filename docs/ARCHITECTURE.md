@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Frankenbeast is a deterministic guardrails framework for AI agents, organized as an npm workspaces monorepo with Turborepo. The current repo has 10 package manifests under `packages/*`. See [ADR-011](adr/011-monorepo-migration.md) for the monorepo migration and [ADR-031](adr/031-architecture-consolidation-provider-agnostic.md) for the package consolidation that absorbed several earlier standalone packages.
+Frankenbeast is a deterministic guardrails framework for AI agents, organized as an npm workspaces monorepo with Turborepo. The current repo has 10 package manifests under `packages/*`. See [ADR-011](adr/011-real-monorepo-migration.md) for the monorepo migration and [ADR-031](adr/031-architecture-consolidation-provider-agnostic.md) for the package consolidation that absorbed several earlier standalone packages.
 
 This document mixes two views:
 
@@ -354,7 +354,7 @@ Chunk-session recovery complements file checkpoints:
 - compaction writes rollback snapshots before transcript surgery
 - `ChunkSessionGc` prunes expired sessions and orphaned snapshots during CLI startup
 
-**Design reference:** See [Approach C Full Pipeline Design](plans/2026-03-05-approach-c-full-pipeline-design.md) and [ADR-008](adr/008-approach-c-full-pipeline.md).
+**Design reference:** See [ADR-008](adr/008-approach-c-full-pipeline.md) for the Approach C full-pipeline design history.
 
 ## CLI Pipeline
 
@@ -381,7 +381,7 @@ All project state lives in `.fbeast/` at the project root.
 
 **Provider selection:** `--provider <name>` sets the primary CLI agent (default: `claude`). `--providers <list>` sets a comma-separated fallback chain for rate-limit cascading (e.g., `claude,gemini,aider`). The config file `providers` section supports `default`, `fallbackChain`, and per-provider `overrides` (command path, model, extra args). CLI args take precedence over config file values.
 
-**Design reference:** See [CLI E2E Design](plans/2026-03-06-cli-e2e-design.md), [ADR-009](adr/009-global-cli-design.md), and [ADR-010](adr/010-pluggable-cli-providers.md).
+**Design reference:** See [ADR-009](adr/009-global-cli-design.md) and [ADR-010](adr/010-pluggable-cli-providers.md) for the CLI design history.
 
 ## Issues Pipeline
 
@@ -900,7 +900,7 @@ The `frankenbeast chat-server` subcommand exposes the ChatRuntime over HTTP and 
 | `ChatSocketController` | `src/http/ws-chat-server.ts` | WebSocket connection management, chunk-based content delivery, turn event streaming |
 | `chat-app.ts` | `src/http/chat-app.ts` | Hono HTTP routes for REST-based chat interactions |
 
-**Design reference:** See [ADR-014](adr/014-chat-two-tier-dispatch.md), [ADR-016](adr/016-chat-server-entrypoint.md), and [ADR-018](adr/018-tracked-agent-init-workflow.md).
+**Design reference:** See [ADR-014](adr/014-chat-two-tier-dispatch.md), [ADR-016](adr/016-chat-server-entrypoint-for-dashboard.md), and [ADR-018](adr/018-tracked-agent-init-workflow.md).
 
 ### Beast Control and Tracked Agents
 
