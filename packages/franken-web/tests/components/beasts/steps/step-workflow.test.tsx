@@ -31,6 +31,20 @@ describe('StepWorkflow', () => {
     expect(screen.getByLabelText('Output Path')).toBeTruthy();
   });
 
+  it('collects backend design-interview fields', () => {
+    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
+    render(<StepWorkflow />);
+
+    fireEvent.change(screen.getByLabelText('Goal'), { target: { value: 'Draft billing design' } });
+    fireEvent.change(screen.getByLabelText('Output Path'), { target: { value: 'docs/billing.md' } });
+
+    expect(useBeastStore.getState().stepValues[1]).toEqual({
+      workflowType: 'design-interview',
+      goal: 'Draft billing design',
+      outputPath: 'docs/billing.md',
+    });
+  });
+
   it('collects both required chunk-plan launch fields', () => {
     useBeastStore.getState().setStepValues(1, { workflowType: 'chunk-plan' });
     render(<StepWorkflow />);
@@ -42,6 +56,22 @@ describe('StepWorkflow', () => {
       workflowType: 'chunk-plan',
       docPath: 'docs/design.md',
       outputDir: 'tasks/chunks',
+    });
+  });
+
+  it('collects backend martin-loop fields', () => {
+    useBeastStore.getState().setStepValues(1, { workflowType: 'martin-loop' });
+    render(<StepWorkflow />);
+
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'codex' } });
+    fireEvent.change(screen.getByLabelText('Objective'), { target: { value: 'Implement chunks' } });
+    fireEvent.change(screen.getByLabelText('Chunk Directory Path'), { target: { value: 'tasks/chunks' } });
+
+    expect(useBeastStore.getState().stepValues[1]).toEqual({
+      workflowType: 'martin-loop',
+      provider: 'codex',
+      objective: 'Implement chunks',
+      chunkDirectory: 'tasks/chunks',
     });
   });
 

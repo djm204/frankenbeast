@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 
-afterEach(cleanup);
 import { StepReview } from '../../../../src/components/beasts/steps/step-review';
 import { useBeastStore } from '../../../../src/stores/beast-store';
+
+afterEach(cleanup);
 
 describe('StepReview', () => {
   beforeEach(() => {
@@ -16,6 +17,35 @@ describe('StepReview', () => {
     render(<StepReview />);
     expect(screen.getByText('Test Agent')).toBeTruthy();
     expect(screen.getByText(/design-interview/i)).toBeTruthy();
+  });
+
+  it('shows backend-required workflow details before launch', () => {
+    useBeastStore.getState().setStepValues(1, {
+      workflowType: 'martin-loop',
+      provider: 'codex',
+      objective: 'Implement chunks',
+      chunkDirectory: 'tasks/chunks',
+    });
+
+    render(<StepReview />);
+
+    expect(screen.getByText('Provider')).toBeTruthy();
+    expect(screen.getByText('codex')).toBeTruthy();
+    expect(screen.getByText('Objective')).toBeTruthy();
+    expect(screen.getByText('Implement chunks')).toBeTruthy();
+    expect(screen.getByText('Chunk directory')).toBeTruthy();
+    expect(screen.getByText('tasks/chunks')).toBeTruthy();
+    expect(screen.queryByText('Required workflow fields are missing:')).toBeNull();
+  });
+
+  it('surfaces missing required workflow fields on the review step', () => {
+    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview', goal: '' });
+
+    render(<StepReview />);
+
+    expect(screen.getByText('Required workflow fields are missing:')).toBeTruthy();
+    expect(screen.getByText('Design interview goal is required.')).toBeTruthy();
+    expect(screen.getByText('Design interview output path is required.')).toBeTruthy();
   });
 
   it('has edit links that call setWizardStep', () => {
