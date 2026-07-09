@@ -43,6 +43,16 @@ function createMockDeps(): DashboardRouteDeps {
   };
 }
 
+async function issueDashboardTicket(app: ReturnType<typeof createDashboardRoutes>): Promise<string> {
+  const ticketRes = await app.request('/events/ticket', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TEST_DASHBOARD_TOKEN}` },
+  });
+  expect(ticketRes.status).toBe(200);
+  const { ticket } = await ticketRes.json() as { ticket: string };
+  return ticket;
+}
+
 describe('dashboard routes', () => {
   afterEach(() => {
     ticketStore?.destroy();
@@ -99,11 +109,35 @@ describe('dashboard routes', () => {
   });
 
   describe('GET /events', () => {
-    it('POST /events/ticket returns a short-lived stream ticket', async () => {
+    it('POST /events/ticket rejects requests without operator auth', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
 
       const res = await app.request('/events/ticket', { method: 'POST' });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /events/ticket rejects invalid operator auth', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events/ticket', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TEST_DASHBOARD_TOKEN}-invalid` },
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /events/ticket returns a short-lived stream ticket for bearer-authenticated callers', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events/ticket', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TEST_DASHBOARD_TOKEN}` },
+      });
 
       expect(res.status).toBe(200);
       const body = await res.json() as { ticket?: string };
@@ -137,8 +171,7 @@ describe('dashboard routes', () => {
     it('returns SSE content-type with a valid ticket', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-      const { ticket } = await ticketRes.json() as { ticket: string };
+      const ticket = await issueDashboardTicket(app);
 
       const res = await app.request(`/events?ticket=${ticket}`);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
@@ -148,8 +181,7 @@ describe('dashboard routes', () => {
     it('rejects a reused stream ticket so EventSource stops retries', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-      const { ticket } = await ticketRes.json() as { ticket: string };
+      const ticket = await issueDashboardTicket(app);
 
       const first = await app.request(`/events?ticket=${ticket}`);
       expect(first.status).toBe(200);
@@ -174,8 +206,7 @@ describe('dashboard routes', () => {
     it('sends initial snapshot event in the stream', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-      const { ticket } = await ticketRes.json() as { ticket: string };
+      const ticket = await issueDashboardTicket(app);
       const res = await app.request(`/events?ticket=${ticket}`);
 
       // Read partial stream — the SSE connection stays open, so we read
@@ -212,8 +243,7 @@ describe('dashboard routes', () => {
         const deps = createMockDeps();
         const providers = deps.getProviders as ReturnType<typeof vi.fn>;
         const app = createDashboardRoutes(deps);
-        const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-        const { ticket } = await ticketRes.json() as { ticket: string };
+        const ticket = await issueDashboardTicket(app);
         const res = await app.request(`/events?ticket=${ticket}`);
 
         const reader = res.body!.getReader();
@@ -248,8 +278,7 @@ describe('dashboard routes', () => {
         const deps = createMockDeps();
         const providers = deps.getProviders as ReturnType<typeof vi.fn>;
         const app = createDashboardRoutes(deps);
-        const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-        const { ticket } = await ticketRes.json() as { ticket: string };
+        const ticket = await issueDashboardTicket(app);
         const res = await app.request(`/events?ticket=${ticket}`);
         const reader = res.body!.getReader();
 
