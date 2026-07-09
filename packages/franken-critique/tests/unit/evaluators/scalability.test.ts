@@ -569,6 +569,27 @@ const port: Brand<
     ]);
   });
 
+  it('covers follow-up Codex plural and markdown fence cases', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `Here is the problematic config:
+\`\`\`ts
+const markdownPort = 8080;
+\`\`\`
+const cfg = { ports_by_protocol: { https: 8443 }, server_ports_by_name: { admin: 9000 } };
+const quoted = { "server-ports": 3000, "server.ports": 5000 };
+config["server-ports"] = 7000;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((f) => f.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 3000. Use environment variables or config.',
+      'Found hardcoded port number: 5000. Use environment variables or config.',
+      'Found hardcoded port number: 7000. Use environment variables or config.',
+      'Found hardcoded port number: 8443. Use environment variables or config.',
+      'Found hardcoded port number: 9000. Use environment variables or config.',
+    ]);
+  });
+
   it('preserves long interface declarations as type-only', async () => {
     const evaluator = new ScalabilityEvaluator();
     const longExtends = Array.from({ length: 260 }, (_, index) => `Base${index}`).join(' & ');
