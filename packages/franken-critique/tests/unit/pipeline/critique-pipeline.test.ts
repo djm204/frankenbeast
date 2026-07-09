@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { CritiquePipeline } from '../../../src/pipeline/critique-pipeline.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { Evaluator, EvaluationInput, EvaluationResult } from '../../../src/types/evaluation.js';
@@ -38,6 +38,10 @@ function createThrowingEvaluator(
 }
 
 describe('CritiquePipeline', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('returns pass with empty evaluator list', async () => {
     const pipeline = new CritiquePipeline([]);
     const result = await pipeline.run(createInput('code'));
@@ -177,12 +181,10 @@ describe('CritiquePipeline', () => {
   });
 
   it('isolates evaluator exceptions as structured failures and continues later evaluators', async () => {
+    const logged = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const backendError = new Error('memory backend unavailable');
     const passing = createMockEvaluator('passing', 'deterministic', { score: 0.8 });
-    const throwing = createThrowingEvaluator(
-      'flaky-adr-check',
-      'heuristic',
-      new Error('memory backend unavailable'),
-    );
+    const throwing = createThrowingEvaluator('flaky-adr-check', 'heuristic', backendError);
     const later = createMockEvaluator('later', 'heuristic', { score: 0.6 });
 
     const pipeline = new CritiquePipeline([passing, throwing, later]);
@@ -209,9 +211,14 @@ describe('CritiquePipeline', () => {
     expect(result.results[1]?.findings[0]?.message).not.toContain('memory backend unavailable');
     expect(result.results[2]).toMatchObject({ evaluatorName: 'later', verdict: 'pass' });
     expect(later.evaluate).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalledWith('Critique evaluator threw during evaluation', {
+      evaluatorName: 'flaky-adr-check',
+      error: backendError,
+    });
   });
 
   it('short-circuits after converting a safety evaluator exception into a structured failure', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const safety = createThrowingEvaluator('safety', 'deterministic', new Error('guardrails unavailable'));
     const other = createMockEvaluator('other', 'heuristic');
 

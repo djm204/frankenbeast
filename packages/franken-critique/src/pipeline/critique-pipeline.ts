@@ -7,6 +7,13 @@ function hasWarningFinding(result: EvaluationResult): boolean {
   return result.findings.some((finding) => finding.severity !== 'info');
 }
 
+function logEvaluatorException(evaluator: Evaluator, error: unknown): void {
+  console.warn('Critique evaluator threw during evaluation', {
+    evaluatorName: evaluator.name,
+    error,
+  });
+}
+
 function createEvaluatorExceptionResult(evaluator: Evaluator): EvaluationResult {
   return {
     evaluatorName: evaluator.name,
@@ -47,7 +54,8 @@ export class CritiquePipeline {
 
       try {
         result = await evaluator.evaluate(input);
-      } catch {
+      } catch (error) {
+        logEvaluatorException(evaluator, error);
         results.push(createEvaluatorExceptionResult(evaluator));
         if (evaluator.name === SAFETY_EVALUATOR_NAME) {
           shortCircuited = true;
