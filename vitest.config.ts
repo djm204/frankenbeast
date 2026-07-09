@@ -27,6 +27,23 @@ const explicitPathRequest = requestedPaths.length > 0;
 const runIntegration = vitestFlags.INTEGRATION;
 const runE2e = vitestFlags.E2E;
 const runDockerBuild = vitestFlags.DOCKER_BUILD || requestedDockerBuild;
+const optionalSuiteRequested = runIntegration || runE2e || runDockerBuild;
+const include = explicitPathRequest || !optionalSuiteRequested
+  ? ['tests/**/*.test.ts']
+  : [
+      ...(runIntegration ? ['tests/integration/**/*.test.ts'] : []),
+      ...(runE2e ? ['tests/integration/**/*e2e*.test.ts'] : []),
+      ...(runDockerBuild ? ['tests/sandbox-dockerfile.test.ts'] : []),
+    ];
+const exclude = explicitPathRequest
+  ? ['**/node_modules/**', '**/dist/**']
+  : [
+      '**/node_modules/**',
+      '**/dist/**',
+      ...(!optionalSuiteRequested ? ['tests/integration/**/*.test.ts'] : []),
+      ...(runIntegration && !runE2e ? ['tests/integration/**/*e2e*.test.ts'] : []),
+      ...(!runDockerBuild ? ['tests/sandbox-dockerfile.test.ts'] : []),
+    ];
 
 export default defineConfig({
   resolve: {
@@ -45,19 +62,8 @@ export default defineConfig({
     // INTEGRATION=true or an explicit tests/integration path opts into root integration tests.
     // E2E=true or an explicit e2e path opts into root end-to-end tests.
     // DOCKER_BUILD=true or the explicit sandbox Dockerfile test path opts into Docker builds.
-    include: runIntegration && !explicitPathRequest
-      ? ['tests/integration/**/*.test.ts']
-      : runE2e && !explicitPathRequest
-        ? ['tests/integration/**/*e2e*.test.ts']
-        : ['tests/**/*.test.ts'],
-    exclude: runIntegration || runE2e || explicitPathRequest
-      ? ['**/node_modules/**', '**/dist/**']
-      : [
-          '**/node_modules/**',
-          '**/dist/**',
-          'tests/integration/**/*.test.ts',
-          ...(runDockerBuild ? [] : ['tests/sandbox-dockerfile.test.ts']),
-        ],
+    include,
+    exclude,
     testTimeout: 15_000,
   },
 });

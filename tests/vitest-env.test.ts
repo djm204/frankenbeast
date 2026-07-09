@@ -48,6 +48,9 @@ describe('Vitest environment flag helper', () => {
     expect(config).toContain('runDockerBuild');
     expect(config).toContain("'tests/**/*.test.ts'");
     expect(config).toContain("'tests/integration/**/*.test.ts'");
-    expect(config).toMatch(/exclude:[\s\S]*runIntegration \|\| runE2e[\s\S]*tests\/integration\/\*\*\/\*\.test\.ts/);
+    expect(config).toContain('optionalSuiteRequested');
+    expect(config).toContain('runIntegration && !runE2e');
+    expect(config).toContain('include,');
+    expect(config).toContain('exclude,');
   });
 });
