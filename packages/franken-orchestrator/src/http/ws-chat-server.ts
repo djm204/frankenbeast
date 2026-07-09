@@ -272,7 +272,7 @@ export class ChatSocketController {
 
     const result = await this.runtime.run(content, {
       sessionId: session.id,
-      ...pendingApprovalRuntimeState(session.pendingApproval),
+      ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),
       projectId: session.projectId,
       transcript: session.transcript,
       ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
@@ -284,7 +284,7 @@ export class ChatSocketController {
     session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
       ? {
           description: result.pendingApprovalDescription,
-          requestedAt: nowIso(),
+          requestedAt: result.pendingApprovalRequestedAt ?? nowIso(),
           ...result.pendingApprovalContext,
         }
       : null;
@@ -406,7 +406,8 @@ export class ChatSocketController {
     try {
       result = await this.runtime.run(runtimeInput, {
         sessionId: session.id,
-        pendingApproval: !pendingApproval?.command,
+        pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
+        approvalResolved: true,
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),

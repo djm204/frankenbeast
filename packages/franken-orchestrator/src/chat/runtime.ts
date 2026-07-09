@@ -19,9 +19,11 @@ const SLASH_COMMANDS = new Set([
 
 export interface ChatRuntimeState {
   sessionId: string;
+  approvalResolved?: boolean;
   pendingApproval: boolean;
   pendingApprovalContext?: PendingApprovalContext;
   pendingApprovalDescription?: string;
+  pendingApprovalRequestedAt?: string;
   projectId: string;
   transcript: TranscriptMessage[];
   beastContext?: ChatBeastContext | null | undefined;
@@ -42,6 +44,7 @@ export interface ChatRuntimeResult {
   pendingApproval: boolean;
   pendingApprovalContext?: PendingApprovalContext;
   pendingApprovalDescription?: string;
+  pendingApprovalRequestedAt?: string;
   providerContext?: {
     provider: string;
     model?: string;
@@ -78,9 +81,10 @@ export interface ChatRuntimeRunOptions {
 
 export function pendingApprovalRuntimeState(
   pendingApproval: PendingApproval | null | undefined,
-): Pick<ChatRuntimeState, 'pendingApproval' | 'pendingApprovalContext' | 'pendingApprovalDescription'> {
+  pendingApprovalState = false,
+): Pick<ChatRuntimeState, 'pendingApproval' | 'pendingApprovalContext' | 'pendingApprovalDescription' | 'pendingApprovalRequestedAt'> {
   if (!pendingApproval) {
-    return { pendingApproval: false };
+    return { pendingApproval: pendingApprovalState };
   }
 
   return {
@@ -93,6 +97,7 @@ export function pendingApprovalRuntimeState(
       ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
     },
     pendingApprovalDescription: pendingApproval.description,
+    pendingApprovalRequestedAt: pendingApproval.requestedAt,
   };
 }
 
@@ -111,7 +116,7 @@ export class ChatRuntime {
     const trimmed = input.trim();
     const command = trimmed.startsWith('/') ? trimmed.split(/\s+/)[0]?.toLowerCase() : undefined;
 
-    if (state.pendingApproval && command !== '/approve') {
+    if (state.pendingApproval && !state.approvalResolved && command !== '/approve') {
       if (trimmed.toLowerCase().startsWith('action rejected by user:')) {
         return this.result({ ...state, pendingApproval: false }, [
           { kind: 'approval', content: 'Rejected.' },
@@ -131,6 +136,9 @@ export class ChatRuntime {
           : {}),
         ...(state.pendingApprovalDescription !== undefined
           ? { pendingApprovalDescription: state.pendingApprovalDescription }
+          : {}),
+        ...(state.pendingApprovalRequestedAt !== undefined
+          ? { pendingApprovalRequestedAt: state.pendingApprovalRequestedAt }
           : {}),
         state: 'pending_approval',
       });
@@ -354,6 +362,7 @@ export class ChatRuntime {
       outcome?: TurnOutcome;
       pendingApprovalContext?: PendingApprovalContext;
       pendingApprovalDescription?: string;
+      pendingApprovalRequestedAt?: string;
       state?: string;
       tier?: string | null;
       providerContext?: ChatRuntimeResult['providerContext'];
@@ -370,6 +379,9 @@ export class ChatRuntime {
         : {}),
       ...(extra?.pendingApprovalDescription !== undefined
         ? { pendingApprovalDescription: extra.pendingApprovalDescription }
+        : {}),
+      ...(extra?.pendingApprovalRequestedAt !== undefined
+        ? { pendingApprovalRequestedAt: extra.pendingApprovalRequestedAt }
         : {}),
       ...(extra?.providerContext ? { providerContext: extra.providerContext } : {}),
       ...(extra?.phase ? { phase: extra.phase } : {}),

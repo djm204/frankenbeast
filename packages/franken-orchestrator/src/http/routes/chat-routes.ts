@@ -163,7 +163,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     return withChatMutationAdmission(c, session.id, async () => {
       const result = await runtime.run(content, {
         sessionId: session.id,
-        ...pendingApprovalRuntimeState(session.pendingApproval),
+        ...pendingApprovalRuntimeState(session.pendingApproval, session.state === 'pending_approval'),
         projectId: session.projectId,
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
@@ -175,7 +175,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
         ? {
             description: result.pendingApprovalDescription,
-            requestedAt: new Date().toISOString(),
+            requestedAt: result.pendingApprovalRequestedAt ?? new Date().toISOString(),
             ...result.pendingApprovalContext,
           }
         : null;
@@ -238,6 +238,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
       if (approved) {
         const pendingApproval = session.pendingApproval ?? null;
+        const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
         const runtimeInput = approvalRuntimeInput(pendingApproval);
         const originalState = session.state;
         session.pendingApproval = null;
@@ -247,7 +248,8 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         try {
           result = await runtime.run(runtimeInput, {
             sessionId: session.id,
-            pendingApproval: !pendingApproval?.command,
+            pendingApproval: wasPendingApproval,
+            approvalResolved: true,
             projectId: session.projectId,
             transcript: session.transcript,
             ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
