@@ -48,6 +48,7 @@ describe('ScalabilityEvaluator', () => {
     ['property assignment', 'config.port = 8080;'],
     ['prefixed port-number declaration', 'const serverPortNumber = 8080;'],
     ['prefixed port-default declaration', 'const apiPortDefault = 8080;'],
+    ['preview port declaration', 'const previewPort = 8080;'],
     ['bracket notation assignment', 'config["serverPort"] = 8080;'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
@@ -74,7 +75,10 @@ interface ListenerConfig {
 }
 const cfg: { port: 8080 } = createCfg();
 function bind(opts: { port: 8080 }) {}
-const castCfg = {} as { port: 8080 };`;
+const castCfg = {} as { port: 8080 };
+type IntersectConfig = BaseConfig & { port: 8080 };
+type ReadonlyConfig = Readonly<{ port: 8080 }>;
+function bindReadonly(opts: Readonly<{ port: 8080 }>) {}`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
@@ -93,6 +97,17 @@ let listenerPort: number, retryTimeout = 5000;`;
   it('does not treat TypeScript parameter literal types as hardcoded runtime ports', async () => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput('function bind(port: 8080) {}'));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('ignores port-shaped text in comments and string literals', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `// config.port = 8080
+/* const cfg = { port: 8080 }; */
+const example = "{ port: 8080 }";
+const template = \`config["serverPort"] = 8080\`;`;
+    const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
   });
