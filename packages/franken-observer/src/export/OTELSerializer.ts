@@ -51,6 +51,7 @@ function toAttributeValue(v: unknown): OTELAttributeValue {
   if (typeof v === 'string') return { stringValue: v }
   if (typeof v === 'boolean') return { boolValue: v }
   if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return { stringValue: String(v) }
     return Number.isInteger(v) ? { intValue: v } : { doubleValue: v }
   }
   return { stringValue: String(v) }

@@ -61,13 +61,37 @@ describe('OTELSerializer', () => {
       const trace = TraceContext.createTrace('goal')
       const span = TraceContext.startSpan(trace, { name: 'llm' })
       SpanLifecycle.recordTokenUsage(span, { promptTokens: 100, completionTokens: 50 })
+      SpanLifecycle.setMetadata(span, { latencyMs: 12.5 })
       TraceContext.endSpan(span)
       TraceContext.endTrace(trace)
 
       const result = OTELSerializer.serializeTrace(trace)
       const attrs = result.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.attributes
       const promptAttr = attrs.find(a => a.key === 'promptTokens')
+      const latencyAttr = attrs.find(a => a.key === 'latencyMs')
       expect(promptAttr?.value).toEqual({ intValue: 100 })
+      expect(latencyAttr?.value).toEqual({ doubleValue: 12.5 })
+    })
+
+    it('serialises non-finite numeric metadata as strings', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'llm' })
+      SpanLifecycle.setMetadata(span, {
+        latencyMs: Number.NaN,
+        positiveInfinity: Infinity,
+        negativeInfinity: -Infinity,
+      })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      const result = OTELSerializer.serializeTrace(trace)
+      const attrs = result.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.attributes
+      const attrValues = Object.fromEntries(attrs.map(attr => [attr.key, attr.value]))
+
+      expect(attrValues.latencyMs).toEqual({ stringValue: 'NaN' })
+      expect(attrValues.positiveInfinity).toEqual({ stringValue: 'Infinity' })
+      expect(attrValues.negativeInfinity).toEqual({ stringValue: '-Infinity' })
+      expect(JSON.stringify(result)).not.toContain('null')
     })
 
     it('serialises thought blocks as a joined string attribute', () => {
