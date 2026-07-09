@@ -168,6 +168,9 @@ describe('local setup scripts', () => {
     expect(readme).toContain('frankenbeast init --non-interactive');
     expect(readme).toContain('Choose the secret backend before the first init run');
     expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
+    expect(readme).toContain('{ "network": { "secureBackend": "1password" } }');
+    expect(readme).toContain('{ "network": { "secureBackend": "bitwarden" } }');
+    expect(readme).toContain('it applies the same `network.secureBackend` choice');
     expect(readme).toContain('Chat, Dashboard, and Comms modules');
     expect(readme).toContain('export FRANKENBEAST_PASSPHRASE=<passphrase>');
     expect(readme).toContain('frankenbeast run --config .fbeast/config.json');
