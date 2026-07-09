@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -892,6 +892,48 @@ describe('ProcessBeastExecutor', () => {
       expect(serializedPersisted).not.toContain(sensitiveTokenValue);
       expect(serializedPersisted).not.toContain(sensitiveWebhookUrl);
       expect(serializedPersisted).not.toContain(sensitivePrivateCredential);
+    });
+
+    it('creates configured run-config dirs relative to the configured secure root', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const projectRoot = join(workDir, 'project-root');
+      const agentWorktree = join(workDir, 'agent-worktree');
+      const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
+      mkdirSync(agentWorktree, { recursive: true });
+      mkdirSync(projectRoot, { recursive: true });
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir, runConfigRoot: projectRoot });
+      const run = createTestRun(repo);
+
+      await executor.start(run, createDefinitionWithCwd(agentWorktree));
+
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      expect(existsSync(configPath)).toBe(true);
+      for (const dir of [join(projectRoot, '.fbeast'), join(projectRoot, '.fbeast', '.build'), runConfigDir]) {
+        expect(statSync(dir).mode & 0o777).toBe(0o700);
+      }
+    });
+
+    it('replaces dangling run-config snapshot symlinks before writing', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const projectRoot = join(workDir, 'project-root');
+      const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
+      mkdirSync(runConfigDir, { recursive: true });
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigDir, runConfigRoot: projectRoot });
+      const run = createTestRun(repo);
+      const configPath = join(runConfigDir, `${run.id}.json`);
+      symlinkSync(join(workDir, 'missing-target.json'), configPath);
+
+      await executor.start(run, createDefinitionWithCwd(projectRoot));
+
+      expect(lstatSync(configPath).isSymbolicLink()).toBe(false);
+      expect(readFileSync(configPath, 'utf8')).toContain('Test objective');
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
     });
 
     it('refuses symlinked run-config directories before applying secure modes', async () => {
