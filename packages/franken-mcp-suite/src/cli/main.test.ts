@@ -225,7 +225,7 @@ describe('fbeast main CLI', () => {
       // process.exit throws in test
     }
 
-    const commandLine = `"${shimPath}" "network" "up" "name&whoami" "100^%literal^%" "C:\\tmp\\" "with space" "--set=a"" b" "(group)|pipe"`;
+    const commandLine = `"${shimPath}" "network" "up" "name&whoami" "100^%literal^%" "C:\\tmp\\\\" "with space" "--set=a"" b" "(group)|pipe"`;
     expect(mockSpawnSync).toHaveBeenCalledWith(
       'C:\\Windows\\System32\\cmd.exe',
       ['/d', '/s', '/c', `"${commandLine}"`],
