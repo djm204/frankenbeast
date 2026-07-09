@@ -2,7 +2,7 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?![Vv]iew[Pp]ort\w*)(?!\w*(?:ViewPort|VIEW_PORT|view_port)\w*)(?:[Pp]ort(?:[A-Z0-9_]\w*)?|PORT(?:_\w*)?|\w+Port(?:[A-Z0-9]\w*)?|\w+_PORT(?:_\w*)?|\w+_port(?:_\w*)?)`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?![Vv]iew[Pp]orts?\w*)(?!\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?)\w*)(?:[Pp]orts?(?:[A-Z0-9_]\w*)?|PORTS?(?:_\w*)?|\w+Ports?(?:[A-Z0-9]\w*)?|\w+_PORTS?(?:_\w*)?|\w+_ports?(?:_\w*)?)`;
 const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv][Ii][Ee][Ww]-[Pp][Oo][Rr][Tt])[^"']*))(?:[A-Za-z0-9_]+-)*[Pp][Oo][Rr][Tt](?:-[A-Za-z0-9_]+)*["']`;
 const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
@@ -34,7 +34,7 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[;{\n])${PORT_PROPERTY_GAP_PATTERN}(?:static\s+)?${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;,\n]+)?\s*=\s*${PORT_NUMBER_PATTERN}\b`,
+      String.raw`(?:^|[;{\n])${PORT_PROPERTY_GAP_PATTERN}(?:(?:public|private|protected|readonly|override|declare|accessor|static)\s+)*${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;,\n]+)?\s*=\s*${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
@@ -227,13 +227,14 @@ export class ScalabilityEvaluator implements Evaluator {
     const statementPrefix = prefix.slice(statementStart);
     const typeAliasContext = /^\s*type\s+\w+[\s\S]*=[^;{}]*$/s.test(statementPrefix);
     return /^\s*(?:(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*|(?:export\s+|declare\s+)*interface\s+\w+[\s\S]*)$/s.test(statementPrefix) ||
+      /(?:^|[;\n])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}\n]+)?\s*$/s.test(prefix) ||
       /\b(?:as\s*|satisfies\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
       /\(\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\)\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
       /(?:<|\bextends)\s*$/s.test(prefix) ||
-      /<[^<>{}();]*,\s*$/s.test(prefix) ||
+      /<[^<>{}();]*(?:=|,)\s*$/s.test(prefix) ||
       (/(?:^|[^&])&\s*$/s.test(prefix) || /(?:^|[^|])\|\s*$/s.test(prefix)) ||
       (typeAliasContext && /(?:=|&|\||<|,|\()\s*$/s.test(prefix));
   }

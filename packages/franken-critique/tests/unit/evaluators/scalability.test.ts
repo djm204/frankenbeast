@@ -59,6 +59,8 @@ describe('ScalabilityEvaluator', () => {
     ['uppercase hyphenated quoted config key', 'const cfg = { "SERVER-PORT": 8080 };'],
     ['hyphenated bracket notation assignment', 'config["server-port"] = 8080;'],
     ['class field initializer', 'class ServerConfig { port = 8080; static defaultPort = 8443; }'],
+    ['modified class field initializer', 'class ServerConfig { private port = 8080; readonly serverPort = 8443; public static defaultPort = 9090; }'],
+    ['plural port declaration and property', 'const ports = 8080; const cfg = { serverPorts: 8443 };'],
     ['numeric separator config literal', 'const cfg = { port: 8_080 };'],
     ['template interpolation assignment', 'const text = `${config.port = 8080}`;'],
     ['template interpolation object literal', 'const text = `${{ port: 8080 }}`;'],
@@ -101,6 +103,10 @@ export interface ExportedListenerConfig {
 declare interface AmbientListenerConfig {
   port: 3000;
 }
+interface MultilineListenerConfig
+{
+  port: 3000;
+}
 const cfg: { port: 8080 } = createCfg();
 function bind(opts: { port: 8080 }) {}
 const castCfg = {} as { port: 8080 };
@@ -125,6 +131,8 @@ makeConfig<{ port: 8080 }>();
 makeConfig<string, { port: 8080 }>();
 class GenericBaseConfig extends Base<string, { port: 8080 }> {}
 function bindGeneric<T extends { port: 8080 }>() {}
+function makeDefaultConfig<T = { port: 8080 }>() {}
+const makeDefaultArrow = <T = { port: 8080 }>() => undefined;
 const cfg = {} satisfies { port: 8080 };
 function bindHost(host: string, port: 8080) {}
 type BindHost = (host: string, port: 8080) => void;
