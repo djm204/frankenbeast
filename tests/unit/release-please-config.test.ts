@@ -12,18 +12,22 @@ function expandWorkspacePackageDirs(workspaces: string[]): string[] {
   const packageDirs = new Set<string>();
 
   for (const workspace of workspaces) {
-    if (workspace === 'packages/*') {
-      for (const entry of readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })) {
+    if (workspace.endsWith('/*') && workspace.indexOf('*') === workspace.length - 1) {
+      const parentDir = workspace.slice(0, -2);
+      for (const entry of readdirSync(resolve(ROOT, parentDir), { withFileTypes: true })) {
         if (entry.isDirectory()) {
-          packageDirs.add(`packages/${entry.name}`);
+          packageDirs.add(`${parentDir}/${entry.name}`);
         }
       }
       continue;
     }
 
-    if (workspace.startsWith('packages/') && !workspace.includes('*')) {
+    if (!workspace.includes('*')) {
       packageDirs.add(workspace);
+      continue;
     }
+
+    throw new Error(`Unsupported workspace glob in release policy test: ${workspace}`);
   }
 
   return [...packageDirs].sort();
