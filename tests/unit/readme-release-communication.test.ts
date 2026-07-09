@@ -6,15 +6,14 @@ const ROOT = resolve(import.meta.dirname, '../..');
 const README = readFileSync(resolve(ROOT, 'README.md'), 'utf-8');
 
 describe('README release communication', () => {
-  it('shows the latest release badge without linking to an unpublished tag', () => {
+  it('shows the latest release badge and release notes link', () => {
     expect(README).toContain('![Latest release](https://img.shields.io/github/v/release/djm204/frankenbeast?label=release)');
-    expect(README).toContain('Release v0.45.0 is the next Frankenbeast release line.');
-    expect(README).toContain('The GitHub release page will be published with the v0.45.0 tag after this announcement lands.');
-    expect(README).not.toContain('https://github.com/djm204/frankenbeast/releases/tag/v0.45.0');
+    expect(README).toContain('[Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0)');
+    expect(README).toContain('is the latest Frankenbeast release line.');
   });
 
   it('announces the release highlights to repository visitors', () => {
-    expect(README).toContain('## Upcoming release announcement');
+    expect(README).toContain('## Latest release announcement');
     expect(README).toContain('one-click onboarding');
     expect(README).toContain('security hardening');
     expect(README).toContain('deterministic mode');
