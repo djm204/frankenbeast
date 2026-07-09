@@ -46,9 +46,15 @@ export interface CorrectionRequest {
   readonly iterationCount: number;
 }
 
-/** Result when the critique loop passes. */
+/** Result when the critique loop passes without warning-bearing findings. */
 export interface CritiqueLoopPass {
   readonly verdict: 'pass';
+  readonly iterations: readonly CritiqueIteration[];
+}
+
+/** Result when the critique loop passes but warning-bearing findings are present. */
+export interface CritiqueLoopWarn {
+  readonly verdict: 'warn';
   readonly iterations: readonly CritiqueIteration[];
 }
 
@@ -76,6 +82,7 @@ export interface CritiqueLoopEscalated {
 /** Discriminated union of all possible loop outcomes. */
 export type CritiqueLoopResult =
   | CritiqueLoopPass
+  | CritiqueLoopWarn
   | CritiqueLoopFail
   | CritiqueLoopHalted
   | CritiqueLoopEscalated;

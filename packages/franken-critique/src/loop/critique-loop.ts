@@ -57,7 +57,7 @@ export class CritiqueLoop {
       // Pass/warn: warnings are non-critical findings that should surface in
       // results without forcing correction iterations.
       if (critiqueResult.verdict === 'pass' || critiqueResult.verdict === 'warn') {
-        return { verdict: 'pass', iterations: state.iterations };
+        return { verdict: critiqueResult.verdict, iterations: state.iterations };
       }
 
       // Fail: update failure history

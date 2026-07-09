@@ -37,6 +37,7 @@ export type {
   CorrectionRequest,
   CritiqueLoopResult,
   CritiqueLoopPass,
+  CritiqueLoopWarn,
   CritiqueLoopFail,
   CritiqueLoopHalted,
   CritiqueLoopEscalated,

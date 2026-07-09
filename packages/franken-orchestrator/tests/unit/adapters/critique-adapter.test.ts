@@ -50,6 +50,53 @@ describe('CritiquePortAdapter', () => {
     );
   });
 
+  it('maps critique warning results without collapsing them to pass', async () => {
+    const loop = {
+      run: vi.fn().mockResolvedValue({
+        verdict: 'warn',
+        iterations: [
+          {
+            index: 0,
+            input: { content: 'plan', metadata: {} },
+            result: {
+              verdict: 'warn',
+              overallScore: 0.8,
+              results: [
+                {
+                  evaluatorName: 'ADR',
+                  verdict: 'warn',
+                  score: 0.8,
+                  findings: [{ message: 'ADR coverage is thin', severity: 'warning' }],
+                },
+              ],
+              shortCircuited: false,
+            },
+            completedAt: '2026-03-05T00:00:00.000Z',
+          },
+        ],
+      }),
+    };
+
+    const adapter = new CritiquePortAdapter({
+      loop,
+      config: {
+        maxIterations: 1,
+        tokenBudget: 1000,
+        consensusThreshold: 2,
+        sessionId: 'sess-1',
+        taskId: 'plan-review',
+      },
+    });
+
+    const result = await adapter.reviewPlan(plan);
+
+    expect(result).toEqual({
+      verdict: 'warn',
+      findings: [{ evaluator: 'ADR', severity: 'warning', message: 'ADR coverage is thin' }],
+      score: 0.8,
+    });
+  });
+
   it('maps critique failures with findings', async () => {
     const loop = {
       run: vi.fn().mockResolvedValue({
