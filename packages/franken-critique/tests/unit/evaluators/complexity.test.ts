@@ -175,6 +175,36 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('ignores TypeScript declarations without implementation bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `declare function external(a, b, c, d, e, f): void;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps generic argument commas nested while counting parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function usesMap(a: Map<string, number>, b, c, d, e) { return a; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('counts parameters for wrapped arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = ((a, b, c, d, e, f) => { return a; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
   it('flags functions with too many top-level parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;

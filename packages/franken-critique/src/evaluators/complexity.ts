@@ -14,8 +14,12 @@ const FUNCTION_PATTERN = /function\s+\w+\s*\(([^)]*)\)\s*\{([\s\S]*?)\}/g;
 const ARROW_FUNCTION_PATTERN =
   /(?:const|let|var)\s+\w+\s*=\s*\(([^)]*)\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*?)\}/g;
 const PARAMETER_LIST_START_PATTERNS = [
-  { pattern: /function\s+\w+\s*\(/g, requiresArrow: false },
-  { pattern: /(?:const|let|var)\s+\w+\s*=\s*\(/g, requiresArrow: true },
+  { pattern: /function\s+\w+\s*\(/g, requiresArrow: false, requiresBody: true },
+  {
+    pattern: /(?:const|let|var)\s+\w+\s*=\s*\(+/g,
+    requiresArrow: true,
+    requiresBody: false,
+  },
 ];
 
 type ParameterList = {
@@ -26,7 +30,11 @@ type ParameterList = {
 function extractParameterLists(content: string): string[] {
   const parameterLists: string[] = [];
 
-  for (const { pattern, requiresArrow } of PARAMETER_LIST_START_PATTERNS) {
+  for (const {
+    pattern,
+    requiresArrow,
+    requiresBody,
+  } of PARAMETER_LIST_START_PATTERNS) {
     for (const match of content.matchAll(pattern)) {
       const openParenIndex = (match.index ?? 0) + match[0].length - 1;
       const parameterList = readBalancedParenthesizedContent(
@@ -36,7 +44,12 @@ function extractParameterLists(content: string): string[] {
       if (
         parameterList !== null &&
         (!requiresArrow ||
-          hasArrowAfterParameterList(content, parameterList.closeParenIndex))
+          hasArrowAfterParameterList(content, parameterList.closeParenIndex)) &&
+        (!requiresBody ||
+          hasFunctionBodyAfterParameterList(
+            content,
+            parameterList.closeParenIndex,
+          ))
       ) {
         parameterLists.push(parameterList.params);
       }
@@ -78,6 +91,14 @@ function hasArrowAfterParameterList(
   return /^\s*(?::\s*[^=]+?)?=>/.test(afterParams);
 }
 
+function hasFunctionBodyAfterParameterList(
+  content: string,
+  closeParenIndex: number,
+): boolean {
+  const afterParams = content.slice(closeParenIndex + 1);
+  return /^\s*(?::[^;{]+)?\{/.test(afterParams);
+}
+
 function hasGenericCloseBeforeTopLevelComma(
   params: string,
   startIndex: number,
@@ -85,6 +106,7 @@ function hasGenericCloseBeforeTopLevelComma(
   let parenDepth = 0;
   let braceDepth = 0;
   let bracketDepth = 0;
+  let angleDepth = 1;
 
   for (let index = startIndex + 1; index < params.length; index++) {
     const char = params[index];
@@ -103,12 +125,12 @@ function hasGenericCloseBeforeTopLevelComma(
     } else if (char === ']') {
       bracketDepth = Math.max(0, bracketDepth - 1);
     } else if (
-      char === ',' &&
+      char === '<' &&
       parenDepth === 0 &&
       braceDepth === 0 &&
       bracketDepth === 0
     ) {
-      return false;
+      angleDepth++;
     } else if (
       char === '>' &&
       parenDepth === 0 &&
@@ -116,7 +138,10 @@ function hasGenericCloseBeforeTopLevelComma(
       bracketDepth === 0 &&
       params[index - 1] !== '='
     ) {
-      return true;
+      angleDepth--;
+      if (angleDepth === 0) {
+        return true;
+      }
     }
   }
 
