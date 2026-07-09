@@ -178,6 +178,11 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
           cleanup();
           resolve();
           break;
+        case 'turn.error':
+          printLine(String(payload.message ?? payload.error ?? 'Chat request failed'));
+          cleanup();
+          resolve();
+          break;
         case 'turn.execution.progress':
           printLine(String((payload.data as { summary?: string } | undefined)?.summary ?? 'Executing...'));
           break;

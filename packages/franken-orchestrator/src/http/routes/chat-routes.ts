@@ -16,8 +16,8 @@ import type {
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
-import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
-import { hashChatRateLimitPrincipal } from '../chat-rate-limit.js';
+import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { chatClientKey } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -40,7 +40,7 @@ export interface ChatRoutesDeps {
   issueSocketToken: (sessionId: string) => string;
   operatorToken?: string | undefined;
   streamTicketStore?: SseConnectionTicketStore | undefined;
-  chatRateLimit: BeastRateLimitOptions;
+  chatRateLimiter: InMemoryRateLimiter;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -70,17 +70,6 @@ function requestAddress(c: Context): string {
     || 'unknown';
 }
 
-function hashPrincipal(value: string): string {
-  return hashChatRateLimitPrincipal(value);
-}
-
-function chatPrincipalKey(c: Context, operatorToken: string | undefined): string {
-  if (operatorToken) {
-    return `operator:${hashPrincipal(operatorToken)}`;
-  }
-  return `ip:${hashPrincipal(requestAddress(c))}`;
-}
-
 function chatMutationKey(sessionId: string): string {
   return `session:${sessionId}`;
 }
@@ -88,7 +77,7 @@ function chatMutationKey(sessionId: string): string {
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
   const { sessionStore, runtime, turnRunner, issueSocketToken, operatorToken, streamTicketStore } = deps;
   const app = new Hono();
-  const limiter = new InMemoryRateLimiter(deps.chatRateLimit);
+  const limiter = deps.chatRateLimiter;
   const inFlightMutations = new Set<string>();
 
   async function withChatMutationAdmission<T>(
@@ -96,9 +85,12 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     sessionId: string,
     run: () => Promise<T>,
   ): Promise<T> {
-    const principalKey = chatPrincipalKey(c, operatorToken);
     const mutationKey = chatMutationKey(sessionId);
-    const result = limiter.take(`chat:principal:${principalKey}`);
+    const result = limiter.take(chatClientKey({
+      action: 'message',
+      operatorToken,
+      remoteAddress: requestAddress(c),
+    }));
     if (!result.allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }

@@ -19,6 +19,8 @@ import {
   createSessionTokenSecret,
   issueSessionToken,
 } from '../../../src/http/ws-chat-auth.js';
+import { createChatApp } from '../../../src/http/chat-app.js';
+import { InMemoryRateLimiter } from '../../../src/beasts/http/beast-rate-limit.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const TMP = join(__dirname, '__fixtures__/ws-chat');
@@ -829,6 +831,69 @@ describe('ws chat server', () => {
 
     const secondEvents = second.sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
     expect(secondEvents).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+    }));
+    expect(runtime.run).toHaveBeenCalledTimes(1);
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('shares rate-limit quota between REST and websocket chat for the same client address', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = {
+      run: vi.fn(async () => ({
+        displayMessages: [{ kind: 'reply' as const, content: 'ok' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      })),
+    };
+    const chatRateLimiter = new InMemoryRateLimiter({ windowMs: 60_000, max: 1 });
+    const app = createChatApp({
+      sessionStore: store,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: secret,
+      chatRateLimiter,
+    });
+    const controller = new ChatSocketController({
+      runtime: runtime as never,
+      sessionStore: store,
+      tokenSecret: secret,
+      chatRateLimiter,
+    });
+    const { peer, sent } = createPeer();
+    const remoteAddress = '198.51.100.30';
+
+    const rest = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-frankenbeast-remote-address': remoteAddress },
+      body: JSON.stringify({ content: 'first over REST' }),
+    });
+    expect(rest.status).toBe(200);
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+      remoteAddress,
+    }).ok).toBe(true);
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-over-shared-limit',
+      content: 'second over websocket',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as { type: string; code?: string });
+    expect(events).toContainEqual(expect.objectContaining({
       type: 'turn.error',
       code: 'RATE_LIMITED',
     }));

@@ -16,8 +16,8 @@ import {
   type ClientSocketEvent,
   type ServerSocketEvent,
 } from '@franken/types';
-import { InMemoryRateLimiter, type BeastRateLimitOptions } from '../beasts/http/beast-rate-limit.js';
-import { DEFAULT_CHAT_RATE_LIMIT, chatRateLimitPrincipalFromAddress } from './chat-rate-limit.js';
+import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
+import { chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;
@@ -35,7 +35,8 @@ export interface ChatSocketControllerOptions {
   sessionStore: ISessionStore;
   ticketStore?: ChatSocketSessionTicketStore;
   tokenSecret: string;
-  chatRateLimit?: BeastRateLimitOptions;
+  operatorToken?: string | undefined;
+  chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
 }
 
@@ -106,6 +107,7 @@ export class ChatSocketController {
   private readonly sessionStore: ISessionStore;
   private readonly ticketStore: ChatSocketSessionTicketStore;
   private readonly tokenSecret: string;
+  private readonly operatorToken: string | undefined;
   private readonly chatRateLimiter: InMemoryRateLimiter;
 
   constructor(options: ChatSocketControllerOptions) {
@@ -114,7 +116,8 @@ export class ChatSocketController {
     this.sessionStore = options.sessionStore;
     this.ticketStore = options.ticketStore ?? new ChatSocketSessionTicketStore();
     this.tokenSecret = options.tokenSecret;
-    this.chatRateLimiter = options.chatRateLimiter ?? new InMemoryRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+    this.operatorToken = options.operatorToken;
+    this.chatRateLimiter = options.chatRateLimiter ?? createChatRateLimiter(options.chatRateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   }
 
   authorize(request: ChatSocketConnectRequest): { ok: true } | { ok: false; status: number } {
@@ -351,8 +354,11 @@ export class ChatSocketController {
     peer: ChatSocketPeer,
     connection: ConnectionState,
   ): boolean {
-    const principal = chatRateLimitPrincipalFromAddress(connection.remoteAddress);
-    const result = this.chatRateLimiter.take(`chat:ws:principal:${principal}`);
+    const result = this.chatRateLimiter.take(chatClientKey({
+      action: 'message',
+      operatorToken: this.operatorToken,
+      remoteAddress: connection.remoteAddress,
+    }));
     if (result.allowed) {
       return true;
     }
