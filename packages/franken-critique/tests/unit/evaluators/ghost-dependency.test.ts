@@ -245,12 +245,22 @@ describe('GhostDependencyEvaluator', () => {
 
   it('still detects packages with names similar to Node built-ins', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
-    const content = `import fsExtra from 'fs-extra';`;
+    const content = `
+      import fsExtra from 'fs-extra';
+      import test from 'test';
+      import customFsTool from 'fs/foo';
+    `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]!.message).toContain('fs-extra');
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings.map((finding) => finding.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('fs-extra'),
+        expect.stringContaining('test'),
+        expect.stringContaining('fs'),
+      ]),
+    );
   });
 
   it('detects require() calls with unknown packages', async () => {

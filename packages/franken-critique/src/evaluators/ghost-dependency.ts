@@ -1,4 +1,4 @@
-import { builtinModules } from 'node:module';
+import { isBuiltin } from 'node:module';
 
 import type {
   Evaluator,
@@ -9,9 +9,6 @@ import type {
 
 const IDENTIFIER_PATTERN = /[A-Za-z0-9_$]/;
 const QUOTE_CHARS = new Set(["'", '"', '`']);
-const NODE_BUILTIN_MODULES = new Set(
-  builtinModules.map((moduleName) => moduleName.replace(/^node:/, '')),
-);
 
 interface StringLiteralRead {
   value: string;
@@ -73,10 +70,7 @@ export class GhostDependencyEvaluator implements Evaluator {
 }
 
 function isNodeBuiltinSpecifier(specifier: string): boolean {
-  const normalized = specifier.replace(/^node:/, '');
-  const packageName = normalized.split('/')[0]!;
-
-  return NODE_BUILTIN_MODULES.has(normalized) || NODE_BUILTIN_MODULES.has(packageName);
+  return isBuiltin(specifier);
 }
 
 function extractDependencySpecifiers(content: string): string[] {
