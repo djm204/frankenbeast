@@ -144,6 +144,38 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('detects dynamic import expressions with comments and import attributes', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const plugin = await import /* chunk */ ('ghost-package', { with: { type: 'json' } });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('detects no-substitution template literal dynamic imports', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = 'const plugin = await import(`ghost-package`);';
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('ignores method calls and TypeScript import types', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `
+      type Ghost = import('ghost-package').Ghost;
+      const plugin = loader.import('unknown-lib');
+    `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('ignores object-literal import keys', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const cfg = { import: { from: 'ghost-package' } };`;

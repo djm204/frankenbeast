@@ -219,19 +219,91 @@ function readDynamicImportSpecifier(
   content: string,
   index: number,
 ): StringLiteralRead | null {
-  let i = skipWhitespace(content, index);
+  if (!canStartNativeDynamicImport(content, index - 'import'.length)) {
+    return null;
+  }
+
+  let i = skipImportTrivia(content, index);
   if (content[i] !== '(') return null;
 
+  const openParenIndex = i;
   i = skipImportTrivia(content, i + 1);
-  if (content[i] !== "'" && content[i] !== '"') return null;
 
-  const specifier = readQuotedString(content, i);
+  const specifier =
+    content[i] === '`'
+      ? readNoSubstitutionTemplateString(content, i)
+      : content[i] === "'" || content[i] === '"'
+        ? readQuotedString(content, i)
+        : null;
   if (!specifier) return null;
 
-  const closeParenIndex = skipImportTrivia(content, specifier.endIndex + 1);
-  if (content[closeParenIndex] !== ')') return null;
+  const nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  if (content[nextTokenIndex] !== ')' && content[nextTokenIndex] !== ',') {
+    return null;
+  }
+
+  const closeParenIndex = findClosingParen(content, openParenIndex);
+  if (closeParenIndex === null) return null;
 
   return { value: specifier.value, endIndex: closeParenIndex };
+}
+
+function canStartNativeDynamicImport(
+  content: string,
+  importIndex: number,
+): boolean {
+  const previous = previousNonWhitespace(content, importIndex - 1);
+  if (previous === '.') return false;
+
+  const statementStart = Math.max(
+    content.lastIndexOf(';', importIndex - 1),
+    content.lastIndexOf('\n', importIndex - 1),
+    content.lastIndexOf('{', importIndex - 1),
+    content.lastIndexOf('}', importIndex - 1),
+  );
+  const prefix = content.slice(statementStart + 1, importIndex);
+
+  return !(
+    /\btype\s+[A-Za-z_$][\w$]*(?:\s*<[^;>{}]*>)?\s*=\s*$/.test(prefix) ||
+    /:\s*$/.test(prefix) ||
+    /\b(?:interface|type)\b[^;{}]*\bextends\s*$/.test(prefix)
+  );
+}
+
+function findClosingParen(content: string, openParenIndex: number): number | null {
+  let depth = 1;
+
+  for (let i = openParenIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '/' && next === '/') {
+      i = skipSingleLineComment(content, i + 2);
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      i = skipMultiLineComment(content, i + 2);
+      continue;
+    }
+
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+
+    if (ch === '(') {
+      depth += 1;
+      continue;
+    }
+
+    if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+
+  return null;
 }
 
 function readRequireSpecifier(
@@ -251,6 +323,33 @@ function readRequireSpecifier(
   if (content[closeParenIndex] !== ')') return null;
 
   return specifier;
+}
+
+function readNoSubstitutionTemplateString(
+  content: string,
+  startIndex: number,
+): StringLiteralRead | null {
+  let value = '';
+
+  for (let i = startIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+
+    if (ch === '\\') {
+      const escaped = content[i + 1];
+      if (escaped) {
+        value += escaped;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (ch === '$' && content[i + 1] === '{') return null;
+    if (ch === '`') return { value, endIndex: i };
+
+    value += ch;
+  }
+
+  return null;
 }
 
 function readQuotedString(
