@@ -66,15 +66,43 @@ describe('ApprovalGateway — security integration', () => {
   it('throws SignatureVerificationError when requireSignedApprovals is true and signature is invalid', async () => {
     const verifier = new SignatureVerifier(signingFixture);
     const channel = makeFakeChannel({ signature: 'invalid-sig' });
+    const auditRecorder = makeFakeAuditRecorder();
     const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
     const gateway = new ApprovalGateway({
       channel,
-      auditRecorder: makeFakeAuditRecorder(),
+      auditRecorder,
       config,
       signatureVerifier: verifier,
     });
+    const request = makeRequest();
 
-    await expect(gateway.requestApproval(makeRequest())).rejects.toThrow(SignatureVerificationError);
+    await expect(gateway.requestApproval(request)).rejects.toThrow(SignatureVerificationError);
+    expect(auditRecorder.record).toHaveBeenCalledWith(
+      request,
+      expect.objectContaining({ requestId: request.requestId, signature: 'invalid-sig' }),
+      { securityFailure: 'signature-verification' },
+    );
+  });
+
+  it('audits missing signatures before rejecting signed approval flows', async () => {
+    const verifier = new SignatureVerifier(signingFixture);
+    const channel = makeFakeChannel({ signature: undefined });
+    const auditRecorder = makeFakeAuditRecorder();
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config,
+      signatureVerifier: verifier,
+    });
+    const request = makeRequest();
+
+    await expect(gateway.requestApproval(request)).rejects.toThrow(SignatureVerificationError);
+    expect(auditRecorder.record).toHaveBeenCalledWith(
+      request,
+      expect.objectContaining({ requestId: request.requestId }),
+      { securityFailure: 'signature-verification' },
+    );
   });
 
   it('passes when requireSignedApprovals is true and signature is valid', async () => {

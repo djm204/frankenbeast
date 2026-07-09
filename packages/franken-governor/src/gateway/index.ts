@@ -1,6 +1,6 @@
 export type { ApprovalChannel } from './approval-channel.js';
 export { ApprovalGateway } from './approval-gateway.js';
-export type { AuditRecorder, ApprovalGatewayDeps } from './approval-gateway.js';
+export type { AuditRecorder, AuditRecordOptions, ApprovalGatewayDeps } from './approval-gateway.js';
 export { GovernorCritiqueAdapter } from './governor-critique-adapter.js';
 export type {
   BudgetStateSource,

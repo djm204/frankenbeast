@@ -15,7 +15,15 @@ import {
 } from '../errors/index.js';
 
 export interface AuditRecorder {
-  record(request: ApprovalRequest, response: ApprovalResponse): Promise<void>;
+  record(
+    request: ApprovalRequest,
+    response: ApprovalResponse,
+    options?: AuditRecordOptions,
+  ): Promise<void>;
+}
+
+export interface AuditRecordOptions {
+  readonly securityFailure?: 'signature-verification';
 }
 
 export interface ApprovalGatewayDeps {
@@ -63,7 +71,16 @@ export class ApprovalGateway {
     }
 
     if (this.config.requireSignedApprovals) {
-      this.verifySignature(response);
+      try {
+        this.verifySignature(response);
+      } catch (error) {
+        if (error instanceof SignatureVerificationError) {
+          await this.auditRecorder.record(request, response, {
+            securityFailure: 'signature-verification',
+          });
+        }
+        throw error;
+      }
     }
 
     await this.auditRecorder.record(request, response);

@@ -40,7 +40,7 @@ export type {
 
 export type { ApprovalChannel } from './gateway/index.js';
 export { ApprovalGateway } from './gateway/index.js';
-export type { AuditRecorder, ApprovalGatewayDeps } from './gateway/index.js';
+export type { AuditRecorder, AuditRecordOptions, ApprovalGatewayDeps } from './gateway/index.js';
 export { GovernorCritiqueAdapter } from './gateway/index.js';
 export type {
   BudgetStateSource,
