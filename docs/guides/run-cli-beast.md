@@ -13,7 +13,7 @@ The beast harness is split across two CLIs. This guide covers both.
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26`
 - For API-backed `frankenbeast` provider registry runs, an API key for at least one supported provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`
-- For `fbeast mcp beast` preset activation, a supported Beast provider path: `anthropic-api` with `ANTHROPIC_API_KEY`, or an installed/logged-in `claude` / `codex` CLI for `claude-cli` / `codex-cli`
+- For `fbeast mcp beast` preset activation, one of the supported Beast provider paths: `anthropic-api` with `ANTHROPIC_API_KEY`, or an installed/logged-in `claude` / `codex` CLI for `claude-cli` / `codex-cli`
 
 ```bash
 cp .env.example .env
@@ -70,6 +70,8 @@ fbeast mcp beast --provider=claude-cli             # Claude CLI binary (prompts 
 ```
 
 This writes `.fbeast/config.json` with `mode: "beast"` and prints the beast catalog. The `claude-cli` provider spawns subprocesses outside the API billing path and asks for one-time confirmation.
+
+The `fbeast mcp beast` activation shim currently accepts only the provider values shown above. Provider registry entries such as `openai-api`, `gemini-api`, or `gemini-cli` can still be used by `frankenbeast` runs, but they are not `fbeast mcp beast --provider` presets unless the shim adds explicit support for them.
 
 ---
 
