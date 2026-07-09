@@ -134,6 +134,8 @@ describe('local setup scripts', () => {
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
     expect(envExample).toContain('Grafana\'s built-in admin/admin default is insecure');
     expect(envExample).toContain('Generate a unique local password before uncommenting');
+    expect(envExample).toContain('Do not use VITE_BEAST_OPERATOR_TOKEN');
+    expect(envExample).not.toMatch(/^#?\s*VITE_BEAST_OPERATOR_TOKEN=/m);
 
     for (const doc of [readme, quickstart, runCliBeastGuide]) {
       expect(doc).toContain('ANTHROPIC_API_KEY');
