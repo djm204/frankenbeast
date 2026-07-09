@@ -552,6 +552,11 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # image versions and mounts ./tempo.yaml so local tracing starts deterministically.
 docker compose up -d
 
+# Local Tempo exposes OTLP/HTTP writes on http://localhost:4318 for TempoAdapter
+# and readiness on http://localhost:3200/ready for verify-setup. The root
+# .env.example intentionally does not define a TEMPO_ENDPOINT override; pass
+# custom Tempo endpoints through TempoAdapter options instead.
+
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npx tsx scripts/seed.ts
 
