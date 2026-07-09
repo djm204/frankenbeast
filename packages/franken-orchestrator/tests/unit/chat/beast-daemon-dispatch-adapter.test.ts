@@ -115,7 +115,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     vi.stubGlobal('fetch', fetchMock);
     const adapter = new BeastDaemonDispatchAdapter({
       baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
+      operatorToken: TEST_DAEMON_TOKEN,
     });
 
     await expect(adapter.handle('spawn a martin beast', {
@@ -132,7 +132,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     vi.stubGlobal('fetch', fetchMock);
     const adapter = new BeastDaemonDispatchAdapter({
       baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
+      operatorToken: TEST_DAEMON_TOKEN,
     });
 
     await expect(adapter.handle('spawn a martin beast', {

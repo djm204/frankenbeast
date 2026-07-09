@@ -17,6 +17,14 @@ vi.mock('../../../src/comms/channels/whatsapp/whatsapp-adapter.js', () => ({
 import { commsRoutes } from '../../../src/http/routes/comms-routes.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
+const TEST_DISCORD_BOT_TOKEN = testCredential('TEST_DISCORD_BOT_TOKEN');
+const TEST_WHATSAPP_ACCESS_TOKEN = testCredential('TEST_WHATSAPP_ACCESS_TOKEN');
+const TEST_WHATSAPP_VERIFY_TOKEN = testCredential('TEST_WHATSAPP_VERIFY_TOKEN');
+const TEST_TELEGRAM_BOT_TOKEN = ['123456', testCredential('TEST_TELEGRAM_BOT_TOKEN_SECRET')].join(':');
+const TEST_TELEGRAM_WEBHOOK_SECRET_TOKEN = testCredential('TEST_TELEGRAM_WEBHOOK_SECRET_TOKEN');
 
 function minimalConfig(overrides?: Partial<CommsConfig>): CommsConfig {
   return {
@@ -42,20 +50,20 @@ function enabledWebhookConfig(): CommsConfig {
     channels: {
       slack: {
         enabled: true,
-        token: 'xoxb-test',
+        token: TEST_SLACK_BOT_TOKEN,
         signingSecret: ['test', 'slack', 'signing', 'fixture'].join('-'),
       },
       discord: {
         enabled: true,
-        token: 'discord-bot-token',
+        token: TEST_DISCORD_BOT_TOKEN,
         publicKey: rawDiscordPublicKey(),
       },
       whatsapp: {
         enabled: true,
-        accessToken: 'whatsapp-access-token',
+        accessToken: TEST_WHATSAPP_ACCESS_TOKEN,
         phoneNumberId: 'phone-number-id',
         appSecret: ['test', 'whatsapp', 'app', 'fixture'].join('-'),
-        verifyToken: 'whatsapp-verify-token',
+        verifyToken: TEST_WHATSAPP_VERIFY_TOKEN,
       },
     },
   });
@@ -171,7 +179,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+          slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),
@@ -191,7 +199,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+          slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),
@@ -227,7 +235,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+          slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),
@@ -263,7 +271,7 @@ describe('commsRoutes', () => {
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
-          slack: { enabled: true, token: 'xoxb-test', signingSecret: ['test', 'signing', 'fixture'].join('-') },
+          slack: { enabled: true, token: TEST_SLACK_BOT_TOKEN, signingSecret: ['test', 'signing', 'fixture'].join('-') },
         },
       }),
       runtime: mockRuntime(),
@@ -402,13 +410,13 @@ describe('commsRoutes', () => {
   });
 
   it('requires the Telegram secret_token header before accepting updates', async () => {
-    const webhookSecretToken = 'telegram-webhook-secret';
+    const webhookSecretToken = TEST_TELEGRAM_WEBHOOK_SECRET_TOKEN;
     const app = commsRoutes({
       config: minimalConfig({
         channels: {
           telegram: {
             enabled: true,
-            botToken: '123456:secret-token',
+            botToken: TEST_TELEGRAM_BOT_TOKEN,
             webhookSecretToken,
           },
         },
@@ -434,7 +442,7 @@ describe('commsRoutes', () => {
     });
     expect(missingHeader.status).toBe(404);
 
-    const tokenPath = await app.request('/webhooks/telegram/123456:secret-token', {
+    const tokenPath = await app.request(`/webhooks/telegram/${TEST_TELEGRAM_BOT_TOKEN}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -3,6 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LocalEncryptedStore } from '../../../../src/network/secret-backends/local-encrypted-store.js';
+import { testCredential } from '../../../support/test-credentials.js';
+
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
 
 describe('LocalEncryptedStore', () => {
   let tempDir: string;
@@ -29,9 +32,9 @@ describe('LocalEncryptedStore', () => {
 
   describe('store and resolve', () => {
     it('stores and resolves a secret', async () => {
-      await store.store('comms.slack.botTokenRef', 'xoxb-test-token');
+      await store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN);
       const value = await store.resolve('comms.slack.botTokenRef');
-      expect(value).toBe('xoxb-test-token');
+      expect(value).toBe(TEST_SLACK_BOT_TOKEN);
     });
 
     it('returns undefined for non-existent key', async () => {

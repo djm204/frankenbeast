@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SlackAdapter } from '../../../src/comms/channels/slack/slack-adapter.js';
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
 
 describe('SlackAdapter', () => {
   beforeEach(() => {
@@ -7,7 +10,7 @@ describe('SlackAdapter', () => {
   });
 
   it('sends a message with blocks', async () => {
-    const adapter = new SlackAdapter({ token: 'xoxb-test' });
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValue({
       ok: true,
@@ -30,7 +33,7 @@ describe('SlackAdapter', () => {
   });
 
   it('formats buttons correctly in blocks', async () => {
-    const adapter = new SlackAdapter({ token: 'xoxb-test' });
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValue({
       ok: true,
@@ -51,7 +54,7 @@ describe('SlackAdapter', () => {
   });
 
   it('renders provider context block when provider metadata present', async () => {
-    const adapter = new SlackAdapter({ token: 'xoxb-test' });
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
 
@@ -68,7 +71,7 @@ describe('SlackAdapter', () => {
   });
 
   it('renders failover metadata in context block', async () => {
-    const adapter = new SlackAdapter({ token: 'xoxb-test' });
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
 
@@ -85,7 +88,7 @@ describe('SlackAdapter', () => {
   });
 
   it('omits provider context when not present', async () => {
-    const adapter = new SlackAdapter({ token: 'xoxb-test' });
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
 
