@@ -164,18 +164,21 @@ describe('local setup scripts', () => {
     expect(readme).toContain('`frankenbeast init` configures the orchestrator/backend control plane');
     expect(readme).toContain('It is separate from `fbeast mcp init`');
     expect(readme).toContain('frankenbeast init --verify');
-    expect(readme).toContain('frankenbeast init --repair');
+    expect(readme).toContain('review token prompts carefully');
     expect(readme).toContain('frankenbeast init --non-interactive');
     expect(readme).toContain('Choose the secret backend before the first init run');
     expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
     expect(readme).toContain('Chat, Dashboard, and Comms modules');
     expect(readme).toContain('export FRANKENBEAST_PASSPHRASE=<passphrase>');
     expect(readme).toContain('frankenbeast run --config .fbeast/config.json');
-    expect(readme).toContain('fails closed if setup is incomplete');
-    expect(readme).toContain('does not create a fresh vault, answer wizard prompts, or decrypt the secret vault');
+    expect(readme).toContain('does not prove every completed step');
+    expect(readme).toContain('create a fresh vault, answer wizard prompts, decrypt the secret vault, or resolve secret refs');
     expect(readme).toContain('does not resolve secret refs');
+    expect(readme).toContain('leaving it blank can generate a replacement token');
     expect(mcpSuiteReadme).toContain('FRANKENBEAST_CONFIG_FILE=/path/to/your-project/.fbeast/config.json');
     expect(mcpSuiteReadme).toContain('or `FRANKENBEAST_CONFIG_PATH`');
+    expect(mcpSuiteReadme).toContain('FRANKENBEAST_PASSPHRASE');
+    expect(mcpSuiteReadme).toContain('does not move the local encrypted vault root');
     for (const frankenOverride of [
       'FRANKEN_MAX_TOTAL_TOKENS',
       'FRANKEN_MAX_DURATION_MS',

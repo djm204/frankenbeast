@@ -624,7 +624,7 @@ Common forms:
 ```bash
 frankenbeast init                  # interactive setup wizard
 frankenbeast init --verify         # validate .fbeast/config.json and .fbeast/init-state.json
-frankenbeast init --repair         # re-run missing or failed init steps only
+frankenbeast init --repair         # re-run repair wizard paths; review token prompts carefully
 frankenbeast init --non-interactive       # safe only after config and init state are complete
 ```
 
@@ -639,7 +639,7 @@ export FRANKENBEAST_PASSPHRASE=<passphrase>
 frankenbeast run --config .fbeast/config.json
 ```
 
-Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It verifies config and init-state completeness and fails closed if setup is incomplete, but it does not create a fresh vault, answer wizard prompts, or decrypt the secret vault. Likewise, `frankenbeast init --verify` validates init config and state files but does not resolve secret refs, so keep a runtime smoke check in CI when you need to prove operator-token resolution works.
+Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It checks the config/init-state files and selected ref fields, but it does not prove every completed step, create a fresh vault, answer wizard prompts, decrypt the secret vault, or resolve secret refs. Likewise, `frankenbeast init --verify` validates init config and state files but does not resolve secret refs, so keep a runtime smoke check in CI when you need to prove operator-token resolution works. During `--repair`, review the operator-token prompt before accepting defaults; leaving it blank can generate a replacement token and rotate the dashboard/control-plane credential.
 
 ### Non-interactive / CI usage
 
