@@ -54,6 +54,7 @@ describe('createPlannerAdapter', () => {
     ['non-array tasks', { objective: 'ship', constraints: null, tasks: null }, /tasks must be an array/i],
     ['malformed dependency array', { objective: 'ship', constraints: null, tasks: [{ id: 't1', title: 'first', deps: 't0', status: 'pending' }] }, /deps must be an array of strings/i],
     ['malformed status', { objective: 'ship', constraints: null, tasks: [{ id: 't1', title: 'first', deps: [], status: 'blocked' }] }, /status must be pending or done/i],
+    ['duplicate task ids', { objective: 'ship', constraints: null, tasks: [{ id: 't1', title: 'first', deps: [], status: 'pending' }, { id: 't1', title: 'again', deps: [], status: 'pending' }] }, /duplicate task id: t1/i],
   ])('returns invalid instead of throwing for %s in stored planner DAGs', async (_name, dag, reasonPattern) => withTempDb(async (dbPath) => {
     const adapter = createPlannerAdapter(dbPath);
     const { planId } = await adapter.decompose({ objective: 'ship a memory search feature' });
@@ -66,6 +67,46 @@ describe('createPlannerAdapter', () => {
     await expect(adapter.validate(planId)).resolves.toMatchObject({
       verdict: 'invalid',
       issues: [expect.stringMatching(reasonPattern)],
+    });
+  }));
+
+  it('accepts valid stored DAGs whose dependencies appear later in the task list', async () => withTempDb(async (dbPath) => {
+    const adapter = createPlannerAdapter(dbPath);
+    const { planId } = await adapter.decompose({ objective: 'ship a memory search feature' });
+    replaceStoredDag(dbPath, planId, JSON.stringify({
+      objective: 'ship',
+      constraints: null,
+      tasks: [
+        { id: 't1', title: 'first', deps: ['t2'], status: 'pending' },
+        { id: 't2', title: 'second', deps: [], status: 'pending' },
+      ],
+    }));
+
+    await expect(adapter.visualize(planId)).resolves.toMatchObject({
+      kind: 'found',
+      mermaid: expect.stringContaining('t2 --> t1'),
+    });
+    await expect(adapter.validate(planId)).resolves.toEqual({
+      verdict: 'valid',
+      issues: [],
+    });
+  }));
+
+  it('reports dependency cycles as invalid without throwing', async () => withTempDb(async (dbPath) => {
+    const adapter = createPlannerAdapter(dbPath);
+    const { planId } = await adapter.decompose({ objective: 'ship a memory search feature' });
+    replaceStoredDag(dbPath, planId, JSON.stringify({
+      objective: 'ship',
+      constraints: null,
+      tasks: [
+        { id: 't1', title: 'first', deps: ['t2'], status: 'pending' },
+        { id: 't2', title: 'second', deps: ['t1'], status: 'pending' },
+      ],
+    }));
+
+    await expect(adapter.validate(planId)).resolves.toEqual({
+      verdict: 'invalid',
+      issues: ['Cycle detected in task dependencies'],
     });
   }));
 

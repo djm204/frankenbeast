@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { PlanGraph, createTaskId } from '@franken/planner';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 
 export interface PlannerTask {
@@ -83,17 +82,7 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
       }
 
       const plan = loaded.plan;
-      const graph = buildGraph(plan.tasks);
-      const mermaidLines = ['graph TD'];
-
-      for (const task of graph.getTasks()) {
-        mermaidLines.push(`  ${task.id}["${task.objective}"]`);
-        for (const dep of graph.getDependencies(task.id)) {
-          mermaidLines.push(`  ${dep} --> ${task.id}`);
-        }
-      }
-
-      return { kind: 'found', mermaid: mermaidLines.join('\n') };
+      return { kind: 'found', mermaid: renderMermaid(plan.tasks) };
     },
 
     async validate(planId) {
@@ -125,8 +114,7 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
       }
 
       if (issues.length === 0) {
-        const graph = buildGraph(plan.tasks);
-        if (graph.hasCycle()) {
+        if (hasCycle(plan.tasks)) {
           issues.push('Cycle detected in task dependencies');
         }
       }
@@ -171,12 +159,16 @@ function decodeStoredPlan(rawDag: string): { kind: 'found'; plan: StoredPlan } |
   }
 
   const tasks: PlannerTask[] = [];
+  const taskIds = new Set<string>();
   for (const [index, task] of parsed.tasks.entries()) {
     if (!isRecord(task)) {
       return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}] must be an object` };
     }
     if (typeof task.id !== 'string' || task.id.length === 0) {
       return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].id must be a non-empty string` };
+    }
+    if (taskIds.has(task.id)) {
+      return { kind: 'corrupt', reason: `stored plan DAG contains duplicate task id: ${task.id}` };
     }
     if (typeof task.title !== 'string') {
       return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].title must be a string` };
@@ -188,6 +180,7 @@ function decodeStoredPlan(rawDag: string): { kind: 'found'; plan: StoredPlan } |
       return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].status must be pending or done` };
     }
 
+    taskIds.add(task.id);
     tasks.push({
       id: task.id,
       title: task.title,
@@ -210,18 +203,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function buildGraph(tasks: PlannerTask[]): PlanGraph {
-  let graph = PlanGraph.empty();
-
+function renderMermaid(tasks: PlannerTask[]): string {
+  const mermaidLines = ['graph TD'];
   for (const task of tasks) {
-    graph = graph.addTask({
-      id: createTaskId(task.id),
-      objective: task.title,
-      requiredSkills: [],
-      dependsOn: task.deps.map((dep) => createTaskId(dep)),
-      status: task.status === 'done' ? 'completed' : 'pending',
-    }, task.deps.map((dep) => createTaskId(dep)));
+    mermaidLines.push(`  ${task.id}["${task.title}"]`);
+    for (const dep of task.deps) {
+      mermaidLines.push(`  ${dep} --> ${task.id}`);
+    }
   }
 
-  return graph;
+  return mermaidLines.join('\n');
+}
+
+function hasCycle(tasks: PlannerTask[]): boolean {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  function visit(taskId: string): boolean {
+    if (visiting.has(taskId)) {
+      return true;
+    }
+    if (visited.has(taskId)) {
+      return false;
+    }
+    const task = byId.get(taskId);
+    if (!task) {
+      return false;
+    }
+
+    visiting.add(taskId);
+    for (const dep of task.deps) {
+      if (visit(dep)) {
+        return true;
+      }
+    }
+    visiting.delete(taskId);
+    visited.add(taskId);
+    return false;
+  }
+
+  return tasks.some((task) => visit(task.id));
 }
