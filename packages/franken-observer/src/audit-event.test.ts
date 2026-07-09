@@ -96,6 +96,37 @@ describe('AuditTrail', () => {
     expect(restored.getAll()).toEqual(json);
   });
 
+  it('toJSON normalizes undefined payloads before persistence', () => {
+    const trail = new AuditTrail();
+    trail.append(createAuditEvent('empty.payload', undefined, { phase: 'p', provider: 'pr' }));
+
+    expect(trail.toJSON()[0]!.payload).toBeNull();
+    expect(AuditTrail.fromJSON(trail.toJSON()).getAll()[0]!.payload).toBeNull();
+  });
+
+  it('fromJSON rejects non-array input', () => {
+    expect(() => AuditTrail.fromJSON({})).toThrow(/events must be an array/i);
+  });
+
+  it('fromJSON rejects events missing required fields', () => {
+    expect(() => AuditTrail.fromJSON([{}])).toThrow(/events\[0\]: eventId must be a non-empty string/i);
+  });
+
+  it('fromJSON rejects malformed optional hashes', () => {
+    const event = { ...createAuditEvent('a', {}, { phase: 'p', provider: 'pr' }), inputHash: '' };
+    expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: inputHash must be a sha256 hash/i);
+  });
+
+  it('fromJSON rejects malformed timestamps', () => {
+    const event = { ...createAuditEvent('a', {}, { phase: 'p', provider: 'pr' }), timestamp: 'not-a-date' };
+    expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: timestamp must be an ISO timestamp/i);
+  });
+
+  it('fromJSON rejects impossible timestamp dates', () => {
+    const event = { ...createAuditEvent('a', {}, { phase: 'p', provider: 'pr' }), timestamp: '2026-02-31T00:00:00.000Z' };
+    expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: timestamp must be an ISO timestamp/i);
+  });
+
   it('verify() passes with correct hashes', () => {
     const trail = new AuditTrail();
     const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: 'hello' });
