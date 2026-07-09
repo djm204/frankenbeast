@@ -408,6 +408,48 @@ describe('SqliteBrain', () => {
       brain2.close();
     });
 
+    it('hydrate() rolls back working memory, episodic replay, and checkpoint together on failure', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+      const snapshot: BrainSnapshot = {
+        version: 1,
+        timestamp: '2026-07-09T00:00:00Z',
+        working: { fresh: 'snapshot' },
+        episodic: [
+          {
+            type: 'success',
+            summary: 'first event should roll back',
+            createdAt: '2026-07-09T00:00:00Z',
+          },
+          {
+            type: 'failure',
+            summary: undefined,
+            createdAt: '2026-07-09T00:01:00Z',
+          } as unknown as EpisodicEvent,
+        ],
+        checkpoint: {
+          runId: 'run-rollback',
+          phase: 'execution',
+          step: 1,
+          context: {},
+          timestamp: '2026-07-09T00:02:00Z',
+        },
+        metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+      };
+
+      try {
+        expect(() => SqliteBrain.hydrate(snapshot, dbPath)).toThrow();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.keys()).toEqual([]);
+        expect(reopened.episodic.count()).toBe(0);
+        expect(reopened.recovery.lastCheckpoint()).toBeNull();
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('hydrate creates independent brain instance', () => {
       brain.working.set('shared', 'original');
       const snapshot = brain.serialize();
