@@ -468,6 +468,28 @@ describe('ParallelPlanner — failure handling', () => {
     expect(result.taskResults[1]?.status).toBe('failure');
   });
 
+  it('does not mark an unexpanded parent complete when a same-wave sibling fails', async () => {
+    const parent = makeTask('parent');
+    const sibling = makeTask('sibling');
+    const child = makeTask('child');
+    const graph = PlanGraph.empty().addTask(parent).addTask(sibling);
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      if (task.id === createTaskId('parent')) return Promise.resolve(expand('parent', [child]));
+      if (task.id === createTaskId('sibling')) return Promise.resolve(failure('sibling', 'boom'));
+      return Promise.resolve(success(task.id));
+    });
+
+    const result = await new ParallelPlanner().execute(graph, { executor });
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('sibling'));
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('sibling'),
+    ]);
+    expect(executor).not.toHaveBeenCalledWith(child);
+  });
+
   it('returns the expanding parent as failed when an expanded sub-task fails', async () => {
     const parent = makeTask('parent');
     const sub = makeTask('sub');

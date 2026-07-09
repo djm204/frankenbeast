@@ -134,7 +134,9 @@ export class ParallelPlanner implements PlanningStrategy {
 
       const failures = waveResults.filter((r) => r.status === 'failure');
       if (failures.length > 0) {
-        allResults.push(...waveResults);
+        allResults.push(
+          ...waveResults.filter((r) => r.status === 'failure' || r.expand !== true)
+        );
         const first = failures[0]!;
         if (first.status === 'failure') {
           return {
