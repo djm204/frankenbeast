@@ -188,6 +188,34 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((f) => f.message.includes('long'))).toBe(true);
   });
 
+  it('flags very long function declarations with object-shaped return types', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = `function longFn(): { ok: boolean } {\n${lines.join('\n')}\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('long'))).toBe(true);
+  });
+
+  it('flags functions with too many parameters after less-than defaults', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function compare(a = x < y, b, c, d, e, f) { return a; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('does not treat later callback arrows as initializer arrows', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const result = (a, b, c, d, e, f).map(x => { return x; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('flags deeply nested code', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;

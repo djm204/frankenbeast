@@ -24,7 +24,7 @@ function findMatchingDelimiter(
   let depth = 0;
 
   for (let i = openIndex; i < content.length; i++) {
-    const char = content[i];
+    const char = content[i] ?? '';
     if (char === openChar) {
       depth++;
     } else if (char === closeChar) {
@@ -37,19 +37,73 @@ function findMatchingDelimiter(
 }
 
 function findBodyOpenAfterSignature(content: string, startIndex: number): number {
+  let inReturnType = false;
+  let typeDepth = 0;
+  let previousSignificant = '';
+
   for (let i = startIndex; i < content.length; i++) {
-    const char = content[i];
-    if (char === '{') return i;
-    if (char === ';') return -1;
+    const char = content[i] ?? '';
+    const isWhitespace = /\s/.test(char);
+
+    if (!inReturnType) {
+      if (char === '{') return i;
+      if (char === ';') return -1;
+      if (char === ':') inReturnType = true;
+      if (!isWhitespace) previousSignificant = char;
+      continue;
+    }
+
+    if (
+      char === '{' &&
+      typeDepth === 0 &&
+      ![':', '|', '&', ',', '<', '(', '['].includes(previousSignificant)
+    ) {
+      return i;
+    }
+
+    if (char === '<' || char === '(' || char === '[' || char === '{') {
+      typeDepth++;
+    } else if (
+      char === '>' ||
+      char === ')' ||
+      char === ']' ||
+      char === '}'
+    ) {
+      typeDepth = Math.max(0, typeDepth - 1);
+    } else if (char === ';' && typeDepth === 0) {
+      return -1;
+    }
+
+    if (!isWhitespace) previousSignificant = char;
   }
 
   return -1;
 }
 
 function findArrowToken(content: string, startIndex: number): number {
-  for (let i = startIndex; i < content.length - 1; i++) {
-    if (content[i] === '=' && content[i + 1] === '>') return i;
-    if (content[i] === ';') return -1;
+  let index = startIndex;
+  while (/\s/.test(content[index] ?? '')) index++;
+
+  if (content[index] !== ':') {
+    return content[index] === '=' && content[index + 1] === '>' ? index : -1;
+  }
+
+  let typeDepth = 0;
+  for (let i = index + 1; i < content.length - 1; i++) {
+    const char = content[i] ?? '';
+    if (typeDepth === 0 && char === '=' && content[i + 1] === '>') return i;
+    if (char === '<' || char === '(' || char === '[' || char === '{') {
+      typeDepth++;
+    } else if (
+      char === '>' ||
+      char === ')' ||
+      char === ']' ||
+      char === '}'
+    ) {
+      typeDepth = Math.max(0, typeDepth - 1);
+    } else if (char === ';' && typeDepth === 0) {
+      return -1;
+    }
   }
 
   return -1;
@@ -106,18 +160,52 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
 function countTopLevelParameters(params: string): number {
   let count = 0;
   let segmentHasContent = false;
-  let depth = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let angleDepth = 0;
+  let inTypeAnnotation = false;
 
   for (const char of params) {
-    if (char === '<' || char === '(' || char === '[' || char === '{') {
-      depth++;
-    } else if (char === '>' || char === ')' || char === ']' || char === '}') {
-      depth = Math.max(0, depth - 1);
+    const atTopLevel =
+      parenDepth === 0 &&
+      bracketDepth === 0 &&
+      braceDepth === 0 &&
+      angleDepth === 0;
+
+    if (char === ':' && atTopLevel) {
+      inTypeAnnotation = true;
+    } else if (char === '=' && atTopLevel) {
+      inTypeAnnotation = false;
+    } else if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+    } else if (char === '<' && inTypeAnnotation) {
+      angleDepth++;
+    } else if (char === '>' && angleDepth > 0) {
+      angleDepth--;
     }
 
-    if (char === ',' && depth === 0) {
+    const isTopLevelComma =
+      char === ',' &&
+      parenDepth === 0 &&
+      bracketDepth === 0 &&
+      braceDepth === 0 &&
+      angleDepth === 0;
+
+    if (isTopLevelComma) {
       if (segmentHasContent) count++;
       segmentHasContent = false;
+      inTypeAnnotation = false;
       continue;
     }
 
