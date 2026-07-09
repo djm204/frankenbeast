@@ -143,7 +143,7 @@ describe('fbeast init', () => {
     expect(postCmd).toBe(`'${join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh')}'`);
   });
 
-  it('falls back to home config dir when no project-level dir exists', () => {
+  it('uses project config dir instead of mutating home settings when no project-level dir exists yet', () => {
     const cwd = '/tmp/project';
     const homeDir = '/tmp/home';
 
@@ -154,10 +154,10 @@ describe('fbeast init', () => {
       exists: (path) => path === join(homeDir, '.claude'),
     });
 
-    expect(claudeDir).toBe(join(homeDir, '.claude'));
+    expect(claudeDir).toBe(join(cwd, '.claude'));
   });
 
-  it('resolves gemini client to .gemini dir', () => {
+  it('resolves gemini client to project .gemini dir', () => {
     const cwd = '/tmp/project';
     const homeDir = '/tmp/home';
 
@@ -168,7 +168,7 @@ describe('fbeast init', () => {
       exists: (path) => path === join(homeDir, '.gemini'),
     });
 
-    expect(geminiDir).toBe(join(homeDir, '.gemini'));
+    expect(geminiDir).toBe(join(cwd, '.gemini'));
   });
 
   it('writes Gemini hooks and shell scripts when --client=gemini --hooks', () => {
