@@ -113,9 +113,31 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('unknown-lib');
   });
 
-  it('continues to explicitly skip dynamic import expressions', async () => {
+  it('detects ghost dependencies in dynamic import expressions', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `const plugin = await import('ghost-package');`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('passes known packages in dynamic import expressions', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `const schema = await import("zod");`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it('ignores relative and node built-in dynamic import expressions', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `
+      const local = await import('./local-plugin.js');
+      const fs = await import('node:fs/promises');
+    `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('pass');

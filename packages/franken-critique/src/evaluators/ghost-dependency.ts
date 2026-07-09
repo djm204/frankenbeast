@@ -108,6 +108,16 @@ function extractDependencySpecifiers(content: string): string[] {
     }
 
     if (startsWithKeyword(content, i, 'import')) {
+      const dynamicallyImported = readDynamicImportSpecifier(
+        content,
+        i + 'import'.length,
+      );
+      if (dynamicallyImported) {
+        specifiers.push(dynamicallyImported.value);
+        i = dynamicallyImported.endIndex;
+        continue;
+      }
+
       const imported = readStaticImportSpecifier(content, i + 'import'.length);
       if (imported) {
         specifiers.push(imported.value);
@@ -203,6 +213,25 @@ function readStaticImportSpecifier(
   }
 
   return null;
+}
+
+function readDynamicImportSpecifier(
+  content: string,
+  index: number,
+): StringLiteralRead | null {
+  let i = skipWhitespace(content, index);
+  if (content[i] !== '(') return null;
+
+  i = skipImportTrivia(content, i + 1);
+  if (content[i] !== "'" && content[i] !== '"') return null;
+
+  const specifier = readQuotedString(content, i);
+  if (!specifier) return null;
+
+  const closeParenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  if (content[closeParenIndex] !== ')') return null;
+
+  return { value: specifier.value, endIndex: closeParenIndex };
 }
 
 function readRequireSpecifier(
