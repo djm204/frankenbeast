@@ -299,6 +299,60 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('does not acknowledge websocket messages rejected by pending approval', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      tool: 'execution',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute: vi.fn() }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-stale',
+      content: 'start another task',
+    }));
+
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events.map((event) => event.type)).not.toContain('message.accepted');
+    expect(events.map((event) => event.type)).not.toContain('message.delivered');
+    expect(events.map((event) => event.type)).not.toContain('message.read');
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_PENDING',
+    }));
+    expect(store.get(session.id)?.transcript).toEqual([]);
+    expect(store.get(session.id)?.pendingApproval).toEqual(expect.objectContaining({
+      requestedAt: '2026-03-09T00:00:00Z',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('emits execution events after an approved action runs', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
