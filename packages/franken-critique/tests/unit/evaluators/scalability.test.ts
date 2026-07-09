@@ -95,6 +95,9 @@ interface GenericListenerConfig<T> {
 interface ExtendedListenerConfig extends BaseConfig {
   port: 3000;
 }
+class LiteralPortConfig {
+  port: 8080;
+}
 function bindReadonly(opts: Readonly<{ port: 8080 }>) {}`;
     const result = await evaluator.evaluate(createInput(content));
 
@@ -127,7 +130,12 @@ type Bind = (host: string, port: 8080) => void;`;
 const text = "{ port: 8080 }";
 const template = \`serverPort = 8080\`;
 const re = /{ port: 8080 }/;
-const escaped = /config\\.port = 8080/;`;
+const escaped = /config\\.port = 8080/;
+function portRegex() {
+  return /config\\.port = 8080/;
+}
+const arrowRegex = () => /{ port: 8080 }/;
+log('debug', "port: 8080");`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);

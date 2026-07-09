@@ -88,7 +88,16 @@ export class ScalabilityEvaluator implements Evaluator {
           continue;
         }
 
+        const portNumberIndex = this.findPortNumberIndex(match);
+        if (this.isInTypeOnlyRange(ignoredRanges, portNumberIndex)) {
+          continue;
+        }
+
         if (skipTypeOnly && (this.isInTypeOnlyRange(typeOnlyRanges, match.index) || this.isInTypeOnlySignature(scanContent, match.index))) {
+          continue;
+        }
+
+        if (skipTypeOnly && this.isClassFieldTypeAnnotation(content, portNumberIndex)) {
           continue;
         }
 
@@ -103,6 +112,29 @@ export class ScalabilityEvaluator implements Evaluator {
 
   private isInTypeOnlyRange(ranges: Array<[number, number]>, matchIndex: number): boolean {
     return ranges.some(([start, end]) => matchIndex >= start && matchIndex <= end);
+  }
+
+  private findPortNumberIndex(match: RegExpMatchArray): number {
+    const matchIndex = match.index ?? 0;
+    return matchIndex + match[0].lastIndexOf(match[1] ?? '');
+  }
+
+  private isClassFieldTypeAnnotation(content: string, portNumberIndex: number): boolean {
+    const suffix = content.slice(portNumberIndex).match(/^\d{2,5}\s*;/);
+    if (!suffix) {
+      return false;
+    }
+
+    const prefix = content.slice(Math.max(0, portNumberIndex - 300), portNumberIndex);
+    const openBrace = prefix.lastIndexOf('{');
+    if (openBrace === -1) {
+      return false;
+    }
+
+    const beforeBrace = prefix.slice(0, openBrace);
+    const afterBrace = prefix.slice(openBrace + 1);
+    const classFieldPattern = new RegExp(String.raw`(?:^|[;\n])\s*${PORT_IDENTIFIER_PATTERN}\s*:\s*$`, 's');
+    return /\bclass\s+\w+(?:\s+extends\s+[\w$.]+)?\s*$/.test(beforeBrace) && classFieldPattern.test(afterBrace);
   }
 
   private findTypeOnlyBraceRanges(content: string): Array<[number, number]> {
@@ -215,7 +247,8 @@ export class ScalabilityEvaluator implements Evaluator {
       previous -= 1;
     }
 
-    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous));
+    const prefix = content.slice(Math.max(0, slashIndex - 40), slashIndex);
+    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:return|throw|yield)\s*$|=>\s*$/.test(prefix);
   }
 
   private findRegexLiteralEnd(content: string, slashIndex: number): number {
