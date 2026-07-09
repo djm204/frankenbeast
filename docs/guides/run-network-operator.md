@@ -128,4 +128,6 @@ For production operators, prefer a managed secret backend when available, such a
 node packages/franken-orchestrator/dist/cli/run.js network config --set network.secureBackend=1password
 ```
 
+Choose the backend before running `frankenbeast init` when possible. Changing `network.secureBackend` later does not migrate existing secret refs or secret values; re-store or migrate referenced secrets such as `network.operatorTokenRef` into the newly selected backend before the next boot.
+
 Use `local-encrypted` for offline, CI/CD, or minimal deployments where a managed secret backend is not available.
