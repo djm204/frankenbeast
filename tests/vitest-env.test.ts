@@ -40,8 +40,11 @@ describe('Vitest environment flag helper', () => {
   it('keeps root integration and e2e suites opt-in for the default root CI command', () => {
     const config = readFileSync(resolve(ROOT, 'vitest.config.ts'), 'utf-8');
 
-    expect(config).toContain("readVitestFlags(['INTEGRATION', 'E2E'])");
+    expect(config).toContain("readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD'])");
+    expect(config).toContain("normalizeRequestedPath");
     expect(config).toContain("arg === 'tests/integration' || arg.startsWith('tests/integration/')");
+    expect(config).toContain("'tests/sandbox-dockerfile.test.ts'");
+    expect(config).toContain('runDockerBuild');
     expect(config).toContain("'tests/**/*.test.ts'");
     expect(config).toContain("'tests/integration/**/*.test.ts'");
     expect(config).toMatch(/exclude:[\s\S]*runIntegration \|\| runE2e[\s\S]*tests\/integration\/\*\*\/\*\.test\.ts/);

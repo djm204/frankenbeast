@@ -1,18 +1,28 @@
 import { defineConfig } from 'vitest/config';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 import { readVitestFlags } from './scripts/vitest-env.js';
 
-const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E']);
+const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD']);
+const normalizeRequestedPath = (arg: string): string => {
+  const normalized = arg.replace(/\\/gu, '/');
+  if (isAbsolute(normalized)) {
+    return relative(process.cwd(), normalized).replace(/\\/gu, '/');
+  }
+  return normalized.replace(/^\.\//u, '');
+};
 const requestedPaths = process.argv
   .slice(2)
-  .filter((arg) => !arg.startsWith('-') && arg !== 'run');
+  .filter((arg) => !arg.startsWith('-') && arg !== 'run')
+  .map(normalizeRequestedPath);
 const requestedIntegration = requestedPaths.some(
   (arg) => arg === 'tests/integration' || arg.startsWith('tests/integration/'),
 );
 const requestedE2e = requestedPaths.some((arg) => /(^|[/.-])e2e([/.-]|$)/u.test(arg));
+const requestedDockerBuild = requestedPaths.some((arg) => arg === 'tests/sandbox-dockerfile.test.ts');
 const runIntegration = vitestFlags.INTEGRATION || requestedIntegration;
 const runE2e = vitestFlags.E2E || requestedE2e;
+const runDockerBuild = vitestFlags.DOCKER_BUILD || requestedDockerBuild;
 
 export default defineConfig({
   resolve: {
@@ -30,6 +40,7 @@ export default defineConfig({
     // Default root CI suite: deterministic repository policy/config tests only.
     // INTEGRATION=true or an explicit tests/integration path opts into root integration tests.
     // E2E=true or an explicit e2e path opts into root end-to-end tests.
+    // DOCKER_BUILD=true or the explicit sandbox Dockerfile test path opts into Docker builds.
     include: runIntegration
       ? ['tests/integration/**/*.test.ts']
       : runE2e
@@ -37,7 +48,12 @@ export default defineConfig({
         : ['tests/**/*.test.ts'],
     exclude: runIntegration || runE2e
       ? ['**/node_modules/**', '**/dist/**']
-      : ['**/node_modules/**', '**/dist/**', 'tests/integration/**/*.test.ts'],
+      : [
+          '**/node_modules/**',
+          '**/dist/**',
+          'tests/integration/**/*.test.ts',
+          ...(runDockerBuild ? [] : ['tests/sandbox-dockerfile.test.ts']),
+        ],
     testTimeout: 15_000,
   },
 });
