@@ -235,6 +235,46 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('does not let paired default comparisons hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(limit = n < max, threshold = x > y, a, b, c, d) { return limit; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores non-declare overload signatures returning object literal types', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function parse(a, b, c, d, e, f): { ok: boolean };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('counts parameters for wrapped generic arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = (<T,>(a, b, c, d, e, f) => { return a; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('counts parameters for whitespace-wrapped arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = (\n  (a, b, c, d, e, f) => { return a; }\n);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
   it('flags functions with too many top-level parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;

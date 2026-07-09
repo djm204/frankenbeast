@@ -76,15 +76,49 @@ function findArrowParameterOpenParen(
   let index = openParenIndex + 1;
   while (/\s/.test(content[index] ?? '')) index++;
 
+  if (content[index] === '(') {
+    return index;
+  }
+
   if (content.slice(index, index + 5) === 'async') {
     index += 5;
     while (/\s/.test(content[index] ?? '')) index++;
-    if (content[index] === '(') {
-      return index;
+  }
+
+  if (content[index] === '<') {
+    const typeParameters = readBalancedAngleContent(content, index);
+    if (typeParameters !== null) {
+      index = typeParameters.closeAngleIndex + 1;
+      while (/\s/.test(content[index] ?? '')) index++;
     }
   }
 
+  if (content[index] === '(') {
+    return index;
+  }
+
   return openParenIndex;
+}
+
+function readBalancedAngleContent(
+  content: string,
+  openAngleIndex: number,
+): { closeAngleIndex: number } | null {
+  let depth = 1;
+
+  for (let index = openAngleIndex + 1; index < content.length; index++) {
+    const char = content[index];
+    if (char === '<') {
+      depth++;
+    } else if (char === '>' && content[index - 1] !== '=') {
+      depth--;
+      if (depth === 0) {
+        return { closeAngleIndex: index };
+      }
+    }
+  }
+
+  return null;
 }
 
 function readBalancedParenthesizedContent(
@@ -123,8 +157,67 @@ function hasFunctionBodyAfterParameterList(
   content: string,
   closeParenIndex: number,
 ): boolean {
-  const afterParams = content.slice(closeParenIndex + 1);
-  return /^\s*(?::[^;{]+)?\{/.test(afterParams);
+  let index = closeParenIndex + 1;
+  while (/\s/.test(content[index] ?? '')) index++;
+
+  if (content[index] !== ':') {
+    return content[index] === '{';
+  }
+
+  index++;
+  let returnTypeStarted = false;
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let angleDepth = 0;
+
+  for (; index < content.length; index++) {
+    const char = content[index];
+    if (char === undefined) continue;
+
+    if (!returnTypeStarted && /\s/.test(char)) continue;
+    returnTypeStarted = true;
+
+    if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+    } else if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (char === '<') {
+      angleDepth++;
+    } else if (char === '>' && content[index - 1] !== '=') {
+      angleDepth = Math.max(0, angleDepth - 1);
+    } else if (
+      char === ';' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      angleDepth === 0
+    ) {
+      return false;
+    }
+
+    const nextIndex = index + 1;
+    if (
+      returnTypeStarted &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      angleDepth === 0 &&
+      /^\s*\{/.test(content.slice(nextIndex))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function hasGenericCloseBeforeTopLevelComma(
@@ -183,6 +276,7 @@ function countTopLevelParameters(params: string): number {
   let braceDepth = 0;
   let bracketDepth = 0;
   let angleDepth = 0;
+  let currentParameterHasDefaultValue = false;
 
   for (let index = 0; index < params.length; index++) {
     const char = params[index];
@@ -206,7 +300,17 @@ function countTopLevelParameters(params: string): number {
     } else if (char === ']') {
       bracketDepth = Math.max(0, bracketDepth - 1);
     } else if (
+      char === '=' &&
+      params[index + 1] !== '>' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      angleDepth === 0
+    ) {
+      currentParameterHasDefaultValue = true;
+    } else if (
       char === '<' &&
+      !currentParameterHasDefaultValue &&
       hasGenericCloseBeforeTopLevelComma(params, index)
     ) {
       angleDepth++;
@@ -221,6 +325,7 @@ function countTopLevelParameters(params: string): number {
     ) {
       count++;
       hasParameterContent = false;
+      currentParameterHasDefaultValue = false;
     }
   }
 
