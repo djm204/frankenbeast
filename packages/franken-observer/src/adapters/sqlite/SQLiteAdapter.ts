@@ -49,8 +49,10 @@ interface FlushedSpanState {
   errorMessage?: string
   metadata: Record<string, unknown>
   metadataKeyCount: number
+  metadataJson: string
   thoughtBlocks: string[]
   thoughtBlockCount: number
+  thoughtBlocksJson: string
 }
 
 /**
@@ -104,6 +106,7 @@ export class SQLiteAdapter implements ExportAdapter {
     warnIfTraceHasActiveSpans(trace, 'SQLiteAdapter')
     const upsertTrace = this.db.prepare(UPSERT_TRACE)
     const upsertSpan = this.db.prepare(UPSERT_SPAN)
+    const flushedInTransaction: Span[] = []
 
     const transaction = this.db.transaction((t: Trace) => {
       upsertTrace.run({
@@ -129,11 +132,14 @@ export class SQLiteAdapter implements ExportAdapter {
           metadata: JSON.stringify(span.metadata),
           thoughtBlocks: JSON.stringify(span.thoughtBlocks),
         })
-        this.rememberFlushedSpan(span)
+        flushedInTransaction.push(span)
       }
     })
 
     transaction(trace)
+    for (const span of flushedInTransaction) {
+      this.rememberFlushedSpan(span)
+    }
   }
 
   private shouldFlushSpan(span: Span): boolean {
@@ -142,21 +148,35 @@ export class SQLiteAdapter implements ExportAdapter {
     if (previous === undefined) return true
 
     // Active spans are still mutable: metadata/thought blocks can grow and the
-    // eventual endSpan() call changes status/timing. Re-flush them while active,
-    // but once completed/error spans have been persisted, skip them unless the
-    // small scalar dirty check below detects a state change.
+    // eventual endSpan() call changes status/timing. Re-flush them while active.
     if (span.status === 'active') return true
 
-    return (
+    if (
       previous.status !== span.status ||
       previous.endedAt !== span.endedAt ||
       previous.durationMs !== span.durationMs ||
-      previous.errorMessage !== span.errorMessage ||
-      previous.metadata !== span.metadata ||
-      previous.metadataKeyCount !== Object.keys(span.metadata).length ||
-      previous.thoughtBlocks !== span.thoughtBlocks ||
-      previous.thoughtBlockCount !== span.thoughtBlocks.length
-    )
+      previous.errorMessage !== span.errorMessage
+    ) {
+      return true
+    }
+
+    return this.metadataChanged(previous, span) || this.thoughtBlocksChanged(previous, span)
+  }
+
+  private metadataChanged(previous: FlushedSpanState, span: Span): boolean {
+    const keyCount = Object.keys(span.metadata).length
+    if (previous.metadata === span.metadata && previous.metadataKeyCount === keyCount) return false
+    return previous.metadataJson !== JSON.stringify(span.metadata)
+  }
+
+  private thoughtBlocksChanged(previous: FlushedSpanState, span: Span): boolean {
+    if (
+      previous.thoughtBlocks === span.thoughtBlocks &&
+      previous.thoughtBlockCount === span.thoughtBlocks.length
+    ) {
+      return false
+    }
+    return previous.thoughtBlocksJson !== JSON.stringify(span.thoughtBlocks)
   }
 
   private rememberFlushedSpan(span: Span): void {
@@ -172,8 +192,10 @@ export class SQLiteAdapter implements ExportAdapter {
       errorMessage: span.errorMessage,
       metadata: span.metadata,
       metadataKeyCount: Object.keys(span.metadata).length,
+      metadataJson: JSON.stringify(span.metadata),
       thoughtBlocks: span.thoughtBlocks,
       thoughtBlockCount: span.thoughtBlocks.length,
+      thoughtBlocksJson: JSON.stringify(span.thoughtBlocks),
     })
   }
 

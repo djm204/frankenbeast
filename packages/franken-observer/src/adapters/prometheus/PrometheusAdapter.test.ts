@@ -88,6 +88,21 @@ describe('PrometheusAdapter', () => {
       )
     })
 
+    it('bounds repeated-flush dedupe memory with a recent-span cap', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 1 })
+      const first = makeTrace('claude-sonnet-4-6', 100, 0)
+      const second = makeTrace('claude-sonnet-4-6', 200, 0)
+
+      await adapter.flush(first)
+      await adapter.flush(second)
+      await adapter.flush(second)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+300/,
+      )
+    })
+
     it('tracks multiple models independently', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTrace('claude-sonnet-4-6', 100, 50))

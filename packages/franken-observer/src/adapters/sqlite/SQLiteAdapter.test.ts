@@ -49,6 +49,8 @@ describe('SQLiteAdapter', () => {
       .mockReturnValueOnce({ run: upsertSpanRun })
       .mockReturnValueOnce({ run: upsertTraceRun })
       .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
     transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
 
     const adapter = new SQLiteAdapter('/tmp/traces.db')
@@ -63,6 +65,17 @@ describe('SQLiteAdapter', () => {
     await adapter.flush(trace)
     expect(upsertSpanRun).toHaveBeenCalledTimes(1)
 
+    const clonedTrace = {
+      ...trace,
+      spans: trace.spans.map(span => ({
+        ...span,
+        metadata: { ...span.metadata },
+        thoughtBlocks: [...span.thoughtBlocks],
+      })),
+    }
+    await adapter.flush(clonedTrace)
+    expect(upsertSpanRun).toHaveBeenCalledTimes(1)
+
     const second = TraceContext.startSpan(trace, { name: 'second' })
     SpanLifecycle.setMetadata(second, { step: 2 })
     TraceContext.endSpan(second)
@@ -72,5 +85,36 @@ describe('SQLiteAdapter', () => {
     expect(upsertSpanRun).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: second.id, metadata: JSON.stringify({ step: 2 }) }),
     )
+  })
+
+  it('does not update the flushed-span cache when the SQLite transaction rolls back', async () => {
+    const upsertTraceRun = vi.fn()
+    const upsertSpanRun = vi
+      .fn()
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error('write failed')
+      })
+      .mockImplementation(() => undefined)
+    prepareMock
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+      .mockReturnValueOnce({ run: upsertTraceRun })
+      .mockReturnValueOnce({ run: upsertSpanRun })
+    transactionMock.mockImplementation(fn => (trace: unknown) => fn(trace))
+
+    const adapter = new SQLiteAdapter('/tmp/traces.db')
+    const trace = TraceContext.createTrace('goal')
+    const first = TraceContext.startSpan(trace, { name: 'first' })
+    const second = TraceContext.startSpan(trace, { name: 'second' })
+    TraceContext.endSpan(first)
+    TraceContext.endSpan(second)
+
+    await expect(adapter.flush(trace)).rejects.toThrow('write failed')
+    await adapter.flush(trace)
+
+    expect(upsertSpanRun).toHaveBeenCalledTimes(4)
+    expect(upsertSpanRun.mock.calls[2]?.[0]).toEqual(expect.objectContaining({ id: first.id }))
+    expect(upsertSpanRun.mock.calls[3]?.[0]).toEqual(expect.objectContaining({ id: second.id }))
   })
 })
