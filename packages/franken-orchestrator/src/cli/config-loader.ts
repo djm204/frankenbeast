@@ -20,7 +20,7 @@ function parseBooleanEnv(name: string): boolean | undefined {
 }
 
 /** Extract config values from environment variables. */
-function fromEnv(): Partial<OrchestratorConfig> {
+function fromEnv(shadowedFields: ReadonlySet<keyof OrchestratorConfig> = new Set()): Partial<OrchestratorConfig> {
   const env: Partial<OrchestratorConfig> = {};
 
   const maxTokens = process.env[`${ENV_PREFIX}MAX_TOTAL_TOKENS`];
@@ -32,14 +32,20 @@ function fromEnv(): Partial<OrchestratorConfig> {
   const maxCritique = process.env[`${ENV_PREFIX}MAX_CRITIQUE_ITERATIONS`];
   if (maxCritique) env.maxCritiqueIterations = Number(maxCritique);
 
-  const heartbeat = parseBooleanEnv(`${ENV_PREFIX}ENABLE_HEARTBEAT`);
-  if (heartbeat !== undefined) env.enableHeartbeat = heartbeat;
+  if (!shadowedFields.has('enableHeartbeat')) {
+    const heartbeat = parseBooleanEnv(`${ENV_PREFIX}ENABLE_HEARTBEAT`);
+    if (heartbeat !== undefined) env.enableHeartbeat = heartbeat;
+  }
 
-  const tracing = parseBooleanEnv(`${ENV_PREFIX}ENABLE_TRACING`);
-  if (tracing !== undefined) env.enableTracing = tracing;
+  if (!shadowedFields.has('enableTracing')) {
+    const tracing = parseBooleanEnv(`${ENV_PREFIX}ENABLE_TRACING`);
+    if (tracing !== undefined) env.enableTracing = tracing;
+  }
 
-  const reflection = parseBooleanEnv(`${ENV_PREFIX}ENABLE_REFLECTION`);
-  if (reflection !== undefined) env.enableReflection = reflection;
+  if (!shadowedFields.has('enableReflection')) {
+    const reflection = parseBooleanEnv(`${ENV_PREFIX}ENABLE_REFLECTION`);
+    if (reflection !== undefined) env.enableReflection = reflection;
+  }
 
   const minScore = process.env[`${ENV_PREFIX}MIN_CRITIQUE_SCORE`];
   if (minScore) env.minCritiqueScore = Number(minScore);
@@ -108,6 +114,13 @@ function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig
   return sanitized;
 }
 
+function getCliShadowedFields(args: CliArgs): Set<keyof OrchestratorConfig> {
+  const fields = new Set<keyof OrchestratorConfig>();
+  if (args.verbose) fields.add('enableTracing');
+  if (args.initBackend) fields.add('network');
+  return fields;
+}
+
 /** Extract config overrides from CLI args. */
 function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
   const cli: Partial<OrchestratorConfig> = {};
@@ -143,7 +156,7 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
     }
   }
 
-  const envConfig = fromEnv();
+  const envConfig = fromEnv(getCliShadowedFields(args));
   const cliConfig = fromCli(args);
 
   let merged = deepMerge<OrchestratorConfig>(

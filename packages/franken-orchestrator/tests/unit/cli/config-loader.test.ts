@@ -149,6 +149,14 @@ describe('Config loader', () => {
     );
   });
 
+  it('does not reject invalid env values shadowed by CLI overrides', async () => {
+    process.env['FRANKEN_ENABLE_TRACING'] = 'disabled';
+
+    const config = await loadConfig(makeArgs({ verbose: true }));
+
+    expect(config.enableTracing).toBe(true);
+  });
+
   it('reads numeric env vars', async () => {
     process.env['FRANKEN_MIN_CRITIQUE_SCORE'] = '0.9';
     const config = await loadConfig(makeArgs());
