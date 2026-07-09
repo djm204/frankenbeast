@@ -150,6 +150,10 @@ describe('local setup scripts', () => {
     expect(readme).toContain('CHROMA_URL');
     expect(readme).toContain('http://localhost:8000');
     expect(readme).toContain('Override it only when ChromaDB runs at a different local port/host or a remote');
+    expect(readme).toContain('Local Tempo exposes OTLP/HTTP writes on http://localhost:4318');
+    expect(readme).toContain('readiness on http://localhost:3200/ready');
+    expect(readme).toContain('does not define a TEMPO_ENDPOINT override');
+    expect(readme).toContain('TempoAdapter options');
     expect(readme).toContain('CLI flags > `FRANKEN_*` env vars > config file > built-in defaults');
     expect(readme).toContain('maxCritiqueIterations * 10000');
     for (const frankenOverride of [
