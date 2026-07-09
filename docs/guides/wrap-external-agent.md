@@ -4,10 +4,18 @@ The current repo does not ship a `firewall` Docker Compose service or a standalo
 
 ## Option 1: Use MCP mode for tool governance
 
-Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`), and `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands that the AI client spawns later — so install the package persistently (global or `npm link`) rather than via a one-shot `npx`, otherwise the registered servers won't be on PATH at runtime:
+Install the MCP suite in the project you want to govern. The `fbeast` binary ships from the `@franken/mcp-suite` package (there is no package named `fbeast`), and `mcp init` registers servers as bare `fbeast-memory`/`fbeast-proxy` commands that the AI client spawns later — so install the package persistently rather than via a one-shot `npx`, otherwise the registered servers won't be on PATH at runtime:
 
 ```bash
-npm install -g @franken/mcp-suite      # or, from this repo: npm run local:link
+# Published package: install once so fbeast and fbeast-* stay on PATH.
+npm install -g @franken/mcp-suite
+
+# Local checkout: use the maintained root script, which builds and links the
+# MCP suite plus orchestrator CLIs, then verify the linked binaries.
+npm install
+npm run local:link
+npm run local:verify-cli
+
 fbeast mcp init
 fbeast mcp init --hooks                # optional: pre/post-tool governance and audit logs
 ```
