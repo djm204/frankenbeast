@@ -81,6 +81,23 @@ describe('analytics routes', () => {
     expect(service.listEvents).toHaveBeenCalledWith({ page: 2, pageSize: 25 });
   });
 
+  it('rejects unsupported timeWindow query values before reading analytics data', async () => {
+    const service = mockAnalyticsService();
+    const app = createAnalyticsRoutes({ analytics: service });
+
+    const res = await app.request('/events?timeWindow=30days');
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        message: 'Unsupported Analytics timeWindow filter',
+        code: 'invalid_time_window',
+        allowedValues: ['24h', '7d', '30d', 'all'],
+      },
+    });
+    expect(service.listEvents).not.toHaveBeenCalled();
+  });
+
   it('returns event details or a 404', async () => {
     const service = mockAnalyticsService();
     const app = createAnalyticsRoutes({ analytics: service });
