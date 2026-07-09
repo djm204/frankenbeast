@@ -579,6 +579,10 @@ const port: Brand<
 \`\`\`ts
 const markdownPort = 8080;
 \`\`\`
+Here's another config:
+\`\`\`ts
+const contractionFencePort = 8087;
+\`\`\`
 const cfg = { ports_by_protocol: { https: 8443 }, server_ports_by_name: { admin: 9000 } };
 const serviceMaps = { transport_ports: { http: 8081 }, support_ports: { health: 8082 }, transports_ports: { http: 8083 }, supports_ports: { health: 8084 } };
 const lowercaseMaps = { serverports: { http: 8085 }, apiports: { grpc: 8086 } };
@@ -588,6 +592,7 @@ config["server-ports"] = 7000;`;
 
     expect(result.findings.map((f) => f.message)).toEqual([
       'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8087. Use environment variables or config.',
       'Found hardcoded port number: 3000. Use environment variables or config.',
       'Found hardcoded port number: 5000. Use environment variables or config.',
       'Found hardcoded port number: 6000. Use environment variables or config.',

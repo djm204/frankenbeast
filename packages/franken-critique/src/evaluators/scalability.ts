@@ -488,6 +488,11 @@ export class ScalabilityEvaluator implements Evaluator {
         continue;
       }
 
+      if (current === "'" && /[A-Za-z]/.test(content[index - 1] ?? '') && /[A-Za-z]/.test(content[index + 1] ?? '')) {
+        index += 1;
+        continue;
+      }
+
       if (current === '"' || current === "'") {
         const quote = current;
         let stop = index + 1;
