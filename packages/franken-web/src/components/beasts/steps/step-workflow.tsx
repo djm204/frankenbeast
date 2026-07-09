@@ -96,11 +96,11 @@ export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
       {values.workflowType === 'design-interview' && (
         <div className="space-y-4">
           <div>
-            <label htmlFor="wf-topic" className="block text-sm font-medium text-beast-text mb-1.5">Goal</label>
+            <label htmlFor="wf-goal" className="block text-sm font-medium text-beast-text mb-1.5">Goal</label>
             <textarea
-              id="wf-topic"
-              value={(values.topic as string) ?? ''}
-              onChange={(e) => updateField('topic', e.target.value)}
+              id="wf-goal"
+              value={(values.goal as string) ?? (values.topic as string) ?? ''}
+              onChange={(e) => updateField('goal', e.target.value)}
               placeholder="Describe what the design interview should produce..."
               rows={3}
               className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent resize-y"
@@ -181,8 +181,8 @@ export function StepWorkflow({ containerRuntime }: StepWorkflowProps) {
             <input
               id="wf-dir"
               type="text"
-              value={(values.chunkDir as string) ?? ''}
-              onChange={(e) => updateField('chunkDir', e.target.value)}
+              value={(values.chunkDirectory as string) ?? (values.chunkDir as string) ?? ''}
+              onChange={(e) => updateField('chunkDirectory', e.target.value)}
               placeholder="/path/to/chunks/"
               className="w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text placeholder:text-beast-subtle text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
             />
