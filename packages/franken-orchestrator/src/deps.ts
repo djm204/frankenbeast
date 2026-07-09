@@ -134,7 +134,7 @@ export interface ICritiqueModule {
 }
 
 export interface CritiqueResult {
-  readonly verdict: 'pass' | 'fail';
+  readonly verdict: 'pass' | 'warn' | 'fail';
   readonly findings: readonly CritiqueFinding[];
   readonly score: number;
   /**
@@ -152,6 +152,7 @@ export interface CritiqueFinding {
   readonly evaluator: string;
   readonly severity: string;
   readonly message: string;
+  readonly location?: string | undefined;
 }
 
 /** What the orchestrator needs from MOD-07 (Governor). */

@@ -8,6 +8,7 @@ const FRANKEN_SOURCE_ENTRYPOINTS = {
   '@franken/observer': 'packages/franken-observer/src/index.ts',
   '@franken/critique': 'packages/franken-critique/src/index.ts',
   '@franken/governor': 'packages/franken-governor/src/index.ts',
+  '@franken/types/path-containment': 'packages/franken-types/src/path-containment.ts',
   '@franken/types': 'packages/franken-types/src/index.ts',
   '@franken/orchestrator': 'packages/franken-orchestrator/src/index.ts',
 } as const;

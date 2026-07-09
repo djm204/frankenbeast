@@ -1,25 +1,141 @@
-🏗️ Frankenbeast: Orchestrator Functional Overview1. Executive SummaryThe Orchestrator is a Stateful Supervisor. It is responsible for the transition between the 8 modules, ensuring that no action is taken without proper guarding, planning, and critique. It maintains the "Shared Mental Model" of the system through a unified context object.2. The Orchestrator Lifecycle (The "Beast" Loop)The Orchestrator manages the execution flow through four distinct phases. It is non-linear; it can loop back to earlier phases if a module (like the Critique module) signals a failure.Phase 1: Ingestion & HydrationAction: Intercepts raw user input.Modules: MOD-01 (Guardrails) & MOD-03 (Memory).Logic: Scrub the input for PII, then inject relevant ADRs and previous episodic traces to give the agent "contextual wisdom."Phase 2: Recursive PlanningAction: Generate and verify the technical roadmap.Modules: MOD-04 (Planner) & MOD-06 (Self-Critique).Logic: The Planner generates a Task DAG. The Reviewer (Critique) audits it. If the Reviewer finds a flaw (e.g., "This violates our TypeScript ADR"), the Orchestrator forces a re-plan.Phase 3: Validated ExecutionAction: Execute the approved steps.Modules: MOD-02 (Skills) & MOD-07 (HITL).Logic: The Orchestrator pulls tool logic from @djm204/agent-skills. If a task is marked as "High Stakes," it pauses and triggers the Human-in-the-Loop gateway.Phase 4: Observability & ClosureAction: Record the results and finalize.Modules: MOD-05 (Obs) & MOD-08 (Heartbeat).Logic: Logs the full trace, updates the token spend, and triggers a "Pulse" to see if any proactive improvements are needed based on the outcome.3. Shared State: The FrankenContextThe Orchestrator maintains a singleton state object that is passed to every module. This ensures "Brutal Honesty" because every module sees the same data.Data CategoryPurposeGlobal StateCurrent project ID, security level, and total token budget.The PlanThe active Directed Acyclic Graph (DAG) of tasks and current progress.The SkillsetVerified tool definitions synced from @djm204/agent-skills.The MemoryRecent failures, successes, and relevant architectural rules.The AuditA list of all critique feedback and human approvals for the current session.4. Key Orchestration Logic (Pseudocode)TypeScript// The heart of 'npm run start:beast'
+# Frankenbeast Orchestrator Functional Overview
+
+Frankenbeast's orchestrator is the stateful supervisor for the Beast Loop. It moves
+work through guarded ingestion, planning, execution, and closure while carrying a
+shared context object across modules so each step sees the same security,
+planning, memory, approval, and observability state.
+
+This page is a functional overview, not the authoritative package inventory. For
+current package ownership, see the [root README workspace table](../README.md#current-workspace-packages)
+and [architecture package table](ARCHITECTURE.md#system-overview). The `MOD-*`
+names below remain useful design vocabulary, but several earlier standalone
+packages have been consolidated into the current workspaces, especially
+`@franken/orchestrator`, `@franken/mcp-suite`, and the shared `@franken/*`
+packages.
+
+## Executive summary
+
+The orchestrator coordinates eight conceptual modules:
+
+| Module | Conceptual role | Current implementation notes |
+|--------|-----------------|------------------------------|
+| MOD-01 Guardrails / Firewall | Sanitize input and fail closed on unsafe requests. | Firewall middleware and safety checks are wired through `@franken/orchestrator`. |
+| MOD-02 Skills / Execution | Run approved work steps. | CLI skill execution and provider registry live in `@franken/orchestrator`; MCP lives in `@franken/mcp-suite`. |
+| MOD-03 Memory | Hydrate context and record useful state. | Working memory and episodic recall live in `@franken/brain`, with orchestrator adapters handling runtime wiring. |
+| MOD-04 Planner | Create the task DAG or execution roadmap. | Planning primitives live in `@franken/planner`; the orchestrator owns runtime coordination. |
+| MOD-05 Observability | Trace spans, token/cost accounting, loop detection, and circuit breakers. | Implemented by `@franken/observer` and orchestrator bridges. |
+| MOD-06 Critique | Review plans or outputs and request corrections. | Implemented by `@franken/critique`; callers apply the feedback. |
+| MOD-07 Human-in-the-loop (HITL) | Pause high-stakes actions for signed approval. | Implemented by `@franken/governor` plus orchestrator approval paths. |
+| MOD-08 Heartbeat | Reflect on outcomes and dispatch proactive follow-up where configured. | Heartbeat/reflection adapters are wired through `@franken/orchestrator`. |
+
+## The orchestrator lifecycle: the Beast Loop
+
+The Beast Loop has four phases. The flow is intentionally non-linear: critique, approval, budget, or safety failures can stop execution or send the loop back to an earlier phase.
+
+### Phase 1: ingestion and hydration
+
+- Intercept raw user input.
+- Scan or transform the request through guardrails/firewall logic.
+- Hydrate the shared context with project state, relevant memory, configuration, and policy.
+- Fail fast if injection, policy, or security checks reject the request.
+
+### Phase 2: recursive planning
+
+- Generate a plan, task DAG, or execution strategy.
+- Review that plan through the critique path.
+- Re-plan when critique reports a fixable problem, such as violating repository conventions or missing required validation.
+- Escalate to HITL when critique repeatedly fails or the request requires human judgement.
+
+### Phase 3: validated execution
+
+- Execute approved tasks in dependency order.
+- Use the configured CLI/provider execution path for local work; use MCP paths only when a live MCP transport is configured.
+- Pause for HITL approval before high-stakes actions.
+- Record each result through memory and observability adapters.
+
+### Phase 4: observability and closure
+
+- Finalize traces, token/cost accounting, and circuit-breaker state.
+- Persist useful execution state for recovery and later analysis.
+- Assemble the final result for the caller.
+- Trigger heartbeat/reflection behavior where enabled.
+
+## Shared state: `FrankenContext`
+
+The orchestrator passes a shared context through the loop so modules operate on a consistent view of the work.
+
+| Data category | Purpose |
+|---------------|---------|
+| Global state | Project ID, security level, run configuration, provider settings, and token/cost budget. |
+| Plan state | Active task DAG, current node, dependencies, approval state, and progress. |
+| Memory state | Hydrated working memory, episodic events, checkpoints, and recovery references. |
+| Safety state | Guardrail decisions, critique results, HITL requirements, and circuit-breaker status. |
+| Observability state | Trace IDs, spans, token usage, cost totals, logs, and exported diagnostics. |
+| Execution state | Tool/provider selection, task outputs, errors, retries, and final result assembly. |
+
+This shared context is the mechanism behind Frankenbeast's "brutal honesty" principle: each module can see the same facts instead of relying on hidden or prompt-only assumptions.
+
+## Code example
+
+The sketch below shows the conceptual control flow. It is intentionally
+pseudo-code; package and adapter names should be checked against the current
+README and architecture docs before implementation work.
+
+```ts
 async function orchestrate(userInput: string) {
-  // 1. Initialize State
   const context = await initializeContext(userInput);
 
-  // 2. Planning Loop
+  context.input = await guardrails.sanitize(context, userInput);
+  await memory.hydrate(context);
+
   while (context.planStatus !== 'APPROVED') {
-    context.plan = await MOD04.plan(context);
-    context.lastCritique = await MOD06.review(context.plan);
-    if (context.lastCritique.isPassed) context.planStatus = 'APPROVED';
+    context.plan = await planner.createPlan(context);
+    context.lastCritique = await critique.review(context.plan, context);
+
+    if (context.lastCritique.passed) {
+      context.planStatus = 'APPROVED';
+    } else if (context.lastCritique.canReplan) {
+      await planner.applyFeedback(context, context.lastCritique);
+    } else {
+      await governor.requestHumanDecision(context);
+    }
   }
 
-  // 3. Execution Loop
   for (const task of context.plan.tasks) {
-    if (task.requiresApproval) await MOD07.waitForHuman(task);
-    
-    const result = await MOD02.execute(task); // Pulls from @djm204/agent-skills
-    await MOD03.record(task, result);         // Stores in Episodic Memory
-    await MOD05.trace(task, result);          // Logs to Observability
+    if (task.requiresApproval) {
+      await governor.waitForHuman(task, context);
+    }
+
+    const result = await skills.execute(task, context);
+    await memory.record(task, result, context);
+    await observer.trace(task, result, context);
   }
 
-  // 4. Final Pulse
-  await MOD08.triggerPulse(context);
+  await heartbeat.reflect(context);
+  return observer.finalize(context);
 }
-5. Failure Handling (The Circuit Breaker)The Orchestrator is programmed with a "Fail-Fast" mentality:Security Breach: If MOD-01 detects an injection, the Orchestrator kills the process immediately.Budget Overrun: If MOD-05 reports token spend exceeding the limit, the loop breaks and triggers MOD-07.Recursive Spiral: If the MOD-06 critique fails 3 times on the same plan, it escalates to the human.
+```
+
+## Failure handling: circuit breakers
+
+The orchestrator is designed to fail closed when safety or correctness checks cannot be satisfied.
+
+| Failure class | Default response |
+|---------------|------------------|
+| Security breach | Stop immediately when guardrails detect injection, unsafe commands, or policy violations. |
+| Budget overrun | Break or pause the loop and escalate through HITL when token/cost limits are exceeded. |
+| Critique spiral | Escalate when repeated critique rounds cannot produce an approved plan. |
+| Missing execution transport | Fail closed instead of pretending MCP or provider execution is available. |
+| Approval denial | Stop the protected action and preserve an audit trail. |
+
+## Current-vs-historical reading guide
+
+- Treat `MOD-*` names as conceptual roles, not current package names.
+- Treat `@franken/orchestrator`, `@franken/mcp-suite`, `@franken/brain`,
+  `@franken/planner`, `@franken/observer`, `@franken/critique`,
+  `@franken/governor`, `@franken/types`, `@franken/web`, and
+  `@franken/live-bench` as the current package surfaces.
+- Treat references to removed packages such as `frankenfirewall`,
+  `franken-skills`, `franken-heartbeat`, `franken-mcp`, or `franken-comms` as
+  historical architecture vocabulary unless a current README or source file says
+  otherwise.

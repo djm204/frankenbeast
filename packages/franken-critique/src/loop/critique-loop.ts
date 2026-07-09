@@ -11,6 +11,10 @@ import type { EscalationRequest } from '../types/contracts.js';
 import type { CritiquePipeline } from '../pipeline/critique-pipeline.js';
 import { hasReachedMaxIterations } from './iteration-limit.js';
 
+interface InternalLoopState extends LoopState {
+  failureHistory: Map<string, number>;
+}
+
 export class CritiqueLoop {
   private readonly pipeline: CritiquePipeline;
   private readonly breakers: readonly CircuitBreaker[];
@@ -21,7 +25,7 @@ export class CritiqueLoop {
   }
 
   async run(input: EvaluationInput, config: LoopConfig): Promise<CritiqueLoopResult> {
-    const state: LoopState = {
+    const state: InternalLoopState = {
       iterationCount: 0,
       iterations: [],
       failureHistory: new Map(),
@@ -53,14 +57,14 @@ export class CritiqueLoop {
       // Pass/warn: warnings are non-critical findings that should surface in
       // results without forcing correction iterations.
       if (critiqueResult.verdict === 'pass' || critiqueResult.verdict === 'warn') {
-        return { verdict: 'pass', iterations: state.iterations };
+        return { verdict: critiqueResult.verdict, iterations: state.iterations };
       }
 
       // Fail: update failure history
       for (const result of critiqueResult.results) {
         if (result.verdict === 'fail') {
           const current = state.failureHistory.get(result.evaluatorName) ?? 0;
-          (state.failureHistory as Map<string, number>).set(result.evaluatorName, current + 1);
+          state.failureHistory.set(result.evaluatorName, current + 1);
         }
       }
 
@@ -77,7 +81,7 @@ export class CritiqueLoop {
   }
 
   private async checkBreakers(
-    state: LoopState,
+    state: InternalLoopState,
     config: LoopConfig,
     phase: 'pre' | 'post',
   ): Promise<CritiqueLoopResult | null> {
@@ -88,7 +92,7 @@ export class CritiqueLoop {
       if (breakerPhase !== phase && breakerPhase !== 'both') continue;
       // Sequential await preserves breaker ordering (e.g. halt short-circuits
       // before escalate). Do not parallelize.
-      const result = await breaker.check(state, config);
+      const result = await breaker.check(this.toPublicState(state), config);
       if (result.tripped) {
         if (result.action === 'escalate') {
           return {
@@ -105,6 +109,14 @@ export class CritiqueLoop {
       }
     }
     return null;
+  }
+
+  private toPublicState(state: InternalLoopState): LoopState {
+    return {
+      iterationCount: state.iterationCount,
+      iterations: [...state.iterations],
+      failureHistory: new Map(state.failureHistory),
+    };
   }
 
   private buildCorrection(

@@ -54,7 +54,7 @@ import type {
 // MOD-06: Critique Port Stubs
 // =============================================================================
 
-const unsafeDynamicCallName = ['ev', 'al'].join('');
+const unsafeDynamicCallName = 'executeUntrustedCode';
 const unsafeDynamicCallRuleId = `no-${unsafeDynamicCallName}`;
 
 const defaultSafetyRules: SafetyRule[] = [

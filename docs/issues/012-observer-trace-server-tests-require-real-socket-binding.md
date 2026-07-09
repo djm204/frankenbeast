@@ -1,5 +1,7 @@
 # Issue: `franken-observer` TraceServer Tests Require Real Socket Binding
 
+> **Historical archive notice (2026-07-09):** This document is preserved from the pre-consolidation 2026-03 audit. It may mention removed packages such as `franken-mcp`, `frankenfirewall`, `franken-comms`, `franken-heartbeat`, or legacy root scripts such as `test:all`. Use the status annotations in `docs/issues/INDEX.md` and the live `package.json`/`packages/*` workspaces as the source of truth for current contributor work.
+
 Severity: medium
 Area: `franken-observer` test reliability
 

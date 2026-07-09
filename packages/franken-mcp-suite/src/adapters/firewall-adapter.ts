@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from '@franken/orchestrator';
 import type { InjectionTier } from '@franken/orchestrator';
@@ -20,21 +20,40 @@ interface FirewallAdapterDeps {
   scanFile(path: string): Promise<FirewallScanResult>;
 }
 
+interface FirewallAdapterOptions {
+  root?: string | undefined;
+  configPath?: string | undefined;
+}
+
+type SecurityProfile = 'strict' | 'standard' | 'permissive';
+
+interface CustomFirewallRule {
+  name: string;
+  pattern: string;
+  action: 'block' | 'warn' | 'log';
+  target: 'request' | 'response' | 'both';
+}
+
+interface FirewallScanConfig {
+  profile: SecurityProfile;
+  injectionDetection: boolean;
+  customRules: CustomFirewallRule[];
+}
+
 export function createFirewallAdapter(
   dbPathOrDeps: string | FirewallAdapterDeps,
   tier: InjectionTier = 'standard',
-  options: { root?: string | undefined } = {},
+  options: FirewallAdapterOptions = {},
 ): FirewallAdapter {
   if (typeof dbPathOrDeps !== 'string') {
     return dbPathOrDeps;
   }
 
   const store = createSqliteStore(dbPathOrDeps);
-  const patterns = tier === 'strict'
-    ? [...PATTERNS_ALL_TIERS, ...PATTERNS_STRICT_ONLY]
-    : PATTERNS_ALL_TIERS;
-
   const root = realpathSync(resolve(options.root ?? process.env['FBEAST_ROOT'] ?? process.cwd()));
+  const explicitConfigPath = options.configPath ?? process.env['FBEAST_CONFIG'];
+  const configPath = resolveConfigPath(explicitConfigPath ?? join(dirname(dbPathOrDeps), 'config.json'), root);
+  const requireConfig = explicitConfigPath !== undefined;
 
   function resolveContained(requested: string): string {
     const target = resolve(root, requested);
@@ -50,7 +69,7 @@ export function createFirewallAdapter(
 
   return {
     async scanText(input) {
-      const result = scanWithPatterns(input, patterns);
+      const result = scanWithConfig(input, loadFirewallScanConfig(configPath, tier, requireConfig));
       logScan(input, result);
       return result;
     },
@@ -58,7 +77,7 @@ export function createFirewallAdapter(
     async scanFile(path) {
       const safePath = resolveContained(path);
       const content = readFileSync(safePath, 'utf8');
-      const result = scanWithPatterns(content, patterns);
+      const result = scanWithConfig(content, loadFirewallScanConfig(configPath, tier, requireConfig));
       logScan(content, result);
       return result;
     },
@@ -73,10 +92,246 @@ export function createFirewallAdapter(
   }
 }
 
-function scanWithPatterns(input: string, patterns: RegExp[]): FirewallScanResult {
-  const matchedPatterns = patterns
+function resolveConfigPath(configPath: string, root: string): string {
+  return isAbsolute(configPath) ? configPath : resolve(root, configPath);
+}
+
+function loadFirewallScanConfig(configPath: string, fallbackTier: InjectionTier, requireConfig = false): FirewallScanConfig {
+  const fallbackProfile: SecurityProfile = fallbackTier === 'strict' ? 'strict' : 'standard';
+  if (!existsSync(configPath)) {
+    if (requireConfig) {
+      throw new Error(`Firewall config file does not exist: ${configPath}`);
+    }
+    return { profile: fallbackProfile, injectionDetection: true, customRules: [] };
+  }
+
+  const raw = readFileSync(configPath, 'utf8');
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error(`Firewall config must contain a JSON object: ${configPath}`);
+  }
+  const security = parsed['security'];
+  if (security === undefined) {
+    return { profile: fallbackProfile, injectionDetection: true, customRules: [] };
+  }
+  if (!isRecord(security)) {
+    throw new Error(`Firewall config security field must be an object: ${configPath}`);
+  }
+  const profile = parseSecurityProfile(security['profile'], fallbackProfile, configPath);
+  return {
+    profile,
+    injectionDetection: parseOptionalBoolean(security['injectionDetection'], profile !== 'permissive', 'security.injectionDetection', configPath),
+    customRules: parseCustomRules(security['customRules'], configPath),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseSecurityProfile(value: unknown, fallback: SecurityProfile, configPath: string): SecurityProfile {
+  if (value === undefined) return fallback;
+  if (value === 'strict' || value === 'standard' || value === 'permissive') return value;
+  throw new Error(`Invalid security.profile in firewall config: ${configPath}`);
+}
+
+function parseOptionalBoolean(value: unknown, fallback: boolean, field: string, configPath: string): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value === 'boolean') return value;
+  throw new Error(`Invalid ${field} in firewall config: ${configPath}`);
+}
+
+function parseCustomRules(value: unknown, configPath: string): CustomFirewallRule[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid security.customRules in firewall config: ${configPath}`);
+  }
+  return value.map((rule, index) => parseCustomRule(rule, index, configPath));
+}
+
+function parseCustomRule(rule: unknown, index: number, configPath: string): CustomFirewallRule {
+  if (!isRecord(rule)) {
+    throw new Error(`Invalid security.customRules[${index}] in firewall config: ${configPath}`);
+  }
+  const name = parseRequiredString(rule['name'], `security.customRules[${index}].name`, configPath);
+  const pattern = parseRequiredString(rule['pattern'], `security.customRules[${index}].pattern`, configPath);
+  const action = parseRuleAction(rule['action'], index, configPath);
+  const target = parseRuleTarget(rule['target'], index, configPath);
+  assertSafeCustomRulePattern(pattern, index, configPath);
+  return { name, pattern, action, target };
+}
+
+function assertSafeCustomRulePattern(pattern: string, index: number, configPath: string): void {
+  if (pattern.length > 256 || hasUnsafeQuantifiedGroup(pattern) || hasRepeatedQuantifiedAtom(pattern)) {
+    throw new Error(`Unsafe security.customRules[${index}].pattern in firewall config: ${configPath}`);
+  }
+  try {
+    new RegExp(pattern, 'i');
+  } catch {
+    throw new Error(`Invalid security.customRules[${index}].pattern in firewall config: ${configPath}`);
+  }
+}
+
+function hasUnsafeQuantifiedGroup(pattern: string): boolean {
+  if (hasNestedQuantifiedGroup(pattern)) return true;
+  const simpleGroup = String.raw`\((?:[^()\\]|\\.)*`;
+  const innerQuantifier = String.raw`(?:[+*]|\{\s*\d+\s*,?\s*\d*\s*\})`;
+  const groupEndWithOuterQuantifier = String.raw`(?:[^()\\]|\\.)*\)\s*[+*?{]`;
+  return new RegExp(`(?:${simpleGroup}${innerQuantifier}${groupEndWithOuterQuantifier})`).test(pattern)
+    || new RegExp(`(?:${simpleGroup}[|]${groupEndWithOuterQuantifier})`).test(pattern);
+}
+
+function hasNestedQuantifiedGroup(pattern: string): boolean {
+  const groups: Array<{ hasNestedGroup: boolean; hasAlternation: boolean; hasQuantifier: boolean }> = [];
+
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+    if (ch === '[') {
+      while (++i < pattern.length) {
+        if (pattern[i] === '\\') i++;
+        else if (pattern[i] === ']') break;
+      }
+      continue;
+    }
+    if (ch === '(') {
+      if (groups.length > 0) groups[groups.length - 1]!.hasNestedGroup = true;
+      groups.push({ hasNestedGroup: false, hasAlternation: false, hasQuantifier: false });
+      continue;
+    }
+    if (ch === ')') {
+      const group = groups.pop();
+      if (!group) continue;
+      const quantifierIndex = nextNonWhitespaceIndex(pattern, i + 1);
+      const quantified = isQuantifierStart(pattern[quantifierIndex]);
+      if (quantified && (group.hasNestedGroup || group.hasAlternation || group.hasQuantifier)) {
+        return true;
+      }
+      if (quantified && groups.length > 0) {
+        groups[groups.length - 1]!.hasQuantifier = true;
+      }
+      continue;
+    }
+    if (groups.length === 0) continue;
+    if (ch === '|') {
+      groups[groups.length - 1]!.hasAlternation = true;
+    } else if (isQuantifierStart(ch)) {
+      groups[groups.length - 1]!.hasQuantifier = true;
+      if (ch === '{') {
+        while (++i < pattern.length) {
+          if (pattern[i] === '\\') i++;
+          else if (pattern[i] === '}') break;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function nextNonWhitespaceIndex(value: string, start: number): number {
+  let index = start;
+  while (index < value.length && /\s/.test(value[index]!)) index++;
+  return index;
+}
+
+function hasRepeatedQuantifiedAtom(pattern: string): boolean {
+  let previousQuantifiedAtom: string | undefined;
+  for (let i = 0; i < pattern.length; i++) {
+    const atomStart = i;
+    const ch = pattern[i];
+    if (ch === '^' || ch === '$') continue;
+    if (ch === '(') {
+      previousQuantifiedAtom = undefined;
+      let depth = 1;
+      while (++i < pattern.length && depth > 0) {
+        if (pattern[i] === '\\') i++;
+        else if (pattern[i] === '(') depth++;
+        else if (pattern[i] === ')') depth--;
+      }
+      if (isQuantifierStart(pattern[i + 1])) previousQuantifiedAtom = undefined;
+      continue;
+    }
+    if (ch === '[') {
+      while (++i < pattern.length) {
+        if (pattern[i] === '\\') i++;
+        else if (pattern[i] === ']') break;
+      }
+    } else if (ch === '\\') {
+      i++;
+    }
+    const atom = pattern.slice(atomStart, i + 1);
+    const quantifierStart = i + 1;
+    if (!isQuantifierStart(pattern[quantifierStart])) {
+      previousQuantifiedAtom = undefined;
+      continue;
+    }
+    const quantifier = readQuantifier(pattern, quantifierStart);
+    i = quantifier.end;
+    if (!quantifier.isBacktrackingRisk) {
+      previousQuantifiedAtom = undefined;
+      continue;
+    }
+    if (previousQuantifiedAtom === atom) return true;
+    previousQuantifiedAtom = atom;
+  }
+  return false;
+}
+
+function isQuantifierStart(ch: string | undefined): boolean {
+  return ch === '*' || ch === '+' || ch === '?' || ch === '{';
+}
+
+function readQuantifier(pattern: string, start: number): { end: number; isBacktrackingRisk: boolean } {
+  const ch = pattern[start];
+  if (ch === '*' || ch === '+') return { end: start, isBacktrackingRisk: true };
+  if (ch === '?') return { end: start, isBacktrackingRisk: false };
+  const close = pattern.indexOf('}', start + 1);
+  if (ch !== '{' || close === -1) return { end: start, isBacktrackingRisk: false };
+  const body = pattern.slice(start + 1, close);
+  return { end: close, isBacktrackingRisk: body.endsWith(',') || /,\s*\d+$/.test(body) };
+}
+
+function parseRequiredString(value: unknown, field: string, configPath: string): string {
+  if (typeof value === 'string' && value.length > 0) return value;
+  throw new Error(`Invalid ${field} in firewall config: ${configPath}`);
+}
+
+function parseRuleAction(value: unknown, index: number, configPath: string): CustomFirewallRule['action'] {
+  if (value === 'block' || value === 'warn' || value === 'log') return value;
+  throw new Error(`Invalid security.customRules[${index}].action in firewall config: ${configPath}`);
+}
+
+function parseRuleTarget(value: unknown, index: number, configPath: string): CustomFirewallRule['target'] {
+  if (value === 'request' || value === 'response' || value === 'both') return value;
+  throw new Error(`Invalid security.customRules[${index}].target in firewall config: ${configPath}`);
+}
+
+function patternsForConfig(config: FirewallScanConfig): RegExp[] {
+  if (!config.injectionDetection) return [];
+  return config.profile === 'strict'
+    ? [...PATTERNS_ALL_TIERS, ...PATTERNS_STRICT_ONLY]
+    : PATTERNS_ALL_TIERS;
+}
+
+function customRequestBlockPatterns(config: FirewallScanConfig): Array<{ name: string; pattern: RegExp }> {
+  return config.customRules
+    .filter((rule) => rule.action === 'block' && rule.target !== 'response')
+    .map((rule) => ({ name: rule.name, pattern: new RegExp(rule.pattern, 'i') }));
+}
+
+function scanWithConfig(input: string, config: FirewallScanConfig): FirewallScanResult {
+  const builtInMatches = patternsForConfig(config)
     .filter((pattern) => pattern.test(input))
     .map((pattern) => pattern.source);
+  const customMatches = customRequestBlockPatterns(config)
+    .filter((rule) => rule.pattern.test(input))
+    .map((rule) => `custom:${rule.name}`);
+
+  const matchedPatterns = [...builtInMatches, ...customMatches];
 
   return {
     verdict: matchedPatterns.length > 0 ? 'flagged' : 'clean',

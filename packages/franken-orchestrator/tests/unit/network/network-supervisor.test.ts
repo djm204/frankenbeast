@@ -207,6 +207,40 @@ describe('NetworkSupervisor', () => {
     ]));
   });
 
+  it('waits for a reused dashboard service to become healthy before reporting success', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
+    const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));
+    const logStore = new NetworkLogStore(join(workDir, 'logs'));
+    const services = resolveNetworkServices(defaultConfig(), { repoRoot: '/repo/frankenbeast' })
+      .filter((service) => service.id === 'dashboard-web');
+    const healthcheck = vi.fn(async () => false);
+    const stopService = vi.fn(async () => undefined);
+
+    const supervisor = new NetworkSupervisor({
+      stateStore,
+      logStore,
+      startService: vi.fn(async () => ({ pid: 202 })),
+      stopService,
+      healthcheck,
+      preflightService: vi.fn(async () => ({ action: 'reuse' as const })),
+      now: () => '2026-03-10T00:00:00.000Z',
+      startupAttempts: 1,
+    });
+
+    await expect(supervisor.up({
+      services,
+      detached: false,
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+    })).rejects.toThrow(/Service dashboard-web failed healthcheck during startup/);
+
+    expect(healthcheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'dashboard-web',
+      status: 'already-running',
+    }));
+    expect(stopService).not.toHaveBeenCalled();
+  });
+
   it('records in-process services without spawning a child process', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-supervisor-'));
     const stateStore = new NetworkStateStore(join(workDir, 'network-state.json'));

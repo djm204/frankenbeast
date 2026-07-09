@@ -4,8 +4,20 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
-vi.mock('../../../src/http/chat-app.js', () => {
-  const { Hono } = require('hono') as typeof import('hono');
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
+const TEST_SLACK_TOKEN = testCredential('TEST_SLACK_TOKEN');
+const TEST_SLACK_SIGNING_SECRET = testCredential('TEST_SLACK_SIGNING_SECRET');
+const TEST_DISCORD_TOKEN = testCredential('TEST_DISCORD_TOKEN');
+const TEST_DISCORD_PUBLIC_KEY = testCredential('TEST_DISCORD_PUBLIC_KEY');
+const TEST_WHATSAPP_TOKEN = testCredential('TEST_WHATSAPP_TOKEN');
+const TEST_WHATSAPP_PHONE_ID = testCredential('TEST_WHATSAPP_PHONE_ID');
+const TEST_WHATSAPP_APP_SECRET = testCredential('TEST_WHATSAPP_APP_SECRET');
+const TEST_WHATSAPP_VERIFY_TOKEN = testCredential('TEST_WHATSAPP_VERIFY_TOKEN');
+const TEST_DAEMON_TOKEN = testCredential('TEST_DAEMON_TOKEN');
+vi.mock('../../../src/http/chat-app.js', async () => {
+  const { Hono } = await import('hono');
   return {
     createChatApp: vi.fn(() => new Hono()),
   };
@@ -153,14 +165,14 @@ describe('startChatServer comms pass-through', () => {
         sessionStoreDir: '/tmp/chat-server-comms-test',
         llm: { complete: vi.fn().mockResolvedValue('ok') },
         projectName: 'test',
-        operatorToken: 'operator-token',
+        operatorToken: TEST_OPERATOR_TOKEN,
         commsConfig: {
           orchestrator: {},
           channels: {
             slack: {
               enabled: true,
-              token: 'slack-token',
-              signingSecret: ['slack', 'signing', 'fixture'].join('-'),
+              token: TEST_SLACK_TOKEN,
+              signingSecret: TEST_SLACK_SIGNING_SECRET,
             },
           },
         },
@@ -199,26 +211,26 @@ describe('startChatServer comms pass-through', () => {
         sessionStoreDir: '/tmp/chat-server-comms-test',
         llm: { complete: vi.fn().mockResolvedValue('ok') },
         projectName: 'test',
-        operatorToken: 'operator-token',
+        operatorToken: TEST_OPERATOR_TOKEN,
         commsConfig: {
           orchestrator: {},
           channels: {
             slack: {
               enabled: true,
-              token: 'slack-token',
-              signingSecret: ['slack', 'signing', 'fixture'].join('-'),
+              token: TEST_SLACK_TOKEN,
+              signingSecret: TEST_SLACK_SIGNING_SECRET,
             },
             discord: {
               enabled: true,
-              token: 'discord-token',
-              publicKey: 'discord-public-key',
+              token: TEST_DISCORD_TOKEN,
+              publicKey: TEST_DISCORD_PUBLIC_KEY,
             },
             whatsapp: {
               enabled: true,
-              accessToken: 'whatsapp-token',
-              phoneNumberId: 'phone-number-id',
-              appSecret: 'whatsapp-app-secret',
-              verifyToken: 'whatsapp-verify-token',
+              accessToken: TEST_WHATSAPP_TOKEN,
+              phoneNumberId: TEST_WHATSAPP_PHONE_ID,
+              appSecret: TEST_WHATSAPP_APP_SECRET,
+              verifyToken: TEST_WHATSAPP_VERIFY_TOKEN,
             },
           },
         },
@@ -261,8 +273,8 @@ describe('startChatServer comms pass-through', () => {
         channels: {
           slack: {
             enabled: true,
-            token: 'slack-token',
-            signingSecret: ['slack', 'signing', 'fixture'].join('-'),
+            token: TEST_SLACK_TOKEN,
+            signingSecret: TEST_SLACK_SIGNING_SECRET,
           },
         },
       },
@@ -405,7 +417,7 @@ describe('startChatServer comms pass-through', () => {
         projectName: 'test',
         beastDaemon: {
           baseUrl: 'http://127.0.0.1:4050',
-          operatorToken: 'daemon-token',
+          operatorToken: TEST_DAEMON_TOKEN,
         },
       });
     } finally {
@@ -420,7 +432,7 @@ describe('startChatServer comms pass-through', () => {
     const opts = mockedCreateChatApp.mock.calls[0]![0];
     expect(opts.beastDaemon).toEqual({
       baseUrl: 'http://127.0.0.1:4050',
-      operatorToken: 'daemon-token',
+      operatorToken: TEST_DAEMON_TOKEN,
     });
   });
 });

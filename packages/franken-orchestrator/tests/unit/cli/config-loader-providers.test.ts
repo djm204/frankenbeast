@@ -1,18 +1,23 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFile, unlink } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, unlink } from 'node:fs/promises';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import type { CliArgs } from '../../../src/cli/args.js';
 
 describe('Config loader providers passthrough', () => {
   const tmpFiles: string[] = [];
+  const tmpDirs: string[] = [];
 
   afterEach(async () => {
     for (const f of tmpFiles) {
       try { await unlink(f); } catch { /* ignore */ }
     }
+    for (const dir of tmpDirs) {
+      try { await rm(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
     tmpFiles.length = 0;
+    tmpDirs.length = 0;
   });
 
   function makeArgs(overrides: Partial<CliArgs> = {}): CliArgs {
@@ -41,7 +46,21 @@ describe('Config loader providers passthrough', () => {
     expect(config.providers.overrides).toEqual({});
   });
 
-  it('passes through providers section from explicit config file', async () => {
+  it('rejects trusted provider command overrides from config file without CLI approval', async () => {
+    const filePath = join(tmpdir(), `beast-providers-unapproved-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({
+      providers: {
+        overrides: {
+          gemini: { command: 'gemini-cli', trustCommandOverride: true, model: 'gemini-pro' },
+        },
+      },
+    }));
+
+    await expect(loadConfig(makeArgs({ config: filePath }))).rejects.toThrow(/--trust-provider-command-overrides/);
+  });
+
+  it('passes through CLI-approved providers section from explicit config file', async () => {
     const filePath = join(tmpdir(), `beast-providers-${Date.now()}.json`);
     tmpFiles.push(filePath);
     await writeFile(filePath, JSON.stringify({
@@ -54,7 +73,10 @@ describe('Config loader providers passthrough', () => {
       },
     }));
 
-    const config = await loadConfig(makeArgs({ config: filePath }));
+    const config = await loadConfig(makeArgs({
+      config: filePath,
+      trustProviderCommandOverrides: true,
+    }));
     expect(config.providers.default).toBe('gemini');
     expect(config.providers.fallbackChain).toEqual(['gemini', 'claude']);
     expect(config.providers.overrides['gemini']).toEqual({
@@ -80,6 +102,53 @@ describe('Config loader providers passthrough', () => {
     }));
 
     await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
+  });
+
+  it('requires CLI approval before a repository-local config can trust an allowed provider binary', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beast-repo-config-json-'));
+    const filePath = join(root, 'config.json');
+    tmpDirs.push(root);
+    await writeFile(filePath, JSON.stringify({
+      providers: {
+        overrides: {
+          claude: {
+            command: 'claude',
+            trustCommandOverride: true,
+          },
+        },
+      },
+    }));
+
+    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
+
+    const approved = await loadConfig(makeArgs({ trustProviderCommandOverrides: true }), filePath);
+    expect(approved.providers.overrides['claude']).toEqual({
+      command: 'claude',
+      trustCommandOverride: true,
+    });
+  });
+
+  it('honors CLI approval for trusted overrides in the default config path', async () => {
+    const filePath = join(tmpdir(), `beast-repo-provider-trust-approved-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({
+      providers: {
+        overrides: {
+          claude: {
+            command: '/usr/local/bin/claude',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/usr/local/bin'],
+          },
+        },
+      },
+    }));
+
+    const config = await loadConfig(makeArgs({ trustProviderCommandOverrides: true }), filePath);
+    expect(config.providers.overrides['claude']).toMatchObject({
+      command: '/usr/local/bin/claude',
+      trustCommandOverride: true,
+      trustedCommandPaths: ['/usr/local/bin'],
+    });
   });
 
   it('does not let repository-local consolidated providers self-approve trust', async () => {

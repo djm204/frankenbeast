@@ -36,6 +36,7 @@ interface BeastsPageProps {
 export function BeastsPage({
   agents,
   agentDetail,
+  catalog,
   runs,
   containerRuntime,
   disabled,
@@ -127,6 +128,7 @@ export function BeastsPage({
         onClose={() => setShowWizard(false)}
         onLaunch={handleLaunch}
         containerRuntime={containerRuntime}
+        catalog={catalog}
         launching={launching}
         launchError={launchError}
       />

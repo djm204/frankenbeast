@@ -2,6 +2,10 @@ import { z } from 'zod';
 import { NetworkConfigFieldsSchema, validateNetworkConfig } from '../network/network-config.js';
 import { validateProviderCommandOverride } from './provider-command-override-policy.js';
 
+export interface OrchestratorConfigParseOptions {
+  readonly allowTrustedProviderCommandOverrides?: boolean | undefined;
+}
+
 // Consolidation schemas (moved from run-config-v2.ts)
 
 export const ProviderConfigSchema = z.object({
@@ -62,24 +66,30 @@ export const ProviderOverrideSchema = z.object({
   extraArgs: z.array(z.string()).optional(),
 });
 
-export const ProvidersConfigSchema = z.object({
-  /** Default provider name. */
-  default: z.string().default('claude'),
-  /** Ordered fallback chain of provider names. */
-  fallbackChain: z.array(z.string()).default(['claude', 'codex']),
-  /** Per-provider overrides (command, model, extraArgs). */
-  overrides: z.record(z.string(), ProviderOverrideSchema).default({}),
-}).superRefine((providers, ctx) => {
-  for (const [name, override] of Object.entries(providers.overrides)) {
-    for (const message of validateProviderCommandOverride(name, override)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['overrides', name, 'command'],
-        message,
-      });
+function createProvidersConfigSchema(options: OrchestratorConfigParseOptions = {}) {
+  return z.object({
+    /** Default provider name. */
+    default: z.string().default('claude'),
+    /** Ordered fallback chain of provider names. */
+    fallbackChain: z.array(z.string()).default(['claude', 'codex']),
+    /** Per-provider overrides (command, model, extraArgs). */
+    overrides: z.record(z.string(), ProviderOverrideSchema).default({}),
+  }).superRefine((providers, ctx) => {
+    for (const [name, override] of Object.entries(providers.overrides)) {
+      for (const message of validateProviderCommandOverride(name, override, {
+        allowTrustedCommandOverrides: options.allowTrustedProviderCommandOverrides,
+      })) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['overrides', name, 'command'],
+          message,
+        });
+      }
     }
-  }
-});
+  });
+}
+
+export const ProvidersConfigSchema = createProvidersConfigSchema();
 
 const MIN_TOTAL_TOKEN_BUDGET = 10_000;
 const MIN_DURATION_MS_PER_CRITIQUE_ITERATION = 10_000;
@@ -134,41 +144,56 @@ const BaseOrchestratorConfigSchema = z.object({
   consolidatedProviders: z.array(ProviderConfigSchema).optional(),
 });
 
-export const OrchestratorConfigSchema = BaseOrchestratorConfigSchema.extend(
-  NetworkConfigFieldsSchema.shape,
-).superRefine((config, ctx) => {
-  validateNetworkConfig(config, ctx);
+function createOrchestratorConfigSchema(options: OrchestratorConfigParseOptions = {}) {
+  return BaseOrchestratorConfigSchema.extend({
+    providers: createProvidersConfigSchema(options).default({}),
+  }).extend(
+    NetworkConfigFieldsSchema.shape,
+  ).superRefine((config, ctx) => {
+    validateNetworkConfig(config, ctx);
 
-  config.consolidatedProviders?.forEach((provider, index) => {
-    if (!provider.type.endsWith('-cli') || !provider.cliPath) return;
-    for (const message of validateProviderCommandOverride(provider.type, {
-      cliPath: provider.cliPath,
-      trustCommandOverride: provider.trustCommandOverride,
-      trustedCommandPaths: provider.trustedCommandPaths,
-    })) {
+    config.consolidatedProviders?.forEach((provider, index) => {
+      if (!provider.type.endsWith('-cli') || !provider.cliPath) return;
+      for (const message of validateProviderCommandOverride(provider.type, {
+        cliPath: provider.cliPath,
+        trustCommandOverride: provider.trustCommandOverride,
+        trustedCommandPaths: provider.trustedCommandPaths,
+      }, {
+        allowTrustedCommandOverrides: options.allowTrustedProviderCommandOverrides,
+      })) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['consolidatedProviders', index, 'cliPath'],
+          message,
+        });
+      }
+    });
+
+    const minDurationMs =
+      config.maxCritiqueIterations * MIN_DURATION_MS_PER_CRITIQUE_ITERATION;
+    if (config.maxDurationMs < minDurationMs) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['consolidatedProviders', index, 'cliPath'],
-        message,
+        path: ['maxDurationMs'],
+        message:
+          `maxDurationMs must be at least ${minDurationMs}ms ` +
+          `for ${config.maxCritiqueIterations} critique iterations`,
       });
     }
   });
+}
 
-  const minDurationMs =
-    config.maxCritiqueIterations * MIN_DURATION_MS_PER_CRITIQUE_ITERATION;
-  if (config.maxDurationMs < minDurationMs) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['maxDurationMs'],
-      message:
-        `maxDurationMs must be at least ${minDurationMs}ms ` +
-        `for ${config.maxCritiqueIterations} critique iterations`,
-    });
-  }
-});
+export const OrchestratorConfigSchema = createOrchestratorConfigSchema();
 
 export type OrchestratorConfig = z.infer<typeof OrchestratorConfigSchema>;
 
 export function defaultConfig(): OrchestratorConfig {
   return OrchestratorConfigSchema.parse({});
+}
+
+export function parseOrchestratorConfig(
+  config: unknown,
+  options: OrchestratorConfigParseOptions = {},
+): OrchestratorConfig {
+  return createOrchestratorConfigSchema(options).parse(config);
 }

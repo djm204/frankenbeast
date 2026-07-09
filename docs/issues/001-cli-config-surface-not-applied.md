@@ -1,5 +1,7 @@
 # Issue: CLI Config Surface Is Not Applied End-to-End
 
+> **Historical archive notice (2026-07-09):** This document is preserved from the pre-consolidation 2026-03 audit. It may mention removed packages such as `franken-mcp`, `frankenfirewall`, `franken-comms`, `franken-heartbeat`, or legacy root scripts such as `test:all`. Use the status annotations in `docs/issues/INDEX.md` and the live `package.json`/`packages/*` workspaces as the source of truth for current contributor work.
+
 Severity: high
 Area: `@franken/orchestrator` CLI
 

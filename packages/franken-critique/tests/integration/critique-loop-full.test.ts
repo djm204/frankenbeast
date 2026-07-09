@@ -4,7 +4,7 @@ import type { GuardrailsPort, MemoryPort, ObservabilityPort } from '../../src/ty
 import type { EvaluationInput } from '../../src/types/evaluation.js';
 import type { LoopConfig } from '../../src/types/loop.js';
 
-const unsafeDynamicCallName = ['ev', 'al'].join('');
+const unsafeDynamicCallName = 'executeUntrustedCode';
 const unsafeDynamicCallPattern = `${unsafeDynamicCallName}\\(`;
 
 function createMockGuardrailsPort(): GuardrailsPort {

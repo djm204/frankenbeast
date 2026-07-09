@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TraceContext } from '../../core/TraceContext.js'
 import { SpanLifecycle } from '../../core/SpanLifecycle.js'
 import { LangfuseAdapter } from './LangfuseAdapter.js'
+import {
+  LANGFUSE_PUBLIC_KEY,
+  LANGFUSE_SECRET_KEY,
+} from '../../../tests/fixtures/langfuse-test-credentials.js'
 
 function makeTrace() {
   const trace = TraceContext.createTrace('test goal')
@@ -21,7 +25,7 @@ describe('LangfuseAdapter', () => {
 
   describe('flush()', () => {
     it('POSTs to the Langfuse OTEL endpoint', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       await adapter.flush(makeTrace())
       expect(mockFetch).toHaveBeenCalledOnce()
       const [url] = mockFetch.mock.calls[0]
@@ -29,7 +33,7 @@ describe('LangfuseAdapter', () => {
     })
 
     it('defaults baseUrl to https://cloud.langfuse.com', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       await adapter.flush(makeTrace())
       const [url] = mockFetch.mock.calls[0]
       expect(url).toMatch(/^https:\/\/cloud\.langfuse\.com/)
@@ -38,8 +42,8 @@ describe('LangfuseAdapter', () => {
     it('uses a custom baseUrl when provided', async () => {
       const adapter = new LangfuseAdapter({
         baseUrl: 'https://eu.cloud.langfuse.com',
-        publicKey: 'public-key-test',
-        secretKey: 'private-key-test',
+        publicKey: LANGFUSE_PUBLIC_KEY,
+        secretKey: LANGFUSE_SECRET_KEY,
         fetch: mockFetch,
       })
       await adapter.flush(makeTrace())
@@ -48,22 +52,22 @@ describe('LangfuseAdapter', () => {
     })
 
     it('sends a Basic Authorization header using publicKey:secretKey', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-abc', secretKey: 'private-key-xyz', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       await adapter.flush(makeTrace())
       const [, init] = mockFetch.mock.calls[0]
-      const expected = `Basic ${Buffer.from('public-key-abc:private-key-xyz').toString('base64')}`
+      const expected = `Basic ${Buffer.from(`${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}`).toString('base64')}`
       expect(init.headers['Authorization']).toBe(expected)
     })
 
     it('sends Content-Type: application/json', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       await adapter.flush(makeTrace())
       const [, init] = mockFetch.mock.calls[0]
       expect(init.headers['Content-Type']).toBe('application/json')
     })
 
     it('sends a JSON body with a resourceSpans array', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       await adapter.flush(makeTrace())
       const [, init] = mockFetch.mock.calls[0]
       const body = JSON.parse(init.body as string)
@@ -72,7 +76,7 @@ describe('LangfuseAdapter', () => {
     })
 
     it('body contains the trace id in resource attributes', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       const trace = makeTrace()
       await adapter.flush(trace)
       const [, init] = mockFetch.mock.calls[0]
@@ -89,7 +93,7 @@ describe('LangfuseAdapter', () => {
     })
 
     it('uses HTTP POST method', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       await adapter.flush(makeTrace())
       const [, init] = mockFetch.mock.calls[0]
       expect(init.method).toBe('POST')
@@ -104,7 +108,7 @@ describe('LangfuseAdapter', () => {
         .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
         .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
       const adapter = new LangfuseAdapter({
-        publicKey: 'public-key', secretKey: 'private-key', fetch: mockFetch, retry: { maxRetries: 2, sleep: sleep() },
+        publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch, retry: { maxRetries: 2, sleep: sleep() },
       })
       await expect(adapter.flush(makeTrace())).resolves.toBeUndefined()
       expect(mockFetch).toHaveBeenCalledTimes(2)
@@ -113,7 +117,7 @@ describe('LangfuseAdapter', () => {
     it('throws after exhausting retries on persistent 5xx', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const adapter = new LangfuseAdapter({
-        publicKey: 'public-key', secretKey: 'private-key', fetch: mockFetch, retry: { maxRetries: 2, sleep: sleep() },
+        publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch, retry: { maxRetries: 2, sleep: sleep() },
       })
       await expect(adapter.flush(makeTrace())).rejects.toThrow('503')
       expect(mockFetch).toHaveBeenCalledTimes(3)
@@ -122,7 +126,7 @@ describe('LangfuseAdapter', () => {
     it('does not retry a 4xx', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' })
       const adapter = new LangfuseAdapter({
-        publicKey: 'public-key', secretKey: 'private-key', fetch: mockFetch, retry: { maxRetries: 3, sleep: sleep() },
+        publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch, retry: { maxRetries: 3, sleep: sleep() },
       })
       await expect(adapter.flush(makeTrace())).rejects.toThrow('401')
       expect(mockFetch).toHaveBeenCalledTimes(1)
@@ -131,12 +135,12 @@ describe('LangfuseAdapter', () => {
 
   describe('ExportAdapter contract — write-only', () => {
     it('queryByTraceId() returns null', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       expect(await adapter.queryByTraceId('any-id')).toBeNull()
     })
 
     it('listTraceIds() returns []', async () => {
-      const adapter = new LangfuseAdapter({ publicKey: 'public-key-test', secretKey: 'private-key-test', fetch: mockFetch })
+      const adapter = new LangfuseAdapter({ publicKey: LANGFUSE_PUBLIC_KEY, secretKey: LANGFUSE_SECRET_KEY, fetch: mockFetch })
       expect(await adapter.listTraceIds()).toEqual([])
     })
   })

@@ -1,5 +1,5 @@
 import type { Score, SessionId, TaskId } from './common.js';
-import type { CritiqueResult, EvaluationFinding, EvaluationInput } from './evaluation.js';
+import type { CritiquePipelineResult, EvaluationFinding, EvaluationInput } from './evaluation.js';
 import type { EscalationRequest } from './contracts.js';
 
 /** Configuration for the critique loop. */
@@ -28,8 +28,8 @@ export interface CritiqueIteration {
   readonly index: number;
   /** The input that was evaluated in this iteration. */
   readonly input: EvaluationInput;
-  /** The critique result for this iteration. */
-  readonly result: CritiqueResult;
+  /** The aggregate critique pipeline result for this iteration. */
+  readonly result: CritiquePipelineResult;
   /** Timestamp when the iteration completed. */
   readonly completedAt: string;
 }
@@ -46,9 +46,15 @@ export interface CorrectionRequest {
   readonly iterationCount: number;
 }
 
-/** Result when the critique loop passes. */
+/** Result when the critique loop passes without warning-bearing findings. */
 export interface CritiqueLoopPass {
   readonly verdict: 'pass';
+  readonly iterations: readonly CritiqueIteration[];
+}
+
+/** Result when the critique loop passes but warning-bearing findings are present. */
+export interface CritiqueLoopWarn {
+  readonly verdict: 'warn';
   readonly iterations: readonly CritiqueIteration[];
 }
 
@@ -76,6 +82,7 @@ export interface CritiqueLoopEscalated {
 /** Discriminated union of all possible loop outcomes. */
 export type CritiqueLoopResult =
   | CritiqueLoopPass
+  | CritiqueLoopWarn
   | CritiqueLoopFail
   | CritiqueLoopHalted
   | CritiqueLoopEscalated;

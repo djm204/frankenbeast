@@ -51,6 +51,7 @@ export type {
 } from './planners/types.js';
 export { LinearPlanner } from './planners/linear.js';
 export { ParallelPlanner } from './planners/parallel.js';
+export type { ParallelPlannerOptions } from './planners/parallel.js';
 export { RecursivePlanner } from './planners/recursive.js';
 
 // ── Chain-of-Thought ───────────────────────────────────────────────

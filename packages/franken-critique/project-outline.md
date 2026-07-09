@@ -3,6 +3,8 @@
 ## 1. Overview
 MOD-06 implements the reviewer side of the "Reflexion" pattern. It evaluates plans or generated content before they reach the user or production environment. Its goal is to identify safety issues, hallucinations, logic flaws, complexity bloat, and architectural drift.
 
+Current status: this outline preserves the original MOD-era framing as historical design context. Current critique execution is implemented through `@franken/critique`, with orchestration and MCP exposure handled by `@franken/orchestrator` and `@franken/mcp-suite`. Treat the root `README.md` and root `package.json` workspaces as authoritative.
+
 ## 2. The Critique Loop
 The wider system can operate in a "Generator-Reviewer" cycle:
 1. **Initial Draft:** The Actor agent proposes code or a plan.
@@ -16,7 +18,7 @@ Current implementation note: `CritiqueLoop` does not call the Actor itself. It c
 
 ### 3.1 The "Naysayer" Persona
 The Reviewer is prompted as a "Senior Technical Architect" with a bias toward skepticism. It specifically looks for:
-- **Ghost Dependencies:** Package imports not present in the `@djm204/agent-skills` registry.
+- **Ghost Dependencies:** Package imports or tool claims not present in the current workspace/package manifest or orchestrator/MCP tool registry.
 - **Complexity Bloat:** Code that violates your preference for 0-to-1 build simplicity.
 - **Logic Loops:** Infinite recursions or improper error handling.
 - **ADR Non-Compliance:** Code that ignores the architecture rules stored in memory.

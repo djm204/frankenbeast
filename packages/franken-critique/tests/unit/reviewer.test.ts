@@ -118,7 +118,7 @@ describe('createReviewer', () => {
   });
 
   it('handles safety failure with short-circuit', async () => {
-    const unsafeDynamicCallName = ['ev', 'al'].join('');
+    const unsafeDynamicCallName = 'executeUntrustedCode';
 
     const guardrails: GuardrailsPort = {
       getSafetyRules: vi.fn().mockResolvedValue([

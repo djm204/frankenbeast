@@ -1,6 +1,11 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { BitwardenStore } from '../../../../src/network/secret-backends/bitwarden-store.js';
 import type { CliResult } from '../../../../src/network/secret-backends/cli-runner.js';
+import { testCredential } from '../../../support/test-credentials.js';
+
+const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
+const UPDATED_SLACK_BOT_TOKEN = testCredential('UPDATED_SLACK_BOT_TOKEN');
+const RESOLVED_SLACK_BOT_TOKEN = testCredential('RESOLVED_SLACK_BOT_TOKEN');
 
 function createMockRunner() {
   const calls: Array<{ command: string; args: string[] }> = [];
@@ -46,7 +51,7 @@ describe('BitwardenStore', () => {
       mock.responses.set('get item', { stdout: '', stderr: 'Not found.', exitCode: 1 });
       mock.responses.set('create item', { stdout: '{"id":"new123"}', stderr: '', exitCode: 0 });
 
-      await store.store('comms.slack.botTokenRef', 'xoxb-test');
+      await store.store('comms.slack.botTokenRef', TEST_SLACK_BOT_TOKEN);
       const createCall = mock.calls.find(c => c.args.includes('create'));
       expect(createCall).toBeDefined();
       expect(createCall?.args).toContain('item');
@@ -56,7 +61,7 @@ describe('BitwardenStore', () => {
       const decoded = JSON.parse(Buffer.from(payload!, 'base64').toString('utf-8'));
       expect(decoded.type).toBe(2);
       expect(decoded.name).toBe('frankenbeast/comms.slack.botTokenRef');
-      expect(decoded.notes).toBe('xoxb-test');
+      expect(decoded.notes).toBe(TEST_SLACK_BOT_TOKEN);
     });
 
     it('edits existing item when key already exists', async () => {
@@ -67,7 +72,7 @@ describe('BitwardenStore', () => {
       });
       mock.responses.set('edit item', { stdout: '{}', stderr: '', exitCode: 0 });
 
-      await store.store('comms.slack.botTokenRef', 'xoxb-updated');
+      await store.store('comms.slack.botTokenRef', UPDATED_SLACK_BOT_TOKEN);
       const editCall = mock.calls.find(c => c.args.includes('edit'));
       expect(editCall).toBeDefined();
       expect(editCall?.args).toContain('abc123');
@@ -75,19 +80,19 @@ describe('BitwardenStore', () => {
       const payload = editCall?.args[3];
       expect(payload).toBeDefined();
       const decoded = JSON.parse(Buffer.from(payload!, 'base64').toString('utf-8'));
-      expect(decoded.notes).toBe('xoxb-updated');
+      expect(decoded.notes).toBe(UPDATED_SLACK_BOT_TOKEN);
     });
   });
 
   describe('resolve', () => {
     it('resolves a stored secret from notes field', async () => {
       mock.responses.set('get item', {
-        stdout: JSON.stringify({ id: 'abc123', name: 'frankenbeast/comms.slack.botTokenRef', notes: 'xoxb-resolved' }),
+        stdout: JSON.stringify({ id: 'abc123', name: 'frankenbeast/comms.slack.botTokenRef', notes: RESOLVED_SLACK_BOT_TOKEN }),
         stderr: '',
         exitCode: 0,
       });
       const value = await store.resolve('comms.slack.botTokenRef');
-      expect(value).toBe('xoxb-resolved');
+      expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
     });
 
     it('returns undefined when secret not found', async () => {

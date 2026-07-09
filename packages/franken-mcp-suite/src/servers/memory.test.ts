@@ -14,14 +14,13 @@ describe('Memory Server', () => {
 
     const names = server.tools.map((t) => t.name);
     expect(names).toEqual([
-      'fbeast_memory_query',
       'fbeast_memory_store',
+      'fbeast_memory_query',
       'fbeast_memory_frontload',
       'fbeast_memory_forget',
     ]);
     const storeTool = server.tools.find((t) => t.name === 'fbeast_memory_store')!;
-    expect(storeTool.description).toContain('Working memory updates by key');
-    expect(storeTool.description).toContain('episodic memory appends an event');
+    expect(storeTool.description).toBe('Store key/value in working or episodic memory');
   });
 
   it('limits memory type enums to working and episodic', () => {

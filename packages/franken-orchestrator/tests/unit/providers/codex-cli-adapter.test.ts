@@ -12,12 +12,23 @@ import { spawn } from 'node:child_process';
 function mockSpawn(stdoutLines: string[], exitCode = 0) {
   const stdout = new PassThrough();
   const stdin = new PassThrough();
-  const proc = Object.assign(new EventEmitter(), { stdout, stdin, stderr: new PassThrough(), pid: 1, kill: vi.fn() });
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    pid: 1,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
+  });
   (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
   setImmediate(() => {
     for (const line of stdoutLines) stdout.write(line + '\n');
     stdout.end();
-    setImmediate(() => proc.emit('close', exitCode));
+    setImmediate(() => {
+      proc.exitCode = exitCode;
+      proc.emit('close', exitCode);
+    });
   });
   return proc;
 }
@@ -84,13 +95,14 @@ describe('CodexCliAdapter', () => {
 
   describe('execute()', () => {
     it('parses text content events', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({ type: 'message', content: 'Hello from Codex' }),
         JSON.stringify({ type: 'done', usage: { input_tokens: 80, output_tokens: 20 } }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'text', content: 'Hello from Codex' });
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 } });
+      expect(proc.kill).not.toHaveBeenCalled();
     });
 
     it('parses tool call events', async () => {
@@ -110,9 +122,20 @@ describe('CodexCliAdapter', () => {
     });
 
     it('emits retryable error on rate limit message', async () => {
-      mockSpawn([JSON.stringify({ type: 'error', message: 'rate limit 429' })]);
+      const proc = mockSpawn([JSON.stringify({ type: 'error', message: 'rate limit 429' })]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'rate limit 429', retryable: true });
+      expect(proc.kill).toHaveBeenCalledTimes(1);
+    });
+
+    it('kills the spawned Codex process when stream iteration stops early', async () => {
+      const proc = mockSpawn([JSON.stringify({ type: 'message', content: 'partial' })]);
+      const iterator = adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] });
+
+      await expect(iterator.next()).resolves.toEqual({ value: { type: 'text', content: 'partial' }, done: false });
+      await iterator.return(undefined);
+
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     });
   });
 

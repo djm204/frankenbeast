@@ -1,6 +1,18 @@
-import type { ApiDataEnvelope, NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
+import type { ApiDataEnvelope, ApiErrorEnvelope, NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 
 export type { NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
+
+export class NetworkApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string,
+    public readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'NetworkApiError';
+  }
+}
 
 export class NetworkApiClient {
   constructor(private readonly baseUrl: string) {}
@@ -52,9 +64,30 @@ export class NetworkApiClient {
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw await this.toError(response);
     }
     const body = await response.json() as ApiDataEnvelope<T>;
     return body.data;
+  }
+
+  private async toError(response: Response): Promise<NetworkApiError> {
+    const fallbackMessage = `HTTP ${response.status}`;
+    try {
+      const body = await response.json() as ApiErrorEnvelope;
+      const serverMessage = body.error?.message;
+      if (serverMessage) {
+        const code = body.error.code;
+        const codeSuffix = code ? `, ${code}` : '';
+        return new NetworkApiError(
+          `${serverMessage} (HTTP ${response.status}${codeSuffix})`,
+          response.status,
+          code,
+          body.error.details,
+        );
+      }
+    } catch {
+      // Fall through with HTTP status message for empty, malformed, or non-JSON bodies.
+    }
+    return new NetworkApiError(fallbackMessage, response.status);
   }
 }

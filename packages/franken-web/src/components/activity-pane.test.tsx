@@ -67,7 +67,8 @@ describe('ActivityPane', () => {
     expect(screen.getByText('Execution complete')).toBeTruthy();
     expect(screen.getByText('Failed')).toBeTruthy();
     expect(screen.getByText('Tests failed')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Session session-7' }).getAttribute('href')).toBe('#/sessions');
+    expect(screen.getByText('Session session-7')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Session session-7' })).toBeNull();
     expect(screen.getByRole('link', { name: 'Run run-42' }).getAttribute('href')).toBe('#/beasts');
     expect(screen.getByText('Artifact /tmp/report.md')).toBeTruthy();
     expect(screen.queryByText('{"taskDescription":"Deploy agent"}')).toBeNull();

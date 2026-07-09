@@ -1,11 +1,28 @@
 import type { ReactNode } from 'react';
+import type { BeastCatalogEntry } from '../../../lib/beast-api';
 import { useBeastStore } from '../../../stores/beast-store';
+import { findCatalogEntry, getPromptLabel, getPromptValue } from '../wizard-catalog';
+import { validateWizardStep } from '../wizard-validation';
 
-export function StepReview() {
+type WorkflowReviewValues = {
+  workflowType?: string;
+  goal?: string;
+  topic?: string;
+  outputPath?: string;
+  designDocPath?: string;
+  docPath?: string;
+  outputDir?: string;
+  provider?: string;
+  objective?: string;
+  chunkDirectory?: string;
+  chunkDir?: string;
+};
+
+export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[] }) {
   const { stepValues, setWizardStep } = useBeastStore();
 
   const identity = stepValues[0] as { name?: string; description?: string } | undefined;
-  const workflow = stepValues[1] as { workflowType?: string } | undefined;
+  const workflow = stepValues[1] as WorkflowReviewValues | undefined;
   const llm = stepValues[2] as { defaultProvider?: string; defaultModel?: string } | undefined;
   const modules = stepValues[3] as Record<string, boolean> | undefined;
   const skills = stepValues[4] as { selectedSkills?: string[] } | undefined;
@@ -20,7 +37,7 @@ export function StepReview() {
       </ReviewSection>
 
       <ReviewSection title="Workflow" stepIndex={1} onEdit={setWizardStep}>
-        <p className="text-sm text-beast-text">{workflow?.workflowType ?? '(not set)'}</p>
+        <WorkflowReview workflow={workflow} stepValues={stepValues} catalog={catalog} />
       </ReviewSection>
 
       <ReviewSection title="LLM Targets" stepIndex={2} onEdit={setWizardStep}>
@@ -72,6 +89,52 @@ export function StepReview() {
 
     </div>
   );
+}
+
+function WorkflowReview({ workflow, stepValues, catalog }: {
+  workflow: WorkflowReviewValues | undefined;
+  stepValues: Record<number, Record<string, unknown> | undefined>;
+  catalog?: readonly BeastCatalogEntry[];
+}) {
+  const workflowErrors = validateWizardStep(1, stepValues, catalog);
+  const rows = buildWorkflowReviewRows(workflow, catalog);
+  const selectedDefinition = findCatalogEntry(catalog, workflow?.workflowType);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-beast-text">{selectedDefinition?.label ?? workflow?.workflowType ?? '(not set)'}</p>
+      {rows.length > 0 && (
+        <dl className="grid gap-1 text-xs text-beast-muted sm:grid-cols-[max-content_1fr]">
+          {rows.map(({ label, value }) => (
+            <div key={label} className="contents">
+              <dt className="font-medium text-beast-subtle">{label}</dt>
+              <dd className="font-mono text-beast-text break-all">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {Object.keys(workflowErrors).length > 0 && (
+        <div className="rounded border border-red-700 bg-red-900/30 px-3 py-2 text-xs text-red-200">
+          <p className="font-medium">Required workflow fields are missing:</p>
+          <ul className="mt-1 list-disc pl-4">
+            {Object.values(workflowErrors).map((message) => <li key={message}>{message}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildWorkflowReviewRows(
+  workflow: WorkflowReviewValues | undefined,
+  catalog?: readonly BeastCatalogEntry[],
+): Array<{ label: string; value: string }> {
+  if (!workflow?.workflowType) return [];
+  const definition = findCatalogEntry(catalog, workflow.workflowType);
+  return (definition?.interviewPrompts ?? []).map((prompt) => ({
+    label: getPromptLabel(prompt),
+    value: String(getPromptValue(workflow as Record<string, unknown>, prompt) ?? '(missing)'),
+  }));
 }
 
 function ReviewSection({ title, stepIndex, onEdit, children }: {

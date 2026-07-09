@@ -12,11 +12,38 @@ The beast harness is split across two CLIs. This guide covers both.
 ## Prerequisites
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26`
-- An API key for at least one provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or a local Ollama instance
+- For API-backed `frankenbeast` provider registry runs, an API key for at least one supported provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`
+- For `fbeast mcp beast` preset activation, one of the supported Beast provider paths: `anthropic-api` with `ANTHROPIC_API_KEY`, or an installed/logged-in `claude` / `codex` CLI for `claude-cli` / `codex-cli`
 
 ```bash
 cp .env.example .env
-# Set ANTHROPIC_API_KEY (or OPENAI_API_KEY / OLLAMA_BASE_URL)
+# For API-backed runs, set ANTHROPIC_API_KEY, OPENAI_API_KEY,
+# or GOOGLE_API_KEY / GEMINI_API_KEY.
+# For fbeast mcp beast --provider=anthropic-api, set ANTHROPIC_API_KEY.
+```
+
+### Ollama endpoint variable status
+
+`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable, not a currently supported local setup requirement. The current orchestrator provider config accepts `claude-cli`, `codex-cli`, `gemini-cli`, `anthropic-api`, `openai-api`, and `gemini-api`, and the `fbeast mcp beast --provider=...` activation shim accepts only the Beast presets documented below. Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build.
+
+If an Ollama-compatible provider is added back in a future build or a custom fork, the usual local daemon endpoint would be:
+
+```bash
+export OLLAMA_BASE_URL=http://localhost:11434
+```
+
+For a non-default daemon in such a build, the value would point at that endpoint instead, for example:
+
+```bash
+export OLLAMA_BASE_URL=http://ollama.internal:11434
+```
+
+The root `.env.example` intentionally leaves `OLLAMA_BASE_URL` out because the default local setup, the current provider schema, and the current `fbeast mcp beast` presets do not consume it.
+
+Endpoint-only verification, useful only when you are working with a build that actually supports an Ollama-compatible provider:
+
+```bash
+curl "$OLLAMA_BASE_URL/api/tags"
 ```
 
 ---
@@ -27,16 +54,14 @@ From the repo root:
 
 ```bash
 npm install
-npm run build
-npm link --workspace=packages/franken-mcp-suite
-npm link --workspace=packages/franken-orchestrator
+npm run local:link
 ```
 
-Verify:
+`local:link` is the supported local-checkout path. It builds the repo and links the package-name workspaces declared in `package.json`, so you do not need to run path-style `npm link --workspace=packages/...` commands manually.
 
+Verify:
 ```bash
-fbeast mcp              # MCP suite CLI
-frankenbeast --help    # Orchestrator CLI
+npm run local:verify-cli
 ```
 
 ---
@@ -55,6 +80,8 @@ fbeast mcp init --client=codex           # target Codex CLI
 
 This writes MCP entries into your client config (`~/.claude/settings.json`, `~/.gemini/settings.json`, etc.) and creates `.fbeast/beast.db`.
 
+`fbeast mcp init` and `fbeast mcp beast` operate on the current working directory. Run them from the target project checkout rather than relying on `FBEAST_ROOT`.
+
 ---
 
 ## 3. Activate beast mode (`fbeast mcp beast`)
@@ -67,6 +94,8 @@ fbeast mcp beast --provider=claude-cli             # Claude CLI binary (prompts 
 ```
 
 This writes `.fbeast/config.json` with `mode: "beast"` and prints the beast catalog. The `claude-cli` provider spawns subprocesses outside the API billing path and asks for one-time confirmation.
+
+The `fbeast mcp beast` activation shim currently accepts only the provider values shown above. Provider registry entries such as `openai-api`, `gemini-api`, or `gemini-cli` can still be used by `frankenbeast` runs, but they are not `fbeast mcp beast --provider` presets unless the shim adds explicit support for them.
 
 ---
 
@@ -103,6 +132,8 @@ frankenbeast interview                                # interview only, saves de
 frankenbeast plan --design-doc design.md              # planning only, saves chunks
 frankenbeast run                                      # execute chunks from .fbeast/
 ```
+
+When a wrapper or service manager starts `frankenbeast` from outside the target project, pass `--base-dir /absolute/path/to/project` for CLI-managed roots. See the README's [Beast project-root override](../../README.md#beast-project-root-override) for the narrower `FBEAST_ROOT` fallback used by Beast service construction and built-in run configs when no explicit root is supplied.
 
 ---
 
@@ -187,6 +218,19 @@ frankenbeast beasts-daemon     # Standalone Beast API/control plane (port 4050)
 
 The Beast daemon owns `/v1/beasts/*` state, logs, lifecycle, SSE tickets/events, and PID-file protection at `.frankenbeast/beasts-daemon.pid`. The chat server remains the chat/WebSocket backend and can proxy `/v1/beasts/*` to the daemon for gateway compatibility. Use `--port` and `--host` to override defaults.
 
+To attach `chat-server` to a standalone daemon, start both processes with the same Beast operator token and point the chat server at the daemon URL:
+
+```bash
+FRANKENBEAST_BEAST_OPERATOR_TOKEN="$BEAST_OPERATOR_TOKEN" \
+  frankenbeast beasts-daemon
+
+FRANKENBEAST_BEAST_OPERATOR_TOKEN="$BEAST_OPERATOR_TOKEN" \
+FRANKENBEAST_BEAST_DAEMON_URL=http://127.0.0.1:4050 \
+  frankenbeast chat-server
+```
+
+`FRANKENBEAST_BEAST_DAEMON_URL` is the explicit external-daemon selector. If it is absent and an operator token is configured, `chat-server` first tries to detect a healthy local `beasts-daemon` from `.frankenbeast/beasts-daemon.pid`; when no daemon is detected, it falls back to local in-process Beast services.
+
 ---
 
 ## 8. Skills
@@ -264,13 +308,20 @@ The matrix covers parser/config truthfulness, `run` and `run --resume`, required
 ## Troubleshooting
 
 **`frankenbeast: command not found`**
+
+From the repo root, refresh the supported local links and verify both CLIs:
 ```bash
-npm link --workspace=packages/franken-orchestrator
+npm run local:link
+npm run local:verify-cli
 ```
 
 **`fbeast-proxy` / `fbeast-memory` not found after `fbeast mcp init`**
+
+Use the same repo-root repair path; `local:link` links the workspace that owns the `fbeast-*` binaries, and `local:verify-cli` checks the primary `fbeast` / `frankenbeast` entrypoints:
 ```bash
-npm link --workspace=packages/franken-mcp-suite
+npm run local:link
+npm run local:verify-cli
+command -v fbeast-proxy fbeast-memory
 ```
 
 **Beast fails to start with "binary not found"**

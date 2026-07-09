@@ -1,129 +1,30 @@
 #!/usr/bin/env node
-import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer, type ToolDef } from '../shared/server-factory.js';
+import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer } from '../shared/server-factory.js';
+import { createToolDefsForServer } from '../shared/tool-registry.js';
 import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
 import { createBrainAdapter, type BrainAdapter } from '../adapters/brain-adapter.js';
 import { parseArgs } from 'node:util';
+import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export interface MemoryServerDeps {
   brain: BrainAdapter;
 }
 
 export function createMemoryServer(deps: MemoryServerDeps, options: CreateMcpServerOptions = {}): FbeastMcpServer {
-  const { brain } = deps;
-
-  const tools: ToolDef[] = [
-    {
-      name: 'fbeast_memory_query',
-      description: 'Query memory for stored entries. Searches keys and values by substring match.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search query (substring match on key and value)' },
-          type: { type: 'string', description: 'Filter by type: working or episodic', enum: ['working', 'episodic'] },
-          limit: { type: 'string', description: 'Max results (default 20)' },
-        },
-        required: ['query'],
-      },
-      async handler(args) {
-        const query = String(args['query']);
-        const type = args['type'] ? String(args['type']) : undefined;
-        const limit = args['limit'] ? Number(args['limit']) : 20;
-        const rows = await brain.query(type ? { query, type, limit } : { query, limit });
-
-        if (rows.length === 0) {
-          return { content: [{ type: 'text', text: `No memory entries found for query: "${query}"` }] };
-        }
-
-        const text = rows
-          .map((row) => formatMemoryEntry(row))
-          .join('\n');
-        return { content: [{ type: 'text', text }] };
-      },
-    },
-    {
-      name: 'fbeast_memory_store',
-      description: 'Store a memory entry. Working memory updates by key; episodic memory appends an event.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          key: { type: 'string', description: 'Unique key for this memory entry' },
-          value: { type: 'string', description: 'Content to store' },
-          type: { type: 'string', description: 'Memory type: working or episodic', enum: ['working', 'episodic'] },
-        },
-        required: ['key', 'value', 'type'],
-      },
-      async handler(args) {
-        const key = String(args['key']);
-        const value = String(args['value']);
-        const type = String(args['type']);
-        await brain.store({ key, value, type });
-        return { content: [{ type: 'text', text: `Stored memory: ${key}` }] };
-      },
-    },
-    {
-      name: 'fbeast_memory_frontload',
-      description: 'Load all memory entries from this database. Returns everything stored.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          projectId: { type: 'string', description: 'Optional legacy project identifier; frontload is database-scoped' },
-        },
-      },
-      async handler(_args) {
-        const sections = await brain.frontload();
-
-        if (sections.length === 0) {
-          return { content: [{ type: 'text', text: 'No memory entries stored yet.' }] };
-        }
-
-        const text = sections
-          .map((section) => `## ${section.type}\n${section.entries.map((entry) => `  ${entry}`).join('\n')}`)
-          .join('\n\n');
-
-        return { content: [{ type: 'text', text }] };
-      },
-    },
-    {
-      name: 'fbeast_memory_forget',
-      description: 'Remove a memory entry by key.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          key: { type: 'string', description: 'Key of the memory entry to remove' },
-        },
-        required: ['key'],
-      },
-      async handler(args) {
-        const key = String(args['key']);
-        const removed = await brain.forget(key);
-        if (!removed) {
-          return { content: [{ type: 'text', text: `No memory entry found with key: ${key}` }] };
-        }
-        return { content: [{ type: 'text', text: `Removed memory: ${key}` }] };
-      },
-    },
-  ];
-
+  const tools = createToolDefsForServer('memory', deps);
   return createMcpServer('fbeast-memory', '0.1.0', tools, options);
 }
 
-// CLI entry point
 if (isMain(import.meta.url)) {
   const { values } = parseArgs({
     options: { db: { type: 'string', default: '.fbeast/beast.db' } },
   });
-  const brain = createBrainAdapter(values['db']!);
-  const server = createMemoryServer({ brain }, createCentralOptions(values['db']!));
+  const dbPath = resolveProjectDbPath(values['db']!);
+  const brain = createBrainAdapter(dbPath);
+  const server = createMemoryServer({ brain }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-memory failed to start:', err);
     process.exit(1);
   });
-}
-
-function formatMemoryEntry(row: { key: string; value: string; type: string; createdAt?: string }): string {
-  if (row.createdAt) {
-    return `[${row.type}] ${row.key}: ${row.value} (${row.createdAt})`;
-  }
-  return `[${row.type}] ${row.key}: ${row.value}`;
 }

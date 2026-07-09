@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ChatSocketTicketResponseSchema,
   ChatSessionResponseSchema,
   MessageResultSchema,
   MODULE_CONFIG_KEYS,
@@ -14,15 +15,19 @@ describe('web/API contracts', () => {
       projectId: 'proj-1',
       transcript: [{ role: 'user', content: 'hello', timestamp: '2026-03-09T00:00:00.000Z' }],
       state: 'active',
-      socketToken: 'socket-token',
       tokenTotals: { cheap: 1, premiumReasoning: 0, premiumExecution: 0 },
       costUsd: 0.01,
       createdAt: '2026-03-09T00:00:00.000Z',
       updatedAt: '2026-03-09T00:00:01.000Z',
     });
 
-    expect(session.socketToken).toBe('socket-token');
+    expect('socketToken' in session).toBe(false);
     expect(session.transcript[0]?.role).toBe('user');
+  });
+
+  it('validates websocket ticket DTOs separately from session snapshots', () => {
+    const ticket = ChatSocketTicketResponseSchema.parse({ ticket: 'socket-ticket' });
+    expect(ticket.ticket).toBe('socket-ticket');
   });
 
   it('validates chat turn result DTOs', () => {

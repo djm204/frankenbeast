@@ -2,6 +2,9 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from '../../../src/http/routes/dashboard-routes.js';
 
+import { testCredential } from '../../support/test-credentials.js';
+
+const TEST_DASHBOARD_TOKEN = testCredential('TEST_DASHBOARD_TOKEN');
 let ticketStore: SseConnectionTicketStore | undefined;
 
 function createMockDeps(): DashboardRouteDeps {
@@ -35,9 +38,19 @@ function createMockDeps(): DashboardRouteDeps {
     getProviders: vi.fn().mockReturnValue([
       { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]),
-    operatorToken: 'dashboard-token',
+    operatorToken: TEST_DASHBOARD_TOKEN,
     ticketStore: ticketStore = new SseConnectionTicketStore(),
   };
+}
+
+async function issueDashboardTicket(app: ReturnType<typeof createDashboardRoutes>): Promise<string> {
+  const ticketRes = await app.request('/events/ticket', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TEST_DASHBOARD_TOKEN}` },
+  });
+  expect(ticketRes.status).toBe(200);
+  const { ticket } = await ticketRes.json() as { ticket: string };
+  return ticket;
 }
 
 describe('dashboard routes', () => {
@@ -96,11 +109,35 @@ describe('dashboard routes', () => {
   });
 
   describe('GET /events', () => {
-    it('POST /events/ticket returns a short-lived stream ticket', async () => {
+    it('POST /events/ticket rejects requests without operator auth', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
 
       const res = await app.request('/events/ticket', { method: 'POST' });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /events/ticket rejects invalid operator auth', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events/ticket', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TEST_DASHBOARD_TOKEN}-invalid` },
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /events/ticket returns a short-lived stream ticket for bearer-authenticated callers', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events/ticket', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TEST_DASHBOARD_TOKEN}` },
+      });
 
       expect(res.status).toBe(200);
       const body = await res.json() as { ticket?: string };
@@ -134,33 +171,42 @@ describe('dashboard routes', () => {
     it('returns SSE content-type with a valid ticket', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-      const { ticket } = await ticketRes.json() as { ticket: string };
+      const ticket = await issueDashboardTicket(app);
 
       const res = await app.request(`/events?ticket=${ticket}`);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
       await res.body?.cancel();
     });
 
-    it('rejects a reused stream ticket', async () => {
+    it('rejects a reused stream ticket so EventSource stops retries', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-      const { ticket } = await ticketRes.json() as { ticket: string };
+      const ticket = await issueDashboardTicket(app);
 
       const first = await app.request(`/events?ticket=${ticket}`);
       expect(first.status).toBe(200);
       await first.body?.cancel();
 
       const second = await app.request(`/events?ticket=${ticket}`);
-      expect(second.status).toBe(401);
+      expect(second.status).toBe(204);
+      expect(await second.text()).toBe('');
+    });
+
+    it('rejects invalid stream tickets', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('/events?ticket=bogus');
+
+      expect(res.status).toBe(401);
+      const body = await res.json() as { error: { message: string } };
+      expect(body.error.message).toBe('Invalid or expired ticket');
     });
 
     it('sends initial snapshot event in the stream', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);
-      const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-      const { ticket } = await ticketRes.json() as { ticket: string };
+      const ticket = await issueDashboardTicket(app);
       const res = await app.request(`/events?ticket=${ticket}`);
 
       // Read partial stream — the SSE connection stays open, so we read
@@ -197,8 +243,7 @@ describe('dashboard routes', () => {
         const deps = createMockDeps();
         const providers = deps.getProviders as ReturnType<typeof vi.fn>;
         const app = createDashboardRoutes(deps);
-        const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-        const { ticket } = await ticketRes.json() as { ticket: string };
+        const ticket = await issueDashboardTicket(app);
         const res = await app.request(`/events?ticket=${ticket}`);
 
         const reader = res.body!.getReader();
@@ -233,8 +278,7 @@ describe('dashboard routes', () => {
         const deps = createMockDeps();
         const providers = deps.getProviders as ReturnType<typeof vi.fn>;
         const app = createDashboardRoutes(deps);
-        const ticketRes = await app.request('/events/ticket', { method: 'POST' });
-        const { ticket } = await ticketRes.json() as { ticket: string };
+        const ticket = await issueDashboardTicket(app);
         const res = await app.request(`/events?ticket=${ticket}`);
         const reader = res.body!.getReader();
 

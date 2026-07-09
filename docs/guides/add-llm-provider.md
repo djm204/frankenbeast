@@ -43,3 +43,5 @@ npm --workspace @franken/orchestrator test
 ## What not to follow
 
 Older docs may mention `frankenfirewall/src/adapters`, `BaseAdapter`, `guardrails.config.json`, or a standalone firewall proxy. Those were pre-consolidation surfaces and are not the current provider extension path in this repo.
+
+Historical `GeminiAdapter` and `MistralAdapter` references belonged to the deleted `frankenfirewall` package. They were placeholder adapter shells, remained unimplemented, and are not supported public APIs in the current monorepo. Do not import, document, or extend those class names for new provider work. `GeminiProvider` is the supported Gemini CLI provider under `packages/franken-orchestrator/src/skills/providers/`. There is no supported Mistral provider until a new current-surface provider is implemented and registered there.

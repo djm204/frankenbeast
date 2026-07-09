@@ -47,6 +47,8 @@ const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean
   { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles', live: false },
 ];
 
+const PRIMARY_NAV_ROUTES = ROUTES.filter((route) => route.live);
+
 function formatSessionCount(count: number): string {
   return `${count} ${count === 1 ? 'message' : 'messages'}`;
 }
@@ -108,7 +110,7 @@ function formatSessionOptionLabel(session: ChatSessionSummary): string {
 
 function routeFromHash(hash: string): RouteId {
   const candidate = hash.replace(/^#\/?/, '') as RouteId;
-  return ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
+  return PRIMARY_NAV_ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
 }
 
 function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
@@ -119,7 +121,6 @@ function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
       <p className="eyebrow">Dashboard Module</p>
       <h2>{route.label}</h2>
       <p>{route.summary}</p>
-      <span>Chat is the only live section in this first Frankenbeast dashboard cut.</span>
     </section>
   );
 }
@@ -218,7 +219,7 @@ function formatStreamedLogLine(event: { eventId?: string; stream?: string; line:
   return event.line;
 }
 
-function buildInitAction(
+export function buildInitAction(
   definitionId: string,
   config: Record<string, unknown>,
   chatSessionId: string | undefined,
@@ -233,9 +234,18 @@ function buildInitAction(
   }
 
   if (definitionId === 'chunk-plan') {
+    const workflow = config.workflow as Record<string, unknown> | undefined;
+    const designDocPath = typeof config.designDocPath === 'string'
+      ? config.designDocPath
+      : typeof workflow?.designDocPath === 'string'
+        ? workflow.designDocPath
+        : typeof workflow?.docPath === 'string'
+          ? workflow.docPath
+          : '';
+
     return {
       kind: 'chunk-plan',
-      command: `/plan --design-doc ${String(config.designDocPath ?? '')}`,
+      command: `/plan --design-doc ${designDocPath}`,
       config,
       ...(chatSessionId ? { chatSessionId } : {}),
     };
@@ -257,6 +267,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const wasSidebarOpenRef = useRef(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>(sessionId);
   const [sessionSeed, setSessionSeed] = useState(0);
+  const [preserveComposerDraft, setPreserveComposerDraft] = useState(!sessionId);
   const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
@@ -306,6 +317,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     retryMessage,
     send,
     sessionId: activeSessionId,
+    sessionState,
     showTypingIndicator,
     status,
     tier,
@@ -355,12 +367,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     });
   }, [baseUrl]);
 
+  const composerSessionKey = preserveComposerDraft
+    ? `anonymous:${sessionSeed}`
+    : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
+
   useEffect(() => {
-    if (!activeSessionId) {
+    if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
       return;
     }
     setSelectedSessionId(activeSessionId);
-  }, [activeSessionId]);
+  }, [activeSessionId, preserveComposerDraft, selectedSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -626,17 +642,21 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   }, [route, beastClient]);
 
   useEffect(() => {
-    if (!window.location.hash) {
-      window.location.hash = '/chat';
-    }
+    function syncRouteFromHash() {
+      const nextRoute = routeFromHash(window.location.hash);
+      const nextHash = `#/${nextRoute}`;
 
-    function handleHashChange() {
-      setRoute(routeFromHash(window.location.hash));
+      if (window.location.hash !== nextHash) {
+        window.history.replaceState(null, '', nextHash);
+      }
+
+      setRoute(nextRoute);
       setIsSidebarOpen(false);
     }
 
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    syncRouteFromHash();
+    window.addEventListener('hashchange', syncRouteFromHash);
+    return () => window.removeEventListener('hashchange', syncRouteFromHash);
   }, []);
 
   useEffect(() => {
@@ -701,6 +721,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     getSidebarFocusableElements(sidebar).at(-1)?.focus();
   }
 
+  const hasPendingApproval = Boolean(pendingApproval) || sessionState === 'pending_approval';
+  const composerDisabled = status === 'connecting'
+    || status === 'sending'
+    || status === 'streaming'
+    || hasPendingApproval;
+  const composerDisabledReason = hasPendingApproval
+    ? 'Dispatch is disabled while an approval request is pending. Approve or reject it before sending another message.'
+    : undefined;
+
   return (
     <div className={`dashboard-shell ${isSidebarOpen ? 'dashboard-shell--nav-open' : ''}`}>
       <button
@@ -739,7 +768,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         </div>
 
         <nav className="sidebar__nav" aria-label="Dashboard navigation">
-          {ROUTES.map((item) => (
+          {PRIMARY_NAV_ROUTES.map((item) => (
             <a
               aria-current={route === item.id ? 'page' : undefined}
               key={item.id}
@@ -750,7 +779,6 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 <strong>{item.label}</strong>
                 <small>{item.summary}</small>
               </span>
-              {!item.live && <span className="sidebar__status">Soon</span>}
             </a>
           ))}
         </nav>
@@ -829,6 +857,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                       disabled={chatSessionsLoading}
                       onChange={(event) => {
                         const nextId = event.target.value.trim();
+                        setPreserveComposerDraft(false);
                         setSelectedSessionId(nextId || undefined);
                       }}
                       value={selectedSessionId ?? ''}
@@ -870,6 +899,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   <button
                     className="button button--secondary"
                     onClick={() => {
+                      setPreserveComposerDraft(true);
                       setSelectedSessionId(undefined);
                       setSessionSeed((current) => current + 1);
                     }}
@@ -908,13 +938,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   }).catch(() => undefined);
                 }}
                 resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`}
-                retryDisabled={status !== 'idle' && status !== 'error'}
+                retryDisabled={hasPendingApproval || (status !== 'idle' && status !== 'error')}
                 showTypingIndicator={showTypingIndicator}
               />
               <Composer
+                key={composerSessionKey}
                 connectionStatus={connectionStatus}
                 clearedFailedDraft={clearedFailedDraft}
-                disabled={status === 'connecting' || status === 'sending' || status === 'streaming'}
+                disabled={composerDisabled}
+                disabledReasonText={composerDisabledReason}
                 onReconnect={reconnect}
                 onSend={send}
                 status={status}
@@ -925,9 +957,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               <CostBadge tier={tier ?? 'pending'} tokenTotals={tokenTotals} costUsd={costUsd} />
               <ActivityPane events={activity} resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`} />
               <ApprovalCard
-                pending={Boolean(pendingApproval)}
+                pending={hasPendingApproval}
                 approval={pendingApproval}
-                description={pendingApproval?.description ?? ''}
+                description={pendingApproval?.description ?? (hasPendingApproval ? 'Approval is pending. Approve or reject it before sending another message.' : '')}
                 resolving={approvalResolving}
                 error={approvalError}
                 sessionId={activeSessionId}

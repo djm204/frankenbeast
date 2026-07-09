@@ -1,6 +1,19 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  chmodSync,
+  lstatSync,
+  mkdtempSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import type {
   ILlmProvider,
   LlmRequest,
@@ -11,13 +24,20 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, platform, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
+import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
+
+function terminateRunningProcess(proc: ChildProcess): void {
+  if (proc.exitCode === null && proc.signalCode === null) {
+    proc.kill();
+  }
+}
 
 export interface GeminiCliOptions {
   binaryPath?: string;
@@ -46,23 +66,42 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
-    this.writeGeminiMd(request.systemPrompt);
+    const workspaceDir = resolve(this.workingDir);
+    const contextWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
+    const settingsWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-settings-')));
+    let managedContextFileName: string | undefined;
 
-    const args = this.buildArgs(request);
-    const proc = spawn(this.binaryPath, args, {
-      cwd: this.workingDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    try {
+      this.removeManagedGeminiMd();
+      const contextSettings = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
+      const settingsPath = contextSettings.settingsPath;
+      managedContextFileName = contextSettings.managedContextFileName;
+      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, managedContextFileName);
+      const args = this.buildArgs(request);
+      const proc = spawn(this.binaryPath, args, {
+        cwd: workspaceDir,
+        env: {
+          ...process.env,
+          GEMINI_CLI_SYSTEM_DEFAULTS_PATH: this.effectiveSystemDefaultsPath(),
+          GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-    const userContent = request.messages
-      .map((m) =>
-        typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      )
-      .join('\n');
-    proc.stdin!.write(userContent);
-    proc.stdin!.end();
+      const userContent = request.messages
+        .map((m) =>
+          typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        )
+        .join('\n');
+      proc.stdin!.write(userContent);
+      proc.stdin!.end();
 
-    yield* this.parseStream(proc);
+      yield* this.parseStream(proc);
+    } finally {
+      if (managedContextFileName) this.removeManagedGeminiMd(contextWorkingDir, managedContextFileName);
+      rmSync(contextWorkingDir, { recursive: true, force: true });
+      rmSync(settingsWorkingDir, { recursive: true, force: true });
+    }
   }
 
   formatHandoff(snapshot: BrainSnapshot): string {
@@ -104,7 +143,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private async discoverFromSettingsFile(): Promise<SkillCatalogEntry[]> {
     try {
-      const settingsPath = join(homedir(), '.gemini', 'settings.json');
+      const settingsPath = this.userSettingsPath();
       if (!existsSync(settingsPath)) return [];
       const raw = readFileSync(settingsPath, 'utf-8');
       const settings = JSON.parse(raw) as Record<string, unknown>;
@@ -135,18 +174,37 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   buildArgs(_request: LlmRequest): string[] {
-    const args = ['-p', '--output-format', 'stream-json'];
+    const args = ['-p', '', '--output-format', 'stream-json'];
     if (this.options.model) {
       args.push('-m', this.options.model);
     }
     if (this.options.extraArgs?.length) {
-      args.push(...this.options.extraArgs);
+      args.push(...this.safeExtraArgs());
     }
     return args;
   }
 
-  writeGeminiMd(systemPrompt: string, handoffContext?: string): void {
-    const geminiMdPath = `${this.workingDir}/GEMINI.md`;
+  private safeExtraArgs(): string[] {
+    const result: string[] = [];
+    for (let index = 0; index < this.options.extraArgs!.length; index += 1) {
+      const arg = this.options.extraArgs![index]!;
+      if (arg === '--include-directories') {
+        index += 1;
+        continue;
+      }
+      if (arg.startsWith('--include-directories=')) continue;
+      result.push(arg);
+    }
+    return result;
+  }
+
+  writeGeminiMd(
+    systemPrompt: string,
+    handoffContext?: string,
+    targetDir = this.workingDir,
+    fileName = 'GEMINI.md',
+  ): void {
+    const geminiMdPath = join(targetDir, fileName);
     const managedContent = [
       MANAGED_START,
       systemPrompt,
@@ -166,9 +224,269 @@ export class GeminiCliAdapter implements ILlmProvider {
       } else {
         existing = managedContent + '\n\n' + existing;
       }
-      writeFileSync(geminiMdPath, existing);
+      this.writeFileAtomically(geminiMdPath, existing);
     } else {
-      writeFileSync(geminiMdPath, managedContent);
+      this.writeFileAtomically(geminiMdPath, managedContent);
+    }
+  }
+
+  private writeContextSettings(
+    targetDir: string,
+    managedContextDir: string,
+  ): { settingsPath: string; managedContextFileName: string } {
+    const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
+    const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
+
+    const existingContext = this.asObject(existing['context']) ?? {};
+    const managedContextFileName = this.managedContextFileName();
+    const settingsPath = join(targetDir, 'settings.json');
+    writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        {
+          ...existing,
+          context: {
+            ...existingContext,
+            fileName: this.contextFileNames(existingContext, managedContextFileName),
+            includeDirectories: [managedContextDir],
+            loadMemoryFromIncludeDirectories: true,
+          },
+        },
+        null,
+        2,
+      ),
+      { mode: 0o600 },
+    );
+    return { settingsPath, managedContextFileName };
+  }
+
+  private managedContextFileName(): string {
+    return `FRANKENBEAST_GEMINI_${crypto.randomUUID()}.md`;
+  }
+
+  private contextFileNames(context: Record<string, unknown>, managedContextFileName: string): string[] {
+    return this.uniqueStrings([
+      managedContextFileName,
+      ...this.stringArray(context['fileName']),
+      ...this.systemDefaultsContextFileNames(),
+      ...this.userContextFileNames(),
+      ...this.workspaceContextFileNames(),
+      'GEMINI.md',
+    ]);
+  }
+
+  private systemDefaultsContextFileNames(): string[] {
+    const defaultsSettings = this.readSettingsFile(this.effectiveSystemDefaultsPath(), 'Gemini system defaults');
+    const defaultsContext = this.asObject(defaultsSettings['context']) ?? {};
+    return this.stringArray(defaultsContext['fileName']);
+  }
+
+  private userContextFileNames(): string[] {
+    const userSettings = this.readSettingsFile(this.userSettingsPath(), 'Gemini user settings');
+    const userContext = this.asObject(userSettings['context']) ?? {};
+    return this.stringArray(userContext['fileName']);
+  }
+
+  private workspaceContextFileNames(): string[] {
+    if (!this.isWorkspaceTrustedForSettings()) return [];
+    const workspaceSettings = this.readSettingsFile(join(resolve(this.workingDir), '.gemini', 'settings.json'), 'Gemini workspace settings');
+    const workspaceContext = this.asObject(workspaceSettings['context']) ?? {};
+    return this.stringArray(workspaceContext['fileName']);
+  }
+
+
+  private stringArray(value: unknown): string[] {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+    return [];
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return Array.from(new Set(values.filter(Boolean)));
+  }
+
+  private defaultSystemSettingsPath(): string {
+    if (platform() === 'darwin') return '/Library/Application Support/GeminiCli/settings.json';
+    if (platform() === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'gemini-cli', 'settings.json');
+    return '/etc/gemini-cli/settings.json';
+  }
+
+  private defaultSystemDefaultsPath(): string {
+    if (platform() === 'darwin') return '/Library/Application Support/GeminiCli/system-defaults.json';
+    if (platform() === 'win32') return join(process.env['ProgramData'] ?? 'C:\\ProgramData', 'gemini-cli', 'system-defaults.json');
+    return '/etc/gemini-cli/system-defaults.json';
+  }
+
+  private effectiveSystemDefaultsPath(): string {
+    if (process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH) return process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH;
+    if (process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH) {
+      return join(dirname(process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH), 'system-defaults.json');
+    }
+    return this.defaultSystemDefaultsPath();
+  }
+
+  private userSettingsPath(): string {
+    return join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini', 'settings.json');
+  }
+
+  private trustedFoldersPath(): string {
+    return process.env.GEMINI_CLI_TRUSTED_FOLDERS_PATH ?? join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini', 'trustedFolders.json');
+  }
+
+  private isWorkspaceTrustedForSettings(): boolean {
+    if (process.env.GEMINI_CLI_TRUST_WORKSPACE === 'true') return true;
+
+    const userSettings = this.readSettingsFile(this.userSettingsPath(), 'Gemini user settings');
+    const security = this.asObject(userSettings['security']) ?? {};
+    const folderTrust = this.asObject(security['folderTrust']) ?? {};
+    const folderTrustEnabled = folderTrust['enabled'] !== false;
+    if (!folderTrustEnabled) return true;
+
+    const trustedFoldersPath = this.trustedFoldersPath();
+    if (!existsSync(trustedFoldersPath)) return false;
+
+    try {
+      const parsed = JSON.parse(this.stripJsonComments(readFileSync(trustedFoldersPath, 'utf-8'))) as Record<string, unknown>;
+      const workspaceDir = this.canonicalPath(resolve(this.workingDir));
+      let longestMatchLength = -1;
+      let longestTrust: unknown;
+
+      for (const [rulePath, trustLevel] of Object.entries(parsed)) {
+        const effectivePath = trustLevel === 'TRUST_PARENT' ? dirname(rulePath) : rulePath;
+        const normalizedRulePath = this.canonicalPath(effectivePath);
+        if (this.isSameOrParentPath(normalizedRulePath, workspaceDir) && rulePath.length > longestMatchLength) {
+          longestMatchLength = rulePath.length;
+          longestTrust = trustLevel;
+        }
+      }
+
+      if (longestTrust === 'TRUST_FOLDER' || longestTrust === 'TRUST_PARENT') return true;
+      if (longestTrust === 'DO_NOT_TRUST') return false;
+    } catch {
+      return false;
+    }
+
+    return false;
+  }
+
+  private canonicalPath(path: string): string {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  }
+
+  private isSameOrParentPath(parent: string, child: string): boolean {
+    const rel = relative(parent, child);
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  }
+
+
+  private readSettingsFile(path: string, description: string): Record<string, unknown> {
+    if (!existsSync(path)) return {};
+    try {
+      return JSON.parse(this.stripJsonComments(readFileSync(path, 'utf-8'))) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Unable to parse ${description} at ${path}`);
+    }
+  }
+
+  private stripJsonComments(value: string): string {
+    let output = '';
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < value.length; i += 1) {
+      const current = value[i]!;
+      const next = value[i + 1];
+
+      if (inString) {
+        output += current;
+        if (escaped) {
+          escaped = false;
+        } else if (current === '\\') {
+          escaped = true;
+        } else if (current === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (current === '"') {
+        inString = true;
+        output += current;
+        continue;
+      }
+
+      if (current === '/' && next === '/') {
+        while (i < value.length && value[i] !== '\n') i += 1;
+        output += '\n';
+        continue;
+      }
+
+      if (current === '/' && next === '*') {
+        i += 2;
+        while (i < value.length && !(value[i] === '*' && value[i + 1] === '/')) i += 1;
+        i += 1;
+        continue;
+      }
+
+      output += current;
+    }
+
+    return output;
+  }
+
+  private removeManagedGeminiMd(targetDir = this.workingDir, fileName = 'GEMINI.md'): void {
+    const geminiMdPath = join(targetDir, fileName);
+    if (!existsSync(geminiMdPath)) return;
+
+    const existing = readFileSync(geminiMdPath, 'utf-8');
+    const startIdx = existing.indexOf(MANAGED_START);
+    const endIdx = existing.indexOf(MANAGED_END);
+    if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) return;
+
+    const before = existing.slice(0, startIdx);
+    let after = existing.slice(endIdx + MANAGED_END.length);
+    if (before.endsWith('\n') && after.startsWith('\n')) {
+      after = after.slice(1);
+    }
+    const next = before + after;
+    if (next) {
+      this.writeFileAtomically(geminiMdPath, next);
+    } else if (this.isSymlink(geminiMdPath)) {
+      this.writeFileAtomically(geminiMdPath, '');
+    } else {
+      unlinkSync(geminiMdPath);
+    }
+  }
+
+  private writeFileAtomically(path: string, content: string): void {
+    const writePath = this.isSymlink(path) ? this.resolveSymlinkTarget(path) : path;
+    const tmpPath = `${writePath}.${process.pid}.${Date.now()}.tmp`;
+    const existingMode = existsSync(writePath) ? statSync(writePath).mode : undefined;
+    writeFileSync(tmpPath, content);
+    if (existingMode !== undefined) {
+      chmodSync(tmpPath, existingMode);
+    }
+    renameSync(tmpPath, writePath);
+  }
+
+  private resolveSymlinkTarget(path: string): string {
+    try {
+      return realpathSync(path);
+    } catch {
+      const target = readlinkSync(path);
+      return isAbsolute(target) ? target : resolve(dirname(path), target);
+    }
+  }
+
+  private isSymlink(path: string): boolean {
+    try {
+      return lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
     }
   }
 
@@ -178,45 +496,199 @@ export class GeminiCliAdapter implements ILlmProvider {
     const rl = createInterface({ input: proc.stdout! });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let emittedText = false;
+    let emittedToolUse = false;
+    let sawTerminalFrame = false;
+    let streamCompleted = false;
 
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-
-      const type = parsed['type'] as string;
-
-      if (type === 'content_block_delta') {
-        const delta = parsed['delta'] as Record<string, unknown>;
-        if (delta?.['type'] === 'text_delta') {
-          yield { type: 'text', content: delta['text'] as string };
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
         }
-      } else if (type === 'content_block_start') {
-        const block = parsed['content_block'] as Record<string, unknown>;
-        if (block?.['type'] === 'tool_use') {
+
+        const type = parsed['type'] as string;
+
+        if (type === 'result') {
+          const parts: string[] = [];
+          tryExtractTextFromNode(parsed['result'] ?? parsed, parts);
+          const text = parts.join('');
+          const error = parsed['error'] as Record<string, unknown> | string | undefined;
+          const errorText = typeof error === 'string' ? error : ((error?.['message'] as string | undefined) ?? '');
+          const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error' || parsed['status'] === 'error';
+          if (isErrorResult) {
+            const message = text || errorText || 'gemini returned an error result frame';
+            yield {
+              type: 'error',
+              error: message,
+              retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
+            };
+            return;
+          }
+          if (text.length > 0 && !emittedText) {
+            yield { type: 'text', content: text };
+            emittedText = true;
+          }
+          const usage = (parsed['usage'] ?? parsed['stats']) as Record<string, number> | undefined;
+          if (usage) {
+            totalInputTokens =
+              usage['input_tokens'] ??
+              usage['inputTokens'] ??
+              usage['prompt_tokens'] ??
+              usage['promptTokenCount'] ??
+              usage['totalInputTokens'] ??
+              totalInputTokens;
+            totalOutputTokens =
+              usage['output_tokens'] ??
+              usage['outputTokens'] ??
+              usage['completion_tokens'] ??
+              usage['candidatesTokenCount'] ??
+              usage['totalOutputTokens'] ??
+              totalOutputTokens;
+          }
+          if (!emittedText && !emittedToolUse) {
+            yield {
+              type: 'error',
+              error: 'gemini result frame contained no text output',
+              retryable: false,
+            };
+            return;
+          }
+          sawTerminalFrame = true;
+
+          streamCompleted = true;
+          yield {
+            type: 'done',
+            usage: {
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              totalTokens: totalInputTokens + totalOutputTokens,
+
+            },
+          };
+          return;
+        } else if (type === 'content_block_delta') {
+          const delta = parsed['delta'] as Record<string, unknown>;
+          if (delta?.['type'] === 'text_delta') {
+            yield { type: 'text', content: delta['text'] as string };
+            emittedText = true;
+          }
+        } else if (type === 'content_block_start') {
+          const block = parsed['content_block'] as Record<string, unknown>;
+          if (block?.['type'] === 'tool_use') {
+            yield {
+              type: 'tool_use',
+              id: (block['id'] as string) ?? crypto.randomUUID(),
+              name: block['name'] as string,
+              input: block['input'] ?? {},
+            };
+            emittedToolUse = true;
+          }
+        } else if (type === 'tool_use') {
           yield {
             type: 'tool_use',
-            id: (block['id'] as string) ?? crypto.randomUUID(),
-            name: block['name'] as string,
-            input: block['input'] ?? {},
+            id: (parsed['tool_id'] as string) ?? (parsed['id'] as string) ?? crypto.randomUUID(),
+            name: (parsed['tool_name'] as string) ?? (parsed['name'] as string),
+            input: parsed['parameters'] ?? parsed['input'] ?? {},
           };
+          emittedToolUse = true;
+        } else if (type === 'message_delta') {
+          const usage = parsed['usage'] as Record<string, number> | undefined;
+          if (usage) {
+            totalOutputTokens = usage['output_tokens'] ?? totalOutputTokens;
+          }
+        } else if (type === 'message_start') {
+          const message = parsed['message'] as Record<string, unknown> | undefined;
+          const usage = message?.['usage'] as Record<string, number> | undefined;
+          if (usage) {
+            totalInputTokens = usage['input_tokens'] ?? 0;
+          }
+        } else if (type === 'message') {
+          const message = parsed['message'] as Record<string, unknown> | undefined;
+          const role = (message?.['role'] ?? parsed['role']) as string | undefined;
+          if (role === 'assistant') {
+            const content = message?.['content'] ?? parsed['content'] ?? parsed['parts'];
+            if (Array.isArray(content)) {
+              const parts = content
+                .map((part) => (part && typeof part === 'object' ? (part as Record<string, unknown>)['text'] : part))
+                .filter((part): part is string => typeof part === 'string');
+              const text = parts.join('');
+              if (text.length > 0) {
+                yield { type: 'text', content: text };
+                emittedText = true;
+              }
+            } else if (typeof content === 'string') {
+              if (content.length > 0) {
+                yield { type: 'text', content };
+                emittedText = true;
+              }
+            } else {
+              const parts: string[] = [];
+              tryExtractTextFromNode(parsed, parts);
+              const text = parts.join('');
+              if (text.length > 0) {
+                yield { type: 'text', content: text };
+                emittedText = true;
+              }
+            }
+          }
+        } else if (type === 'message_stop') {
+          sawTerminalFrame = true;
+          if (!emittedText && !emittedToolUse) {
+            yield {
+              type: 'error',
+              error: 'gemini stream completed without parseable text',
+              retryable: true,
+            };
+            return;
+          }
+          streamCompleted = true;
+          yield {
+            type: 'done',
+            usage: {
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              totalTokens: totalInputTokens + totalOutputTokens,
+            },
+          };
+          return;
+        } else if (type === 'error') {
+          const message = this.stringifyGeminiContent(parsed['message'] ?? parsed['error'] ?? 'Unknown error');
+          yield {
+            type: 'error',
+            error: message,
+            retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
+          };
+          return;
+        } else if (type === 'tool_result') {
+          continue;
+        } else if (!emittedText) {
+          const parts: string[] = [];
+          tryExtractTextFromNode(parsed, parts);
+          const text = parts.join('').trim();
+          if (text.length > 0) {
+            yield { type: 'text', content: text };
+            emittedText = true;
+          }
         }
-      } else if (type === 'message_delta') {
-        const usage = parsed['usage'] as Record<string, number> | undefined;
-        if (usage) {
-          totalOutputTokens = usage['output_tokens'] ?? totalOutputTokens;
-        }
-      } else if (type === 'message_start') {
-        const message = parsed['message'] as Record<string, unknown> | undefined;
-        const usage = message?.['usage'] as Record<string, number> | undefined;
-        if (usage) {
-          totalInputTokens = usage['input_tokens'] ?? 0;
-        }
-      } else if (type === 'message_stop') {
+      }
+
+      // Stream ended without message_stop/result/error — check exit code
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
+      if (exitCode !== 0 && exitCode !== null) {
+        yield {
+          type: 'error',
+          error: `gemini process exited with code ${exitCode}`,
+          retryable: false,
+        };
+      } else if (sawTerminalFrame && (emittedText || emittedToolUse)) {
+        streamCompleted = true;
         yield {
           type: 'done',
           usage: {
@@ -225,37 +697,66 @@ export class GeminiCliAdapter implements ILlmProvider {
             totalTokens: totalInputTokens + totalOutputTokens,
           },
         };
-        return;
-      } else if (type === 'error') {
-        const message = (parsed['message'] as string) ?? 'Unknown error';
+      } else {
         yield {
           type: 'error',
-          error: message,
-          retryable: message.includes('rate') || message.includes('RESOURCE_EXHAUSTED'),
+          error: 'gemini process exited without producing a result frame or text output',
+          retryable: false,
         };
-        return;
+      }
+    } finally {
+      rl.close();
+      if (!streamCompleted) {
+        terminateRunningProcess(proc);
       }
     }
+  }
 
-    // Stream ended without message_stop/error — check exit code
-    const exitCode = await new Promise<number | null>((resolve) => {
-      proc.on('close', resolve);
-    });
-    if (exitCode !== 0 && exitCode !== null) {
-      yield {
-        type: 'error',
-        error: `gemini process exited with code ${exitCode}`,
-        retryable: false,
-      };
-    } else {
-      yield {
-        type: 'done',
-        usage: {
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens,
-          totalTokens: totalInputTokens + totalOutputTokens,
-        },
-      };
+  private extractGeminiText(event: Record<string, unknown>): string[] {
+    const message = this.asObject(event['message']) ?? event;
+    return this.extractTextParts(message['content'] ?? message['text']);
+  }
+
+  private isAssistantGeminiMessage(event: Record<string, unknown>): boolean {
+    const message = this.asObject(event['message']) ?? event;
+    const role = message['role'] ?? event['role'];
+    return role === undefined || role === 'assistant' || role === 'model';
+  }
+
+  private extractTextParts(value: unknown): string[] {
+    if (typeof value === 'string') return value ? [value] : [];
+    if (Array.isArray(value)) return value.flatMap((part) => this.extractTextParts(part));
+    const objectValue = this.asObject(value);
+    if (!objectValue) return [];
+    if (objectValue['type'] === 'text' && typeof objectValue['text'] === 'string') {
+      return [objectValue['text']];
     }
+    return this.extractTextParts(objectValue['content'] ?? objectValue['parts'] ?? objectValue['text']);
+  }
+
+  private extractGeminiUsage(event: Record<string, unknown>): Partial<{ inputTokens: number; outputTokens: number; totalTokens: number }> {
+    const usage = this.asObject(event['usage']) ?? this.asObject(event['usageMetadata']) ?? this.asObject(event['usage_metadata']) ?? this.asObject(event['stats']) ?? event;
+    const inputTokens = this.numberValue(usage['inputTokens'], usage['input_tokens'], usage['promptTokenCount'], usage['prompt_token_count']);
+    const outputTokens = this.numberValue(usage['outputTokens'], usage['output_tokens'], usage['candidatesTokenCount'], usage['candidates_token_count']);
+    const totalTokens = this.numberValue(usage['totalTokens'], usage['total_tokens'], usage['totalTokenCount'], usage['total_token_count']);
+    return {
+      ...(inputTokens === undefined ? {} : { inputTokens }),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
+      ...(totalTokens === undefined ? {} : { totalTokens }),
+    };
+  }
+
+  private numberValue(...values: unknown[]): number | undefined {
+    return values.find((value): value is number => typeof value === 'number');
+  }
+
+  private stringifyGeminiContent(value: unknown): string {
+    return typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  private asObject(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
   }
 }

@@ -4,23 +4,23 @@ This project uses AI-assisted development. Rules in `.cursor/rules/` provide gui
 
 ## Monorepo Layout
 
-This is an npm workspaces monorepo with Turborepo for build orchestration. All 10 packages live under `packages/`:
+This is an npm workspaces monorepo with Turborepo for build orchestration. The root `package.json` declares `packages/*`, so the live workspace map is the direct `packages/<name>/package.json` set:
 
 ```
 packages/
-├── franken-types/           # Shared types + runtime Zod schemas (@franken/types)
+├── franken-types/           # @franken/types: Shared types + runtime Zod schemas
 ├── franken-brain/           # @franken/brain: MOD-03 SQLite-backed memory (working + episodic)
 ├── franken-planner/         # @franken/planner: MOD-04 DAG planning, strategies, recovery primitives
-├── franken-observer/        # MOD-05: Tracing, token/cost tracking, circuit breaker (@franken/observer)
-├── franken-critique/        # MOD-06: Self-critique evaluators + reviewer loop (@franken/critique)
-├── franken-governor/        # MOD-07: HITL governance, triggers, approval gateway (@franken/governor)
+├── franken-observer/        # @franken/observer: MOD-05 tracing, token/cost tracking, circuit breaker
+├── franken-critique/        # @franken/critique: MOD-06 self-critique evaluators + reviewer loop
+├── franken-governor/        # @franken/governor: MOD-07 HITL governance, triggers, approval gateway
 ├── franken-orchestrator/    # @franken/orchestrator: Beast Loop, CLI, chat/network servers
-├── franken-mcp-suite/       # fbeast CLI, MCP servers, hooks, proxy (@franken/mcp-suite)
-├── franken-web/             # React dashboard (@franken/web)
-└── live-bench/              # Live CLI benchmark tooling (@franken/live-bench)
+├── franken-mcp-suite/       # @franken/mcp-suite: fbeast CLI, MCP servers, hooks, proxy
+├── franken-web/             # @franken/web: React dashboard
+└── live-bench/              # @franken/live-bench: Live CLI benchmark tooling
 ```
 
-Former packages `frankenfirewall` (MOD-01), `franken-skills` (MOD-02), `franken-heartbeat` (MOD-08), `franken-mcp`, and `franken-comms` were consolidated into `@franken/orchestrator` and `franken-mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md); their capabilities live on as internal adapters.
+Historical packages `frankenfirewall` (MOD-01), `franken-skills` (MOD-02), `franken-heartbeat` (MOD-08), `franken-mcp`, and `franken-comms` are not standalone workspaces anymore; they were consolidated into `@franken/orchestrator` and `@franken/mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md), with their capabilities retained as internal adapters.
 
 **Build commands** (all via Turborepo):
 - `npm run build` — runs `turbo run build` (dependency-ordered)
@@ -139,4 +139,5 @@ Common patterns that MUST be ignored:
 
 - Create new `.mdc` files in `.cursor/rules/` for project-specific rules
 - Edit existing files directly; changes take effect immediately
-- Re-run to update: `npx @djm204/agent-skills javascript-expert qa-engineering testing web-backend ml-ai`
+- The checked-in root assistant rules are maintained from this repository. When workflow guidance changes, update the supported source in [`djm204/agent-workflow-skills`](https://github.com/djm204/agent-workflow-skills), then copy the relevant Claude/Cursor guidance into `.cursor/rules/` with a focused reviewable diff.
+- Do not regenerate the root `.cursor/rules/*.mdc` files with the legacy `@djm204/agent-skills` package; package-level `project-outline.md` cleanup is tracked separately from this root assistant-guide maintenance path.

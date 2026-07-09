@@ -107,7 +107,10 @@ export async function runPlanning(
       throw new CritiqueBudgetHaltError(1, reason);
     }
 
-    if (critiqueResult.verdict === 'pass' && critiqueResult.score >= config.minCritiqueScore) {
+    if (
+      (critiqueResult.verdict === 'pass' || critiqueResult.verdict === 'warn') &&
+      critiqueResult.score >= config.minCritiqueScore
+    ) {
       return; // Plan approved
     }
 
@@ -178,7 +181,10 @@ export async function runPlanning(
       throw new CritiqueBudgetHaltError(i + 1, reason);
     }
 
-    if (critiqueResult.verdict === 'pass' && critiqueResult.score >= config.minCritiqueScore) {
+    if (
+      (critiqueResult.verdict === 'pass' || critiqueResult.verdict === 'warn') &&
+      critiqueResult.score >= config.minCritiqueScore
+    ) {
       return; // Plan approved
     }
   }

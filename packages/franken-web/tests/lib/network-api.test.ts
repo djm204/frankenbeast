@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NetworkApiClient } from '../../src/lib/network-api';
+import { NetworkApiClient, NetworkApiError } from '../../src/lib/network-api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -94,5 +94,40 @@ describe('NetworkApiClient', () => {
       'http://localhost:3000/v1/network/logs/chat-server',
       expect.objectContaining({ method: 'GET' }),
     );
+  });
+
+  it('surfaces structured network error envelopes with status and code context', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      json: () => Promise.resolve({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Request validation failed',
+          details: [{ path: ['assignments'], message: 'Expected array' }],
+        },
+      }),
+    });
+
+    try {
+      await client.updateConfig(['network.mode=insecure']);
+      throw new Error('Expected updateConfig to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(NetworkApiError);
+      expect((error as Error).message).toBe('Request validation failed (HTTP 422, VALIDATION_ERROR)');
+      expect((error as NetworkApiError).status).toBe(422);
+      expect((error as NetworkApiError).code).toBe('VALIDATION_ERROR');
+      expect((error as NetworkApiError).details).toEqual([{ path: ['assignments'], message: 'Expected array' }]);
+    }
+  });
+
+  it('falls back to HTTP status for malformed network error bodies', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+    });
+
+    await expect(client.getStatus()).rejects.toThrow('HTTP 502');
   });
 });

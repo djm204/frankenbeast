@@ -1,5 +1,5 @@
-import { resolve, basename, dirname, relative } from 'node:path';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { resolve, basename, dirname, relative, isAbsolute } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 export interface ProjectPaths {
   root: string;
@@ -17,6 +17,7 @@ export interface ProjectPaths {
   logFile: string;
   designDocFile: string;
   configFile: string;
+  activePlanFile: string;
   stateDir: string;
   /** Raw LLM decomposition response cache */
   llmResponseFile: string;
@@ -83,6 +84,36 @@ export function generatePlanName(designDocPath?: string): string {
   return `plan-${date}`;
 }
 
+function normalizeActivePlanName(value: string): string | undefined {
+  const planName = value.trim();
+  if (!planName) return undefined;
+  if (planName === '.' || planName === '..') return undefined;
+  if (isAbsolute(planName) || planName.includes('/') || planName.includes('\\')) return undefined;
+  return planName;
+}
+
+/**
+ * Reads the last active implicit plan name, if one has been recorded.
+ */
+export function readActivePlanName(root: string): string | undefined {
+  const activePlanFile = resolve(root, '.fbeast', 'active-plan');
+  try {
+    return normalizeActivePlanName(readFileSync(activePlanFile, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Records the plan name that implicit follow-up subcommands should reuse.
+ */
+export function writeActivePlanName(paths: Pick<ProjectPaths, 'frankenbeastDir' | 'activePlanFile'>, planName: string): void {
+  const normalized = normalizeActivePlanName(planName);
+  if (!normalized) return;
+  mkdirSync(paths.frankenbeastDir, { recursive: true });
+  writeFileSync(paths.activePlanFile, `${normalized}\n`, 'utf8');
+}
+
 /**
  * Returns all conventional paths within .fbeast/.
  * When planName is provided, plans are scoped to .fbeast/plans/<planName>/.
@@ -110,6 +141,7 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
     logFile: resolve(buildDir, 'build.log'),
     designDocFile: resolve(plansDir, 'design.md'),
     configFile: resolve(frankenbeastDir, 'config.json'),
+    activePlanFile: resolve(frankenbeastDir, 'active-plan'),
     stateDir: resolve(frankenbeastDir, 'state'),
     llmResponseFile: resolve(plansDir, 'llm-response.json'),
   };

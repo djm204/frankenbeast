@@ -13,6 +13,10 @@ export interface JudgeResponse {
  */
 export type JudgeFunction = (prompt: string) => Promise<JudgeResponse>
 
+function isValidScore(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1
+}
+
 export interface LLMJudgeEvalOptions<TInput> {
   name: string
   /** Converts the raw eval input into the prompt sent to the judge LLM. */
@@ -39,6 +43,12 @@ export class LLMJudgeEval<TInput = string> implements Eval<TInput> {
     this.buildPrompt = options.buildPrompt
     this.judge = options.judge
     this.passThreshold = options.passThreshold ?? 0.7
+
+    if (!isValidScore(this.passThreshold)) {
+      throw new RangeError(
+        'passThreshold must be a finite number between 0 and 1',
+      )
+    }
   }
 
   async run(input: TInput): Promise<EvalResult> {
@@ -52,6 +62,14 @@ export class LLMJudgeEval<TInput = string> implements Eval<TInput> {
         evalName: this.name,
         status: 'fail',
         reason: `Judge function failed: ${message}`,
+      }
+    }
+
+    if (!isValidScore(response.score)) {
+      return {
+        evalName: this.name,
+        status: 'fail',
+        reason: 'Judge returned invalid score: expected a finite number between 0 and 1',
       }
     }
 

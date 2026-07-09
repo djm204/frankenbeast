@@ -1,6 +1,11 @@
 import { SqliteBrain } from '@franken/brain';
 import Database from 'better-sqlite3';
 
+function configureBrainAdapterDb(db: Database.Database): void {
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
+}
+
 export interface BrainQueryInput {
   query: string;
   type?: string;
@@ -44,7 +49,8 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
   // Rehydrate working memory from SQLite so entries survive process restarts.
   // SqliteBrain's constructor starts with an empty in-memory Map; flush() writes
   // to the working_memory table but construction doesn't read it back.
-  const readDb = new Database(dbPath, { readonly: true });
+  const readDb = new Database(dbPath);
+  configureBrainAdapterDb(readDb);
   try {
     const rows = readDb.prepare('SELECT key, value FROM working_memory').all() as Array<{ key: string; value: string }>;
     const snap: Record<string, unknown> = {};
