@@ -152,6 +152,7 @@ export interface CritiqueFinding {
   readonly evaluator: string;
   readonly severity: string;
   readonly message: string;
+  readonly location?: string | undefined;
 }
 
 /** What the orchestrator needs from MOD-07 (Governor). */

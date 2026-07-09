@@ -5,6 +5,7 @@
 export type { Severity, Verdict, Score, SessionId, TaskId } from './types/common.js';
 
 // Types — evaluation
+export { EVALUATOR_EXCEPTION_LOCATION } from './types/evaluation.js';
 export type {
   EvaluationInput,
   EvaluationFinding,

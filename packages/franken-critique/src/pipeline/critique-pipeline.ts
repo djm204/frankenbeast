@@ -1,9 +1,33 @@
+import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
 import type { Evaluator, EvaluationInput, EvaluationResult, CritiquePipelineResult } from '../types/evaluation.js';
 
 const SAFETY_EVALUATOR_NAME = 'safety';
 
 function hasWarningFinding(result: EvaluationResult): boolean {
   return result.findings.some((finding) => finding.severity !== 'info');
+}
+
+function logEvaluatorException(evaluator: Evaluator, error: unknown): void {
+  console.warn('Critique evaluator threw during evaluation', {
+    evaluatorName: evaluator.name,
+    error,
+  });
+}
+
+function createEvaluatorExceptionResult(evaluator: Evaluator): EvaluationResult {
+  return {
+    evaluatorName: evaluator.name,
+    verdict: 'fail',
+    score: 0,
+    findings: [
+      {
+        message: `Evaluator "${evaluator.name}" failed because an internal evaluator error occurred.`,
+        severity: 'critical',
+        location: EVALUATOR_EXCEPTION_LOCATION,
+        suggestion: 'Inspect trusted evaluator logs or dependencies before retrying the critique run.',
+      },
+    ],
+  };
 }
 
 export class CritiquePipeline {
@@ -26,7 +50,20 @@ export class CritiquePipeline {
     let shortCircuited = false;
 
     for (const evaluator of this.evaluators) {
-      const result = await evaluator.evaluate(input);
+      let result: EvaluationResult;
+
+      try {
+        result = await evaluator.evaluate(input);
+      } catch (error) {
+        logEvaluatorException(evaluator, error);
+        results.push(createEvaluatorExceptionResult(evaluator));
+        if (evaluator.name === SAFETY_EVALUATOR_NAME) {
+          shortCircuited = true;
+          break;
+        }
+        continue;
+      }
+
       results.push(result);
 
       // Short-circuit on safety failure

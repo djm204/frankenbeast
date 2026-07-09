@@ -1,6 +1,7 @@
 import type { MemoryPort, CritiqueLesson } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
+import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -42,10 +43,14 @@ export class LessonRecorder {
     );
 
     for (const evalResult of failingIteration.result.results) {
-      if (evalResult.verdict === 'fail' && evalResult.findings.length > 0) {
+      const critiqueFindings = evalResult.findings.filter(
+        (finding) => finding.location !== EVALUATOR_EXCEPTION_LOCATION,
+      );
+
+      if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
-          failureDescription: evalResult.findings.map((f) => f.message).join('; '),
+          failureDescription: critiqueFindings.map((f) => f.message).join('; '),
           correctionApplied: passingIteration
             ? `Corrected in iteration ${passingIteration.index}`
             : 'Unknown correction',

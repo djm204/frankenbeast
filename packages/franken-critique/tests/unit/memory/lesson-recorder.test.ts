@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { LessonRecorder } from '../../../src/memory/lesson-recorder.js';
+import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { MemoryPort } from '../../../src/types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../../../src/types/loop.js';
-import type { CritiqueResult } from '../../../src/types/evaluation.js';
+import type { CritiqueResult, EvaluationFinding } from '../../../src/types/evaluation.js';
 
 function createMockMemoryPort(): MemoryPort {
   return {
@@ -16,7 +17,7 @@ function createIteration(
   index: number,
   verdict: 'pass' | 'warn' | 'fail',
   evaluatorName = 'mock',
-  findings: { message: string; severity: 'critical' | 'warning' | 'info' }[] = [],
+  findings: EvaluationFinding[] = [],
 ): CritiqueIteration {
   const result: CritiqueResult = {
     verdict,
@@ -120,6 +121,29 @@ describe('LessonRecorder', () => {
       correctionApplied: string;
     };
     expect(call.correctionApplied).toBe('Corrected in iteration 1');
+  });
+
+  it('does not record evaluator infrastructure exceptions as learned critique lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'adr-compliance', [
+          {
+            message: 'Evaluator "adr-compliance" failed because an internal evaluator error occurred.',
+            severity: 'critical',
+            location: EVALUATOR_EXCEPTION_LOCATION,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-123');
+
+    expect(port.recordLesson).not.toHaveBeenCalled();
   });
 
   it('does not record on fail verdict', async () => {

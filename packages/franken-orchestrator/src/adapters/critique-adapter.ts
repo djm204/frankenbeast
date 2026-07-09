@@ -1,5 +1,7 @@
 import type { ICritiqueModule, CritiqueFinding, CritiqueResult, PlanGraph } from '../deps.js';
 
+const EVALUATOR_EXCEPTION_LOCATION = 'internal:evaluator-exception';
+
 export interface EvaluationInput {
   readonly content: string;
   readonly source?: string | undefined;
@@ -9,6 +11,7 @@ export interface EvaluationInput {
 export interface EvaluationFinding {
   readonly message: string;
   readonly severity: string;
+  readonly location?: string | undefined;
 }
 
 export interface EvaluationResult {
@@ -108,16 +111,29 @@ export class CritiquePortAdapter implements ICritiqueModule {
     }
 
     if (loopResult.verdict === 'fail') {
+      const infrastructureFailure = this.hasEvaluatorExceptionFinding(lastResult?.results ?? []);
       const correctionFindings = loopResult.correction.findings.map(finding => ({
         evaluator: 'critique-loop',
         severity: finding.severity,
         message: finding.message,
+        ...(finding.location ? { location: finding.location } : {}),
       }));
       const normalizedFindings = findings.length > 0
         ? findings
         : correctionFindings.length > 0
           ? correctionFindings
           : [{ evaluator: 'critique-loop', severity: 'high', message: loopResult.correction.summary }];
+
+      if (infrastructureFailure) {
+        return {
+          verdict: 'fail',
+          findings: normalizedFindings,
+          score: loopResult.correction.score ?? lastResult?.overallScore ?? 0,
+          halted: true,
+          haltReason: 'Critique evaluator infrastructure failure',
+        };
+      }
+
       return {
         verdict: 'fail',
         findings: normalizedFindings,
@@ -137,6 +153,16 @@ export class CritiquePortAdapter implements ICritiqueModule {
       };
     }
 
+    if (this.hasEvaluatorExceptionFinding(lastResult?.results ?? [])) {
+      return {
+        verdict: 'fail',
+        findings,
+        score: lastResult?.overallScore ?? 0,
+        halted: true,
+        haltReason: 'Critique evaluator infrastructure failure',
+      };
+    }
+
     return {
       verdict: 'fail',
       findings: [{ evaluator: 'critique-loop', severity: 'high', message: loopResult.escalation.reason }],
@@ -150,7 +176,14 @@ export class CritiquePortAdapter implements ICritiqueModule {
         evaluator: result.evaluatorName,
         severity: finding.severity,
         message: finding.message,
+        ...(finding.location ? { location: finding.location } : {}),
       })),
+    );
+  }
+
+  private hasEvaluatorExceptionFinding(results: readonly EvaluationResult[]): boolean {
+    return results.some(result =>
+      result.findings.some(finding => finding.location === EVALUATOR_EXCEPTION_LOCATION),
     );
   }
 }
