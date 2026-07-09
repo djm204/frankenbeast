@@ -14,7 +14,7 @@ would leave the registered servers unable to start.
 # Global install (publishes the fbeast + fbeast-* binaries onto PATH)
 npm install -g @franken/mcp-suite
 # …or, from a clone of this monorepo:
-#   npm install && npm link --workspace=packages/franken-mcp-suite
+#   npm install && npm run local:link && npm run local:verify-cli
 
 # Initialize for your project
 cd your-project

@@ -30,16 +30,12 @@ From the repo root:
 
 ```bash
 npm install
-npm run build
-npm link --workspace=packages/franken-mcp-suite
-npm link --workspace=packages/franken-orchestrator
+npm run local:link
 ```
 
 Verify:
-
 ```bash
-fbeast mcp              # MCP suite CLI
-frankenbeast --help    # Orchestrator CLI
+npm run local:verify-cli
 ```
 
 ---
@@ -272,12 +268,14 @@ The matrix covers parser/config truthfulness, `run` and `run --resume`, required
 
 **`frankenbeast: command not found`**
 ```bash
-npm link --workspace=packages/franken-orchestrator
+npm run local:link
+npm run local:verify-cli
 ```
 
 **`fbeast-proxy` / `fbeast-memory` not found after `fbeast mcp init`**
 ```bash
-npm link --workspace=packages/franken-mcp-suite
+npm run local:link
+npm run local:verify-cli
 ```
 
 **Beast fails to start with "binary not found"**

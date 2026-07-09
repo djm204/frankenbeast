@@ -12,7 +12,10 @@ import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient
 import { resolveInitOptions } from './init-options.js';
 
 const command = process.argv[2];
-const FRANKENBEAST_INSTALL_HELP = "install @franken/orchestrator with 'npm install -g @franken/orchestrator'";
+const FRANKENBEAST_INSTALL_HELP =
+  'for a local checkout, from the repo root run: npm run local:link\n' +
+  'then verify with: npm run local:verify-cli\n' +
+  "for a global install, run: npm install -g @franken/orchestrator";
 const TOP_LEVEL_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
 const MCP_HELP_OPTIONS = new Set(['--help', '-h', 'help']);
 
