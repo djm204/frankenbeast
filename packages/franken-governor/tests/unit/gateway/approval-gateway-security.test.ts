@@ -182,6 +182,56 @@ describe('ApprovalGateway — security integration', () => {
     expect(outcome.decision).toBe('APPROVE');
   });
 
+  it('refreshes the config-derived verifier when config.signingSecret changes', async () => {
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: 'old-secret' };
+    const channel = makeFakeChannel();
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config,
+    });
+
+    const sign = (secret: string, requestId: string) => new SignatureVerifier(secret).sign(
+      formatApprovalResponseSignaturePayload({ requestId, decision: 'APPROVE' }),
+    );
+
+    vi.mocked(channel.requestApproval)
+      .mockResolvedValueOnce({
+        requestId: 'req-old',
+        decision: 'APPROVE',
+        respondedBy: 'human',
+        respondedAt: new Date(),
+        signature: sign('old-secret', 'req-old'),
+      })
+      .mockResolvedValueOnce({
+        requestId: 'req-stale',
+        decision: 'APPROVE',
+        respondedBy: 'human',
+        respondedAt: new Date(),
+        signature: sign('old-secret', 'req-stale'),
+      })
+      .mockResolvedValueOnce({
+        requestId: 'req-new',
+        decision: 'APPROVE',
+        respondedBy: 'human',
+        respondedAt: new Date(),
+        signature: sign('new-secret', 'req-new'),
+      });
+
+    await expect(gateway.requestApproval(makeRequest({ requestId: 'req-old' }))).resolves.toMatchObject({
+      decision: 'APPROVE',
+    });
+
+    config.signingSecret = 'new-secret';
+
+    await expect(gateway.requestApproval(makeRequest({ requestId: 'req-stale' }))).rejects.toThrow(
+      SignatureVerificationError,
+    );
+    await expect(gateway.requestApproval(makeRequest({ requestId: 'req-new' }))).resolves.toMatchObject({
+      decision: 'APPROVE',
+    });
+  });
+
   it('rejects an unsigned response whose requestId does not match the active request', async () => {
     // Response is for a different (stale/misrouted) request than the one in flight.
     const channel = makeFakeChannel({ requestId: 'req-OTHER', decision: 'APPROVE' });
