@@ -54,18 +54,25 @@ describe('ScalabilityEvaluator', () => {
     ['computed literal object key', 'const cfg = { ["serverPort"]: 8080 };'],
     ['commented config property', 'const cfg = { /* docs */ port: 8080 };'],
     ['numeric suffixed config key', 'const cfg = { port2: 8080 };'],
+    ['hyphenated quoted config key', 'const cfg = { "server-port": 8080, \'api-port\': 8443 };'],
+    ['numeric separator config literal', 'const cfg = { port: 8_080 };'],
+    ['template interpolation assignment', 'const text = `${config.port = 8080}`;'],
+    ['template interpolation object literal', 'const text = `${{ port: 8080 }}`;'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.findings.some((f) => f.message.includes('hardcoded port number: 8080'))).toBe(true);
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(true);
   });
 
   it('does not treat non-port config keys containing port as port literals', async () => {
     const evaluator = new ScalabilityEvaluator();
     const content = `const cfg = { transport: 443, viewport: 1024, viewPortWidth: 1024, view_port: 1024, support: 1000, portalId: 1234, portfolio: 1000, support_portal: 8080 };
 const VIEW_PORT_WIDTH = 1024;
+const DEFAULT_VIEW_PORT_WIDTH = 1024;
+const defaultViewPortWidth = 1024;
 layout.viewPortWidth = 1024;
+layout.defaultViewPortWidth = 1024;
 layout.view_port_width = 1024;`;
     const result = await evaluator.evaluate(createInput(content));
 
@@ -98,7 +105,9 @@ interface ExtendedListenerConfig extends BaseConfig {
 class LiteralPortConfig {
   port: 8080;
 }
-function bindReadonly(opts: Readonly<{ port: 8080 }>) {}`;
+function bindReadonly(opts: Readonly<{ port: 8080 }>) {}
+makeConfig<{ port: 8080 }>();
+function bindGeneric<T extends { port: 8080 }>() {}`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);

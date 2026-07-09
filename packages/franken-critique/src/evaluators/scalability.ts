@@ -2,32 +2,34 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z0-9_]\w*)?|PORT(?:_\w*)?|(?!(?:[Vv]iew[Pp]ort)\w*)\w+Port(?:[A-Z0-9]\w*)?|(?!(?:VIEW_PORT)\w*)\w+_PORT(?:_\w*)?|(?!(?:view_port)\w*)\w+_port(?:_\w*)?)`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?![Vv]iew[Pp]ort\w*)(?!\w*(?:ViewPort|VIEW_PORT|view_port)\w*)(?:[Pp]ort(?:[A-Z0-9_]\w*)?|PORT(?:_\w*)?|\w+Port(?:[A-Z0-9]\w*)?|\w+_PORT(?:_\w*)?|\w+_port(?:_\w*)?)`;
+const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv]iew-[Pp]ort|view-port)[^"']*))(?:[A-Za-z0-9_]+-)*[Pp]ort(?:-[A-Za-z0-9_]+)*["']`;
+const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
 const DECLARATION_PORT_SUGGESTION = 'Use process.env.PORT or a config object instead';
 const CONFIG_PORT_SUGGESTION = 'Move port to environment variable or external configuration';
 const HARDCODED_PORT_PATTERNS = [
   {
     pattern: new RegExp(
-      String.raw`(?:export\s+)?(?:const|let|var)\s+${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;,\n]+)?\s*=\s*(\d{2,5})\b`,
+      String.raw`(?:export\s+)?(?:const|let|var)\s+${PORT_IDENTIFIER_PATTERN}(?:\s*:\s*[^=;,\n]+)?\s*=\s*${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: DECLARATION_PORT_SUGGESTION,
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\])\s*:\s*(\d{2,5})\b`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\])\s*:\s*${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
     skipTypeOnly: true,
   },
   {
-    pattern: new RegExp(String.raw`\.\s*${PORT_IDENTIFIER_PATTERN}\s*=\s*(\d{2,5})\b`, 'g'),
+    pattern: new RegExp(String.raw`\.\s*${PORT_IDENTIFIER_PATTERN}\s*=\s*${PORT_NUMBER_PATTERN}\b`, 'g'),
     suggestion: CONFIG_PORT_SUGGESTION,
   },
   {
-    pattern: new RegExp(String.raw`\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\]\s*=\s*(\d{2,5})\b`, 'g'),
+    pattern: new RegExp(String.raw`\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\]\s*=\s*${PORT_NUMBER_PATTERN}\b`, 'g'),
     suggestion: CONFIG_PORT_SUGGESTION,
   },
 ];
@@ -163,6 +165,7 @@ export class ScalabilityEvaluator implements Evaluator {
       /[(),]\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\)\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
+      /(?:<|\bextends)\s*$/s.test(prefix) ||
       (typeAliasContext && /(?:=|&|\||<|,|\()\s*$/s.test(prefix));
   }
 
@@ -216,7 +219,12 @@ export class ScalabilityEvaluator implements Evaluator {
         continue;
       }
 
-      if (current === '"' || current === "'" || current === '`') {
+      if (current === '`') {
+        index = this.collectTemplateLiteralRanges(content, index, ranges);
+        continue;
+      }
+
+      if (current === '"' || current === "'") {
         const quote = current;
         let stop = index + 1;
         while (stop < content.length) {
@@ -239,6 +247,84 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     return ranges;
+  }
+
+  private collectTemplateLiteralRanges(content: string, templateStart: number, ranges: Array<[number, number]>): number {
+    let index = templateStart + 1;
+    let segmentStart = templateStart;
+
+    while (index < content.length) {
+      if (content[index] === '\\') {
+        index += 2;
+        continue;
+      }
+
+      if (content[index] === '$' && content[index + 1] === '{') {
+        ranges.push([segmentStart, index]);
+        index = this.findTemplateInterpolationEnd(content, index + 2) + 1;
+        segmentStart = index;
+        continue;
+      }
+
+      if (content[index] === '`') {
+        ranges.push([segmentStart, index]);
+        return index + 1;
+      }
+
+      index += 1;
+    }
+
+    ranges.push([segmentStart, content.length - 1]);
+    return content.length;
+  }
+
+  private findTemplateInterpolationEnd(content: string, expressionStart: number): number {
+    let index = expressionStart;
+    let depth = 1;
+
+    while (index < content.length) {
+      const current = content[index];
+      if (current === '\\') {
+        index += 2;
+        continue;
+      }
+
+      if (current === '"' || current === "'" || current === '`') {
+        index = this.findQuotedRangeEnd(content, index);
+        continue;
+      }
+
+      if (current === '{') {
+        depth += 1;
+      } else if (current === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          return index;
+        }
+      }
+
+      index += 1;
+    }
+
+    return content.length - 1;
+  }
+
+  private findQuotedRangeEnd(content: string, quoteStart: number): number {
+    const quote = content[quoteStart];
+    let index = quoteStart + 1;
+
+    while (index < content.length) {
+      if (content[index] === '\\') {
+        index += 2;
+        continue;
+      }
+      if (content[index] === quote) {
+        return index + 1;
+      }
+      index += 1;
+    }
+
+    return content.length;
   }
 
   private startsRegexLiteral(content: string, slashIndex: number): boolean {
