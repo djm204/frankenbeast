@@ -140,7 +140,8 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ```
 
 - [ ] Keep the operator token server-side.
-  - Use the configured secret backend, or put `FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token>` in an uncommitted local env file.
+  - For same-repo dashboard setup, use the configured secret backend, or put `FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token>` in an uncommitted local env file read by the Frankenbeast repo processes.
+  - For MCP-mode dashboards that target another governed project with `--base-dir`, also provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` to the Vite process or Frankenbeast repo root `.env`; the Vite dev proxy resolves its token from the Frankenbeast checkout, not from the external governed project's secret store.
   - Do not set `VITE_BEAST_OPERATOR_TOKEN`; `VITE_*` values are exposed to browser bundles.
 - [ ] If the backend runs on a different port, keep browser calls same-origin through the Vite proxy with `VITE_API_PROXY_TARGET` and, for Beast routes, `VITE_BEAST_API_PROXY_TARGET` when needed.
 
