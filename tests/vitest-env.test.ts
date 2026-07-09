@@ -42,7 +42,8 @@ describe('Vitest environment flag helper', () => {
 
     expect(config).toContain("readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD'])");
     expect(config).toContain("normalizeRequestedPath");
-    expect(config).toContain("arg === 'tests/integration' || arg.startsWith('tests/integration/')");
+    expect(config).toContain("arg === 'tests/integration'");
+    expect(config).toContain("arg.startsWith('tests/integration/')");
     expect(config).toContain("'tests/sandbox-dockerfile.test.ts'");
     expect(config).toContain('runDockerBuild');
     expect(config).toContain("'tests/**/*.test.ts'");

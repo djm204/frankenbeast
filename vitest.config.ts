@@ -5,23 +5,27 @@ import { readVitestFlags } from './scripts/vitest-env.js';
 
 const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD']);
 const normalizeRequestedPath = (arg: string): string => {
-  const normalized = arg.replace(/\\/gu, '/');
+  const normalized = arg.replace(/:\d+(?::\d+)?$/u, '').replace(/\\/gu, '/');
   if (isAbsolute(normalized)) {
     return relative(process.cwd(), normalized).replace(/\\/gu, '/');
   }
   return normalized.replace(/^\.\//u, '');
 };
+const isRequestedTestPath = (arg: string): boolean => (
+  arg === 'tests/integration'
+  || arg.startsWith('tests/integration/')
+  || arg === 'tests/sandbox-dockerfile.test.ts'
+  || (arg.startsWith('tests/') && arg.endsWith('.test.ts'))
+);
 const requestedPaths = process.argv
   .slice(2)
   .filter((arg) => !arg.startsWith('-') && arg !== 'run')
-  .map(normalizeRequestedPath);
-const requestedIntegration = requestedPaths.some(
-  (arg) => arg === 'tests/integration' || arg.startsWith('tests/integration/'),
-);
-const requestedE2e = requestedPaths.some((arg) => /(^|[/.-])e2e([/.-]|$)/u.test(arg));
+  .map(normalizeRequestedPath)
+  .filter(isRequestedTestPath);
 const requestedDockerBuild = requestedPaths.some((arg) => arg === 'tests/sandbox-dockerfile.test.ts');
-const runIntegration = vitestFlags.INTEGRATION || requestedIntegration;
-const runE2e = vitestFlags.E2E || requestedE2e;
+const explicitPathRequest = requestedPaths.length > 0;
+const runIntegration = vitestFlags.INTEGRATION;
+const runE2e = vitestFlags.E2E;
 const runDockerBuild = vitestFlags.DOCKER_BUILD || requestedDockerBuild;
 
 export default defineConfig({
@@ -41,12 +45,12 @@ export default defineConfig({
     // INTEGRATION=true or an explicit tests/integration path opts into root integration tests.
     // E2E=true or an explicit e2e path opts into root end-to-end tests.
     // DOCKER_BUILD=true or the explicit sandbox Dockerfile test path opts into Docker builds.
-    include: runIntegration
+    include: runIntegration && !explicitPathRequest
       ? ['tests/integration/**/*.test.ts']
-      : runE2e
+      : runE2e && !explicitPathRequest
         ? ['tests/integration/**/*e2e*.test.ts']
         : ['tests/**/*.test.ts'],
-    exclude: runIntegration || runE2e
+    exclude: runIntegration || runE2e || explicitPathRequest
       ? ['**/node_modules/**', '**/dist/**']
       : [
           '**/node_modules/**',
