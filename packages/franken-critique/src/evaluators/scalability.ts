@@ -5,7 +5,7 @@ const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
 const NON_PORT_IDENTIFIER_EXCLUSIONS = String.raw`(?:[Dd]efault)?[Vv]iew_?[Pp]orts?\w*|(?:DEFAULT_)?VIEW_PORTS?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|view_?ports?|View_?Ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b|[Rr]eports?(?![Pp]ort)\w*|[Ii]mports?(?![Pp]ort)\w*|[Ee]xports?(?![Pp]ort)\w*|[Ii]mportant(?![Pp]ort)\w*|REPORT(?!_?PORT)\w*|IMPORT(?!_?PORT)\w*|EXPORT(?!_?PORT)\w*|IMPORTANT(?!_?PORT)\w*)|[Aa]irports?\w*|[Pp]assports?\w*|[Ss]ports?\w*`;
 const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:${NON_PORT_IDENTIFIER_EXCLUSIONS})(?![\w$]))\w*[Pp][Oo][Rr][Tt][Ss]?(?=$|[^a-z0-9_$]|[A-Z0-9_])\w*(?![\w$])`;
 const PORT_CONFIG_KEY_PATTERN = PORT_IDENTIFIER_PATTERN;
-const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[Vv][Ii][Ee][Ww][-.][Pp][Oo][Rr][Tt][Ss]?|[^"']*[-.][Vv][Ii][Ee][Ww][-.][Pp][Oo][Rr][Tt][Ss]?)[^"']*["'])(?:[A-Za-z0-9_]+[-.])*[Pp][Oo][Rr][Tt][Ss]?(?:[-.][A-Za-z0-9_]+)*["']`;
+const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[Vv][Ii][Ee][Ww][-.][Pp][Oo][Rr][Tt][Ss]?|[^"']*[-._][Vv][Ii][Ee][Ww][-.][Pp][Oo][Rr][Tt][Ss]?)[^"']*["'])(?:[A-Za-z0-9_]+[-.])*[Pp][Oo][Rr][Tt][Ss]?(?:[-.][A-Za-z0-9_]+)*["']`;
 const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
 const PORT_TYPE_ANNOTATION_PATTERN = String.raw`(?:\s*:\s*(?:[^=;,\n<>]+|[^=;\n<>]*<[^=;]*>[^=;\n]*))?`;
@@ -157,10 +157,13 @@ export class ScalabilityEvaluator implements Evaluator {
       if (this.isInTypeOnlyRange(ignoredRanges, containerStart)) {
         continue;
       }
-      if (/(?:^|[^a-z0-9])(?:[Tt]ransports|[Ss]upports)(?:$|[^a-z0-9]|[A-Z])/.test(normalizedContainerKey)) {
+      if (/(?:^|[^a-z0-9])(?:[Aa]irports?|[Cc]arports?|[Pp]assports?|[Ss]ports?)(?:$|[^a-z0-9]|[A-Z_])/.test(normalizedContainerKey)) {
         continue;
       }
-      if (!/(?:^|[^a-z0-9]|[a-z](?=[A-Z]))[Pp][Oo][Rr][Tt][Ss](?:$|[^a-z0-9]|[A-Z])/.test(normalizedContainerKey)) {
+      if (/(?:^|[^a-z0-9])(?:[Tt]ransports|[Ss]upports)(?![-._]?[Pp][Oo][Rr][Tt][Ss])(?:$|[^a-z0-9]|[A-Z])/.test(normalizedContainerKey)) {
+        continue;
+      }
+      if (!/[Pp][Oo][Rr][Tt][Ss](?:$|[^a-z0-9]|[A-Z])/.test(normalizedContainerKey)) {
         continue;
       }
       if (this.isInTypeOnlyRange(typeOnlyRanges, matchIndex) ||

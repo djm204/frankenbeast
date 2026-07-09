@@ -571,7 +571,7 @@ const port: Brand<
 
   it('covers follow-up Codex plural and markdown fence cases', async () => {
     const evaluator = new ScalabilityEvaluator();
-    const cleanResult = await evaluator.evaluate(createInput('const cfg = { transports_by_mode: { bus: 8080 }, supports_by_mode: { retries: 8443 }, carports_by_site: { count: 5000 } };'));
+    const cleanResult = await evaluator.evaluate(createInput('const cfg = { transports_by_mode: { bus: 8080 }, supports_by_mode: { retries: 8443 }, carports_by_site: { count: 5000 }, "server_view-port": 1024 };'));
 
     expect(cleanResult.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
 
@@ -580,7 +580,8 @@ const port: Brand<
 const markdownPort = 8080;
 \`\`\`
 const cfg = { ports_by_protocol: { https: 8443 }, server_ports_by_name: { admin: 9000 } };
-const serviceMaps = { transport_ports: { http: 8081 }, support_ports: { health: 8082 } };
+const serviceMaps = { transport_ports: { http: 8081 }, support_ports: { health: 8082 }, transports_ports: { http: 8083 }, supports_ports: { health: 8084 } };
+const lowercaseMaps = { serverports: { http: 8085 }, apiports: { grpc: 8086 } };
 const quoted = { "server-ports": 3000, "server.ports": 5000, "preview-ports": 6000 };
 config["server-ports"] = 7000;`;
     const result = await evaluator.evaluate(createInput(content));
@@ -595,6 +596,10 @@ config["server-ports"] = 7000;`;
       'Found hardcoded port number: 9000. Use environment variables or config.',
       'Found hardcoded port number: 8081. Use environment variables or config.',
       'Found hardcoded port number: 8082. Use environment variables or config.',
+      'Found hardcoded port number: 8083. Use environment variables or config.',
+      'Found hardcoded port number: 8084. Use environment variables or config.',
+      'Found hardcoded port number: 8085. Use environment variables or config.',
+      'Found hardcoded port number: 8086. Use environment variables or config.',
     ]);
   });
 
