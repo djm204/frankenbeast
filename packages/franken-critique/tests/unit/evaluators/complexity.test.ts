@@ -205,6 +205,36 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('does not let comparisons before later generic parameters hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(limit = n < max, map: Map<string, number>, a, b, c, d) { return map; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores declared functions returning object literal types', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `declare function external(a, b, c, d, e, f): { ok: boolean };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('counts parameters for wrapped async arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = (async (a, b, c, d, e, f) => { return a; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
   it('flags functions with too many top-level parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;

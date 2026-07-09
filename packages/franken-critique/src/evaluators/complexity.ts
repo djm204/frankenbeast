@@ -36,7 +36,13 @@ function extractParameterLists(content: string): string[] {
     requiresBody,
   } of PARAMETER_LIST_START_PATTERNS) {
     for (const match of content.matchAll(pattern)) {
-      const openParenIndex = (match.index ?? 0) + match[0].length - 1;
+      let openParenIndex = (match.index ?? 0) + match[0].length - 1;
+      if (requiresBody && hasDeclareBeforeMatch(content, match.index ?? 0)) {
+        continue;
+      }
+      if (requiresArrow) {
+        openParenIndex = findArrowParameterOpenParen(content, openParenIndex);
+      }
       const parameterList = readBalancedParenthesizedContent(
         content,
         openParenIndex,
@@ -57,6 +63,28 @@ function extractParameterLists(content: string): string[] {
   }
 
   return parameterLists;
+}
+
+function hasDeclareBeforeMatch(content: string, matchIndex: number): boolean {
+  return /\bdeclare\s*$/.test(content.slice(0, matchIndex));
+}
+
+function findArrowParameterOpenParen(
+  content: string,
+  openParenIndex: number,
+): number {
+  let index = openParenIndex + 1;
+  while (/\s/.test(content[index] ?? '')) index++;
+
+  if (content.slice(index, index + 5) === 'async') {
+    index += 5;
+    while (/\s/.test(content[index] ?? '')) index++;
+    if (content[index] === '(') {
+      return index;
+    }
+  }
+
+  return openParenIndex;
 }
 
 function readBalancedParenthesizedContent(
