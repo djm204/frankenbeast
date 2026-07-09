@@ -69,6 +69,19 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
     });
 
+    it('runs the deterministic root Vitest suite separately from Turbo', () => {
+      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
+      expect(content).toContain('npm run test:root');
+      expect(content).not.toMatch(/npm run test:root --/);
+      expect(content.indexOf('npm run test:root')).toBeLessThan(content.indexOf('npx turbo run test'));
+    });
+
+    it('documents the root-suite and package-Turbo CI split in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build and lint/);
+      expect(content).toMatch(/name:\s*Run package tests/);
+      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
+    });
+
     it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {
       expect(existsSync(WORKFLOW_LINT_PATH)).toBe(true);
       const workflowLint = readFileSync(WORKFLOW_LINT_PATH, 'utf-8');

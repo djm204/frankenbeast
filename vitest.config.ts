@@ -1,6 +1,17 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
 
+import { readVitestFlags } from './scripts/vitest-env.js';
+
+const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E']);
+const requestedPaths = process.argv
+  .slice(2)
+  .filter((arg) => !arg.startsWith('-') && arg !== 'run');
+const requestedIntegration = requestedPaths.some((arg) => arg.includes('tests/integration/'));
+const requestedE2e = requestedPaths.some((arg) => arg.includes('e2e'));
+const runIntegration = vitestFlags.INTEGRATION || requestedIntegration;
+const runE2e = vitestFlags.E2E || requestedE2e;
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -14,8 +25,17 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['tests/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**'],
+    // Default root CI suite: deterministic repository policy/config tests only.
+    // INTEGRATION=true or an explicit tests/integration path opts into root integration tests.
+    // E2E=true or an explicit e2e path opts into root end-to-end tests.
+    include: runIntegration
+      ? ['tests/integration/**/*.test.ts']
+      : runE2e
+        ? ['tests/integration/**/*e2e*.test.ts']
+        : ['tests/**/*.test.ts'],
+    exclude: runIntegration || runE2e
+      ? ['**/node_modules/**', '**/dist/**']
+      : ['**/node_modules/**', '**/dist/**', 'tests/integration/**/*.test.ts'],
     testTimeout: 15_000,
   },
 });

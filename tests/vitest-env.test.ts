@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { readVitestFlag, readVitestFlags } from '../scripts/vitest-env.js';
+
+const ROOT = resolve(import.meta.dirname, '..');
 
 describe('Vitest environment flag helper', () => {
   it('treats missing and explicit false-like values as disabled', () => {
@@ -31,5 +35,14 @@ describe('Vitest environment flag helper', () => {
     expect(readVitestFlags(['INTEGRATION'], { INTEGRATION: 'true', E2E: 'secret-token-value' })).toEqual({
       INTEGRATION: true,
     });
+  });
+
+  it('keeps root integration and e2e suites opt-in for the default root CI command', () => {
+    const config = readFileSync(resolve(ROOT, 'vitest.config.ts'), 'utf-8');
+
+    expect(config).toContain("readVitestFlags(['INTEGRATION', 'E2E'])");
+    expect(config).toContain("'tests/**/*.test.ts'");
+    expect(config).toContain("'tests/integration/**/*.test.ts'");
+    expect(config).toMatch(/exclude:[\s\S]*runIntegration \|\| runE2e[\s\S]*tests\/integration\/\*\*\/\*\.test\.ts/);
   });
 });
