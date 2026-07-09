@@ -34,7 +34,8 @@ export class PrometheusAdapter implements ExportAdapter {
   private tokenCounters = new Map<string, TokenCounts>()
   private spanCounters = new Map<string, number>()
   private costCounters = new Map<string, number>()
-  private flushedSpanIds = new Map<string, undefined>()
+  private flushedSpanIdsByTrace = new Map<string, Set<string>>()
+  private flushedSpanIdCount = 0
 
   constructor(options: PrometheusAdapterOptions = {}) {
     this.pricingTable = options.pricingTable
@@ -43,9 +44,11 @@ export class PrometheusAdapter implements ExportAdapter {
 
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'PrometheusAdapter')
+    const flushedSpanIds = this.flushedSpanIdsByTrace.get(trace.id)
+    const newlyFlushedSpanIds: string[] = []
+
     for (const span of trace.spans) {
-      const spanKey = `${trace.id}\u0000${span.id}`
-      if (this.flushedSpanIds.has(spanKey) || span.status === 'active') continue
+      if (flushedSpanIds?.has(span.id) || span.status === 'active') continue
 
       // Span status counter
       this.spanCounters.set(span.status, (this.spanCounters.get(span.status) ?? 0) + 1)
@@ -79,17 +82,51 @@ export class PrometheusAdapter implements ExportAdapter {
         }
       }
 
-      this.rememberFlushedSpan(spanKey)
+      newlyFlushedSpanIds.push(span.id)
     }
+
+    this.rememberFlushedSpans(trace.id, newlyFlushedSpanIds)
   }
 
-  private rememberFlushedSpan(spanKey: string): void {
-    if (this.maxDedupeSpans === 0) return
-    this.flushedSpanIds.set(spanKey, undefined)
-    while (this.flushedSpanIds.size > this.maxDedupeSpans) {
-      const oldest = this.flushedSpanIds.keys().next().value as string | undefined
-      if (oldest === undefined) break
-      this.flushedSpanIds.delete(oldest)
+  private rememberFlushedSpans(traceId: string, spanIds: string[]): void {
+    if (this.maxDedupeSpans === 0 || spanIds.length === 0) return
+
+    let flushedSpanIds = this.flushedSpanIdsByTrace.get(traceId)
+    if (flushedSpanIds === undefined) {
+      flushedSpanIds = new Set<string>()
+      this.flushedSpanIdsByTrace.set(traceId, flushedSpanIds)
+    }
+
+    for (const spanId of spanIds) {
+      if (flushedSpanIds.has(spanId)) continue
+      flushedSpanIds.add(spanId)
+      this.flushedSpanIdCount += 1
+    }
+
+    this.pruneFlushedSpans(traceId)
+  }
+
+  private pruneFlushedSpans(currentTraceId: string): void {
+    while (this.flushedSpanIdCount > this.maxDedupeSpans) {
+      const oldestTraceId = this.flushedSpanIdsByTrace.keys().next().value as string | undefined
+      if (oldestTraceId === undefined) break
+
+      // Keep the trace currently being flushed intact so a retry of a large
+      // trace does not evict the next span immediately before it is checked and
+      // double-count the trace. Older traces are pruned first; a single large
+      // trace may temporarily exceed the configured cap until another trace is
+      // flushed.
+      if (oldestTraceId === currentTraceId) {
+        if (this.flushedSpanIdsByTrace.size === 1) break
+        const current = this.flushedSpanIdsByTrace.get(oldestTraceId)
+        this.flushedSpanIdsByTrace.delete(oldestTraceId)
+        this.flushedSpanIdsByTrace.set(oldestTraceId, current ?? new Set<string>())
+        continue
+      }
+
+      const pruned = this.flushedSpanIdsByTrace.get(oldestTraceId)
+      this.flushedSpanIdCount -= pruned?.size ?? 0
+      this.flushedSpanIdsByTrace.delete(oldestTraceId)
     }
   }
 
@@ -140,7 +177,8 @@ export class PrometheusAdapter implements ExportAdapter {
     this.tokenCounters.clear()
     this.spanCounters.clear()
     this.costCounters.clear()
-    this.flushedSpanIds.clear()
+    this.flushedSpanIdsByTrace.clear()
+    this.flushedSpanIdCount = 0
   }
 
   async queryByTraceId(_traceId: string): Promise<Trace | null> {
