@@ -100,7 +100,7 @@ VITE_PROJECT_ID=my-project
 **Server side:** For local development, the orchestrator and Vite proxy both read `FRANKENBEAST_BEAST_OPERATOR_TOKEN` from server-side env files. The browser does not read this value.
 
 **Accepted headers** (server checks in order):
-- `Authorization: Bearer ***`
+- `Authorization: Bearer <token>`
 - `x-frankenbeast-operator-token: <token>`
 
 **Security notes:**
