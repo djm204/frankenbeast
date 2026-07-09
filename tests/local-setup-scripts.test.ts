@@ -167,7 +167,9 @@ describe('local setup scripts', () => {
     expect(readme).toContain('frankenbeast init --non-interactive');
     expect(readme).toContain('Chat, Dashboard, and Comms modules');
     expect(readme).toContain('export FRANKENBEAST_PASSPHRASE=<passphrase>');
+    expect(readme).toContain('frankenbeast run --config .fbeast/config.json');
     expect(readme).toContain('fails closed if setup is incomplete');
+    expect(readme).toContain('does not decrypt the secret vault');
     for (const frankenOverride of [
       'FRANKEN_MAX_TOTAL_TOKENS',
       'FRANKEN_MAX_DURATION_MS',

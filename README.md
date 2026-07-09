@@ -631,14 +631,14 @@ frankenbeast init --non-interactive       # safe only after config and init stat
 
 During the interactive wizard, expect prompts for the Chat, Dashboard, and Comms modules; the default provider; the `secure`/`insecure` network mode; optional Slack, Discord, Telegram, or WhatsApp credentials when Comms is enabled; and an operator token prompt that can be left blank to auto-generate a token. Sensitive values are stored in the selected secret backend and referenced from `.fbeast/config.json`; the raw operator token is printed once when auto-generated so you can copy it into a local server-side `.env` if you are not resolving it through the configured backend.
 
-For the default `local-encrypted` backend, init needs a passphrase. In a terminal run, enter it at the prompt; in CI or other headless verification paths, export only that variable before the command that needs to read the vault:
+For the default `local-encrypted` backend, interactive init needs a passphrase to create or update the encrypted vault. In CI or other headless runtime paths, export only that variable before commands that actually resolve stored secrets, such as a run or dashboard backend process:
 
 ```bash
 export FRANKENBEAST_PASSPHRASE=<passphrase>
-frankenbeast init --verify
+frankenbeast run --config .fbeast/config.json
 ```
 
-Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It verifies existing state and fails closed if setup is incomplete; it does not create a fresh vault or answer wizard prompts.
+Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It verifies existing state and fails closed if setup is incomplete; it does not create a fresh vault or answer wizard prompts. Likewise, `frankenbeast init --verify` validates init config and state files but does not decrypt the secret vault, so keep a runtime smoke check in CI when you need to prove secret resolution works.
 
 ### Non-interactive / CI usage
 
