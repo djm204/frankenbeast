@@ -2,7 +2,8 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z_]\w*)?|PORT(?:_\w*)?|(?!(?:[Vv]iew[Pp]ort)\w*)\w+Port(?:[A-Z]\w*)?|(?!(?:VIEW_PORT)\w*)\w+_PORT(?:_\w*)?|(?!(?:view_port)\w*)\w+_port(?:_\w*)?)`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z0-9_]\w*)?|PORT(?:_\w*)?|(?!(?:[Vv]iew[Pp]ort)\w*)\w+Port(?:[A-Z0-9]\w*)?|(?!(?:VIEW_PORT)\w*)\w+_PORT(?:_\w*)?|(?!(?:view_port)\w*)\w+_port(?:_\w*)?)`;
+const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
 const DECLARATION_PORT_SUGGESTION = 'Use process.env.PORT or a config object instead';
 const CONFIG_PORT_SUGGESTION = 'Move port to environment variable or external configuration';
 const HARDCODED_PORT_PATTERNS = [
@@ -15,7 +16,7 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[,{])\s*(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\])\s*:\s*(\d{2,5})\b`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\])\s*:\s*(\d{2,5})\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
@@ -128,6 +129,7 @@ export class ScalabilityEvaluator implements Evaluator {
     return /\b(?:type\s+\w+(?:<[^>{}]*>)?\s*=\s*|interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[\w$.,<>\s]+)?\s*|as\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
       /[(),]\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
+      /\)\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
       (typeAliasContext && /(?:=|&|\||<|,|\()\s*$/s.test(prefix));
   }
@@ -175,6 +177,13 @@ export class ScalabilityEvaluator implements Evaluator {
         continue;
       }
 
+      if (current === '/' && this.startsRegexLiteral(content, index)) {
+        const stop = this.findRegexLiteralEnd(content, index);
+        ranges.push([index, stop - 1]);
+        index = stop;
+        continue;
+      }
+
       if (current === '"' || current === "'" || current === '`') {
         const quote = current;
         let stop = index + 1;
@@ -198,5 +207,41 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     return ranges;
+  }
+
+  private startsRegexLiteral(content: string, slashIndex: number): boolean {
+    let previous = slashIndex - 1;
+    while (previous >= 0 && /\s/.test(content.charAt(previous))) {
+      previous -= 1;
+    }
+
+    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous));
+  }
+
+  private findRegexLiteralEnd(content: string, slashIndex: number): number {
+    let index = slashIndex + 1;
+    let inCharacterClass = false;
+
+    while (index < content.length) {
+      const current = content[index];
+      if (current === '\\') {
+        index += 2;
+        continue;
+      }
+      if (current === '[') {
+        inCharacterClass = true;
+      } else if (current === ']') {
+        inCharacterClass = false;
+      } else if (current === '/' && !inCharacterClass) {
+        index += 1;
+        while (index < content.length && /[a-z]/i.test(content.charAt(index))) {
+          index += 1;
+        }
+        return index;
+      }
+      index += 1;
+    }
+
+    return slashIndex + 1;
   }
 }
