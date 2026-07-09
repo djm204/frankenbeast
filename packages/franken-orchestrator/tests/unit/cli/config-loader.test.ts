@@ -17,6 +17,7 @@ describe('Config loader', () => {
     delete process.env['FRANKEN_MAX_TOTAL_TOKENS'];
     delete process.env['FRANKEN_ENABLE_HEARTBEAT'];
     delete process.env['FRANKEN_ENABLE_TRACING'];
+    delete process.env['FRANKEN_ENABLE_REFLECTION'];
     delete process.env['FRANKEN_MIN_CRITIQUE_SCORE'];
   });
 
@@ -128,10 +129,24 @@ describe('Config loader', () => {
     expect(config.network.secureBackend).toBe('1password');
   });
 
-  it('reads boolean env vars', async () => {
-    process.env['FRANKEN_ENABLE_HEARTBEAT'] = 'false';
+  it('reads strict boolean env vars with common true-like and false-like values', async () => {
+    process.env['FRANKEN_ENABLE_HEARTBEAT'] = '1';
+    process.env['FRANKEN_ENABLE_TRACING'] = 'TRUE';
+    process.env['FRANKEN_ENABLE_REFLECTION'] = 'off';
+
     const config = await loadConfig(makeArgs());
-    expect(config.enableHeartbeat).toBe(false);
+
+    expect(config.enableHeartbeat).toBe(true);
+    expect(config.enableTracing).toBe(true);
+    expect(config.enableReflection).toBe(false);
+  });
+
+  it('rejects invalid boolean env vars with a clear error', async () => {
+    process.env['FRANKEN_ENABLE_HEARTBEAT'] = 'definitely';
+
+    await expect(loadConfig(makeArgs())).rejects.toThrow(
+      'Invalid boolean value for FRANKEN_ENABLE_HEARTBEAT',
+    );
   });
 
   it('reads numeric env vars', async () => {
