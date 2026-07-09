@@ -243,10 +243,10 @@ describe('PlanGraph — fromTasks', () => {
     );
   });
 
-  it('throws when a task references an unknown dependency', () => {
+  it('throws TaskNotFoundError when a task references an unknown dependency', () => {
     const task = makeTask('a', { dependsOn: [createTaskId('missing')] });
 
-    expect(() => PlanGraph.fromTasks([task])).toThrow(/Dependency 'missing' not found/);
+    expect(() => PlanGraph.fromTasks([task])).toThrowError(TaskNotFoundError);
   });
 
   it('throws CyclicDependencyError when tasks form a cycle', () => {

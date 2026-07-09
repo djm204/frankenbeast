@@ -2,8 +2,12 @@ import { applyModifications } from './hitl/plan-modifier.js';
 import { PlanExporter } from './hitl/plan-exporter.js';
 import { buildCoTExecutor } from './cot/cot-gate.js';
 import {
+  CyclicDependencyError,
+  DuplicateTaskError,
   RationaleRejectedError,
   MaxRecoveryAttemptsError,
+  RecursionDepthExceededError,
+  TaskNotFoundError,
   UnknownErrorEscalatedError,
 } from './core/errors.js';
 import { createTaskId } from './core/types.js';
@@ -77,6 +81,9 @@ export class Planner {
         if (err instanceof RationaleRejectedError) {
           return { status: 'rationale_rejected', taskId: createTaskId(err.taskId) };
         }
+        if (Planner.isStrategyDomainError(err)) {
+          return Planner.toStrategyDomainFailure(err);
+        }
         throw err;
       }
 
@@ -104,6 +111,27 @@ export class Planner {
         throw recoveryErr;
       }
     }
+  }
+
+  private static readonly STRATEGY_DOMAIN_FAILURE_TASK_ID = createTaskId('planner-domain-error');
+
+  private static isStrategyDomainError(err: unknown): err is Error {
+    return (
+      err instanceof CyclicDependencyError ||
+      err instanceof DuplicateTaskError ||
+      err instanceof RecursionDepthExceededError ||
+      err instanceof TaskNotFoundError
+    );
+  }
+
+  private static toStrategyDomainFailure(error: Error): PlanResult {
+    const failedTaskId = Planner.STRATEGY_DOMAIN_FAILURE_TASK_ID;
+    return {
+      status: 'failed',
+      taskResults: [{ status: 'failure', taskId: failedTaskId, error }],
+      failedTaskId,
+      error,
+    };
   }
 
   /**
