@@ -18,10 +18,11 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\[[^\]]*?${PORT_NUMBER_PATTERN}\b`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\[[^\]]*?(?<![\w$])${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
+    skipTypeOnly: true,
   },
   {
     pattern: new RegExp(
@@ -161,10 +162,10 @@ export class ScalabilityEvaluator implements Evaluator {
 
     const beforeParen = prefix.slice(0, openParen);
     const beforeMatchInParams = prefix.slice(openParen + 1);
-    if (/[{["']/.test(beforeMatchInParams)) {
+    if (/[{[]/.test(beforeMatchInParams)) {
       return false;
     }
-    return /(?:\bfunction\b|=>\s*$|=\s*$|\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$|\b\w+\s*$)/s.test(beforeParen) && /\b\w+\s*:\s*[^,]+$/s.test(beforeMatchInParams);
+    return /(?:\bfunction\b|=>\s*$|=\s*$|\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$|\b\w+\s*$)/s.test(beforeParen) && /\b\w+\??\s*:\s*[^,]+$/s.test(beforeMatchInParams);
   }
 
   private isTupleElementLiteralType(content: string, matchIndex: number, portNumberIndex: number): boolean {
@@ -185,10 +186,6 @@ export class ScalabilityEvaluator implements Evaluator {
 
     const beforeBracket = prefix.slice(0, openBracket);
     const tuplePrefix = prefix.slice(openBracket + 1);
-    if (/[{(["']/.test(tuplePrefix)) {
-      return false;
-    }
-
     return /(?:\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$|:\s*$|\bas\s*$|\bsatisfies\s*$)/s.test(beforeBracket) && /\b\w+\s*:\s*[^,\]]+$/s.test(tuplePrefix);
   }
 
@@ -207,7 +204,7 @@ export class ScalabilityEvaluator implements Evaluator {
     const beforeBrace = prefix.slice(0, openBrace);
     const afterBrace = prefix.slice(openBrace + 1);
     const classFieldPattern = new RegExp(String.raw`(?:^|[;\n])\s*${PORT_IDENTIFIER_PATTERN}\s*:\s*$`, 's');
-    return /\bclass\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}]+?)?(?:\s+implements\s+[^{}]+?)?\s*$/.test(beforeBrace) && classFieldPattern.test(afterBrace);
+    return /\bclass(?:\s+\w+(?:<[^>{}]*>)?)?(?:\s+extends\s+[^{}]+?)?(?:\s+implements\s+[^{}]+?)?\s*$/.test(beforeBrace) && classFieldPattern.test(afterBrace);
   }
 
   private findTypeOnlyBraceRanges(content: string): Array<[number, number]> {
@@ -234,7 +231,7 @@ export class ScalabilityEvaluator implements Evaluator {
     const statementPrefix = prefix.slice(statementStart);
     const typeAliasContext = /^\s*type\s+\w+[\s\S]*=[^;{}]*$/s.test(statementPrefix);
     return /^\s*(?:(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*|(?:export\s+|declare\s+)*interface\s+\w+[\s\S]*)$/s.test(statementPrefix) ||
-      /(?:^|[;\n])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}\n]+)?\s*$/s.test(prefix) ||
+      /(?:^|[;\n{])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}]+)?\s*$/s.test(prefix) ||
       /\b(?:as\s*|satisfies\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:export\s+|declare\s+)*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
       /\(\s*\w+\??\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
@@ -249,7 +246,7 @@ export class ScalabilityEvaluator implements Evaluator {
 
   private isInTypeOnlySignature(content: string, matchIndex: number): boolean {
     const prefix = content.slice(Math.max(0, matchIndex - 200), matchIndex);
-    return /\btype\s+\w+(?:<[^>{}]*>)?\s*=[^;{}]*$/s.test(prefix);
+    return /\btype\s+\w+(?:<[^>{}]*>)?\s*=[^;\n{}]*$/s.test(prefix);
   }
 
   private maskCommentsAndStrings(content: string): string {

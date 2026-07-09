@@ -63,6 +63,7 @@ describe('ScalabilityEvaluator', () => {
     ['private class field initializer', 'class ServerConfig { #port = 8080; #serverPorts = 8443; }'],
     ['plural port declaration and property', 'const ports = 8080; const cfg = { serverPorts: 8443 };'],
     ['plural port container array', 'const cfg = { ports: [8080, 8443] };'],
+    ['plural port container after symbolic element', 'const cfg = { ports: [DEFAULT_PORT_8080, 8443] };'],
     ['numeric separator config literal', 'const cfg = { port: 8_080 };'],
     ['template interpolation assignment', 'const text = `${config.port = 8080}`;'],
     ['template interpolation object literal', 'const text = `${{ port: 8080 }}`;'],
@@ -96,6 +97,7 @@ layout.view_port_width = 1024;`;
     const evaluator = new ScalabilityEvaluator();
     const content = `type ServerConfig = { port: 8080 };
 type NestedConfig = { server: { port: 8080 } };
+type ArrayConfig = { ports: [8080, 8443] };
 interface ListenerConfig {
   port: 3000;
 }
@@ -109,12 +111,18 @@ interface MultilineListenerConfig
 {
   port: 3000;
 }
+interface WrappedExtendsConfig extends BaseConfig,
+  OtherConfig {
+  port: 3000;
+}
+declare global { interface AmbientNestedConfig { port: 3000 } }
 const cfg: { port: 8080 } = createCfg();
 export const exportedCfg: { port: 8080 } = createCfg();
 declare const declaredCfg: { port: 8080 };
 function bind(opts: { port: 8080 }) {}
 function bindLater(host: string, opts: { port: 8080 }) {}
 function bindOptional(host: string, opts?: { port: 8080 }) {}
+function bindLiteral(protocol: 'http', port: 8080) {}
 const castCfg = {} as { port: 8080 };
 function getConfig(): { port: 8080 } {
   return createCfg();
@@ -144,6 +152,7 @@ function bindHost(host: string, port: 8080) {}
 type BindHost = (host: string, port: 8080) => void;
 class Server { bind(host: string, port: 8080) {} }
 const tupleArgs: [host: string, port: 8080] = value;
+const tupleLiteralArgs: [protocol: 'http', port: 8080] = value;
 const inlineUnion: Base | { port: 8080 } = makeCfg();
 const inlineIntersection = {} as Base & { port: 8080 };
 type ComplexConfig<T extends Record<string, unknown>> = { port: 8080 };
@@ -155,6 +164,9 @@ class GenericPortConfig<T> {
   port: 8080;
 }
 class ExtendedGenericPortConfig extends Base<Foo> {
+  port: 8080;
+}
+const AnonymousPortConfig = class {
   port: 8080;
 }
 class SemicolonlessPortConfig {
@@ -173,6 +185,15 @@ let listenerPort: number, retryTimeout = 5000;`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('does not let semicolonless type aliases hide later runtime config ports', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `type Listener = string
+const cfg = { port: 8080 };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(true);
   });
 
   it('does not treat TypeScript parameter literal types as hardcoded runtime ports', async () => {
