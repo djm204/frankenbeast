@@ -164,4 +164,24 @@ describe('local setup scripts', () => {
       expect(readme).toContain(frankenOverride);
     }
   });
+
+  it('keeps the CLI Beast guide aligned with supported Beast activation providers', () => {
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
+
+    expect(runCliBeastGuide).not.toContain('OLLAMA_BASE_URL');
+    expect(runCliBeastGuide).not.toMatch(/local\s+Ollama/i);
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
+    expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
+
+    const providersMatch = beastModeSource.match(/SUPPORTED_BEAST_PROVIDERS = new Set\(\[([^\]]+)\]\)/);
+    expect(providersMatch).not.toBeNull();
+    const supportedProviders = providersMatch?.[1] ?? '';
+    for (const provider of ['anthropic-api', 'codex-cli', 'claude-cli']) {
+      expect(supportedProviders).toContain(provider);
+      expect(runCliBeastGuide).toContain(`--provider=${provider}`);
+    }
+    expect(supportedProviders).not.toContain('ollama');
+  });
 });
