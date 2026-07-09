@@ -73,6 +73,36 @@ describe('PrometheusAdapter', () => {
       )
     })
 
+    it('does not count the same trace span twice when a trace is flushed repeatedly', async () => {
+      const adapter = new PrometheusAdapter()
+      const trace = makeTrace('claude-sonnet-4-6', 100, 50)
+      await adapter.flush(trace)
+      await adapter.flush(trace)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+100/,
+      )
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="completion"\}\s+50/,
+      )
+    })
+
+    it('bounds repeated-flush dedupe memory with a recent-span cap', async () => {
+      const adapter = new PrometheusAdapter({ maxDedupeSpans: 1 })
+      const first = makeTrace('claude-sonnet-4-6', 100, 0)
+      const second = makeTrace('claude-sonnet-4-6', 200, 0)
+
+      await adapter.flush(first)
+      await adapter.flush(second)
+      await adapter.flush(second)
+
+      const out = adapter.scrape()
+      expect(out).toMatch(
+        /franken_observer_tokens_total\{model="claude-sonnet-4-6",type="prompt"\}\s+300/,
+      )
+    })
+
     it('tracks multiple models independently', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTrace('claude-sonnet-4-6', 100, 50))
@@ -111,6 +141,16 @@ describe('PrometheusAdapter', () => {
     it('counts completed spans', async () => {
       const adapter = new PrometheusAdapter()
       await adapter.flush(makeTrace())
+      const out = adapter.scrape()
+      expect(out).toMatch(/franken_observer_spans_total\{status="completed"\}\s+1/)
+    })
+
+    it('does not double-count spans when the same trace is flushed repeatedly', async () => {
+      const adapter = new PrometheusAdapter()
+      const trace = makeTrace()
+      await adapter.flush(trace)
+      await adapter.flush(trace)
+      await adapter.flush(trace)
       const out = adapter.scrape()
       expect(out).toMatch(/franken_observer_spans_total\{status="completed"\}\s+1/)
     })

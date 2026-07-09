@@ -6,6 +6,8 @@ import type { PricingTable } from '../../cost/defaultPricing.js'
 export interface PrometheusAdapterOptions {
   /** Optional pricing table for cost metrics. If absent, cost lines are omitted. */
   pricingTable?: PricingTable
+  /** Maximum recent span ids retained to make repeated trace flushes idempotent. */
+  maxDedupeSpans?: number
 }
 
 interface TokenCounts {
@@ -28,17 +30,23 @@ function escapePrometheusLabelValue(value: string): string {
  */
 export class PrometheusAdapter implements ExportAdapter {
   private readonly pricingTable: PricingTable | undefined
+  private readonly maxDedupeSpans: number
   private tokenCounters = new Map<string, TokenCounts>()
   private spanCounters = new Map<string, number>()
   private costCounters = new Map<string, number>()
+  private flushedSpanIds = new Map<string, undefined>()
 
   constructor(options: PrometheusAdapterOptions = {}) {
     this.pricingTable = options.pricingTable
+    this.maxDedupeSpans = Math.max(0, Math.floor(options.maxDedupeSpans ?? 10_000))
   }
 
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'PrometheusAdapter')
     for (const span of trace.spans) {
+      const spanKey = `${trace.id}\u0000${span.id}`
+      if (this.flushedSpanIds.has(spanKey) || span.status === 'active') continue
+
       // Span status counter
       this.spanCounters.set(span.status, (this.spanCounters.get(span.status) ?? 0) + 1)
 
@@ -70,6 +78,18 @@ export class PrometheusAdapter implements ExportAdapter {
           this.costCounters.set(model, (this.costCounters.get(model) ?? 0) + cost)
         }
       }
+
+      this.rememberFlushedSpan(spanKey)
+    }
+  }
+
+  private rememberFlushedSpan(spanKey: string): void {
+    if (this.maxDedupeSpans === 0) return
+    this.flushedSpanIds.set(spanKey, undefined)
+    while (this.flushedSpanIds.size > this.maxDedupeSpans) {
+      const oldest = this.flushedSpanIds.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      this.flushedSpanIds.delete(oldest)
     }
   }
 
@@ -120,6 +140,7 @@ export class PrometheusAdapter implements ExportAdapter {
     this.tokenCounters.clear()
     this.spanCounters.clear()
     this.costCounters.clear()
+    this.flushedSpanIds.clear()
   }
 
   async queryByTraceId(_traceId: string): Promise<Trace | null> {
