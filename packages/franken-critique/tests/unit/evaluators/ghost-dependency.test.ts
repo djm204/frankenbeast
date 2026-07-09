@@ -168,12 +168,32 @@ describe('GhostDependencyEvaluator', () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `
       type Ghost = import('ghost-package').Ghost;
+      type GhostModule = typeof import('ghost-package');
       const plugin = loader.import('unknown-lib');
+      this.#import('private-loader');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('pass');
     expect(result.findings).toHaveLength(0);
+  });
+
+  it('detects dynamic imports used as object values and nested option expressions', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `
+      const loaders = { plugin: import('ghost-package') };
+      await import('zod', { with: makeOptions(require('unknown-lib')) });
+    `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.map((finding) => finding.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('ghost-package'),
+        expect.stringContaining('unknown-lib'),
+      ]),
+    );
   });
 
   it('ignores object-literal import keys', async () => {

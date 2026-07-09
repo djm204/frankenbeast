@@ -226,7 +226,6 @@ function readDynamicImportSpecifier(
   let i = skipImportTrivia(content, index);
   if (content[i] !== '(') return null;
 
-  const openParenIndex = i;
   i = skipImportTrivia(content, i + 1);
 
   const specifier =
@@ -242,10 +241,7 @@ function readDynamicImportSpecifier(
     return null;
   }
 
-  const closeParenIndex = findClosingParen(content, openParenIndex);
-  if (closeParenIndex === null) return null;
-
-  return { value: specifier.value, endIndex: closeParenIndex };
+  return specifier;
 }
 
 function canStartNativeDynamicImport(
@@ -253,7 +249,7 @@ function canStartNativeDynamicImport(
   importIndex: number,
 ): boolean {
   const previous = previousNonWhitespace(content, importIndex - 1);
-  if (previous === '.') return false;
+  if (previous === '.' || previous === '#') return false;
 
   const statementStart = Math.max(
     content.lastIndexOf(';', importIndex - 1),
@@ -262,48 +258,14 @@ function canStartNativeDynamicImport(
     content.lastIndexOf('}', importIndex - 1),
   );
   const prefix = content.slice(statementStart + 1, importIndex);
+  const startsAfterObjectBrace = content[statementStart] === '{';
 
   return !(
     /\btype\s+[A-Za-z_$][\w$]*(?:\s*<[^;>{}]*>)?\s*=\s*$/.test(prefix) ||
-    /:\s*$/.test(prefix) ||
+    /\btypeof\s*$/.test(prefix) ||
+    (!startsAfterObjectBrace && /:\s*$/.test(prefix)) ||
     /\b(?:interface|type)\b[^;{}]*\bextends\s*$/.test(prefix)
   );
-}
-
-function findClosingParen(content: string, openParenIndex: number): number | null {
-  let depth = 1;
-
-  for (let i = openParenIndex + 1; i < content.length; i++) {
-    const ch = content[i]!;
-    const next = content[i + 1];
-
-    if (ch === '/' && next === '/') {
-      i = skipSingleLineComment(content, i + 2);
-      continue;
-    }
-
-    if (ch === '/' && next === '*') {
-      i = skipMultiLineComment(content, i + 2);
-      continue;
-    }
-
-    if (QUOTE_CHARS.has(ch)) {
-      i = skipStringLiteral(content, i);
-      continue;
-    }
-
-    if (ch === '(') {
-      depth += 1;
-      continue;
-    }
-
-    if (ch === ')') {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-
-  return null;
 }
 
 function readRequireSpecifier(
