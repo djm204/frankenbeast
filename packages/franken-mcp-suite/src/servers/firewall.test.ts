@@ -48,9 +48,18 @@ describe('Firewall Server', () => {
     expect(fileResult.content[0]!.text).toContain('clean');
   });
 
-  it('expands Claude project placeholders in explicit firewall config paths', () => {
+  it('expands project placeholders in explicit firewall config paths', () => {
     expect(resolveFirewallConfigPath('${CLAUDE_PROJECT_DIR}/.fbeast/config.json', '/project-a')).toBe(
       join('/project-a', '.fbeast', 'config.json'),
+    );
+    expect(resolveFirewallConfigPath('$FBEAST_ROOT/.fbeast/config.json', '/project-a')).toBe(
+      join('/project-a', '.fbeast', 'config.json'),
+    );
+  });
+
+  it('preserves explicit relative config paths containing nested .fbeast dirs', () => {
+    expect(resolveFirewallConfigPath('nested/.fbeast/config.json', '/project-a')).toBe(
+      join('/project-a', 'nested', '.fbeast', 'config.json'),
     );
   });
 

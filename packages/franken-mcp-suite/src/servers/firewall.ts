@@ -6,6 +6,7 @@ import { isMain } from '../shared/is-main.js';
 import { createFirewallAdapter, type FirewallAdapter } from '../adapters/firewall-adapter.js';
 import { parseArgs } from 'node:util';
 import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
+import { isAbsolute, resolve } from 'node:path';
 
 export interface FirewallServerDeps {
   firewall: FirewallAdapter;
@@ -17,7 +18,19 @@ export function createFirewallServer(deps: FirewallServerDeps, options: CreateMc
 }
 
 export function resolveFirewallConfigPath(configPath: string | undefined, root: string): string | undefined {
-  return configPath ? resolveProjectDbPath(configPath, root) : undefined;
+  if (!configPath) return undefined;
+  const expandedConfigPath = expandProjectRootPlaceholder(configPath, root);
+  return isAbsolute(expandedConfigPath) ? expandedConfigPath : resolve(root, expandedConfigPath);
+}
+
+function expandProjectRootPlaceholder(configPath: string, root: string): string {
+  return configPath
+    .replace(/^\$\{CLAUDE_PROJECT_DIR}(?=\/|$)/, root)
+    .replace(/^\$CLAUDE_PROJECT_DIR(?=\/|$)/, root)
+    .replace(/^\$\{GEMINI_PROJECT_ROOT}(?=\/|$)/, root)
+    .replace(/^\$GEMINI_PROJECT_ROOT(?=\/|$)/, root)
+    .replace(/^\$\{FBEAST_ROOT}(?=\/|$)/, root)
+    .replace(/^\$FBEAST_ROOT(?=\/|$)/, root);
 }
 
 if (isMain(import.meta.url)) {
