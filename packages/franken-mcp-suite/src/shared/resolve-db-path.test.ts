@@ -34,4 +34,45 @@ describe('resolveProjectDbPath', () => {
       join('/project-a', '.fbeast', 'beast.db'),
     );
   });
+
+  it('keeps absolute database paths independent of ambient project env roots', () => {
+    process.env['CLAUDE_PROJECT_DIR'] = '/stale-project';
+    delete process.env['GEMINI_PROJECT_ROOT'];
+    delete process.env['FBEAST_ROOT'];
+
+    expect(resolveProjectDbPath('/project-a/.fbeast/beast.db')).toBe('/project-a/.fbeast/beast.db');
+  });
+
+  it('expands each project-root placeholder from its matching env var', () => {
+    process.env['CLAUDE_PROJECT_DIR'] = '/claude-project';
+    process.env['GEMINI_PROJECT_ROOT'] = '/gemini-project';
+    process.env['FBEAST_ROOT'] = '/fbeast-project';
+
+    expect(resolveProjectDbPath('${GEMINI_PROJECT_ROOT}/.fbeast/beast.db')).toBe(
+      join('/gemini-project', '.fbeast', 'beast.db'),
+    );
+    expect(resolveProjectDbPath('$FBEAST_ROOT/.fbeast/beast.db')).toBe(
+      join('/fbeast-project', '.fbeast', 'beast.db'),
+    );
+  });
+
+  it('lets an explicit root override placeholder expansion', () => {
+    process.env['CLAUDE_PROJECT_DIR'] = '/stale-project';
+    delete process.env['GEMINI_PROJECT_ROOT'];
+    delete process.env['FBEAST_ROOT'];
+
+    expect(resolveProjectDbPath('${CLAUDE_PROJECT_DIR}/.fbeast/beast.db', '/intended-project')).toBe(
+      join('/intended-project', '.fbeast', 'beast.db'),
+    );
+  });
+
+  it('inserts env root values literally while expanding placeholders', () => {
+    process.env['CLAUDE_PROJECT_DIR'] = '/project-$&-literal';
+    delete process.env['GEMINI_PROJECT_ROOT'];
+    delete process.env['FBEAST_ROOT'];
+
+    expect(resolveProjectDbPath('${CLAUDE_PROJECT_DIR}/.fbeast/beast.db')).toBe(
+      join('/project-$&-literal', '.fbeast', 'beast.db'),
+    );
+  });
 });
