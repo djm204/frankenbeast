@@ -2,7 +2,7 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z_]\w*)?|PORT(?:_\w*)?|(?!(?:[Vv]iew[Pp]ort)\w*)\w+Port(?:[A-Z]\w*)?|\w+_PORT(?:_\w*)?|\w+_port(?:_\w*)?)`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?:[Pp]ort(?:[A-Z_]\w*)?|PORT(?:_\w*)?|(?!(?:[Vv]iew[Pp]ort)\w*)\w+Port(?:[A-Z]\w*)?|(?!(?:VIEW_PORT)\w*)\w+_PORT(?:_\w*)?|(?!(?:view_port)\w*)\w+_port(?:_\w*)?)`;
 const DECLARATION_PORT_SUGGESTION = 'Use process.env.PORT or a config object instead';
 const CONFIG_PORT_SUGGESTION = 'Move port to environment variable or external configuration';
 const HARDCODED_PORT_PATTERNS = [
@@ -14,7 +14,10 @@ const HARDCODED_PORT_PATTERNS = [
     suggestion: DECLARATION_PORT_SUGGESTION,
   },
   {
-    pattern: new RegExp(String.raw`(?:^|[,{])\s*["']?${PORT_IDENTIFIER_PATTERN}["']?\s*:\s*(\d{2,5})\b`, 'g'),
+    pattern: new RegExp(
+      String.raw`(?:^|[,{])\s*(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\])\s*:\s*(\d{2,5})\b`,
+      'g',
+    ),
     suggestion: CONFIG_PORT_SUGGESTION,
     skipTypeOnly: true,
   },
@@ -84,7 +87,7 @@ export class ScalabilityEvaluator implements Evaluator {
           continue;
         }
 
-        if (skipTypeOnly && this.isInTypeOnlyRange(typeOnlyRanges, match.index)) {
+        if (skipTypeOnly && (this.isInTypeOnlyRange(typeOnlyRanges, match.index) || this.isInTypeOnlySignature(scanContent, match.index))) {
           continue;
         }
 
@@ -121,12 +124,17 @@ export class ScalabilityEvaluator implements Evaluator {
 
   private startsTypeOnlyBrace(content: string, openBraceIndex: number): boolean {
     const prefix = content.slice(Math.max(0, openBraceIndex - 200), openBraceIndex);
-    const typeAliasContext = /\btype\s+\w+\s*=[^;{}]*$/s.test(prefix);
-    return /\b(?:type\s+\w+\s*=\s*|interface\s+\w+\s*|as\s*)$/s.test(prefix) ||
+    const typeAliasContext = /\btype\s+\w+(?:<[^>{}]*>)?\s*=[^;{}]*$/s.test(prefix);
+    return /\b(?:type\s+\w+(?:<[^>{}]*>)?\s*=\s*|interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[\w$.,<>\s]+)?\s*|as\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
       /[(),]\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
       (typeAliasContext && /(?:=|&|\||<|,|\()\s*$/s.test(prefix));
+  }
+
+  private isInTypeOnlySignature(content: string, matchIndex: number): boolean {
+    const prefix = content.slice(Math.max(0, matchIndex - 200), matchIndex);
+    return /\btype\s+\w+(?:<[^>{}]*>)?\s*=[^;{}]*$/s.test(prefix);
   }
 
   private maskCommentsAndStrings(content: string): string {

@@ -50,6 +50,7 @@ describe('ScalabilityEvaluator', () => {
     ['prefixed port-default declaration', 'const apiPortDefault = 8080;'],
     ['preview port declaration', 'const previewPort = 8080;'],
     ['bracket notation assignment', 'config["serverPort"] = 8080;'],
+    ['computed literal object key', 'const cfg = { ["serverPort"]: 8080 };'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput(content));
@@ -59,8 +60,10 @@ describe('ScalabilityEvaluator', () => {
 
   it('does not treat non-port config keys containing port as port literals', async () => {
     const evaluator = new ScalabilityEvaluator();
-    const content = `const cfg = { transport: 443, viewport: 1024, viewPortWidth: 1024, support: 1000, portalId: 1234, portfolio: 1000, support_portal: 8080 };
-layout.viewPortWidth = 1024;`;
+    const content = `const cfg = { transport: 443, viewport: 1024, viewPortWidth: 1024, view_port: 1024, support: 1000, portalId: 1234, portfolio: 1000, support_portal: 8080 };
+const VIEW_PORT_WIDTH = 1024;
+layout.viewPortWidth = 1024;
+layout.view_port_width = 1024;`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
@@ -78,6 +81,13 @@ function bind(opts: { port: 8080 }) {}
 const castCfg = {} as { port: 8080 };
 type IntersectConfig = BaseConfig & { port: 8080 };
 type ReadonlyConfig = Readonly<{ port: 8080 }>;
+type GenericConfig<T> = { port: 8080 };
+interface GenericListenerConfig<T> {
+  port: 3000;
+}
+interface ExtendedListenerConfig extends BaseConfig {
+  port: 3000;
+}
 function bindReadonly(opts: Readonly<{ port: 8080 }>) {}`;
     const result = await evaluator.evaluate(createInput(content));
 
@@ -96,7 +106,9 @@ let listenerPort: number, retryTimeout = 5000;`;
 
   it('does not treat TypeScript parameter literal types as hardcoded runtime ports', async () => {
     const evaluator = new ScalabilityEvaluator();
-    const result = await evaluator.evaluate(createInput('function bind(port: 8080) {}'));
+    const content = `function bind(port: 8080) {}
+type Bind = (host: string, port: 8080) => void;`;
+    const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
   });
