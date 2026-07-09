@@ -158,12 +158,14 @@ export class SessionTokenStore {
 
     mkdirSync(dirname(this.persistenceFile), { recursive: true, mode: 0o700 });
     const lockPath = `${this.persistenceFile}.lock`;
+    const lockToken = `${process.pid}:${Date.now()}:${Math.random()}`;
     const deadline = Date.now() + LOCK_TIMEOUT_MS;
     let lockFd: number | undefined;
 
     while (lockFd === undefined) {
       try {
         lockFd = openSync(lockPath, 'wx', 0o600);
+        writeFileSync(lockFd, lockToken);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'EEXIST' && this.reclaimStaleLock(lockPath)) {
@@ -180,19 +182,27 @@ export class SessionTokenStore {
       return operation();
     } finally {
       closeSync(lockFd);
-      try {
+      this.releaseFileLock(lockPath, lockToken);
+    }
+  }
+
+  private releaseFileLock(lockPath: string, lockToken: string): void {
+    try {
+      if (readFileSync(lockPath, 'utf8') === lockToken) {
         unlinkSync(lockPath);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT') throw err;
       }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw err;
     }
   }
 
   private reclaimStaleLock(lockPath: string): boolean {
     try {
+      const observedToken = readFileSync(lockPath, 'utf8');
       const lockAgeMs = Date.now() - statSync(lockPath).mtimeMs;
       if (lockAgeMs < LOCK_STALE_MS) return false;
+      if (readFileSync(lockPath, 'utf8') !== observedToken) return false;
       unlinkSync(lockPath);
       return true;
     } catch (err) {
