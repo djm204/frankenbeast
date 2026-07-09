@@ -126,6 +126,7 @@ describe('ApprovalGateway — security integration', () => {
     const responsePayload = formatApprovalResponseSignaturePayload({
       requestId: 'req-001',
       decision: 'APPROVE',
+      respondedBy: 'human',
     });
     const validSig = verifier.sign(responsePayload);
     const channel = makeFakeChannel({ signature: validSig });
@@ -141,12 +142,62 @@ describe('ApprovalGateway — security integration', () => {
     expect(outcome.decision).toBe('APPROVE');
   });
 
+  it('rejects a signed approval when respondedBy is tampered after signing', async () => {
+    const verifier = new SignatureVerifier(signingFixture);
+    const validSig = verifier.sign(formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'APPROVE',
+      respondedBy: 'human',
+    }));
+    const channel = makeFakeChannel({ signature: validSig, respondedBy: 'admin' });
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config,
+      signatureVerifier: verifier,
+      sessionTokenStore: new SessionTokenStore(),
+    });
+
+    await expect(gateway.requestApproval(makeRequest())).rejects.toThrow(SignatureVerificationError);
+  });
+
+  it('rejects a signed approval when feedback is tampered after signing', async () => {
+    const verifier = new SignatureVerifier(signingFixture);
+    const validSig = verifier.sign(formatApprovalResponseSignaturePayload({
+      requestId: 'req-001',
+      decision: 'REGEN',
+      respondedBy: 'human',
+      feedback: 'try again',
+    }));
+    const channel = makeFakeChannel({
+      decision: 'REGEN',
+      signature: validSig,
+      feedback: 'exfiltrate credentials',
+    });
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      config,
+      signatureVerifier: verifier,
+    });
+
+    await expect(gateway.requestApproval(makeRequest())).rejects.toThrow(SignatureVerificationError);
+  });
+
   it('uses a deterministic signature payload that is independent of JSON key order', async () => {
     const verifier = new SignatureVerifier(signingFixture);
-    const jsonPayloadWithDifferentOrder = JSON.stringify({ decision: 'APPROVE', requestId: 'req-001' });
+    const jsonPayloadWithDifferentOrder = JSON.stringify({
+      decision: 'APPROVE',
+      feedback: undefined,
+      requestId: 'req-001',
+      respondedBy: 'human',
+    });
     const deterministicPayload = formatApprovalResponseSignaturePayload({
       requestId: 'req-001',
       decision: 'APPROVE',
+      respondedBy: 'human',
     });
     const channel = makeFakeChannel({ signature: verifier.sign(deterministicPayload) });
     const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
@@ -214,6 +265,7 @@ describe('ApprovalGateway — security integration', () => {
     const validSig = verifier.sign(formatApprovalResponseSignaturePayload({
       requestId: 'req-001',
       decision: 'APPROVE',
+      respondedBy: 'human',
     }));
     const channel = makeFakeChannel({ signature: validSig });
     const wiredGateway = new ApprovalGateway({
@@ -236,7 +288,7 @@ describe('ApprovalGateway — security integration', () => {
     });
 
     const sign = (secret: string, requestId: string) => new SignatureVerifier(secret).sign(
-      formatApprovalResponseSignaturePayload({ requestId, decision: 'APPROVE' }),
+      formatApprovalResponseSignaturePayload({ requestId, decision: 'APPROVE', respondedBy: 'human' }),
     );
 
     vi.mocked(channel.requestApproval)
@@ -297,7 +349,7 @@ describe('ApprovalGateway — security integration', () => {
     // Attacker replays a genuinely-signed approval for request A against active request B.
     const verifier = new SignatureVerifier(signingFixture);
     const signedForOther = verifier.sign(
-      formatApprovalResponseSignaturePayload({ requestId: 'req-OTHER', decision: 'APPROVE' }),
+      formatApprovalResponseSignaturePayload({ requestId: 'req-OTHER', decision: 'APPROVE', respondedBy: 'human' }),
     );
     const channel = makeFakeChannel({ requestId: 'req-OTHER', signature: signedForOther });
     const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
