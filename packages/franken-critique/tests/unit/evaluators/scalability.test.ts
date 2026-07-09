@@ -60,6 +60,9 @@ describe('ScalabilityEvaluator', () => {
     ['template interpolation assignment', 'const text = `${config.port = 8080}`;'],
     ['template interpolation object literal', 'const text = `${{ port: 8080 }}`;'],
     ['template interpolation with comment brace', 'const text = `${/* } */ { port: 8080 }}`;'],
+    ['runtime config after type declaration', 'interface Listener { host: string }\nconst cfg = { port: 8080 };'],
+    ['parenthesized runtime config', 'const cfg = ({ host: "x", port: 8080, secure: true });'],
+    ['nested runtime config object', 'const cfg = { host: "x", server: { port: 8080 } };'],
   ])('flags hardcoded port numbers in %s', async (_name, content) => {
     const evaluator = new ScalabilityEvaluator();
     const result = await evaluator.evaluate(createInput(content));
@@ -165,6 +168,7 @@ const nestedTemplateString = \`\${"{ port: 8080 }"}\`;
 const nestedTemplateComment = \`\${/* { port: 8080 } */ value}\`;
 if (enabled) /{ port: 8080 }/.test(input);
 while (enabled) /{ port: 8080 }/.test(input);
+await /{ port: 8080 }/.test(input);
 log('debug', "port: 8080");`;
     const result = await evaluator.evaluate(createInput(content));
 

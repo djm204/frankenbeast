@@ -143,6 +143,9 @@ export class ScalabilityEvaluator implements Evaluator {
 
     const beforeParen = prefix.slice(0, openParen);
     const beforeMatchInParams = prefix.slice(openParen + 1);
+    if (/[{["']/.test(beforeMatchInParams)) {
+      return false;
+    }
     return /(?:\bfunction\b|=>\s*$|=\s*$|\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$)/s.test(beforeParen) && /\b\w+\s*:\s*[^,]+$/s.test(beforeMatchInParams);
   }
 
@@ -184,10 +187,13 @@ export class ScalabilityEvaluator implements Evaluator {
 
   private startsTypeOnlyBrace(content: string, openBraceIndex: number): boolean {
     const prefix = content.slice(Math.max(0, openBraceIndex - 200), openBraceIndex);
-    const typeAliasContext = /(?:^|[\n;])\s*type\s+\w+[\s\S]*=[^;{}]*$/s.test(prefix);
-    return /\b(?:type\s+\w+[\s\S]*=\s*|interface\s+\w+[\s\S]*|as\s*|satisfies\s*)$/s.test(prefix) ||
+    const statementStart = Math.max(prefix.lastIndexOf(';'), prefix.lastIndexOf('\n')) + 1;
+    const statementPrefix = prefix.slice(statementStart);
+    const typeAliasContext = /^\s*type\s+\w+[\s\S]*=[^;{}]*$/s.test(statementPrefix);
+    return /^\s*(?:type\s+\w+[\s\S]*=\s*|interface\s+\w+[\s\S]*)$/s.test(statementPrefix) ||
+      /\b(?:as\s*|satisfies\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
-      /[(),]\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
+      /\(\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\)\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
       /(?:<|\bextends)\s*$/s.test(prefix) ||
@@ -376,7 +382,7 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     const prefix = content.slice(Math.max(0, slashIndex - 40), slashIndex);
-    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:case|return|throw|yield)\s*$|=>\s*$/.test(prefix) || /\b(?:if|while|for|with)\s*\([^)]*\)\s*$/.test(prefix);
+    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:await|case|return|throw|yield|delete|typeof|void)\s*$|=>\s*$/.test(prefix) || /\b(?:if|while|for|with)\s*\([^)]*\)\s*$/.test(prefix);
   }
 
   private findRegexLiteralEnd(content: string, slashIndex: number): number {
