@@ -86,6 +86,9 @@ class ChatSocketMessageRateLimiter {
   constructor(private readonly options: ChatSocketMessageRateLimitOptions) {}
 
   take(key: string): { allowed: boolean; remaining: number } {
+    if (this.options.max <= 0) {
+      return { allowed: false, remaining: 0 };
+    }
     const now = Date.now();
     this.pruneExpired(now);
     const current = this.counters.get(key);
@@ -172,7 +175,7 @@ export class ChatSocketController {
   constructor(options: ChatSocketControllerOptions) {
     this.allowedOrigins = options.allowedOrigins ?? [];
     this.messageRateLimiter = new ChatSocketMessageRateLimiter(
-      options.chatMessageRateLimit ?? DEFAULT_CHAT_MESSAGE_RATE_LIMIT,
+      options.chatMessageRateLimit ?? options.chatRateLimit ?? DEFAULT_CHAT_MESSAGE_RATE_LIMIT,
     );
     this.runtime = options.runtime;
     this.sessionStore = options.sessionStore;
