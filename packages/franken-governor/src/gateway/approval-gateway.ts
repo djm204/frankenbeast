@@ -75,9 +75,15 @@ export class ApprovalGateway {
         this.verifySignature(response);
       } catch (error) {
         if (error instanceof SignatureVerificationError) {
-          await this.auditRecorder.record(request, response, {
-            securityFailure: 'signature-verification',
-          });
+          try {
+            await this.auditRecorder.record(request, response, {
+              securityFailure: 'signature-verification',
+            });
+          } catch {
+            // Preserve the signature verification contract for callers even if
+            // the audit backend is unavailable. The original verification
+            // failure remains the security-relevant result of this request.
+          }
         }
         throw error;
       }

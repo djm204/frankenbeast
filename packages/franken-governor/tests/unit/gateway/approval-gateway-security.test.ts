@@ -105,6 +105,22 @@ describe('ApprovalGateway — security integration', () => {
     );
   });
 
+  it('preserves SignatureVerificationError when audit logging a failed signature also fails', async () => {
+    const verifier = new SignatureVerifier(signingFixture);
+    const channel = makeFakeChannel({ signature: 'invalid-sig' });
+    const auditRecorder = { record: vi.fn().mockRejectedValue(new Error('audit unavailable')) };
+    const config = { ...defaultConfig(), requireSignedApprovals: true, signingSecret: signingFixture };
+    const gateway = new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config,
+      signatureVerifier: verifier,
+    });
+
+    await expect(gateway.requestApproval(makeRequest())).rejects.toThrow(SignatureVerificationError);
+    expect(auditRecorder.record).toHaveBeenCalledOnce();
+  });
+
   it('passes when requireSignedApprovals is true and signature is valid', async () => {
     const verifier = new SignatureVerifier(signingFixture);
     const responsePayload = formatApprovalResponseSignaturePayload({
