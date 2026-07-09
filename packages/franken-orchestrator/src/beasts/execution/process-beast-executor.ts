@@ -24,6 +24,8 @@ export interface RunConfigSnapshotOwner {
   readonly gid: number;
 }
 
+type RunConfigSnapshotOwnerProvider = () => RunConfigSnapshotOwner | undefined;
+
 const SENSITIVE_CONFIG_KEY_PATTERN = /(?:password|passwd|pwd|secret|clientsecret|token|apikey|accesskey|privatekey|auth|credential|webhook)/i;
 
 function escapeRegExp(value: string): string {
@@ -209,7 +211,8 @@ export interface ProcessBeastExecutorOptions {
   eventBus?: BeastEventBus;
   defaultStopTimeoutMs?: number;
   runConfigDir?: string;
-  runConfigOwner?: RunConfigSnapshotOwner;
+  runConfigRoot?: string;
+  runConfigOwner?: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider;
   transformSpec?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -233,6 +236,12 @@ function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | u
     return;
   }
   chownSync(path, owner.uid, owner.gid);
+}
+
+function resolveRunConfigOwner(
+  owner: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider | undefined,
+): RunConfigSnapshotOwner | undefined {
+  return typeof owner === 'function' ? owner() : owner;
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
@@ -329,13 +338,18 @@ export class ProcessBeastExecutor implements BeastExecutor {
       : processSpec;
 
     // Write configSnapshot to a JSON file for the spawned process to load
-    const runConfigRoot = resolve(isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
+    const runConfigRoot = resolve(this.options.runConfigRoot ?? isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
     const configDir = resolve(this.options.runConfigDir ?? join(runConfigRoot, '.fbeast', '.build', 'run-configs'));
-    const runConfigOwner = this.options.runConfigOwner;
+    const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
     ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
     const configFilePath = join(configDir, `${run.id}.json`);
-    if (existsSync(configFilePath)) {
+    try {
+      lstatSync(configFilePath);
       unlinkSync(configFilePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
     }
     this.pendingConfigFilePaths.set(run.id, configFilePath);
 

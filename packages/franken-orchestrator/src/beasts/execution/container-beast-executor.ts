@@ -75,7 +75,7 @@ export class ContainerBeastExecutor implements BeastExecutor {
     if (deps.eventBus) {
       options.eventBus = deps.eventBus;
     }
-    options.runConfigOwner = parseRunConfigOwner(writableWorkspaceUser(policy));
+    options.runConfigOwner = () => parseRunConfigOwner(writableWorkspaceUser(policy));
     const nextAttemptNumber = (run: BeastRun): number => deps.repository.listAttempts(run.id).length + 1;
     options.transformSpec = (run, _originalSpec, mergedSpec) => toDockerSpec(mergedSpec, policy, {
       containerName: containerNameForRunAttempt(run, nextAttemptNumber(run)),
