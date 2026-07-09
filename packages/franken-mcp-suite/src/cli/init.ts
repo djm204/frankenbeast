@@ -111,11 +111,14 @@ function initJsonClient(options: {
   const dbPath = join('.fbeast', 'beast.db');
   const configPath = join('.fbeast', 'config.json');
   const proxyArgs = ['--db', dbPath, '--config', configPath];
+  const standardServerArgs = (srv: FbeastServer) => srv === 'firewall'
+    ? ['--db', dbPath, '--config', configPath]
+    : ['--db', dbPath];
   if (mode === 'proxy') {
     mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: proxyArgs };
   } else {
     for (const srv of servers) {
-      mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath, '--config', configPath] };
+      mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: standardServerArgs(srv) };
     }
   }
   mcpConfig['mcpServers'] = mcpServers;
@@ -220,12 +223,14 @@ function writeCodexProjectConfig(
   const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
   const cleaned = removeFbeastMcpServerTables(existing).trimEnd();
   const serverEntries = mode === 'proxy'
-    ? [{ name: codexServerName(root, 'proxy'), command: 'fbeast-proxy' }]
-    : servers.map((srv) => ({ name: codexServerName(root, srv), command: SERVER_BIN_MAP[srv] }));
-  const fbeastConfig = serverEntries.map(({ name, command }) => {
+    ? [{ name: codexServerName(root, 'proxy'), command: 'fbeast-proxy', server: 'proxy' as const }]
+    : servers.map((srv) => ({ name: codexServerName(root, srv), command: SERVER_BIN_MAP[srv], server: srv }));
+  const fbeastConfig = serverEntries.map(({ name, command, server }) => {
     const args = mode === 'proxy'
       ? ['--db', dbPath, '--root', root, '--config', fbeastConfigPath]
-      : ['--db', dbPath, '--config', fbeastConfigPath];
+      : server === 'firewall'
+        ? ['--db', dbPath, '--config', fbeastConfigPath]
+        : ['--db', dbPath];
     return [
       `[mcp_servers.${name}]`,
       `command = ${tomlString(command)}`,

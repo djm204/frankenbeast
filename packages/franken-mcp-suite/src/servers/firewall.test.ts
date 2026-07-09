@@ -151,4 +151,19 @@ describe('Firewall Server', () => {
 
     await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
   });
+
+  it('rejects ambiguous custom firewall alternation before scanning', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-unsafe-alt-'));
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    writeFileSync(join(root, '.fbeast', 'config.json'), JSON.stringify({
+      security: {
+        customRules: [
+          { name: 'ambiguous', pattern: '(a|aa)+$', action: 'block', target: 'request' },
+        ],
+      },
+    }));
+    const adapter = createFirewallAdapter(join(root, '.fbeast', 'fw.db'), 'standard', { root });
+
+    await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
+  });
 });

@@ -51,7 +51,10 @@ export function createFirewallAdapter(
 
   const store = createSqliteStore(dbPathOrDeps);
   const root = realpathSync(resolve(options.root ?? process.env['FBEAST_ROOT'] ?? process.cwd()));
-  const configPath = options.configPath ?? process.env['FBEAST_CONFIG'] ?? join(dirname(dbPathOrDeps), 'config.json');
+  const configPath = resolveConfigPath(
+    options.configPath ?? process.env['FBEAST_CONFIG'] ?? join(dirname(dbPathOrDeps), 'config.json'),
+    root,
+  );
 
   function resolveContained(requested: string): string {
     const target = resolve(root, requested);
@@ -88,6 +91,10 @@ export function createFirewallAdapter(
       VALUES (?, ?, ?)
     `).run(inputHash, result.verdict, result.matchedPatterns.join(',') || null);
   }
+}
+
+function resolveConfigPath(configPath: string, root: string): string {
+  return isAbsolute(configPath) ? configPath : resolve(root, configPath);
 }
 
 function loadFirewallScanConfig(configPath: string, fallbackTier: InjectionTier): FirewallScanConfig {
@@ -153,7 +160,7 @@ function parseCustomRule(rule: unknown, index: number, configPath: string): Cust
 }
 
 function assertSafeCustomRulePattern(pattern: string, index: number, configPath: string): void {
-  if (pattern.length > 256 || hasNestedQuantifier(pattern)) {
+  if (pattern.length > 256 || hasUnsafeQuantifiedGroup(pattern)) {
     throw new Error(`Unsafe security.customRules[${index}].pattern in firewall config: ${configPath}`);
   }
   try {
@@ -163,8 +170,11 @@ function assertSafeCustomRulePattern(pattern: string, index: number, configPath:
   }
 }
 
-function hasNestedQuantifier(pattern: string): boolean {
-  return /\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)\s*[+*?{]/.test(pattern);
+function hasUnsafeQuantifiedGroup(pattern: string): boolean {
+  const simpleGroup = String.raw`\((?:[^()\\]|\\.)*`;
+  const groupEndWithOuterQuantifier = String.raw`(?:[^()\\]|\\.)*\)\s*[+*?{]`;
+  return new RegExp(`${simpleGroup}[+*]${groupEndWithOuterQuantifier}`).test(pattern)
+    || new RegExp(`${simpleGroup}\|${groupEndWithOuterQuantifier}`).test(pattern);
 }
 
 function parseRequiredString(value: unknown, field: string, configPath: string): string {

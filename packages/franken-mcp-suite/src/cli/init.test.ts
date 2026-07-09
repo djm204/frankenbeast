@@ -409,11 +409,11 @@ describe('fbeast init', () => {
     const configB = JSON.parse(readFileSync(join(rootB, '.mcp.json'), 'utf-8'));
     expect(configA.mcpServers['fbeast-memory']).toEqual({
       command: 'fbeast-memory',
-      args: ['--db', join('.fbeast', 'beast.db'), '--config', join('.fbeast', 'config.json')],
+      args: ['--db', join('.fbeast', 'beast.db')],
     });
     expect(configB.mcpServers['fbeast-memory']).toEqual({
       command: 'fbeast-memory',
-      args: ['--db', join('.fbeast', 'beast.db'), '--config', join('.fbeast', 'config.json')],
+      args: ['--db', join('.fbeast', 'beast.db')],
     });
     expect(JSON.stringify(configA.mcpServers)).not.toContain(rootA);
     expect(JSON.stringify(configB.mcpServers)).not.toContain(rootB);
@@ -458,7 +458,11 @@ describe('fbeast init', () => {
 
     const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
     expect(Object.keys(mcpConfig.mcpServers).length).toBe(7);
-    expect(mcpConfig.mcpServers['fbeast-memory']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-memory']).toEqual({ command: 'fbeast-memory', args: ['--db', join('.fbeast', 'beast.db')] });
+    expect(mcpConfig.mcpServers['fbeast-firewall']).toEqual({
+      command: 'fbeast-firewall',
+      args: ['--db', join('.fbeast', 'beast.db'), '--config', join('.fbeast', 'config.json')],
+    });
     expect(mcpConfig.mcpServers['fbeast-proxy']).toBeUndefined();
   });
 

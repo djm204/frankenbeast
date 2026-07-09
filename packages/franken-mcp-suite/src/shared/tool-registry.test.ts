@@ -151,4 +151,34 @@ describe('proxy adapter containment', () => {
     rmSync(projectRoot, { recursive: true, force: true });
     rmSync(configRoot, { recursive: true, force: true });
   });
+
+  it('resolves relative active config paths from the project root', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'fbeast-proxy-relative-config-'));
+    const nestedCwd = join(projectRoot, 'packages', 'app');
+    mkdirSync(join(projectRoot, '.fbeast'), { recursive: true });
+    mkdirSync(nestedCwd, { recursive: true });
+    writeFileSync(join(projectRoot, '.fbeast', 'config.json'), JSON.stringify({
+      security: {
+        profile: 'permissive',
+        customRules: [
+          { name: 'root-relative-rule', pattern: 'root-relative-rule', action: 'block', target: 'request' },
+        ],
+      },
+    }));
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(nestedCwd);
+      const adapters = createAdapterSet(join(projectRoot, '.fbeast', 'beast.db'), {
+        root: projectRoot,
+        configPath: join('.fbeast', 'config.json'),
+      });
+      const scanTool = TOOL_REGISTRY.get('fbeast_firewall_scan')!;
+      const result = await scanTool.makeHandler(adapters)({ input: 'hit root-relative-rule' });
+
+      expect(result.content[0].text).toContain('flagged');
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
 });
