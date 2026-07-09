@@ -56,10 +56,14 @@ describe('ScalabilityEvaluator', () => {
     ['commented config separators', 'const cfg = { port /* docs */: /* docs */ 8080 };'],
     ['numeric suffixed config key', 'const cfg = { port2: 8080 };'],
     ['hyphenated quoted config key', 'const cfg = { "server-port": 8080, \'api-port\': 8443 };'],
+    ['uppercase hyphenated quoted config key', 'const cfg = { "SERVER-PORT": 8080 };'],
+    ['hyphenated bracket notation assignment', 'config["server-port"] = 8080;'],
+    ['class field initializer', 'class ServerConfig { port = 8080; static defaultPort = 8443; }'],
     ['numeric separator config literal', 'const cfg = { port: 8_080 };'],
     ['template interpolation assignment', 'const text = `${config.port = 8080}`;'],
     ['template interpolation object literal', 'const text = `${{ port: 8080 }}`;'],
     ['template interpolation with comment brace', 'const text = `${/* } */ { port: 8080 }}`;'],
+    ['template interpolation with regex brace', 'const text = `${/}/.test(input) && { port: 8080 }}`;'],
     ['runtime config after type declaration', 'interface Listener { host: string }\nconst cfg = { port: 8080 };'],
     ['parenthesized runtime config', 'const cfg = ({ host: "x", port: 8080, secure: true });'],
     ['nested runtime config object', 'const cfg = { host: "x", server: { port: 8080 } };'],
@@ -91,6 +95,12 @@ type NestedConfig = { server: { port: 8080 } };
 interface ListenerConfig {
   port: 3000;
 }
+export interface ExportedListenerConfig {
+  port: 3000;
+}
+declare interface AmbientListenerConfig {
+  port: 3000;
+}
 const cfg: { port: 8080 } = createCfg();
 function bind(opts: { port: 8080 }) {}
 const castCfg = {} as { port: 8080 };
@@ -112,13 +122,25 @@ class LiteralPortConfig {
 }
 function bindReadonly(opts: Readonly<{ port: 8080 }>) {}
 makeConfig<{ port: 8080 }>();
+makeConfig<string, { port: 8080 }>();
+class GenericBaseConfig extends Base<string, { port: 8080 }> {}
 function bindGeneric<T extends { port: 8080 }>() {}
 const cfg = {} satisfies { port: 8080 };
 function bindHost(host: string, port: 8080) {}
 type BindHost = (host: string, port: 8080) => void;
+class Server { bind(host: string, port: 8080) {} }
+const tupleArgs: [host: string, port: 8080] = value;
+const inlineUnion: Base | { port: 8080 } = makeCfg();
+const inlineIntersection = {} as Base & { port: 8080 };
 type ComplexConfig<T extends Record<string, unknown>> = { port: 8080 };
 type DefaultedConfig<T = {}> = { port: 8080 };
 class ImplementedPortConfig implements ListenerConfig {
+  port: 8080;
+}
+class GenericPortConfig<T> {
+  port: 8080;
+}
+class ExtendedGenericPortConfig extends Base<Foo> {
   port: 8080;
 }
 class SemicolonlessPortConfig {
