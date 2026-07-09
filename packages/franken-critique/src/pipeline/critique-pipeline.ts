@@ -6,6 +6,39 @@ function hasWarningFinding(result: EvaluationResult): boolean {
   return result.findings.some((finding) => finding.severity !== 'info');
 }
 
+function summarizeEvaluatorError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function createEvaluatorExceptionResult(evaluator: Evaluator, error: unknown): EvaluationResult {
+  const summary = summarizeEvaluatorError(error) || 'Unknown evaluator error';
+
+  return {
+    evaluatorName: evaluator.name,
+    verdict: 'fail',
+    score: 0,
+    findings: [
+      {
+        message: `Evaluator "${evaluator.name}" failed with an exception: ${summary}`,
+        severity: 'critical',
+        suggestion: 'Inspect the evaluator dependency or implementation and retry the critique run.',
+      },
+    ],
+  };
+}
+
 export class CritiquePipeline {
   private readonly evaluators: readonly Evaluator[];
 
@@ -26,7 +59,15 @@ export class CritiquePipeline {
     let shortCircuited = false;
 
     for (const evaluator of this.evaluators) {
-      const result = await evaluator.evaluate(input);
+      let result: EvaluationResult;
+
+      try {
+        result = await evaluator.evaluate(input);
+      } catch (error) {
+        results.push(createEvaluatorExceptionResult(evaluator, error));
+        continue;
+      }
+
       results.push(result);
 
       // Short-circuit on safety failure

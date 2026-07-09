@@ -24,6 +24,18 @@ function createMockEvaluator(
   };
 }
 
+function createThrowingEvaluator(
+  name: string,
+  category: 'deterministic' | 'heuristic',
+  error: unknown,
+): Evaluator {
+  return {
+    name,
+    category,
+    evaluate: vi.fn().mockRejectedValue(error),
+  };
+}
+
 describe('CritiquePipeline', () => {
   it('returns pass with empty evaluator list', async () => {
     const pipeline = new CritiquePipeline([]);
@@ -161,6 +173,40 @@ describe('CritiquePipeline', () => {
     expect(result.shortCircuited).toBe(false);
     expect(result.results).toHaveLength(2);
     expect(other.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates evaluator exceptions as structured failures and continues later evaluators', async () => {
+    const passing = createMockEvaluator('passing', 'deterministic', { score: 0.8 });
+    const throwing = createThrowingEvaluator(
+      'flaky-adr-check',
+      'heuristic',
+      new Error('memory backend unavailable'),
+    );
+    const later = createMockEvaluator('later', 'heuristic', { score: 0.6 });
+
+    const pipeline = new CritiquePipeline([passing, throwing, later]);
+    const result = await pipeline.run(createInput('code'));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.shortCircuited).toBe(false);
+    expect(result.overallScore).toBeCloseTo((0.8 + 0 + 0.6) / 3);
+    expect(result.results).toHaveLength(3);
+    expect(result.results[0]).toMatchObject({ evaluatorName: 'passing', verdict: 'pass' });
+    expect(result.results[1]).toMatchObject({
+      evaluatorName: 'flaky-adr-check',
+      verdict: 'fail',
+      score: 0,
+      findings: [
+        {
+          severity: 'critical',
+          message: expect.stringContaining('flaky-adr-check'),
+          suggestion: expect.stringContaining('evaluator'),
+        },
+      ],
+    });
+    expect(result.results[1]?.findings[0]?.message).toContain('memory backend unavailable');
+    expect(result.results[2]).toMatchObject({ evaluatorName: 'later', verdict: 'pass' });
+    expect(later.evaluate).toHaveBeenCalledTimes(1);
   });
 
   it('calculates average score across all evaluators', async () => {
