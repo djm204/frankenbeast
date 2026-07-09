@@ -98,8 +98,9 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content).toMatch(/cache.*npm/);
     });
 
-    it('uses actions/checkout', () => {
+    it('uses actions/checkout with full history for root verification tests', () => {
       expect(content).toContain('actions/checkout');
+      expect(content).toMatch(/actions\/checkout@v4[\s\S]*fetch-depth:\s*0/);
     });
 
     it('runs on ubuntu-latest', () => {
