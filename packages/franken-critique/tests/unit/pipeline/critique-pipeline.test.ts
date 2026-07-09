@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CritiquePipeline } from '../../../src/pipeline/critique-pipeline.js';
+import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { Evaluator, EvaluationInput, EvaluationResult } from '../../../src/types/evaluation.js';
 
 function createInput(content: string): EvaluationInput {
@@ -199,12 +200,13 @@ describe('CritiquePipeline', () => {
       findings: [
         {
           severity: 'critical',
+          location: EVALUATOR_EXCEPTION_LOCATION,
           message: expect.stringContaining('flaky-adr-check'),
-          suggestion: expect.stringContaining('evaluator'),
+          suggestion: expect.stringContaining('trusted evaluator logs'),
         },
       ],
     });
-    expect(result.results[1]?.findings[0]?.message).toContain('memory backend unavailable');
+    expect(result.results[1]?.findings[0]?.message).not.toContain('memory backend unavailable');
     expect(result.results[2]).toMatchObject({ evaluatorName: 'later', verdict: 'pass' });
     expect(later.evaluate).toHaveBeenCalledTimes(1);
   });
@@ -226,7 +228,8 @@ describe('CritiquePipeline', () => {
       findings: [
         {
           severity: 'critical',
-          message: expect.stringContaining('guardrails unavailable'),
+          location: EVALUATOR_EXCEPTION_LOCATION,
+          message: expect.stringContaining('internal evaluator error'),
         },
       ],
     });

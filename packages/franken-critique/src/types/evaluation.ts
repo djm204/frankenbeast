@@ -10,6 +10,8 @@ export interface EvaluationInput {
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
+export const EVALUATOR_EXCEPTION_LOCATION = 'internal:evaluator-exception';
+
 /** A single finding from an evaluator. */
 export interface EvaluationFinding {
   /** Human-readable description of the issue. */

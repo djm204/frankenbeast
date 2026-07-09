@@ -1,3 +1,4 @@
+import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
 import type { Evaluator, EvaluationInput, EvaluationResult, CritiquePipelineResult } from '../types/evaluation.js';
 
 const SAFETY_EVALUATOR_NAME = 'safety';
@@ -6,34 +7,17 @@ function hasWarningFinding(result: EvaluationResult): boolean {
   return result.findings.some((finding) => finding.severity !== 'info');
 }
 
-function summarizeEvaluatorError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message || error.name;
-  }
-
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
-
-function createEvaluatorExceptionResult(evaluator: Evaluator, error: unknown): EvaluationResult {
-  const summary = summarizeEvaluatorError(error) || 'Unknown evaluator error';
-
+function createEvaluatorExceptionResult(evaluator: Evaluator): EvaluationResult {
   return {
     evaluatorName: evaluator.name,
     verdict: 'fail',
     score: 0,
     findings: [
       {
-        message: `Evaluator "${evaluator.name}" failed with an exception: ${summary}`,
+        message: `Evaluator "${evaluator.name}" failed because an internal evaluator error occurred.`,
         severity: 'critical',
-        suggestion: 'Inspect the evaluator dependency or implementation and retry the critique run.',
+        location: EVALUATOR_EXCEPTION_LOCATION,
+        suggestion: 'Inspect trusted evaluator logs or dependencies before retrying the critique run.',
       },
     ],
   };
@@ -63,8 +47,8 @@ export class CritiquePipeline {
 
       try {
         result = await evaluator.evaluate(input);
-      } catch (error) {
-        results.push(createEvaluatorExceptionResult(evaluator, error));
+      } catch {
+        results.push(createEvaluatorExceptionResult(evaluator));
         if (evaluator.name === SAFETY_EVALUATOR_NAME) {
           shortCircuited = true;
           break;
