@@ -55,8 +55,6 @@ export async function fetchWithRetry(
   options: HttpRetryOptions = {},
 ): Promise<FetchResponse> {
   const maxRetries = normalizeMaxRetries(options.maxRetries)
-  const baseDelayMs = requireFiniteNonNegative('baseDelayMs', options.baseDelayMs, 200)
-  const maxDelayMs = requireFiniteNonNegative('maxDelayMs', options.maxDelayMs, 30_000)
   const jitter = options.jitter ?? true
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
 
@@ -65,6 +63,8 @@ export async function fetchWithRetry(
 
   for (let i = 0; i < maxAttempts; i++) {
     if (i > 0) {
+      const baseDelayMs = requireFiniteNonNegative('baseDelayMs', options.baseDelayMs, 200)
+      const maxDelayMs = requireFiniteNonNegative('maxDelayMs', options.maxDelayMs, 30_000)
       const base = Math.min(baseDelayMs * 2 ** (i - 1), maxDelayMs)
       // Clamp AFTER jitter so maxDelayMs is a true upper bound (callers rely on
       // it to cap shutdown-sensitive export latency).

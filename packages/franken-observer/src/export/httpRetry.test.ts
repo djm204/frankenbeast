@@ -111,8 +111,19 @@ describe('fetchWithRetry (issue #68)', () => {
       await expect(fetchWithRetry(attempt, { maxRetries: 1, ...options, sleep })).rejects.toThrow(
         /baseDelayMs|maxDelayMs/,
       )
-      expect(attempt).not.toHaveBeenCalled()
+      expect(attempt).toHaveBeenCalledTimes(1)
       expect(sleep).not.toHaveBeenCalled()
     }
+  })
+
+  it('preserves the initial attempt when invalid backoff bounds are unused', async () => {
+    const sleep = noSleep()
+    const attempt = vi.fn().mockResolvedValue(ok)
+
+    const res = await fetchWithRetry(attempt, { maxRetries: 0, baseDelayMs: -1, maxDelayMs: Number.NaN, sleep })
+
+    expect(res).toEqual(ok)
+    expect(attempt).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
   })
 })
