@@ -1,4 +1,4 @@
-export type VitestFlagName = 'INTEGRATION' | 'EVAL' | 'E2E';
+export type VitestFlagName = 'INTEGRATION' | 'EVAL' | 'E2E' | 'DOCKER_BUILD';
 
 export type VitestEnv = Readonly<Record<string, string | undefined>>;
 
