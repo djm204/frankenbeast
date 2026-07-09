@@ -38,6 +38,9 @@ export class GhostDependencyEvaluator implements Evaluator {
       // Skip relative imports
       if (specifier.startsWith('.')) continue;
 
+      // Skip absolute local paths used by dynamic import() loaders.
+      if (specifier.startsWith('/')) continue;
+
       // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
       if (isNodeBuiltinSpecifier(specifier)) continue;
 
@@ -248,24 +251,48 @@ function canStartNativeDynamicImport(
   content: string,
   importIndex: number,
 ): boolean {
-  const previous = previousNonWhitespace(content, importIndex - 1);
-  if (previous === '.' || previous === '#') return false;
+  const previousIndex = previousNonWhitespaceIndex(content, importIndex - 1);
+  const previous = previousIndex === null ? null : content[previousIndex]!;
+  if (
+    previous === '#' ||
+    (previous === '.' &&
+      previousIndex !== null &&
+      !isSpreadOperand(content, previousIndex))
+  ) {
+    return false;
+  }
 
-  const statementStart = Math.max(
-    content.lastIndexOf(';', importIndex - 1),
-    content.lastIndexOf('{', importIndex - 1),
-    content.lastIndexOf('}', importIndex - 1),
-  );
+  const statementStart = content.lastIndexOf(';', importIndex - 1);
   const prefix = content.slice(statementStart + 1, importIndex);
-  const startsAfterObjectBrace = content[statementStart] === '{';
   const isTernaryBranch = prefix.includes('?');
+  const endsAfterTypeAnnotation = /:\s*$/.test(prefix);
 
   return !(
-    /\btype\s+[A-Za-z_$][\w$]*(?:\s*<[^;>{}]*>)?\s*=\s*$/.test(prefix) ||
-    (/\btype\b/.test(prefix) && /\btypeof\s*$/.test(prefix)) ||
-    (!startsAfterObjectBrace && !isTernaryBranch && /:\s*$/.test(prefix)) ||
-    /\b(?:interface|type)\b[^;{}]*\bextends\s*$/.test(prefix)
+    isInsideTypeDeclaration(prefix) ||
+    (endsAfterTypeAnnotation &&
+      !isTernaryBranch &&
+      !isLikelyObjectLiteralValue(content, importIndex))
   );
+}
+
+function isSpreadOperand(content: string, dotIndex: number): boolean {
+  return content.slice(dotIndex - 2, dotIndex + 1) === '...';
+}
+
+function isInsideTypeDeclaration(prefix: string): boolean {
+  return /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix);
+}
+
+function isLikelyObjectLiteralValue(content: string, importIndex: number): boolean {
+  const colonIndex = content.lastIndexOf(':', importIndex - 1);
+  if (colonIndex === -1) return false;
+
+  let i = colonIndex - 1;
+  while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
+  while (i >= 0 && isIdentifierCharacter(content[i]!)) i -= 1;
+  while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
+
+  return content[i] === '{' || content[i] === ',';
 }
 
 function readRequireSpecifier(
@@ -492,9 +519,17 @@ function isRegexLiteralStart(content: string, index: number): boolean {
 }
 
 function previousNonWhitespace(content: string, index: number): string | null {
+  const indexOfPrevious = previousNonWhitespaceIndex(content, index);
+  return indexOfPrevious === null ? null : content[indexOfPrevious]!;
+}
+
+function previousNonWhitespaceIndex(
+  content: string,
+  index: number,
+): number | null {
   for (let i = index; i >= 0; i--) {
     const ch = content[i]!;
-    if (!/\s/.test(ch)) return ch;
+    if (!/\s/.test(ch)) return i;
   }
 
   return null;

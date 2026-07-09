@@ -136,6 +136,7 @@ describe('GhostDependencyEvaluator', () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `
       const local = await import('./local-plugin.js');
+      const absoluteLocal = await import('/tmp/generated/plugin.mjs');
       const fs = await import('node:fs/promises');
     `;
     const result = await evaluator.evaluate(createInput(content));
@@ -170,6 +171,10 @@ describe('GhostDependencyEvaluator', () => {
       type Ghost = import('ghost-package').Ghost;
       type MultilineGhost =
         import('ghost-package').Ghost;
+      type GhostShape = { dep: import('ghost-package').Ghost };
+      type ConditionalGhost<T> = T extends true
+        ? import('ghost-package').Ghost
+        : import('another-ghost').Ghost;
       type GhostModule = typeof import('ghost-package');
       const plugin = loader.import('unknown-lib');
       this.#import('private-loader');
@@ -184,6 +189,8 @@ describe('GhostDependencyEvaluator', () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `
       const loaders = { plugin: import('ghost-package') };
+      const nestedLoaders = { opts: {}, plugin: import('nested-ghost') };
+      const spreadLoader = { ...import('spread-ghost') };
       const multilineLoaders = {
         plugin: import('another-ghost')
       };
@@ -194,10 +201,12 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(5);
+    expect(result.findings).toHaveLength(7);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('ghost-package'),
+        expect.stringContaining('nested-ghost'),
+        expect.stringContaining('spread-ghost'),
         expect.stringContaining('another-ghost'),
         expect.stringContaining('missing-branch'),
         expect.stringContaining('runtime-ghost'),
