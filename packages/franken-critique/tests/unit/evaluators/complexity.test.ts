@@ -136,7 +136,26 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
-  it('flags functions with too many parameters', async () => {
+  it('ignores nested TypeScript commas inside function parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'function configure(options: {',
+      '  alpha: string,',
+      '  beta: [string, number],',
+      '  gamma: Map<string, { id: string, label: string }>,',
+      '  delta: { enabled: boolean, retries: number },',
+      "} = { alpha: 'a', beta: ['b', 1], gamma: undefined, delta: { enabled: true, retries: 3 } }) {",
+      '  return options.alpha;',
+      '}',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('flags functions with too many top-level parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;
     const result = await evaluator.evaluate(createInput(content));
