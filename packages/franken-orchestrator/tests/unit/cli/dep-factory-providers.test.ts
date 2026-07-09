@@ -578,6 +578,27 @@ describe('dep-factory provider wiring', () => {
     expect(sessionManifest[0]?.runId).toBe('cli-session-1');
   });
 
+  it('does not let a corrupt existing replay manifest abort other finalize writes', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({ runSessionId: 'cli-session-1' });
+    const result = await createCliDeps(opts);
+    const auditDir = resolve(opts.paths.root, '.fbeast', 'audit');
+    mkdirSync(auditDir, { recursive: true });
+    writeFileSync(resolve(auditDir, 'issue-89.replay.json'), '{not valid json', 'utf8');
+    mockBridgeReplayManifest.push(
+      { version: 1, kind: 'llm.request', runId: 'issue-89', timestamp: '2026-05-25T00:00:00.000Z', contentRef: 'a'.repeat(64) },
+      { version: 1, kind: 'tool.result', runId: 'cli-session-1', timestamp: '2026-05-25T00:00:01.000Z', contentRef: 'b'.repeat(64) },
+    );
+
+    await result.finalize();
+
+    const issueManifest = JSON.parse(readFileSync(resolve(auditDir, 'issue-89.replay.json'), 'utf8')) as Array<{ runId: string }>;
+    const sessionManifest = JSON.parse(readFileSync(resolve(auditDir, 'cli-session-1.replay.json'), 'utf8')) as Array<{ runId: string }>;
+
+    expect(issueManifest).toEqual([expect.objectContaining({ runId: 'issue-89' })]);
+    expect(sessionManifest).toEqual([expect.objectContaining({ runId: 'cli-session-1' })]);
+  });
+
   it('clears issue-scoped runtime artifacts when reset is requested', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
