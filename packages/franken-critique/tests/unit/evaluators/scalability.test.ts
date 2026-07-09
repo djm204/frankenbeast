@@ -350,6 +350,40 @@ this.#port = 9000;`;
     ]);
   });
 
+  it('covers Codex-reviewed port scanner false positives and missed fallbacks', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const cleanContent = `const cfg = { ports: [{ port: process.env.PORT, weight: 10 }] };
+const weightedPorts = { ports: [{ weight: 10, port: 8080 }] };
+const IMPORTANT_TIMEOUT_MS = 5000;
+const REPORT_LIMIT = 1000;
+const IMPORT_LIMIT = 5000;
+const EXPORT_BATCH_SIZE = 3000;
+const cfgWords = { passport: 1234, sport: 55, airportCode: 7890, portfolioId: 42, reporting: 8080, imported: 8443, exporter: 9000, importantValue: 3000 };
+function bind(reallyLongParameterNameThatKeepsTheOpeningParenOutsideThePreviousShortLookbackWindowAlpha: string, reallyLongParameterNameThatKeepsTheOpeningParenOutsideThePreviousShortLookbackWindowBeta: string, reallyLongParameterNameThatKeepsTheOpeningParenOutsideThePreviousShortLookbackWindowGamma: string, port: 8080) {}
+if (x) foo(); else /{ port: 8080 }/.test(input);
+do /{ port: 8443 }/.test(input); while (x);
+type ConditionalConfig<T> = T extends true ? { port: 8080 } : { port: 8443 };
+const options = { "portOptions": { timeoutMs: 5000, port: 8080 } };
+const singular = { portConfig: { timeoutMs: 5000 } };
+class C { // {
+  port: 8080;
+}
+/* type Foo = */ const masked = { ports: { http: 8080 } };`;
+    const cleanResult = await evaluator.evaluate(createInput(cleanContent));
+
+    expect(cleanResult.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+
+    const fallbackResult = await evaluator.evaluate(createInput('const cfg = useEnv ? loadConfig() : { port: 8080 };'));
+
+    expect(fallbackResult.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
   it('includes dotted quoted port keys', async () => {
     const evaluator = new ScalabilityEvaluator();
     const content = `const cfg = { "server.port": 8080 };
@@ -396,6 +430,112 @@ log('debug', "port: 8080");`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+
+  it('does not report object-array metadata when port values are externalized', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { ports: [{ port: process.env.PORT, weight: 10 }, { weight: 20, port: 8080 }] };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('excludes uppercase non-port constants from declaration scans', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const IMPORTANT_TIMEOUT_MS = 5000;
+const REPORT_LIMIT = 1000;
+const EXPORT_BATCH_SIZE = 3000;
+const DEFAULT_PORT = 8080;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('requires port-like config keys to avoid ordinary embedded words', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { passport: 1, sport: 2, airportCode: 3, portfolioId: 4, serverPort: 8080 };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('does not suppress ternary fallback config objects as return types', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('const cfg = useEnv ? loadConfig() : { port: 8080 };'));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('scans full parameter lists before suppressing literal types', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const longName = `param${'x'.repeat(350)}`;
+    const result = await evaluator.evaluate(createInput(`function bind(${longName}: string, port: 8080) {}`));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('treats regex literals after else and do as ignored ranges', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `if (x) foo(); else /{ port: 8080 }/.test(input);
+do /{ port: 8443 }/.test(input); while (x);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('preserves type alias context across conditional branches', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('type ConditionalConfig<T> = T extends true ? { port: 8080 } : { port: 8443 };'));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('normalizes quoted option keys before filtering metadata', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { "portOptions": { timeoutMs: 5000, port: 8080 } };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('filters singular port option object metadata', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { portConfig: { timeoutMs: 5000, port: 8080 } };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('ignores comment braces when checking class port literal types', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `class C { // {
+ port: 8080; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
+  it('masks comments before checking plural port maps for type-only signatures', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `/* type Foo = */ const cfg = { ports: { http: 8080 } };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
   });
 
   it('uses env-focused guidance for config-shape hardcoded ports', async () => {

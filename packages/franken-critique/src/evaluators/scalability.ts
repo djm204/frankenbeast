@@ -2,8 +2,9 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
-const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b)\w*))\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
-const PORT_CONFIG_KEY_PATTERN = String.raw`(?<![\w$])(?!(?:[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b|[Rr]eports?\b|[Ii]mport(?:s|ant)?\b|[Ee]xports?\b)\w*))\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
+const NON_PORT_IDENTIFIER_EXCLUSIONS = String.raw`[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b|[Rr]eports?\w*|[Ii]mports?\w*|[Ee]xports?\w*|[Ii]mportant\w*|REPORT\w*|IMPORT\w*|EXPORT\w*|IMPORTANT\w*)|[Aa]irports?\w*|[Pp]assports?\w*|[Ss]ports?\w*`;
+const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:${NON_PORT_IDENTIFIER_EXCLUSIONS})\w*)\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
+const PORT_CONFIG_KEY_PATTERN = PORT_IDENTIFIER_PATTERN;
 const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv][Ii][Ee][Ww][-.][Pp][Oo][Rr][Tt])[^"']*))(?:[A-Za-z0-9_]+[-.])*[Pp][Oo][Rr][Tt](?:[-.][A-Za-z0-9_]+)*["']`;
 const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
@@ -17,14 +18,6 @@ const HARDCODED_PORT_PATTERNS = [
       'g',
     ),
     suggestion: DECLARATION_PORT_SUGGESTION,
-  },
-  {
-    pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\[[^\]]*?(?<![\w$"'])${PORT_NUMBER_PATTERN}\b`,
-      'g',
-    ),
-    suggestion: CONFIG_PORT_SUGGESTION,
-    skipTypeOnly: true,
   },
   {
     pattern: new RegExp(
@@ -119,7 +112,7 @@ export class ScalabilityEvaluator implements Evaluator {
           continue;
         }
 
-        if (skipTypeOnly && this.isClassFieldTypeAnnotation(content, portNumberIndex)) {
+        if (skipTypeOnly && this.isClassFieldTypeAnnotation(scanContent, portNumberIndex)) {
           continue;
         }
 
@@ -140,27 +133,33 @@ export class ScalabilityEvaluator implements Evaluator {
       }
     }
 
-    this.checkPluralPortContainers(content, findings, ignoredRanges, typeOnlyRanges, seenPortNumberIndexes);
+    this.checkPluralPortContainers(content, scanContent, findings, ignoredRanges, typeOnlyRanges, seenPortNumberIndexes);
   }
 
   private checkPluralPortContainers(
     content: string,
+    scanContent: string,
     findings: EvaluationFinding[],
     ignoredRanges: Array<[number, number]>,
     typeOnlyRanges: Array<[number, number]>,
     seenPortNumberIndexes: Set<number>,
   ): void {
     const containerPattern = new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}([\[{])`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}((?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\]))${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}([\[{])`,
       'g',
     );
 
     for (const match of content.matchAll(containerPattern)) {
       const matchIndex = match.index ?? 0;
-      const containerStart = matchIndex + match[0].lastIndexOf(match[1] ?? '');
+      const containerKey = match[1] ?? '';
+      const containerStart = matchIndex + match[0].lastIndexOf(match[2] ?? '');
+      const normalizedContainerKey = this.normalizePortKey(containerKey);
+      if (!/[Pp][Oo][Rr][Tt][Ss](?:$|[^A-Za-z0-9_])/.test(normalizedContainerKey) && !/[Pp][Oo][Rr][Tt][Ss]$/.test(normalizedContainerKey)) {
+        continue;
+      }
       if (this.isInTypeOnlyRange(typeOnlyRanges, matchIndex) ||
-        this.isInTypeOnlySignature(content, matchIndex) ||
-        this.isParameterContainerLiteralType(content, matchIndex, containerStart)) {
+        this.isInTypeOnlySignature(scanContent, matchIndex) ||
+        this.isParameterContainerLiteralType(scanContent, matchIndex, containerStart)) {
         continue;
       }
 
@@ -219,14 +218,19 @@ export class ScalabilityEvaluator implements Evaluator {
     }
     const keyPrefix = valuePrefix.replace(/:\s*$/, '').trim();
     const nestedContainerPrefix = prefix.slice(0, valueStart);
+    const normalizedParentKey = this.normalizePortKey(content.slice(Math.max(0, containerStart - 120), containerStart));
     const isPortKey = new RegExp(String.raw`^(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])$`).test(keyPrefix);
-    if (/Options\s*:\s*$/i.test(content.slice(Math.max(0, containerStart - 120), containerStart))) {
+    if (/Options\s*:?\s*$/i.test(normalizedParentKey)) {
       return !isPortKey;
     }
     if (!/[\[{]/.test(nestedContainerPrefix)) {
       return false;
     }
     return !isPortKey;
+  }
+
+  private normalizePortKey(key: string): string {
+    return key.replace(/[\"'\[\]]/g, '').trim();
   }
 
   private isInTypeOnlyRange(ranges: Array<[number, number]>, matchIndex: number): boolean {
@@ -248,14 +252,13 @@ export class ScalabilityEvaluator implements Evaluator {
       return false;
     }
 
-    const prefix = content.slice(Math.max(0, matchIndex - 300), matchIndex);
-    const openParen = prefix.lastIndexOf('(');
+    const openParen = this.findUnclosedOpenBefore(content, matchIndex, '(', ')');
     if (openParen === -1) {
       return false;
     }
 
-    const beforeParen = prefix.slice(0, openParen);
-    const beforeMatchInParams = prefix.slice(openParen + 1);
+    const beforeParen = content.slice(Math.max(0, openParen - 2000), openParen);
+    const beforeMatchInParams = content.slice(openParen + 1, matchIndex);
     if (/[{[]/.test(beforeMatchInParams)) {
       return false;
     }
@@ -267,18 +270,33 @@ export class ScalabilityEvaluator implements Evaluator {
       return false;
     }
 
-    const prefix = content.slice(Math.max(0, matchIndex - 300), matchIndex);
-    const openParen = prefix.lastIndexOf('(');
+    const openParen = this.findUnclosedOpenBefore(content, matchIndex, '(', ')');
     if (openParen === -1) {
       return false;
     }
 
-    const beforeParen = prefix.slice(0, openParen);
-    const beforeMatchInParams = prefix.slice(openParen + 1);
+    const beforeParen = content.slice(Math.max(0, openParen - 2000), openParen);
+    const beforeMatchInParams = content.slice(openParen + 1, matchIndex);
     const annotationPrefix = content.slice(matchIndex, containerStart);
     return /(?:\bfunction\b|=>\s*$|=\s*$|\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$|\b\w+\s*$)/s.test(beforeParen) &&
       !/[{[]/.test(beforeMatchInParams) &&
       /^,\s*\w+\??\s*:\s*$/.test(annotationPrefix);
+  }
+
+  private findUnclosedOpenBefore(content: string, beforeIndex: number, open: string, close: string): number {
+    let depth = 0;
+    for (let index = beforeIndex - 1; index >= 0; index -= 1) {
+      const current = content[index];
+      if (current === close) {
+        depth += 1;
+      } else if (current === open) {
+        if (depth === 0) {
+          return index;
+        }
+        depth -= 1;
+      }
+    }
+    return -1;
   }
 
   private isTupleElementLiteralType(content: string, matchIndex: number, portNumberIndex: number): boolean {
@@ -348,6 +366,9 @@ export class ScalabilityEvaluator implements Evaluator {
     if (/<[A-Z][\w.:-]*(?:\s+[\w:-]+(?:\s*=\s*(?:[^\s{}]+|\{[^{}]*\}))?)*\s+[\w:-]+\s*=\s*$/s.test(linePrefix)) {
       return false;
     }
+    if (/\?[^;{}]*:\s*$/s.test(prefix) && !/[\w$]\?\s*:\s*$/s.test(prefix)) {
+      return false;
+    }
     if (/^\s*$/.test(statementPrefix)) {
       const boundaryStart = Math.max(prefix.lastIndexOf(';'), prefix.lastIndexOf('}')) + 1;
       const previousStatementPrefix = prefix.slice(boundaryStart);
@@ -356,7 +377,7 @@ export class ScalabilityEvaluator implements Evaluator {
         statementPrefix = prefix.slice(statementStart);
       }
     }
-    const typeAliasContext = /^\s*(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=[^;{}]*$/s.test(statementPrefix);
+    const typeAliasContext = /^\s*(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=[^;]*$/s.test(statementPrefix);
     return /^\s*(?:(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*|(?:export\s+|declare\s+)*interface\s+\w+[^{}]*)$/s.test(statementPrefix) ||
       /(?:^|[;\n{])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}]+)?\s*$/s.test(prefix) ||
       /\b(?:as\s*|satisfies\s*)$/s.test(prefix) ||
@@ -369,7 +390,7 @@ export class ScalabilityEvaluator implements Evaluator {
       /<[^<>{}();]*(?:=|,)\s*$/s.test(prefix) ||
       /<[^=;{}]*,\s*$/s.test(prefix) ||
       (/(?:^|[^&])&\s*$/s.test(prefix) || /(?:^|[^|])\|\s*$/s.test(prefix)) ||
-      (typeAliasContext && /(?:=|&|\||<|,|\()\s*$/s.test(prefix));
+      (typeAliasContext && /(?:=|&|\||<|,|\(|:|\?)\s*$/s.test(prefix));
   }
 
   private isInTypeOnlySignature(content: string, matchIndex: number): boolean {
@@ -559,7 +580,7 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     const prefix = content.slice(Math.max(0, slashIndex - 40), slashIndex);
-    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:await|case|return|throw|yield|delete|typeof|void)\s*$|=>\s*$/.test(prefix) || /\b(?:if|while|for|with)\s*\([^)]*\)\s*$/.test(prefix);
+    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:await|case|return|throw|yield|delete|typeof|void|else|do)\s*$|=>\s*$/.test(prefix) || /\b(?:if|while|for|with)\s*\([^)]*\)\s*$/.test(prefix);
   }
 
   private findRegexLiteralEnd(content: string, slashIndex: number): number {
