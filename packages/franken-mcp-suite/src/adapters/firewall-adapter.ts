@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createSqliteStore } from '../shared/sqlite-store.js';
-import { parseOrchestratorConfig, PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from '@franken/orchestrator';
+import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from '@franken/orchestrator';
 import type { InjectionTier } from '@franken/orchestrator';
 
 export interface FirewallScanResult {
@@ -97,14 +97,78 @@ function loadFirewallScanConfig(configPath: string, fallbackTier: InjectionTier)
   }
 
   const raw = readFileSync(configPath, 'utf8');
-  const parsed = parseOrchestratorConfig(JSON.parse(raw));
-  const security = parsed.security;
-  const profile = security?.profile ?? 'standard';
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error(`Firewall config must contain a JSON object: ${configPath}`);
+  }
+  const security = parsed['security'];
+  if (security === undefined) {
+    return { profile: fallbackProfile, injectionDetection: true, customRules: [] };
+  }
+  if (!isRecord(security)) {
+    throw new Error(`Firewall config security field must be an object: ${configPath}`);
+  }
+  const profile = parseSecurityProfile(security['profile'], fallbackProfile, configPath);
   return {
     profile,
-    injectionDetection: security?.injectionDetection ?? profile !== 'permissive',
-    customRules: security?.customRules ?? [],
+    injectionDetection: parseOptionalBoolean(security['injectionDetection'], profile !== 'permissive', 'security.injectionDetection', configPath),
+    customRules: parseCustomRules(security['customRules'], configPath),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseSecurityProfile(value: unknown, fallback: SecurityProfile, configPath: string): SecurityProfile {
+  if (value === undefined) return fallback;
+  if (value === 'strict' || value === 'standard' || value === 'permissive') return value;
+  throw new Error(`Invalid security.profile in firewall config: ${configPath}`);
+}
+
+function parseOptionalBoolean(value: unknown, fallback: boolean, field: string, configPath: string): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value === 'boolean') return value;
+  throw new Error(`Invalid ${field} in firewall config: ${configPath}`);
+}
+
+function parseCustomRules(value: unknown, configPath: string): CustomFirewallRule[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid security.customRules in firewall config: ${configPath}`);
+  }
+  return value.map((rule, index) => parseCustomRule(rule, index, configPath));
+}
+
+function parseCustomRule(rule: unknown, index: number, configPath: string): CustomFirewallRule {
+  if (!isRecord(rule)) {
+    throw new Error(`Invalid security.customRules[${index}] in firewall config: ${configPath}`);
+  }
+  const name = parseRequiredString(rule['name'], `security.customRules[${index}].name`, configPath);
+  const pattern = parseRequiredString(rule['pattern'], `security.customRules[${index}].pattern`, configPath);
+  const action = parseRuleAction(rule['action'], index, configPath);
+  const target = parseRuleTarget(rule['target'], index, configPath);
+  try {
+    new RegExp(pattern, 'i');
+  } catch {
+    throw new Error(`Invalid security.customRules[${index}].pattern in firewall config: ${configPath}`);
+  }
+  return { name, pattern, action, target };
+}
+
+function parseRequiredString(value: unknown, field: string, configPath: string): string {
+  if (typeof value === 'string' && value.length > 0) return value;
+  throw new Error(`Invalid ${field} in firewall config: ${configPath}`);
+}
+
+function parseRuleAction(value: unknown, index: number, configPath: string): CustomFirewallRule['action'] {
+  if (value === 'block' || value === 'warn' || value === 'log') return value;
+  throw new Error(`Invalid security.customRules[${index}].action in firewall config: ${configPath}`);
+}
+
+function parseRuleTarget(value: unknown, index: number, configPath: string): CustomFirewallRule['target'] {
+  if (value === 'request' || value === 'response' || value === 'both') return value;
+  throw new Error(`Invalid security.customRules[${index}].target in firewall config: ${configPath}`);
 }
 
 function patternsForConfig(config: FirewallScanConfig): RegExp[] {
