@@ -66,6 +66,54 @@ describe('dashboard static server', () => {
     expect(health.status).toBe(200);
   });
 
+  it('gates dashboard routes while the build is running but still allows backend proxy routes', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    globalThis.fetch = fetchMock;
+
+    const clientRoute = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/'),
+      staticDir,
+      { buildStatus: { state: 'building' } },
+    );
+    const asset = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/assets/app.js'),
+      staticDir,
+      { buildStatus: { state: 'building' } },
+    );
+    const proxied = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/api/dashboard', {
+        headers: { origin: 'http://dashboard.local' },
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', buildStatus: { state: 'building' } },
+    );
+
+    expect(clientRoute.status).toBe(503);
+    await expect(clientRoute.text()).resolves.toContain('Dashboard build in progress');
+    expect(asset.status).toBe(503);
+    expect(proxied.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('gates dashboard routes after a build failure instead of serving stale assets', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+
+    const response = await createDashboardStaticResponse(
+      new Request('http://dashboard.local/beasts'),
+      staticDir,
+      { buildStatus: { state: 'failed', message: 'npm exited 1' } },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toContain('Dashboard build failed: npm exited 1');
+  });
+
   it('fails health when the dashboard build is missing', async () => {
     const staticDir = await mkdtemp(join(tmpdir(), 'franken-dashboard-empty-'));
     dirs.push(staticDir);

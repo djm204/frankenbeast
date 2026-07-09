@@ -188,6 +188,22 @@ async function readStaticFile(filePath: string): Promise<Response | undefined> {
   }
 }
 
+function dashboardBuildUnavailableResponse(buildStatus: DashboardBuildStatus): Response | undefined {
+  if (buildStatus.state === 'building') {
+    return response('Dashboard build in progress', {
+      status: 503,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }
+  if (buildStatus.state === 'failed') {
+    return response(`Dashboard build failed: ${buildStatus.message}`, {
+      status: 503,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }
+  return undefined;
+}
+
 export async function createDashboardStaticResponse(
   request: Request,
   staticDir: string,
@@ -229,6 +245,11 @@ export async function createDashboardStaticResponse(
   if (isReservedBackendPath(url.pathname)) {
     return await createProxyResponse(request, options)
       ?? response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  }
+
+  const unavailable = options.buildStatus ? dashboardBuildUnavailableResponse(options.buildStatus) : undefined;
+  if (unavailable) {
+    return unavailable;
   }
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {
