@@ -88,8 +88,8 @@ VITE_PROJECT_ID=my-project
 
 | Variable | Purpose |
 | --- | --- |
-| `VITE_API_URL` | API base URL. Leave unset or empty for local Vite dev so requests stay same-origin and use the Vite dev proxy. Set it only when serving the built app or intentionally calling a remote backend directly. |
-| `VITE_API_PROXY_TARGET` | Backend target for the same-origin Vite dev proxy. Defaults to `http://127.0.0.1:3737`; set this when the backend runs on another port, for example `VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm run dev:chat`. |
+| `VITE_API_URL` | Legacy/reserved API base URL. Leave unset; the current web client intentionally ignores this value and always calls same-origin paths so browser requests stay behind the server-side proxy/BFF. |
+| `VITE_API_PROXY_TARGET` | Backend target for the same-origin Vite dev proxy. Defaults to `http://127.0.0.1:3737`; set this when the backend runs on another port, for example `VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm run dev`. |
 | `VITE_BEAST_API_PROXY_TARGET` | Beast daemon target when it differs from `VITE_API_PROXY_TARGET`, for example when Beast controls use a separate local orchestrator port. |
 | `VITE_PROJECT_ID` | Optional project identifier for scoping chat sessions. Defaults to `default`. |
 
