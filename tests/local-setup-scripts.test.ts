@@ -197,4 +197,16 @@ describe('local setup scripts', () => {
       'add CLI execution providers through `ICliProvider` or API-backed clients through the provider registry',
     );
   });
+
+  it('keeps root AI assistant rule regeneration guidance on the supported workflow source', () => {
+    for (const docPath of ['CLAUDE.md', 'GEMINI.md']) {
+      const doc = read(docPath);
+
+      expect(doc).toContain('djm204/agent-workflow-skills');
+      expect(doc).toContain('package-level `project-outline.md` cleanup is tracked separately');
+      expect(doc).toContain('Do not regenerate the root `.cursor/rules/*.mdc` files');
+      expect(doc).not.toContain('npx @djm204/agent-skills');
+      expect(doc).not.toMatch(/Re-run to update:/i);
+    }
+  });
 });
