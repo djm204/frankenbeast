@@ -60,6 +60,21 @@ export class ParallelPlanner implements PlanningStrategy {
       throw new RecursionDepthExceededError(depth);
     }
 
+    // Validate dangling dependency references before sorting/executing so a
+    // malformed plan cannot run a partial independent subset and be reported as
+    // success. Cycles remain a structural graph error from topoSort below.
+    const danglingDependency = findDanglingDependency(graph);
+    if (danglingDependency) {
+      return {
+        status: 'failed',
+        taskResults: [],
+        failedTaskId: danglingDependency.taskId,
+        error: new Error(
+          `Task '${danglingDependency.taskId}' depends on unknown dependency node '${danglingDependency.dependencyId}'`
+        ),
+      };
+    }
+
     // Validate the DAG up front so cyclic plans fail loudly instead of
     // deadlocking the wave scheduler and returning partial success.
     const tasks = graph.topoSort();
@@ -202,6 +217,22 @@ function normalizeMaxWaveConcurrency(value: number | undefined): number {
   }
 
   return value;
+}
+
+function findDanglingDependency(
+  graph: PlanGraph
+): { taskId: TaskId; dependencyId: TaskId } | undefined {
+  const taskIds = new Set(graph.getTasks().map((task) => task.id));
+
+  for (const task of graph.getTasks()) {
+    for (const dependencyId of graph.getDependencies(task.id)) {
+      if (!taskIds.has(dependencyId)) {
+        return { taskId: task.id, dependencyId };
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function createLimitedExecutor(executor: TaskExecutor, maxConcurrency: number): TaskExecutor {
