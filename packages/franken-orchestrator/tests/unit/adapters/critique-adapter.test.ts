@@ -217,6 +217,69 @@ describe('CritiquePortAdapter', () => {
     });
   });
 
+  it('treats escalated evaluator infrastructure exceptions as terminal', async () => {
+    const loop = {
+      run: vi.fn().mockResolvedValue({
+        verdict: 'escalated',
+        iterations: [
+          {
+            index: 0,
+            input: { content: 'plan', metadata: {} },
+            result: {
+              verdict: 'fail',
+              overallScore: 0,
+              shortCircuited: false,
+              results: [
+                {
+                  evaluatorName: 'adr-compliance',
+                  verdict: 'fail',
+                  score: 0,
+                  findings: [
+                    {
+                      message: 'Evaluator "adr-compliance" failed because an internal evaluator error occurred.',
+                      severity: 'critical',
+                      location: EVALUATOR_EXCEPTION_LOCATION,
+                    },
+                  ],
+                },
+              ],
+            },
+            completedAt: '2026-03-05T00:00:00.000Z',
+          },
+        ],
+        escalation: { reason: 'Consensus failure' },
+      }),
+    };
+
+    const adapter = new CritiquePortAdapter({
+      loop,
+      config: {
+        maxIterations: 1,
+        tokenBudget: 1000,
+        consensusThreshold: 0.7,
+        sessionId: 'sess-1',
+        taskId: 'plan-review',
+      },
+    });
+
+    const result = await adapter.reviewPlan(plan);
+
+    expect(result).toEqual({
+      verdict: 'fail',
+      score: 0,
+      findings: [
+        {
+          evaluator: 'adr-compliance',
+          severity: 'critical',
+          message: 'Evaluator "adr-compliance" failed because an internal evaluator error occurred.',
+          location: EVALUATOR_EXCEPTION_LOCATION,
+        },
+      ],
+      halted: true,
+      haltReason: 'Critique evaluator infrastructure failure',
+    });
+  });
+
   it('flags halted loop results as terminal (regression: PR #343 P1)', async () => {
     const loop = {
       run: vi.fn().mockResolvedValue({

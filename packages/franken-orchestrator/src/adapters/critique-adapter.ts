@@ -153,6 +153,16 @@ export class CritiquePortAdapter implements ICritiqueModule {
       };
     }
 
+    if (this.hasEvaluatorExceptionFinding(lastResult?.results ?? [])) {
+      return {
+        verdict: 'fail',
+        findings,
+        score: lastResult?.overallScore ?? 0,
+        halted: true,
+        haltReason: 'Critique evaluator infrastructure failure',
+      };
+    }
+
     return {
       verdict: 'fail',
       findings: [{ evaluator: 'critique-loop', severity: 'high', message: loopResult.escalation.reason }],
