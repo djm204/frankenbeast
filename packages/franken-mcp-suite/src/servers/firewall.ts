@@ -21,12 +21,13 @@ if (isMain(import.meta.url)) {
     options: {
       db: { type: 'string', default: '.fbeast/beast.db' },
       tier: { type: 'string', default: 'standard' },
+      config: { type: 'string' },
     },
   });
   const tier = values['tier'] === 'strict' ? 'strict' : 'standard';
   const dbPath = resolveProjectDbPath(values['db']!);
   const root = process.env['FBEAST_ROOT'] ?? deriveProjectRootFromDbPath(values['db']!) ?? process.cwd();
-  const firewall = createFirewallAdapter(dbPath, tier, { root });
+  const firewall = createFirewallAdapter(dbPath, tier, { root, configPath: values['config'] });
   const server = createFirewallServer({ firewall }, createCentralOptions(dbPath));
   server.start().catch((err) => {
     console.error('fbeast-firewall failed to start:', err);
