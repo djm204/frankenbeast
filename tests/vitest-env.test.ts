@@ -59,4 +59,19 @@ describe('Vitest environment flag helper', () => {
     expect(config).toContain('include,');
     expect(config).toContain('exclude,');
   });
+
+  it('declares an explicit Docker sandbox smoke path with pass and skip output', () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+      scripts?: Record<string, string>;
+    };
+    const ci = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf-8');
+    const smokeScript = readFileSync(resolve(ROOT, 'scripts/run-docker-sandbox-smoke.mjs'), 'utf-8');
+
+    expect(pkg.scripts?.['test:docker:sandbox']).toBe('node scripts/run-docker-sandbox-smoke.mjs');
+    expect(ci).toContain('Run Docker sandbox build smoke test');
+    expect(ci).toContain('npm run test:docker:sandbox');
+    expect(smokeScript).toContain('DOCKER_BUILD');
+    expect(smokeScript).toContain('Docker sandbox build smoke test skipped: Docker daemon unavailable');
+    expect(smokeScript).toContain('Docker sandbox build smoke test passed');
+  });
 });

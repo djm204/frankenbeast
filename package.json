@@ -19,6 +19,7 @@
     "local:verify-cli": "fbeast --help && fbeast mcp --help && frankenbeast --help",
     "test": "turbo run test",
     "test:root": "vitest run",
+    "test:docker:sandbox": "node scripts/run-docker-sandbox-smoke.mjs",
     "test:root:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
