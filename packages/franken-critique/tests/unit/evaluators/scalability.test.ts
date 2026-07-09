@@ -582,7 +582,7 @@ const markdownPort = 8080;
 const cfg = { ports_by_protocol: { https: 8443 }, server_ports_by_name: { admin: 9000 } };
 const serviceMaps = { transport_ports: { http: 8081 }, support_ports: { health: 8082 }, transports_ports: { http: 8083 }, supports_ports: { health: 8084 } };
 const lowercaseMaps = { serverports: { http: 8085 }, apiports: { grpc: 8086 } };
-const quoted = { "server-ports": 3000, "server.ports": 5000, "preview-ports": 6000 };
+const quoted = { "server-ports": 3000, "server.ports": 5000, "preview-ports": 6000, "sports-ports": 9443 };
 config["server-ports"] = 7000;`;
     const result = await evaluator.evaluate(createInput(content));
 
@@ -591,6 +591,7 @@ config["server-ports"] = 7000;`;
       'Found hardcoded port number: 3000. Use environment variables or config.',
       'Found hardcoded port number: 5000. Use environment variables or config.',
       'Found hardcoded port number: 6000. Use environment variables or config.',
+      'Found hardcoded port number: 9443. Use environment variables or config.',
       'Found hardcoded port number: 7000. Use environment variables or config.',
       'Found hardcoded port number: 8443. Use environment variables or config.',
       'Found hardcoded port number: 9000. Use environment variables or config.',

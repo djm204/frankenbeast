@@ -157,10 +157,10 @@ export class ScalabilityEvaluator implements Evaluator {
       if (this.isInTypeOnlyRange(ignoredRanges, containerStart)) {
         continue;
       }
-      if (/(?:^|[^a-z0-9])(?:[Aa]irports?|[Cc]arports?|[Pp]assports?|[Ss]ports?)(?:$|[^a-z0-9]|[A-Z_])/.test(normalizedContainerKey)) {
+      if (/^(?:[Aa]irports?|[Cc]arports?|[Pp]assports?|[Ss]ports?)(?![-._]?[Pp][Oo][Rr][Tt][Ss])(?:$|[^a-z0-9]|[A-Z_])/.test(normalizedContainerKey)) {
         continue;
       }
-      if (/(?:^|[^a-z0-9])(?:[Tt]ransports|[Ss]upports)(?![-._]?[Pp][Oo][Rr][Tt][Ss])(?:$|[^a-z0-9]|[A-Z])/.test(normalizedContainerKey)) {
+      if (/^(?:[Tt]ransports|[Ss]upports)(?![-._]?[Pp][Oo][Rr][Tt][Ss])(?:$|[^a-z0-9]|[A-Z])/.test(normalizedContainerKey)) {
         continue;
       }
       if (!/[Pp][Oo][Rr][Tt][Ss](?:$|[^a-z0-9]|[A-Z])/.test(normalizedContainerKey)) {
