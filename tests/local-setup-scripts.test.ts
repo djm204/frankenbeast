@@ -132,6 +132,7 @@ describe('local setup scripts', () => {
 
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
+    expect(envExample).toContain('Grafana\'s built-in admin/admin default is insecure');
     expect(envExample).toContain('Generate a unique local password before uncommenting');
 
     for (const doc of [readme, quickstart, runCliBeastGuide]) {
