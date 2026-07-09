@@ -267,6 +267,54 @@ class NestedGenericBaseConfig extends Base<Record<string, unknown>, { port: 9000
     ]);
   });
 
+  it('does not treat every port substring as a config port key', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { report: 8080, important: 8443, imports: 9000, exports: 3000, port: 5000 };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 5000. Use environment variables or config.',
+    ]);
+  });
+
+  it('limits plural port container scanning to port values inside object elements', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const content = `const cfg = { ports: [{ port: 8080, weight: 10 }], serverPorts: [{ serverPort: 8443, timeoutMs: 5000 }] };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+      'Found hardcoded port number: 8443. Use environment variables or config.',
+    ]);
+  });
+
+  it('does not let completed interface prefixes hide later same-line runtime configs', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('interface I { x: string } const cfg = { port: 8443 };'));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8443. Use environment variables or config.',
+    ]);
+  });
+
+  it('does not classify JSX config props as type-only braces', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const result = await evaluator.evaluate(createInput('const view = <Component config={{ port: 8080 }} />;'));
+
+    expect(result.findings.map((finding) => finding.message)).toEqual([
+      'Found hardcoded port number: 8080. Use environment variables or config.',
+    ]);
+  });
+
+  it('preserves class context for long literal fields', async () => {
+    const evaluator = new ScalabilityEvaluator();
+    const longComment = 'x'.repeat(400);
+    const content = `class LiteralPortConfig {\n  other: string;\n  // ${longComment}\n  port: 8080;\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
+  });
+
   it('does not scan comments or strings for port-shaped assignments', async () => {
     const evaluator = new ScalabilityEvaluator();
     const content = `// const port = 8080

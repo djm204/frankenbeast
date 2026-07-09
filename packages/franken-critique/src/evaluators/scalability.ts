@@ -3,6 +3,7 @@ import type { Evaluator, EvaluationInput, EvaluationResult, EvaluationFinding } 
 const HARDCODED_URL_PATTERN = /["'](https?:\/\/(?:localhost|127\.0\.0\.1)[^"']*)["']/g;
 const HARDCODED_IP_PATTERN = /["'](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})["']/g;
 const PORT_IDENTIFIER_PATTERN = String.raw`(?<![\w$])(?!(?:[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b)\w*))\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
+const PORT_CONFIG_KEY_PATTERN = String.raw`(?<![\w$])(?!(?:[Vv]iew[Pp]orts?\w*|\w*(?:ViewPorts?|VIEW_PORTS?|view_ports?|[Ss]upport_[Pp]ortal|[Tt]ransports?\b|[Ss]upports?\b|[Pp]ortal(?:s|Id)?\b|[Pp]ortfolios?\b|[Rr]eports?\b|[Ii]mport(?:s|ant)?\b|[Ee]xports?\b)\w*))\w*[Pp][Oo][Rr][Tt][Ss]?\w*(?![\w$])`;
 const QUOTED_PORT_KEY_PATTERN = String.raw`["'](?!(?:[^"']*(?:[Vv][Ii][Ee][Ww]-[Pp][Oo][Rr][Tt])[^"']*))(?:[A-Za-z0-9_]+-)*[Pp][Oo][Rr][Tt](?:-[A-Za-z0-9_]+)*["']`;
 const PORT_NUMBER_PATTERN = String.raw`(\d[\d_]{1,6})`;
 const PORT_PROPERTY_GAP_PATTERN = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*`;
@@ -19,7 +20,7 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\[[^\]]*?(?<![\w$"'])${PORT_NUMBER_PATTERN}\b`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\[[^\]]*?(?<![\w$"'])${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
@@ -27,7 +28,7 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}${PORT_NUMBER_PATTERN}\b`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
@@ -50,7 +51,7 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\{[^{}]*?:${PORT_PROPERTY_GAP_PATTERN}${PORT_NUMBER_PATTERN}\b`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}\{[^{}]*?:${PORT_PROPERTY_GAP_PATTERN}${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
@@ -156,7 +157,7 @@ export class ScalabilityEvaluator implements Evaluator {
     seenPortNumberIndexes: Set<number>,
   ): void {
     const containerPattern = new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_IDENTIFIER_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}([\[{])`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}([\[{])`,
       'g',
     );
 
@@ -178,7 +179,9 @@ export class ScalabilityEvaluator implements Evaluator {
       for (const numberMatch of body.matchAll(new RegExp(String.raw`(?<![\w$])${PORT_NUMBER_PATTERN}\b`, 'g'))) {
         const portNumber = numberMatch[1];
         const portNumberIndex = containerStart + 1 + (numberMatch.index ?? 0);
-        if (this.isInTypeOnlyRange(ignoredRanges, portNumberIndex) || seenPortNumberIndexes.has(portNumberIndex)) {
+        if (this.isInTypeOnlyRange(ignoredRanges, portNumberIndex) ||
+          seenPortNumberIndexes.has(portNumberIndex) ||
+          this.isNonPortObjectValueInContainer(content, containerStart, portNumberIndex)) {
           continue;
         }
         seenPortNumberIndexes.add(portNumberIndex);
@@ -211,6 +214,18 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     return -1;
+  }
+
+  private isNonPortObjectValueInContainer(content: string, containerStart: number, portNumberIndex: number): boolean {
+    const prefix = content.slice(containerStart + 1, portNumberIndex);
+    const valueStart = Math.max(prefix.lastIndexOf(','), prefix.lastIndexOf('{'), prefix.lastIndexOf('[')) + 1;
+    const valuePrefix = prefix.slice(valueStart);
+    if (!/:\s*$/.test(valuePrefix)) {
+      return false;
+    }
+
+    const keyPrefix = valuePrefix.replace(/:\s*$/, '').trim();
+    return !new RegExp(String.raw`^(?:["']?${PORT_CONFIG_KEY_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*(?:["']${PORT_CONFIG_KEY_PATTERN}["']|${QUOTED_PORT_KEY_PATTERN})\s*\])$`).test(keyPrefix);
   }
 
   private isInTypeOnlyRange(ranges: Array<[number, number]>, matchIndex: number): boolean {
@@ -292,7 +307,7 @@ export class ScalabilityEvaluator implements Evaluator {
       return false;
     }
 
-    const prefix = content.slice(Math.max(0, portNumberIndex - 300), portNumberIndex);
+    const prefix = content.slice(Math.max(0, portNumberIndex - 2000), portNumberIndex);
     const openBrace = prefix.lastIndexOf('{');
     if (openBrace === -1) {
       return false;
@@ -328,6 +343,10 @@ export class ScalabilityEvaluator implements Evaluator {
     const newlineStart = prefix.lastIndexOf('\n') + 1;
     let statementStart = Math.max(semicolonStart, newlineStart);
     let statementPrefix = prefix.slice(statementStart);
+    const linePrefix = prefix.slice(Math.max(prefix.lastIndexOf('\n') + 1, prefix.lastIndexOf(';') + 1));
+    if (/<[A-Z][\w.:-]*(?:\s+[\w:-]+(?:\s*=\s*(?:[^\s{}]+|\{[^{}]*\}))?)*\s+[\w:-]+\s*=\s*$/s.test(linePrefix)) {
+      return false;
+    }
     if (/^\s*$/.test(statementPrefix)) {
       const boundaryStart = Math.max(prefix.lastIndexOf(';'), prefix.lastIndexOf('}')) + 1;
       const previousStatementPrefix = prefix.slice(boundaryStart);
@@ -337,7 +356,7 @@ export class ScalabilityEvaluator implements Evaluator {
       }
     }
     const typeAliasContext = /^\s*(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=[^;{}]*$/s.test(statementPrefix);
-    return /^\s*(?:(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*|(?:export\s+|declare\s+)*interface\s+\w+[\s\S]*)$/s.test(statementPrefix) ||
+    return /^\s*(?:(?:export\s+|declare\s+)*type\s+\w+[\s\S]*=\s*|(?:export\s+|declare\s+)*interface\s+\w+[^{}]*)$/s.test(statementPrefix) ||
       /(?:^|[;\n{])\s*(?:export\s+|declare\s+)*interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[^{}]+)?\s*$/s.test(prefix) ||
       /\b(?:as\s*|satisfies\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:export\s+|declare\s+)*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
@@ -347,7 +366,7 @@ export class ScalabilityEvaluator implements Evaluator {
       /\bas\s+[\w$.]+\s*<\s*$/s.test(prefix) ||
       /(?:<|\bextends)\s*$/s.test(prefix) ||
       /<[^<>{}();]*(?:=|,)\s*$/s.test(prefix) ||
-      /<[\s\S]*,\s*$/s.test(prefix) ||
+      /<[^=;{}]*,\s*$/s.test(prefix) ||
       (/(?:^|[^&])&\s*$/s.test(prefix) || /(?:^|[^|])\|\s*$/s.test(prefix)) ||
       (typeAliasContext && /(?:=|&|\||<|,|\()\s*$/s.test(prefix));
   }
