@@ -122,9 +122,10 @@ describe('CodexCliAdapter', () => {
     });
 
     it('emits retryable error on rate limit message', async () => {
-      mockSpawn([JSON.stringify({ type: 'error', message: 'rate limit 429' })]);
+      const proc = mockSpawn([JSON.stringify({ type: 'error', message: 'rate limit 429' })]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'rate limit 429', retryable: true });
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     });
 
     it('kills the spawned Codex process when stream iteration stops early', async () => {

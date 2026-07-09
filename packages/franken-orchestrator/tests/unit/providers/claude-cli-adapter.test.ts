@@ -327,7 +327,7 @@ describe('ClaudeCliAdapter', () => {
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'x' }] }));
       expect(events[0]).toEqual({ type: 'error', error: 'rate limit exceeded', retryable: true });
-      expect(proc.kill).not.toHaveBeenCalled();
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     });
 
     it('kills the spawned Claude process when stream iteration stops early', async () => {

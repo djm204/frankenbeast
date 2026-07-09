@@ -522,7 +522,6 @@ export class GeminiCliAdapter implements ILlmProvider {
           const isErrorResult = parsed['is_error'] === true || parsed['subtype'] === 'error' || parsed['status'] === 'error';
           if (isErrorResult) {
             const message = text || errorText || 'gemini returned an error result frame';
-            streamCompleted = true;
             yield {
               type: 'error',
               error: message,
@@ -552,7 +551,6 @@ export class GeminiCliAdapter implements ILlmProvider {
               totalOutputTokens;
           }
           if (!emittedText && !emittedToolUse) {
-            streamCompleted = true;
             yield {
               type: 'error',
               error: 'gemini result frame contained no text output',
@@ -641,7 +639,6 @@ export class GeminiCliAdapter implements ILlmProvider {
         } else if (type === 'message_stop') {
           sawTerminalFrame = true;
           if (!emittedText && !emittedToolUse) {
-            streamCompleted = true;
             yield {
               type: 'error',
               error: 'gemini stream completed without parseable text',
@@ -661,7 +658,6 @@ export class GeminiCliAdapter implements ILlmProvider {
           return;
         } else if (type === 'error') {
           const message = this.stringifyGeminiContent(parsed['message'] ?? parsed['error'] ?? 'Unknown error');
-          streamCompleted = true;
           yield {
             type: 'error',
             error: message,
@@ -686,7 +682,6 @@ export class GeminiCliAdapter implements ILlmProvider {
         proc.on('close', resolve);
       });
       if (exitCode !== 0 && exitCode !== null) {
-        streamCompleted = true;
         yield {
           type: 'error',
           error: `gemini process exited with code ${exitCode}`,
@@ -703,7 +698,6 @@ export class GeminiCliAdapter implements ILlmProvider {
           },
         };
       } else {
-        streamCompleted = true;
         yield {
           type: 'error',
           error: 'gemini process exited without producing a result frame or text output',

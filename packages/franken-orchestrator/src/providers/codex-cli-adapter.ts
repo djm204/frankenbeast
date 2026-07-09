@@ -179,7 +179,6 @@ export class CodexCliAdapter implements ILlmProvider {
             (parsed['message'] as string) ?? 'Unknown error';
           const retryable =
             message.includes('rate') || message.includes('429');
-          streamCompleted = true;
           yield { type: 'error', error: message, retryable };
           return;
         }
@@ -190,7 +189,6 @@ export class CodexCliAdapter implements ILlmProvider {
         proc.on('close', resolve);
       });
       if (exitCode !== 0 && exitCode !== null) {
-        streamCompleted = true;
         yield {
           type: 'error',
           error: `codex process exited with code ${exitCode}`,

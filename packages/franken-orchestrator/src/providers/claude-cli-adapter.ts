@@ -172,7 +172,6 @@ export class ClaudeCliAdapter implements ILlmProvider {
           const isErrorResult = parsed['is_error'] === true || subtype === 'error' || subtype?.startsWith('error_') === true;
           if (isErrorResult) {
             const message = resultText.trim() || errorText.trim() || errors.join('\n').trim() || 'claude returned an error result frame';
-            streamCompleted = true;
             yield {
               type: 'error',
               error: message,
@@ -196,7 +195,6 @@ export class ClaudeCliAdapter implements ILlmProvider {
             (parsed['total_output_tokens'] as number | undefined) ??
             totalOutputTokens;
           if (!emittedText && !emittedToolUse) {
-            streamCompleted = true;
             yield {
               type: 'error',
               error: 'claude result frame contained no text output',
@@ -302,7 +300,6 @@ export class ClaudeCliAdapter implements ILlmProvider {
           continue;
         } else if (type === 'message_stop') {
           if (!emittedText && !emittedToolUse) {
-            streamCompleted = true;
             yield {
               type: 'error',
               error: 'claude stream completed without parseable text',
@@ -326,7 +323,6 @@ export class ClaudeCliAdapter implements ILlmProvider {
             (error?.['message'] as string) ?? 'Unknown error';
           const retryable =
             message.includes('rate') || message.includes('overloaded');
-          streamCompleted = true;
           yield { type: 'error', error: message, retryable };
           return;
         }
@@ -337,14 +333,12 @@ export class ClaudeCliAdapter implements ILlmProvider {
         proc.on('close', resolve);
       });
       if (exitCode !== 0) {
-        streamCompleted = true;
         yield {
           type: 'error',
           error: `claude process exited with code ${exitCode}`,
           retryable: false,
         };
       } else if (!emittedText) {
-        streamCompleted = true;
         yield {
           type: 'error',
           error: 'claude process exited without producing a result frame or text output',
