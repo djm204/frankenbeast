@@ -246,6 +246,56 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('shares websocket message rate limits across refreshed tokens for the same session', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const firstToken = issueSessionToken({ secret, sessionId: session.id, expiresInMs: 60_000 });
+    const refreshedToken = issueSessionToken({ secret, sessionId: session.id, expiresInMs: 120_000 });
+    const llmComplete = vi.fn().mockResolvedValue('Working on it right now.');
+    const controller = new ChatSocketController({
+      runtime: createTestRuntime(llmComplete),
+      sessionStore: store,
+      tokenSecret: secret,
+      chatMessageRateLimit: { max: 1, windowMs: 60_000 },
+    });
+    const first = createPeer();
+    const second = createPeer();
+
+    expect(controller.connect(first.peer, {
+      origin: null,
+      sessionId: session.id,
+      token: firstToken,
+    }).ok).toBe(true);
+    expect(controller.connect(second.peer, {
+      origin: null,
+      sessionId: session.id,
+      token: refreshedToken,
+    }).ok).toBe(true);
+
+    await controller.receive(first.peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'first message',
+    }));
+    await controller.receive(second.peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-2',
+      content: 'second message',
+    }));
+
+    const events = second.sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'WebSocket chat message rate limit exceeded.',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('rejects overlapping websocket turns before starting another runtime execution', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
@@ -263,34 +313,100 @@ describe('ws chat server', () => {
       tokenSecret: secret,
       chatMessageRateLimit: { max: 10, windowMs: 60_000 },
     });
-    const { peer, sent } = createPeer();
+    const first = createPeer();
+    const second = createPeer();
 
-    const connect = controller.connect(peer, {
+    expect(controller.connect(first.peer, {
       origin: null,
       sessionId: session.id,
       token,
-    });
-    expect(connect.ok).toBe(true);
+    }).ok).toBe(true);
+    expect(controller.connect(second.peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
 
-    const firstReceive = controller.receive(peer, JSON.stringify({
+    const firstReceive = controller.receive(first.peer, JSON.stringify({
       type: 'message.send',
       clientMessageId: 'client-1',
       content: 'first message',
     }));
     await vi.waitFor(() => expect(llmComplete).toHaveBeenCalledTimes(1));
 
-    await controller.receive(peer, JSON.stringify({
+    await controller.receive(second.peer, JSON.stringify({
       type: 'message.send',
       clientMessageId: 'client-2',
       content: 'second message',
     }));
 
-    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    const events = second.sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
     expect(llmComplete).toHaveBeenCalledTimes(1);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn.error',
       code: 'RATE_LIMITED',
-      message: 'A chat turn is already running for this websocket connection.',
+      message: 'A chat turn is already running for this chat session.',
+    }));
+
+    resolveLlm('Working on it right now.');
+    await firstReceive;
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('applies the session turn guard to approval responses', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: new Date().toISOString(),
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ secret, sessionId: session.id });
+    let resolveLlm!: (value: string) => void;
+    const llmPending = new Promise<string>((resolve) => {
+      resolveLlm = resolve;
+    });
+    const llmComplete = vi.fn().mockReturnValue(llmPending);
+    const controller = new ChatSocketController({
+      runtime: createTestRuntime(llmComplete),
+      sessionStore: store,
+      tokenSecret: secret,
+      chatMessageRateLimit: { max: 10, windowMs: 60_000 },
+    });
+    const first = createPeer();
+    const second = createPeer();
+
+    expect(controller.connect(first.peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+    expect(controller.connect(second.peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    const firstReceive = controller.receive(first.peer, JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-1',
+      content: 'first message',
+    }));
+    await vi.waitFor(() => expect(llmComplete).toHaveBeenCalledTimes(1));
+
+    await controller.receive(second.peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+
+    const events = second.sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(llmComplete).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'A chat turn is already running for this chat session.',
     }));
 
     resolveLlm('Working on it right now.');
