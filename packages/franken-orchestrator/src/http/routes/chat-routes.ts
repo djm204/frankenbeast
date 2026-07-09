@@ -17,7 +17,7 @@ import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
-import { chatClientKey, chatRateLimitPrincipal } from '../chat-rate-limit.js';
+import { chatClientKey } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -70,10 +70,6 @@ function requestAddress(c: Context): string {
     || 'unknown';
 }
 
-function chatPrincipalKey(c: Context, operatorToken: string | undefined): string {
-  return chatRateLimitPrincipal({ operatorToken, remoteAddress: requestAddress(c) });
-}
-
 function chatMutationKey(sessionId: string): string {
   return `session:${sessionId}`;
 }
@@ -87,12 +83,14 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   async function withChatMutationAdmission<T>(
     c: Context,
     sessionId: string,
-    action: 'message' | 'approval',
     run: () => Promise<T>,
   ): Promise<T> {
-    const principalKey = chatPrincipalKey(c, operatorToken);
     const mutationKey = chatMutationKey(sessionId);
-    const result = limiter.take(chatClientKey({ action: 'message', principal: principalKey }));
+    const result = limiter.take(chatClientKey({
+      action: 'message',
+      operatorToken,
+      remoteAddress: requestAddress(c),
+    }));
     if (!result.allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
@@ -154,7 +152,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    return withChatMutationAdmission(c, session.id, 'message', async () => {
+    return withChatMutationAdmission(c, session.id, async () => {
       if (session.pendingApproval || session.state === 'pending_approval') {
         return c.json({
           error: {
@@ -233,7 +231,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
-    return withChatMutationAdmission(c, session.id, 'approval', async () => {
+    return withChatMutationAdmission(c, session.id, async () => {
       if (!session.pendingApproval && session.state !== 'pending_approval') {
         return c.json({ data: { id: session.id, approved, state: session.state } });
       }

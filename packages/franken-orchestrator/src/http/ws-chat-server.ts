@@ -219,7 +219,7 @@ export class ChatSocketController {
 
     switch (event.type) {
       case 'message.send':
-        if (!this.takeChatRateLimit(peer, connection, 'message')) {
+        if (!this.takeChatRateLimit(peer, connection)) {
           return;
         }
         await this.handleMessageSend(
@@ -231,7 +231,7 @@ export class ChatSocketController {
         );
         return;
       case 'approval.respond':
-        if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection, 'approval')) {
+        if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection)) {
           return;
         }
         await this.handleApproval(peer, session, event.approved);
@@ -353,10 +353,9 @@ export class ChatSocketController {
   private takeChatRateLimit(
     peer: ChatSocketPeer,
     connection: ConnectionState,
-    action: 'message' | 'approval',
   ): boolean {
     const result = this.chatRateLimiter.take(chatClientKey({
-      action,
+      action: 'message',
       operatorToken: this.operatorToken,
       remoteAddress: connection.remoteAddress,
     }));
