@@ -130,6 +130,7 @@ export class CodexCliAdapter implements ILlmProvider {
     const rl = createInterface({ input: proc.stdout! });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let streamCompleted = false;
 
     try {
       for await (const line of rl) {
@@ -162,6 +163,7 @@ export class CodexCliAdapter implements ILlmProvider {
           totalOutputTokens =
             (usage['output_tokens'] as number) ?? totalOutputTokens;
           if (type === 'done') {
+            streamCompleted = true;
             yield {
               type: 'done',
               usage: {
@@ -177,6 +179,7 @@ export class CodexCliAdapter implements ILlmProvider {
             (parsed['message'] as string) ?? 'Unknown error';
           const retryable =
             message.includes('rate') || message.includes('429');
+          streamCompleted = true;
           yield { type: 'error', error: message, retryable };
           return;
         }
@@ -187,12 +190,14 @@ export class CodexCliAdapter implements ILlmProvider {
         proc.on('close', resolve);
       });
       if (exitCode !== 0 && exitCode !== null) {
+        streamCompleted = true;
         yield {
           type: 'error',
           error: `codex process exited with code ${exitCode}`,
           retryable: false,
         };
       } else {
+        streamCompleted = true;
         yield {
           type: 'done',
           usage: {
@@ -204,7 +209,9 @@ export class CodexCliAdapter implements ILlmProvider {
       }
     } finally {
       rl.close();
-      terminateRunningProcess(proc);
+      if (!streamCompleted) {
+        terminateRunningProcess(proc);
+      }
     }
   }
 }

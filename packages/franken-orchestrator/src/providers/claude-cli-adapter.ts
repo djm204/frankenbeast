@@ -147,6 +147,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
     let totalOutputTokens = 0;
     let emittedText = false;
     let emittedToolUse = false;
+    let streamCompleted = false;
 
     try {
       for await (const line of rl) {
@@ -171,6 +172,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
           const isErrorResult = parsed['is_error'] === true || subtype === 'error' || subtype?.startsWith('error_') === true;
           if (isErrorResult) {
             const message = resultText.trim() || errorText.trim() || errors.join('\n').trim() || 'claude returned an error result frame';
+            streamCompleted = true;
             yield {
               type: 'error',
               error: message,
@@ -194,6 +196,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
             (parsed['total_output_tokens'] as number | undefined) ??
             totalOutputTokens;
           if (!emittedText && !emittedToolUse) {
+            streamCompleted = true;
             yield {
               type: 'error',
               error: 'claude result frame contained no text output',
@@ -201,6 +204,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
             };
             return;
           }
+          streamCompleted = true;
           yield {
             type: 'done',
             usage: {
@@ -298,6 +302,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
           continue;
         } else if (type === 'message_stop') {
           if (!emittedText && !emittedToolUse) {
+            streamCompleted = true;
             yield {
               type: 'error',
               error: 'claude stream completed without parseable text',
@@ -305,6 +310,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
             };
             return;
           }
+          streamCompleted = true;
           yield {
             type: 'done',
             usage: {
@@ -330,12 +336,14 @@ export class ClaudeCliAdapter implements ILlmProvider {
         proc.on('close', resolve);
       });
       if (exitCode !== 0) {
+        streamCompleted = true;
         yield {
           type: 'error',
           error: `claude process exited with code ${exitCode}`,
           retryable: false,
         };
       } else if (!emittedText) {
+        streamCompleted = true;
         yield {
           type: 'error',
           error: 'claude process exited without producing a result frame or text output',
@@ -344,7 +352,9 @@ export class ClaudeCliAdapter implements ILlmProvider {
       }
     } finally {
       rl.close();
-      terminateRunningProcess(proc);
+      if (!streamCompleted) {
+        terminateRunningProcess(proc);
+      }
     }
   }
 }

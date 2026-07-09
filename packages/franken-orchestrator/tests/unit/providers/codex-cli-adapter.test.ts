@@ -95,13 +95,14 @@ describe('CodexCliAdapter', () => {
 
   describe('execute()', () => {
     it('parses text content events', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({ type: 'message', content: 'Hello from Codex' }),
         JSON.stringify({ type: 'done', usage: { input_tokens: 80, output_tokens: 20 } }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'text', content: 'Hello from Codex' });
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 } });
+      expect(proc.kill).not.toHaveBeenCalled();
     });
 
     it('parses tool call events', async () => {

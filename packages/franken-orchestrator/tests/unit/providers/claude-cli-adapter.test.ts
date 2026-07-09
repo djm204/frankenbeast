@@ -162,11 +162,12 @@ describe('ClaudeCliAdapter', () => {
     });
 
     it('reads top-level Claude result token totals', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({ type: 'result', result: 'Final answer', usage: {}, total_input_tokens: 21, total_output_tokens: 8 }),
       ]);
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 21, outputTokens: 8, totalTokens: 29 } });
+      expect(proc.kill).not.toHaveBeenCalled();
     });
 
     it('treats Claude error result subtypes as failures', async () => {

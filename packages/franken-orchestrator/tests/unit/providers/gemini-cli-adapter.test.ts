@@ -314,7 +314,7 @@ describe('GeminiCliAdapter', () => {
     });
 
     it('parses Gemini CLI result wrapper frames', async () => {
-      mockSpawn([
+      const proc = mockSpawn([
         JSON.stringify({
           type: 'result',
           result: { response: { text: 'Gemini wrapper answer' } },
@@ -326,6 +326,7 @@ describe('GeminiCliAdapter', () => {
         { type: 'text', content: 'Gemini wrapper answer' },
         { type: 'done', usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 } },
       ]);
+      expect(proc.kill).not.toHaveBeenCalled();
     });
 
     it('preserves whitespace in Gemini result wrapper frames', async () => {
