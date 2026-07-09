@@ -15,6 +15,8 @@
     "lint:any": "node scripts/audit-explicit-any.mjs",
     "lint:security": "node scripts/check-plain-http.mjs && node scripts/check-hardcoded-secrets.mjs && node scripts/audit-todo-markers.mjs",
     "audit:todos": "node scripts/audit-todo-markers.mjs",
+    "local:link": "npm run build && npm link --workspace=@franken/mcp-suite --workspace=@franken/orchestrator",
+    "local:verify-cli": "fbeast --help && fbeast mcp --help && frankenbeast --help",
     "test": "turbo run test",
     "test:root": "vitest run",
     "test:root:watch": "vitest",

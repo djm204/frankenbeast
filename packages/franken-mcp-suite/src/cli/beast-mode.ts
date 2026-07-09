@@ -6,7 +6,7 @@ import { FbeastConfig } from '../shared/config.js';
 function printLine(...args: unknown[]): void {
   console.info(...args);
 }
-const FRANKENBEAST_INSTALL_COMMAND = 'npm install -g @franken/orchestrator';
+const FRANKENBEAST_INSTALL_HELP = ['from the repo root, run: npm run local:link', 'then verify with: npm run local:verify-cli'];
 const SUPPORTED_BEAST_PROVIDERS = new Set(['anthropic-api', 'codex-cli', 'claude-cli']);
 
 function parseProvider(argv: string[]): string {
@@ -54,8 +54,10 @@ export async function runBeastMode(argv: string[], deps: BeastModeDeps): Promise
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('binary not found') || msg.includes('ENOENT')) {
-      printLine('\nTo launch the orchestrator, install the frankenbeast CLI:');
-      printLine(`  ${FRANKENBEAST_INSTALL_COMMAND}`);
+      printLine('\nTo launch the orchestrator from a local checkout:');
+      for (const line of FRANKENBEAST_INSTALL_HELP) {
+        printLine(`  ${line}`);
+      }
       printLine('  frankenbeast beasts catalog');
     } else {
       throw err;
