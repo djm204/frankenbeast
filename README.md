@@ -615,6 +615,32 @@ You can also set the backend in `.fbeast/config.json` with `{ "network": { "secu
 2. Keep the token server-side: use the configured secret store or set `FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token>` in a local, uncommitted env file.
 3. Run the dashboard through same-origin backend routes. In Vite dev mode, use `VITE_API_PROXY_TARGET`/`VITE_BEAST_API_PROXY_TARGET` so the Vite server attaches the token to proxy requests without exposing it to the browser bundle.
 
+### Init backend setup flow
+
+`frankenbeast init` configures the orchestrator/backend control plane. It is separate from `fbeast mcp init`, which only registers MCP servers and optional hooks for an AI client in the current project. Run `frankenbeast init` before enabling Beast controls in the dashboard so the backend has module settings, a secret backend, and `network.operatorTokenRef` ready for the Vite proxy or production BFF.
+
+Common forms:
+
+```bash
+frankenbeast init                  # interactive setup wizard
+frankenbeast init --verify         # validate .fbeast/config.json and .fbeast/init-state.json
+frankenbeast init --repair         # re-run repair wizard paths; review token prompts carefully
+frankenbeast init --non-interactive       # safe only after config and init state are complete
+```
+
+Choose the secret backend before the first init run by writing `network.secureBackend` in `.fbeast/config.json`, for example `{ "network": { "secureBackend": "os-keychain" } }`. Keeping the config choice ahead of init ensures the generated operator token is written to the same backend that later runtime and dashboard processes will read.
+
+During the interactive wizard, expect prompts for the Chat, Dashboard, and Comms modules; the default provider; the `secure`/`insecure` network mode; optional Slack, Discord, Telegram, or WhatsApp credentials when Comms is enabled; and an operator token prompt that can be left blank to auto-generate a token. Sensitive values are stored in the selected secret backend and referenced from `.fbeast/config.json`; the raw operator token is printed once when auto-generated so you can copy it into a local server-side `.env` if you are not resolving it through the configured backend.
+
+For the default `local-encrypted` backend, interactive init needs a passphrase to create or update the encrypted vault. In CI or other headless runtime paths, export only that variable before commands that actually resolve stored secrets, such as a run or dashboard backend process:
+
+```bash
+export FRANKENBEAST_PASSPHRASE=<passphrase>
+frankenbeast run --config .fbeast/config.json
+```
+
+Use `frankenbeast init --non-interactive` only when `.fbeast/config.json`, `.fbeast/init-state.json`, and the selected backend entries already exist. It checks the config/init-state files and selected ref fields, but it does not prove every completed step, create a fresh vault, answer wizard prompts, decrypt the secret vault, or resolve secret refs. Likewise, `frankenbeast init --verify` validates init config and state files but does not resolve secret refs, so keep a runtime smoke check in CI when you need to prove operator-token resolution works. During `--repair`, review the operator-token prompt before accepting defaults; leaving it blank can generate a replacement token and rotate the dashboard/control-plane credential.
+
 ### Non-interactive / CI usage
 
 ```bash
