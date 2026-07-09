@@ -124,4 +124,31 @@ describe('proxy adapter containment', () => {
     expect(strictResult.content[0].text).toContain('flagged');
     rmSync(projectRoot, { recursive: true, force: true });
   });
+
+  it('uses an explicit active config path for proxy firewall scans', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'fbeast-proxy-active-config-'));
+    const configRoot = mkdtempSync(join(tmpdir(), 'fbeast-active-config-'));
+    mkdirSync(join(projectRoot, '.fbeast'), { recursive: true });
+    const activeConfig = join(configRoot, 'active-config.json');
+    writeFileSync(activeConfig, JSON.stringify({
+      security: {
+        profile: 'permissive',
+        customRules: [
+          { name: 'active-config-rule', pattern: 'active-config-rule', action: 'block', target: 'request' },
+        ],
+      },
+    }));
+    const adapters = createAdapterSet(join(projectRoot, '.fbeast', 'beast.db'), {
+      root: projectRoot,
+      configPath: activeConfig,
+    });
+    const scanTool = TOOL_REGISTRY.get('fbeast_firewall_scan')!;
+    const handler = scanTool.makeHandler(adapters);
+
+    const result = await handler({ input: 'hit active-config-rule' });
+
+    expect(result.content[0].text).toContain('flagged');
+    rmSync(projectRoot, { recursive: true, force: true });
+    rmSync(configRoot, { recursive: true, force: true });
+  });
 });

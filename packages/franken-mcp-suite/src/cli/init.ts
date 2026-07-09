@@ -109,12 +109,13 @@ function initJsonClient(options: {
   pruneFbeastMcpServerEntries(mcpConfig);
   const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
   const dbPath = join('.fbeast', 'beast.db');
-  const proxyArgs = ['--db', dbPath];
+  const configPath = join('.fbeast', 'config.json');
+  const proxyArgs = ['--db', dbPath, '--config', configPath];
   if (mode === 'proxy') {
     mcpServers['fbeast-proxy'] = { command: 'fbeast-proxy', args: proxyArgs };
   } else {
     for (const srv of servers) {
-      mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath] };
+      mcpServers[`fbeast-${srv}`] = { command: SERVER_BIN_MAP[srv], args: ['--db', dbPath, '--config', configPath] };
     }
   }
   mcpConfig['mcpServers'] = mcpServers;
@@ -160,9 +161,10 @@ function initCodex(options: {
   const { root, servers, hooks, config, spawnFn, mode } = options;
   ensureCodexProjectId(root);
   const dbPath = join(root, '.fbeast', 'beast.db');
+  const configPath = join(root, '.fbeast', 'config.json');
 
   migrateLegacyCodexServers(root, spawnFn);
-  writeCodexProjectConfig(root, servers, mode, dbPath);
+  writeCodexProjectConfig(root, servers, mode, dbPath, configPath);
 
   // Drop instructions into AGENTS.md
   writeAgentsMd(root);
@@ -210,6 +212,7 @@ function writeCodexProjectConfig(
   servers: readonly FbeastServer[],
   mode: 'standard' | 'proxy',
   dbPath: string,
+  fbeastConfigPath: string,
 ): void {
   const codexDir = join(root, '.codex');
   mkdirSync(codexDir, { recursive: true });
@@ -221,8 +224,8 @@ function writeCodexProjectConfig(
     : servers.map((srv) => ({ name: codexServerName(root, srv), command: SERVER_BIN_MAP[srv] }));
   const fbeastConfig = serverEntries.map(({ name, command }) => {
     const args = mode === 'proxy'
-      ? ['--db', dbPath, '--root', root]
-      : ['--db', dbPath];
+      ? ['--db', dbPath, '--root', root, '--config', fbeastConfigPath]
+      : ['--db', dbPath, '--config', fbeastConfigPath];
     return [
       `[mcp_servers.${name}]`,
       `command = ${tomlString(command)}`,

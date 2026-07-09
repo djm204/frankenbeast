@@ -136,4 +136,19 @@ describe('Firewall Server', () => {
 
     expect(result).toEqual({ verdict: 'flagged', matchedPatterns: ['custom:secret-sauce'] });
   });
+
+  it('rejects unsafe custom firewall regex patterns before scanning', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fw-unsafe-regex-'));
+    mkdirSync(join(root, '.fbeast'), { recursive: true });
+    writeFileSync(join(root, '.fbeast', 'config.json'), JSON.stringify({
+      security: {
+        customRules: [
+          { name: 'catastrophic', pattern: '(a+)+$', action: 'block', target: 'request' },
+        ],
+      },
+    }));
+    const adapter = createFirewallAdapter(join(root, '.fbeast', 'fw.db'), 'standard', { root });
+
+    await expect(adapter.scanText(`${'a'.repeat(64)}!`)).rejects.toThrow(/Unsafe security\.customRules\[0]\.pattern/);
+  });
 });

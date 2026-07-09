@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createSqliteStore } from '../shared/sqlite-store.js';
 import { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from '@franken/orchestrator';
 import type { InjectionTier } from '@franken/orchestrator';
@@ -51,7 +51,7 @@ export function createFirewallAdapter(
 
   const store = createSqliteStore(dbPathOrDeps);
   const root = realpathSync(resolve(options.root ?? process.env['FBEAST_ROOT'] ?? process.cwd()));
-  const configPath = options.configPath ?? join(root, '.fbeast', 'config.json');
+  const configPath = options.configPath ?? process.env['FBEAST_CONFIG'] ?? join(dirname(dbPathOrDeps), 'config.json');
 
   function resolveContained(requested: string): string {
     const target = resolve(root, requested);
@@ -148,12 +148,23 @@ function parseCustomRule(rule: unknown, index: number, configPath: string): Cust
   const pattern = parseRequiredString(rule['pattern'], `security.customRules[${index}].pattern`, configPath);
   const action = parseRuleAction(rule['action'], index, configPath);
   const target = parseRuleTarget(rule['target'], index, configPath);
+  assertSafeCustomRulePattern(pattern, index, configPath);
+  return { name, pattern, action, target };
+}
+
+function assertSafeCustomRulePattern(pattern: string, index: number, configPath: string): void {
+  if (pattern.length > 256 || hasNestedQuantifier(pattern)) {
+    throw new Error(`Unsafe security.customRules[${index}].pattern in firewall config: ${configPath}`);
+  }
   try {
     new RegExp(pattern, 'i');
   } catch {
     throw new Error(`Invalid security.customRules[${index}].pattern in firewall config: ${configPath}`);
   }
-  return { name, pattern, action, target };
+}
+
+function hasNestedQuantifier(pattern: string): boolean {
+  return /\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)\s*[+*?{]/.test(pattern);
 }
 
 function parseRequiredString(value: unknown, field: string, configPath: string): string {
