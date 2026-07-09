@@ -53,6 +53,7 @@ describe('ScalabilityEvaluator', () => {
     ['bracket notation assignment', 'config["serverPort"] = 8080;'],
     ['computed literal object key', 'const cfg = { ["serverPort"]: 8080 };'],
     ['commented config property', 'const cfg = { /* docs */ port: 8080 };'],
+    ['commented config separators', 'const cfg = { port /* docs */: /* docs */ 8080 };'],
     ['numeric suffixed config key', 'const cfg = { port2: 8080 };'],
     ['hyphenated quoted config key', 'const cfg = { "server-port": 8080, \'api-port\': 8443 };'],
     ['numeric separator config literal', 'const cfg = { port: 8_080 };'],
@@ -107,7 +108,13 @@ class LiteralPortConfig {
 }
 function bindReadonly(opts: Readonly<{ port: 8080 }>) {}
 makeConfig<{ port: 8080 }>();
-function bindGeneric<T extends { port: 8080 }>() {}`;
+function bindGeneric<T extends { port: 8080 }>() {}
+const cfg = {} satisfies { port: 8080 };
+function bindHost(host: string, port: 8080) {}
+type BindHost = (host: string, port: 8080) => void;
+class ImplementedPortConfig implements ListenerConfig {
+  port: 8080;
+}`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((f) => f.message.includes('hardcoded port number'))).toBe(false);
@@ -144,6 +151,12 @@ function portRegex() {
   return /config\\.port = 8080/;
 }
 const arrowRegex = () => /{ port: 8080 }/;
+switch (true) {
+  case /{ port: 8080 }/.test(input):
+    break;
+}
+const nestedTemplateString = \`\${"{ port: 8080 }"}\`;
+const nestedTemplateComment = \`\${/* { port: 8080 } */ value}\`;
 log('debug', "port: 8080");`;
     const result = await evaluator.evaluate(createInput(content));
 

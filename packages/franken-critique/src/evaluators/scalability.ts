@@ -18,7 +18,7 @@ const HARDCODED_PORT_PATTERNS = [
   },
   {
     pattern: new RegExp(
-      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\])\s*:\s*${PORT_NUMBER_PATTERN}\b`,
+      String.raw`(?:^|[,{])${PORT_PROPERTY_GAP_PATTERN}(?:["']?${PORT_IDENTIFIER_PATTERN}["']?|${QUOTED_PORT_KEY_PATTERN}|\[\s*["']${PORT_IDENTIFIER_PATTERN}["']\s*\])${PORT_PROPERTY_GAP_PATTERN}:${PORT_PROPERTY_GAP_PATTERN}${PORT_NUMBER_PATTERN}\b`,
       'g',
     ),
     suggestion: CONFIG_PORT_SUGGESTION,
@@ -99,6 +99,10 @@ export class ScalabilityEvaluator implements Evaluator {
           continue;
         }
 
+        if (skipTypeOnly && this.isParameterLiteralType(content, match.index, portNumberIndex)) {
+          continue;
+        }
+
         if (skipTypeOnly && this.isClassFieldTypeAnnotation(content, portNumberIndex)) {
           continue;
         }
@@ -121,6 +125,27 @@ export class ScalabilityEvaluator implements Evaluator {
     return matchIndex + match[0].lastIndexOf(match[1] ?? '');
   }
 
+  private isParameterLiteralType(content: string, matchIndex: number, portNumberIndex: number): boolean {
+    if (content[matchIndex] !== ',') {
+      return false;
+    }
+
+    const suffix = content.slice(portNumberIndex).match(/^\d[\d_]*\s*[,)]/);
+    if (!suffix) {
+      return false;
+    }
+
+    const prefix = content.slice(Math.max(0, matchIndex - 300), matchIndex);
+    const openParen = prefix.lastIndexOf('(');
+    if (openParen === -1) {
+      return false;
+    }
+
+    const beforeParen = prefix.slice(0, openParen);
+    const beforeMatchInParams = prefix.slice(openParen + 1);
+    return /(?:\bfunction\b|=>\s*$|=\s*$|\btype\s+\w+(?:<[^>{}]*>)?\s*=\s*$)/s.test(beforeParen) && /\b\w+\s*:\s*[^,]+$/s.test(beforeMatchInParams);
+  }
+
   private isClassFieldTypeAnnotation(content: string, portNumberIndex: number): boolean {
     const suffix = content.slice(portNumberIndex).match(/^\d{2,5}\s*;/);
     if (!suffix) {
@@ -136,7 +161,7 @@ export class ScalabilityEvaluator implements Evaluator {
     const beforeBrace = prefix.slice(0, openBrace);
     const afterBrace = prefix.slice(openBrace + 1);
     const classFieldPattern = new RegExp(String.raw`(?:^|[;\n])\s*${PORT_IDENTIFIER_PATTERN}\s*:\s*$`, 's');
-    return /\bclass\s+\w+(?:\s+extends\s+[\w$.]+)?\s*$/.test(beforeBrace) && classFieldPattern.test(afterBrace);
+    return /\bclass\s+\w+(?:\s+extends\s+[\w$.]+)?(?:\s+implements\s+[\w$.,<>\s]+)?\s*$/.test(beforeBrace) && classFieldPattern.test(afterBrace);
   }
 
   private findTypeOnlyBraceRanges(content: string): Array<[number, number]> {
@@ -160,7 +185,7 @@ export class ScalabilityEvaluator implements Evaluator {
   private startsTypeOnlyBrace(content: string, openBraceIndex: number): boolean {
     const prefix = content.slice(Math.max(0, openBraceIndex - 200), openBraceIndex);
     const typeAliasContext = /\btype\s+\w+(?:<[^>{}]*>)?\s*=[^;{}]*$/s.test(prefix);
-    return /\b(?:type\s+\w+(?:<[^>{}]*>)?\s*=\s*|interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[\w$.,<>\s]+)?\s*|as\s*)$/s.test(prefix) ||
+    return /\b(?:type\s+\w+(?:<[^>{}]*>)?\s*=\s*|interface\s+\w+(?:<[^>{}]*>)?(?:\s+extends\s+[\w$.,<>\s]+)?\s*|as\s*|satisfies\s*)$/s.test(prefix) ||
       /(?:^|[\n;])\s*(?:const|let|var)\s+\w+\s*:\s*$/s.test(prefix) ||
       /[(),]\s*\w+\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
       /\)\s*:\s*(?:[\w$.]+\s*<\s*)?$/s.test(prefix) ||
@@ -261,7 +286,12 @@ export class ScalabilityEvaluator implements Evaluator {
 
       if (content[index] === '$' && content[index + 1] === '{') {
         ranges.push([segmentStart, index]);
-        index = this.findTemplateInterpolationEnd(content, index + 2) + 1;
+        const expressionStart = index + 2;
+        const expressionEnd = this.findTemplateInterpolationEnd(content, expressionStart);
+        for (const [start, end] of this.findCommentAndStringRanges(content.slice(expressionStart, expressionEnd))) {
+          ranges.push([expressionStart + start, expressionStart + end]);
+        }
+        index = expressionEnd + 1;
         segmentStart = index;
         continue;
       }
@@ -334,7 +364,7 @@ export class ScalabilityEvaluator implements Evaluator {
     }
 
     const prefix = content.slice(Math.max(0, slashIndex - 40), slashIndex);
-    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:return|throw|yield)\s*$|=>\s*$/.test(prefix);
+    return previous < 0 || /[=(:,\[{};!&|?]/.test(content.charAt(previous)) || /(?:^|[\s;{}])(?:case|return|throw|yield)\s*$|=>\s*$/.test(prefix);
   }
 
   private findRegexLiteralEnd(content: string, slashIndex: number): number {
