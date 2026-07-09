@@ -68,6 +68,13 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
     });
 
+    it('runs workflow linting with actionlint before Node setup', () => {
+      expect(content).toContain('Lint GitHub Actions workflows');
+      expect(content).toContain('raven-actions/actionlint@v2.2.0');
+      expect(content).not.toContain('actions/bin/check-yaml');
+      expect(content.indexOf('raven-actions/actionlint@v2.2.0')).toBeLessThan(content.indexOf('actions/setup-node'));
+    });
+
     it('uses actions/setup-node with npm cache', () => {
       expect(content).toContain('actions/setup-node');
       expect(content).toMatch(/cache.*npm/);
