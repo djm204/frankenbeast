@@ -41,6 +41,8 @@ describe('Vitest environment flag helper', () => {
     const config = readFileSync(resolve(ROOT, 'vitest.config.ts'), 'utf-8');
 
     expect(config).toContain("readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD'])");
+    expect(config).toContain('optionsWithRequiredValue');
+    expect(config).toContain('collectRequestedPaths');
     expect(config).toContain("normalizeRequestedPath");
     expect(config).toContain("arg === 'tests/integration'");
     expect(config).toContain("arg.startsWith('tests/integration/')");
@@ -50,6 +52,7 @@ describe('Vitest environment flag helper', () => {
     expect(config).toContain("'tests/integration/**/*.test.ts'");
     expect(config).toContain('optionalSuiteRequested');
     expect(config).toContain('runIntegration && !runE2e');
+    expect(config).not.toContain("...(!runDockerBuild ? ['tests/sandbox-dockerfile.test.ts'] : [])");
     expect(config).toContain('include,');
     expect(config).toContain('exclude,');
   });

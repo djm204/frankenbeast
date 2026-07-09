@@ -4,6 +4,22 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { readVitestFlags } from './scripts/vitest-env.js';
 
 const vitestFlags = readVitestFlags(['INTEGRATION', 'E2E', 'DOCKER_BUILD']);
+const optionsWithRequiredValue = new Set([
+  '--config',
+  '--dir',
+  '--environment',
+  '--exclude',
+  '--include',
+  '--pool',
+  '--project',
+  '--reporter',
+  '--root',
+  '--testNamePattern',
+  '--test-name-pattern',
+  '-c',
+  '-r',
+  '-t',
+]);
 const normalizeRequestedPath = (arg: string): string => {
   const normalized = arg.replace(/:\d+(?::\d+)?$/u, '').replace(/\\/gu, '/');
   if (isAbsolute(normalized)) {
@@ -17,11 +33,37 @@ const isRequestedTestPath = (arg: string): boolean => (
   || arg === 'tests/sandbox-dockerfile.test.ts'
   || (arg.startsWith('tests/') && arg.endsWith('.test.ts'))
 );
-const requestedPaths = process.argv
-  .slice(2)
-  .filter((arg) => !arg.startsWith('-') && arg !== 'run')
-  .map(normalizeRequestedPath)
-  .filter(isRequestedTestPath);
+const collectRequestedPaths = (args: readonly string[]): string[] => {
+  const paths: string[] = [];
+  let skipOptionValue = false;
+
+  for (const arg of args) {
+    if (skipOptionValue) {
+      skipOptionValue = false;
+      continue;
+    }
+
+    if (arg === 'run') {
+      continue;
+    }
+
+    if (arg.startsWith('-')) {
+      const optionName = arg.split('=', 1)[0];
+      if (optionsWithRequiredValue.has(optionName) && !arg.includes('=')) {
+        skipOptionValue = true;
+      }
+      continue;
+    }
+
+    const normalized = normalizeRequestedPath(arg);
+    if (isRequestedTestPath(normalized)) {
+      paths.push(normalized);
+    }
+  }
+
+  return paths;
+};
+const requestedPaths = collectRequestedPaths(process.argv.slice(2));
 const requestedDockerBuild = requestedPaths.some((arg) => arg === 'tests/sandbox-dockerfile.test.ts');
 const explicitPathRequest = requestedPaths.length > 0;
 const runIntegration = vitestFlags.INTEGRATION;
@@ -42,7 +84,6 @@ const exclude = explicitPathRequest
       '**/dist/**',
       ...(!optionalSuiteRequested ? ['tests/integration/**/*.test.ts'] : []),
       ...(runIntegration && !runE2e ? ['tests/integration/**/*e2e*.test.ts'] : []),
-      ...(!runDockerBuild ? ['tests/sandbox-dockerfile.test.ts'] : []),
     ];
 
 export default defineConfig({
@@ -61,7 +102,7 @@ export default defineConfig({
     // Default root CI suite: deterministic repository policy/config tests only.
     // INTEGRATION=true or an explicit tests/integration path opts into root integration tests.
     // E2E=true or an explicit e2e path opts into root end-to-end tests.
-    // DOCKER_BUILD=true or the explicit sandbox Dockerfile test path opts into Docker builds.
+    // DOCKER_BUILD=true opts into the Docker build assertion inside the sandbox Dockerfile test.
     include,
     exclude,
     testTimeout: 15_000,

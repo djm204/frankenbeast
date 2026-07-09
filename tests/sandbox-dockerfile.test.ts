@@ -3,6 +3,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { readVitestFlag } from '../scripts/vitest-env.js';
+
 function hasDocker(): boolean {
   const result = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], {
     encoding: 'utf8',
@@ -11,7 +13,8 @@ function hasDocker(): boolean {
   return !result.error && result.status === 0;
 }
 
-const dockerIt = hasDocker() ? it : it.skip;
+const runDockerBuild = readVitestFlag(process.env, 'DOCKER_BUILD');
+const dockerIt = runDockerBuild && hasDocker() ? it : it.skip;
 
 describe('sandbox Dockerfile', () => {
   const dockerfile = readFileSync(resolve('Dockerfile'), 'utf8');
