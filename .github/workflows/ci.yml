@@ -34,6 +34,9 @@ jobs:
       - name: Run deterministic root Vitest suite
         run: npm run test:root
 
+      - name: Run Docker sandbox build smoke test
+        run: npm run test:docker:sandbox
+
       - run: npm run lint:security
 
       - name: Track code comment debt markers
