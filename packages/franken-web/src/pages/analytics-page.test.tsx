@@ -17,6 +17,7 @@ function mockClient(): AnalyticsApiClient {
     }),
     fetchSessions: vi.fn().mockResolvedValue([
       { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 2, failureCount: 1 },
+      { id: 'session-b', lastActivityAt: '2026-04-28T12:02:00.000Z', eventCount: 1, failureCount: 0 },
     ]),
     fetchEvents: vi.fn().mockResolvedValue({
       total: 2,
@@ -99,6 +100,23 @@ describe('AnalyticsPage', () => {
       expect(client.fetchSummary).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a' }));
       expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a', page: 1 }));
     });
+  });
+
+  it('keeps in-scope session picker options available after selecting one session', async () => {
+    const client = mockClient();
+
+    render(<AnalyticsPage client={client} />);
+    const select = await screen.findByLabelText('Session');
+    expect(screen.getByRole('option', { name: 'session-b' })).toBeTruthy();
+
+    fireEvent.change(select, { target: { value: 'session-a' } });
+
+    await waitFor(() => {
+      expect(client.fetchSummary).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a' }));
+      expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a', page: 1 }));
+      expect(client.fetchSessions).toHaveBeenLastCalledWith({ timeWindow: '24h' });
+    });
+    expect(screen.getByRole('option', { name: 'session-b' })).toBeTruthy();
   });
 
   it('marks summary metrics as updating instead of silently showing stale filter values', async () => {
@@ -513,6 +531,8 @@ describe('AnalyticsPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
       expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a' }));
+      expect(client.fetchSessions).toHaveBeenLastCalledWith({ timeWindow: '24h' });
+      expect(screen.getByRole('option', { name: 'session-b' })).toBeTruthy();
       expect(document.activeElement).toBe(screen.getByRole('button', { name: 'View details for Denied destructive command' }));
     });
   });
