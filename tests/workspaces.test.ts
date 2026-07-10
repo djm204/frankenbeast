@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -40,6 +40,20 @@ describe('npm workspaces configuration', () => {
     it('pins ws to a security-fixed version for all workspace consumers', () => {
       expect(rootPkg.overrides?.ws).toBeDefined();
       expect(isAtLeast(rootPkg.overrides.ws, '8.21.0')).toBe(true);
+    });
+
+    it('uses the root package-lock.json as the only package workspace lockfile', () => {
+      expect(existsSync(join(ROOT, 'package-lock.json')), 'root package-lock.json must govern workspace installs').toBe(true);
+
+      const nestedWorkspaceLockfiles = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `packages/${entry.name}/package-lock.json`)
+        .filter((path) => existsSync(join(ROOT, path)));
+
+      expect(
+        nestedWorkspaceLockfiles,
+        'npm workspaces under packages/* must not commit nested lockfiles; use the root package-lock.json instead',
+      ).toEqual([]);
     });
 
     it('pins Vite to a security-fixed version for Vitest consumers', () => {

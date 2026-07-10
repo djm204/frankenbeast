@@ -14,6 +14,9 @@ dist
 # Build runner artifacts (logs, traces, checkpoint) — must be invisible to git/codex/rg
 **/.build/
 
+# npm workspaces use the root package-lock.json as the single dependency lockfile.
+/packages/*/package-lock.json
+
 # Generated audit/scan artifacts belong in issues, PR attachments, or docs/audits/ after review.
 /audit.json
 /eval_findings.json
