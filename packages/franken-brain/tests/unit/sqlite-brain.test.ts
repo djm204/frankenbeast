@@ -173,6 +173,25 @@ describe('SqliteBrain', () => {
       hydrated.close();
     });
 
+    it('constructor hydration honors stricter custom working memory limits', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const roomy = new SqliteBrain(dbPath, { maxEntries: 3 });
+        roomy.working.set('a', 1);
+        roomy.working.set('b', 2);
+        roomy.flush();
+        roomy.close();
+
+        expect(() => new SqliteBrain(dbPath, { maxEntries: 1 })).toThrow(
+          WorkingMemoryLimitError,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('keeps previous state when restore() exceeds limits', () => {
       const bounded = new SqliteBrain(':memory:', { maxEntries: 2 });
       bounded.working.set('keep', 'me');
@@ -236,6 +255,19 @@ describe('SqliteBrain', () => {
 
       const auditRows = db.prepare('SELECT action, key FROM working_memory_audit').all();
       expect(new Set(auditRows.map(row => row.key))).toEqual(new Set(['beta']));
+    });
+
+    it('serializes current mutable working-memory values during flush', () => {
+      brain.working.set('mutable', { count: 1 });
+      brain.flush();
+
+      const current = brain.working.get('mutable') as { count: number };
+      current.count = 2;
+      brain.flush();
+
+      const reopened = SqliteBrain.hydrate(brain.serialize());
+      expect(reopened.working.get('mutable')).toEqual({ count: 2 });
+      reopened.close();
     });
 
     it('deletes only removed persisted working-memory rows on flush', () => {
@@ -400,6 +432,12 @@ describe('SqliteBrain', () => {
 
       const row = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
       expect(row).toBeUndefined();
+
+      db.exec(`DROP TRIGGER fail_checkpoint_insert`);
+      brain.recovery.checkpoint(makeState({ step: 4 }));
+
+      const recovered = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
+      expect(recovered?.value).toBe('"value1"');
     });
 
     it('lastCheckpoint() returns most recent', () => {
