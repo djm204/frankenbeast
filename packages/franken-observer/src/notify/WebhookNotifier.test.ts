@@ -204,6 +204,60 @@ describe('WebhookNotifier', () => {
       expect(delays[3]).toBe(250) // capped
     })
 
+    it('clamps jittered delay at maxDelayMs', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.9)
+      const notifier = new WebhookNotifier({
+        url: 'https://hooks.example.com/signal',
+        fetch: mockFetch,
+        retry: { maxRetries: 1, baseDelayMs: 100, maxDelayMs: 100, jitter: true },
+        sleep: sleepFn,
+      })
+
+      try {
+        await expect(notifier.send({ type: 'test' })).rejects.toThrow()
+
+        expect(sleepFn).toHaveBeenCalledWith(100)
+      } finally {
+        randomSpy.mockRestore()
+      }
+    })
+
+    it('does not retry non-transient 4xx responses', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const notifier = new WebhookNotifier({
+        url: 'https://hooks.example.com/signal',
+        fetch: mockFetch,
+        retry: { maxRetries: 3 },
+        sleep: sleepFn,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow('401')
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(sleepFn).not.toHaveBeenCalled()
+    })
+
+    it('still retries 429 responses', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 429, statusText: 'Too Many Requests' })
+        .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const notifier = new WebhookNotifier({
+        url: 'https://hooks.example.com/signal',
+        fetch: mockFetch,
+        retry: { maxRetries: 2, jitter: false },
+        sleep: sleepFn,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(sleepFn).toHaveBeenCalledTimes(1)
+    })
+
     it('retries on network errors (fetch rejection)', async () => {
       mockFetch
         .mockRejectedValueOnce(new Error('ECONNREFUSED'))
