@@ -5,9 +5,22 @@
 </p>
 
 ![Status](https://img.shields.io/badge/status-beta-blue)
+[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)
 **Deterministic guardrails for AI agents.**
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
+
+## Latest release announcement
+
+[Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0) is the latest Frankenbeast release line. It packages the recent one-click onboarding cleanup, security hardening across MCP, observer, orchestrator, governor, and web surfaces, plus deterministic mode improvements for repeatable validation, recovery, and release gates.
+
+Highlights:
+
+- **One-click onboarding:** refreshed init, MCP setup, dashboard, provider, and quickstart guidance so operators can choose the right setup path without mixing local-checkout and published-package commands.
+- **Security hardening:** tightened path containment, webhook/token handling, approval signing, chat/dashboard auth, config validation, and persisted-state hydration safeguards.
+- **Deterministic mode:** expanded root/package verification, release checks, replay validation, and schema guards so CI and operators catch drift before runtime.
+
+Community announcement target: share this release summary in the Frankenbeast Discord once the v0.45.0 GitHub release is published.
 
 ## Modes
 
