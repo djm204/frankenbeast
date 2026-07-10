@@ -69,7 +69,7 @@ npm run typecheck
 npm test
 ```
 
-Root scripts currently include `build`, `typecheck`, `test`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
+Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. Use `test:ci` for the same root-plus-package test target that CI runs locally; it first builds the shared `@franken/types` workspace so fresh checkouts can resolve workspace package exports, and it intentionally excludes Docker smoke, security, dependency, lint, and live/e2e gates that remain separate CI steps. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
 ## 5. Try the orchestrator CLI
 

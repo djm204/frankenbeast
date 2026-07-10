@@ -14,9 +14,6 @@
       ],
       "env": ["INTEGRATION", "E2E", "EVAL", "DOCKER_BUILD"]
     },
-    "test:ci": {
-      "dependsOn": ["build"]
-    },
     "test:live": {
       "dependsOn": ["build"],
       "cache": false,
