@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { runInteractiveInit } from '../../../src/init/init-engine.js';
+import { runInteractiveInit, runRepairInit } from '../../../src/init/init-engine.js';
 import { FileInitStateStore } from '../../../src/init/init-state-store.js';
 import { createEmptyInitState } from '../../../src/init/init-types.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
@@ -123,6 +123,20 @@ describe('runInteractiveInit', () => {
     });
 
     expect(result.config.network.secureBackend).toBe('1password');
+  });
+
+  it('reports malformed init JSON before repair reloads files', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const { io } = scriptedIo();
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, '{"comms": ', 'utf-8');
+    await stateStore.save(createEmptyInitState(configFile));
+
+    await expect(runRepairInit({ configFile, stateStore, io })).rejects.toThrow(
+      /Cannot repair init because required init JSON is malformed:[\s\S]*Config file[\s\S]*could not be parsed/,
+    );
   });
 
   it('resumes from saved init state defaults instead of starting from scratch', async () => {

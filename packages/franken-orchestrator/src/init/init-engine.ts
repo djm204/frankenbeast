@@ -98,6 +98,17 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
     };
   }
 
+  const invalidJsonIssues = verification.issues.filter((issue) =>
+    issue.code === 'invalid-config-json' || issue.code === 'invalid-init-state-json');
+  if (invalidJsonIssues.length > 0) {
+    throw new Error(
+      [
+        'Cannot repair init because required init JSON is malformed:',
+        ...invalidJsonIssues.map((issue) => `- ${issue.message}`),
+      ].join('\n'),
+    );
+  }
+
   const needsFullWizard = verification.issues.some((issue) =>
     issue.code === 'missing-config' || issue.code === 'missing-init-state');
   if (needsFullWizard) {
