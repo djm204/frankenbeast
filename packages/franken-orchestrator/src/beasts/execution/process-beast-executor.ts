@@ -388,7 +388,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         onStdout: (line) => {
           const redactedLine = redactBeastLogLine(line, configuredSecrets);
           if (attemptId) {
-            const createdAt = isoNow();
+            const createdAt = new Date(wallClockNow()).toISOString();
             void this.logs.append(run.id, attemptId, 'stdout', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
@@ -403,7 +403,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           stderrTail.push(redactedLine);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
-            const createdAt = isoNow();
+            const createdAt = new Date(wallClockNow()).toISOString();
             void this.logs.append(run.id, attemptId, 'stderr', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
@@ -418,22 +418,14 @@ export class ProcessBeastExecutor implements BeastExecutor {
             this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail], configuredSecrets);
           } else {
             earlyExit = { code, signal };
-          }
-        },
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorCode = (error as NodeJS.ErrnoException).code;
-      const failedAt = isoNow();
+          this.repository.updateRun(run.id, {
+            status: 'failed',
+            finishedAt: failedAt,
+            stopReason: 'spawn_failed',
+          });
 
-      this.repository.updateRun(run.id, {
-        status: 'failed',
-        finishedAt: failedAt,
-        stopReason: 'spawn_failed',
-      });
-
-      const spawnFailedEvent = {
-        type: 'run.spawn_failed' as const,
+          const spawnFailedEvent = {
+            type: 'run.spawn_failed' as const,
         payload: {
           error: errorMessage,
           ...(errorCode ? { code: errorCode } : {}),
@@ -493,7 +485,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     // Flush early buffered lines to logs and SSE
     for (const line of earlyStdoutLines) {
-      const createdAt = isoNow();
+      const createdAt = new Date(wallClockNow()).toISOString();
       void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',
@@ -501,7 +493,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
     }
     for (const line of earlyStderrLines) {
-      const createdAt = isoNow();
+      const createdAt = new Date(wallClockNow()).toISOString();
       void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',

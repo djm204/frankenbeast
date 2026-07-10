@@ -14,7 +14,7 @@ export class FileChunkSessionSnapshotStore {
     mkdirSync(dir, { recursive: true });
     const ts = new Date(wallClockNow()).toISOString().replace(/[:.]/g, '-');
     const uniqueSuffix = randomUUID();
-    const file = join(dir, `${ts}-${uniqueSuffix}-gen-${session.compactionGeneration}-${reason}.json`);
+    const file = join(dir, `${ts}-gen-${session.compactionGeneration}-${uniqueSuffix}-${reason}.json`);
     atomicWriteFileSync(file, JSON.stringify(session, null, 2));
     return file;
   }

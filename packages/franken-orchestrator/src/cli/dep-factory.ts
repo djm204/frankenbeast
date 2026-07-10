@@ -258,10 +258,11 @@ function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
   const checkpointFile = resolve(paths.buildDir, `${planName}.checkpoint`);
   const now = new Date(wallClockNow());
   const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const uniqueSuffix = deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts:log-file');
   return {
     planName,
     checkpointFile,
-    logFile: resolve(paths.buildDir, `${planName}-${ts}-build.log`),
+    logFile: resolve(paths.buildDir, `${planName}-${ts}-${uniqueSuffix}-build.log`),
   };
 }
 
