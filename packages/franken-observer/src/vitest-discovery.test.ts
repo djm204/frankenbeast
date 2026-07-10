@@ -24,6 +24,19 @@ function runObserverVitestWithNoMatches(env: NodeJS.ProcessEnv = {}) {
   );
 }
 
+function runObserverPackageScript(script: string) {
+  return spawnSync('npm', ['run', script], {
+    cwd: packageRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CI: '1',
+      INTEGRATION: undefined,
+      EVAL: undefined,
+    },
+  });
+}
+
 describe('observer Vitest discovery', () => {
   it('does not mask empty default unit test discovery', () => {
     const config = readFileSync(resolve(packageRoot, 'vitest.config.ts'), 'utf8');
@@ -43,5 +56,14 @@ describe('observer Vitest discovery', () => {
       expect(result.status).not.toBe(0);
       expect(`${result.stdout}\n${result.stderr}`).toMatch(/No test files found|No test files matched/u);
     }
+  });
+
+  it('runs the advertised observer eval suite instead of a zero-test placeholder', () => {
+    const result = runObserverPackageScript('test:eval');
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, output).toBe(0);
+    expect(output).toMatch(/src\/evals\/.+\.test\.ts/u);
+    expect(output).toMatch(/Test Files[\s\S]*[1-9]\d*\s+passed/u);
   });
 });
