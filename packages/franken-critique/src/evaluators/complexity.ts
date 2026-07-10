@@ -12,7 +12,15 @@ const MAX_FUNCTION_LINES = 50;
 
 interface FunctionBlock {
   params: string;
-  body: string;
+  body?: string;
+}
+
+function createFunctionBlock(params: string, body?: string): FunctionBlock {
+  return body === undefined ? { params } : { params, body };
+}
+
+function isArrowGreaterThan(content: string, index: number): boolean {
+  return content[index] === '>' && content[index - 1] === '=';
 }
 
 function findMatchingDelimiter(
@@ -27,7 +35,10 @@ function findMatchingDelimiter(
     const char = content[i] ?? '';
     if (char === openChar) {
       depth++;
-    } else if (char === closeChar) {
+    } else if (
+      char === closeChar &&
+      !(openChar === '<' && closeChar === '>' && isArrowGreaterThan(content, i))
+    ) {
       depth--;
       if (depth === 0) return i;
     }
@@ -117,7 +128,7 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
     if (char === '<' || char === '(' || char === '[' || char === '{') {
       typeDepth++;
     } else if (
-      char === '>' ||
+      (char === '>' && !isArrowGreaterThan(content, i)) ||
       char === ')' ||
       char === ']' ||
       char === '}'
@@ -159,15 +170,16 @@ function skipAsyncAndTypeParameters(content: string, startIndex: number): number
 }
 
 function findInitializerParamsOpen(content: string, startIndex: number): number {
-  const index = skipAsyncAndTypeParameters(content, startIndex);
-  if (index === -1 || content[index] !== '(') return -1;
+  let paramsOpenIndex = skipAsyncAndTypeParameters(content, startIndex);
+  if (paramsOpenIndex === -1 || content[paramsOpenIndex] !== '(') return -1;
 
-  const groupedIndex = skipAsyncAndTypeParameters(content, index + 1);
-  if (groupedIndex !== -1 && content[groupedIndex] === '(') {
-    return groupedIndex;
+  while (true) {
+    const groupedIndex = skipAsyncAndTypeParameters(content, paramsOpenIndex + 1);
+    if (groupedIndex === -1 || content[groupedIndex] !== '(') {
+      return paramsOpenIndex;
+    }
+    paramsOpenIndex = groupedIndex;
   }
-
-  return index;
 }
 
 function findArrowToken(content: string, startIndex: number): number {
@@ -209,7 +221,7 @@ function findArrowToken(content: string, startIndex: number): number {
     if (char === '<' || char === '(' || char === '[' || char === '{') {
       typeDepth++;
     } else if (
-      char === '>' ||
+      (char === '>' && !isArrowGreaterThan(content, i)) ||
       char === ')' ||
       char === ']' ||
       char === '}'
@@ -253,12 +265,14 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
     if (bodyOpenIndex === -1) continue;
 
     const bodyCloseIndex = findMatchingDelimiter(content, bodyOpenIndex, '{', '}');
-    if (bodyCloseIndex === -1) continue;
-
-    blocks.push({
-      params: content.slice(paramsOpenIndex + 1, paramsCloseIndex),
-      body: content.slice(bodyOpenIndex + 1, bodyCloseIndex),
-    });
+    blocks.push(
+      createFunctionBlock(
+        content.slice(paramsOpenIndex + 1, paramsCloseIndex),
+        bodyCloseIndex === -1
+          ? undefined
+          : content.slice(bodyOpenIndex + 1, bodyCloseIndex),
+      ),
+    );
   }
 
   for (const match of content.matchAll(
@@ -276,15 +290,22 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
     if (arrowIndex === -1) continue;
 
     const bodyOpenIndex = findBlockBodyOpen(content, arrowIndex + 2);
-    if (bodyOpenIndex === -1) continue;
+    if (bodyOpenIndex === -1) {
+      blocks.push(
+        createFunctionBlock(content.slice(paramsOpenIndex + 1, paramsCloseIndex)),
+      );
+      continue;
+    }
 
     const bodyCloseIndex = findMatchingDelimiter(content, bodyOpenIndex, '{', '}');
-    if (bodyCloseIndex === -1) continue;
-
-    blocks.push({
-      params: content.slice(paramsOpenIndex + 1, paramsCloseIndex),
-      body: content.slice(bodyOpenIndex + 1, bodyCloseIndex),
-    });
+    blocks.push(
+      createFunctionBlock(
+        content.slice(paramsOpenIndex + 1, paramsCloseIndex),
+        bodyCloseIndex === -1
+          ? undefined
+          : content.slice(bodyOpenIndex + 1, bodyCloseIndex),
+      ),
+    );
   }
 
   return blocks;
@@ -544,6 +565,7 @@ export class ComplexityEvaluator implements Evaluator {
     findings: EvaluationFinding[],
   ): void {
     for (const block of collectFunctionBlocks(content)) {
+      if (block.body === undefined) continue;
       const lineCount = block.body.split('\n').length;
       if (lineCount > MAX_FUNCTION_LINES) {
         findings.push({
