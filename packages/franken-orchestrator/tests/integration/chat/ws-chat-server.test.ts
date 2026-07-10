@@ -122,13 +122,13 @@ describe('ws chat server', () => {
     );
 
     await expect(onceSocket(socket, 'open')).resolves.toEqual([]);
-    expect(chatSocketServer.controller.connections).toHaveLength(1);
+    expect(chatSocketServer.controller.connections.size).toBe(1);
 
     const closed = onceSocket(socket, 'close');
     socket.close();
     await closed;
 
-    expect(chatSocketServer.controller.connections).toHaveLength(0);
+    expect(chatSocketServer.controller.connections.size).toBe(0);
 
     chatSocketServer.close();
     httpServer.close();
