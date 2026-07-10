@@ -186,6 +186,33 @@ describe('DomainAllowlistMiddleware', () => {
       );
       expect(logs.some((msg) => msg.includes('evil.com'))).toBe(true);
     });
+
+    it('preserves sibling blocked domains when another input property throws during access', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const input: Record<string, unknown> = {
+        url: 'https://evil.com/data',
+      };
+      Object.defineProperty(input, 'bad', {
+        enumerable: true,
+        get() {
+          throw new Error('adapter getter failed');
+        },
+      });
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [{ name: 'fetch', input }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+
+      expect(() => logMw.afterResponse(resp)).not.toThrow();
+      expect(logs.some((msg) => msg.includes('could not fully serialize'))).toBe(
+        true,
+      );
+      expect(logs.some((msg) => msg.includes('evil.com'))).toBe(true);
+    });
   });
 
   describe('domain matching', () => {

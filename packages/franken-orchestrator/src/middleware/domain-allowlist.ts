@@ -11,33 +11,47 @@ interface SerializedToolInput {
 
 function serializeToolInputForDomainScan(input: unknown): SerializedToolInput {
   const seen = new WeakSet<object>();
+  const parts: string[] = [];
   let lossy = false;
 
-  try {
-    const text = JSON.stringify(input, (_key, value: unknown) => {
-      if (typeof value === 'bigint') {
-        lossy = true;
-        return value.toString();
-      }
-      if (typeof value === 'object' && value !== null) {
-        if (seen.has(value)) {
-          lossy = true;
-          return '[Circular]';
-        }
-        seen.add(value);
-      }
-      return value;
-    });
-
-    if (text === undefined) {
-      lossy = true;
-      return { text: '', lossy };
+  const collect = (value: unknown): void => {
+    if (typeof value === 'string') {
+      parts.push(value);
+      return;
     }
+    if (
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      parts.push(String(value));
+      return;
+    }
+    if (typeof value !== 'object' || value === null) {
+      return;
+    }
+    if (seen.has(value)) {
+      lossy = true;
+      return;
+    }
+    seen.add(value);
 
-    return { text, lossy };
+    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+      if ('value' in descriptor) {
+        collect(descriptor.value);
+      } else {
+        lossy = true;
+      }
+    }
+  };
+
+  try {
+    collect(input);
   } catch {
-    return { text: '', lossy: true };
+    lossy = true;
   }
+
+  return { text: parts.join(' '), lossy };
 }
 
 export class DomainBlockedError extends Error {
