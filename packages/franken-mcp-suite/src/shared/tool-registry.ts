@@ -59,15 +59,15 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
 
 function parseNonNegativeIntegerArg(name: string, value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (typeof value !== 'number' && typeof value !== 'string') {
-    return { ok: false, message: `${name} must be a finite non-negative integer` };
+    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
   }
   const raw = typeof value === 'string' ? value.trim() : String(value);
   if (raw.length === 0) {
-    return { ok: false, message: `${name} must be a finite non-negative integer` };
+    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
   }
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
-    return { ok: false, message: `${name} must be a finite non-negative integer` };
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 0) {
+    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
   }
   return { ok: true, value: parsed };
 }

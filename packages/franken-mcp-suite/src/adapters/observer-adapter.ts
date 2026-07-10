@@ -86,11 +86,11 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 }
 
 function validateCostInput(input: ObserverCostInput): void {
-  if (!Number.isFinite(input.promptTokens) || !Number.isInteger(input.promptTokens) || input.promptTokens < 0) {
-    throw new Error('promptTokens must be a finite non-negative integer');
+  if (!Number.isFinite(input.promptTokens) || !Number.isSafeInteger(input.promptTokens) || input.promptTokens < 0) {
+    throw new Error('promptTokens must be a finite safe non-negative integer');
   }
-  if (!Number.isFinite(input.completionTokens) || !Number.isInteger(input.completionTokens) || input.completionTokens < 0) {
-    throw new Error('completionTokens must be a finite non-negative integer');
+  if (!Number.isFinite(input.completionTokens) || !Number.isSafeInteger(input.completionTokens) || input.completionTokens < 0) {
+    throw new Error('completionTokens must be a finite safe non-negative integer');
   }
   if (input.costUsd !== undefined && (!Number.isFinite(input.costUsd) || input.costUsd < 0)) {
     throw new Error('costUsd must be a finite non-negative number');

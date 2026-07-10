@@ -492,10 +492,12 @@ describe('ObserverAdapter', () => {
       { promptTokens: Number.POSITIVE_INFINITY, completionTokens: 0 },
       { promptTokens: -1, completionTokens: 0 },
       { promptTokens: 1.5, completionTokens: 0 },
+      { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 },
       { promptTokens: 0, completionTokens: Number.NaN },
       { promptTokens: 0, completionTokens: Number.POSITIVE_INFINITY },
       { promptTokens: 0, completionTokens: -1 },
       { promptTokens: 0, completionTokens: 1.5 },
+      { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 },
       { promptTokens: 0, completionTokens: 0, costUsd: Number.NaN },
       { promptTokens: 0, completionTokens: 0, costUsd: Number.POSITIVE_INFINITY },
       { promptTokens: 0, completionTokens: 0, costUsd: -0.01 },
@@ -506,7 +508,7 @@ describe('ObserverAdapter', () => {
         sessionId: 'sess-invalid-cost',
         model: 'gpt-4o',
         ...input,
-      })).rejects.toThrow(/finite non-negative/);
+      })).rejects.toThrow(/finite (safe )?non-negative/);
     }
 
     await expect(observer.cost({ sessionId: 'sess-invalid-cost' })).resolves.toMatchObject({
