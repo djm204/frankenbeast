@@ -861,6 +861,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setStatus('sending');
 
     if (!optimisticAdd) {
+      let fallbackRefreshError: Error | null = null;
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
         if (!sessionStillCurrent(sessionId)) {
@@ -886,18 +887,22 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           if (!sessionStillCurrent(sessionId)) {
             return;
           }
+          const refreshError = error instanceof Error
+            ? error
+            : new Error('The fallback chat request completed, but the updated transcript could not be loaded.');
           setMessages((current) => [
             ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
-            { ...optimisticMessage, receipt: 'accepted' },
+            { ...optimisticMessage, receipt: 'failed', error: refreshError.message, canRetry: true },
           ]);
           addErrorBanner(makeBanner(
-            'Message sent; refresh failed',
-            errorMessage(error, 'The message was accepted, but the updated transcript could not be loaded.'),
-            'retry-session',
-            'Refresh chat',
-            'session_refresh_failed',
+            'Message was not sent',
+            refreshError.message,
+            'retry-message',
+            'Retry last message',
+            'message_send_failed',
           ));
-          setStatus('idle');
+          setStatus('error');
+          fallbackRefreshError = refreshError;
         }
       } catch (error) {
         if (!sessionStillCurrent(sessionId)) {
@@ -932,6 +937,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         ));
         setStatus('error');
         throw sendError;
+      }
+      if (fallbackRefreshError) {
+        throw fallbackRefreshError;
       }
       return;
     }

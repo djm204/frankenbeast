@@ -306,7 +306,7 @@ describe('useChatSession error banners', () => {
     expect(MockWebSocket.instances[0]!.send).toHaveBeenCalledTimes(2);
   });
 
-  it('does not offer message retry when delivery succeeded but transcript refresh failed', async () => {
+  it('rejects fallback HTTP sends when the transcript refresh fails', async () => {
     const fetch = chatFetch({
       responses: [
         jsonResponse(sessionResponse()),
@@ -325,14 +325,36 @@ describe('useChatSession error banners', () => {
     MockWebSocket.instances[0]!.readyState = 0;
 
     await act(async () => {
-      await result.current.send('launch beast');
+      await expect(result.current.send('launch beast')).rejects.toThrow('refresh failed');
     });
 
+    expect(result.current.status).toBe('error');
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: 'launch beast',
+        receipt: 'failed',
+        error: expect.stringContaining('refresh failed'),
+        canRetry: true,
+      }),
+    ]);
     expect(result.current.errorBanners[0]).toMatchObject({
-      title: 'Message sent; refresh failed',
-      code: 'session_refresh_failed',
-      actionLabel: 'Refresh chat',
+      title: 'Message was not sent',
+      code: 'message_send_failed',
+      actionLabel: 'Retry last message',
     });
+  });
+
+  it('rejects sends attempted before a session id exists', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('session bootstrap failed')));
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('error');
+    });
+
+    await expect(result.current.send('keep this draft')).rejects.toThrow('Chat session is not ready yet. Your draft was kept.');
   });
 
   it('waits for fallback HTTP refresh before adding the sent message', async () => {
