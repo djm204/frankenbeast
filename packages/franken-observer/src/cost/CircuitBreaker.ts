@@ -12,7 +12,8 @@ type LimitReachedHandler = (result: CircuitBreakerResult) => void
 
 /**
  * Non-blocking budget guard. Emits a 'limit-reached' event when
- * cumulative spend exceeds the configured USD limit. Never throws.
+ * cumulative spend exceeds the configured USD limit. Throws RangeError for
+ * invalid numeric inputs so broken budget accounting cannot be reported safe.
  */
 export class CircuitBreaker {
   private readonly limitUsd: number
@@ -20,10 +21,12 @@ export class CircuitBreaker {
   private tripped = false
 
   constructor(options: CircuitBreakerOptions) {
+    assertFiniteNonNegativeUsd('limitUsd', options.limitUsd)
     this.limitUsd = options.limitUsd
   }
 
   check(spendUsd: number): CircuitBreakerResult {
+    assertFiniteNonNegativeUsd('spendUsd', spendUsd)
     const result: CircuitBreakerResult = {
       tripped: spendUsd > this.limitUsd,
       limitUsd: this.limitUsd,
@@ -59,5 +62,11 @@ export class CircuitBreaker {
 
   off(event: 'limit-reached', handler: LimitReachedHandler): void {
     this.handlers.delete(handler)
+  }
+}
+
+function assertFiniteNonNegativeUsd(name: 'limitUsd' | 'spendUsd', value: number): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(`${name} must be a finite non-negative number`)
   }
 }
