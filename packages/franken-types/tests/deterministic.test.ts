@@ -43,16 +43,27 @@ describe('deterministic helpers', () => {
   });
 
   it('uses deterministic timestamps and UUID-shaped IDs with a seed', () => {
-    const values = withSeed('clock-and-id-test', () => ({
-      firstNow: now(),
-      secondNow: now(),
-      iso: isoNow(),
-      firstId: deterministicUuid('unit'),
-      secondId: deterministicUuid('unit'),
-    }));
+    const values = withSeed('clock-and-id-test', () => {
+      const before = Date.now();
+      const firstNow = now();
+      const secondNow = now();
+      const iso = isoNow();
+      const after = Date.now();
+      return {
+        before,
+        firstNow,
+        secondNow,
+        iso,
+        after,
+        firstId: deterministicUuid('unit'),
+        secondId: deterministicUuid('unit'),
+      };
+    });
 
-    expect(values.secondNow).toBe(values.firstNow + 1);
-    expect(values.iso).toMatch(/^2026-01-01T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(values.firstNow).toBeGreaterThanOrEqual(values.before);
+    expect(values.firstNow).toBeLessThanOrEqual(values.after);
+    expect(values.secondNow).toBeGreaterThanOrEqual(values.firstNow);
+    expect(new Date(values.iso).getTime()).toBeGreaterThanOrEqual(values.firstNow);
     expect(values.firstId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(values.secondId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(values.firstId).not.toBe(values.secondId);

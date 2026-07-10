@@ -398,7 +398,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     const tsSeconds = Number(timestamp);
     if (
       !Number.isFinite(tsSeconds) ||
-      Math.abs(deterministicNow() / 1000 - tsSeconds) > SLACK_MAX_TIMESTAMP_SKEW_SECONDS
+      Math.abs(Date.now() / 1000 - tsSeconds) > SLACK_MAX_TIMESTAMP_SKEW_SECONDS
     ) {
       return c.json({ error: { message: 'Stale or invalid Slack timestamp' } }, 401);
     }

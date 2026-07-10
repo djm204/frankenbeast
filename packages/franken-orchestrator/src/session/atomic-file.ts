@@ -40,9 +40,20 @@ function fsyncDir(dirPath: string): void {
  * The parent directory must already exist.
  */
 export function atomicWriteFileSync(filePath: string, contents: string): void {
-  const tmpPath = `${filePath}.tmp.${writeCounter++}.${deterministicUuid('atomic-file-write')}`;
+  let tmpPath = `${filePath}.tmp.${writeCounter++}.${deterministicUuid('atomic-file-write')}`;
   try {
-    const fd = openSync(tmpPath, 'w');
+    let fd: number;
+    for (;;) {
+      try {
+        fd = openSync(tmpPath, 'wx');
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw error;
+        }
+        tmpPath = `${filePath}.tmp.${writeCounter++}.${deterministicUuid('atomic-file-write')}`;
+      }
+    }
     try {
       writeAll(fd, contents);
       fsyncSync(fd);

@@ -293,7 +293,7 @@ export class FileCheckpointStore implements ICheckpointStore {
           // Owner identity cannot be verified (no start time available):
           // the age ceiling is the only backstop against PID reuse.
           try {
-            if (deterministicNow() - statSync(lockPath).mtimeMs < LIVE_LOCK_AGE_CEILING_MS) {
+            if (Date.now() - statSync(lockPath).mtimeMs < LIVE_LOCK_AGE_CEILING_MS) {
               return;
             }
           } catch {
@@ -309,7 +309,7 @@ export class FileCheckpointStore implements ICheckpointStore {
       // timing out before the fallback can fire.
       const reapAgeMs = Math.min(UNREADABLE_LOCK_REAP_MS, this.lockTimeoutMs / 2);
       try {
-        if (deterministicNow() - statSync(lockPath).mtimeMs < reapAgeMs) {
+        if (Date.now() - statSync(lockPath).mtimeMs < reapAgeMs) {
           return;
         }
       } catch {
