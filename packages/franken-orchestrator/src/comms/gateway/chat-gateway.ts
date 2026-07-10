@@ -75,6 +75,8 @@ export class ChatGateway extends EventEmitter {
         ? '/approve'
         : `Action rejected by user: ${actionId}`;
 
+    const cachedRouteMetadata = routeMetadata ?? this.getRememberedRouteMetadata(sessionId);
+
     const result = await this.runtime.processInbound({
       sessionId,
       channelType,
@@ -82,9 +84,7 @@ export class ChatGateway extends EventEmitter {
       externalUserId: 'system',
     });
 
-    const outboundRouteMetadata = routeMetadata
-      ?? this.getRememberedRouteMetadata(sessionId)
-      ?? result.metadata;
+    const outboundRouteMetadata = cachedRouteMetadata ?? result.metadata;
     if (outboundRouteMetadata) {
       this.rememberRouteMetadata(sessionId, outboundRouteMetadata);
     }
