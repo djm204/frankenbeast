@@ -25,14 +25,39 @@ interface RegexPrefixExpansion {
   truncated: boolean;
 }
 
+type RegexWorkerFactory = {
+  (pattern: string, content: string): Worker;
+};
+
 export class SafetyEvaluator implements Evaluator {
   readonly name = 'safety';
   readonly category = 'deterministic' as const;
 
   private readonly guardrails: GuardrailsPort;
+  private readonly createRegexWorker: RegexWorkerFactory;
 
-  constructor(guardrails: GuardrailsPort) {
+  constructor(
+    guardrails: GuardrailsPort,
+    options?: {
+      createRegexWorker?: RegexWorkerFactory;
+    },
+  ) {
     this.guardrails = guardrails;
+    this.createRegexWorker =
+      options?.createRegexWorker ??
+      ((pattern, content) =>
+        new Worker(
+          `
+        import { parentPort, workerData } from 'node:worker_threads';
+        try {
+          const regex = new RegExp(workerData.pattern, 'g');
+          parentPort.postMessage({ matches: regex.test(workerData.content) });
+        } catch (error) {
+          parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
+        }
+      `,
+          { eval: true, workerData: { pattern, content } },
+        ));
   }
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
@@ -95,18 +120,7 @@ export class SafetyEvaluator implements Evaluator {
     pattern: string,
     content: string,
   ): Promise<boolean | 'timeout'> {
-    const worker = new Worker(
-      `
-        import { parentPort, workerData } from 'node:worker_threads';
-        try {
-          const regex = new RegExp(workerData.pattern, 'g');
-          parentPort.postMessage({ matches: regex.test(workerData.content) });
-        } catch (error) {
-          parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
-        }
-      `,
-      { eval: true, workerData: { pattern, content } },
-    );
+    const worker = this.createRegexWorker(pattern, content);
 
     return new Promise<boolean | 'timeout'>((resolve, reject) => {
       let settled = false;
