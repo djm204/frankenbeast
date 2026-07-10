@@ -503,10 +503,17 @@ describe('SqliteBrain', () => {
 
   describe('constructor', () => {
     it('accepts custom db path', () => {
-      const tmpBrain = new SqliteBrain('/tmp/test-brain.db');
-      tmpBrain.working.set('test', 'value');
-      expect(tmpBrain.working.get('test')).toBe('value');
-      tmpBrain.close();
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const tmpBrain = new SqliteBrain(dbPath);
+        tmpBrain.working.set('test', 'value');
+        expect(tmpBrain.working.get('test')).toBe('value');
+        tmpBrain.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('hydrates persisted working memory from an existing SQLite file', () => {
