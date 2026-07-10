@@ -126,6 +126,7 @@ export function AgentDetailPanel({
         <AgentActionBar
           status={agent.status}
           hasLinkedRun={!!agent.dispatchRunId}
+          agentLabel={agent.name ?? agent.id}
           onStart={onStart}
           onStop={onStop}
           onRestart={onRestart}
