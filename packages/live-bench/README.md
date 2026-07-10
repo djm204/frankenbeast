@@ -1,8 +1,8 @@
 # @franken/live-bench
 
-Live benchmark runner for comparing Codex, Gemini, and Frankenbeast MCP-suite behavior against repeatable corpora.
+Corpus, fixture, workspace, and evidence helpers for live Codex/Gemini/Frankenbeast MCP-suite benchmark work.
 
-The package exposes reusable corpus/workspace helpers and the `fbeast-live-bench` CLI so contributors can inspect benchmark task sets before running live client comparisons.
+The package exposes reusable primitives plus the `fbeast-live-bench` CLI so contributors can inspect benchmark task sets before wiring or running live client comparison workflows.
 
 ## Requirements
 
@@ -31,7 +31,8 @@ Key exports:
 | --- | --- |
 | `loadCorpus`, `loadTaskFile` | Load benchmark task definitions from a corpus root. |
 | `BenchmarkTaskSchema` | Validate benchmark task JSON with Zod. |
-| `ToolCallEvidenceSchema`, `serializeToolCallEvidence` | Validate and serialize tool-call evidence artifacts. |
+| `ToolCallEvidenceSchema` | Validate a single tool-call evidence record. |
+| `ToolCallEvidenceManifestSchema`, `serializeToolCallEvidence` | Validate and serialize the full tool-call evidence artifact array. |
 | `FixtureStore` | Manage fixture files used by benchmark workspaces. |
 | `WorkspaceProvisioner` | Create isolated workspaces and capture environment snapshots for benchmark runs. |
 
@@ -41,8 +42,8 @@ The package publishes `fbeast-live-bench`.
 
 ```bash
 npm run build --workspace=@franken/live-bench
-fbeast-live-bench --help
-fbeast-live-bench list <corpus-root>
+npm exec --workspace=@franken/live-bench -- fbeast-live-bench --help
+npm exec --workspace=@franken/live-bench -- fbeast-live-bench list <corpus-root>
 ```
 
 `list` loads the corpus root and prints the benchmark task ids, one per line. Use it as a lightweight sanity check before a live benchmark run.
