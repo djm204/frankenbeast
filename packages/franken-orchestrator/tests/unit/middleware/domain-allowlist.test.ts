@@ -213,6 +213,30 @@ describe('DomainAllowlistMiddleware', () => {
       );
       expect(logs.some((msg) => msg.includes('evil.com'))).toBe(true);
     });
+
+    it('scans blocked domains in object keys and toJSON-backed values', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [
+          {
+            name: 'fetch',
+            input: {
+              'https://evil.com/keyed': true,
+              url: new URL('https://phish.test/data'),
+            },
+          },
+        ],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+
+      expect(() => logMw.afterResponse(resp)).not.toThrow();
+      expect(logs.some((msg) => msg.includes('evil.com'))).toBe(true);
+      expect(logs.some((msg) => msg.includes('phish.test'))).toBe(true);
+    });
   });
 
   describe('domain matching', () => {

@@ -36,7 +36,22 @@ function serializeToolInputForDomainScan(input: unknown): SerializedToolInput {
     }
     seen.add(value);
 
-    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+    const toJson = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJson === 'function') {
+      try {
+        const jsonValue = toJson.call(value);
+        if (jsonValue !== value) {
+          collect(jsonValue);
+        }
+      } catch {
+        lossy = true;
+      }
+    }
+
+    for (const [key, descriptor] of Object.entries(
+      Object.getOwnPropertyDescriptors(value),
+    )) {
+      parts.push(key);
       if ('value' in descriptor) {
         collect(descriptor.value);
       } else {
