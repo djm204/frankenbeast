@@ -478,6 +478,7 @@ describe('BeastRunService', () => {
       status: 'failed',
       finishedAt: '2026-03-10T00:01:00.000Z',
       stopReason: 'exit_1',
+      latestExitCode: 1,
     });
 
     const failed = await runs.start(run.id, 'operator');
@@ -487,6 +488,9 @@ describe('BeastRunService', () => {
       stopReason: 'start_failed',
       attemptCount: 1,
     });
+    expect(failed.currentAttemptId).toBeUndefined();
+    expect(failed.latestExitCode).toBeUndefined();
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: config invalid'));
     expect(repo.listEvents(run.id).at(-1)).toMatchObject({
       type: 'run.start_failed',
       payload: { error: 'config invalid' },

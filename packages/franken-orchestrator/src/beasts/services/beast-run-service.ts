@@ -91,6 +91,8 @@ export class BeastRunService {
         const updatedRun = this.repository.updateRun(run.id, {
           status: 'failed',
           finishedAt: failedAt,
+          currentAttemptId: null,
+          latestExitCode: null,
           stopReason: 'start_failed',
         });
         const startFailedEvent = this.repository.appendEvent(run.id, {
