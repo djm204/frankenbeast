@@ -215,6 +215,27 @@ describe('AnalyticsPage', () => {
     expect(screen.getByText('3')).toBeTruthy();
   });
 
+  it('clears stale session options when a filtered session refresh fails', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchSessions)
+      .mockResolvedValueOnce([
+        { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 2, failureCount: 1 },
+        { id: 'session-b', lastActivityAt: '2026-04-28T12:02:00.000Z', eventCount: 1, failureCount: 0 },
+      ])
+      .mockRejectedValueOnce(new Error('sessions timeout'));
+
+    render(<AnalyticsPage client={client} />);
+
+    expect(await screen.findByRole('option', { name: 'session-b' })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'denied' } });
+
+    expect(await screen.findByText('sessions timeout')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole('option', { name: 'session-b' })).toBeNull();
+    });
+  });
+
   it('navigates event pages and exposes disabled pagination states', async () => {
     const client = mockClient();
     let resolveSecondPage!: (page: AnalyticsEventPage) => void;
@@ -307,8 +328,46 @@ describe('AnalyticsPage', () => {
 
     expect(await screen.findByText('HTTP 500')).toBeTruthy();
     expect(screen.queryByText('First page event')).toBeNull();
-    expect(screen.getByText('Page 2 of 2 · 75 events')).toBeTruthy();
+    expect(screen.getByText('Page 2 of 2 · 0 events')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Previous' })).toHaveProperty('disabled', false);
+  });
+
+  it('clears stale event rows and totals when a filtered event refresh fails', async () => {
+    const client = mockClient();
+    vi.mocked(client.fetchEvents)
+      .mockResolvedValueOnce({
+        total: 2,
+        page: 1,
+        pageSize: 50,
+        events: [
+          {
+            id: 'audit:old-filter',
+            timestamp: '2026-04-28T12:00:00.000Z',
+            sessionId: 'session-a',
+            toolName: 'fbeast_observer_log',
+            source: 'observer',
+            category: 'tool_call',
+            outcome: 'approved',
+            summary: 'Old filter event',
+            severity: 'info',
+            raw: { event: 'tool_call' },
+            links: {},
+          },
+        ],
+      })
+      .mockRejectedValueOnce(new Error('events timeout'));
+
+    render(<AnalyticsPage client={client} />);
+    expect(await screen.findByText('Old filter event')).toBeTruthy();
+    expect(screen.getByText('2 normalized events')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'denied' } });
+
+    expect(await screen.findByText('events timeout')).toBeTruthy();
+    expect(screen.queryByText('Old filter event')).toBeNull();
+    expect(screen.getByText('0 normalized events')).toBeTruthy();
+    expect(screen.getByText('Page 1 of 1 · 0 events')).toBeTruthy();
+    expect(screen.getAllByText('No events match the current filters.').length).toBeGreaterThan(0);
   });
 
   it('resets to the first page when filters or page size change', async () => {
