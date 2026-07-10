@@ -143,7 +143,7 @@ if [[ "$START_DOCKER" -eq 1 ]]; then
   }
   grafana_user="$(env_value GRAFANA_USER)"
   grafana_password="$(env_value GRAFANA_PASSWORD)"
-  if [[ -z "$grafana_user" || -z "$grafana_password" || "$grafana_password" == "admin" ]]; then
+  if [[ -z "$grafana_user" || -z "$grafana_password" || "$grafana_password" == "admin" || "$grafana_password" == "change-me-random-grafana-password" ]]; then
     fail "--with-docker requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD in .env before starting Grafana."
   fi
   [[ "$grafana_user" == "admin" ]] || fail "docker-compose.yml requires GRAFANA_USER=admin for the local Grafana service."
