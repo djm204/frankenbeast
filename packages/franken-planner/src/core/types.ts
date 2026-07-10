@@ -3,6 +3,7 @@
 // =============================================================================
 
 import type { TaskId } from '@franken/types';
+import type { PlanGraph } from './dag.js';
 export type { TaskId };
 export { createTaskId } from '@franken/types';
 
@@ -55,7 +56,17 @@ export type TaskResult = TaskResultSuccess | TaskResultExpand | TaskResultFailur
 
 export type PlanResult =
   | { status: 'completed'; taskResults: TaskResult[] }
-  | { status: 'failed'; taskResults: TaskResult[]; failedTaskId: TaskId; error: Error }
+  | {
+      status: 'failed';
+      taskResults: TaskResult[];
+      failedTaskId: TaskId;
+      error: Error;
+      /**
+       * Graph that owns failedTaskId when it differs from the current top-level
+       * graph, e.g. a recursive dynamic expansion sub-graph.
+       */
+      recoveryGraph?: PlanGraph;
+    }
   | { status: 'aborted'; reason: string }
   | { status: 'rationale_rejected'; taskId: TaskId };
 

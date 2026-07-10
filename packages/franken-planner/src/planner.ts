@@ -101,10 +101,11 @@ export class Planner {
       const failedTaskLineage = Planner.getRecoveryLineageRoot(result.failedTaskId);
       const attempt = (recoveryAttemptsByTask.get(failedTaskLineage) ?? 0) + 1;
       try {
+        const recoveryGraph = result.recoveryGraph ?? currentGraph;
         currentGraph = await this.recovery.recover(
           result.failedTaskId,
           result.error,
-          currentGraph,
+          recoveryGraph,
           attempt
         );
         recoveryAttemptsByTask.set(failedTaskLineage, attempt);
