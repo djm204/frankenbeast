@@ -65,9 +65,6 @@ describe('deterministic Vitest mode', () => {
       const nowDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
       expect(nowDescriptor?.configurable).toBe(true);
       expect(nowDescriptor?.writable).toBe(true);
-      const nowDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
-      expect(nowDescriptor?.configurable).toBe(true);
-      expect(nowDescriptor?.writable).toBe(true);
     } finally {
       globalThis.Date = originalDate;
       Math.random = originalRandom;
