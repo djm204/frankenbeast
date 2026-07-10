@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
-import { AgentActionBar } from '../../../src/components/beasts/agent-action-bar';
+import { useState } from 'react';
+import { AgentActionBar, type AgentLifecycleAction } from '../../../src/components/beasts/agent-action-bar';
 
 afterEach(() => {
   cleanup();
@@ -24,6 +25,47 @@ describe('AgentActionBar', () => {
     expect(screen.getByText('Stop')).toBeTruthy();
     expect(screen.getByText('Restart')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy();
+  });
+
+  it('disables running-agent controls while a stop request is pending', () => {
+    render(<AgentActionBar status="running" hasLinkedRun={true} pendingAction="stop" {...handlers} />);
+
+    expect(screen.getByRole('button', { name: 'Stopping...' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Restart' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Kill' }).getAttribute('disabled')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stopping...' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Kill' }));
+
+    expect(handlers.onStop).not.toHaveBeenCalled();
+    expect(handlers.onRestart).not.toHaveBeenCalled();
+    expect(handlers.onKill).not.toHaveBeenCalled();
+  });
+
+  it('guards duplicate running-agent action clicks after a request enters pending state', () => {
+    function PendingHarness() {
+      const [pendingAction, setPendingAction] = useState<AgentLifecycleAction | null>(null);
+      return (
+        <AgentActionBar
+          status="running"
+          hasLinkedRun={true}
+          pendingAction={pendingAction}
+          {...handlers}
+          onStop={() => {
+            handlers.onStop();
+            setPendingAction('stop');
+          }}
+        />
+      );
+    }
+
+    render(<PendingHarness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stopping...' }));
+
+    expect(handlers.onStop).toHaveBeenCalledTimes(1);
   });
 
   it('requires cancelable confirmation before killing a running agent', () => {
@@ -50,6 +92,47 @@ describe('AgentActionBar', () => {
     expect(screen.getByText('Start')).toBeTruthy();
     expect(screen.getByText('Resume')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
+  });
+
+  it('disables stopped-agent controls while a start request is pending', () => {
+    render(<AgentActionBar status="stopped" hasLinkedRun={true} pendingAction="start" {...handlers} />);
+
+    expect(screen.getByRole('button', { name: 'Starting...' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Resume' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Delete' }).getAttribute('disabled')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Starting...' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(handlers.onStart).not.toHaveBeenCalled();
+    expect(handlers.onResume).not.toHaveBeenCalled();
+    expect(handlers.onDelete).not.toHaveBeenCalled();
+  });
+
+  it('guards duplicate stopped-agent action clicks after a request enters pending state', () => {
+    function PendingHarness() {
+      const [pendingAction, setPendingAction] = useState<AgentLifecycleAction | null>(null);
+      return (
+        <AgentActionBar
+          status="stopped"
+          hasLinkedRun={true}
+          pendingAction={pendingAction}
+          {...handlers}
+          onStart={() => {
+            handlers.onStart();
+            setPendingAction('start');
+          }}
+        />
+      );
+    }
+
+    render(<PendingHarness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Starting...' }));
+
+    expect(handlers.onStart).toHaveBeenCalledTimes(1);
   });
 
   it('requires cancelable confirmation before deleting a stopped agent', () => {

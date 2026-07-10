@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 
+export type AgentLifecycleAction = 'start' | 'stop' | 'restart' | 'resume' | 'delete' | 'kill';
+
 interface AgentActionBarProps {
   status: string;
   hasLinkedRun: boolean;
   agentLabel?: string;
+  pendingAction?: AgentLifecycleAction | null;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
@@ -13,14 +16,14 @@ interface AgentActionBarProps {
   onKill: () => void;
 }
 
-function ActionButton({ label, onClick, variant = 'default' }: {
-  label: string; onClick: () => void; variant?: 'default' | 'danger';
+function ActionButton({ label, onClick, variant = 'default', disabled = false }: {
+  label: string; onClick: () => void; variant?: 'default' | 'danger'; disabled?: boolean;
 }) {
   const base = 'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors';
   const styles = variant === 'danger'
-    ? `${base} bg-beast-danger/20 text-beast-danger hover:bg-beast-danger/30 border border-beast-danger/30`
-    : `${base} bg-beast-control text-beast-text hover:bg-beast-elevated border border-beast-border`;
-  return <button type="button" onClick={onClick} className={styles}>{label}</button>;
+    ? `${base} bg-beast-danger/20 text-beast-danger hover:bg-beast-danger/30 border border-beast-danger/30 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-beast-danger/20`
+    : `${base} bg-beast-control text-beast-text hover:bg-beast-elevated border border-beast-border disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-beast-control`;
+  return <button type="button" onClick={onClick} disabled={disabled} className={styles}>{label}</button>;
 }
 
 function ConfirmDangerAction({
@@ -29,17 +32,19 @@ function ConfirmDangerAction({
   description,
   confirmLabel,
   onConfirm,
+  disabled = false,
 }: {
   label: string;
   title: string;
   description: string;
   confirmLabel: string;
   onConfirm: () => void;
+  disabled?: boolean;
 }) {
   return (
     <AlertDialog.Root>
       <AlertDialog.Trigger asChild>
-        <button type="button" className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-beast-danger/20 text-beast-danger hover:bg-beast-danger/30 border border-beast-danger/30">
+        <button type="button" disabled={disabled} className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-beast-danger/20 text-beast-danger hover:bg-beast-danger/30 border border-beast-danger/30 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-beast-danger/20">
           {label}
         </button>
       </AlertDialog.Trigger>
@@ -59,7 +64,7 @@ function ConfirmDangerAction({
               <button type="button" className="px-3 py-1.5 rounded-lg text-sm bg-beast-control text-beast-text border border-beast-border">Cancel</button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
-              <button type="button" onClick={onConfirm} className="px-3 py-1.5 rounded-lg text-sm bg-beast-danger text-white">{confirmLabel}</button>
+              <button type="button" onClick={onConfirm} disabled={disabled} className="px-3 py-1.5 rounded-lg text-sm bg-beast-danger text-white disabled:opacity-50 disabled:cursor-not-allowed">{confirmLabel}</button>
             </AlertDialog.Action>
           </div>
         </AlertDialog.Content>
@@ -68,25 +73,39 @@ function ConfirmDangerAction({
   );
 }
 
-export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracked agent', onStart, onStop, onRestart, onResume, onDelete, onKill }: AgentActionBarProps) {
+const PENDING_LABELS: Record<AgentLifecycleAction, string> = {
+  start: 'Starting...',
+  stop: 'Stopping...',
+  restart: 'Restarting...',
+  resume: 'Resuming...',
+  delete: 'Deleting...',
+  kill: 'Killing...',
+};
+
+function actionLabel(action: AgentLifecycleAction, label: string, pendingAction: AgentLifecycleAction | null | undefined): string {
+  return pendingAction === action ? PENDING_LABELS[action] : label;
+}
+
+export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracked agent', pendingAction = null, onStart, onStop, onRestart, onResume, onDelete, onKill }: AgentActionBarProps) {
   const [forceRestart, setForceRestart] = useState(false);
 
   const isInitOrDispatch = status === 'initializing' || status === 'dispatching';
   const isRunning = status === 'running';
   const isStopped = status === 'stopped';
   const isTerminal = status === 'failed' || status === 'completed';
+  const lifecyclePending = pendingAction !== null;
 
   return (
     <div className="flex items-center gap-2 flex-wrap p-4 border-t border-beast-border">
-      {(isInitOrDispatch || isRunning) && <ActionButton label="Stop" onClick={onStop} />}
+      {(isInitOrDispatch || isRunning) && <ActionButton label={actionLabel('stop', 'Stop', pendingAction)} onClick={onStop} disabled={lifecyclePending} />}
 
       {isRunning && (
         <>
           {forceRestart ? (
             <AlertDialog.Root>
               <AlertDialog.Trigger asChild>
-                <button type="button" className="px-3 py-1.5 rounded-lg text-sm font-medium bg-beast-danger/20 text-beast-danger border border-beast-danger/30">
-                  Restart
+                <button type="button" disabled={lifecyclePending} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-beast-danger/20 text-beast-danger border border-beast-danger/30 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {actionLabel('restart', 'Restart', pendingAction)}
                 </button>
               </AlertDialog.Trigger>
               <AlertDialog.Portal>
@@ -105,38 +124,40 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracke
                       <button type="button" className="px-3 py-1.5 rounded-lg text-sm bg-beast-control text-beast-text border border-beast-border">Cancel</button>
                     </AlertDialog.Cancel>
                     <AlertDialog.Action asChild>
-                      <button type="button" onClick={onRestart} className="px-3 py-1.5 rounded-lg text-sm bg-beast-danger text-white">Force Restart</button>
+                      <button type="button" onClick={onRestart} disabled={lifecyclePending} className="px-3 py-1.5 rounded-lg text-sm bg-beast-danger text-white disabled:opacity-50 disabled:cursor-not-allowed">Force Restart</button>
                     </AlertDialog.Action>
                   </div>
                 </AlertDialog.Content>
               </AlertDialog.Portal>
             </AlertDialog.Root>
           ) : (
-            <ActionButton label="Restart" onClick={onRestart} />
+            <ActionButton label={actionLabel('restart', 'Restart', pendingAction)} onClick={onRestart} disabled={lifecyclePending} />
           )}
           <ConfirmDangerAction
-            label="Kill"
+            label={actionLabel('kill', 'Kill', pendingAction)}
             title="Kill tracked agent"
             description={`Kill ${agentLabel}? This interrupts the linked run immediately and cannot be undone from the dashboard.`}
             confirmLabel="Kill agent"
             onConfirm={onKill}
+            disabled={lifecyclePending}
           />
-          <label className="flex items-center gap-1.5 text-xs text-beast-subtle ml-2 cursor-pointer">
-            <input type="checkbox" checked={forceRestart} onChange={(e) => setForceRestart(e.target.checked)} className="accent-beast-danger" />
+          <label className={`flex items-center gap-1.5 text-xs text-beast-subtle ml-2 ${lifecyclePending ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+            <input type="checkbox" checked={forceRestart} disabled={lifecyclePending} onChange={(e) => setForceRestart(e.target.checked)} className="accent-beast-danger" />
             Force
           </label>
         </>
       )}
 
-      {(isStopped || isTerminal) && <ActionButton label="Start" onClick={onStart} />}
-      {isStopped && hasLinkedRun && <ActionButton label="Resume" onClick={onResume} />}
+      {(isStopped || isTerminal) && <ActionButton label={actionLabel('start', 'Start', pendingAction)} onClick={onStart} disabled={lifecyclePending} />}
+      {isStopped && hasLinkedRun && <ActionButton label={actionLabel('resume', 'Resume', pendingAction)} onClick={onResume} disabled={lifecyclePending} />}
       {(isStopped || isTerminal) && (
         <ConfirmDangerAction
-          label="Delete"
+          label={actionLabel('delete', 'Delete', pendingAction)}
           title="Delete tracked agent"
           description={`Delete ${agentLabel}? This soft-deletes it and removes it from the dashboard history.`}
           confirmLabel="Delete agent"
           onConfirm={onDelete}
+          disabled={lifecyclePending}
         />
       )}
     </div>
