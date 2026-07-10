@@ -203,6 +203,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
 // --- Episodic Memory ---
 
+const SQLITE_VARIABLE_LIMIT = 999;
+const RECALL_VARIABLES_PER_KEYWORD = 4;
+const RECALL_LIMIT_VARIABLES = 1;
+const MAX_RECALL_KEYWORDS_PER_QUERY = Math.floor(
+  (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) / RECALL_VARIABLES_PER_KEYWORD,
+);
+
 interface EpisodicRow {
   id: number;
   type: string;
@@ -241,6 +248,35 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       return this.recent(limit);
     }
 
+    if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
+      return this.recallKeywordChunk(keywords, limit).map(row => rowToEvent(row));
+    }
+
+    const rowsById = new Map<number, EpisodicRow & { relevance_score: number }>();
+    for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
+      for (const row of this.recallKeywordChunk(chunk)) {
+        const existing = rowsById.get(row.id);
+        if (existing) {
+          existing.relevance_score += row.relevance_score;
+        } else {
+          rowsById.set(row.id, { ...row });
+        }
+      }
+    }
+
+    const sortedRows = [...rowsById.values()].sort((a, b) =>
+      b.relevance_score - a.relevance_score
+      || b.created_at.localeCompare(a.created_at)
+      || b.id - a.id,
+    );
+
+    return (limit < 0 ? sortedRows : sortedRows.slice(0, limit)).map(rowToEvent);
+  }
+
+  private recallKeywordChunk(
+    keywords: string[],
+    limit?: number,
+  ): Array<EpisodicRow & { relevance_score: number }> {
     // Build scoring SQL: count keyword matches across summary + details
     const scoringCases = keywords.map(() =>
       `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
@@ -255,17 +291,18 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       FROM episodic_events
       WHERE ${whereClauses}
       ORDER BY relevance_score DESC, created_at DESC
-      LIMIT ?
+      ${limit === undefined ? '' : 'LIMIT ?'}
     `;
 
     const likeParams = keywords.flatMap(k => {
       const escaped = `%${escapeLike(k)}%`;
       return [escaped, escaped];
     });
-    const allParams = [...likeParams, ...likeParams, limit];
+    const allParams = limit === undefined
+      ? [...likeParams, ...likeParams]
+      : [...likeParams, ...likeParams, limit];
 
-    const rows = this.db.prepare(sql).all(...allParams) as (EpisodicRow & { relevance_score: number })[];
-    return rows.map(rowToEvent);
+    return this.db.prepare(sql).all(...allParams) as Array<EpisodicRow & { relevance_score: number }>;
   }
 
   recentFailures(n = 10): EpisodicEvent[] {
@@ -475,6 +512,14 @@ const STOPWORDS = new Set([
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');
+}
+
+function chunkArray<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function parseStoredWorkingMemoryValue(value: string): unknown {
