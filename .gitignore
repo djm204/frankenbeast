@@ -5,6 +5,7 @@ node_modules
 .superpowers
 .worktrees
 .turbo
+.tmp/
 dist
 # Frankenbeast project-local state (build logs, checkpoints, plans)
 .frankenbeast/
