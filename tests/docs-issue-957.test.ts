@@ -39,7 +39,13 @@ describe('issue #957 CLAUDE monorepo package map', () => {
 
     expect(readText('CLAUDE.md')).not.toContain('All 11 packages live under `packages/`');
 
-    for (const retiredPackage of ['frankenfirewall/', 'franken-skills/', 'franken-heartbeat/', 'franken-mcp/']) {
+    for (const retiredPackage of [
+      'frankenfirewall/',
+      'franken-skills/',
+      'franken-heartbeat/',
+      'franken-mcp/',
+      'franken-comms/',
+    ]) {
       expect(packageMap, `${retiredPackage} should not appear in the active package map`).not.toContain(retiredPackage);
     }
   });
