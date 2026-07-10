@@ -19,7 +19,11 @@ export function SlideInPanel({ isOpen, onClose, children }: SlideInPanelProps) {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (isOpen && panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const panelPortal = target instanceof Element
+        ? target.closest('[data-beast-panel-portal="true"]')
+        : null;
+      if (isOpen && panelRef.current && !panelRef.current.contains(target) && !panelPortal) {
         onClose();
       }
     }

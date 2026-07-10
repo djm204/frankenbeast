@@ -163,4 +163,29 @@ describe('AgentDetailPanel', () => {
     rejectSave?.(new Error('HTTP 500'));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 500'));
   });
+
+  it('keeps delete confirmation actions from closing the detail panel as outside clicks', () => {
+    render(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          status: 'stopped',
+          name: 'Review Agent',
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const confirm = screen.getByRole('button', { name: 'Delete agent' });
+
+    fireEvent.mouseDown(confirm);
+    expect(handlers.onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(confirm);
+    expect(handlers.onDelete).toHaveBeenCalledTimes(1);
+  });
 });
