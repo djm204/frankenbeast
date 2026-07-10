@@ -24,6 +24,5 @@ export default defineConfig({
       ? []
       : ['src/**/*.integration.test.ts', 'src/**/*.eval.test.ts'],
     reporters: ['verbose'],
-    passWithNoTests: true,
   },
 })
