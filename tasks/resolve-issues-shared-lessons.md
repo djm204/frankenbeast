@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — Observer replay timestamp validation
+- Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant regressions (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
+
 ## 2026-07-10 — Parallel planner deadlock guard
 - In ParallelPlanner execution, don't allow the "no tasks ready" path to continue silently as success. Keep cycle checks explicit and fail fast with a clear `CyclicDependencyError` (or similar) before running task waves, and add a unit test that proves executor is never called when readiness stalls due to a dependency cycle.
 - When `@codex review` is usage-limited, classify it as a blocker state and do not merge until a new trigger can produce a current-head clean response.
