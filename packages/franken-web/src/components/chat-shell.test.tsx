@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildInitAction, ChatShell } from './chat-shell';
 
@@ -266,6 +266,39 @@ describe('ChatShell route heading', () => {
     expect(await screen.findByText('insecure')).toBeTruthy();
 
     rejectStaleRefresh(new Error('HTTP 500'));
+
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('ignores stale manual refresh failures after a newer service action refresh succeeds', async () => {
+    let rejectStaleRefresh!: (error: Error) => void;
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat', status: 'running', inProcess: false }],
+      })
+      .mockImplementationOnce(() => new Promise((_, reject) => {
+        rejectStaleRefresh = reject;
+      }))
+      .mockResolvedValueOnce({
+        mode: 'insecure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat', status: 'running', inProcess: false }],
+      });
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    expect(await screen.findByText('chat')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+
+    expect(await screen.findByText('insecure')).toBeTruthy();
+
+    await act(async () => {
+      rejectStaleRefresh(new Error('HTTP 500'));
+    });
 
     await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(3));
     expect(screen.queryByRole('alert')).toBeNull();

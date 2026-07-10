@@ -394,6 +394,17 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
   const beastCreationDisabled = Boolean(beastCreationUnavailableReason);
 
+  const refreshNetworkStatusAfterAction = (client: NetworkApiClient): Promise<void> => {
+    const statusRequestId = ++networkStatusRequestIdRef.current;
+    return client.getStatus().then((nextStatus) => {
+      if (statusRequestId !== networkStatusRequestIdRef.current) {
+        return;
+      }
+      setNetworkStatus(nextStatus);
+      setNetworkError(null);
+    });
+  };
+
   useEffect(() => {
     if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
       return;
@@ -1213,10 +1224,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onRestart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.restart(serviceId).then(() => {
-                return client.getStatus().then((nextStatus) => {
-                  setNetworkStatus(nextStatus);
-                  setNetworkError(null);
-                });
+                return refreshNetworkStatusAfterAction(client);
               });
             }}
             onSaveConfig={(assignments) => {
@@ -1261,19 +1269,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onStart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.start(serviceId).then(() => {
-                return client.getStatus().then((nextStatus) => {
-                  setNetworkStatus(nextStatus);
-                  setNetworkError(null);
-                });
+                return refreshNetworkStatusAfterAction(client);
               });
             }}
             onStop={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.stop(serviceId).then(() => {
-                return client.getStatus().then((nextStatus) => {
-                  setNetworkStatus(nextStatus);
-                  setNetworkError(null);
-                });
+                return refreshNetworkStatusAfterAction(client);
               });
             }}
             selectedLogServiceId={selectedNetworkLogServiceId}
