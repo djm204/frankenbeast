@@ -51,8 +51,10 @@ export function installDeterministicMode(seed = process.env['FRANKENBEAST_SEED']
   }
 
   const rng = seededRandom(seed);
-  const clock = createDeterministicClock(seed);
   const OriginalDate = Date as DateConstructorWithOriginal;
+  const deterministicEpoch = createDeterministicClock(seed)();
+  const realStart = OriginalDate.now();
+  const clock = (): number => deterministicEpoch + Math.max(OriginalDate.now() - realStart, 0);
 
   Math.random = rng;
 

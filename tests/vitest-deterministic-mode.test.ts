@@ -42,7 +42,7 @@ describe('deterministic Vitest mode', () => {
     expect(values[2]).toBe(values[1] + 1);
   });
 
-  it('preserves Date constructor and callable behavior when deterministic mode is installed', () => {
+  it('preserves Date constructor and callable behavior when deterministic mode is installed', async () => {
     const originalDate = globalThis.Date;
     const originalRandom = Math.random;
     const globalObject = globalThis as typeof globalThis & {
@@ -65,6 +65,9 @@ describe('deterministic Vitest mode', () => {
       const nowDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
       expect(nowDescriptor?.configurable).toBe(true);
       expect(nowDescriptor?.writable).toBe(true);
+      const start = Date.now();
+      await new Promise((resolveTimer) => setTimeout(resolveTimer, 20));
+      expect(Date.now() - start).toBeGreaterThanOrEqual(15);
     } finally {
       globalThis.Date = originalDate;
       Math.random = originalRandom;
