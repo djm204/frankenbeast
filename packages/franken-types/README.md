@@ -32,8 +32,8 @@ import {
 Subpath exports are available for focused imports:
 
 ```ts
-import { assertInsideRoot } from '@franken/types/path-containment';
-import { seededRandom, deterministicUuid } from '@franken/types/utils';
+import { resolveContainedPath } from '@franken/types/path-containment';
+import { createSeededRandom, deterministicUuid } from '@franken/types/utils';
 ```
 
 ## Export groups
@@ -73,5 +73,5 @@ The package test script writes temporary files under `../../.tmp/franken-types` 
 
 ## Related docs
 
-- [Ramp-up notes](./docs/RAMP_UP.md)
-- [Changelog](./CHANGELOG.md)
+- [Ramp-up notes](https://github.com/djm204/frankenbeast/blob/main/packages/franken-types/docs/RAMP_UP.md)
+- [Changelog](https://github.com/djm204/frankenbeast/blob/main/packages/franken-types/CHANGELOG.md)

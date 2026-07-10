@@ -82,8 +82,8 @@ Integration and E2E scripts enable broader runtime paths with `INTEGRATION=true`
 
 ## Related docs
 
-- [Ramp-up notes](./docs/RAMP_UP.md)
-- [LLM caching architecture](./docs/architecture/llm-caching.md)
-- [ADR 0001: hybrid intelligent LLM caching](./docs/adr/0001-hybrid-intelligent-llm-caching.md)
-- [ADR 0002: work-scoped LLM cache isolation](./docs/adr/0002-work-scoped-llm-cache-isolation.md)
-- [Changelog](./CHANGELOG.md)
+- [Ramp-up notes](https://github.com/djm204/frankenbeast/blob/main/packages/franken-orchestrator/docs/RAMP_UP.md)
+- [LLM caching architecture](https://github.com/djm204/frankenbeast/blob/main/packages/franken-orchestrator/docs/architecture/llm-caching.md)
+- [ADR 0001: hybrid intelligent LLM caching](https://github.com/djm204/frankenbeast/blob/main/packages/franken-orchestrator/docs/adr/0001-hybrid-intelligent-llm-caching.md)
+- [ADR 0002: work-scoped LLM cache isolation](https://github.com/djm204/frankenbeast/blob/main/packages/franken-orchestrator/docs/adr/0002-work-scoped-llm-cache-isolation.md)
+- [Changelog](https://github.com/djm204/frankenbeast/blob/main/packages/franken-orchestrator/CHANGELOG.md)
