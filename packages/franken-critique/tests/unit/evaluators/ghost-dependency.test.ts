@@ -132,24 +132,22 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
-  it('ignores relative and node built-in dynamic import expressions', async () => {
+  it('ignores relative, URL, and node built-in dynamic import expressions', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
-    it('ignores relative, URL, and node built-in dynamic import expressions', async () => {
-      const evaluator = new GhostDependencyEvaluator(knownPackages);
-      const content = `
-        const local = await import('./local-plugin.js');
-        const absoluteLocal = await import('/tmp/generated/plugin.mjs');
-        const fileUrlLocal = await import('file:///tmp/generated/plugin.mjs');
-        const dataUrl = await import('data:text/javascript,export default 1');
-        const browserUrl = await import('https://cdn.example.test/plugin.mjs');
-        const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
-        const fs = await import('node:fs/promises');
-      `;
-      const result = await evaluator.evaluate(createInput(content));
+    const content = `
+      const local = await import('./local-plugin.js');
+      const absoluteLocal = await import('/tmp/generated/plugin.mjs');
+      const fileUrlLocal = await import('file:///tmp/generated/plugin.mjs');
+      const dataUrl = await import('data:text/javascript,export default 1');
+      const browserUrl = await import('https://cdn.example.test/plugin.mjs');
+      const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
+      const fs = await import('node:fs/promises');
+    `;
+    const result = await evaluator.evaluate(createInput(content));
 
-      expect(result.verdict).toBe('pass');
-      expect(result.findings).toHaveLength(0);
-    });
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toHaveLength(0);
+  });
 
   it('detects dynamic import expressions with comments and import attributes', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
@@ -160,7 +158,6 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
-
   it('detects no-substitution template literal dynamic imports', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = 'const plugin = await import(`ghost-package`);';
