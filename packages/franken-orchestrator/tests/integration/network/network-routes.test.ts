@@ -82,6 +82,31 @@ describe('network routes', () => {
     },
   );
 
+  it('allows idempotent stops for known service IDs when no service is running', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const app = createChatApp({
+      sessionStoreDir: join(TMP, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'network-project',
+      networkControl: {
+        root: TMP,
+        frankenbeastDir: TMP,
+        configFile: join(TMP, 'config.json'),
+        getConfig: () => defaultConfig(),
+        setConfig: () => {},
+      },
+    });
+
+    const response = await app.request('/v1/network/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ target: 'chat-server' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { ok: true } });
+  });
+
   it('stops persisted running services even after they are disabled in config', async () => {
     mkdirSync(TMP, { recursive: true });
     const stateFile = join(TMP, 'network/state.json');

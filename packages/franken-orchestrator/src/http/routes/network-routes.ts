@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../../network/network-config-paths.js';
-import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../../network/network-registry.js';
+import { filterNetworkServices, resolveNetworkServices, createNetworkRegistry, type NetworkServiceId, type ResolvedNetworkService } from '../../network/network-registry.js';
 import { NetworkLogStore } from '../../network/network-logs.js';
 import { redactSensitiveConfig } from '../../network/network-secrets.js';
 import { NetworkStateStore } from '../../network/network-state-store.js';
@@ -67,8 +67,8 @@ function withValidTarget(
   }
 }
 
-function assertKnownRunningTarget(services: Array<{ id: string }>, target: string): void {
-  if (target === 'all' || services.some((service) => service.id === target)) {
+function assertKnownStopTarget(target: string): void {
+  if (target === 'all' || createNetworkRegistry().has(target as NetworkServiceId)) {
     return;
   }
   throw new HttpError(400, 'UNKNOWN_NETWORK_SERVICE_TARGET', `Unknown network service target: ${target}`);
@@ -147,8 +147,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.post('/v1/network/stop', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
-    const status = await supervisor.status();
-    assertKnownRunningTarget(status.services, body.target);
+    assertKnownStopTarget(body.target);
     await supervisor.stop(body.target);
     return c.json({ data: { ok: true } });
   });
