@@ -62,7 +62,9 @@ function cloneUnknown<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   }
 
   if (value instanceof RegExp) {
-    return new RegExp(value.source, value.flags) as T;
+    const clone = new RegExp(value.source, value.flags);
+    clone.lastIndex = value.lastIndex;
+    return clone as T;
   }
 
   if (value instanceof Set) {

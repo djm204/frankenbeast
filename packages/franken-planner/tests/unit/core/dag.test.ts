@@ -138,6 +138,20 @@ describe('PlanGraph — construction', () => {
     }
   });
 
+  it('preserves stateful RegExp metadata when cloning task snapshots', () => {
+    const pattern = /work/g;
+    pattern.lastIndex = 2;
+    const graph = PlanGraph.empty().addTask(makeTask('regexp', { metadata: { pattern } }));
+    pattern.lastIndex = 0;
+
+    const snapshot = graph.getTask(createTaskId('regexp')) as Task;
+    expect((snapshot.metadata?.pattern as RegExp).lastIndex).toBe(2);
+
+    (snapshot.metadata?.pattern as RegExp).lastIndex = 0;
+    const stored = graph.getTask(createTaskId('regexp')) as Task;
+    expect((stored.metadata?.pattern as RegExp).lastIndex).toBe(2);
+  });
+
   it('isolates stored tasks from mutations to getTask, getTasks, and topoSort results', () => {
     const g = PlanGraph.empty()
       .addTask(makeTask('a', { requiredSkills: ['setup'] }))
