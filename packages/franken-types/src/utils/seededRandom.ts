@@ -37,6 +37,8 @@ let activeRandom: RandomGenerator | undefined;
 export function random(): number {
   const seed = currentSeed();
   if (!seed) {
+    activeSeed = undefined;
+    activeRandom = undefined;
     return Math.random();
   }
 
