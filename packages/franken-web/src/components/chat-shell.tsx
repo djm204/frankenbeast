@@ -9,6 +9,7 @@ import { CostBadge } from './cost-badge';
 import { NetworkPage } from '../pages/network-page';
 import {
   BeastApiClient,
+  BeastApiError,
   type BeastContainerRuntimeStatus,
   type BeastCatalogEntry,
   type BeastRunDetail,
@@ -1062,8 +1063,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const initAction = buildInitAction(definitionId, config, selectedSessionId);
-              await beastClient.createAgent({ definitionId, initAction, initConfig: config, executionMode });
-              setBeastRefreshNonce((current) => current + 1);
+              try {
+                await beastClient.createAgent({ definitionId, initAction, initConfig: config, executionMode });
+                setBeastRefreshNonce((current) => current + 1);
+              } catch (error) {
+                if (error instanceof BeastApiError && error.code === 'AGENT_DISPATCH_FAILED') {
+                  setBeastRefreshNonce((current) => current + 1);
+                }
+                throw error;
+              }
             }}
             onDelete={(agentId) => {
               runBeastAgentLifecycleAction({
