@@ -1075,11 +1075,8 @@ describe('useChatSession', () => {
       await result.current.approve(false);
     });
 
-    expect(socket.sent).toHaveLength(2);
-    expect(JSON.parse(socket.sent[1] ?? '{}')).toMatchObject({
-      type: 'approval.respond',
-      approved: false,
-    });
+    expect(socket.sent).toHaveLength(1);
+    expect(mockApprove).toHaveBeenCalledWith('chat-1', false);
   });
 
   it('preserves streamed messages after HTTP approval fallback', async () => {

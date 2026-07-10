@@ -568,6 +568,15 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     function handleProtocolError(message: string) {
       protocolErrored = true;
+      shouldReconnect = false;
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
+      try {
+        socket.close();
+      } catch {
+        // Ignore close failures; the protocol-error banner already tells the user how to recover.
+      }
       setStatus('error');
       setConnectionStatus('error');
       failAllPendingSends(new Error(message));
