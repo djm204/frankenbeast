@@ -66,6 +66,53 @@ describe('npm workspaces configuration', () => {
         .filter((entry) => entry.isDirectory())
         .map((entry) => `packages/${entry.name}/package.json`),
     ];
+    const getDirectDependency = (pkg: Record<string, Record<string, string> | undefined>, dependencyName: string) => {
+      for (const dependencySection of [
+        'dependencies',
+        'devDependencies',
+        'optionalDependencies',
+        'peerDependencies',
+      ]) {
+        const version = pkg[dependencySection]?.[dependencyName];
+        if (version !== undefined) return version;
+      }
+      return undefined;
+    };
+    const majorOf = (version: string) => majorMinorPatch(version)[0];
+
+    it('keeps workspace Vitest declarations on the root Vitest major', () => {
+      const rootPkg = readPkg('package.json');
+      const rootVitest = rootPkg.devDependencies?.vitest;
+
+      expect(rootVitest).toBeDefined();
+      const rootVitestMajor = majorOf(rootVitest);
+
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const vitest = getDirectDependency(pkg, 'vitest');
+        if (vitest === undefined) continue;
+
+        expect(
+          majorOf(vitest),
+          `vitest in ${path} must stay on root major ${rootVitestMajor}`,
+        ).toBe(rootVitestMajor);
+      }
+    });
+
+    it('keeps workspace coverage-v8 declarations on the same major as Vitest', () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const vitest = getDirectDependency(pkg, 'vitest');
+        const coverage = getDirectDependency(pkg, '@vitest/coverage-v8');
+        if (coverage === undefined) continue;
+
+        expect(vitest, `${path} declares @vitest/coverage-v8 without vitest`).toBeDefined();
+        expect(
+          majorOf(coverage),
+          `@vitest/coverage-v8 in ${path} must match vitest major`,
+        ).toBe(majorOf(vitest));
+      }
+    });
 
     it('keeps every Vitest and coverage dependency on the non-vulnerable floor', () => {
       for (const path of packageJsonPaths) {
