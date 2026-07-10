@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { confirmYesNo } from './prompt.js';
 import { codexProjectIds, codexServerNamesForProjectIds } from './codex-server-names.js';
-import { parseJsonObjectWithComments, writeJsonFileAtomic } from './settings-json.js';
+import { readJsonObjectFileOrRecover, writeJsonFileAtomic } from './settings-json.js';
 import type { FbeastServer } from '../shared/config.js';
 
 export interface UninstallOptions {
@@ -110,7 +110,7 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
 function pruneFbeastMcpServers(settingsPath: string): Record<string, unknown> {
   if (!existsSync(settingsPath)) return {};
 
-  const settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
+  const settings = readJsonObjectFileOrRecover(settingsPath, readFileSync(settingsPath, 'utf-8'));
   const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
   for (const key of Object.keys(mcpServers)) {
     if (key.startsWith('fbeast-')) delete mcpServers[key];
