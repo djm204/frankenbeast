@@ -101,7 +101,6 @@ const inputClass = 'w-full bg-beast-control border border-beast-border rounded-l
 const labelClass = 'block text-xs font-medium text-beast-muted mb-1.5';
 
 function boundedIntegerChangeHandler(
-  min: number,
   max: number,
   update: (value: number) => void,
 ): ChangeEventHandler<HTMLInputElement> {
@@ -110,7 +109,7 @@ function boundedIntegerChangeHandler(
     if (!/^\d+$/.test(rawValue)) return;
 
     const parsed = Number(rawValue);
-    if (!Number.isInteger(parsed) || parsed < min || parsed > max) return;
+    if (!Number.isInteger(parsed) || parsed > max) return;
 
     update(parsed);
   };
@@ -194,7 +193,7 @@ function renderModuleConfig(
               min={1}
               max={50}
               value={(config.maxDagDepth as number) ?? 10}
-              onChange={boundedIntegerChangeHandler(1, 50, (value) => update('maxDagDepth', value))}
+              onChange={boundedIntegerChangeHandler(50, (value) => update('maxDagDepth', value))}
               className={inputClass}
             />
           </div>
@@ -206,7 +205,7 @@ function renderModuleConfig(
               min={1}
               max={20}
               value={(config.parallelTaskLimit as number) ?? 4}
-              onChange={boundedIntegerChangeHandler(1, 20, (value) => update('parallelTaskLimit', value))}
+              onChange={boundedIntegerChangeHandler(20, (value) => update('parallelTaskLimit', value))}
               className={inputClass}
             />
           </div>
@@ -224,7 +223,7 @@ function renderModuleConfig(
               min={1}
               max={10}
               value={(config.maxIterations as number) ?? 3}
-              onChange={boundedIntegerChangeHandler(1, 10, (value) => update('maxIterations', value))}
+              onChange={boundedIntegerChangeHandler(10, (value) => update('maxIterations', value))}
               className={inputClass}
             />
           </div>
@@ -285,7 +284,7 @@ function renderModuleConfig(
               min={10}
               max={600}
               value={(config.reflectionInterval as number) ?? 60}
-              onChange={boundedIntegerChangeHandler(10, 600, (value) => update('reflectionInterval', value))}
+              onChange={boundedIntegerChangeHandler(600, (value) => update('reflectionInterval', value))}
               className={inputClass}
             />
           </div>

@@ -89,12 +89,21 @@ function validateCatalogPrompt(
   }
 }
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function addModuleNumericErrors(errors: WizardValidationErrors, values: Record<string, unknown> | undefined): void {
   if (!values) return;
 
   for (const fieldSpec of MODULE_NUMERIC_FIELDS) {
-    const config = values[fieldSpec.configKey] as Record<string, unknown> | undefined;
-    if (!config || !(fieldSpec.field in config)) continue;
+    const config = values[fieldSpec.configKey];
+    if (config === undefined) continue;
+    if (!isRecordObject(config)) {
+      errors[fieldSpec.configKey] = `${fieldSpec.label} configuration is malformed.`;
+      continue;
+    }
+    if (!(fieldSpec.field in config)) continue;
 
     const value = config[fieldSpec.field];
     if (typeof value !== 'number' || !Number.isInteger(value) || value < fieldSpec.min || value > fieldSpec.max) {

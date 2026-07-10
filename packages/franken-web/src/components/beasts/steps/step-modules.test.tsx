@@ -15,7 +15,7 @@ describe('StepModules numeric configuration', () => {
     cleanup();
   });
 
-  it('does not store blank or out-of-range planner numbers as module config', () => {
+  it('does not store blank or above-maximum planner numbers as module config', () => {
     render(<StepModules />);
 
     fireEvent.click(screen.getByRole('button', { name: /Planner DAG-based task planning/ }));
@@ -28,11 +28,24 @@ describe('StepModules numeric configuration', () => {
     fireEvent.change(maxDepth, { target: { value: '' } });
     expect((useBeastStore.getState().stepValues[3]?.plannerConfig as Record<string, unknown>).maxDagDepth).toBe(12);
 
-    fireEvent.change(maxDepth, { target: { value: '0' } });
-    expect((useBeastStore.getState().stepValues[3]?.plannerConfig as Record<string, unknown>).maxDagDepth).toBe(12);
-
     fireEvent.change(maxDepth, { target: { value: '51' } });
     expect((useBeastStore.getState().stepValues[3]?.plannerConfig as Record<string, unknown>).maxDagDepth).toBe(12);
+  });
+
+  it('allows intermediate heartbeat prefixes while final validation blocks too-low values', () => {
+    render(<StepModules />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Heartbeat Periodic reflection/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Heartbeat Configuration/ }));
+
+    const reflectionInterval = screen.getByLabelText('Reflection Interval (seconds)') as HTMLInputElement;
+    fireEvent.change(reflectionInterval, { target: { value: '3' } });
+    expect((useBeastStore.getState().stepValues[3]?.heartbeatConfig as Record<string, unknown>).reflectionInterval).toBe(3);
+    expect(validateWizardStep(3, useBeastStore.getState().stepValues)['heartbeatConfig.reflectionInterval']).toContain('Reflection Interval');
+
+    fireEvent.change(reflectionInterval, { target: { value: '30' } });
+    expect((useBeastStore.getState().stepValues[3]?.heartbeatConfig as Record<string, unknown>).reflectionInterval).toBe(30);
+    expect(validateWizardStep(3, useBeastStore.getState().stepValues)['heartbeatConfig.reflectionInterval']).toBeUndefined();
   });
 
   it('rejects invalid planner, critique, and heartbeat numeric config before launch validation passes', () => {
@@ -57,5 +70,17 @@ describe('StepModules numeric configuration', () => {
     expect(errors['plannerConfig.parallelTaskLimit']).toContain('Parallel Task Limit');
     expect(errors['critiqueConfig.maxIterations']).toContain('Max Iterations');
     expect(errors['heartbeatConfig.reflectionInterval']).toContain('Reflection Interval');
+  });
+
+  it('rejects malformed config sections without throwing', () => {
+    const errors = validateWizardStep(3, {
+      3: {
+        plannerConfig: true,
+        heartbeatConfig: 'bad',
+      },
+    });
+
+    expect(errors.plannerConfig).toContain('malformed');
+    expect(errors.heartbeatConfig).toContain('malformed');
   });
 });
