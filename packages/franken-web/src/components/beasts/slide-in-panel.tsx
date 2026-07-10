@@ -11,7 +11,9 @@ export function SlideInPanel({ isOpen, onClose, children }: SlideInPanelProps) {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === 'Escape' && isOpen && !document.querySelector('[data-beast-panel-portal="true"]')) {
+        onClose();
+      }
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -20,9 +22,10 @@ export function SlideInPanel({ isOpen, onClose, children }: SlideInPanelProps) {
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Node;
-      const panelPortal = target instanceof Element
-        ? target.closest('[data-beast-panel-portal="true"]')
-        : null;
+      const targetElement = target instanceof Element
+        ? target
+        : target.parentElement;
+      const panelPortal = targetElement?.closest('[data-beast-panel-portal="true"]');
       if (isOpen && panelRef.current && !panelRef.current.contains(target) && !panelPortal) {
         onClose();
       }

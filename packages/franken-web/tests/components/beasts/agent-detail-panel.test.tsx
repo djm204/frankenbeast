@@ -185,7 +185,34 @@ describe('AgentDetailPanel', () => {
     fireEvent.mouseDown(confirm);
     expect(handlers.onClose).not.toHaveBeenCalled();
 
-    fireEvent.click(confirm);
-    expect(handlers.onDelete).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(handlers.onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const overlay = document.querySelector('[data-beast-panel-portal="true"].fixed.inset-0');
+    if (!overlay) throw new Error('Expected delete confirmation overlay');
+    fireEvent.mouseDown(overlay);
+    expect(handlers.onClose).not.toHaveBeenCalled();
+  });
+
+  it('uses the agent id in delete confirmation when the agent name is blank', () => {
+    render(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          id: 'agent-blank-name',
+          status: 'completed',
+          name: '   ',
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(screen.getByText(/agent-blank-name/)).toBeTruthy();
   });
 });

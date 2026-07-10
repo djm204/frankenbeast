@@ -45,7 +45,7 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel, onStart, onSt
                 </button>
               </AlertDialog.Trigger>
               <AlertDialog.Portal>
-                <AlertDialog.Overlay className="fixed inset-0 bg-black/50 z-[60]" />
+                <AlertDialog.Overlay data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
                 <AlertDialog.Content
                   data-beast-panel-portal="true"
                   className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md"
@@ -86,7 +86,7 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel, onStart, onSt
             </button>
           </AlertDialog.Trigger>
           <AlertDialog.Portal>
-            <AlertDialog.Overlay className="fixed inset-0 bg-black/50 z-[60]" />
+            <AlertDialog.Overlay data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
             <AlertDialog.Content
               data-beast-panel-portal="true"
               className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md"
