@@ -38,6 +38,11 @@ jobs:
 
       - run: npm ci
 
+      - name: Validate bootstrap script (dry-run)
+        env:
+          CI_BOOTSTRAP_DRY_RUN: "1"
+        run: npm run bootstrap:dry-run
+
       - name: Dependency vulnerability audit
         run: npm run audit:dependencies
 

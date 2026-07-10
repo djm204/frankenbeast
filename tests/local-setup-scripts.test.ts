@@ -42,6 +42,42 @@ describe('local setup scripts', () => {
     expect(source).not.toContain('Firewall server');
   });
 
+  it('verify-setup supports a dry-run that validates bootstrap prerequisites without probing services', () => {
+    const source = read('scripts/verify-setup.ts');
+    const packageJson = JSON.parse(read('package.json')) as { scripts?: Record<string, string> };
+
+    expect(packageJson.scripts?.['bootstrap:dry-run']).toBe('tsx scripts/verify-setup.ts --dry-run --env-file .env.example');
+    expect(source).toContain('--dry-run');
+    expect(source).toContain('--env-file');
+    expect(source).toContain('Required bootstrap env vars');
+    expect(source).toContain('Skipping live service probes in dry-run mode');
+  });
+
+  it('bootstrap dry-run succeeds against .env.example and fails when required env vars are missing', () => {
+    const ok = spawnSync('npx', ['tsx', 'scripts/verify-setup.ts', '--dry-run', '--env-file', '.env.example'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+    expect(ok.status).toBe(0);
+    expect(`${ok.stdout}\n${ok.stderr}`).toContain('Skipping live service probes in dry-run mode');
+
+    const dir = mkdtempSync(join(tmpdir(), 'frankenbeast-verify-setup-'));
+    try {
+      const envPath = join(dir, '.env.missing');
+      writeFileSync(envPath, 'CHROMA_URL=http://localhost:8000\n');
+      const missing = spawnSync('npx', ['tsx', 'scripts/verify-setup.ts', '--dry-run', '--env-file', envPath], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+
+      expect(missing.status).not.toBe(0);
+      expect(`${missing.stdout}\n${missing.stderr}`).toContain('Required bootstrap env vars');
+      expect(`${missing.stdout}\n${missing.stderr}`).toContain('FRANKEN_MAX_TOTAL_TOKENS');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('seed script uses the Chroma v2 tenant/database collection API', () => {
     const source = read('scripts/seed.ts');
 

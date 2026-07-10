@@ -10,6 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "bootstrap": "bash scripts/bootstrap.sh",
+    "bootstrap:dry-run": "tsx scripts/verify-setup.ts --dry-run --env-file .env.example",
     "typecheck": "turbo run typecheck",
     "audit:security": "node scripts/check-package-manager.mjs && npm audit --audit-level=moderate",
     "audit:dependencies": "node scripts/check-package-manager.mjs && npm audit",
