@@ -94,6 +94,10 @@ interface PendingSend {
   reject: (error: Error) => void;
 }
 
+class NonRetryableSendError extends Error {
+  readonly retryableSend = false;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -290,10 +294,14 @@ function preserveLocalRecoveryMessages(
     }
 
     if (consumeSnapshotMatch(message)) {
-      if (message.role === 'user' && message.receipt === 'failed') {
+      if (message.role === 'user' && (message.receipt === 'failed' || (message.receipt === 'accepted' && message.canRetry === false))) {
         clearedFailedDrafts.push(message.content);
       }
       return [];
+    }
+
+    if (message.role === 'user' && message.receipt === 'accepted' && message.canRetry === false) {
+      return [message];
     }
 
     if (message.role !== 'user' || !message.receipt || message.canRetry === false) {
@@ -861,6 +869,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setStatus('sending');
 
     if (!optimisticAdd) {
+      let fallbackRefreshError: Error | null = null;
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
         if (!sessionStillCurrent(sessionId)) {
@@ -886,18 +895,23 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           if (!sessionStillCurrent(sessionId)) {
             return;
           }
+          const refreshMessage = errorMessage(
+            error,
+            'The fallback chat request completed, but the updated transcript could not be loaded.',
+          );
           setMessages((current) => [
             ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
-            { ...optimisticMessage, receipt: 'accepted' },
+            { ...optimisticMessage, receipt: 'accepted', canRetry: false },
           ]);
           addErrorBanner(makeBanner(
             'Message sent; refresh failed',
-            errorMessage(error, 'The message was accepted, but the updated transcript could not be loaded.'),
+            refreshMessage,
             'retry-session',
             'Refresh chat',
             'session_refresh_failed',
           ));
           setStatus('idle');
+          fallbackRefreshError = new NonRetryableSendError(refreshMessage);
         }
       } catch (error) {
         if (!sessionStillCurrent(sessionId)) {
@@ -932,6 +946,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         ));
         setStatus('error');
         throw sendError;
+      }
+      if (fallbackRefreshError) {
+        throw fallbackRefreshError;
       }
       return;
     }

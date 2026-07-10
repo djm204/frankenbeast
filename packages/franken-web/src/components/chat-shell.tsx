@@ -259,6 +259,7 @@ export function buildInitAction(
       kind: 'martin-loop',
       command: 'martin-loop',
       config,
+      ...(chatSessionId ? { chatSessionId } : {}),
     };
   }
 
@@ -1063,7 +1064,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               const workflow = config.workflow as Record<string, unknown> | undefined;
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
-              const initAction = buildInitAction(definitionId, config, selectedSessionId);
+              const launchChatSessionId = selectedSessionId ?? activeSessionId ?? undefined;
+              const initAction = buildInitAction(definitionId, config, launchChatSessionId);
               const moduleConfig = config.moduleConfig && typeof config.moduleConfig === 'object' && !Array.isArray(config.moduleConfig)
                 ? config.moduleConfig as ModuleConfig
                 : undefined;
@@ -1074,6 +1076,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   initConfig: config,
                   executionMode,
                   ...(moduleConfig ? { moduleConfig } : {}),
+                  ...(launchChatSessionId ? { chatSessionId: launchChatSessionId } : {}),
                 });
                 setBeastRefreshNonce((current) => current + 1);
               } catch (error) {

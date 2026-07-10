@@ -118,6 +118,47 @@ describe('ProcessBeastExecutor', () => {
     ]);
   });
 
+  it('kills a spawned process when attempt creation fails', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+    vi.spyOn(repo, 'createAttempt').mockImplementation(() => {
+      throw new Error('attempt insert failed');
+    });
+
+    await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('attempt insert failed');
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242);
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'queued',
+      attemptCount: 0,
+    });
+    expect(repo.getRun(run.id)?.currentAttemptId).toBeUndefined();
+  });
+
+  it('cleans pending run resources and preserves the insert error when kill fails after spawn', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    supervisor.kill.mockRejectedValue(new Error('kill denied'));
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+    vi.spyOn(repo, 'createAttempt').mockImplementation(() => {
+      throw new Error('attempt insert failed');
+    });
+
+    await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('attempt insert failed');
+
+    const [spawnedSpec] = supervisor.spawn.mock.calls[0];
+    const configPath = (spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG;
+    expect(supervisor.kill).toHaveBeenCalledWith(4242);
+    expect(existsSync(configPath)).toBe(false);
+  });
+
   it('creates an isolated git worktree and spawns the process inside it when enabled', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

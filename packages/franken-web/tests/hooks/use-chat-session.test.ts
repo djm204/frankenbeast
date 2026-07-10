@@ -387,7 +387,7 @@ describe('useChatSession', () => {
     }));
   });
 
-  it('does not offer a retry when HTTP send succeeds but refresh fails', async () => {
+  it('keeps the draft but does not retry when HTTP fallback refresh fails', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -397,7 +397,7 @@ describe('useChatSession', () => {
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
 
     await act(async () => {
-      await result.current.send('Already ran on the server');
+      await expect(result.current.send('Already ran on the server')).rejects.toMatchObject({ retryableSend: false });
     });
 
     expect(result.current.status).toBe('idle');
@@ -406,6 +406,10 @@ describe('useChatSession', () => {
       receipt: 'accepted',
     }));
     expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Message sent; refresh failed',
+      actionLabel: 'Refresh chat',
+    });
   });
 
   it('removes stale failed drafts when an HTTP composer retry succeeds but refresh fails', async () => {
@@ -427,7 +431,7 @@ describe('useChatSession', () => {
 
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
     await act(async () => {
-      await result.current.send('retry over HTTP');
+      await expect(result.current.send('retry over HTTP')).rejects.toMatchObject({ retryableSend: false });
     });
 
     expect(result.current.status).toBe('idle');
