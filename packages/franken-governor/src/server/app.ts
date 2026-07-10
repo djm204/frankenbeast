@@ -375,9 +375,10 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
   // POST /v1/webhook/slack — Slack interactive message callback
   app.post('/v1/webhook/slack', async (c) => {
-    // Read the raw body once: signature verification must run over the exact
-    // bytes Slack signed, and the parsed payload is derived from the same text.
-    const rawBody = await c.req.text();
+    // Read the raw body once as bytes: Slack signs the exact octets on the wire,
+    // so signature verification must not depend on a UTF-8 string round trip.
+    const rawBodyBytes = Buffer.from(await c.req.arrayBuffer());
+    const rawBody = rawBodyBytes.toString('utf8');
 
     // Authenticate the callback. Fail closed: without a configured Slack signing
     // secret we cannot trust any inbound callback, so reject it.
@@ -403,9 +404,10 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       return c.json({ error: { message: 'Stale or invalid Slack timestamp' } }, 401);
     }
 
-    const baseString = `v0:${timestamp}:${rawBody}`;
+    const baseStringPrefix = `v0:${timestamp}:`;
     const expected = `v0=${createHmac('sha256', options.slackSigningSecret)
-      .update(baseString)
+      .update(baseStringPrefix, 'utf8')
+      .update(rawBodyBytes)
       .digest('hex')}`;
     if (!safeEqual(expected, signature)) {
       return c.json({ error: { message: 'Invalid Slack signature' } }, 401);
