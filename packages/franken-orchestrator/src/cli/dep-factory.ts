@@ -34,7 +34,7 @@ import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
   BeastLoopDeps, IPlannerModule, ICritiqueModule, IGovernorModule,
 } from '../deps.js';
-import { deterministicUuid, now as deterministicNow } from '@franken/types';
+import { deterministicUuid, now as deterministicNow, wallClockNow } from '@franken/types';
 import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
 import type { ProviderConfig } from '../providers/provider-config.js';
@@ -256,7 +256,7 @@ function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
     ? basename(options.planDirOverride).replace(/\/$/, '')
     : basename(paths.plansDir) === 'plans' ? 'session' : basename(paths.plansDir);
   const checkpointFile = resolve(paths.buildDir, `${planName}.checkpoint`);
-  const now = new Date(deterministicNow());
+  const now = new Date(wallClockNow());
   const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
   return {
     planName,

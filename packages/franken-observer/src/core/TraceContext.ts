@@ -6,13 +6,14 @@ import type {
   TraceValidationOptions,
   TraceValidationResult,
 } from './types.js'
-import { deterministicUuid, wallClockNow } from '@franken/types';
+import { randomUUID } from 'node:crypto';
+import { wallClockNow } from '@franken/types';
 import type { LoopDetector } from '../incident/LoopDetector.js'
 
 export const TraceContext = {
   createTrace(goal: string): Trace {
     return {
-      id: deterministicUuid('packages/franken-observer/src/core/TraceContext.ts'),
+      id: randomUUID(),
       goal,
       status: 'active',
       startedAt: wallClockNow(),
@@ -25,7 +26,7 @@ export const TraceContext = {
       throw new Error(`Cannot start span on a ${trace.status} trace (id: ${trace.id})`)
     }
     const span: Span = {
-      id: deterministicUuid('packages/franken-observer/src/core/TraceContext.ts'),
+      id: randomUUID(),
       traceId: trace.id,
       parentSpanId: options.parentSpanId,
       name: options.name,
