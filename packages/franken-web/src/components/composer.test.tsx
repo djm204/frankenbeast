@@ -64,6 +64,22 @@ describe('Composer failed-send recovery', () => {
     });
   });
 
+  it('keeps the draft without offering resend for accepted messages that need refresh', async () => {
+    const refreshError = new Error('Message sent; refresh failed');
+    (refreshError as Error & { retryableSend?: boolean }).retryableSend = false;
+    const onSend = vi.fn().mockRejectedValueOnce(refreshError);
+    render(<Composer connectionStatus="connected" disabled={false} onSend={onSend} status="idle" />);
+
+    const input = screen.getByLabelText('Message input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'already accepted prompt' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Message sent; refresh failed');
+    expect(screen.queryByRole('button', { name: 'Retry send' })).toBeNull();
+    expect(input.value).toBe('already accepted prompt');
+  });
+
   it('clears a composer failure only when a matching transcript retry succeeds', async () => {
     const failedAttempt = deferred<void>();
     const onSend = vi.fn().mockReturnValueOnce(failedAttempt.promise);

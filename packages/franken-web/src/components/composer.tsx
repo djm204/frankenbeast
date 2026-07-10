@@ -11,6 +11,12 @@ export interface ComposerProps {
   status: SessionStatus;
 }
 
+type ComposerError = { content: string; message: string; retryable: boolean };
+
+function isNonRetryableSendError(error: unknown): boolean {
+  return error instanceof Error && (error as Error & { retryableSend?: boolean }).retryableSend === false;
+}
+
 function connectionStatusLabel(connectionStatus: ConnectionStatus): string {
   switch (connectionStatus) {
     case 'connected':
@@ -78,7 +84,7 @@ function canRetryConnection(connectionStatus: ConnectionStatus): boolean {
 }
 
 export function Composer({ connectionStatus, clearedFailedDraft, disabled, disabledReasonText, onReconnect, onSend, status }: ComposerProps) {
-  const [error, setError] = useState<{ content: string; message: string } | null>(null);
+  const [error, setError] = useState<ComposerError | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [value, setValue] = useState('');
   const lastClearedFailedDraftNonceRef = useRef<number | null>(null);
@@ -126,6 +132,7 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, disab
       setError({
         content: trimmed,
         message: err instanceof Error ? err.message : 'Message failed to send. Your draft was kept.',
+        retryable: !isNonRetryableSendError(err),
       });
     } finally {
       setIsSending(false);
@@ -164,9 +171,11 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, disab
       {error && (
         <div className="composer__error" role="alert">
           <span>{error.message}</span>
-          <button className="button button--secondary button--small" type="button" onClick={() => void submitCurrentValue()} disabled={disabled || isSending}>
-            Retry send
-          </button>
+          {error.retryable ? (
+            <button className="button button--secondary button--small" type="button" onClick={() => void submitCurrentValue()} disabled={disabled || isSending}>
+              Retry send
+            </button>
+          ) : null}
         </div>
       )}
       <div className="composer__footer">

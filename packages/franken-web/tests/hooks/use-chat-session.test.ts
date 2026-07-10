@@ -387,7 +387,7 @@ describe('useChatSession', () => {
     }));
   });
 
-  it('keeps HTTP fallback sends retryable when the transcript refresh fails', async () => {
+  it('keeps the draft but does not retry when HTTP fallback refresh fails', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -397,22 +397,22 @@ describe('useChatSession', () => {
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
 
     await act(async () => {
-      await expect(result.current.send('Already ran on the server')).rejects.toThrow('refresh failed');
+      await expect(result.current.send('Already ran on the server')).rejects.toMatchObject({ retryableSend: false });
     });
 
-    expect(result.current.status).toBe('error');
+    expect(result.current.status).toBe('idle');
     expect(result.current.messages).toContainEqual(expect.objectContaining({
       content: 'Already ran on the server',
-      receipt: 'failed',
-      canRetry: true,
+      receipt: 'accepted',
     }));
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
     expect(result.current.errorBanners[0]).toMatchObject({
-      title: 'Message was not sent',
-      actionLabel: 'Retry last message',
+      title: 'Message sent; refresh failed',
+      actionLabel: 'Refresh chat',
     });
   });
 
-  it('keeps stale failed drafts when an HTTP composer retry cannot refresh the transcript', async () => {
+  it('removes stale failed drafts when an HTTP composer retry succeeds but refresh fails', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -431,15 +431,18 @@ describe('useChatSession', () => {
 
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
     await act(async () => {
-      await expect(result.current.send('retry over HTTP')).rejects.toThrow('refresh failed');
+      await expect(result.current.send('retry over HTTP')).rejects.toMatchObject({ retryableSend: false });
     });
 
-    expect(result.current.status).toBe('error');
+    expect(result.current.status).toBe('idle');
     expect(result.current.messages.filter((message) => message.content === 'retry over HTTP')).toHaveLength(1);
     expect(result.current.messages).toContainEqual(expect.objectContaining({
       content: 'retry over HTTP',
+      receipt: 'accepted',
+    }));
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({
+      content: 'retry over HTTP',
       receipt: 'failed',
-      canRetry: true,
     }));
   });
 

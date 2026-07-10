@@ -306,7 +306,7 @@ describe('useChatSession error banners', () => {
     expect(MockWebSocket.instances[0]!.send).toHaveBeenCalledTimes(2);
   });
 
-  it('rejects fallback HTTP sends when the transcript refresh fails', async () => {
+  it('preserves the composer draft but does not retry when fallback HTTP refresh fails', async () => {
     const fetch = chatFetch({
       responses: [
         jsonResponse(sessionResponse()),
@@ -325,23 +325,22 @@ describe('useChatSession error banners', () => {
     MockWebSocket.instances[0]!.readyState = 0;
 
     await act(async () => {
-      await expect(result.current.send('launch beast')).rejects.toThrow('refresh failed');
+      await expect(result.current.send('launch beast')).rejects.toMatchObject({ retryableSend: false });
     });
 
-    expect(result.current.status).toBe('error');
+    expect(result.current.status).toBe('idle');
     expect(result.current.messages).toEqual([
       expect.objectContaining({
         role: 'user',
         content: 'launch beast',
-        receipt: 'failed',
-        error: expect.stringContaining('refresh failed'),
-        canRetry: true,
+        receipt: 'accepted',
       }),
     ]);
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
     expect(result.current.errorBanners[0]).toMatchObject({
-      title: 'Message was not sent',
-      code: 'message_send_failed',
-      actionLabel: 'Retry last message',
+      title: 'Message sent; refresh failed',
+      code: 'session_refresh_failed',
+      actionLabel: 'Refresh chat',
     });
   });
 

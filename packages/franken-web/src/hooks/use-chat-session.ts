@@ -94,6 +94,10 @@ interface PendingSend {
   reject: (error: Error) => void;
 }
 
+class NonRetryableSendError extends Error {
+  readonly retryableSend = false;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -887,22 +891,23 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           if (!sessionStillCurrent(sessionId)) {
             return;
           }
-          const refreshError = error instanceof Error
-            ? error
-            : new Error('The fallback chat request completed, but the updated transcript could not be loaded.');
+          const refreshMessage = errorMessage(
+            error,
+            'The fallback chat request completed, but the updated transcript could not be loaded.',
+          );
           setMessages((current) => [
             ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
-            { ...optimisticMessage, receipt: 'failed', error: refreshError.message, canRetry: true },
+            { ...optimisticMessage, receipt: 'accepted' },
           ]);
           addErrorBanner(makeBanner(
-            'Message was not sent',
-            refreshError.message,
-            'retry-message',
-            'Retry last message',
-            'message_send_failed',
+            'Message sent; refresh failed',
+            refreshMessage,
+            'retry-session',
+            'Refresh chat',
+            'session_refresh_failed',
           ));
-          setStatus('error');
-          fallbackRefreshError = refreshError;
+          setStatus('idle');
+          fallbackRefreshError = new NonRetryableSendError(refreshMessage);
         }
       } catch (error) {
         if (!sessionStillCurrent(sessionId)) {
