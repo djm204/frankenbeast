@@ -66,6 +66,57 @@ describe('npm workspaces configuration', () => {
         .filter((entry) => entry.isDirectory())
         .map((entry) => `packages/${entry.name}/package.json`),
     ];
+    const dependencySections = [
+      'dependencies',
+      'devDependencies',
+      'optionalDependencies',
+      'peerDependencies',
+    ] as const;
+    const getDirectDependencies = (pkg: Record<string, Record<string, string> | undefined>, dependencyName: string) => dependencySections
+      .map((dependencySection) => ({
+        dependencySection,
+        version: pkg[dependencySection]?.[dependencyName],
+      }))
+      .filter((entry): entry is { dependencySection: typeof dependencySections[number]; version: string } => entry.version !== undefined);
+    const majorOf = (version: string) => majorMinorPatch(version)[0];
+
+    it('keeps workspace Vitest declarations on the root Vitest major', () => {
+      const rootPkg = readPkg('package.json');
+      const rootVitest = rootPkg.devDependencies?.vitest;
+
+      expect(rootVitest).toBeDefined();
+      const rootVitestMajor = majorOf(rootVitest);
+
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const vitestDeclarations = getDirectDependencies(pkg, 'vitest');
+
+        for (const { dependencySection, version } of vitestDeclarations) {
+          expect(
+            majorOf(version),
+            `vitest in ${path} ${dependencySection} must stay on root major ${rootVitestMajor}`,
+          ).toBe(rootVitestMajor);
+        }
+      }
+    });
+
+    it('keeps workspace coverage-v8 declarations on the same major as Vitest', () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const vitestDeclarations = getDirectDependencies(pkg, 'vitest');
+        const coverageDeclarations = getDirectDependencies(pkg, '@vitest/coverage-v8');
+        if (coverageDeclarations.length === 0) continue;
+
+        expect(vitestDeclarations.length, `${path} declares @vitest/coverage-v8 without vitest`).toBeGreaterThan(0);
+        const vitestMajors = new Set(vitestDeclarations.map(({ version }) => majorOf(version)));
+        for (const { dependencySection, version } of coverageDeclarations) {
+          expect(
+            vitestMajors.has(majorOf(version)),
+            `@vitest/coverage-v8 in ${path} ${dependencySection} must match a declared vitest major`,
+          ).toBe(true);
+        }
+      }
+    });
 
     it('keeps every Vitest and coverage dependency on the non-vulnerable floor', () => {
       for (const path of packageJsonPaths) {
