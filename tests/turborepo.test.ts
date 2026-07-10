@@ -165,6 +165,18 @@ describe('Turborepo configuration', () => {
       expect(rootPkg.scripts.typecheck).toBe('turbo run typecheck');
     });
 
+    it('lint script checks workspace coverage before running Turbo lint', () => {
+      expect(rootPkg.scripts.lint).toBe(
+        'node scripts/check-workspace-lint-coverage.mjs && turbo run lint',
+      );
+
+      const ciWorkflow = readFileSync(
+        join(ROOT, '.github/workflows/ci.yml'),
+        'utf8',
+      );
+      expect(ciWorkflow).toContain('run: npm run lint');
+    });
+
     it('does not have test:all (redundant with turbo)', () => {
       expect(rootPkg.scripts['test:all']).toBeUndefined();
     });

@@ -15,6 +15,7 @@
     "dev:chat": "VITE_API_PROXY_TARGET=http://127.0.0.1:3737 vite",
     "dev:network": "vite",
     "build": "tsc && vite build",
+    "lint": "eslint src/ tests/",
     "preview": "vite preview",
     "test": "vitest run --fileParallelism=false",
     "typecheck": "tsc --noEmit",

@@ -111,10 +111,12 @@ on:
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
-    it('builds before running the shared CI test target', () => {
-      expect(content).toContain('turbo run');
-      expect(content).toMatch(/turbo run build lint[\s\S]*npm run test:ci/);
-      expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('npm run test:ci'));
+    it('builds and runs the explicit lint gate before the shared CI test target', () => {
+      expect(content).toContain('npx turbo run build');
+      expect(content).toMatch(/npx turbo run build[\s\S]*npm run lint[\s\S]*npm run test:ci/);
+      const workspaceLintStep = '\n        run: npm run lint\n';
+      expect(content.indexOf('npx turbo run build')).toBeLessThan(content.indexOf(workspaceLintStep));
+      expect(content.indexOf(workspaceLintStep)).toBeLessThan(content.indexOf('npm run test:ci'));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
     });
 
@@ -164,8 +166,9 @@ on:
       expect(content).not.toContain('run: npx turbo run test');
     });
 
-    it('documents the package build and shared CI test target in step names', () => {
-      expect(content).toMatch(/name:\s*Run package build and lint/);
+    it('documents the package build, workspace lint, and shared CI test target in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build/);
+      expect(content).toMatch(/name:\s*Run workspace lint gate/);
       expect(content).toMatch(/name:\s*Run CI test suite/);
     });
 

@@ -74,8 +74,11 @@ jobs:
       - name: Workspace dependency hygiene (no wildcard internal deps)
         run: node scripts/check-workspace-deps.mjs
 
-      - name: Run package build and lint
-        run: npx turbo run build lint
+      - name: Run package build
+        run: npx turbo run build
+
+      - name: Run workspace lint gate
+        run: npm run lint
 
       - name: Run CI test suite
         run: npm run test:ci
