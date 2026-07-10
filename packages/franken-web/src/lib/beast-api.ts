@@ -179,22 +179,40 @@ export class BeastApiClient {
     let eventSource: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let lastEventId: string | undefined;
+    let failedEventId: string | undefined;
     const parse = <T>(event: MessageEvent): T => JSON.parse(event.data) as T;
     const parseWithEventId = <T extends object>(event: MessageEvent): T & { eventId?: string } => {
       const parsed = parse<T>(event);
       return event.lastEventId ? { ...parsed, eventId: event.lastEventId } : parsed;
     };
     const rememberProcessedEventId = (event: MessageEvent): void => {
-      if (event.lastEventId) lastEventId = event.lastEventId;
+      if (!event.lastEventId) return;
+      if (failedEventId && event.lastEventId !== failedEventId) return;
+      lastEventId = event.lastEventId;
+      if (event.lastEventId === failedEventId) failedEventId = undefined;
+    };
+    const rememberFailedEventId = (event: MessageEvent): void => {
+      if (event.lastEventId && !failedEventId) failedEventId = event.lastEventId;
     };
     const handleEvent = <T>(
       event: MessageEvent,
       parsePayload: (event: MessageEvent) => T,
       handler: ((payload: T) => void) | undefined,
     ): void => {
-      const payload = parsePayload(event);
+      if (!handler) {
+        rememberProcessedEventId(event);
+        return;
+      }
+
+      let payload: T;
+      try {
+        payload = parsePayload(event);
+      } catch (error) {
+        rememberFailedEventId(event);
+        throw error;
+      }
       rememberProcessedEventId(event);
-      handler?.(payload);
+      handler(payload);
     };
     const scheduleReconnect = () => {
       if (closed || reconnectTimer) return;
