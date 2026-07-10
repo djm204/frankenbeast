@@ -32,6 +32,11 @@ Community announcement target: share this release summary in the Frankenbeast Di
 
 Both modes share `.fbeast/beast.db`.
 
+## Prerequisites
+
+- Node.js `>=22.13.0 <23 || >=24.0.0 <26`; the local default is pinned in [.nvmrc](.nvmrc), enforced by the root `engines.node` field with `engine-strict=true`, and exercised by CI.
+- Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`).
+
 ## Why This Exists
 
 LLM-based agents routinely lose safety constraints when context windows compress, hallucinate tool calls that violate architectural rules, and take destructive actions without human oversight. Frankenbeast solves this by placing safety enforcement in a deterministic pipeline that the LLM cannot bypass, forget, or summarise away.

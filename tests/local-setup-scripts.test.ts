@@ -19,6 +19,8 @@ describe('local setup scripts', () => {
 
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
+    expect(read('README.md')).toContain('Node.js `>=22.13.0 <23 || >=24.0.0 <26`');
+    expect(read('README.md')).toContain('local default is pinned in [.nvmrc](.nvmrc)');
     expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
     expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
     expect(read('scripts/bootstrap.sh')).toContain('command -v corepack');
