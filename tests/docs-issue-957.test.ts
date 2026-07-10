@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -9,11 +9,22 @@ const PACKAGES_DIR = resolve(ROOT, 'packages');
 const readText = (relativePath: string) => readFileSync(resolve(ROOT, relativePath), 'utf8');
 const readJson = <T>(relativePath: string): T => JSON.parse(readText(relativePath)) as T;
 
-const workspacePackageDirs = () => readdirSync(PACKAGES_DIR, { withFileTypes: true })
+type WorkspacePackage = {
+  dir: string;
+  name: string;
+};
+
+const workspacePackages = (): WorkspacePackage[] => readdirSync(PACKAGES_DIR, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
-  .filter((entry) => readJson<{ name?: string }>(`packages/${entry.name}/package.json`).name !== undefined)
-  .map((entry) => entry.name)
-  .sort();
+  .filter((entry) => existsSync(resolve(PACKAGES_DIR, entry.name, 'package.json')))
+  .map((entry) => {
+    const packageJson = readJson<{ name?: string }>(`packages/${entry.name}/package.json`);
+
+    expect(packageJson.name, `packages/${entry.name}/package.json should declare a package name`).toBeDefined();
+
+    return { dir: entry.name, name: packageJson.name ?? '' };
+  })
+  .sort((left, right) => left.dir.localeCompare(right.dir));
 
 const claudePackageMapBlock = () => {
   const claude = readText('CLAUDE.md');
@@ -24,14 +35,20 @@ const claudePackageMapBlock = () => {
   return match?.groups?.map ?? '';
 };
 
-describe('issue #957 CLAUDE monorepo package map', () => {
-  it('lists every direct packages/* workspace directory exactly once', () => {
-    const packageMap = claudePackageMapBlock();
+const claudePackageMapEntries = () => claudePackageMapBlock()
+  .split('\n')
+  .map((line) => line.match(/^[├└]── (?<dir>[^/]+)\/\s+# (?<packageName>[^:]+):/u)?.groups)
+  .filter((entry): entry is { dir: string; packageName: string } => entry !== undefined)
+  .map(({ dir, packageName }) => ({ dir, name: packageName.trim() }))
+  .sort((left, right) => left.dir.localeCompare(right.dir));
 
-    for (const packageDir of workspacePackageDirs()) {
-      const occurrences = packageMap.match(new RegExp(`\\b${packageDir}/`, 'gu')) ?? [];
-      expect(occurrences.length, `CLAUDE.md package map should list packages/${packageDir}/ exactly once`).toBe(1);
-    }
+describe('issue #957 CLAUDE monorepo package map', () => {
+  it('matches the exact direct packages/* workspace directory set', () => {
+    expect(claudePackageMapEntries().map(({ dir }) => dir)).toEqual(workspacePackages().map(({ dir }) => dir));
+  });
+
+  it('uses each workspace package.json name in the active package map', () => {
+    expect(claudePackageMapEntries()).toEqual(workspacePackages());
   });
 
   it('does not describe retired pre-consolidation packages as active workspaces', () => {
