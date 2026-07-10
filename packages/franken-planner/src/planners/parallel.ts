@@ -1,4 +1,4 @@
-import { RationaleRejectedError, RecursionDepthExceededError } from '../core/errors.js';
+import { CyclicDependencyError, RationaleRejectedError, RecursionDepthExceededError } from '../core/errors.js';
 import { PlanGraph } from '../core/dag.js';
 import type { PlanResult, Task, TaskId, TaskResult } from '../core/types.js';
 import type { PlanContext, PlanningStrategy, TaskExecutor } from './types.js';
@@ -92,7 +92,15 @@ export class ParallelPlanner implements PlanningStrategy {
           graph.getDependencies(t.id).every((dep) => completedIds.has(dep))
       );
 
-      if (ready.length === 0) break; // no progress — cycle guard (should not happen in a valid DAG)
+      if (ready.length === 0) {
+        const blockedTaskIds = tasks
+          .filter((task) => !completedIds.has(task.id))
+          .map((task) => task.id);
+        throw new CyclicDependencyError(
+          `ParallelPlanner cannot make progress on tasks: ${blockedTaskIds.join(', ')}. ` +
+            'This indicates a dependency cycle in the plan graph.'
+        );
+      }
 
       // Run all ready tasks concurrently; convert ordinary task exceptions into
       // failures, but let governance rejections propagate to the Planner so they
