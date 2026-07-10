@@ -594,6 +594,90 @@ describe('BeastRunService', () => {
     }));
   });
 
+  it('does not duplicate tracked-agent failure notifications already emitted by the executor callback', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const eventBus = new BeastEventBus();
+    const publish = vi.spyOn(eventBus, 'publish');
+    const agents = new AgentService(repo, () => '2026-03-10T00:02:00.000Z');
+    let notifyRunStatusChange = (_runId: string): void => {};
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => {
+          const failedAt = '2026-03-10T00:02:00.000Z';
+          repo.updateRun(run.id, {
+            status: 'failed',
+            finishedAt: failedAt,
+            stopReason: 'spawn_failed',
+          });
+          repo.appendEvent(run.id, {
+            type: 'run.spawn_failed',
+            payload: { error: 'spawn ENOENT' },
+            createdAt: failedAt,
+          });
+          notifyRunStatusChange(run.id);
+          throw new Error('spawn ENOENT');
+        }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const runs = new BeastRunService(
+      repo,
+      new BeastCatalogService(),
+      executors,
+      metrics,
+      logs,
+      { eventBus },
+    );
+    notifyRunStatusChange = (runId: string) => runs.notifyRunStatusChange(runId);
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'martin-loop',
+        config: {
+          provider: 'claude',
+          objective: 'Spawn work',
+          chunkDirectory: 'docs/chunks',
+        },
+      },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Spawn work',
+        chunkDirectory: 'docs/chunks',
+      },
+    });
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Spawn work',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: false,
+    });
+
+    const failed = await runs.start(run.id, 'operator');
+
+    expect(failed.status).toBe('failed');
+    expect(repo.getTrackedAgent(agent.id)?.status).toBe('failed');
+    expect(repo.listTrackedAgentEvents(agent.id).filter((event) => event.level === 'error')).toHaveLength(1);
+    expect(repo.listTrackedAgentEvents(agent.id).filter((event) => event.type === 'agent.dispatch.failed')).toHaveLength(0);
+    expect(publish.mock.calls.filter(([event]) => event.type === 'agent.status')).toHaveLength(1);
+    expect(publish.mock.calls.filter(([event]) => event.type === 'agent.event')).toHaveLength(1);
+  });
+
   it('clears stale attempt metadata when preserving executor-recorded retry failures', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
@@ -760,6 +844,62 @@ describe('BeastRunService', () => {
       status: 'running',
       attemptCount: 1,
     });
+    expect(repo.listEvents(run.id).some((event) => event.type === 'run.start_failed')).toBe(false);
+  });
+
+  it('keeps a newly created running attempt current when an older running attempt also exists', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => {
+          repo.createAttempt(run.id, {
+            status: 'running',
+            pid: 888,
+            startedAt: '2026-03-10T00:06:00.000Z',
+            executorMetadata: { backend: 'process' },
+          });
+          throw new Error('post-start tracking failed');
+        }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Start queued work',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: false,
+    });
+    const priorAttempt = repo.createAttempt(run.id, {
+      status: 'running',
+      pid: 777,
+      startedAt: '2026-03-10T00:05:00.000Z',
+      executorMetadata: { backend: 'process' },
+    });
+
+    await expect(runs.start(run.id, 'operator')).rejects.toThrow('post-start tracking failed');
+
+    const attempts = repo.listAttempts(run.id);
+    expect(attempts).toHaveLength(2);
+    expect(repo.getRun(run.id)).toMatchObject({
+      id: run.id,
+      status: 'running',
+      currentAttemptId: attempts[1].id,
+      attemptCount: 2,
+    });
+    expect(repo.getRun(run.id)?.currentAttemptId).not.toBe(priorAttempt.id);
     expect(repo.listEvents(run.id).some((event) => event.type === 'run.start_failed')).toBe(false);
   });
 

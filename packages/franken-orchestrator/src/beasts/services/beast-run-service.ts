@@ -72,6 +72,15 @@ export class BeastRunService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const currentRun = this.repository.getRun(run.id);
+      if (
+        currentRun
+        && (
+          (currentRun.currentAttemptId !== undefined && currentRun.currentAttemptId !== priorAttemptId)
+          || currentRun.attemptCount > priorAttemptCount
+        )
+      ) {
+        throw error;
+      }
       const priorAttempt = priorAttemptId ? this.repository.getAttempt(priorAttemptId) : undefined;
       if (priorAttempt?.status === 'running') {
         this.repository.updateRun(run.id, {
@@ -82,15 +91,6 @@ export class BeastRunService {
           latestExitCode: run.latestExitCode ?? null,
           stopReason: run.stopReason ?? null,
         });
-        throw error;
-      }
-      if (
-        currentRun
-        && (
-          (currentRun.currentAttemptId !== undefined && currentRun.currentAttemptId !== priorAttemptId)
-          || currentRun.attemptCount > priorAttemptCount
-        )
-      ) {
         throw error;
       }
       if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
@@ -105,7 +105,7 @@ export class BeastRunService {
           const pendingPublications: Array<Omit<BeastSseEvent, 'id'>> = [];
           if (normalizedRun.trackedAgentId) {
             const trackedAgent = this.repository.getTrackedAgent(normalizedRun.trackedAgentId);
-            if (trackedAgent && trackedAgent.status !== 'deleted') {
+            if (trackedAgent && trackedAgent.status !== 'deleted' && trackedAgent.status !== 'failed') {
               this.repository.updateTrackedAgent(normalizedRun.trackedAgentId, {
                 status: 'failed',
                 dispatchRunId: normalizedRun.id,

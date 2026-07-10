@@ -485,8 +485,14 @@ export class ProcessBeastExecutor implements BeastExecutor {
         },
       });
     } catch (error) {
-      await this.supervisor.kill(handle.pid);
-      this.cleanupRunResources(run.id);
+      try {
+        await this.supervisor.kill(handle.pid);
+      } catch {
+        // Preserve the original attempt-persistence failure while still
+        // releasing pre-attempt config/worktree resources below.
+      } finally {
+        this.cleanupRunResources(run.id);
+      }
       throw error;
     }
 
