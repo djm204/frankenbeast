@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { load } from 'js-yaml';
@@ -8,6 +8,20 @@ const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
 const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
+const NPMRC_PATH = resolve(ROOT, '.npmrc');
+
+function packageManifestPaths(): string[] {
+  const packageDirs = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => resolve(ROOT, 'packages', entry.name, 'package.json'))
+    .filter((path) => existsSync(path));
+
+  return [resolve(ROOT, 'package.json'), ...packageDirs];
+}
+
+function readJsonFile<T>(path: string): T {
+  return JSON.parse(readFileSync(path, 'utf-8')) as T;
+}
 
 function parseWorkflowYaml(source: string): Record<string, unknown> {
   let workflow: unknown;
@@ -222,6 +236,27 @@ on:
       }
 
       expect(nvmrc).toBe('22.13.0');
+    });
+
+    it('does not schedule unsupported Node 20 test jobs', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const serializedJobs = JSON.stringify(jobs);
+
+      expect(serializedJobs).not.toContain('"node-version":');
+      expect(serializedJobs).not.toMatch(/\b20(?:\.\d+)?\b/);
+    });
+
+    it('keeps package engines aligned with the Node baseline exercised in CI', () => {
+      const rootPackage = readJsonFile<{ engines?: { node?: string } }>(resolve(ROOT, 'package.json'));
+      const rootNodeRange = rootPackage.engines?.node;
+      expect(rootNodeRange).toBe('>=22.13.0 <23 || >=24.0.0 <26');
+      expect(rootNodeRange).not.toContain('20');
+      expect(readFileSync(NPMRC_PATH, 'utf-8')).toContain('engine-strict=true');
+
+      for (const manifestPath of packageManifestPaths()) {
+        const manifest = readJsonFile<{ name?: string; engines?: { node?: string } }>(manifestPath);
+        expect(manifest.engines?.node, `${manifest.name ?? manifestPath} should match root Node engines`).toBe(rootNodeRange);
+      }
     });
 
     it('uses actions/checkout with full history for root verification tests', () => {
