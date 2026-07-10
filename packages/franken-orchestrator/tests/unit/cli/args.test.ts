@@ -535,7 +535,7 @@ describe('parseArgs', () => {
       expect(issueArgs.issueLimit).toBe(50);
     });
 
-    it.each(['NaN', 'Infinity', '12abc'])('rejects invalid budget value %s', (value) => {
+    it.each(['abc', 'NaN', 'Infinity', '12abc'])('rejects invalid budget value %s', (value) => {
       expect(() => parseArgs(['--budget', value])).toThrow(/Invalid --budget/);
     });
 
