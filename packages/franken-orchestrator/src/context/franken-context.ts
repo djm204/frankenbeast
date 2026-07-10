@@ -1,7 +1,7 @@
 import type { TokenSpend } from '@franken/types';
 import type { BeastPhase } from '../types.js';
 import type { PlanGraph } from '../deps.js';
-import { isoNow, now as deterministicNow } from '@franken/types';
+import { isoNow, wallClockNow } from '@franken/types';
 
 /** Audit entry recording a module action during the Beast Loop. */
 export interface AuditEntry {
@@ -50,7 +50,7 @@ export class BeastContext {
     this.projectId = projectId;
     this.sessionId = sessionId;
     this.userInput = userInput;
-    this.startTime = deterministicNow();
+    this.startTime = wallClockNow();
   }
 
   /** Append an audit entry. */
@@ -65,6 +65,6 @@ export class BeastContext {
 
   /** Elapsed time since context creation. */
   elapsedMs(): number {
-    return deterministicNow() - this.startTime;
+    return wallClockNow() - this.startTime;
   }
 }
