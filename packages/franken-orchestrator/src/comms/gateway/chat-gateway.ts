@@ -8,15 +8,24 @@ import type {
   ChannelType,
 } from '../core/types.js';
 
+export interface ChatGatewayOptions {
+  /** Maximum number of session route metadata records kept for action callbacks. */
+  routeMetadataMaxEntries?: number;
+}
+
+const DEFAULT_ROUTE_METADATA_MAX_ENTRIES = 10_000;
+
 export class ChatGateway extends EventEmitter {
   private readonly adapters = new Map<ChannelType, ChannelAdapter>();
   private readonly sessionMapper = new SessionMapper();
   private readonly routeMetadataBySession = new Map<string, Record<string, unknown>>();
   private readonly runtime: CommsRuntimePort;
+  private readonly routeMetadataMaxEntries: number;
 
-  constructor(runtime: CommsRuntimePort) {
+  constructor(runtime: CommsRuntimePort, options: ChatGatewayOptions = {}) {
     super();
     this.runtime = runtime;
+    this.routeMetadataMaxEntries = this.normalizeRouteMetadataLimit(options.routeMetadataMaxEntries);
   }
 
   registerAdapter(adapter: ChannelAdapter): void {
@@ -31,7 +40,7 @@ export class ChatGateway extends EventEmitter {
       externalThreadId: message.externalThreadId,
     });
     const routeMetadata = this.toRouteMetadata(message);
-    this.routeMetadataBySession.set(sessionId, routeMetadata);
+    this.rememberRouteMetadata(sessionId, routeMetadata);
 
     const result = await this.runtime.processInbound({
       sessionId,
@@ -74,10 +83,10 @@ export class ChatGateway extends EventEmitter {
     });
 
     const outboundRouteMetadata = routeMetadata
-      ?? this.routeMetadataBySession.get(sessionId)
+      ?? this.getRememberedRouteMetadata(sessionId)
       ?? result.metadata;
     if (outboundRouteMetadata) {
-      this.routeMetadataBySession.set(sessionId, outboundRouteMetadata);
+      this.rememberRouteMetadata(sessionId, outboundRouteMetadata);
     }
     const outbound: ChannelOutboundMessage = {
       text: result.text,
@@ -107,6 +116,33 @@ export class ChatGateway extends EventEmitter {
     };
   }
 
+  private rememberRouteMetadata(sessionId: string, routeMetadata: Record<string, unknown>): void {
+    // Refresh insertion order so the least-recently used session falls off first.
+    this.routeMetadataBySession.delete(sessionId);
+    this.routeMetadataBySession.set(sessionId, routeMetadata);
+
+    while (this.routeMetadataBySession.size > this.routeMetadataMaxEntries) {
+      const oldestSessionId = this.routeMetadataBySession.keys().next().value;
+      if (typeof oldestSessionId !== 'string') break;
+      this.routeMetadataBySession.delete(oldestSessionId);
+    }
+  }
+
+  private getRememberedRouteMetadata(sessionId: string): Record<string, unknown> | undefined {
+    const routeMetadata = this.routeMetadataBySession.get(sessionId);
+    if (!routeMetadata) return undefined;
+    this.rememberRouteMetadata(sessionId, routeMetadata);
+    return routeMetadata;
+  }
+
+  private normalizeRouteMetadataLimit(routeMetadataMaxEntries: number | undefined): number {
+    if (routeMetadataMaxEntries === undefined) return DEFAULT_ROUTE_METADATA_MAX_ENTRIES;
+    if (!Number.isSafeInteger(routeMetadataMaxEntries) || routeMetadataMaxEntries < 1) {
+      throw new Error('ChatGateway routeMetadataMaxEntries must be a positive safe integer');
+    }
+    return routeMetadataMaxEntries;
+  }
+
   private relayToChannel(
     sessionId: string,
     channelType: ChannelType,
@@ -126,6 +162,6 @@ export class ChatGateway extends EventEmitter {
   }
 
   close(): void {
-    // No bridges to clean up — in-process calls are stateless
+    this.routeMetadataBySession.clear();
   }
 }
