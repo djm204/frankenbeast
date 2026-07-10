@@ -14,10 +14,9 @@ Bootstraps a Frankenbeast checkout for local development:
   1. validates Node.js, npm, and Corepack prerequisites;
   2. activates the repository-pinned npm version;
   3. creates .env from .env.example when missing;
-  4. prompts for any required env vars that are blank;
+  4. merges documented default env vars into existing .env files without clobbering local secrets;
   5. runs npm ci;
-  6. optionally starts docker compose services;
-  7. validates required env vars before exiting.
+  6. optionally validates Grafana credentials and starts docker compose services.
 
 Options:
   --dry-run       Validate prerequisites and planned actions without mutating files,
@@ -73,7 +72,7 @@ expected_npm="${expected_pm#npm@}"
 actual_npm="$(npm --version)"
 if [[ "$actual_npm" != "$expected_npm" ]]; then
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "dry-run: npm $actual_npm does not match packageManager $expected_pm; would run corepack enable npm and corepack prepare \"$expected_pm\" --activate"
+    fail "npm $actual_npm does not match packageManager $expected_pm. A real bootstrap would run: corepack enable npm && corepack prepare \"$expected_pm\" --activate"
   else
     log "Activating repository package manager pin $expected_pm with Corepack."
     corepack enable npm
@@ -96,50 +95,32 @@ else
   log ".env already exists; leaving it unchanged."
 fi
 
-# Required keys are the uncommented KEY=VALUE assignments in .env.example. Most
-# provider keys are intentionally commented because they are only required for
-# specific provider paths.
-required_keys="$({ grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env.example || true; } | cut -d= -f1)"
-missing_keys=()
-blank_keys=()
-if [[ -n "$required_keys" ]]; then
-  source_file=.env
-  [[ -f "$source_file" ]] || source_file=.env.example
+# Merge uncommented defaults from .env.example into existing local .env files
+# without overwriting provider keys, local secrets, or operator overrides.
+default_keys="$({ grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env.example || true; } | cut -d= -f1)"
+if [[ -n "$default_keys" && -f .env ]]; then
+  defaults_to_add=()
   while IFS= read -r key; do
     [[ -n "$key" ]] || continue
-    if ! grep -Eq "^${key}=" "$source_file"; then
-      missing_keys+=("$key")
-      continue
+    if ! grep -Eq "^${key}=" .env; then
+      defaults_to_add+=("$(grep -E "^${key}=" .env.example | tail -n 1)")
     fi
-    value="$(grep -E "^${key}=" "$source_file" | tail -n 1 | cut -d= -f2-)"
-    if [[ -z "$value" ]]; then
-      blank_keys+=("$key")
-    fi
-  done <<< "$required_keys"
-fi
+  done <<< "$default_keys"
 
-if [[ "${#missing_keys[@]}" -gt 0 || "${#blank_keys[@]}" -gt 0 ]]; then
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    fail "Required env vars are missing or blank: ${missing_keys[*]} ${blank_keys[*]}. Copy .env.example to .env and fill them in."
-  fi
-  if [[ -t 0 ]]; then
-    for key in "${missing_keys[@]}" "${blank_keys[@]}"; do
-      [[ -n "$key" ]] || continue
-      read -r -p "Enter value for required env var $key: " value
-      [[ -n "$value" ]] || fail "$key cannot be blank."
-      if grep -Eq "^${key}=" .env; then
-        tmp="$(mktemp)"
-        awk -v k="$key" -v v="$value" 'BEGIN{done=0} $0 ~ "^" k "=" {$0=k "=" v; done=1} {print} END{if(!done) print k "=" v}' .env > "$tmp"
-        mv "$tmp" .env
-      else
-        printf '%s=%s\n' "$key" "$value" >> .env
-      fi
-    done
+  if [[ "${#defaults_to_add[@]}" -gt 0 ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      log "dry-run: would append missing .env defaults: ${defaults_to_add[*]%%=*}"
+    else
+      {
+        printf '\n# Defaults appended by scripts/bootstrap.sh\n'
+        printf '%s\n' "${defaults_to_add[@]}"
+      } >> .env
+      log "Appended missing documented defaults to .env."
+    fi
   else
-    fail "Required env vars are missing or blank: ${missing_keys[*]} ${blank_keys[*]}. Edit .env and rerun."
+    log ".env includes documented defaults."
   fi
 fi
-log "Required env vars are present."
 
 run npm ci
 
@@ -153,9 +134,24 @@ fi
 
 if [[ "$START_DOCKER" -eq 1 ]]; then
   command -v docker >/dev/null 2>&1 || fail "Docker is required for --with-docker. Install Docker or rerun with --no-docker."
+  env_value() {
+    local key="$1"
+    [[ -f .env ]] || return 0
+    grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2-
+  }
+  grafana_user="$(env_value GRAFANA_USER)"
+  grafana_password="$(env_value GRAFANA_PASSWORD)"
+  if [[ -z "$grafana_user" || -z "$grafana_password" || "$grafana_password" == "admin" ]]; then
+    fail "--with-docker requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD in .env before starting Grafana."
+  fi
+  [[ "$grafana_user" == "admin" ]] || fail "docker-compose.yml requires GRAFANA_USER=admin for the local Grafana service."
   run docker compose up -d
 else
   log "Skipping optional Docker compose services. Use --with-docker to start them."
 fi
 
-log "Bootstrap ${DRY_RUN:+dry-run }completed successfully."
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  log "Bootstrap dry-run completed successfully."
+else
+  log "Bootstrap completed successfully."
+fi

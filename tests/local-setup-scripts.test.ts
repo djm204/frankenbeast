@@ -84,7 +84,8 @@ describe('local setup scripts', () => {
     expect(script).toContain('--dry-run');
     expect(script).toContain('Node.js >=22.13.0 <23 or >=24.0.0 <26');
     expect(script).toContain('cp .env.example .env');
-    expect(script).toContain('required_keys');
+    expect(script).toContain('default_keys');
+    expect(script).toContain('GRAFANA_USER=admin');
     expect(script).toContain('npm ci');
     expect(script).toContain('docker compose up -d');
     expect(readme).toContain('npm run bootstrap -- --no-docker');
@@ -100,7 +101,7 @@ describe('local setup scripts', () => {
       timeout: 60_000,
     });
     expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
-    expect(dryRun.stdout).toContain('Required env vars are present.');
+    expect(dryRun.stdout).toContain('dry-run: would copy .env.example to .env');
     expect(dryRun.stdout).toContain('dry-run: npm ci');
   });
 
