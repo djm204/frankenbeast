@@ -84,11 +84,16 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
         content[nextIndex] === '{' ||
         content[nextIndex] === '|' ||
         content[nextIndex] === '&' ||
+        content[nextIndex] === '?' ||
+        content[nextIndex] === ':' ||
         (content[nextIndex] === '=' && content[nextIndex + 1] === '>')
       ) {
         i = closeIndex;
         expectTypeOperand =
-          content[nextIndex] === '|' || content[nextIndex] === '&';
+          content[nextIndex] === '|' ||
+          content[nextIndex] === '&' ||
+          content[nextIndex] === '?' ||
+          content[nextIndex] === ':';
         continue;
       }
       return i;
@@ -146,7 +151,11 @@ function findArrowToken(content: string, startIndex: number): number {
           if (closeIndex === -1) return -1;
           let afterObjectIndex = closeIndex + 1;
           while (/\s/.test(content[afterObjectIndex] ?? '')) afterObjectIndex++;
-          if (content[afterObjectIndex] !== '=') return i;
+          if (
+            !['=', '|', '&', '?', ':'].includes(content[afterObjectIndex] ?? '')
+          ) {
+            return i;
+          }
         }
       } else {
         return i;
@@ -178,8 +187,21 @@ function findArrowToken(content: string, startIndex: number): number {
 function collectFunctionBlocks(content: string): FunctionBlock[] {
   const blocks: FunctionBlock[] = [];
 
-  for (const match of content.matchAll(/function\s+\w+\s*\(/g)) {
-    const paramsOpenIndex = (match.index ?? 0) + match[0].length - 1;
+  for (const match of content.matchAll(/function\s+\w+/g)) {
+    let paramsOpenIndex = (match.index ?? 0) + match[0].length;
+    while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
+    if (content[paramsOpenIndex] === '<') {
+      const typeParamsCloseIndex = findMatchingDelimiter(
+        content,
+        paramsOpenIndex,
+        '<',
+        '>',
+      );
+      if (typeParamsCloseIndex === -1) continue;
+      paramsOpenIndex = typeParamsCloseIndex + 1;
+      while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
+    }
+    if (content[paramsOpenIndex] !== '(') continue;
     const paramsCloseIndex = findMatchingDelimiter(content, paramsOpenIndex, '(', ')');
     if (paramsCloseIndex === -1) continue;
 
@@ -199,9 +221,22 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
   }
 
   for (const match of content.matchAll(
-    /(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\(/g,
+    /(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?/g,
   )) {
-    let paramsOpenIndex = (match.index ?? 0) + match[0].length - 1;
+    let paramsOpenIndex = (match.index ?? 0) + match[0].length;
+    while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
+    if (content[paramsOpenIndex] === '<') {
+      const typeParamsCloseIndex = findMatchingDelimiter(
+        content,
+        paramsOpenIndex,
+        '<',
+        '>',
+      );
+      if (typeParamsCloseIndex === -1) continue;
+      paramsOpenIndex = typeParamsCloseIndex + 1;
+      while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
+    }
+    if (content[paramsOpenIndex] !== '(') continue;
     let nestedParamsIndex = paramsOpenIndex + 1;
     while (/\s/.test(content[nestedParamsIndex] ?? '')) nestedParamsIndex++;
     if (content[nestedParamsIndex] === '(') {
