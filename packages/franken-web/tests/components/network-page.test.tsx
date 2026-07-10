@@ -46,7 +46,7 @@ describe('NetworkPage', () => {
     expect(screen.getByRole('button', { name: 'Save config' }).getAttribute('class')).toContain('button--primary');
   });
 
-  it('invokes service controls and saves all changed config assignments atomically', async () => {
+  it('gates service controls by status and saves all changed config assignments atomically', async () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
     const onStop = vi.fn().mockResolvedValue(undefined);
     const onRestart = vi.fn().mockResolvedValue(undefined);
@@ -69,17 +69,37 @@ describe('NetworkPage', () => {
             explanation: 'CLI-parity websocket chat',
             url: 'http://127.0.0.1:3737',
           },
+          {
+            id: 'dashboard',
+            status: 'stopped',
+            explanation: 'Dashboard is offline',
+          },
         ]}
         status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start chat-server' }));
-    await waitFor(() => expect(screen.getByText('Started chat-server.')).toBeDefined());
+    const runningStart = screen.getByRole('button', { name: 'Start chat-server' });
+    const stoppedStop = screen.getByRole('button', { name: 'Stop dashboard' });
+    const stoppedRestart = screen.getByRole('button', { name: 'Restart dashboard' });
+
+    expect(runningStart).toHaveProperty('disabled', true);
+    expect(stoppedStop).toHaveProperty('disabled', true);
+    expect(stoppedRestart).toHaveProperty('disabled', true);
+
+    fireEvent.click(runningStart);
+    fireEvent.click(stoppedStop);
+    fireEvent.click(stoppedRestart);
+    expect(onStart).not.toHaveBeenCalledWith('chat-server');
+    expect(onStop).not.toHaveBeenCalledWith('dashboard');
+    expect(onRestart).not.toHaveBeenCalledWith('dashboard');
+
     fireEvent.click(screen.getByRole('button', { name: 'Stop chat-server' }));
     await waitFor(() => expect(screen.getByText('Stopped chat-server.')).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: 'Restart chat-server' }));
     await waitFor(() => expect(screen.getByText('Restarted chat-server.')).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: 'Start dashboard' }));
+    await waitFor(() => expect(screen.getByText('Started dashboard.')).toBeDefined());
     fireEvent.change(screen.getByLabelText('Network mode'), { target: { value: 'insecure' } });
     fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
     fireEvent.change(screen.getByLabelText('Chat host'), { target: { value: '0.0.0.0' } });
@@ -87,7 +107,7 @@ describe('NetworkPage', () => {
     fireEvent.click(screen.getByLabelText('Comms enabled'));
     fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
 
-    expect(onStart).toHaveBeenCalledWith('chat-server');
+    expect(onStart).toHaveBeenCalledWith('dashboard');
     expect(onStop).toHaveBeenCalledWith('chat-server');
     expect(onRestart).toHaveBeenCalledWith('chat-server');
     expect(onSaveConfig).toHaveBeenCalledWith([
@@ -97,6 +117,37 @@ describe('NetworkPage', () => {
       'dashboard.port=5173',
       'comms.enabled=true',
     ]);
+  });
+
+  it('disables duplicate service actions while a request is pending', async () => {
+    let resolveStop!: () => void;
+    const onStop = vi.fn().mockImplementation(() => new Promise<void>((resolve) => { resolveStop = resolve; }));
+
+    render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={vi.fn()}
+        onStart={vi.fn()}
+        onStop={onStop}
+        services={[{ id: 'chat-server', status: 'running' }]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    const stopButton = screen.getByRole('button', { name: 'Stop chat-server' });
+    fireEvent.click(stopButton);
+    fireEvent.click(stopButton);
+
+    await waitFor(() => expect(stopButton).toHaveProperty('disabled', true));
+    expect(screen.getByRole('button', { name: 'Restart chat-server' })).toHaveProperty('disabled', true);
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    resolveStop();
+    await waitFor(() => expect(screen.getByText('Stopped chat-server.')).toBeDefined());
   });
 
   it('keeps Save disabled until valid config changes are pending and previews assignments', () => {
@@ -259,7 +310,7 @@ describe('NetworkPage', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('HTTP 400'));
   });
 
-  it('disables unsupported stop and restart controls for in-process services', () => {
+  it('disables unsupported service controls for in-process services', () => {
     const onStart = vi.fn();
     const onStop = vi.fn();
     const onRestart = vi.fn();
@@ -289,16 +340,18 @@ describe('NetworkPage', () => {
       />,
     );
 
+    const startButton = screen.getByRole('button', { name: 'Start comms-gateway' });
     const stopButton = screen.getByRole('button', { name: 'Stop comms-gateway' });
     const restartButton = screen.getByRole('button', { name: 'Restart comms-gateway' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start comms-gateway' }));
+    fireEvent.click(startButton);
     fireEvent.click(stopButton);
     fireEvent.click(restartButton);
 
+    expect(startButton).toHaveProperty('disabled', true);
     expect(stopButton).toHaveProperty('disabled', true);
     expect(restartButton).toHaveProperty('disabled', true);
-    expect(onStart).toHaveBeenCalledWith('comms-gateway');
+    expect(onStart).not.toHaveBeenCalled();
     expect(onStop).not.toHaveBeenCalled();
     expect(onRestart).not.toHaveBeenCalled();
   });
