@@ -193,8 +193,8 @@ export class BeastApiClient {
       handler: ((payload: T) => void) | undefined,
     ): void => {
       const payload = parsePayload(event);
-      handler?.(payload);
       rememberProcessedEventId(event);
+      handler?.(payload);
     };
     const scheduleReconnect = () => {
       if (closed || reconnectTimer) return;
