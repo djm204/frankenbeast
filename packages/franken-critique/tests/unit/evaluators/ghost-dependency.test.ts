@@ -180,6 +180,7 @@ describe('GhostDependencyEvaluator', () => {
         : import('another-ghost').Ghost;
       type GhostModule = typeof import('ghost-package');
       const p: Promise<import('ghost-package').Ghost> = Promise.resolve({} as never);
+      const unionType: Promise<string | import('ghost-package').Ghost> = Promise.resolve({} as never);
       const cast = value as import('ghost-package').Ghost;
       function typedParam(dep?: import('ghost-package').Ghost) {}
       class TypedField { dep?: import('ghost-package').Ghost }

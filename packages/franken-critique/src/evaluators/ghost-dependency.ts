@@ -273,7 +273,7 @@ function canStartNativeDynamicImport(
   const prefix = content.slice(statementStart + 1, importIndex);
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
   const endsAfterTypeAnnotation = /:\s*$/.test(prefix);
-  const isNestedTypeReference = /(?:\bas\s*|\bsatisfies\s*|<\s*)$/.test(prefix);
+  const isNestedTypeReference = /(?:\bas\s*|\bsatisfies\s*|[<|&]\s*)$/.test(prefix);
 
   return !(
     isNestedTypeReference ||
