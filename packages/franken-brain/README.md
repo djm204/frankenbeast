@@ -19,10 +19,13 @@ npm install
 ## Commands
 
 ```bash
-npm test                  # vitest run
-npm run test:watch        # watch mode
+npm test                  # vitest run --reporter=verbose
+npm run test:watch        # vitest --reporter=verbose
+npm run test:coverage     # vitest run --coverage
+npm run test:integration  # vitest run --reporter=verbose --config vitest.integration.config.ts
 npm run typecheck         # tsc --noEmit
 npm run build             # compile to dist/
+npm run lint              # eslint src/ tests/
 ```
 
 ## Usage
