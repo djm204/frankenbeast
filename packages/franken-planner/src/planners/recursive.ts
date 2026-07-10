@@ -78,7 +78,7 @@ export class RecursivePlanner implements PlanningStrategy {
           if (subResult.status !== 'failed') return subResult;
           return {
             ...subResult,
-            taskResults: [result, ...subResult.taskResults],
+            taskResults: [...allResults, result, ...subResult.taskResults],
             recoveryGraph: subResult.recoveryGraph ?? subGraph,
             recoveryContinuationGraphs: [
               ...(subResult.recoveryContinuationGraphs ?? []),
