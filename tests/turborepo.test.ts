@@ -176,12 +176,14 @@ describe('Turborepo configuration', () => {
     it('exposes orchestrator E2E tests through a root script', () => {
       const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
 
-      expect(rootPkg.scripts['test:e2e']).toBe('npm run test:e2e --workspace @franken/orchestrator');
+      expect(rootPkg.scripts['test:e2e']).toBe('npm run test:e2e --workspace @franken/orchestrator --');
       expect(readme).toContain('npm run test:e2e');
       expect(readme).toContain('E2E=true');
-      expect(readme).toContain('npm run build --workspace @franken/orchestrator');
+      expect(readme).toContain('npm run build');
+      expect(readme).not.toContain('npm run build --workspace @franken/orchestrator');
       expect(readme).toContain('real `claude` CLI on');
-      expect(readme).toContain('valid `ANTHROPIC_API_KEY` in the environment');
+      expect(readme).toContain('provide a valid');
+      expect(readme).toContain('`ANTHROPIC_API_KEY` in the environment');
     });
 
     it('keeps test:root:watch as vitest for dev', () => {

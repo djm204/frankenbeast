@@ -562,11 +562,11 @@ npm run test:e2e
 ```
 
 The E2E suites are opt-in and remain outside the regular `npm test` path. Before
-running them, build the orchestrator artifacts with
-`npm run build --workspace @franken/orchestrator`, install a real `claude` CLI on
-`PATH`, and provide a valid `ANTHROPIC_API_KEY` in the environment. The root
-`test:e2e` script delegates to the workspace script, which sets `E2E=true` for
-the gated suites.
+running them from a clean checkout, run the dependency-aware root build with
+`npm run build`, install a real `claude` CLI on `PATH`, and provide a valid
+`ANTHROPIC_API_KEY` in the environment. The root `test:e2e` script delegates to
+the workspace script, which sets `E2E=true` for the gated suites and forwards
+Vitest arguments after `--`.
 
 ## Local Dev Environment
 
