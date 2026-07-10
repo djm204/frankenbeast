@@ -272,15 +272,12 @@ function canStartNativeDynamicImport(
   const statementStart = content.lastIndexOf(';', importIndex - 1);
   const prefix = content.slice(statementStart + 1, importIndex);
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
-  const endsAfterTypeAnnotation = /:\s*$/.test(prefix);
   const isNestedTypeReference = /(?:\bas\s*|\bsatisfies\s*|[<|&]\s*)$/.test(prefix);
 
   return !(
     isNestedTypeReference ||
     isInsideTypeDeclaration(prefix) ||
-    (endsAfterTypeAnnotation &&
-      !isTernaryBranch &&
-      !isLikelyObjectLiteralValue(content, importIndex))
+    isInsideTypeAnnotation(prefix, content, importIndex, isTernaryBranch)
   );
 }
 
@@ -298,6 +295,23 @@ function isInsideTypeDeclaration(prefix: string): boolean {
       prefix,
     )
   );
+}
+
+function isInsideTypeAnnotation(
+  prefix: string,
+  content: string,
+  importIndex: number,
+  isTernaryBranch: boolean,
+): boolean {
+  if (isTernaryBranch) return false;
+
+  const annotationIndex = prefix.lastIndexOf(':');
+  if (annotationIndex === -1) return false;
+
+  const annotationSuffix = prefix.slice(annotationIndex + 1);
+  if (/[=;]/.test(annotationSuffix)) return false;
+
+  return !isLikelyObjectLiteralValue(content, importIndex);
 }
 
 function hasTernaryBranchMarker(prefix: string): boolean {
