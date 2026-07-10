@@ -246,6 +246,81 @@ describe('PlanGraph — removeTask', () => {
   });
 });
 
+describe('PlanGraph — insertFixItTask', () => {
+  it('inserts a fix task before the failed task', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+
+    const g2 = g.insertFixItTask(createTaskId('b'), makeTask('fix-b'));
+
+    expect(g2.size()).toBe(3);
+    expect(g2.getDependencies(createTaskId('fix-b'))).toEqual([createTaskId('a')]);
+    expect(g2.getDependencies(createTaskId('b'))).toEqual([createTaskId('fix-b')]);
+    expect(g2.getTask(createTaskId('fix-b'))?.dependsOn).toEqual([createTaskId('a')]);
+    expect(g2.getTask(createTaskId('b'))?.dependsOn).toEqual([createTaskId('fix-b')]);
+  });
+
+  it('preserves explicit fix task dependencies when inserting before a failed task', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('setup'))
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+    const fix = makeTask('fix-b', { dependsOn: [createTaskId('setup')] });
+
+    const g2 = g.insertFixItTask(createTaskId('b'), fix);
+
+    expect(g2.getDependencies(createTaskId('fix-b'))).toEqual([
+      createTaskId('a'),
+      createTaskId('setup'),
+    ]);
+    expect(g2.getTask(createTaskId('fix-b'))?.dependsOn).toEqual([
+      createTaskId('a'),
+      createTaskId('setup'),
+    ]);
+    expect(g2.getDependencies(createTaskId('b'))).toEqual([createTaskId('fix-b')]);
+    expect(g2.getTask(createTaskId('b'))?.dependsOn).toEqual([createTaskId('fix-b')]);
+  });
+
+  it('is immutable and increments the recovery version', () => {
+    const g = PlanGraph.empty().addTask(makeTask('a'));
+
+    const g2 = g.insertFixItTask(createTaskId('a'), makeTask('fix-a'));
+
+    expect(g.size()).toBe(1);
+    expect(g2.version).toBe(g.version + 1);
+    expect(g2.reason).toMatch(/recovery/i);
+  });
+
+  it('throws when the target task is missing or the fix task id already exists', () => {
+    expect(() =>
+      PlanGraph.empty().insertFixItTask(createTaskId('missing'), makeTask('fix'))
+    ).toThrowError(TaskNotFoundError);
+
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+    expect(() => g.insertFixItTask(createTaskId('b'), makeTask('a'))).toThrowError(
+      DuplicateTaskError
+    );
+  });
+
+  it('sorts the fix task before the failed task', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+
+    const sorted = g
+      .insertFixItTask(createTaskId('b'), makeTask('fix-b'))
+      .topoSort()
+      .map((t) => t.id);
+
+    expect(sorted.indexOf(createTaskId('fix-b'))).toBeLessThan(
+      sorted.indexOf(createTaskId('b'))
+    );
+  });
+});
+
 
 describe('PlanGraph — fromTasks', () => {
   it('builds a graph from tasks supplied in dependency-last order', () => {

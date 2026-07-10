@@ -456,8 +456,8 @@ export class SqliteBrain implements IBrain {
 
     try {
       const insertEvent = brain.db.prepare(
-        `INSERT INTO episodic_events (type, step, summary, details, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO episodic_events (id, type, step, summary, details, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       );
       const insertCheckpoint = brain.db.prepare(
         `INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`,
@@ -467,8 +467,12 @@ export class SqliteBrain implements IBrain {
         brain.working.restore(snapshot.working);
         brain.working.flushToDb();
 
+        brain.db.prepare(`DELETE FROM episodic_events`).run();
+        brain.db.prepare(`DELETE FROM checkpoints`).run();
+
         for (const event of snapshot.episodic) {
           insertEvent.run(
+            event.id ?? null,
             event.type,
             event.step ?? null,
             event.summary,

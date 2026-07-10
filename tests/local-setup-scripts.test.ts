@@ -19,6 +19,10 @@ describe('local setup scripts', () => {
 
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
+    expect(read('README.md')).toContain('Node.js** `>=22.13.0 <23 || >=24.0.0 <26`');
+    expect(read('README.md')).toContain('local default is pinned in [.nvmrc](.nvmrc)');
+    expect(read('README.md')).toContain('**npm** 11.5.1 via the root `packageManager` pin');
+    expect(read('packages/franken-brain/README.md')).toContain('npm 11.5.1 via the repository `packageManager` setting');
     expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
     expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
     expect(read('scripts/bootstrap.sh')).toContain('command -v corepack');
@@ -141,7 +145,12 @@ describe('local setup scripts', () => {
     expect(script).toContain('GRAFANA_USER=admin');
     expect(script).toContain('npm ci');
     expect(script).toContain('docker compose up -d');
+    expect(readme).toContain('## 🚀 One-click onboarding');
+    expect(readme).toContain('[Frankenbeast onboarding checklist](ONBOARDING.md)');
+    expect(readme).toContain('[`scripts/bootstrap.sh`](scripts/bootstrap.sh)');
     expect(readme).toContain('npm run bootstrap -- --no-docker');
+    expect(readme).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(onboarding).toMatch(/^---\ntitle: Frankenbeast Onboarding Checklist\ndescription: /);
     expect(onboarding).toContain('./scripts/bootstrap.sh --dry-run');
     expect(quickstart).toContain('./scripts/bootstrap.sh --dry-run');
     expect(ci).toContain('Validate bootstrap dry-run');

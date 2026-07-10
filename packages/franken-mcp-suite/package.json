@@ -29,8 +29,10 @@
   },
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --reporter=verbose",
+    "test:integration": "vitest run --reporter=verbose src/**/*.integration.test.ts",
     "test:watch": "vitest --reporter=verbose",
     "test:coverage": "vitest run --coverage",
     "prepublishOnly": "npm --prefix ../.. run build"

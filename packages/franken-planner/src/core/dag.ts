@@ -190,8 +190,12 @@ export class PlanGraph {
       return { ...task, dependsOn: this.getDependencies(task.id) };
     });
 
+    const fixTaskDependencies = [
+      ...new Set([...this.getDependencies(failedTaskId), ...fixTask.dependsOn]),
+    ];
+
     return PlanGraph.fromTasks(
-      [...tasks, { ...fixTask, dependsOn: this.getDependencies(failedTaskId) }],
+      [...tasks, { ...fixTask, dependsOn: fixTaskDependencies }],
       {
         version: this.version + 1,
         reason: `recovery: fix-it injected before '${failedTaskId}'`,

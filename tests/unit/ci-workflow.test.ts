@@ -37,6 +37,16 @@ function expectSteps(job: Record<string, unknown>): Array<Record<string, unknown
   return job.steps as Array<Record<string, unknown>>;
 }
 
+function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
+  const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+  const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+  const step = expectSteps(buildTestLint).find(
+    (candidate) => candidate.run === 'npx turbo run build typecheck',
+  );
+  expect(step, 'CI should explicitly gate build and typecheck through Turbo').toBeTruthy();
+  return step as Record<string, unknown>;
+}
+
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
     expect(existsSync(CI_PATH)).toBe(true);
@@ -81,13 +91,14 @@ on:
       expect(pullRequest.branches).toEqual(['main']);
     });
 
-    it('uses Node.js 22', () => {
+    it('uses the repository-pinned minimum supported Node.js version', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
       const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
-      expect(setupNodeWith['node-version']).toBe('22');
+      expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+      expect(setupNodeWith['node-version']).toBeUndefined();
     });
 
     it('runs npm ci for deterministic installs', () => {
@@ -102,24 +113,36 @@ on:
     });
 
     it('enables Corepack and verifies the packageManager-pinned npm before installing', () => {
+      expect(content).toContain('npm install -g corepack@0.34.4');
       expect(content).toContain('corepack enable npm');
       expect(content).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
       expect(content).toContain('node scripts/check-package-manager.mjs');
+      expect(content.indexOf('npm install -g corepack@0.34.4')).toBeLessThan(content.indexOf('corepack enable npm'));
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
-    it('builds before running package tests in CI', () => {
-      expect(content).toContain('turbo run');
-      expect(content).toMatch(/turbo run build lint[\s\S]*npm run ci:test:packages/);
-      expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('npm run ci:test:packages'));
+    it('explicitly gates build, typecheck, and the root lint coverage check before running the shared CI test target', () => {
+      const buildTypecheckStep = expectBuildTypecheckStep(workflow);
+      expect(buildTypecheckStep.name).toBe('Run package build and typecheck');
+      expect(content).toMatch(/npx turbo run build typecheck[\s\S]*npm run lint[\s\S]*npm run test:ci/);
+      const workspaceLintStep = '\n        run: npm run lint\n';
+      expect(content.indexOf('npx turbo run build typecheck')).toBeLessThan(content.indexOf(workspaceLintStep));
+      expect(content.indexOf(workspaceLintStep)).toBeLessThan(content.indexOf('npm run test:ci'));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
+      expect(content).not.toContain('npx turbo run build typecheck lint');
     });
 
-    it('runs the deterministic root Vitest suite separately from Turbo', () => {
-      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
-      expect(content).toContain('npm run ci:test:root');
+    it('runs the deterministic root Vitest suite through the shared CI test script', () => {
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+
+      expect(content).toMatch(/name:\s*Run CI test suite/);
+      expect(packageJson.scripts?.['test:ci']).toContain('npm run ci:test:root');
       expect(content).not.toMatch(/npm run test:root --/);
-      expect(content.indexOf('npm run ci:test:root')).toBeLessThan(content.indexOf('npm run ci:test:packages'));
+      expect(packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:root')).toBeLessThan(
+        packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:packages') ?? -1,
+      );
     });
 
     it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
@@ -134,7 +157,7 @@ on:
       expect(content).toContain('deterministic-seed');
       expect(content).toContain("deterministic-seed: ['1337']");
       expect(content).toContain('FRANKENBEAST_SEED: ${{ matrix.deterministic-seed }}');
-      expect(content.indexOf('FRANKENBEAST_SEED')).toBeLessThan(content.indexOf('npm run ci:test:root'));
+      expect(content.indexOf('FRANKENBEAST_SEED')).toBeLessThan(content.indexOf('npm run test:ci'));
     });
 
     it('runs test commands through a configurable retry wrapper', () => {
@@ -145,16 +168,24 @@ on:
       expect(content).toContain("CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}");
       expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
       expect(packageJson.scripts?.['ci:test:packages']).toBe('node scripts/retry-ci-command.mjs -- npx turbo run test');
-      expect(content).toContain('npm run ci:test:root');
-      expect(content).toContain('npm run ci:test:packages');
+      expect(packageJson.scripts?.['ci:test:planner-integration']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner',
+      );
+      expect(packageJson.scripts?.['test:ci']).toBe(
+        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration',
+      );
+      expect(content).toContain('npm run test:ci');
+      expect(content).not.toContain('run: npm run ci:test:root');
+      expect(content).not.toContain('run: npm run ci:test:packages');
+      expect(content).not.toContain('run: npm run ci:test:planner-integration');
       expect(content).not.toContain('run: npm run test:root');
       expect(content).not.toContain('run: npx turbo run test');
     });
 
-    it('documents the root-suite and package-Turbo CI split in step names', () => {
-      expect(content).toMatch(/name:\s*Run package build and lint/);
-      expect(content).toMatch(/name:\s*Run package tests/);
-      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
+    it('documents the package build, typecheck, workspace lint, and shared CI test targets in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build and typecheck/);
+      expect(content).toMatch(/name:\s*Run workspace lint gate/);
+      expect(content).toMatch(/name:\s*Run CI test suite/);
     });
 
     it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {
@@ -175,6 +206,22 @@ on:
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith.cache).toBe('npm');
+    });
+
+    it('uses the pinned minimum Node.js version in every CI setup-node step', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const nvmrc = readFileSync(resolve(ROOT, '.nvmrc'), 'utf-8').trim();
+
+      for (const [jobName, jobConfig] of Object.entries(jobs)) {
+        const job = expectRecord(jobConfig, `jobs.${jobName}`);
+        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v4')) {
+          const setupNodeWith = expectRecord(step.with, `${jobName}.actions/setup-node.with`);
+          expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+          expect(setupNodeWith['node-version']).toBeUndefined();
+        }
+      }
+
+      expect(nvmrc).toBe('22.13.0');
     });
 
     it('uses actions/checkout with full history for root verification tests', () => {
