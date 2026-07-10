@@ -97,6 +97,19 @@ describe('RateLimitedSampler', () => {
     expect(results.slice(0, 5).every(Boolean)).toBe(true)
     expect(results[5]).toBe(false)
   })
+
+  it('throws RangeError when windowMs is zero', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: 0 })).toThrow(RangeError)
+  })
+
+  it('throws RangeError when windowMs is negative', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: -1 })).toThrow(RangeError)
+  })
+
+  it('throws RangeError when windowMs is not finite', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: Number.NaN })).toThrow(RangeError)
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: Number.POSITIVE_INFINITY })).toThrow(RangeError)
+  })
 })
 
 // ── SamplingAdapter ──────────────────────────────────────────────────────────
