@@ -31,10 +31,12 @@ function getEnvPath(env: NodeJS.ProcessEnv): string {
 }
 
 function windowsCommandCandidates(command: string): string[] {
-  const pathext = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+  const pathext = [...new Set((process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
     .split(';')
-    .map((ext) => ext.trim())
-    .filter(Boolean);
+    .flatMap((ext) => {
+      const trimmed = ext.trim();
+      return trimmed ? [trimmed, trimmed.toLowerCase(), trimmed.toUpperCase()] : [];
+    }))];
   const hasWindowsPathSeparator = command.includes('/') || command.includes('\\');
   const commandHasExt = win32.extname(command) !== '';
 
