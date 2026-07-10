@@ -15,8 +15,15 @@ function traceIdHashForFilename(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex')
 }
 
+function dateFromTimestamp(timestamp: number): Date | null {
+  if (!Number.isFinite(timestamp)) return null
+
+  const date = new Date(timestamp)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 function timestampForFilename(timestamp: number): string {
-  return Number.isFinite(timestamp) ? String(Math.trunc(timestamp)) : 'invalid-timestamp'
+  return dateFromTimestamp(timestamp) ? String(Math.trunc(timestamp)) : 'invalid-timestamp'
 }
 
 async function writeNewReportFile(filePath: string, content: string): Promise<void> {
@@ -48,9 +55,7 @@ export class PostMortemGenerator {
   }
 
   generateContent(trace: Trace, signal: InterruptSignal): string {
-    const detectedAt = Number.isFinite(signal.timestamp)
-      ? new Date(signal.timestamp).toISOString()
-      : 'Invalid timestamp'
+    const detectedAt = dateFromTimestamp(signal.timestamp)?.toISOString() ?? 'Invalid timestamp'
     const patternList = signal.detectedPattern.map(p => `  - \`${p}\``).join('\n')
 
     const spansTable = trace.spans
