@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
@@ -12,7 +13,8 @@ export class FileChunkSessionSnapshotStore {
     const dir = this.snapshotDir(session.planName, session.chunkId, session.taskId);
     mkdirSync(dir, { recursive: true });
     const ts = isoNow().replace(/[:.]/g, '-');
-    const file = join(dir, `${ts}-gen-${session.compactionGeneration}-${reason}.json`);
+    const uniqueSuffix = randomUUID();
+    const file = join(dir, `${ts}-${uniqueSuffix}-gen-${session.compactionGeneration}-${reason}.json`);
     atomicWriteFileSync(file, JSON.stringify(session, null, 2));
     return file;
   }

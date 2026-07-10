@@ -8,7 +8,14 @@ function activeSeed(): string | undefined {
   const globalWithProcess = globalThis as typeof globalThis & {
     process?: { env?: Record<string, string | undefined> };
   };
-  return globalWithProcess.process?.env?.['FRANKENBEAST_SEED'];
+  const env = globalWithProcess.process?.env;
+  const seed = env?.['FRANKENBEAST_SEED'];
+  if (!seed) return undefined;
+  const workerId = env?.['VITEST_POOL_ID']
+    ?? env?.['VITEST_WORKER_ID']
+    ?? env?.['VITEST_WORKER_POOL_ID']
+    ?? env?.['JEST_WORKER_ID'];
+  return workerId ? `${seed}:worker:${workerId}` : seed;
 }
 
 export function hashSeed(seed: string): number {

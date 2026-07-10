@@ -730,7 +730,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     status: BeastRunAttempt['status'],
     stopReason: string,
   ): BeastRunAttempt {
-    const finishedAt = isoNow();
+    const finishedAt = new Date(wallClockNow()).toISOString();
     const updatedAttempt = this.repository.updateAttempt(attempt.id, {
       status,
       finishedAt,
