@@ -72,45 +72,16 @@ export class BeastRunService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const currentRun = this.repository.getRun(run.id);
-      if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
-        const failedAt = currentRun.finishedAt;
-        await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
-        const publications: Array<Omit<BeastSseEvent, 'id'>> = [];
-        if (currentRun.trackedAgentId) {
-          const trackedAgent = this.repository.getTrackedAgent(currentRun.trackedAgentId);
-          if (trackedAgent && trackedAgent.status !== 'deleted') {
-            this.repository.transaction(() => {
-              this.repository.updateTrackedAgent(currentRun.trackedAgentId!, {
-                status: 'failed',
-                dispatchRunId: currentRun.id,
-                updatedAt: failedAt,
-              });
-              publications.push({
-                type: 'agent.status',
-                data: { agentId: currentRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
-              });
-              const failedEvent = {
-                level: 'error' as const,
-                type: 'agent.dispatch.failed',
-                message: `Failed to start Beast run ${currentRun.id}`,
-                payload: { runId: currentRun.id, error: errorMessage },
-                createdAt: failedAt,
-              };
-              this.repository.appendTrackedAgentEvent(currentRun.trackedAgentId!, failedEvent);
-              publications.push({
-                type: 'agent.event',
-                data: { agentId: currentRun.trackedAgentId, event: failedEvent },
-              });
-            });
-          }
-        }
-        for (const publication of publications) {
-          this.serviceOptions.eventBus?.publish(publication);
-        }
-        return currentRun;
-      }
       const priorAttempt = priorAttemptId ? this.repository.getAttempt(priorAttemptId) : undefined;
       if (priorAttempt?.status === 'running') {
+        this.repository.updateRun(run.id, {
+          status: run.status,
+          startedAt: run.startedAt ?? priorAttempt.startedAt,
+          finishedAt: run.finishedAt ?? null,
+          currentAttemptId: priorAttemptId,
+          latestExitCode: run.latestExitCode ?? null,
+          stopReason: run.stopReason ?? null,
+        });
         throw error;
       }
       if (
@@ -121,6 +92,49 @@ export class BeastRunService {
         )
       ) {
         throw error;
+      }
+      if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
+        const failedAt = currentRun.finishedAt;
+        await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
+        const { failedRun, publications } = this.repository.transaction(() => {
+          const normalizedRun = this.repository.updateRun(run.id, {
+            startedAt: null,
+            currentAttemptId: null,
+            latestExitCode: null,
+          });
+          const pendingPublications: Array<Omit<BeastSseEvent, 'id'>> = [];
+          if (normalizedRun.trackedAgentId) {
+            const trackedAgent = this.repository.getTrackedAgent(normalizedRun.trackedAgentId);
+            if (trackedAgent && trackedAgent.status !== 'deleted') {
+              this.repository.updateTrackedAgent(normalizedRun.trackedAgentId, {
+                status: 'failed',
+                dispatchRunId: normalizedRun.id,
+                updatedAt: failedAt,
+              });
+              pendingPublications.push({
+                type: 'agent.status',
+                data: { agentId: normalizedRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
+              });
+              const failedEvent = {
+                level: 'error' as const,
+                type: 'agent.dispatch.failed',
+                message: `Failed to start Beast run ${normalizedRun.id}`,
+                payload: { runId: normalizedRun.id, error: errorMessage },
+                createdAt: failedAt,
+              };
+              this.repository.appendTrackedAgentEvent(normalizedRun.trackedAgentId, failedEvent);
+              pendingPublications.push({
+                type: 'agent.event',
+                data: { agentId: normalizedRun.trackedAgentId, event: failedEvent },
+              });
+            }
+          }
+          return { failedRun: normalizedRun, publications: pendingPublications };
+        });
+        for (const publication of publications) {
+          this.serviceOptions.eventBus?.publish(publication);
+        }
+        return failedRun;
       }
 
       const failedAt = isoNow();

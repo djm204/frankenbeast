@@ -41,11 +41,11 @@ interface UpdateRunPatch {
   status?: BeastRunStatus | undefined;
   configSnapshot?: Readonly<Record<string, unknown>> | undefined;
   startedAt?: string | null | undefined;
-  finishedAt?: string | undefined;
+  finishedAt?: string | null | undefined;
   currentAttemptId?: string | null | undefined;
   attemptCount?: number | undefined;
   lastHeartbeatAt?: string | undefined;
-  stopReason?: string | undefined;
+  stopReason?: string | null | undefined;
   latestExitCode?: number | null | undefined;
 }
 
@@ -288,7 +288,11 @@ export class SQLiteBeastRepository {
           ? { startedAt: undefined }
           : { startedAt: patch.startedAt }
         : {}),
-      ...(patch.finishedAt !== undefined ? { finishedAt: patch.finishedAt } : {}),
+      ...(patch.finishedAt !== undefined
+        ? patch.finishedAt === null
+          ? { finishedAt: undefined }
+          : { finishedAt: patch.finishedAt }
+        : {}),
       ...(patch.currentAttemptId !== undefined
         ? patch.currentAttemptId === null
           ? { currentAttemptId: undefined }
@@ -296,7 +300,11 @@ export class SQLiteBeastRepository {
         : {}),
       ...(patch.attemptCount !== undefined ? { attemptCount: patch.attemptCount } : {}),
       ...(patch.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: patch.lastHeartbeatAt } : {}),
-      ...(patch.stopReason !== undefined ? { stopReason: patch.stopReason } : {}),
+      ...(patch.stopReason !== undefined
+        ? patch.stopReason === null
+          ? { stopReason: undefined }
+          : { stopReason: patch.stopReason }
+        : {}),
       ...(patch.latestExitCode !== undefined
         ? patch.latestExitCode === null
           ? { latestExitCode: undefined }
