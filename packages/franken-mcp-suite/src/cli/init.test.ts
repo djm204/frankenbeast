@@ -5,7 +5,7 @@ import { codexServerName } from './codex-server-names.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 
 function tmpDir(): string {
   const dir = join(tmpdir(), `fbeast-init-${randomUUID()}`);
@@ -15,6 +15,10 @@ function tmpDir(): string {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function jsonBackups(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.startsWith('settings.json.invalid-'));
 }
 
 describe('fbeast init', () => {
@@ -76,6 +80,38 @@ describe('fbeast init', () => {
     ]);
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
     expect(settings.mcpServers).toBeUndefined();
+  });
+
+  it('backs up invalid Claude settings.json and initializes without SyntaxError', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, 'settings.json'), '{ invalid json');
+
+    expect(() => runInit({ root, claudeDir, hooks: false, client: 'claude' })).not.toThrow();
+
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers).toBeUndefined();
+    const backups = jsonBackups(claudeDir);
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(claudeDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
+  });
+
+  it('backs up invalid Gemini settings.json and initializes MCP entries', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    writeFileSync(join(geminiDir, 'settings.json'), '{ invalid json');
+
+    expect(() => runInit({ root, claudeDir: geminiDir, hooks: false, client: 'gemini' })).not.toThrow();
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
+    const backups = jsonBackups(geminiDir);
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(geminiDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
   });
 
   it('merges with existing Claude .mcp.json comments and trailing commas without overwriting', () => {

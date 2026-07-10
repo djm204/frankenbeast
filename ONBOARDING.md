@@ -172,8 +172,8 @@ Use this checklist for a first local checkout or when rebuilding a development e
 - [ ] Seed and verify ChromaDB only when you are using semantic memory locally:
 
   ```bash
-  npx tsx scripts/seed.ts
-  npx tsx scripts/verify-setup.ts
+  npm run local:seed
+  npm run local:verify-setup
   ```
 
 ## Secrets backend

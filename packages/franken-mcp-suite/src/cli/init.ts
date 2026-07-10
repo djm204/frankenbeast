@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
 import { codexServerName, ensureCodexProjectId } from './codex-server-names.js';
-import { parseJsonObjectWithComments, writeJsonFileAtomic } from './settings-json.js';
+import { readJsonObjectFileOrRecover, writeJsonFileAtomic } from './settings-json.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -92,7 +92,7 @@ function initJsonClient(options: {
   const settingsPath = join(claudeDir, 'settings.json');
   let settings: Record<string, unknown> = {};
   if (existsSync(settingsPath)) {
-    settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
+    settings = readJsonObjectFileOrRecover(settingsPath, readFileSync(settingsPath, 'utf-8'));
   }
 
   // Add MCP server entries. Claude project-scoped MCP registrations belong in
@@ -102,7 +102,7 @@ function initJsonClient(options: {
   const mcpConfigPath = client === 'claude' ? join(root, '.mcp.json') : settingsPath;
   let mcpConfig: Record<string, unknown> = client === 'claude' ? {} : settings;
   if (client === 'claude' && existsSync(mcpConfigPath)) {
-    mcpConfig = parseJsonObjectWithComments(readFileSync(mcpConfigPath, 'utf-8'));
+    mcpConfig = readJsonObjectFileOrRecover(mcpConfigPath, readFileSync(mcpConfigPath, 'utf-8'));
   }
   if (client === 'claude') {
     pruneFbeastMcpServerEntries(settings);
