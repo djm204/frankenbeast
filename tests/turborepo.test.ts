@@ -69,6 +69,33 @@ describe('Turborepo configuration', () => {
     });
   });
 
+  describe('franken-web package turbo.json', () => {
+    it('hashes the root manifest for cached web builds and tests that read the root version', () => {
+      const turbo = readJson('packages/franken-web/turbo.json');
+      expect(turbo.extends).toEqual(['//']);
+
+      const buildTask = turbo.tasks?.build;
+      expect(buildTask).toBeDefined();
+      expect(buildTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/package.json',
+        ]),
+      );
+
+      const testTask = turbo.tasks?.test;
+      expect(testTask).toBeDefined();
+      expect(testTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/package.json',
+          '$TURBO_ROOT$/scripts/vitest-*.ts',
+          '$TURBO_ROOT$/packages/*/src/**',
+        ]),
+      );
+    });
+  });
+
   describe('root package.json scripts', () => {
     const rootPkg = readJson('package.json');
 
