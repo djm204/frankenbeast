@@ -6,6 +6,9 @@
 
 ![Status](https://img.shields.io/badge/status-beta-blue)
 [![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)
+[![Daily security scan](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml/badge.svg)](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml)
+[![Dependabot](https://img.shields.io/badge/dependabot-configured-025E8C?logo=dependabot)](.github/dependabot.yml)
+
 **Deterministic guardrails for AI agents.**
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
@@ -34,6 +37,10 @@ Both modes share `.fbeast/beast.db`.
 LLM-based agents routinely lose safety constraints when context windows compress, hallucinate tool calls that violate architectural rules, and take destructive actions without human oversight. Frankenbeast solves this by placing safety enforcement in a deterministic pipeline that the LLM cannot bypass, forget, or summarise away.
 
 **The key guarantee:** Safety constraints survive context-window compression because they are enforced by the firewall pipeline, not by the LLM prompt.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations.
 
 ## Architecture
 
