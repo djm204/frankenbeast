@@ -16,6 +16,14 @@ function sectionBetween(source: string, start: string, end: string): string {
   return source.slice(startIndex, endIndex);
 }
 
+function escapeRegex(source: string): string {
+  return source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function expectFlagToken(source: string, flag: string): void {
+  expect(source).toMatch(new RegExp(`(^|[^\\w-])${escapeRegex(flag)}([^\\w-]|$)`));
+}
+
 describe('README issue workflow flags', () => {
   it('keeps the quick-reference aligned with the dedicated issue guide', () => {
     const readmeIssueFlags = sectionBetween(
@@ -35,11 +43,11 @@ describe('README issue workflow flags', () => {
       '--dry-run',
     ]) {
       expect(ISSUE_GUIDE).toContain(flag);
-      expect(readmeIssueFlags).toContain(flag);
+      expectFlagToken(readmeIssueFlags, flag);
     }
 
     for (const flag of ['--budget', '--provider', '--providers', '--no-pr']) {
-      expect(readmeIssueFlags).toContain(flag);
+      expectFlagToken(readmeIssueFlags, flag);
     }
 
     expect(readmeIssueFlags).toContain('docs/guides/fix-github-issues.md');
