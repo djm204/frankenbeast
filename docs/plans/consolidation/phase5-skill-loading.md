@@ -67,6 +67,29 @@ This keeps dashboard toggles durable without rewriting user-authored YAML on eve
 - `GET /api/skills` returns provider origin and MCP status metadata needed by the advanced dashboard
 - Dashboard can browse, install, toggle, and manage skills
 
+## Current implementation status
+
+The Phase 5 SkillManager work is not a TODO placeholder. The live code now has
+these supported surfaces:
+
+- `packages/franken-orchestrator/src/skills/skill-manager.ts` owns the
+  directory-backed installed-skill registry, enable/disable persistence,
+  `mcp.json` reads, optional `context.md` reads/writes, `tools.json` manifest
+  reads, and provider-specific translation through `loadForProvider()`.
+- `packages/franken-orchestrator/src/adapters/skill-manager-adapter.ts`
+  advertises enabled MCP skill descriptors to the execution graph, including
+  tool-level ids, namespaced ids, and `requiresHitl` metadata.
+- Direct execution through `SkillManagerAdapter.execute()` intentionally fails
+  closed. Runtime MCP execution requires an `IMcpModule` dispatch path in
+  `runExecution`; CLI, function, or LLM skills require executors for those
+  execution types. This prevents the old placeholder-success behavior from
+  implying a skill ran when no MCP transport was available.
+
+Remaining work should therefore be tracked as a concrete execution-dispatch or
+transport gap, not as a generic "Phase 5 SkillManager placeholder". Historical
+references to "Phase 5 SkillManager" in type comments or planning documents are
+phase labels only; they are not evidence that skill loading is still stubbed.
+
 ## Chunks
 
 | # | Chunk | Committable Unit | Can Parallel? |
