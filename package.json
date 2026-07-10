@@ -10,6 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "bootstrap": "bash scripts/bootstrap.sh",
+    "bootstrap:dry-run": "tsx scripts/verify-setup.ts --dry-run --env-file .env.example",
     "typecheck": "turbo run typecheck",
     "audit:security": "node scripts/check-package-manager.mjs && npm audit --audit-level=moderate",
     "audit:dependencies": "node scripts/check-package-manager.mjs && npm audit",
@@ -39,6 +40,7 @@
     "better-sqlite3": "^12.6.2",
     "js-yaml": "^5.2.1",
     "sharp": "^0.34.5",
+    "tsx": "^4.23.0",
     "turbo": "^2.10.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"

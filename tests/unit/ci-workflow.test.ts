@@ -122,6 +122,14 @@ on:
       expect(content.indexOf('npm run ci:test:root')).toBeLessThan(content.indexOf('npm run ci:test:packages'));
     });
 
+    it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
+      expect(content).toMatch(/name:\s*Validate bootstrap script \(dry-run\)/);
+      expect(content).toContain('npm run bootstrap:dry-run');
+      expect(content.indexOf('npm ci')).toBeLessThan(content.indexOf('npm run bootstrap:dry-run'));
+      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run audit:dependencies'));
+      expect(content).toContain('CI_BOOTSTRAP_DRY_RUN: "1"');
+    });
+
     it('runs CI test commands with a fixed deterministic seed matrix', () => {
       expect(content).toContain('deterministic-seed');
       expect(content).toContain("deterministic-seed: ['1337']");
