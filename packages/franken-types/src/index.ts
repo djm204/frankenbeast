@@ -24,6 +24,7 @@ export {
   isoNow,
   now,
   seededRandom,
+  wallClockNow,
 } from './deterministic.js';
 
 // Severity

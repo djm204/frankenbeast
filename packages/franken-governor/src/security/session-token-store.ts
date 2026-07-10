@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
-import { deterministicUuid, now as deterministicNow, seededRandom } from '@franken/types';
+import { deterministicUuid, seededRandom, wallClockNow } from '@franken/types';
 import type { SessionToken } from '../core/types.js';
 
 const LOCK_RETRY_MS = 10;
@@ -159,8 +159,8 @@ export class SessionTokenStore {
 
     mkdirSync(dirname(this.persistenceFile), { recursive: true, mode: 0o700 });
     const lockPath = `${this.persistenceFile}.lock`;
-    const lockToken = `${deterministicUuid('session-token-lock')}:${deterministicNow()}:${seededRandom.random()}`;
-    const deadline = deterministicNow() + LOCK_TIMEOUT_MS;
+    const lockToken = `${deterministicUuid('session-token-lock')}:${wallClockNow()}:${seededRandom.random()}`;
+    const deadline = wallClockNow() + LOCK_TIMEOUT_MS;
     let lockFd: number | undefined;
 
     while (lockFd === undefined) {
@@ -172,7 +172,7 @@ export class SessionTokenStore {
         if (code === 'EEXIST' && this.reclaimStaleLock(lockPath)) {
           continue;
         }
-        if (code !== 'EEXIST' || deterministicNow() >= deadline) {
+        if (code !== 'EEXIST' || wallClockNow() >= deadline) {
           throw err;
         }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
@@ -201,7 +201,7 @@ export class SessionTokenStore {
   private reclaimStaleLock(lockPath: string): boolean {
     try {
       const observedToken = readFileSync(lockPath, 'utf8');
-      const lockAgeMs = deterministicNow() - statSync(lockPath).mtimeMs;
+      const lockAgeMs = wallClockNow() - statSync(lockPath).mtimeMs;
       if (lockAgeMs < LOCK_STALE_MS) return false;
       if (readFileSync(lockPath, 'utf8') !== observedToken) return false;
       unlinkSync(lockPath);
@@ -234,6 +234,6 @@ export class SessionTokenStore {
   }
 
   private isExpired(token: SessionToken): boolean {
-    return deterministicNow() >= token.expiresAt.getTime();
+    return wallClockNow() >= token.expiresAt.getTime();
   }
 }
