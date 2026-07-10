@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { BeastsPage } from '../../src/pages/beasts-page';
+import type { DashboardApiClient } from '../../src/lib/dashboard-api';
 
 afterEach(cleanup);
 
@@ -25,6 +26,13 @@ const baseProps = {
   error: null,
   logs: [] as string[],
   selectedAgentId: null,
+  dashboardClient: ({
+    fetchSnapshot: vi.fn().mockResolvedValue({
+      skills: [],
+      security: { profile: 'standard', injectionDetection: true, piiMasking: true, outputValidation: true },
+      providers: [],
+    }),
+  } as unknown as DashboardApiClient),
   onClose: vi.fn(),
   onLaunch: vi.fn(),
   onDelete: vi.fn(),

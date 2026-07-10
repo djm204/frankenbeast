@@ -18,6 +18,7 @@ export interface DashboardProvider {
   type: string;
   available: boolean;
   failoverOrder: number;
+  model?: string;
 }
 
 export interface DashboardSnapshot {

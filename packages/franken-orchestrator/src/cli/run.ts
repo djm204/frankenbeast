@@ -60,6 +60,8 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
+import { resolveProviderType } from '../providers/provider-config.js';
+import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -399,6 +401,51 @@ export function assertAnyProviderCliAvailable(
       + `Checked: ${attempted || 'none'}. `
       + 'Install one of: claude, codex, gemini, aider; or configure providers.overrides.<provider>.command.',
   );
+}
+
+export function buildDashboardProviderSnapshot(
+  config: OrchestratorConfig,
+  providerRegistry?: LlmProviderRegistry | undefined,
+  extraProviderNames: readonly string[] = [],
+): Array<{ name: string; type: string; available: boolean; failoverOrder: number; model?: string }> {
+  if (config.consolidatedProviders?.length) {
+    return config.consolidatedProviders.map((provider, index) => ({
+      name: provider.name,
+      type: provider.type,
+      available: true,
+      failoverOrder: index,
+      ...(provider.model ? { model: provider.model } : {}),
+    }));
+  }
+
+  const registryProviders = providerRegistry?.getProviders() ?? [];
+  const registryByName = new Map(registryProviders.map((provider) => [provider.name, provider]));
+  const configuredNames = [...new Set([
+    config.providers.default,
+    ...(config.providers.fallbackChain ?? []),
+    ...extraProviderNames,
+    ...registryProviders.map((provider) => provider.name),
+  ].filter(Boolean))];
+
+  return configuredNames.map((name, index) => {
+    const registryProvider = registryByName.get(name);
+    let type: string = registryProvider?.type ?? '';
+    if (!type) {
+      try {
+        type = resolveProviderType(name);
+      } catch {
+        type = registryProviders[index]?.type ?? 'unknown';
+      }
+    }
+    const model = config.providers.overrides?.[name]?.model;
+    return {
+      name,
+      type,
+      available: true,
+      failoverOrder: index,
+      ...(model ? { model } : {}),
+    };
+  });
 }
 
 function isCommandAvailable(command: string): boolean {
@@ -1059,9 +1106,7 @@ export async function main(): Promise<void> {
               dashboardDeps: {
                 skillManager,
                 getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
-                getProviders: () => providerRegistry.getProviders().map((p, i) => ({
-                  name: p.name, type: p.type, available: true, failoverOrder: i,
-                })),
+                getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, args.providers ?? []),
               },
             }
           : {}),

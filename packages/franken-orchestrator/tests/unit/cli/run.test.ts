@@ -1284,7 +1284,7 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh' } } },
+      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh', model: 'gemini-2.5-pro' } } },
       security: {
         profile: 'permissive',
         webhookSignaturePolicy: 'local-dev-unsigned',
@@ -1370,6 +1370,10 @@ describe('main() execution', () => {
       webhookSignaturePolicy: 'local-dev-unsigned',
       customRules: [{ name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' }],
     }));
+    expect(startOptions.dashboardDeps?.getProviders()).toEqual([
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 0, model: 'gemini-2.5-pro' },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1 },
+    ]);
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));
     logSpy.mockRestore();

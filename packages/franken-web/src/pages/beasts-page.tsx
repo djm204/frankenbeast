@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
@@ -10,6 +10,8 @@ import { AgentList } from '../components/beasts/agent-list';
 import { AgentDetailPanel } from '../components/beasts/agent-detail-panel';
 import { WizardDialog } from '../components/beasts/wizard-dialog';
 import { useBeastStore } from '../stores/beast-store';
+import { useDashboardStore } from '../stores/dashboard-store';
+import type { DashboardApiClient } from '../lib/dashboard-api';
 
 interface BeastsPageProps {
   agents: TrackedAgentSummary[];
@@ -21,6 +23,7 @@ interface BeastsPageProps {
   error: string | null;
   logs: string[];
   selectedAgentId: string | null;
+  dashboardClient: DashboardApiClient;
   onClose: () => void;
   onLaunch: (config: Record<string, unknown>) => Promise<void>;
   onDelete: (agentId: string) => void;
@@ -43,6 +46,7 @@ export function BeastsPage({
   error,
   logs,
   selectedAgentId,
+  dashboardClient,
   onClose,
   onLaunch,
   onDelete,
@@ -58,6 +62,19 @@ export function BeastsPage({
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const resetWizard = useBeastStore((s) => s.resetWizard);
+  const providers = useDashboardStore((s) => s.providers);
+  const setSnapshot = useDashboardStore((s) => s.setSnapshot);
+
+  useEffect(() => {
+    if (!showWizard || providers.length > 0) return undefined;
+    let cancelled = false;
+    dashboardClient.fetchSnapshot()
+      .then((snapshot) => {
+        if (!cancelled) setSnapshot(snapshot);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [dashboardClient, providers.length, setSnapshot, showWizard]);
 
   function handleOpenWizard() {
     resetWizard();

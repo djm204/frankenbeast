@@ -987,6 +987,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
             selectedAgentId={selectedBeastAgentId}
+            dashboardClient={dashboardClient}
             onClose={() => {
               shouldAutoSelectBeastAgentRef.current = false;
               selectedBeastAgentIdRef.current = null;
