@@ -37,6 +37,16 @@ function expectSteps(job: Record<string, unknown>): Array<Record<string, unknown
   return job.steps as Array<Record<string, unknown>>;
 }
 
+function expectBuildTypecheckLintStep(workflow: Record<string, unknown>): Record<string, unknown> {
+  const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+  const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+  const step = expectSteps(buildTestLint).find(
+    (candidate) => candidate.run === 'npx turbo run build typecheck lint',
+  );
+  expect(step, 'CI should explicitly gate build, typecheck, and lint through Turbo').toBeTruthy();
+  return step as Record<string, unknown>;
+}
+
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
     expect(existsSync(CI_PATH)).toBe(true);
@@ -111,10 +121,11 @@ on:
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
-    it('builds before running the shared CI test target', () => {
-      expect(content).toContain('turbo run');
-      expect(content).toMatch(/turbo run build lint[\s\S]*npm run test:ci/);
-      expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('npm run test:ci'));
+    it('explicitly gates build, typecheck, and lint before running the shared CI test target', () => {
+      const buildTypecheckLintStep = expectBuildTypecheckLintStep(workflow);
+      expect(buildTypecheckLintStep.name).toBe('Run package build, typecheck, and lint');
+      expect(content).toMatch(/turbo run build typecheck lint[\s\S]*npm run test:ci/);
+      expect(content.indexOf('turbo run build typecheck lint')).toBeLessThan(content.indexOf('npm run test:ci'));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
     });
 
@@ -164,8 +175,8 @@ on:
       expect(content).not.toContain('run: npx turbo run test');
     });
 
-    it('documents the package build and shared CI test target in step names', () => {
-      expect(content).toMatch(/name:\s*Run package build and lint/);
+    it('documents the package build, typecheck, lint, and shared CI test targets in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build, typecheck, and lint/);
       expect(content).toMatch(/name:\s*Run CI test suite/);
     });
 
