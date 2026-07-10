@@ -30,10 +30,12 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.3.0",
     "@vitest/coverage-v8": "^4.1.9",
     "acorn": "^8.17.0",
     "better-sqlite3": "^12.6.2",
+    "js-yaml": "^4.3.0",
     "sharp": "^0.34.5",
     "turbo": "^2.10.3",
     "typescript": "^5.9.3",
