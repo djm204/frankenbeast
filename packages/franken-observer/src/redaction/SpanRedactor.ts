@@ -104,7 +104,7 @@ export class SpanRedactor implements ExportAdapter {
     for (const [key] of Object.entries(metadata)) {
       for (const rule of this.rules) {
         const matches =
-          typeof rule.key === 'string' ? rule.key === key : rule.key.test(key)
+          typeof rule.key === 'string' ? rule.key === key : SpanRedactor.testRegExpKey(rule.key, key)
         if (!matches) continue
         if (rule.action === 'remove') {
           delete result[key]
@@ -114,5 +114,9 @@ export class SpanRedactor implements ExportAdapter {
       }
     }
     return result
+  }
+
+  private static testRegExpKey(pattern: RegExp, key: string): boolean {
+    return new RegExp(pattern.source, pattern.flags).test(key)
   }
 }
