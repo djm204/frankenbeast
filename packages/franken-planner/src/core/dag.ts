@@ -145,7 +145,7 @@ export class PlanGraph {
       }
     }
     const newNodes = new Map(this._nodes);
-    newNodes.set(task.id, task);
+    newNodes.set(task.id, { ...task, dependsOn: [...dependsOn] });
     const newEdges = new Map(this._edges);
     newEdges.set(task.id, new Set(dependsOn));
     return new PlanGraph(newNodes, newEdges, this.version, this.reason);
@@ -163,6 +163,10 @@ export class PlanGraph {
       const cleaned = new Set(deps);
       cleaned.delete(taskId);
       newEdges.set(id, cleaned);
+      const task = newNodes.get(id);
+      if (task) {
+        newNodes.set(id, { ...task, dependsOn: [...cleaned] });
+      }
     }
     return new PlanGraph(newNodes, newEdges, this.version, this.reason);
   }
