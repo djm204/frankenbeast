@@ -553,10 +553,17 @@ cd packages/franken-orchestrator && npm run test:e2e
 
 ## Local Dev Environment
 
+For first-time setup, use the onboarding checklist and bootstrap script:
+
 ```bash
-# Configure local services. Generate a unique Grafana password before starting
-# the full compose stack; Grafana requires GRAFANA_USER=admin with a non-default password.
-cp .env.example .env
+# Validate prerequisites and create .env without starting optional services.
+npm run bootstrap -- --no-docker
+
+# CI-style prerequisite validation without mutating files or installing packages.
+./scripts/bootstrap.sh --dry-run
+
+# Generate a unique Grafana password before starting the full compose stack;
+# Grafana requires GRAFANA_USER=admin with a non-default password.
 $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and adjust CHROMA_URL if needed
 
 # .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.

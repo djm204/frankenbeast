@@ -11,12 +11,16 @@ Get Frankenbeast running locally.
 ## 1. Install dependencies
 
 ```bash
-if ! command -v corepack >/dev/null 2>&1; then npm install -g corepack; fi
-corepack enable npm
-corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
-npm run check:package-manager
-npm install
+npm run bootstrap -- --no-docker
 ```
+
+For CI-style validation without mutating files or installing dependencies, run:
+
+```bash
+./scripts/bootstrap.sh --dry-run
+```
+
+If Corepack is not available yet, install it first with `npm install -g corepack`; the bootstrap script then activates and verifies the root `packageManager` pin.
 
 Run reproducible dependency audits through the guarded script so the live npm
 binary still matches the root `packageManager` pin before `npm audit` runs:
@@ -28,8 +32,9 @@ npm run audit:security
 ## 2. Configure environment
 
 ```bash
-cp .env.example .env
-# Edit .env with provider API keys or local runtime settings as needed:
+# Bootstrap creates .env when it is missing; edit the existing file without overwriting it.
+${EDITOR:-vi} .env
+# Add provider API keys or local runtime settings as needed:
 #   ANTHROPIC_API_KEY for Claude, OPENAI_API_KEY for OpenAI,
 #   or GOOGLE_API_KEY / GEMINI_API_KEY for Gemini.
 # Before starting the full Docker stack, uncomment GRAFANA_USER=admin and set a
@@ -39,7 +44,8 @@ cp .env.example .env
 ## 3. Optional: start infrastructure
 
 ```bash
-docker compose up -d
+# The bootstrap script validates Grafana credentials before starting compose.
+npm run bootstrap -- --with-docker
 ```
 
 This starts the services defined in `docker-compose.yml`:

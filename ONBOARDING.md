@@ -41,18 +41,21 @@ Use this checklist for a first local checkout or when rebuilding a development e
   cd frankenbeast
   ```
 
-- [ ] Re-activate the repository-pinned npm version from inside the checkout, then install dependencies:
+- [ ] Run the one-click bootstrap. It validates Node.js and Corepack, activates the repository-pinned npm version, creates `.env` from `.env.example` when needed, validates required env vars, runs `npm ci`, and skips optional Docker services unless you ask for them:
 
   ```bash
-  corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
-  npm run check:package-manager
-  npm install
+  npm run bootstrap -- --no-docker
   ```
 
-- [ ] Create a local environment file and fill in only the values you need:
+  To preview checks without mutating files or installing dependencies, run:
 
   ```bash
-  cp .env.example .env
+  ./scripts/bootstrap.sh --dry-run
+  ```
+
+- [ ] Review `.env` and fill in only the values you need:
+
+  ```bash
   $EDITOR .env
   ```
 

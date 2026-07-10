@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "turbo run build",
+    "bootstrap": "bash scripts/bootstrap.sh",
     "typecheck": "turbo run typecheck",
     "audit:security": "node scripts/check-package-manager.mjs && npm audit --audit-level=moderate",
     "audit:dependencies": "node scripts/check-package-manager.mjs && npm audit",
