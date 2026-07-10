@@ -58,8 +58,10 @@ export function BeastsPage({
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const resetWizard = useBeastStore((s) => s.resetWizard);
+  const createAgentDisabledReason = error ?? 'Beast API is not available. Configure the operator token/API client before creating agents.';
 
   function handleOpenWizard() {
+    if (disabled) return;
     resetWizard();
     setLaunchError(null);
     setShowWizard(true);
@@ -105,6 +107,8 @@ export function BeastsPage({
         selectedAgentId={selectedAgentId}
         onSelectAgent={onSelectAgent}
         onCreateAgent={handleOpenWizard}
+        createAgentDisabled={disabled}
+        createAgentDisabledReason={disabled ? createAgentDisabledReason : null}
       />
 
       {agentDetail && (
