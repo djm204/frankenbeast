@@ -442,9 +442,8 @@ describe('SqliteBrain', () => {
 
         expect(second.working.snapshot()).toEqual({ task: 'snapshot' });
         expect(second.episodic.count()).toBe(1);
-        expect(second.episodic.recent(10).map(event => event.summary)).toEqual([
-          'hydrated once only',
-        ]);
+        expect(second.episodic.recent(10)).toEqual(snapshot.episodic);
+        expect(second.serialize().episodic).toEqual(snapshot.episodic);
         expect(second.recovery.listCheckpoints()).toHaveLength(1);
         expect(second.recovery.lastCheckpoint()?.runId).toBe('run-1');
         second.close();
