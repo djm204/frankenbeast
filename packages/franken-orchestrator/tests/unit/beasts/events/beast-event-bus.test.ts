@@ -174,6 +174,19 @@ describe('BeastEventBus', () => {
     ]);
   });
 
+  it('preserves structured-cloneable payload values while isolating mutations', () => {
+    const bus = new BeastEventBus();
+    const observed: BeastSseEvent[] = [];
+    const startedAt = new Date('2026-03-17T00:00:00.000Z');
+
+    bus.subscribe((event) => observed.push(event));
+    bus.publish({ type: 'agent.status', data: { agentId: 'a1', startedAt } });
+
+    expect(observed[0].data.startedAt).toEqual(startedAt);
+    expect(observed[0].data.startedAt).not.toBe(startedAt);
+    expect(bus.replaySince(0)[0].data.startedAt).toEqual(startedAt);
+  });
+
   it('evicts oldest events when buffer exceeds maxBufferSize', () => {
     const bus = new BeastEventBus(3); // buffer limited to 3
     bus.publish({ type: 'e', data: { n: 1 } });

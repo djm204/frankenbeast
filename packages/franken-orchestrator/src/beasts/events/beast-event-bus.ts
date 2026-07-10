@@ -25,18 +25,29 @@ function reportDefaultListenerError({ event, error }: BeastEventBusListenerError
   });
 }
 
-function cloneValue(value: unknown): unknown {
+function cloneJsonCompatibleValue(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => cloneValue(item));
+    return value.map((item) => cloneJsonCompatibleValue(item));
   }
 
   if (value && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [key, cloneValue(nestedValue)]),
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+        key,
+        cloneJsonCompatibleValue(nestedValue),
+      ]),
     );
   }
 
   return value;
+}
+
+function cloneValue(value: unknown): unknown {
+  try {
+    return structuredClone(value);
+  } catch {
+    return cloneJsonCompatibleValue(value);
+  }
 }
 
 function cloneEvent(event: BeastSseEvent): BeastSseEvent {
