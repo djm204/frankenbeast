@@ -102,6 +102,39 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('removes only the real websocket peer after a successful upgrade closes', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const httpServer = createServer();
+    const chatSocketServer = attachChatWebSocketServer({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`,
+      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`],
+    );
+
+    await expect(onceSocket(socket, 'open')).resolves.toEqual([]);
+    expect(chatSocketServer.controller.connections.size).toBe(1);
+
+    const closed = onceSocket(socket, 'close');
+    socket.close();
+    await closed;
+
+    expect(chatSocketServer.controller.connections.size).toBe(0);
+
+    chatSocketServer.close();
+    httpServer.close();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('rejects replayed socket tokens after the first successful upgrade', async () => {
     mkdirSync(TMP, { recursive: true });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
