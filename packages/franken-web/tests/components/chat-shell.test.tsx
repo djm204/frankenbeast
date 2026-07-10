@@ -853,14 +853,6 @@ describe('ChatShell', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
-    act(() => {
-      actionStatus.resolve({
-        mode: 'secure',
-        secureBackend: 'local-encrypted',
-        services: [{ id: 'chat-server', status: 'running' }],
-      });
-    });
-
     await waitFor(() => {
       expect(screen.getByText('Restarting chat-server…')).toBeDefined();
       expect(screen.queryByRole('alert')).toBeNull();
@@ -877,6 +869,14 @@ describe('ChatShell', () => {
     await waitFor(() => {
       expect(screen.getByText('Restarted chat-server.')).toBeDefined();
       expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    act(() => {
+      actionStatus.resolve({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      });
     });
   });
 
