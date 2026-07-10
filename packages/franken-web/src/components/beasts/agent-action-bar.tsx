@@ -69,12 +69,14 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracke
 
   const isInitOrDispatch = status === 'initializing' || status === 'dispatching';
   const isRunning = status === 'running';
+  const isAwaitingApproval = status === 'awaiting_approval';
   const isStopped = status === 'stopped';
   const isTerminal = status === 'failed' || status === 'completed';
+  const isDeleted = status === 'deleted';
 
   return (
     <div className="flex items-center gap-2 flex-wrap p-4 border-t border-beast-border">
-      {(isInitOrDispatch || isRunning) && <ActionButton label="Stop" onClick={onStop} />}
+      {(isInitOrDispatch || isRunning || isAwaitingApproval) && <ActionButton label="Stop" onClick={onStop} />}
 
       {isRunning && (
         <>
@@ -130,6 +132,20 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracke
           confirmLabel="Delete agent"
           onConfirm={onDelete}
         />
+      )}
+
+      {isAwaitingApproval && (
+        <div className="text-sm text-beast-muted">
+          <span className="font-medium text-beast-text">Approval required</span>
+          <span className="ml-2">Resolve the pending approval in the linked chat, or stop the agent to cancel it.</span>
+        </div>
+      )}
+
+      {isDeleted && (
+        <div className="text-sm text-beast-muted">
+          <span className="font-medium text-beast-text">Agent deleted</span>
+          <span className="ml-2">This tracked agent is no longer operable.</span>
+        </div>
       )}
     </div>
   );

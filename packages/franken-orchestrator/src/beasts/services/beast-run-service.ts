@@ -161,11 +161,13 @@ export class BeastRunService {
 
     const status = run.status === 'running'
       ? 'running'
-      : run.status === 'completed'
-        ? 'completed'
-        : run.status === 'failed'
-          ? 'failed'
-          : 'stopped';
+      : run.status === 'pending_approval'
+        ? 'awaiting_approval'
+        : run.status === 'completed'
+          ? 'completed'
+          : run.status === 'failed'
+            ? 'failed'
+            : 'stopped';
 
     // Skip all writes if status hasn't changed (full idempotency — prevents duplicate SSE, DB events, AND redundant updateTrackedAgent writes)
     if (trackedAgent.status === status) {

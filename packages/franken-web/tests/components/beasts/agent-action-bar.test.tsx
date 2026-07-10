@@ -77,4 +77,25 @@ describe('AgentActionBar', () => {
     expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
     expect(screen.queryByText('Resume')).toBeNull();
   });
+
+  it('shows a stop control and approval handoff for an agent awaiting approval', () => {
+    render(<AgentActionBar status="awaiting_approval" hasLinkedRun={true} {...handlers} />);
+
+    expect(screen.getByText('Stop')).toBeTruthy();
+    expect(screen.getByText('Approval required')).toBeTruthy();
+    expect(screen.getByText('Resolve the pending approval in the linked chat, or stop the agent to cancel it.')).toBeTruthy();
+    expect(screen.queryByText('Start')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    expect(screen.queryByText('Kill')).toBeNull();
+  });
+
+  it('shows a non-operable deleted state without lifecycle controls', () => {
+    render(<AgentActionBar status="deleted" hasLinkedRun={true} {...handlers} />);
+
+    expect(screen.getByText('Agent deleted')).toBeTruthy();
+    expect(screen.queryByText('Start')).toBeNull();
+    expect(screen.queryByText('Stop')).toBeNull();
+    expect(screen.queryByText('Resume')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+  });
 });
