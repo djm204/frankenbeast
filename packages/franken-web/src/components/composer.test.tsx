@@ -77,7 +77,13 @@ describe('Composer failed-send recovery', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Message sent; refresh failed');
     expect(screen.queryByRole('button', { name: 'Retry send' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toHaveProperty('disabled', true);
+    fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }));
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(input.value).toBe('already accepted prompt');
+
+    fireEvent.change(input, { target: { value: 'different prompt' } });
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toHaveProperty('disabled', false);
   });
 
   it('clears a composer failure only when a matching transcript retry succeeds', async () => {

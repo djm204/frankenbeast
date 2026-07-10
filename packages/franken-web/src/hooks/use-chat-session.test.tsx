@@ -312,6 +312,7 @@ describe('useChatSession error banners', () => {
         jsonResponse(sessionResponse()),
         jsonResponse({ data: { tier: 'cheap' } }),
         jsonResponse({ error: { message: 'refresh failed' } }, 500),
+        jsonResponse(sessionResponse()),
         jsonResponse(sessionResponse({
           transcript: [
             {
@@ -356,6 +357,20 @@ describe('useChatSession error banners', () => {
     const refreshBanner = result.current.errorBanners[0]!;
     act(() => {
       void result.current.retryError(refreshBanner.id);
+    });
+
+    await waitFor(() => {
+      expect(result.current.errorBanners).toHaveLength(0);
+    });
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'launch beast',
+      receipt: 'accepted',
+      canRetry: false,
+    }));
+    expect(result.current.clearedFailedDraft).toBeUndefined();
+
+    act(() => {
+      result.current.reconnect();
     });
 
     await waitFor(() => {

@@ -300,6 +300,10 @@ function preserveLocalRecoveryMessages(
       return [];
     }
 
+    if (message.role === 'user' && message.receipt === 'accepted' && message.canRetry === false) {
+      return [message];
+    }
+
     if (message.role !== 'user' || !message.receipt || message.canRetry === false) {
       return [];
     }

@@ -94,6 +94,7 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, disab
     ?? 'Type a message, then press Dispatch or Ctrl+Enter to send.';
   const liveStatus = `${connectionStatusLabel(connectionStatus)}. ${sessionStatusLabel(status)}.`;
   const showReconnect = canRetryConnection(connectionStatus);
+  const hasBlockedAcceptedDraft = Boolean(error && !error.retryable && value.trim() === error.content.trim());
 
   useEffect(() => {
     if (!clearedFailedDraft || lastClearedFailedDraftNonceRef.current === clearedFailedDraft.nonce) {
@@ -119,7 +120,7 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, disab
     }
 
     const trimmed = value.trim();
-    if (!trimmed || isSending) {
+    if (!trimmed || isSending || hasBlockedAcceptedDraft) {
       return;
     }
 
@@ -190,7 +191,7 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, disab
               Try reconnecting
             </button>
           ) : null}
-          <button className="button button--primary" type="submit" disabled={disabled || isSending}>
+          <button className="button button--primary" type="submit" disabled={disabled || isSending || hasBlockedAcceptedDraft}>
             {isSending ? 'Dispatching…' : 'Dispatch'}
           </button>
         </div>
