@@ -70,7 +70,7 @@ export function whatsappRouter(options: WhatsAppRouterOptions) {
               externalChannelId: from,
               externalMessageId: message.id,
               text: message.text.body,
-              receivedAt: new Date(parseInt(message.timestamp, 10) * 1000).toISOString(),
+              receivedAt: new Date(Number(message.timestamp) * 1000).toISOString(),
               rawEvent: body,
             });
           }
