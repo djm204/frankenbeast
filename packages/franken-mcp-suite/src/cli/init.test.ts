@@ -54,7 +54,7 @@ describe('fbeast init', () => {
     expect(content).not.toContain('You have access to fbeast MCP tools');
   });
 
-  it('writes Claude MCP server config to project .mcp.json', () => {
+  it('writes Claude MCP server config to project .mcp.json with project-anchored db paths', () => {
     const root = tmpDir();
     dirs.push(root);
 
@@ -70,6 +70,10 @@ describe('fbeast init', () => {
     expect(mcpConfig.mcpServers['fbeast-observer']).toBeDefined();
     expect(mcpConfig.mcpServers['fbeast-governor']).toBeDefined();
     expect(mcpConfig.mcpServers['fbeast-skills']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-memory'].args).toEqual([
+      '--db',
+      '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db',
+    ]);
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
     expect(settings.mcpServers).toBeUndefined();
   });
@@ -395,7 +399,7 @@ describe('fbeast init', () => {
     ).toThrow('failed to remove legacy Codex MCP server fbeast-memory');
   });
 
-  it('uses cwd-relative database paths for Claude .mcp.json across project roots', () => {
+  it('uses project-root placeholders for Claude .mcp.json across project roots', () => {
     const globalConfigDir = tmpDir();
     const rootA = tmpDir();
     const rootB = tmpDir();
@@ -409,11 +413,11 @@ describe('fbeast init', () => {
     const configB = JSON.parse(readFileSync(join(rootB, '.mcp.json'), 'utf-8'));
     expect(configA.mcpServers['fbeast-memory']).toEqual({
       command: 'fbeast-memory',
-      args: ['--db', join('.fbeast', 'beast.db')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'],
     });
     expect(configB.mcpServers['fbeast-memory']).toEqual({
       command: 'fbeast-memory',
-      args: ['--db', join('.fbeast', 'beast.db')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'],
     });
     expect(JSON.stringify(configA.mcpServers)).not.toContain(rootA);
     expect(JSON.stringify(configB.mcpServers)).not.toContain(rootB);
@@ -431,7 +435,7 @@ describe('fbeast init', () => {
     expect(keys).toEqual(['fbeast-proxy']);
     expect(mcpConfig.mcpServers['fbeast-proxy']).toEqual({
       command: 'fbeast-proxy',
-      args: ['--db', join('.fbeast', 'beast.db'), '--config', join('.fbeast', 'config.json')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db', '--config', join('.fbeast', 'config.json')],
     });
     expect(mcpConfig.mcpServers['fbeast-memory']).toBeUndefined();
   });
@@ -458,10 +462,13 @@ describe('fbeast init', () => {
 
     const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
     expect(Object.keys(mcpConfig.mcpServers).length).toBe(7);
-    expect(mcpConfig.mcpServers['fbeast-memory']).toEqual({ command: 'fbeast-memory', args: ['--db', join('.fbeast', 'beast.db')] });
+    expect(mcpConfig.mcpServers['fbeast-memory']).toEqual({
+      command: 'fbeast-memory',
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'],
+    });
     expect(mcpConfig.mcpServers['fbeast-firewall']).toEqual({
       command: 'fbeast-firewall',
-      args: ['--db', join('.fbeast', 'beast.db'), '--config', join('.fbeast', 'config.json')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db', '--config', join('.fbeast', 'config.json')],
     });
     expect(mcpConfig.mcpServers['fbeast-proxy']).toBeUndefined();
   });

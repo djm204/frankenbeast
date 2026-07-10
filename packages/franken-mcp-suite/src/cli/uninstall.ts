@@ -351,7 +351,30 @@ function pruneFbeastFromEntry(entry: unknown): unknown | null {
 
 function resolveUninstallClientConfigDirs(client: McpClient, root: string): string[] {
   const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
-  return [projectDir];
+  if (client === 'codex' || hasProjectFbeastJsonConfig(client, root, projectDir)) {
+    return [projectDir];
+  }
+
+  const homeDir = resolveLegacyHomeConfigDir(client);
+  return homeDir === projectDir ? [projectDir] : [projectDir, homeDir];
+}
+
+function resolveLegacyHomeConfigDir(client: McpClient): string {
+  if (client === 'claude') return join(homedir(), '.claude');
+  if (client === 'gemini') return join(homedir(), '.gemini');
+  return join(homedir(), '.codex');
+}
+
+function hasProjectFbeastJsonConfig(client: McpClient, root: string, projectDir: string): boolean {
+  if (client === 'codex') return true;
+  const paths = client === 'claude'
+    ? [join(root, '.mcp.json'), join(projectDir, 'settings.json')]
+    : [join(projectDir, 'settings.json')];
+  return paths.some((path) => {
+    if (!existsSync(path)) return false;
+    const content = readFileSync(path, 'utf-8');
+    return content.includes('fbeast-') || content.includes('fbeast hook') || content.includes('fbeast-hook');
+  });
 }
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);

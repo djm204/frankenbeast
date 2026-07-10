@@ -136,7 +136,179 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
-  it('flags functions with too many parameters', async () => {
+  it('ignores nested TypeScript commas inside function parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'function configure(options: {',
+      '  alpha: string,',
+      '  beta: [string, number],',
+      '  gamma: Map<string, { id: string, label: string }>,',
+      '  delta: { enabled: boolean, retries: number },',
+      "} = { alpha: 'a', beta: ['b', 1], gamma: undefined, delta: { enabled: true, retries: 3 } }) {",
+      '  return options.alpha;',
+      '}',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('does not let default comparison expressions hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(limit = n < max, a, b, c, d, e) { return limit; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('does not count parenthesized variable expressions as arrow parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const value = (a, b, c, d, e, f);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores TypeScript declarations without implementation bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `declare function external(a, b, c, d, e, f): void;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps generic argument commas nested while counting parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function usesMap(a: Map<string, number>, b, c, d, e) { return a; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('counts parameters for wrapped arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = ((a, b, c, d, e, f) => { return a; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('does not let comparisons before later generic parameters hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(limit = n < max, map: Map<string, number>, a, b, c, d) { return map; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores declared functions returning object literal types', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `declare function external(a, b, c, d, e, f): { ok: boolean };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('counts parameters for wrapped async arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = (async (a, b, c, d, e, f) => { return a; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('does not let paired default comparisons hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(limit = n < max, threshold = x > y, a, b, c, d) { return limit; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores non-declare overload signatures returning object literal types', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function parse(a, b, c, d, e, f): { ok: boolean };`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores semicolonless overload signatures before implementations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'function parse(a, b, c, d, e, f): void',
+      'function parse(a, b) { return a; }',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('does not let nested default comparisons hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex({ x = a < b }, c = d > e, p1, p2, p3, p4) { return x; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps generic call commas nested inside default values', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function ok(value = make<string, number>(), a, b, c, d): void { return value; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('counts parameters for wrapped generic arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = (<T,>(a, b, c, d, e, f) => { return a; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('counts parameters for whitespace-wrapped arrow functions', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const fn = (\n  (a, b, c, d, e, f) => { return a; }\n);`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('flags functions with too many top-level parameters', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f, g) { return a; }`;
     const result = await evaluator.evaluate(createInput(content));

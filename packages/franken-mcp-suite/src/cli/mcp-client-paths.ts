@@ -52,7 +52,8 @@ export function parseMcpClient(value: string | undefined): McpClient | undefined
 
 /**
  * Detects which MCP client is present. Checks project-level JSON-client dirs
- * first, then project-level Codex, then home-level fallbacks.
+ * first, then Claude's project-level .mcp.json, then project-level Codex,
+ * then home-level fallbacks.
  */
 export function detectMcpClient(input: {
   cwd: string;
@@ -64,6 +65,7 @@ export function detectMcpClient(input: {
   for (const [client, dir] of Object.entries(JSON_CLIENT_DIR) as [McpClient, string][]) {
     if (input.exists(join(input.cwd, dir))) return client;
   }
+  if (input.exists(join(input.cwd, '.mcp.json'))) return 'claude';
   if (input.exists(join(input.cwd, '.codex'))) return 'codex';
 
   // Home-level dir next

@@ -48,6 +48,12 @@ function previousIdentifier(content: string, beforeIndex: number): string {
   return content.slice(start + 1, end + 1);
 }
 
+function skipWhitespace(content: string, index: number): number {
+  let nextIndex = index;
+  while (/\s/.test(content[nextIndex] ?? '')) nextIndex++;
+  return nextIndex;
+}
+
 function findBodyOpenAfterSignature(content: string, startIndex: number): number {
   let inReturnType = false;
   let typeDepth = 0;
@@ -73,11 +79,20 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
       continue;
     }
 
+    if (
+      typeDepth === 0 &&
+      content.startsWith('function', i) &&
+      !/[A-Za-z0-9_$]/.test(content[i - 1] ?? '') &&
+      !/[A-Za-z0-9_$]/.test(content[i + 'function'.length] ?? '')
+    ) {
+      return -1;
+    }
+
     if (char === '{' && typeDepth === 0) {
       const closeIndex = findMatchingDelimiter(content, i, '{', '}');
       if (closeIndex === -1) return -1;
       let nextIndex = closeIndex + 1;
-      while (/\s/.test(content[nextIndex] ?? '')) nextIndex++;
+      nextIndex = skipWhitespace(content, nextIndex);
       if (
         expectTypeOperand ||
         ['keyof', 'is', 'asserts'].includes(previousIdentifier(content, i - 1)) ||
@@ -123,14 +138,40 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
 }
 
 function findBlockBodyOpen(content: string, startIndex: number): number {
-  let index = startIndex;
-  while (/\s/.test(content[index] ?? '')) index++;
+  const index = skipWhitespace(content, startIndex);
   return content[index] === '{' ? index : -1;
 }
 
+function skipAsyncAndTypeParameters(content: string, startIndex: number): number {
+  let index = skipWhitespace(content, startIndex);
+  if (
+    content.startsWith('async', index) &&
+    !/[A-Za-z0-9_$]/.test(content[index + 'async'.length] ?? '')
+  ) {
+    index = skipWhitespace(content, index + 'async'.length);
+  }
+  if (content[index] === '<') {
+    const typeParamsCloseIndex = findMatchingDelimiter(content, index, '<', '>');
+    if (typeParamsCloseIndex === -1) return -1;
+    index = skipWhitespace(content, typeParamsCloseIndex + 1);
+  }
+  return index;
+}
+
+function findInitializerParamsOpen(content: string, startIndex: number): number {
+  const index = skipAsyncAndTypeParameters(content, startIndex);
+  if (index === -1 || content[index] !== '(') return -1;
+
+  const groupedIndex = skipAsyncAndTypeParameters(content, index + 1);
+  if (groupedIndex !== -1 && content[groupedIndex] === '(') {
+    return groupedIndex;
+  }
+
+  return index;
+}
+
 function findArrowToken(content: string, startIndex: number): number {
-  let index = startIndex;
-  while (/\s/.test(content[index] ?? '')) index++;
+  const index = skipWhitespace(content, startIndex);
 
   if (content[index] !== ':') {
     return content[index] === '=' && content[index + 1] === '>' ? index : -1;
@@ -145,12 +186,12 @@ function findArrowToken(content: string, startIndex: number): number {
     if (typeDepth === 0 && char === '=' && content[i + 1] === '>') {
       if (previousSignificant === ')') {
         let nextIndex = i + 2;
-        while (/\s/.test(content[nextIndex] ?? '')) nextIndex++;
+        nextIndex = skipWhitespace(content, nextIndex);
         if (content[nextIndex] === '{') {
           const closeIndex = findMatchingDelimiter(content, nextIndex, '{', '}');
           if (closeIndex === -1) return -1;
           let afterObjectIndex = closeIndex + 1;
-          while (/\s/.test(content[afterObjectIndex] ?? '')) afterObjectIndex++;
+          afterObjectIndex = skipWhitespace(content, afterObjectIndex);
           if (
             !['=', '|', '&', '?', ':'].includes(content[afterObjectIndex] ?? '')
           ) {
@@ -189,7 +230,7 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
 
   for (const match of content.matchAll(/function\s+\w+/g)) {
     let paramsOpenIndex = (match.index ?? 0) + match[0].length;
-    while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
+    paramsOpenIndex = skipWhitespace(content, paramsOpenIndex);
     if (content[paramsOpenIndex] === '<') {
       const typeParamsCloseIndex = findMatchingDelimiter(
         content,
@@ -199,7 +240,7 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
       );
       if (typeParamsCloseIndex === -1) continue;
       paramsOpenIndex = typeParamsCloseIndex + 1;
-      while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
+      paramsOpenIndex = skipWhitespace(content, paramsOpenIndex);
     }
     if (content[paramsOpenIndex] !== '(') continue;
     const paramsCloseIndex = findMatchingDelimiter(content, paramsOpenIndex, '(', ')');
@@ -223,25 +264,11 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
   for (const match of content.matchAll(
     /(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?/g,
   )) {
-    let paramsOpenIndex = (match.index ?? 0) + match[0].length;
-    while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
-    if (content[paramsOpenIndex] === '<') {
-      const typeParamsCloseIndex = findMatchingDelimiter(
-        content,
-        paramsOpenIndex,
-        '<',
-        '>',
-      );
-      if (typeParamsCloseIndex === -1) continue;
-      paramsOpenIndex = typeParamsCloseIndex + 1;
-      while (/\s/.test(content[paramsOpenIndex] ?? '')) paramsOpenIndex++;
-    }
-    if (content[paramsOpenIndex] !== '(') continue;
-    let nestedParamsIndex = paramsOpenIndex + 1;
-    while (/\s/.test(content[nestedParamsIndex] ?? '')) nestedParamsIndex++;
-    if (content[nestedParamsIndex] === '(') {
-      paramsOpenIndex = nestedParamsIndex;
-    }
+    const paramsOpenIndex = findInitializerParamsOpen(
+      content,
+      (match.index ?? 0) + match[0].length,
+    );
+    if (paramsOpenIndex === -1) continue;
     const paramsCloseIndex = findMatchingDelimiter(content, paramsOpenIndex, '(', ')');
     if (paramsCloseIndex === -1) continue;
 
@@ -263,67 +290,177 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
   return blocks;
 }
 
-function countTopLevelParameters(params: string): number {
-  let count = 0;
-  let segmentHasContent = false;
+function hasGenericCloseBeforeTopLevelComma(
+  params: string,
+  startIndex: number,
+): boolean {
   let parenDepth = 0;
-  let bracketDepth = 0;
   let braceDepth = 0;
-  let angleDepth = 0;
-  let inTypeAnnotation = false;
-  let inDefaultValue = false;
+  let bracketDepth = 0;
+  let angleDepth = 1;
 
-  for (let i = 0; i < params.length; i++) {
-    const char = params[i] ?? '';
-    const atTopLevel =
-      parenDepth === 0 &&
-      bracketDepth === 0 &&
-      braceDepth === 0 &&
-      angleDepth === 0;
+  for (let index = startIndex + 1; index < params.length; index++) {
+    const char = params[index];
+    if (char === undefined) continue;
 
-    if (char === ':' && atTopLevel && !inDefaultValue) {
-      inTypeAnnotation = true;
-    } else if (char === '=' && params[i + 1] !== '>' && atTopLevel) {
-      inTypeAnnotation = false;
-      inDefaultValue = true;
-    } else if (char === '(') {
+    if (char === '(') {
       parenDepth++;
     } else if (char === ')') {
       parenDepth = Math.max(0, parenDepth - 1);
-    } else if (char === '[') {
-      bracketDepth++;
-    } else if (char === ']') {
-      bracketDepth = Math.max(0, bracketDepth - 1);
     } else if (char === '{') {
       braceDepth++;
     } else if (char === '}') {
       braceDepth = Math.max(0, braceDepth - 1);
-    } else if (char === '<' && inTypeAnnotation) {
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (
+      char === '<' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0
+    ) {
       angleDepth++;
-    } else if (char === '>' && angleDepth > 0) {
+    } else if (
+      char === '>' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      params[index - 1] !== '='
+    ) {
       angleDepth--;
-    }
-
-    const isTopLevelComma =
+      if (angleDepth === 0) {
+        return true;
+      }
+    } else if (
       char === ',' &&
       parenDepth === 0 &&
-      bracketDepth === 0 &&
       braceDepth === 0 &&
-      angleDepth === 0;
-
-    if (isTopLevelComma) {
-      if (segmentHasContent) count++;
-      segmentHasContent = false;
-      inTypeAnnotation = false;
-      inDefaultValue = false;
-      continue;
+      bracketDepth === 0 &&
+      angleDepth === 1
+    ) {
+      if (!hasUnmatchedAngleCloseBeforeNextTopLevelComma(params, index)) {
+        return false;
+      }
     }
-
-    if (!char.match(/\s/)) segmentHasContent = true;
   }
 
-  if (segmentHasContent) count++;
-  return count;
+  return false;
+}
+
+function hasUnmatchedAngleCloseBeforeNextTopLevelComma(
+  params: string,
+  commaIndex: number,
+): boolean {
+  let nestedAngleDepth = 0;
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+
+  for (let index = commaIndex + 1; index < params.length; index++) {
+    const char = params[index];
+    if (char === undefined) continue;
+
+    if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      if (parenDepth === 0) return false;
+      parenDepth--;
+    } else if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      if (braceDepth === 0) return false;
+      braceDepth--;
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      if (bracketDepth === 0) return false;
+      bracketDepth--;
+    } else if (char === '<') {
+      nestedAngleDepth++;
+    } else if (char === '>' && params[index - 1] !== '=') {
+      if (
+        nestedAngleDepth === 0 &&
+        parenDepth === 0 &&
+        braceDepth === 0 &&
+        bracketDepth === 0
+      ) {
+        return true;
+      }
+      nestedAngleDepth = Math.max(0, nestedAngleDepth - 1);
+    } else if (
+      (char === ',' || char === '=' || char === ':') &&
+      nestedAngleDepth === 0 &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0
+    ) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function countTopLevelParameters(params: string): number {
+  let count = 0;
+  let hasParameterContent = false;
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let angleDepth = 0;
+
+  for (let index = 0; index < params.length; index++) {
+    const char = params[index];
+    if (char === undefined) continue;
+    const previousChar = params[index - 1];
+
+    if (char.trim()) {
+      hasParameterContent = true;
+    }
+
+    if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+    } else if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (
+      char === '<' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      hasGenericCloseBeforeTopLevelComma(params, index)
+    ) {
+      angleDepth++;
+    } else if (
+      char === '>' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      previousChar !== '='
+    ) {
+      angleDepth = Math.max(0, angleDepth - 1);
+    } else if (
+      char === ',' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      angleDepth === 0
+    ) {
+      count++;
+      hasParameterContent = false;
+    }
+  }
+
+  return hasParameterContent ? count + 1 : count;
 }
 
 export class ComplexityEvaluator implements Evaluator {
