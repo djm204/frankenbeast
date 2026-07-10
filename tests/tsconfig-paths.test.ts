@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const readJson = (rel: string) =>
@@ -27,7 +27,7 @@ const expandWorkspacePackageDirs = (workspaces: string[]): string[] => {
         if (!entry.isDirectory()) continue;
         const manifestPath = join(parentDir, entry.name, 'package.json');
         if (existsSync(join(ROOT, manifestPath))) {
-          packageDirs.add(join(parentDir, entry.name));
+          packageDirs.add(posix.join(parentDir, entry.name));
         }
       }
       continue;
@@ -49,14 +49,14 @@ const hasTypeScriptSource = (relDir: string): boolean => {
   if (!existsSync(absDir)) return false;
 
   for (const entry of readdirSync(absDir, { withFileTypes: true })) {
-    const relPath = join(relDir, entry.name);
+    const relPath = `${relDir}/${entry.name}`;
     if (entry.isDirectory()) {
       if (entry.name === 'dist' || entry.name === 'node_modules') continue;
       if (hasTypeScriptSource(relPath)) return true;
       continue;
     }
 
-    if (entry.isFile() && /\.tsx?$/u.test(entry.name)) {
+    if (entry.isFile() && /\.(?:[cm]?ts|tsx)$/u.test(entry.name)) {
       return true;
     }
   }
@@ -154,6 +154,7 @@ describe('tsconfig.json path aliases', () => {
     const workspacePackageNames = new Set(workspacePackages.map((workspacePackage) => workspacePackage.name));
     for (const [packageName, reason] of Object.entries(PATH_ALIAS_ALLOWLIST)) {
       expect(workspacePackageNames.has(packageName), `${packageName} is no longer a workspace package`).toBe(true);
+      expect(ALIASED_WORKSPACE_PACKAGES.has(packageName), `${packageName} now has a root alias; remove it from PATH_ALIAS_ALLOWLIST`).toBe(false);
       expect(reason.trim(), `${packageName} allowlist entry must explain why no root alias is expected`).not.toBe('');
     }
   });
@@ -200,6 +201,11 @@ describe('tsconfig.test.json includes', () => {
     const workspacePackageNames = new Set(workspacePackages.map((workspacePackage) => workspacePackage.name));
     for (const [packageName, reason] of Object.entries(TSCONFIG_TEST_INCLUDE_ALLOWLIST)) {
       expect(workspacePackageNames.has(packageName), `${packageName} is no longer a workspace package`).toBe(true);
+      const workspacePackage = workspacePackages.find((candidate) => candidate.name === packageName);
+      expect(
+        includes.includes(`${workspacePackage?.dir}/src/**/*`),
+        `${packageName} is now included in tsconfig.test.json; remove it from TSCONFIG_TEST_INCLUDE_ALLOWLIST`,
+      ).toBe(false);
       expect(reason.trim(), `${packageName} tsconfig.test include allowlist entry must explain the exclusion`).not.toBe('');
     }
   });
