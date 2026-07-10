@@ -32,18 +32,45 @@ export class ModelAttribution {
     this.calc = new CostCalculator(pricing)
   }
 
+  /** A token delta must be a non-negative safe integer. */
+  private static assertValidDelta(value: number, label: string): void {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new RangeError(
+        `ModelAttribution: ${label} must be a non-negative safe integer, received ${value}`,
+      )
+    }
+  }
+
+  /** Add two token counts, throwing if the result would leave the safe-integer range. */
+  private static safeAdd(a: number, b: number): number {
+    const sum = a + b
+    if (!Number.isSafeInteger(sum)) {
+      throw new RangeError(
+        `ModelAttribution: token total ${sum} exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
+      )
+    }
+    return sum
+  }
+
   record(entry: AttributionEntry): void {
+    ModelAttribution.assertValidDelta(entry.promptTokens, 'promptTokens')
+    ModelAttribution.assertValidDelta(entry.completionTokens, 'completionTokens')
+
     const existing = this.state.get(entry.model) ?? {
       totalCalls: 0,
       successfulCalls: 0,
       promptTokens: 0,
       completionTokens: 0,
     }
+    const promptTokens = ModelAttribution.safeAdd(existing.promptTokens, entry.promptTokens)
+    const completionTokens = ModelAttribution.safeAdd(existing.completionTokens, entry.completionTokens)
+    ModelAttribution.safeAdd(promptTokens, completionTokens)
+
     this.state.set(entry.model, {
       totalCalls: existing.totalCalls + 1,
       successfulCalls: existing.successfulCalls + (entry.success ? 1 : 0),
-      promptTokens: existing.promptTokens + entry.promptTokens,
-      completionTokens: existing.completionTokens + entry.completionTokens,
+      promptTokens,
+      completionTokens,
     })
   }
 
