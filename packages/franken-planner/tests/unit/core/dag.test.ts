@@ -115,6 +115,29 @@ describe('PlanGraph — construction', () => {
     expect((stored.metadata as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
+  it('rejects metadata objects that cannot be cloned without aliasing or semantic loss', () => {
+    class CustomMetadata {
+      readonly value = 'custom';
+    }
+
+    expect(() =>
+      PlanGraph.empty().addTask(makeTask('custom', { metadata: { value: new CustomMetadata() } }))
+    ).toThrow(/unsupported mutable object/);
+
+    if (typeof SharedArrayBuffer !== 'undefined') {
+      const shared = new Uint8Array(new SharedArrayBuffer(4));
+      shared[0] = 1;
+      const graph = PlanGraph.empty().addTask(makeTask('shared', { metadata: { bytes: shared } }));
+      shared[0] = 9;
+      const snapshot = graph.getTask(createTaskId('shared')) as Task;
+      (snapshot.metadata?.bytes as Uint8Array)[0] = 8;
+
+      const stored = graph.getTask(createTaskId('shared')) as Task;
+      expect(Array.from(stored.metadata?.bytes as Uint8Array)).toEqual([1, 0, 0, 0]);
+      expect((stored.metadata?.bytes as Uint8Array).buffer).toBeInstanceOf(ArrayBuffer);
+    }
+  });
+
   it('isolates stored tasks from mutations to getTask, getTasks, and topoSort results', () => {
     const g = PlanGraph.empty()
       .addTask(makeTask('a', { requiredSkills: ['setup'] }))

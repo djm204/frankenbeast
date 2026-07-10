@@ -25,15 +25,27 @@ function cloneUnknown<T>(value: T, seen = new WeakMap<object, unknown>()): T {
     return value;
   }
 
-  try {
-    return structuredClone(value);
-  } catch {
-    // Fall back to targeted cloning for runtimes/values not covered by structuredClone.
-  }
-
   const existing = seen.get(value);
   if (existing !== undefined) {
     return existing as T;
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return value.slice(0) as T;
+  }
+
+  if (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer) {
+    throw new TypeError('Task metadata cannot contain SharedArrayBuffer values');
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    const copiedBuffer = bytes.slice().buffer;
+    if (value instanceof DataView) {
+      return new DataView(copiedBuffer) as T;
+    }
+    const TypedArray = value.constructor as new (buffer: ArrayBuffer) => ArrayBufferView;
+    return new TypedArray(copiedBuffer) as T;
   }
 
   if (Array.isArray(value)) {
@@ -47,10 +59,6 @@ function cloneUnknown<T>(value: T, seen = new WeakMap<object, unknown>()): T {
 
   if (value instanceof Date) {
     return new Date(value.getTime()) as T;
-  }
-
-  if (value instanceof URL) {
-    return new URL(value.href) as T;
   }
 
   if (value instanceof RegExp) {
