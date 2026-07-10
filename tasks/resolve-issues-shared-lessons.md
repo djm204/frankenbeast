@@ -74,3 +74,7 @@
 
 ## 2026-07-10 — Network stop/restart target validation
 - Validate stop and restart target IDs through `filterNetworkServices` before invoking supervisor operations, so unknown names fail fast with 400 instead of becoming no-op successes. Keep this as a shared pattern for all service-targeted control-plane endpoints where missing resources must be surfaced as client errors.
+
+## 2026-07-10 — BeastRunService start failure retries
+- When `executor.start()` throws after mutating run state, compare the current attempt id/count to the pre-start snapshot before accepting service-level fallback handling. If a prior attempt is still running, restore live run metadata and rethrow so the live process remains controllable.
+- Executor-recorded pre-attempt failures should preserve the executor's specific stop reason/event while clearing stale run-level `startedAt`, `currentAttemptId`, and `latestExitCode` from older terminal attempts; add retry and duplicate-start regressions before retriggering Codex.
