@@ -78,6 +78,9 @@ export class RateLimitedSampler implements SamplerStrategy {
     if (!Number.isFinite(options.windowMs) || options.windowMs <= 0) {
       throw new RangeError(`windowMs must be greater than 0, got ${options.windowMs}`)
     }
+    if (!Number.isFinite(options.maxPerWindow) || options.maxPerWindow <= 0) {
+      throw new RangeError(`maxPerWindow must be greater than 0, got ${options.maxPerWindow}`)
+    }
     this.maxPerWindow = options.maxPerWindow
     this.windowMs = options.windowMs
     this.now = options.now ?? Date.now
