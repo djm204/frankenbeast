@@ -382,7 +382,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number, hash: string, parentHash?: string): void {
-  store.db.prepare('UPDATE audit_trail SET hash = ?, parent_hash = ? WHERE id = ?').run(hash, parentHash ?? null, id);
+  store.setAuditTrailMutationEnabled(true);
+  try {
+    store.db.prepare('UPDATE audit_trail SET hash = ?, parent_hash = ? WHERE id = ?').run(hash, parentHash ?? null, id);
+  } finally {
+    store.setAuditTrailMutationEnabled(false);
+  }
 }
 
 function parseMetadata(metadata: string): unknown {
