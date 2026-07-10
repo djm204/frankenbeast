@@ -50,6 +50,7 @@ npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/you
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 
 # Separate Beast backend: chat/API traffic goes to :4242, Beast controls go to :4050.
+npm --workspace @franken/orchestrator run beasts-daemon -- --base-dir /path/to/your-project --port 4050
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
 VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4050 \
   npm --workspace @franken/web run dev
