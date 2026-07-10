@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { deterministicUuid } from '@franken/types/utils';
 import { createFrankenSourceAliases } from '../scripts/vitest-source-aliases.js';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -30,6 +31,10 @@ const PACKAGE_CONFIGS = [
 ];
 
 describe('package Vitest source aliases', () => {
+  it('lets root Vitest resolve the @franken/types/utils subpath from source', () => {
+    expect(deterministicUuid('root-vitest-alias', 0)).toMatch(/^[0-9a-f-]+$/u);
+  });
+
   it('maps every first-party package scope to its TypeScript source entrypoint', () => {
     expect(createFrankenSourceAliases(new URL('../packages/franken-orchestrator/vitest.config.ts', import.meta.url))).toEqual(
       EXPECTED_ALIASES,
