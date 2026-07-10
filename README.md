@@ -409,9 +409,7 @@ If you run the backend on a different port, keep browser requests same-origin an
 
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
-VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4050 \
-  npm --workspace @franken/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 
 For Beast controls, set the operator token once in the repo root `.env` so the backend and Vite dev proxy can read it server-side:
