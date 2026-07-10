@@ -34,7 +34,7 @@ import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
   BeastLoopDeps, IPlannerModule, ICritiqueModule, IGovernorModule,
 } from '../deps.js';
-import { now as deterministicNow } from '@franken/types';
+import { deterministicUuid, now as deterministicNow } from '@franken/types';
 import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
 import type { ProviderConfig } from '../providers/provider-config.js';
@@ -334,7 +334,7 @@ async function createObserverDeps(
   const replayAuditRoot = resolve(options.paths.root, '.fbeast', 'audit');
   const replayStore = new ReplayContentStore(replayAuditRoot);
   const observerBridge = new CliObserverBridge({ budgetLimitUsd: config.budget, replayStore });
-  const runSessionId = options.runSessionId ?? `cli-session-${deterministicNow()}`;
+  const runSessionId = options.runSessionId ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
   if (config.enableTracing) {
     observerBridge.startTrace(runSessionId);
   }

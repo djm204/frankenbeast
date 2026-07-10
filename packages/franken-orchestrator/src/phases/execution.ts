@@ -13,7 +13,7 @@ import type {
   ICheckpointStore,
   SkillDescriptor,
 } from '../deps.js';
-import { isoNow, now as deterministicNow } from '@franken/types';
+import { isoNow, wallClockNow } from '@franken/types';
 import type { TaskOutcome } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -816,7 +816,7 @@ async function executeTask(
   config?: Pick<OrchestratorConfig, 'enableTracing'>,
 ): Promise<TaskOutcome> {
   ctx.retryCount = (ctx.retryCount ?? 0) + 1;
-  const startTime = deterministicNow();
+  const startTime = wallClockNow();
   const span = config?.enableTracing ? observer.startSpan(`task:${task.id}`) : undefined;
   logger.info('Execution: task start', {
     taskId: task.id,
@@ -911,7 +911,7 @@ async function executeTask(
       });
       logger.debug('Execution: task timing', {
         taskId: task.id,
-        durationMs: deterministicNow() - startTime,
+        durationMs: wallClockNow() - startTime,
         tokensUsed: 0,
       });
 
@@ -967,7 +967,7 @@ async function executeTask(
     });
     logger.debug('Execution: task timing', {
       taskId: task.id,
-      durationMs: deterministicNow() - startTime,
+      durationMs: wallClockNow() - startTime,
       tokensUsed,
     });
     return { taskId: task.id, status: 'success', output };
@@ -980,7 +980,7 @@ async function executeTask(
     logger.error('Execution: task failed', { taskId: task.id, error: errorMsg });
     logger.debug('Execution: task timing', {
       taskId: task.id,
-      durationMs: deterministicNow() - startTime,
+      durationMs: wallClockNow() - startTime,
       tokensUsed: 0,
     });
     return { taskId: task.id, status: 'failure', error: errorMsg };
