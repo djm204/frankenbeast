@@ -15,6 +15,10 @@
 
 - When `@codex review` is usage-limited, classify it as a blocker state and do not merge until a new trigger can produce a current-head clean response.
 
+## 2026-07-10 — ProcessSupervisor runtime error cleanup
+- In `ProcessSupervisor`, clean up child-process listeners and stream resources on runtime `error` events, not just `spawn` failures. Keep map deregistration idempotent and remove `error/exit/close` listeners before invoking user exit callbacks so repeated events cannot double-trigger callback paths.
+- Add a regression test that simulates a runtime `error` with a mocked `ChildProcess` and verifies `onExit` is emitted once, `SIGTERM` attempted, and listener cleanup is performed.
+
 ## 2026-07-09 — Franken-web beast wizard catalog data
 - When backend beast definitions expose interview prompts, drive cards, labels, validation, review rows, and launch config from the catalog instead of adding one-off hardcoded UI branches. Preserve old aliases (`docPath`, `chunkDir`, `topic`) only as compatibility fallbacks while preferring backend field names (`designDocPath`, `chunkDirectory`, `goal`).
 
@@ -70,3 +74,7 @@
 
 ## 2026-07-10 — Network stop/restart target validation
 - Validate stop and restart target IDs through `filterNetworkServices` before invoking supervisor operations, so unknown names fail fast with 400 instead of becoming no-op successes. Keep this as a shared pattern for all service-targeted control-plane endpoints where missing resources must be surfaced as client errors.
+
+## 2026-07-10 — MCP stdio health probes
+- MCP stdio probes need stream-level `stdin` error handlers that defer EPIPE to the process close/timeout path, and Content-Length parsing must buffer bytes rather than UTF-16 strings. Add regressions for clean-exit EPIPE races, explicit initialize error responses before close(0), non-ASCII framed JSON bodies, and split `Content-Length` headers before retriggering Codex.
+- For SDK-backed stdio MCP servers, send newline-delimited JSON initialize requests while still accepting framed responses; on explicit initialize error responses, kill the still-running probe child instead of treating generic error status as a reason to skip cleanup.

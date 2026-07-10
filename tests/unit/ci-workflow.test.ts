@@ -110,23 +110,45 @@ on:
 
     it('builds before running package tests in CI', () => {
       expect(content).toContain('turbo run');
-      expect(content).toMatch(/turbo run build lint[\s\S]*turbo run test/);
-      expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('turbo run test'));
+      expect(content).toMatch(/turbo run build lint[\s\S]*npm run ci:test:packages/);
+      expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('npm run ci:test:packages'));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
     });
 
     it('runs the deterministic root Vitest suite separately from Turbo', () => {
       expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
-      expect(content).toContain('npm run test:root');
+      expect(content).toContain('npm run ci:test:root');
       expect(content).not.toMatch(/npm run test:root --/);
-      expect(content.indexOf('npm run test:root')).toBeLessThan(content.indexOf('npx turbo run test'));
+      expect(content.indexOf('npm run ci:test:root')).toBeLessThan(content.indexOf('npm run ci:test:packages'));
+    });
+
+    it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
+      expect(content).toMatch(/name:\s*Validate bootstrap script \(dry-run\)/);
+      expect(content).toContain('npm run bootstrap:dry-run');
+      expect(content.indexOf('npm ci')).toBeLessThan(content.indexOf('npm run bootstrap:dry-run'));
+      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run audit:dependencies'));
+      expect(content).toContain('CI_BOOTSTRAP_DRY_RUN: "1"');
     });
 
     it('runs CI test commands with a fixed deterministic seed matrix', () => {
       expect(content).toContain('deterministic-seed');
       expect(content).toContain("deterministic-seed: ['1337']");
       expect(content).toContain('FRANKENBEAST_SEED: ${{ matrix.deterministic-seed }}');
-      expect(content.indexOf('FRANKENBEAST_SEED')).toBeLessThan(content.indexOf('npm run test:root'));
+      expect(content.indexOf('FRANKENBEAST_SEED')).toBeLessThan(content.indexOf('npm run ci:test:root'));
+    });
+
+    it('runs test commands through a configurable retry wrapper', () => {
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+
+      expect(content).toContain("CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}");
+      expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
+      expect(packageJson.scripts?.['ci:test:packages']).toBe('node scripts/retry-ci-command.mjs -- npx turbo run test');
+      expect(content).toContain('npm run ci:test:root');
+      expect(content).toContain('npm run ci:test:packages');
+      expect(content).not.toContain('run: npm run test:root');
+      expect(content).not.toContain('run: npx turbo run test');
     });
 
     it('documents the root-suite and package-Turbo CI split in step names', () => {

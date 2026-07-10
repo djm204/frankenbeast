@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, spawn as defaultSpawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { BeastProcessSpec } from '../types.js';
@@ -23,6 +23,7 @@ export interface ProcessSupervisorLike {
 
 export interface ProcessSupervisorOptions {
   readonly projectRoot?: string | undefined;
+  readonly spawn?: typeof defaultSpawn;
 }
 
 function allowlistedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
@@ -67,7 +68,14 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     let stderrClosed = false;
     let exitInfo: { code: number | null; signal: string | null } | undefined;
     let exitFired = false;
+    let cleanupStarted = false;
+    const forceClose = {
+      stdout: undefined as (() => void) | undefined,
+      stderr: undefined as (() => void) | undefined,
+    };
+    let recordExit: (code: number | null, signal: string | null) => void = () => undefined;
 
+    const spawn = this.options.spawn ?? defaultSpawn;
     const child = spawn(spec.command, [...spec.args], {
       cwd: spec.cwd,
       env: {
@@ -77,17 +85,57 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    child.once('error', (error) => {
-      const failedPid = child.pid;
-      if (failedPid) {
-        this.processes.delete(failedPid);
+    const cleanupProcess = () => {
+      if (cleanupStarted) {
+        return;
       }
+      cleanupStarted = true;
+
+      if (child.pid) {
+        this.processes.delete(child.pid);
+      }
+      child.removeListener('error', onError);
+      child.removeListener('exit', recordExit);
+      child.removeListener('close', recordExit);
+    };
+
+    let maybeFireExit: () => void = () => undefined;
+
+    const onError = (error: Error) => {
       callbacks.onStderr(`Process spawn failed for ${spec.command}: ${error.message}`);
-      if (!exitFired) {
-        exitFired = true;
-        callbacks.onExit(1, null);
+      if (!exitInfo) {
+        exitInfo = { code: 1, signal: null };
       }
-    });
+      cleanupProcess();
+      if (child.pid) {
+        try {
+          child.kill('SIGTERM');
+        } catch (killError) {
+          const killCode = (killError as NodeJS.ErrnoException).code;
+          if (killCode !== 'ESRCH') {
+            throw killError;
+          }
+        }
+      }
+
+      setImmediate(() => {
+        if (!stdoutClosed) {
+          if (!child.stdout) {
+            stdoutClosed = true;
+          }
+          forceClose.stdout?.();
+        }
+        if (!stderrClosed) {
+          if (!child.stderr) {
+            stderrClosed = true;
+          }
+          forceClose.stderr?.();
+        }
+        maybeFireExit();
+      });
+    };
+
+    child.once('error', onError);
 
     if (!child.pid) {
       throw new Error(
@@ -98,10 +146,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     const pid = child.pid;
     this.processes.set(pid, child);
 
-    const maybeFireExit = () => {
+    maybeFireExit = () => {
       if (!exitFired && stdoutClosed && stderrClosed && exitInfo) {
+        cleanupProcess();
         exitFired = true;
-        this.processes.delete(pid);
         callbacks.onExit(exitInfo.code, exitInfo.signal);
       }
     };
@@ -180,28 +228,28 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       };
     };
 
-    const forceCloseStdout = child.stdout
+    forceClose.stdout = child.stdout
       ? wireLineReader(child.stdout, callbacks.onStdout, markStdoutClosed)
       : undefined;
-    if (!forceCloseStdout) {
+    if (!forceClose.stdout) {
       stdoutClosed = true;
     }
 
-    const forceCloseStderr = child.stderr
+    forceClose.stderr = child.stderr
       ? wireLineReader(child.stderr, callbacks.onStderr, markStderrClosed)
       : undefined;
-    if (!forceCloseStderr) {
+    if (!forceClose.stderr) {
       stderrClosed = true;
     }
 
-    const recordExit = (code: number | null, signal: string | null) => {
+    recordExit = (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
       setImmediate(() => {
         if (!stdoutClosed) {
-          forceCloseStdout?.();
+          forceClose.stdout?.();
         }
         if (!stderrClosed) {
-          forceCloseStderr?.();
+          forceClose.stderr?.();
         }
         maybeFireExit();
       });

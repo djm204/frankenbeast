@@ -41,14 +41,16 @@ describe('ConsoleLogger', () => {
     );
   });
 
-  it('logs warn with timestamp and prefix', () => {
+  it('logs warn through the shared output path without calling console.warn', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const logger = new ConsoleLogger({ verbose: false });
 
     logger.warn('heads up');
 
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toBe(
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0]?.[0]).toBe(
       '2025-02-01T12:00:00.000Z [beast:warn] heads up',
     );
   });

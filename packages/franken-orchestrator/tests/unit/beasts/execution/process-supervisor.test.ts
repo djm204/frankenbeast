@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProcessSupervisor } from '../../../../src/beasts/execution/process-supervisor.js';
 import type { ProcessCallbacks } from '../../../../src/beasts/execution/process-supervisor.js';
 import type { BeastProcessSpec } from '../../../../src/beasts/types.js';
@@ -75,6 +76,76 @@ describe('ProcessSupervisor', () => {
       await vi.waitFor(() => {
         expect(callbacks.onStderr).toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
       }, { timeout: 5000 });
+    });
+
+    it('cleans up resources after runtime child process errors', async () => {
+      const callbacks = makeCallbacks();
+      const handlers: Record<string, (...args: unknown[]) => void> = {};
+
+      const fakeStdout = new EventEmitter() as EventEmitter & {
+        setEncoding: (encoding: BufferEncoding) => void;
+        destroy: () => void;
+      };
+      fakeStdout.setEncoding = vi.fn();
+      fakeStdout.destroy = vi.fn();
+
+      const fakeStderr = new EventEmitter() as EventEmitter & {
+        setEncoding: (encoding: BufferEncoding) => void;
+        destroy: () => void;
+      };
+      fakeStderr.setEncoding = vi.fn();
+      fakeStderr.destroy = vi.fn();
+
+      const fakeChild: {
+        pid: number;
+        stdout: unknown;
+        stderr: unknown;
+        kill: ReturnType<typeof vi.fn>;
+        on: ReturnType<typeof vi.fn>;
+        once: ReturnType<typeof vi.fn>;
+        removeListener: ReturnType<typeof vi.fn>;
+      } = {
+        pid: 41234,
+        stdout: fakeStdout,
+        stderr: fakeStderr,
+        kill: vi.fn(),
+        on: vi.fn((event, listener) => {
+          handlers[event] = listener;
+          return fakeChild as any;
+        }),
+        once: vi.fn((event, listener) => {
+          handlers[event] = listener;
+          return fakeChild as any;
+        }),
+        removeListener: vi.fn((event, listener) => {
+          if (handlers[event] === listener) {
+            delete handlers[event];
+          }
+          return fakeChild as any;
+        }),
+      };
+
+      supervisor = new ProcessSupervisor({
+        spawn: vi.fn(() => fakeChild as never),
+      });
+
+      const spawnPromise = supervisor.spawn(makeSpec(), callbacks);
+      handlers.error?.(new Error('runtime pipe break'));
+
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalledWith(1, null);
+      }, { timeout: 1000 });
+
+      expect(callbacks.onStderr).toHaveBeenCalledWith(expect.stringContaining('Process spawn failed for echo: runtime pipe break'));
+      expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(fakeChild.removeListener).toHaveBeenCalledWith('exit', expect.any(Function));
+      expect(fakeChild.removeListener).toHaveBeenCalledWith('close', expect.any(Function));
+
+      // Ensure runtime error does not double-fire onExit if process events are later emitted
+      handlers.exit?.(1, null);
+      expect(callbacks.onExit).toHaveBeenCalledTimes(1);
+
+      await spawnPromise;
     });
 
     it('captures stdout lines via onStdout callback', async () => {
@@ -280,7 +351,7 @@ child.unref();`,
       try {
         await new ProcessSupervisor({ projectRoot: workDir }).spawn({
           command: process.execPath,
-          args: ['-e', 'process.stdout.write(JSON.stringify(process.env) + \"\\n\")'],
+          args: ['-e', 'process.stdout.write(JSON.stringify(process.env) + "\\n")'],
           cwd: workDir,
           env: { FRANKENBEAST_RUN_CONFIG: '/x' },
         }, callbacks);

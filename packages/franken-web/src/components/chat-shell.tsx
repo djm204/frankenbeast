@@ -20,6 +20,7 @@ import {
 import { ChatApiClient, type ChatSessionSummary } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import { BeastsPage } from '../pages/beasts-page';
+import type { AgentLifecycleAction } from './beasts/agent-action-bar';
 import { AnalyticsApiClient } from '../lib/analytics-api';
 import { AnalyticsPage } from '../pages/analytics-page';
 import { DashboardApiClient } from '../lib/dashboard-api';
@@ -286,7 +287,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const beastAgentsRef = useRef<TrackedAgentSummary[]>([]);
   const beastAgentDetailRef = useRef<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
+  const [beastCreationUnavailableReason, setBeastCreationUnavailableReason] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
+  const [pendingBeastAgentActions, setPendingBeastAgentActions] = useState<Record<string, AgentLifecycleAction | undefined>>({});
+  const pendingBeastAgentActionsRef = useRef<Record<string, AgentLifecycleAction | undefined>>({});
   const selectedBeastAgentIdRef = useRef<string | null>(null);
   const shouldAutoSelectBeastAgentRef = useRef(true);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
@@ -374,6 +378,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const composerSessionKey = preserveComposerDraft
     ? `anonymous:${sessionSeed}`
     : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
+  const beastCreationDisabled = Boolean(beastCreationUnavailableReason);
 
   useEffect(() => {
     if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
@@ -431,8 +436,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     let cancelled = false;
 
     async function refreshBeasts() {
+      let catalog: Awaited<ReturnType<typeof client.getCatalog>>;
+      let agents: Awaited<ReturnType<typeof client.listAgents>>;
+      let runs: Awaited<ReturnType<typeof client.listRuns>>;
+      let containerRuntime: Awaited<ReturnType<typeof client.getContainerRuntimeStatus>>;
       try {
-        const [catalog, agents, runs, containerRuntime] = await Promise.all([
+        [catalog, agents, runs, containerRuntime] = await Promise.all([
           client.getCatalog(),
           client.listAgents(),
           client.listRuns(),
@@ -444,15 +453,26 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         if (cancelled) {
           return;
         }
-        setBeastError(null);
-        setBeastCatalog(catalog);
-        setBeastAgents(agents);
-        setBeastRuns(runs);
-        setBeastContainerRuntime(containerRuntime);
-        const autoSelectedAgentId = agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
-        const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
-        setSelectedBeastAgentId(currentAgentId);
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          setBeastError(message);
+          setBeastCreationUnavailableReason(message);
+        }
+        return;
+      }
 
+      setBeastError(null);
+      setBeastCreationUnavailableReason(null);
+      setBeastCatalog(catalog);
+      setBeastAgents(agents);
+      setBeastRuns(runs);
+      setBeastContainerRuntime(containerRuntime);
+      const autoSelectedAgentId = agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
+      const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
+      setSelectedBeastAgentId(currentAgentId);
+
+      try {
         if (currentAgentId) {
           const detail = await client.getAgent(currentAgentId);
           if (!cancelled) {
@@ -473,7 +493,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         }
       } catch (error) {
         if (!cancelled) {
-          setBeastError(error instanceof Error ? error.message : 'Unable to load Beast dispatch state.');
+          const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          setBeastError(message);
         }
       }
     }
@@ -724,6 +745,47 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     const sidebar = sidebarRef.current;
     if (!sidebar) return;
     getSidebarFocusableElements(sidebar).at(-1)?.focus();
+  }
+
+  function setPendingBeastAgentAction(agentId: string, action: AgentLifecycleAction | undefined) {
+    const next = { ...pendingBeastAgentActionsRef.current };
+    if (action) {
+      next[agentId] = action;
+    } else {
+      delete next[agentId];
+    }
+    pendingBeastAgentActionsRef.current = next;
+    setPendingBeastAgentActions(next);
+  }
+
+  function runBeastAgentLifecycleAction({
+    agentId,
+    action,
+    request,
+    onSuccess,
+    errorMessage,
+  }: {
+    agentId: string;
+    action: AgentLifecycleAction;
+    request: () => Promise<unknown>;
+    onSuccess?: () => void;
+    errorMessage: string;
+  }) {
+    if (!beastClient || pendingBeastAgentActionsRef.current[agentId]) return;
+
+    setBeastError(null);
+    setPendingBeastAgentAction(agentId, action);
+    void request()
+      .then(() => {
+        onSuccess?.();
+        setBeastRefreshNonce((current) => current + 1);
+      })
+      .catch((err) => {
+        setBeastError(err instanceof Error ? err.message : errorMessage);
+      })
+      .finally(() => {
+        setPendingBeastAgentAction(agentId, undefined);
+      });
   }
 
   const hasPendingApproval = Boolean(pendingApproval) || sessionState === 'pending_approval';
@@ -984,9 +1046,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             catalog={beastCatalog}
             runs={beastRuns}
             containerRuntime={beastContainerRuntime}
-            disabled={false}
+            disabled={beastCreationDisabled}
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
+            pendingAgentActions={pendingBeastAgentActions}
             selectedAgentId={selectedBeastAgentId}
             onClose={() => {
               shouldAutoSelectBeastAgentRef.current = false;
@@ -1003,42 +1066,46 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               setBeastRefreshNonce((current) => current + 1);
             }}
             onDelete={(agentId) => {
-              if (!beastClient) return;
-              void beastClient.deleteAgent(agentId).then(() => {
-                shouldAutoSelectBeastAgentRef.current = false;
-                setSelectedBeastAgentId((current) => {
-                  if (current !== agentId) return current;
-                  selectedBeastAgentIdRef.current = null;
-                  return null;
-                });
-                setBeastAgentDetail((current) => current?.agent.id === agentId ? null : current);
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((err) => {
-                setBeastError(err instanceof Error ? err.message : 'Unable to delete tracked agent.');
+              runBeastAgentLifecycleAction({
+                agentId,
+                action: 'delete',
+                request: () => beastClient.deleteAgent(agentId),
+                onSuccess: () => {
+                  shouldAutoSelectBeastAgentRef.current = false;
+                  setSelectedBeastAgentId((current) => {
+                    if (current !== agentId) {
+                      return current;
+                    }
+                    selectedBeastAgentIdRef.current = null;
+                    return null;
+                  });
+                  setBeastAgentDetail((current) => current?.agent.id === agentId ? null : current);
+                },
+                errorMessage: 'Unable to delete tracked agent.',
               });
             }}
             onKill={(agentId) => {
-              if (!beastClient) return;
-              void beastClient.killAgent(agentId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((err) => {
-                setBeastError(err instanceof Error ? err.message : 'Unable to kill tracked agent.');
+              runBeastAgentLifecycleAction({
+                agentId,
+                action: 'kill',
+                request: () => beastClient.killAgent(agentId),
+                errorMessage: 'Unable to kill tracked agent.',
               });
             }}
             onRestart={(agentId) => {
-              if (!beastClient) return;
-              void beastClient.restartAgent(agentId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((err) => {
-                setBeastError(err instanceof Error ? err.message : 'Unable to restart tracked agent.');
+              runBeastAgentLifecycleAction({
+                agentId,
+                action: 'restart',
+                request: () => beastClient.restartAgent(agentId),
+                errorMessage: 'Unable to restart tracked agent.',
               });
             }}
             onResume={(agentId) => {
-              if (!beastClient) return;
-              void beastClient.resumeAgent(agentId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((err) => {
-                setBeastError(err instanceof Error ? err.message : 'Unable to resume tracked agent.');
+              runBeastAgentLifecycleAction({
+                agentId,
+                action: 'resume',
+                request: () => beastClient.resumeAgent(agentId),
+                errorMessage: 'Unable to resume tracked agent.',
               });
             }}
             onSaveAgentConfig={async (agentId, values) => {
@@ -1056,19 +1123,19 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               setSelectedBeastAgentId(agentId);
             }}
             onStart={(agentId) => {
-              if (!beastClient) return;
-              void beastClient.startAgent(agentId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((err) => {
-                setBeastError(err instanceof Error ? err.message : 'Unable to start tracked agent.');
+              runBeastAgentLifecycleAction({
+                agentId,
+                action: 'start',
+                request: () => beastClient.startAgent(agentId),
+                errorMessage: 'Unable to start tracked agent.',
               });
             }}
             onStop={(agentId) => {
-              if (!beastClient) return;
-              void beastClient.stopAgent(agentId).then(() => {
-                setBeastRefreshNonce((current) => current + 1);
-              }).catch((err) => {
-                setBeastError(err instanceof Error ? err.message : 'Unable to stop tracked agent.');
+              runBeastAgentLifecycleAction({
+                agentId,
+                action: 'stop',
+                request: () => beastClient.stopAgent(agentId),
+                errorMessage: 'Unable to stop tracked agent.',
               });
             }}
           />
