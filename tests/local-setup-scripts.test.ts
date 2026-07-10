@@ -19,9 +19,11 @@ describe('local setup scripts', () => {
 
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
+    expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
     expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
-    expect(read('docs/guides/quickstart.md')).toContain('corepack enable npm');
-    expect(read('docs/guides/quickstart.md')).toContain('npm run check:package-manager');
+    expect(read('scripts/bootstrap.sh')).toContain('command -v corepack');
+    expect(read('scripts/bootstrap.sh')).toContain('corepack enable npm');
+    expect(read('scripts/bootstrap.sh')).toContain('corepack prepare "$expected_pm" --activate');
 
     for (const packagePath of packagePaths) {
       const manifest = JSON.parse(read(packagePath)) as { engines?: { node?: string } };
@@ -66,6 +68,40 @@ describe('local setup scripts', () => {
     expect(onboarding).toContain('npm run local:verify-setup');
     expect(seedScript).toContain('Usage: npm run local:seed');
     expect(verifyScript).toContain('Usage: npm run local:verify-setup');
+  });
+
+  it('provides a one-click bootstrap script and CI dry-run gate', () => {
+    const manifest = JSON.parse(read('package.json')) as { scripts?: Record<string, string> };
+    const scriptPath = join(ROOT, 'scripts/bootstrap.sh');
+    const script = read('scripts/bootstrap.sh');
+    const readme = read('README.md');
+    const onboarding = read('ONBOARDING.md');
+    const quickstart = read('docs/guides/quickstart.md');
+    const ci = read('.github/workflows/ci.yml');
+
+    expect(manifest.scripts?.bootstrap).toBe('bash scripts/bootstrap.sh');
+    expect(statSync(scriptPath).mode & 0o111).not.toBe(0);
+    expect(script).toContain('--dry-run');
+    expect(script).toContain('Node.js >=22.13.0 <23 or >=24.0.0 <26');
+    expect(script).toContain('cp .env.example .env');
+    expect(script).toContain('required_keys');
+    expect(script).toContain('npm ci');
+    expect(script).toContain('docker compose up -d');
+    expect(readme).toContain('npm run bootstrap -- --no-docker');
+    expect(onboarding).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(quickstart).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(ci).toContain('Validate bootstrap dry-run');
+    expect(ci).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(ci.indexOf('./scripts/bootstrap.sh --dry-run')).toBeLessThan(ci.indexOf('npm ci'));
+
+    const dryRun = spawnSync('bash', [scriptPath, '--dry-run'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
+    expect(dryRun.stdout).toContain('Required env vars are present.');
+    expect(dryRun.stdout).toContain('dry-run: npm ci');
   });
 
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {

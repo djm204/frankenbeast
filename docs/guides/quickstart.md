@@ -11,12 +11,16 @@ Get Frankenbeast running locally.
 ## 1. Install dependencies
 
 ```bash
-if ! command -v corepack >/dev/null 2>&1; then npm install -g corepack; fi
-corepack enable npm
-corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
-npm run check:package-manager
-npm install
+npm run bootstrap -- --no-docker
 ```
+
+For CI-style validation without mutating files or installing dependencies, run:
+
+```bash
+./scripts/bootstrap.sh --dry-run
+```
+
+If Corepack is not available yet, install it first with `npm install -g corepack`; the bootstrap script then activates and verifies the root `packageManager` pin.
 
 Run reproducible dependency audits through the guarded script so the live npm
 binary still matches the root `packageManager` pin before `npm audit` runs:

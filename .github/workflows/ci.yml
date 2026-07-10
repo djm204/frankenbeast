@@ -32,6 +32,9 @@ jobs:
       - name: Verify npm matches packageManager
         run: node scripts/check-package-manager.mjs
 
+      - name: Validate bootstrap dry-run
+        run: ./scripts/bootstrap.sh --dry-run
+
       - run: npm ci
 
       - name: Dependency vulnerability audit
