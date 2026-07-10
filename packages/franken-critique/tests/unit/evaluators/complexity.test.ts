@@ -567,6 +567,51 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
   });
 
+  it('keeps named imports from becoming semicolonless signature bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'export function external(a, b, c, d, e, f): void',
+      "import { Shape } from './shape'",
+      'function ok(a, b) { return a ?? b; }',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
+  });
+
+  it('flags long declarations with non-object function return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = `function makeCallback(): () => void {\n${lines.join('\n')}\n  return () => undefined;\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
+  });
+
+  it('flags long block arrows with non-object function return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = `const makeCallback = (): () => void => {\n${lines.join('\n')}\n  return () => undefined;\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
+  });
+
+  it('flags parameters on declarations with non-object function return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(a, b, c, d, e, f): () => void { return () => undefined; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags parameters on block arrows with non-object function return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const complex = (a, b, c, d, e, f): () => void => { return () => undefined; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
 
   it('flags generic arrow functions with function type constraints', async () => {
     const evaluator = new ComplexityEvaluator();
