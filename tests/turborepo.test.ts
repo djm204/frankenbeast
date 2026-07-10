@@ -105,10 +105,15 @@ describe('Turborepo configuration', () => {
     });
   });
 
-  describe('.gitignore includes .turbo', () => {
+  describe('.gitignore includes generated workspace artifacts', () => {
     it('has .turbo entry', () => {
       const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
       expect(gitignore).toMatch(/^\.turbo$/m);
+    });
+
+    it('ignores the root .tmp directory used by package test scripts', () => {
+      const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+      expect(gitignore).toMatch(/^\.tmp\/$/m);
     });
   });
 
