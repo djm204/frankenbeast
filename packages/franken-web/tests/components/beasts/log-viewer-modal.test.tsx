@@ -46,6 +46,50 @@ describe('LogViewerModal', () => {
     expect(screen.queryByText('info: success')).toBeNull();
   });
 
+  it('interleaves timestamped events and logs chronologically after filtering', () => {
+    render(<LogViewerModal
+      isOpen={true}
+      onClose={vi.fn()}
+      events={[
+        {
+          id: 'event-after',
+          agentId: 'agent-1',
+          sequence: 2,
+          level: 'info',
+          type: 'agent.event',
+          message: 'agent finished',
+          payload: {},
+          createdAt: '2026-03-15T10:02:00.000Z',
+        },
+        {
+          id: 'event-before',
+          agentId: 'agent-1',
+          sequence: 1,
+          level: 'info',
+          type: 'agent.event',
+          message: 'agent started',
+          payload: {},
+          createdAt: '2026-03-15T10:00:00.000Z',
+        },
+      ]}
+      logs={[
+        JSON.stringify({ stream: 'stdout', message: 'middle log line', createdAt: '2026-03-15T10:01:00.000Z' }),
+      ]}
+    />);
+
+    const entries = screen.getAllByText(/agent started|middle log line|agent finished/).map((entry) => entry.textContent);
+    expect(entries).toEqual([
+      expect.stringContaining('agent started'),
+      expect.stringContaining('middle log line'),
+      expect.stringContaining('agent finished'),
+    ]);
+
+    const search = screen.getByPlaceholderText(/search logs/i);
+    fireEvent.change(search, { target: { value: 'middle' } });
+    expect(screen.getByText(/middle log line/)).toBeTruthy();
+    expect(screen.queryByText(/agent started/)).toBeNull();
+  });
+
   it('disables fullscreen toggle when fullscreen is not supported', () => {
     mockFullscreenApi({ requestFullscreen: undefined, exitFullscreen: undefined });
 

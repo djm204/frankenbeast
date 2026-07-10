@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
 import type { TrackedAgentEvent } from '../../lib/beast-api';
+import { buildLogDisplayEntries } from './log-display-entry';
 
 interface LogViewerModalProps {
   isOpen: boolean;
@@ -38,12 +39,7 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  const filteredLogs = search
-    ? logs.filter((l) => l.toLowerCase().includes(search.toLowerCase()))
-    : logs;
-  const filteredEvents = search
-    ? events.filter((e) => e.message.toLowerCase().includes(search.toLowerCase()))
-    : events;
+  const displayEntries = buildLogDisplayEntries(events, logs, search);
 
   async function handleFullscreen() {
     if (!isFullscreenSupported) {
@@ -114,15 +110,12 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
           <ScrollArea.Root className="flex-1 overflow-hidden">
             <ScrollArea.Viewport className="h-full w-full p-4">
               <div className="space-y-1 font-mono text-xs text-beast-muted">
-                {filteredEvents.map((e) => (
-                  <div key={e.id} className={e.level === 'error' ? 'text-beast-danger' : ''}>
-                    [{new Date(e.createdAt).toLocaleTimeString()}] [{e.level}] {e.message}
+                {displayEntries.map((entry) => (
+                  <div key={entry.key} className={entry.level === 'error' ? 'text-beast-danger' : ''}>
+                    {entry.label}
                   </div>
                 ))}
-                {filteredLogs.map((line, i) => (
-                  <div key={i}>{line}</div>
-                ))}
-                {filteredEvents.length === 0 && filteredLogs.length === 0 && (
+                {displayEntries.length === 0 && (
                   <p className="text-beast-subtle italic">No matching entries</p>
                 )}
               </div>
