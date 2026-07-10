@@ -62,6 +62,12 @@ describe('deterministic Vitest mode', () => {
       expect(new Date()).toBeInstanceOf(originalDate);
       expect(Date.parse('2026-01-01T00:00:00.000Z')).toBe(originalDate.parse('2026-01-01T00:00:00.000Z'));
       expect(Date.UTC(2026, 0, 1)).toBe(originalDate.UTC(2026, 0, 1));
+      const nowDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
+      expect(nowDescriptor?.configurable).toBe(true);
+      expect(nowDescriptor?.writable).toBe(true);
+      const nowDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
+      expect(nowDescriptor?.configurable).toBe(true);
+      expect(nowDescriptor?.writable).toBe(true);
     } finally {
       globalThis.Date = originalDate;
       Math.random = originalRandom;
@@ -78,6 +84,14 @@ describe('deterministic Vitest mode', () => {
       const source = readFileSync(resolve(ROOT, configPath), 'utf8');
       expect(source, configPath).toContain('setupFiles');
       expect(source, configPath).toContain(DETERMINISTIC_SETUP);
+      expect(source, configPath).toContain('fileURLToPath');
+      expect(source, configPath).not.toContain('.pathname');
     }
+  });
+
+  it('declares the deterministic seed as a Turbo global env input for package tests', () => {
+    const turboJson = JSON.parse(readFileSync(resolve(ROOT, 'turbo.json'), 'utf8')) as { globalEnv?: string[] };
+
+    expect(turboJson.globalEnv).toContain('FRANKENBEAST_SEED');
   });
 });

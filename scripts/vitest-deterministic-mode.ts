@@ -76,7 +76,9 @@ export function installDeterministicMode(seed = process.env['FRANKENBEAST_SEED']
     value: OriginalDate.prototype,
   });
   Object.defineProperty(DeterministicDate, 'now', {
+    configurable: true,
     value: () => clock(),
+    writable: true,
   });
 
   Object.defineProperty(DeterministicDate, '__frankenOriginalDate', {
