@@ -7,15 +7,15 @@ import { describe, expect, it } from 'vitest';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const SCRIPT = resolve(ROOT, 'scripts/check-major-outdated.mjs');
 
-function writeJson(value: unknown) {
+function writeJson(value: unknown, filename = 'outdated.json') {
   const dir = mkdtempSync(join(tmpdir(), 'franken-outdated-'));
-  const file = join(dir, 'outdated.json');
+  const file = join(dir, filename);
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
   return file;
 }
 
-function runOutdatedGuard(report: unknown) {
-  return spawnSync(process.execPath, [SCRIPT, '--input', writeJson(report)], {
+function runOutdatedGuard(report: unknown, baseline: unknown = []) {
+  return spawnSync(process.execPath, [SCRIPT, '--input', writeJson(report), '--baseline', writeJson(baseline, 'baseline.json')], {
     cwd: ROOT,
     encoding: 'utf8',
   });
@@ -75,6 +75,22 @@ describe('dependency CI guards for issue #1414', () => {
     expect(result.stderr).toContain('E403');
   });
 
+  it('passes when existing direct major gaps match the approved baseline', () => {
+    const report = {
+      react: {
+        current: '18.3.1',
+        wanted: '18.3.1',
+        latest: '19.2.7',
+        location: 'packages/franken-web/node_modules/react',
+      },
+    };
+
+    const result = runOutdatedGuard(report, [{ name: 'react', currentMajor: 18, latestMajor: 19 }]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('baseline-approved major gap');
+  });
+
   it('passes when dependencies are only behind within their current major', () => {
     const result = runOutdatedGuard({
       typescript: {
@@ -86,7 +102,7 @@ describe('dependency CI guards for issue #1414', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('no direct dependencies are behind an allowed major release');
+    expect(result.stdout).toContain('no unapproved direct dependencies are behind the latest major release');
   });
 
   it('wires dependency audit, major outdated check, and SBOM artifact generation into CI', () => {

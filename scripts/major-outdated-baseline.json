@@ -1,0 +1,106 @@
+[
+  {
+    "name": "@google/genai",
+    "currentMajor": 1,
+    "latestMajor": 2,
+    "current": "1.46.0",
+    "latest": "2.11.0",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "@types/node",
+    "currentMajor": 20,
+    "latestMajor": 26,
+    "current": "20.19.43",
+    "latest": "26.1.1",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "@types/node",
+    "currentMajor": 22,
+    "latestMajor": 26,
+    "current": "22.20.0",
+    "latest": "26.1.1",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "@types/node",
+    "currentMajor": 25,
+    "latestMajor": 26,
+    "current": "25.9.4",
+    "latest": "26.1.1",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "@types/react",
+    "currentMajor": 18,
+    "latestMajor": 19,
+    "current": "18.3.28",
+    "latest": "19.2.17",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "@types/react-dom",
+    "currentMajor": 18,
+    "latestMajor": 19,
+    "current": "18.3.7",
+    "latest": "19.2.3",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "eslint",
+    "currentMajor": 9,
+    "latestMajor": 10,
+    "current": "9.39.4",
+    "latest": "10.6.0",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "eslint-config-prettier",
+    "currentMajor": 9,
+    "latestMajor": 10,
+    "current": "9.1.2",
+    "latest": "10.1.8",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "jsdom",
+    "currentMajor": 25,
+    "latestMajor": 29,
+    "current": "25.0.1",
+    "latest": "29.1.1",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "react",
+    "currentMajor": 18,
+    "latestMajor": 19,
+    "current": "18.3.1",
+    "latest": "19.2.7",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "react-dom",
+    "currentMajor": 18,
+    "latestMajor": 19,
+    "current": "18.3.1",
+    "latest": "19.2.7",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "typescript",
+    "currentMajor": 5,
+    "latestMajor": 7,
+    "current": "5.9.3",
+    "latest": "7.0.2",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "zod",
+    "currentMajor": 3,
+    "latestMajor": 4,
+    "current": "3.25.76",
+    "latest": "4.4.3",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  }
+]

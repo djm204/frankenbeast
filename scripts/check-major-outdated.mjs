@@ -1,24 +1,44 @@
 #!/usr/bin/env node
 /**
- * Fail CI only when `npm outdated` reports a direct dependency whose declared
- * range permits a newer major than the version currently locked/installed.
+ * Fail CI when `npm outdated` reports direct dependencies whose latest release
+ * is on a newer major than the version currently locked/installed, excluding
+ * repo-approved baseline gaps that predate the guard.
  *
  * Usage:
  *   node scripts/check-major-outdated.mjs
  *   node scripts/check-major-outdated.mjs --input path/to/npm-outdated.json
+ *   node scripts/check-major-outdated.mjs --baseline path/to/baseline.json
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const defaultBaseline = resolve(repoRoot, 'scripts/major-outdated-baseline.json');
 
 function usage() {
-  console.error('Usage: node scripts/check-major-outdated.mjs [--input npm-outdated.json]');
+  console.error('Usage: node scripts/check-major-outdated.mjs [--input npm-outdated.json] [--baseline baseline.json]');
 }
 
 function parseArgs(argv) {
-  if (argv.length === 0) return { input: null };
-  if (argv.length === 2 && argv[0] === '--input') return { input: argv[1] };
-  usage();
-  process.exit(2);
+  const args = { input: null, baseline: defaultBaseline };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--input' && argv[i + 1]) {
+      args.input = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg === '--baseline' && argv[i + 1]) {
+      args.baseline = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    usage();
+    process.exit(2);
+  }
+  return args;
 }
 
 function readOutdatedJson(input) {
@@ -70,11 +90,42 @@ function hasNpmError(report) {
   return Boolean(report && typeof report === 'object' && !Array.isArray(report) && 'error' in report);
 }
 
+function readBaseline(path) {
+  if (!path || !existsSync(path)) return new Set();
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    console.error(`Unable to parse major-outdated baseline ${path}.`);
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(2);
+  }
+  if (!Array.isArray(parsed)) {
+    console.error(`Major-outdated baseline ${path} must be a JSON array.`);
+    process.exit(2);
+  }
+  return new Set(
+    parsed.map((entry) => {
+      if (!entry || typeof entry !== 'object' || typeof entry.name !== 'string') {
+        console.error(`Invalid major-outdated baseline entry: ${JSON.stringify(entry)}`);
+        process.exit(2);
+      }
+      const currentMajor = Number.isInteger(entry.currentMajor) ? entry.currentMajor : parseMajor(entry.current);
+      const latestMajor = Number.isInteger(entry.latestMajor) ? entry.latestMajor : parseMajor(entry.latest);
+      if (currentMajor === null || latestMajor === null) {
+        console.error(`Invalid major-outdated baseline versions for ${entry.name}.`);
+        process.exit(2);
+      }
+      return `${entry.name}:${currentMajor}->${latestMajor}`;
+    }),
+  );
+}
+
 export function findMajorOutdated(report) {
   return toRows(report)
     .map((entry) => {
       const currentMajor = parseMajor(entry.current);
-      const wantedMajor = parseMajor(entry.wanted);
+      const latestMajor = parseMajor(entry.latest);
       return {
         name: entry.name,
         current: entry.current,
@@ -82,14 +133,14 @@ export function findMajorOutdated(report) {
         latest: entry.latest,
         location: entry.location,
         currentMajor,
-        wantedMajor,
+        latestMajor,
       };
     })
-    .filter((entry) => entry.currentMajor !== null && entry.wantedMajor !== null && entry.wantedMajor > entry.currentMajor)
+    .filter((entry) => entry.currentMajor !== null && entry.latestMajor !== null && entry.latestMajor > entry.currentMajor)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-const { input } = parseArgs(process.argv.slice(2));
+const { input, baseline } = parseArgs(process.argv.slice(2));
 const raw = readOutdatedJson(input).trim();
 if (!raw) {
   console.log('dependency freshness OK — npm outdated reported no outdated dependencies');
@@ -111,16 +162,19 @@ if (hasNpmError(parsed)) {
   process.exit(2);
 }
 
+const baselineKeys = readBaseline(baseline);
 const majorGaps = findMajorOutdated(parsed);
-if (majorGaps.length === 0) {
-  console.log('dependency freshness OK — no direct dependencies are behind an allowed major release');
+const unapprovedGaps = majorGaps.filter((entry) => !baselineKeys.has(`${entry.name}:${entry.currentMajor}->${entry.latestMajor}`));
+if (unapprovedGaps.length === 0) {
+  const suffix = majorGaps.length > 0 ? ` (${majorGaps.length} baseline-approved major gap${majorGaps.length === 1 ? '' : 's'} unchanged)` : '';
+  console.log(`dependency freshness OK — no unapproved direct dependencies are behind the latest major release${suffix}`);
   process.exit(0);
 }
 
-console.error(`FAIL: ${majorGaps.length} direct dependenc${majorGaps.length === 1 ? 'y is' : 'ies are'} behind a newer major permitted by package.json:`);
-for (const gap of majorGaps) {
+console.error(`FAIL: ${unapprovedGaps.length} direct dependenc${unapprovedGaps.length === 1 ? 'y is' : 'ies are'} behind the latest major release without a baseline entry:`);
+for (const gap of unapprovedGaps) {
   const where = gap.location ? ` (${gap.location})` : '';
   console.error(`- ${gap.name}${where}: current ${gap.current}, wanted ${gap.wanted ?? 'unknown'}, latest ${gap.latest}`);
 }
-console.error('\nUpdate or intentionally pin these dependencies before merging.');
+console.error('\nUpdate these dependencies or add an intentional baseline entry before merging.');
 process.exit(1);
