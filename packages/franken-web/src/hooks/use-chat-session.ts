@@ -554,6 +554,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     let shouldReconnect = true;
     let reconnectRefreshInFlight = false;
+    let protocolErrored = false;
     setConnectionStatus('connecting');
     readyRef.current = false;
 
@@ -566,6 +567,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     function handleProtocolError(message: string) {
+      protocolErrored = true;
       setStatus('error');
       setConnectionStatus('error');
       failAllPendingSends(new Error(message));
@@ -594,6 +596,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onmessage = (event) => {
+      if (protocolErrored) {
+        return;
+      }
+
       let decoded: unknown;
 
       try {

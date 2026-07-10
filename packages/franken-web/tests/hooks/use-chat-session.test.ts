@@ -329,6 +329,15 @@ describe('useChatSession', () => {
       });
     });
 
+    act(() => {
+      socket.message({
+        type: 'message.accepted',
+        clientMessageId,
+        sessionId: 'chat-1',
+        timestamp: '2026-03-09T00:00:02Z',
+      });
+    });
+
     await expect(sendPromise).rejects.toThrow('invalid event');
     expect(result.current.messages).toContainEqual(expect.objectContaining({
       id: clientMessageId,

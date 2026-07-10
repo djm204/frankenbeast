@@ -568,11 +568,16 @@ describe('useChatSession error banners', () => {
         }),
       });
       MockWebSocket.instances[0]!.onmessage?.({
-        data: JSON.stringify({ type: 'message.delivered', clientMessageId: userMessageId }),
+        data: JSON.stringify({
+          type: 'message.delivered',
+          clientMessageId: userMessageId,
+          timestamp: '2026-01-01T10:29:30.100Z',
+        }),
       });
       MockWebSocket.instances[0]!.onmessage?.({
         data: JSON.stringify({
           type: 'session.ready',
+          sessionId: 'session-1',
           transcript: [],
           pendingApproval: null,
           state: 'active',
@@ -585,7 +590,8 @@ describe('useChatSession error banners', () => {
       expect.objectContaining({
         id: userMessageId,
         content: 'preserve delivered prompt',
-        receipt: 'accepted',
+        receipt: 'failed',
+        canRetry: true,
       }),
     ]));
   });
