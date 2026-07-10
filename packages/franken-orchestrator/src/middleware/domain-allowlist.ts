@@ -4,8 +4,6 @@ import type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
 const URL_PATTERN =
   /https?:\/\/([a-zA-Z0-9.-]+(?:\.[a-zA-Z]{2,}))(\/[^\s)'"]*)?/g;
 
-const MAX_TOOL_INPUT_SCAN_CHARS = 10_000;
-
 interface SerializedToolInput {
   readonly text: string;
   readonly lossy: boolean;
@@ -34,11 +32,6 @@ function serializeToolInputForDomainScan(input: unknown): SerializedToolInput {
     if (text === undefined) {
       lossy = true;
       return { text: '', lossy };
-    }
-
-    if (text.length > MAX_TOOL_INPUT_SCAN_CHARS) {
-      lossy = true;
-      return { text: text.slice(0, MAX_TOOL_INPUT_SCAN_CHARS), lossy };
     }
 
     return { text, lossy };

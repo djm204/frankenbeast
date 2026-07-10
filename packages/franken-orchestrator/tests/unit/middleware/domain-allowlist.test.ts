@@ -138,6 +138,28 @@ describe('DomainAllowlistMiddleware', () => {
       expect(logs[0]).toContain('fetch');
     });
 
+    it('preserves blocked domains that appear after large serializable input fields', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [
+          {
+            name: 'fetch',
+            input: { payload: 'x'.repeat(12_000), url: 'https://evil.com/data' },
+          },
+        ],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+
+      expect(() => logMw.afterResponse(resp)).not.toThrow();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain('evil.com');
+      expect(logs[0]).toContain('fetch');
+    });
+
     it('does not throw when tool call input contains a circular reference', () => {
       const logs: string[] = [];
       const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
