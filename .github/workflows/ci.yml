@@ -27,6 +27,7 @@ jobs:
 
       - name: Enable packageManager-pinned npm
         run: |
+          npm install -g corepack@latest
           corepack enable npm
           corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 
@@ -98,6 +99,7 @@ jobs:
 
       - name: Enable packageManager-pinned npm
         run: |
+          npm install -g corepack@latest
           corepack enable npm
           corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 

@@ -103,9 +103,11 @@ on:
     });
 
     it('enables Corepack and verifies the packageManager-pinned npm before installing', () => {
+      expect(content).toContain('npm install -g corepack@latest');
       expect(content).toContain('corepack enable npm');
       expect(content).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
       expect(content).toContain('node scripts/check-package-manager.mjs');
+      expect(content.indexOf('npm install -g corepack@latest')).toBeLessThan(content.indexOf('corepack enable npm'));
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
