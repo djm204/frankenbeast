@@ -182,7 +182,22 @@ const TOOLS: ToolFull[] = [
       const constraints = args['constraints'] ? String(args['constraints']) : undefined;
       const result = await planner.decompose(constraints ? { objective, constraints } : { objective });
       const taskList = result.tasks.map((t) => `  ${t.id}: ${t.title}${t.deps.length > 0 ? ` (after: ${t.deps.join(', ')})` : ''}`).join('\n');
-      const text = [`## Plan created: ${result.planId}`, ``, `**Objective:** ${result.objective}`, constraints ? `**Constraints:** ${constraints}` : '', `**Provenance:** ${result.provenance}`, `**Provenance note:** ${result.provenanceNote}`, ``, `**Tasks:**`, taskList, ``, `Use fbeast_plan_validate with planId "${result.planId}" to check for issues.`].filter(Boolean).join('\n');
+      const text = [
+        `## Plan created: ${result.planId}`,
+        ``,
+        `**Objective:** ${result.objective}`,
+        constraints ? `**Constraints:** ${constraints}` : '',
+        `**Provenance:** ${result.provenance}`,
+        `**Provenance note:** ${result.provenanceNote}`,
+        ``,
+        `**Tasks:**`,
+        taskList,
+        ``,
+        `Use fbeast_plan_status with planId "${result.planId}" to view the DAG.`,
+        `Use fbeast_plan_validate with planId "${result.planId}" to check for issues.`,
+      ]
+        .filter(Boolean)
+        .join('\n');
       return { content: [{ type: 'text', text }] };
     },
   },
