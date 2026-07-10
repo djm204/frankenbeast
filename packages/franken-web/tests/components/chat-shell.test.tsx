@@ -880,6 +880,40 @@ describe('ChatShell', () => {
     });
   });
 
+  it('resolves stale service actions as soon as a superseding manual refresh succeeds', async () => {
+    window.location.hash = '#/network';
+    const actionStatus = deferred<{ mode: 'secure'; secureBackend: 'local-encrypted'; services: Array<{ id: string; status: string }> }>();
+    const manualStatus = deferred<{ mode: 'secure'; secureBackend: 'local-encrypted'; services: Array<{ id: string; status: string }> }>();
+    mockNetworkGetStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      })
+      .mockReturnValueOnce(actionStatus.promise)
+      .mockReturnValueOnce(manualStatus.promise);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    act(() => {
+      manualStatus.resolve({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Restarted chat-server.')).toBeDefined();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    expect(screen.queryByText('Restarting chat-server…')).toBeNull();
+  });
+
   it('surfaces network status refresh failures before selected service logs settle', async () => {
     window.location.hash = '#/network';
     const slowLogs = deferred<{ logs: string[] }>();

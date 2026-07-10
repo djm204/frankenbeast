@@ -405,6 +405,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   const refreshNetworkStatusAfterAction = (client: NetworkApiClient): Promise<void> => {
     const statusRequestId = ++networkStatusRequestIdRef.current;
+    let statusRefreshDone = false;
     const waitForSupersedingStatusRefresh = (): Promise<void> => new Promise((resolve, reject) => {
       const checkSupersedingStatus = () => {
         if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
@@ -415,11 +416,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           reject(new Error('Network status refresh was superseded before a newer refresh succeeded.'));
           return;
         }
-        window.setTimeout(checkSupersedingStatus, 25);
+        if (!statusRefreshDone) {
+          window.setTimeout(checkSupersedingStatus, 25);
+        }
       };
       checkSupersedingStatus();
     });
-    return client.getStatus()
+    const statusRefresh = client.getStatus()
       .then((nextStatus) => {
         if (statusRequestId !== networkStatusRequestIdRef.current) {
           if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
@@ -442,7 +445,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         }
         networkStatusSettledRequestIdRef.current = statusRequestId;
         throw error;
+      })
+      .finally(() => {
+        statusRefreshDone = true;
       });
+
+    return Promise.race([
+      statusRefresh,
+      waitForSupersedingStatusRefresh(),
+    ]);
   };
 
   useEffect(() => {
