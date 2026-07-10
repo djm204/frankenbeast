@@ -50,6 +50,9 @@ describe('local setup scripts', () => {
     expect(source).toContain('--dry-run');
     expect(source).toContain('--env-file');
     expect(source).toContain('Required bootstrap env vars');
+    expect(source).toContain('if (options.dryRun)');
+    expect(source).toContain("envFile.get('CHROMA_URL')");
+    expect(source).toContain("shell: process.platform === 'win32'");
     expect(source).toContain('Skipping live service probes in dry-run mode');
   });
 
@@ -65,9 +68,23 @@ describe('local setup scripts', () => {
     try {
       const envPath = join(dir, '.env.missing');
       writeFileSync(envPath, 'CHROMA_URL=http://localhost:8000\n');
+      const scrubbedEnv = { ...process.env };
+      for (const key of [
+        'CHROMA_URL',
+        'FRANKEN_MAX_TOTAL_TOKENS',
+        'FRANKEN_MAX_DURATION_MS',
+        'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+        'FRANKEN_ENABLE_HEARTBEAT',
+        'FRANKEN_ENABLE_TRACING',
+        'FRANKEN_ENABLE_REFLECTION',
+        'FRANKEN_MIN_CRITIQUE_SCORE',
+      ]) {
+        delete scrubbedEnv[key];
+      }
       const missing = spawnSync('npx', ['tsx', 'scripts/verify-setup.ts', '--dry-run', '--env-file', envPath], {
         cwd: ROOT,
         encoding: 'utf8',
+        env: scrubbedEnv,
       });
 
       expect(missing.status).not.toBe(0);

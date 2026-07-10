@@ -11,6 +11,7 @@ function printLine(...args: unknown[]): void {
  * Verify local development setup.
  * Checks that all required services and configs are available.
  *
+ * Usage: npm run local:verify-setup
  * Usage: npx tsx scripts/verify-setup.ts [--dry-run] [--env-file <path>]
  */
 
@@ -104,7 +105,7 @@ function parseEnvFile(path: string): Map<string, string> {
     }
 
     const key = line.slice(0, equalsIndex).trim();
-    const value = line.slice(equalsIndex + 1).trim().replace(/^[ '"]|[ '"]$/gu, '');
+    const value = line.slice(equalsIndex + 1).trim().replace(/^(?:"|')|(?:"|')$/gu, '');
     env.set(key, value);
   }
 
