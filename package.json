@@ -1,6 +1,6 @@
 {
   "name": "frankenbeast",
-  "version": "0.44.0",
+  "version": "0.44.1",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -13,6 +13,7 @@
     "audit:security": "node scripts/check-package-manager.mjs && npm audit --audit-level=moderate",
     "audit:dependencies": "node scripts/check-package-manager.mjs && npm audit",
     "check:package-manager": "node scripts/check-package-manager.mjs",
+    "create:project": "bash scripts/create-project.sh",
     "deps:outdated:major": "node scripts/check-major-outdated.mjs",
     "lint:any": "node scripts/audit-explicit-any.mjs",
     "lint:security": "node scripts/check-plain-http.mjs && node scripts/check-hardcoded-secrets.mjs && node scripts/audit-todo-markers.mjs",

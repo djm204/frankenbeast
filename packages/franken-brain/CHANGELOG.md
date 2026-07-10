@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.7.4](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.3...@franken/brain-v0.7.4) (2026-07-10)
+
+
+### Bug Fixes
+
+* **brain:** make checkpoints atomic with working-memory flush ([7eafa81](https://github.com/djm204/frankenbeast/commit/7eafa812cb8848c31defb02d0dbde7b44940a772)), closes [#939](https://github.com/djm204/frankenbeast/issues/939)
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+
+
+### Performance
+
+* **brain:** batch SqliteBrain hydrate writes ([5837ccb](https://github.com/djm204/frankenbeast/commit/5837ccb8886ce836f0655d6848a86874e28a1447)), closes [#940](https://github.com/djm204/frankenbeast/issues/940)
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.1 to 0.8.2
+
 ## [0.7.3](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.2...@franken/brain-v0.7.3) (2026-07-08)
 
 

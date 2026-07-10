@@ -357,6 +357,9 @@ cd frankenbeast
 # Install all dependencies
 npm install
 
+# Optional: scaffold a standalone quick-start example into ../my-frankenbeast-app
+npm run create:project -- quick-start ../my-frankenbeast-app
+
 # Build all modules
 npm run build
 
@@ -765,7 +768,17 @@ The currently shipped integration path is to call the orchestrator runtime, use 
 
 ## Examples
 
-There is no current top-level `examples/` directory in this repo. Use the package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, `docs/guides/run-dashboard-chat.md`, and implementation-adjacent tests as runnable examples. Older references to provider quickstarts or an OpenClaw/firewall-proxy example are pre-consolidation documentation.
+Use the root scaffolding script to copy an example into a fresh standalone folder, create `.env` from the example's `.env.example`, and run `npm ci` in the new project:
+
+```bash
+npm run create:project -- quick-start ../my-frankenbeast-app
+cd ../my-frankenbeast-app
+npm start
+```
+
+Pass another example name when more directories are added under `examples/`. The target directory is optional and defaults to `./<example-name>-project` from your current working directory.
+
+Package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, `docs/guides/run-dashboard-chat.md`, and implementation-adjacent tests remain useful runnable examples for the full monorepo. Older references to provider quickstarts or an OpenClaw/firewall-proxy example are pre-consolidation documentation.
 
 ## Martin Loop Build System
 

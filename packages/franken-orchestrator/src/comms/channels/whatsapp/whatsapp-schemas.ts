@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+const MAX_VALID_UNIX_SECONDS = 8_640_000_000_000;
+
+const WhatsAppTimestampSchema = z.string().refine((value) => {
+  if (!/^\d+$/.test(value)) {
+    return false;
+  }
+
+  const seconds = Number(value);
+  return Number.isSafeInteger(seconds) && seconds <= MAX_VALID_UNIX_SECONDS;
+}, 'timestamp must be a valid Unix timestamp in seconds');
+
 export const WhatsAppWebhookSchema = z.object({
   object: z.string(),
   entry: z.array(z.object({
@@ -18,7 +29,7 @@ export const WhatsAppWebhookSchema = z.object({
         messages: z.array(z.object({
           from: z.string(),
           id: z.string(),
-          timestamp: z.string(),
+          timestamp: WhatsAppTimestampSchema,
           text: z.object({ body: z.string() }).optional(),
           type: z.string(),
           interactive: z.object({

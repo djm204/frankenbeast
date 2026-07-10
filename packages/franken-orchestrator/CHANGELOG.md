@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.42.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.42.0...@franken/orchestrator-v0.42.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **beasts:** surface daemon child shutdown failures ([9980fbe](https://github.com/djm204/frankenbeast/commit/9980fbea3a99f628f8fa6649f0e7d8a36cd970f0)), closes [#996](https://github.com/djm204/frankenbeast/issues/996)
+* **cli:** persist implicit active plan name ([#839](https://github.com/djm204/frankenbeast/issues/839)) ([791cdd2](https://github.com/djm204/frankenbeast/commit/791cdd227f113f447119bf2b44f07e5b22944e1a))
+* **critique:** isolate evaluator exceptions ([d5c2e2a](https://github.com/djm204/frankenbeast/commit/d5c2e2a57021cc5088bb9e6634873c9cdd704a8f)), closes [#1210](https://github.com/djm204/frankenbeast/issues/1210)
+* **critique:** preserve loop warning verdicts ([715a1de](https://github.com/djm204/frankenbeast/commit/715a1de089d9071b7bf218bff7790dd0d544345a)), closes [#1160](https://github.com/djm204/frankenbeast/issues/1160)
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **orchestrator:** accumulate stream progress input deltas ([862d902](https://github.com/djm204/frankenbeast/commit/862d9027ed51ddd35f3540572744138d8948e3d9)), closes [#1237](https://github.com/djm204/frankenbeast/issues/1237)
+* **orchestrator:** block chat input while approval pending ([#1316](https://github.com/djm204/frankenbeast/issues/1316)) ([7d67c0f](https://github.com/djm204/frankenbeast/commit/7d67c0fa8de42db1e79c9cc05d89a9f3a20129d4)), closes [#1154](https://github.com/djm204/frankenbeast/issues/1154)
+* **orchestrator:** cap websocket chat message size ([183e6e6](https://github.com/djm204/frankenbeast/commit/183e6e61e9f6a2c9eb4695840c58eadc7af646bc)), closes [#1093](https://github.com/djm204/frankenbeast/issues/1093)
+* **orchestrator:** clean up CLI provider child processes ([99a42ba](https://github.com/djm204/frankenbeast/commit/99a42ba8399accc2bbfa9af104dea04340d01887)), closes [#872](https://github.com/djm204/frankenbeast/issues/872)
+* **orchestrator:** handle CLI provider result frames ([#1279](https://github.com/djm204/frankenbeast/issues/1279)) ([807af5e](https://github.com/djm204/frankenbeast/commit/807af5e2afaa47fa511172be2f09bfed27d15c1b))
+* **orchestrator:** harden generic comms gateway ([#1365](https://github.com/djm204/frankenbeast/issues/1365)) ([de36fea](https://github.com/djm204/frankenbeast/commit/de36fea36f0132a6d872486b22b8c0370129d169))
+* **orchestrator:** isolate Gemini CLI prompt file ([#1277](https://github.com/djm204/frankenbeast/issues/1277)) ([8bf2025](https://github.com/djm204/frankenbeast/commit/8bf20254c7570fde6029f9f9bf0af94043cb5ed5))
+* **orchestrator:** quarantine invalid analytics timestamps ([#1405](https://github.com/djm204/frankenbeast/issues/1405)) ([6353ac3](https://github.com/djm204/frankenbeast/commit/6353ac3ffbf49643dfd8468c03a1a200a34a0ea1))
+* **orchestrator:** reject invalid analytics time windows ([#1386](https://github.com/djm204/frankenbeast/issues/1386)) ([df4aeb4](https://github.com/djm204/frankenbeast/commit/df4aeb4ae24c80d7c2c298f4c930b07ccae8871c))
+* **orchestrator:** resolve run config hardening follow-ups ([38ac7f0](https://github.com/djm204/frankenbeast/commit/38ac7f0672c1c0d484f0d35ff5eda5d863ed7953))
+* **orchestrator:** surface BeastEventBus listener failures ([#1343](https://github.com/djm204/frankenbeast/issues/1343)) ([1fb08dc](https://github.com/djm204/frankenbeast/commit/1fb08dc082803171fe442c5b74eda3ba8560fb4c))
+* **orchestrator:** tolerate corrupt LLM cache JSON ([b454807](https://github.com/djm204/frankenbeast/commit/b454807d0c2174cf988a71402fe67b1ffd211a8e)), closes [#1219](https://github.com/djm204/frankenbeast/issues/1219)
+* **orchestrator:** tolerate corrupt replay manifests ([758f5fb](https://github.com/djm204/frankenbeast/commit/758f5fb3f3fa3fe31f410a5df622e1c7be85d603)), closes [#1153](https://github.com/djm204/frankenbeast/issues/1153)
+* **security:** scrub telegram webhook tokens from proxied paths ([#905](https://github.com/djm204/frankenbeast/issues/905)) ([3471078](https://github.com/djm204/frankenbeast/commit/347107887ea05c680f2f8979e04fa251ee3d6200))
+* **web:** close dashboard proxy Codex follow-ups ([#813](https://github.com/djm204/frankenbeast/issues/813)) ([eee9613](https://github.com/djm204/frankenbeast/commit/eee96131d97cc653b2492eaefa3f4077f14c27b9))
+* **web:** enforce auth for dashboard SSE tickets ([#1370](https://github.com/djm204/frankenbeast/issues/1370)) ([0a592f9](https://github.com/djm204/frankenbeast/commit/0a592f914bbddfd1203365996b3892e62364c65c))
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+* **web:** secure chat websocket authentication ([679b15d](https://github.com/djm204/frankenbeast/commit/679b15dfbd8cc592ed04b67339230494a5586a8c)), closes [#703](https://github.com/djm204/frankenbeast/issues/703)
+
+
+### Documentation
+
+* **mcp:** document skill health endpoint ([#1385](https://github.com/djm204/frankenbeast/issues/1385)) ([4c87b69](https://github.com/djm204/frankenbeast/commit/4c87b6983538d4030e8663d0d82f8ef92dec636e))
+* **network:** document managed network marker ([4d2edf7](https://github.com/djm204/frankenbeast/commit/4d2edf78e457e8e612203559fb72ea98effd335d)), closes [#1257](https://github.com/djm204/frankenbeast/issues/1257)
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Tests
+
+* **credentials:** remove remaining hard-coded test tokens ([#1304](https://github.com/djm204/frankenbeast/issues/1304)) ([a7cbc3a](https://github.com/djm204/frankenbeast/commit/a7cbc3af78f8ed96ac0de0883b5a5bbe4a7516bb))
+* **orchestrator:** cover dynamic comms webhook security policy ([#1366](https://github.com/djm204/frankenbeast/issues/1366)) ([ee1877c](https://github.com/djm204/frankenbeast/commit/ee1877c0af8fe7b9e817cc05c9a3f03bd89d30c9))
+* **orchestrator:** cover numeric CLI flag validation ([c7d9dc8](https://github.com/djm204/frankenbeast/commit/c7d9dc84b15ea6ae9cf6bd1db4c21108cccfe77a)), closes [#1249](https://github.com/djm204/frankenbeast/issues/1249)
+* **orchestrator:** cover repo config provider override approval ([#1352](https://github.com/djm204/frankenbeast/issues/1352)) ([fbc4b5c](https://github.com/djm204/frankenbeast/commit/fbc4b5c882eebf274441d0d13b4b38acecfc8d59))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.6.14 to 0.6.15
+    * @franken/governor bumped from 0.5.12 to 0.5.13
+    * @franken/types bumped from 0.8.1 to 0.8.2
+    * @franken/observer bumped from 0.7.14 to 0.7.15
+    * @franken/planner bumped from 0.4.12 to 0.4.13
+    * @franken/brain bumped from 0.7.3 to 0.7.4
+
 ## [0.42.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.41.1...@franken/orchestrator-v0.42.0) (2026-07-08)
 
 

@@ -96,6 +96,50 @@ describe('whatsappRouter', () => {
     expect(gateway.handleAction).not.toHaveBeenCalled();
   });
 
+  it.each(['not-a-number', '123abc', '999999999999999999999999999999'])(
+    'returns 400 for invalid message timestamp %s without invoking handlers',
+    async (timestamp) => {
+      const appWithoutSig = whatsappRouter({
+        gateway,
+        sessionMapper,
+        appSecret,
+        verifyToken,
+        verifySignature: false,
+      });
+      const body = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [{
+          id: '1',
+          changes: [{
+            value: {
+              messaging_product: 'whatsapp',
+              metadata: { display_phone_number: '123', phone_number_id: '1' },
+              messages: [{
+                from: '123456',
+                id: 'm1',
+                timestamp,
+                type: 'text',
+                text: { body: 'hello' },
+              }],
+            },
+            field: 'messages',
+          }],
+        }],
+      });
+
+      const res = await appWithoutSig.request('/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({ error: 'Invalid payload' });
+      expect(gateway.handleInbound).not.toHaveBeenCalled();
+      expect(gateway.handleAction).not.toHaveBeenCalled();
+    },
+  );
+
   it('routes button reply to gateway', async () => {
     const body = JSON.stringify({
       object: 'whatsapp_business_account',

@@ -400,6 +400,32 @@ describe('ParallelPlanner — cycle handling', () => {
     );
     expect(executor).not.toHaveBeenCalled();
   });
+
+  it('throws CyclicDependencyError when no tasks are ready due to a cycle', async () => {
+    const cyclic: Task[] = [makeTask('a'), makeTask('b')];
+    const a = cyclic[0]!.id;
+    const b = cyclic[1]!.id;
+    const graph = {
+      topoSort: vi.fn().mockReturnValue(cyclic),
+      getTasks: vi.fn().mockReturnValue(cyclic),
+      getDependencies: vi.fn().mockImplementation((taskId: TaskId) => {
+        if (taskId === a) return [b];
+        if (taskId === b) return [a];
+        return [];
+      }),
+    } as unknown as PlanGraph;
+
+    const executor = vi.fn().mockResolvedValue(success('a'));
+
+    const result = new ParallelPlanner().execute(graph, { executor });
+
+    await expect(result).rejects.toBeInstanceOf(CyclicDependencyError);
+    await expect(result).rejects.toMatchObject({
+      name: 'CyclicDependencyError',
+    });
+    await expect(result).rejects.toMatchObject({ message: expect.stringContaining('cannot make progress') });
+    expect(executor).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Dangling dependency handling ─────────────────────────────────────────────

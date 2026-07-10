@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.13](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.12...@franken/planner-v0.4.13) (2026-07-10)
+
+
+### Bug Fixes
+
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **planner:** convert strategy domain exceptions ([#1354](https://github.com/djm204/frankenbeast/issues/1354)) ([82d27aa](https://github.com/djm204/frankenbeast/commit/82d27aa7a30553edd45f614114ee4eca9eeb97f4))
+* **planner:** fail parallel planner on dangling dependencies ([#1306](https://github.com/djm204/frankenbeast/issues/1306)) ([a5baa8f](https://github.com/djm204/frankenbeast/commit/a5baa8f35e91ccd215cf77d3d06dc4fe9c72d724))
+* **planner:** limit parallel wave concurrency ([#1296](https://github.com/djm204/frankenbeast/issues/1296)) ([66ce5c5](https://github.com/djm204/frankenbeast/commit/66ce5c5c2fa113c275b5ebf6c3309041610eecdd))
+* **planner:** skip completed recovery tasks ([6b247d5](https://github.com/djm204/frankenbeast/commit/6b247d5249f8d00f24528cc1d1c19d32196e36e6)), closes [#917](https://github.com/djm204/frankenbeast/issues/917)
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.1 to 0.8.2
+
 ## [0.4.12](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.11...@franken/planner-v0.4.12) (2026-07-08)
 
 
