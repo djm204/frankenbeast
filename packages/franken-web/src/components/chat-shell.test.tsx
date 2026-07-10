@@ -248,6 +248,29 @@ describe('ChatShell route heading', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network status: HTTP 503');
   });
 
+  it('ignores stale refresh failures after a newer network refresh succeeds', async () => {
+    let rejectStaleRefresh!: (error: Error) => void;
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({ mode: 'secure', secureBackend: 'local-encrypted', services: [] })
+      .mockImplementationOnce(() => new Promise((_, reject) => {
+        rejectStaleRefresh = reject;
+      }))
+      .mockResolvedValueOnce({ mode: 'insecure', secureBackend: 'local-encrypted', services: [] });
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(1));
+
+    const refreshButton = screen.getByRole('button', { name: 'Refresh' });
+    fireEvent.click(refreshButton);
+    fireEvent.click(refreshButton);
+    expect(await screen.findByText('insecure')).toBeTruthy();
+
+    rejectStaleRefresh(new Error('HTTP 500'));
+
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('surfaces a service action failure when the follow-up status refresh is rejected', async () => {
     networkApiMocks.getStatus
       .mockResolvedValueOnce({

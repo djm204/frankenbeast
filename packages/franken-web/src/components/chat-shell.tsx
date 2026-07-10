@@ -313,6 +313,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [networkLogsLoading, setNetworkLogsLoading] = useState(false);
   const [networkLogsError, setNetworkLogsError] = useState<string | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const networkStatusRequestIdRef = useRef(0);
   const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
@@ -372,12 +373,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   useEffect(() => {
     const client = new NetworkApiClient(baseUrl);
+    const statusRequestId = ++networkStatusRequestIdRef.current;
     void Promise.allSettled([client.getStatus(), client.getConfig()]).then(([statusResult, configResult]) => {
-      if (statusResult.status === 'fulfilled') {
-        setNetworkStatus(statusResult.value);
-        setNetworkError(null);
-      } else {
-        setNetworkError(`Unable to load network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
+      if (statusRequestId === networkStatusRequestIdRef.current) {
+        if (statusResult.status === 'fulfilled') {
+          setNetworkStatus(statusResult.value);
+          setNetworkError(null);
+        } else {
+          setNetworkError(`Unable to load network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
+        }
       }
       if (configResult.status === 'fulfilled') {
         setNetworkConfig(configResult.value);
@@ -1173,6 +1177,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onRefresh={() => {
               const client = new NetworkApiClient(baseUrl);
               const logServiceId = selectedNetworkLogServiceId;
+              const statusRequestId = ++networkStatusRequestIdRef.current;
               const requestId = ++networkLogsRequestIdRef.current;
               if (logServiceId) {
                 setNetworkLogsLoading(true);
@@ -1180,11 +1185,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               }
               void Promise.allSettled([client.getStatus(), logServiceId ? client.getLogs(logServiceId) : Promise.resolve(null)])
                 .then(([statusResult, logsResult]) => {
-                  if (statusResult.status === 'fulfilled') {
-                    setNetworkStatus(statusResult.value);
-                    setNetworkError(null);
-                  } else {
-                    setNetworkError(`Unable to refresh network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
+                  if (statusRequestId === networkStatusRequestIdRef.current) {
+                    if (statusResult.status === 'fulfilled') {
+                      setNetworkStatus(statusResult.value);
+                      setNetworkError(null);
+                    } else {
+                      setNetworkError(`Unable to refresh network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
+                    }
                   }
                   if (requestId !== networkLogsRequestIdRef.current) {
                     return;
@@ -1216,7 +1223,6 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               const client = new NetworkApiClient(baseUrl);
               return client.updateConfig(assignments).then((nextConfig) => {
                 setNetworkConfig(nextConfig);
-                setNetworkError(null);
               });
             }}
             onSelectLogService={(serviceId) => {
