@@ -374,6 +374,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const composerSessionKey = preserveComposerDraft
     ? `anonymous:${sessionSeed}`
     : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
+  const beastCreationDisabled = Boolean(beastError);
 
   useEffect(() => {
     if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
@@ -983,7 +984,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             catalog={beastCatalog}
             runs={beastRuns}
             containerRuntime={beastContainerRuntime}
-            disabled={false}
+            disabled={beastCreationDisabled}
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
             selectedAgentId={selectedBeastAgentId}

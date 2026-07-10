@@ -325,6 +325,30 @@ afterEach(() => {
     latestBeastEventHandlers = handlers;
     return Promise.resolve(vi.fn());
   });
+  mockGetCatalog.mockReset();
+  mockGetCatalog.mockResolvedValue([
+    {
+      id: 'chunk-plan',
+      label: 'Design Doc -> Chunk Creation',
+      description: 'Build chunks from a design doc',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'designDocPath', prompt: 'Design doc', kind: 'file', required: true },
+        { key: 'outputDir', prompt: 'Output directory', kind: 'string', required: true },
+      ],
+    },
+    {
+      id: 'martin-loop',
+      label: 'Martin Loop',
+      description: 'Run Martin loop',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'provider', prompt: 'Provider', kind: 'string', options: ['claude', 'codex'] },
+        { key: 'objective', prompt: 'Objective', kind: 'string' },
+        { key: 'chunkDirectory', prompt: 'Chunk directory', kind: 'directory', required: true },
+      ],
+    },
+  ]);
   mockListSessions.mockResolvedValue([
     {
       id: 'sess-1',
@@ -1161,6 +1185,32 @@ describe('ChatShell', () => {
     await waitFor(() => {
       expect(screen.getByText('agent-1')).toBeDefined();
     });
+  });
+
+  it('disables create-agent entry points when Beast API state cannot load', async () => {
+    window.location.hash = '#/beasts';
+    mockGetCatalog.mockRejectedValue(new Error('Beast API not available'));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Beast API not available').length).toBeGreaterThan(0);
+    });
+
+    const headerCreateButton = screen.getByRole('button', { name: /^\+ create agent$/i });
+    const emptyStateCreateButton = screen.getByRole('button', { name: /create your first agent/i });
+
+    expect(headerCreateButton.hasAttribute('disabled')).toBe(true);
+    expect(emptyStateCreateButton.hasAttribute('disabled')).toBe(true);
+
+    fireEvent.click(emptyStateCreateButton);
+    expect(screen.queryByText('Identity')).toBeNull();
   });
 
   it('renders initializing agents in the beasts list', async () => {
