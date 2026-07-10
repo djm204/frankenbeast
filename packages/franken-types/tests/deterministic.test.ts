@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSeededRandom, deterministicUuid, isoNow, now, seededRandom } from '../src/deterministic.js';
+import { createDeterministicRandom, deterministicUuid, isoNow, now, seededRandom } from '../src/deterministic.js';
 
 function withSeed<T>(seed: string | undefined, fn: () => T): T {
   const previous = process.env['FRANKENBEAST_SEED'];
@@ -21,8 +21,8 @@ function withSeed<T>(seed: string | undefined, fn: () => T): T {
 
 describe('deterministic helpers', () => {
   it('creates reproducible pseudo-random sequences from the same seed', () => {
-    const first = createSeededRandom('seed-a');
-    const second = createSeededRandom('seed-a');
+    const first = createDeterministicRandom('seed-a');
+    const second = createDeterministicRandom('seed-a');
 
     expect([first.random(), first.random(), first.random()]).toEqual([
       second.random(),

@@ -24,7 +24,7 @@ export interface SeededRandom {
   random(): number;
 }
 
-export function createSeededRandom(seed = activeSeed() ?? DEFAULT_SEED): SeededRandom {
+export function createDeterministicRandom(seed = activeSeed() ?? DEFAULT_SEED): SeededRandom {
   let state = hashSeed(seed) || 0x6d2b79f5;
 
   return {
@@ -43,7 +43,7 @@ const randomBySeed = new Map<string, SeededRandom>();
 function randomForSeed(seed: string): SeededRandom {
   let random = randomBySeed.get(seed);
   if (!random) {
-    random = createSeededRandom(seed);
+    random = createDeterministicRandom(seed);
     randomBySeed.set(seed, random);
   }
   return random;
@@ -65,7 +65,7 @@ const nowStateBySeed = new Map<string, number>();
 function nowState(seed: string): number {
   let state = nowStateBySeed.get(seed);
   if (state === undefined) {
-    state = DEFAULT_EPOCH_MS + Math.floor(createSeededRandom(`clock:${seed}`).random() * 86_400_000);
+    state = DEFAULT_EPOCH_MS + Math.floor(createDeterministicRandom(`clock:${seed}`).random() * 86_400_000);
     nowStateBySeed.set(seed, state);
   }
   return state;
@@ -97,7 +97,7 @@ function randomUuidFromRuntime(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
   }
-  const random = createSeededRandom(`${DEFAULT_SEED}:fallback:${Date.now()}:${Math.random()}`);
+  const random = createDeterministicRandom(`${DEFAULT_SEED}:fallback:${Date.now()}:${Math.random()}`);
   const bytes = Array.from({ length: 16 }, () => randomByte(random));
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
@@ -119,7 +119,7 @@ export function deterministicUuid(namespace = 'default', explicitCounter?: numbe
   const counter = uuidCounters.get(key) ?? 0;
   uuidCounters.set(key, counter + 1);
 
-  const random = createSeededRandom(`uuid:${seed}:${namespace}:${counter}`);
+  const random = createDeterministicRandom(`uuid:${seed}:${namespace}:${counter}`);
   const bytes = Array.from({ length: 16 }, () => randomByte(random));
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
