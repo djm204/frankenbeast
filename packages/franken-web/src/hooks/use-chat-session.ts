@@ -171,9 +171,20 @@ function makeBanner(
   };
 }
 
+function hasDeterministicSeed(): boolean {
+  const globalWithProcess = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return Boolean(globalWithProcess.process?.env?.['FRANKENBEAST_SEED']);
+}
+
 function makeId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (hasDeterministicSeed()) {
     return deterministicUuid('packages/franken-web/src/hooks/use-chat-session.ts');
+  }
+
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
   }
 
   return `${prefix}-${seededRandom.random().toString(36).slice(2, 10)}`;
