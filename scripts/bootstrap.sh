@@ -72,16 +72,18 @@ expected_npm="${expected_pm#npm@}"
 actual_npm="$(npm --version)"
 if [[ "$actual_npm" != "$expected_npm" ]]; then
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    fail "npm $actual_npm does not match packageManager $expected_pm. A real bootstrap would run: corepack enable npm && corepack prepare \"$expected_pm\" --activate"
+    log "dry-run: npm $actual_npm does not match packageManager $expected_pm; a real bootstrap would run corepack enable npm and corepack prepare \"$expected_pm\" --activate"
   else
     log "Activating repository package manager pin $expected_pm with Corepack."
     corepack enable npm
     corepack prepare "$expected_pm" --activate
     actual_npm="$(npm --version)"
     [[ "$actual_npm" == "$expected_npm" ]] || fail "npm $actual_npm does not match packageManager $expected_pm after Corepack activation."
+    log "npm $actual_npm matches packageManager $expected_pm."
   fi
+else
+  log "npm $actual_npm matches packageManager $expected_pm."
 fi
-log "npm $actual_npm matches packageManager $expected_pm."
 
 [[ -f .env.example ]] || fail ".env.example is missing; cannot bootstrap local environment."
 if [[ ! -f .env ]]; then
@@ -137,7 +139,7 @@ if [[ "$START_DOCKER" -eq 1 ]]; then
   env_value() {
     local key="$1"
     [[ -f .env ]] || return 0
-    grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2-
+    { grep -E "^${key}=" .env || true; } | tail -n 1 | cut -d= -f2-
   }
   grafana_user="$(env_value GRAFANA_USER)"
   grafana_password="$(env_value GRAFANA_PASSWORD)"

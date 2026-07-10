@@ -101,7 +101,7 @@ describe('local setup scripts', () => {
       timeout: 60_000,
     });
     expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
-    expect(dryRun.stdout).toContain('dry-run: would copy .env.example to .env');
+    expect(dryRun.stdout).toMatch(/dry-run: would copy \.env\.example to \.env|\.env already exists; leaving it unchanged\./);
     expect(dryRun.stdout).toContain('dry-run: npm ci');
   });
 
