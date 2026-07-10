@@ -40,6 +40,14 @@ function isTypeOperandPrefix(char: string): boolean {
   return [':', '|', '&', ',', '<', '(', '['].includes(char);
 }
 
+function previousIdentifier(content: string, beforeIndex: number): string {
+  let end = beforeIndex;
+  while (end >= 0 && /\s/.test(content[end] ?? '')) end--;
+  let start = end;
+  while (start >= 0 && /[A-Za-z0-9_$]/.test(content[start] ?? '')) start--;
+  return content.slice(start + 1, end + 1);
+}
+
 function findBodyOpenAfterSignature(content: string, startIndex: number): number {
   let inReturnType = false;
   let typeDepth = 0;
@@ -72,6 +80,7 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
       while (/\s/.test(content[nextIndex] ?? '')) nextIndex++;
       if (
         expectTypeOperand ||
+        ['keyof', 'is', 'asserts'].includes(previousIdentifier(content, i - 1)) ||
         content[nextIndex] === '{' ||
         content[nextIndex] === '|' ||
         content[nextIndex] === '&' ||
