@@ -47,7 +47,7 @@ function readOutdatedJson(input) {
   }
 
   try {
-    return execFileSync('npm', ['outdated', '--json'], {
+    return execFileSync('npm', ['outdated', '--json', '--workspaces', '--include-workspace-root'], {
       encoding: 'utf8',
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -90,6 +90,17 @@ function hasNpmError(report) {
   return Boolean(report && typeof report === 'object' && !Array.isArray(report) && 'error' in report);
 }
 
+function normalizeIdentity(identity) {
+  if (typeof identity !== 'string' || !identity.trim()) return '<root>';
+  const normalized = identity.replaceAll('\\\\', '/');
+  const root = repoRoot.replaceAll('\\\\', '/');
+  return normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : normalized;
+}
+
+function baselineKey(entry) {
+  return `${entry.name}:${normalizeIdentity(entry.location ?? entry.dependent ?? '<root>')}:${entry.currentMajor}->${entry.latestMajor}`;
+}
+
 function readBaseline(path) {
   if (!path || !existsSync(path)) return new Set();
   let parsed;
@@ -116,7 +127,12 @@ function readBaseline(path) {
         console.error(`Invalid major-outdated baseline versions for ${entry.name}.`);
         process.exit(2);
       }
-      return `${entry.name}:${currentMajor}->${latestMajor}`;
+      const identity = entry.location ?? entry.dependent ?? '<root>';
+      if (typeof identity !== 'string' || !identity.trim()) {
+        console.error(`Invalid major-outdated baseline identity for ${entry.name}.`);
+        process.exit(2);
+      }
+      return baselineKey({ name: entry.name, location: identity, currentMajor, latestMajor });
     }),
   );
 }
@@ -132,6 +148,7 @@ export function findMajorOutdated(report) {
         wanted: entry.wanted,
         latest: entry.latest,
         location: entry.location,
+        dependent: entry.dependent,
         currentMajor,
         latestMajor,
       };
@@ -164,7 +181,7 @@ if (hasNpmError(parsed)) {
 
 const baselineKeys = readBaseline(baseline);
 const majorGaps = findMajorOutdated(parsed);
-const unapprovedGaps = majorGaps.filter((entry) => !baselineKeys.has(`${entry.name}:${entry.currentMajor}->${entry.latestMajor}`));
+const unapprovedGaps = majorGaps.filter((entry) => !baselineKeys.has(baselineKey(entry)));
 if (unapprovedGaps.length === 0) {
   const suffix = majorGaps.length > 0 ? ` (${majorGaps.length} baseline-approved major gap${majorGaps.length === 1 ? '' : 's'} unchanged)` : '';
   console.log(`dependency freshness OK — no unapproved direct dependencies are behind the latest major release${suffix}`);

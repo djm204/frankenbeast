@@ -1,6 +1,7 @@
 [
   {
     "name": "@google/genai",
+    "location": "node_modules/@google/genai",
     "currentMajor": 1,
     "latestMajor": 2,
     "current": "1.46.0",
@@ -9,14 +10,16 @@
   },
   {
     "name": "@types/node",
-    "currentMajor": 20,
+    "location": "node_modules/@types/node",
+    "currentMajor": 25,
     "latestMajor": 26,
-    "current": "20.19.43",
+    "current": "25.9.4",
     "latest": "26.1.1",
     "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
   },
   {
     "name": "@types/node",
+    "location": "packages/franken-critique/node_modules/@types/node",
     "currentMajor": 22,
     "latestMajor": 26,
     "current": "22.20.0",
@@ -25,14 +28,34 @@
   },
   {
     "name": "@types/node",
-    "currentMajor": 25,
+    "location": "packages/franken-observer/node_modules/@types/node",
+    "currentMajor": 20,
     "latestMajor": 26,
-    "current": "25.9.4",
+    "current": "20.19.43",
+    "latest": "26.1.1",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "@types/node",
+    "location": "packages/franken-orchestrator/node_modules/@types/node",
+    "currentMajor": 22,
+    "latestMajor": 26,
+    "current": "22.20.0",
+    "latest": "26.1.1",
+    "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "@types/node",
+    "location": "packages/franken-types/node_modules/@types/node",
+    "currentMajor": 22,
+    "latestMajor": 26,
+    "current": "22.20.0",
     "latest": "26.1.1",
     "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
   },
   {
     "name": "@types/react",
+    "location": "node_modules/@types/react",
     "currentMajor": 18,
     "latestMajor": 19,
     "current": "18.3.28",
@@ -41,6 +64,7 @@
   },
   {
     "name": "@types/react-dom",
+    "location": "node_modules/@types/react-dom",
     "currentMajor": 18,
     "latestMajor": 19,
     "current": "18.3.7",
@@ -49,6 +73,7 @@
   },
   {
     "name": "eslint",
+    "location": "node_modules/eslint",
     "currentMajor": 9,
     "latestMajor": 10,
     "current": "9.39.4",
@@ -57,6 +82,7 @@
   },
   {
     "name": "eslint-config-prettier",
+    "location": "packages/franken-planner/node_modules/eslint-config-prettier",
     "currentMajor": 9,
     "latestMajor": 10,
     "current": "9.1.2",
@@ -65,6 +91,7 @@
   },
   {
     "name": "jsdom",
+    "location": "node_modules/jsdom",
     "currentMajor": 25,
     "latestMajor": 29,
     "current": "25.0.1",
@@ -73,6 +100,7 @@
   },
   {
     "name": "react",
+    "location": "node_modules/react",
     "currentMajor": 18,
     "latestMajor": 19,
     "current": "18.3.1",
@@ -81,6 +109,7 @@
   },
   {
     "name": "react-dom",
+    "location": "node_modules/react-dom",
     "currentMajor": 18,
     "latestMajor": 19,
     "current": "18.3.1",
@@ -89,6 +118,7 @@
   },
   {
     "name": "typescript",
+    "location": "node_modules/typescript",
     "currentMajor": 5,
     "latestMajor": 7,
     "current": "5.9.3",
@@ -97,6 +127,7 @@
   },
   {
     "name": "zod",
+    "location": "node_modules/zod",
     "currentMajor": 3,
     "latestMajor": 4,
     "current": "3.25.76",
