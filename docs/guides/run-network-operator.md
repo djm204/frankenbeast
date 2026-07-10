@@ -18,13 +18,11 @@ Optional surfaces activate from config:
 
 - `comms-gateway`
 
-## Install or Link the CLI
+## Link the Local CLI
 
-Install the published CLI, or link a local checkout before running operator commands:
+The network operator currently launches repo-local services and dashboard assets, so run it from a Frankenbeast checkout with the public CLI linked:
 
 ```bash
-npm install -g @franken/orchestrator
-# or, from a local repo checkout:
 npm install
 npm run local:link
 npm run local:verify-cli
@@ -34,7 +32,7 @@ The public `frankenbeast` binary is the primary operator interface. Maintainers 
 
 ## Start the Network
 
-From the target project root:
+From the Frankenbeast repo root:
 
 ```bash
 frankenbeast network up
