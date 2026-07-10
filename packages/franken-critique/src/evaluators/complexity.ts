@@ -43,7 +43,6 @@ function isTypeOperandPrefix(char: string): boolean {
 function findBodyOpenAfterSignature(content: string, startIndex: number): number {
   let inReturnType = false;
   let typeDepth = 0;
-  let previousSignificant = '';
   let expectTypeOperand = false;
 
   for (let i = startIndex; i < content.length; i++) {
@@ -57,18 +56,32 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
         inReturnType = true;
         expectTypeOperand = true;
       }
-      if (!isWhitespace) previousSignificant = char;
       continue;
     }
 
     if (typeDepth === 0 && char === '=' && content[i + 1] === '>') {
       expectTypeOperand = true;
-      previousSignificant = '>';
       i++;
       continue;
     }
 
-    if (char === '{' && typeDepth === 0 && !expectTypeOperand) {
+    if (char === '{' && typeDepth === 0) {
+      const closeIndex = findMatchingDelimiter(content, i, '{', '}');
+      if (closeIndex === -1) return -1;
+      let nextIndex = closeIndex + 1;
+      while (/\s/.test(content[nextIndex] ?? '')) nextIndex++;
+      if (
+        expectTypeOperand ||
+        content[nextIndex] === '{' ||
+        content[nextIndex] === '|' ||
+        content[nextIndex] === '&' ||
+        (content[nextIndex] === '=' && content[nextIndex + 1] === '>')
+      ) {
+        i = closeIndex;
+        expectTypeOperand =
+          content[nextIndex] === '|' || content[nextIndex] === '&';
+        continue;
+      }
       return i;
     }
 
@@ -88,8 +101,7 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
     if (!isWhitespace) {
       expectTypeOperand =
         typeDepth === 0 &&
-        (isTypeOperandPrefix(char) || previousSignificant === '>');
-      previousSignificant = char;
+        isTypeOperandPrefix(char);
     }
   }
 
@@ -117,7 +129,19 @@ function findArrowToken(content: string, startIndex: number): number {
     const isWhitespace = /\s/.test(char);
 
     if (typeDepth === 0 && char === '=' && content[i + 1] === '>') {
-      if (previousSignificant !== ')') return i;
+      if (previousSignificant === ')') {
+        let nextIndex = i + 2;
+        while (/\s/.test(content[nextIndex] ?? '')) nextIndex++;
+        if (content[nextIndex] === '{') {
+          const closeIndex = findMatchingDelimiter(content, nextIndex, '{', '}');
+          if (closeIndex === -1) return -1;
+          let afterObjectIndex = closeIndex + 1;
+          while (/\s/.test(content[afterObjectIndex] ?? '')) afterObjectIndex++;
+          if (content[afterObjectIndex] !== '=') return i;
+        }
+      } else {
+        return i;
+      }
       previousSignificant = '>';
       i++;
       continue;
@@ -168,7 +192,12 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
   for (const match of content.matchAll(
     /(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\(/g,
   )) {
-    const paramsOpenIndex = (match.index ?? 0) + match[0].length - 1;
+    let paramsOpenIndex = (match.index ?? 0) + match[0].length - 1;
+    let nestedParamsIndex = paramsOpenIndex + 1;
+    while (/\s/.test(content[nestedParamsIndex] ?? '')) nestedParamsIndex++;
+    if (content[nestedParamsIndex] === '(') {
+      paramsOpenIndex = nestedParamsIndex;
+    }
     const paramsCloseIndex = findMatchingDelimiter(content, paramsOpenIndex, '(', ')');
     if (paramsCloseIndex === -1) continue;
 
@@ -198,6 +227,7 @@ function countTopLevelParameters(params: string): number {
   let braceDepth = 0;
   let angleDepth = 0;
   let inTypeAnnotation = false;
+  let inDefaultValue = false;
 
   for (let i = 0; i < params.length; i++) {
     const char = params[i] ?? '';
@@ -207,10 +237,11 @@ function countTopLevelParameters(params: string): number {
       braceDepth === 0 &&
       angleDepth === 0;
 
-    if (char === ':' && atTopLevel) {
+    if (char === ':' && atTopLevel && !inDefaultValue) {
       inTypeAnnotation = true;
     } else if (char === '=' && params[i + 1] !== '>' && atTopLevel) {
       inTypeAnnotation = false;
+      inDefaultValue = true;
     } else if (char === '(') {
       parenDepth++;
     } else if (char === ')') {
@@ -240,6 +271,7 @@ function countTopLevelParameters(params: string): number {
       if (segmentHasContent) count++;
       segmentHasContent = false;
       inTypeAnnotation = false;
+      inDefaultValue = false;
       continue;
     }
 

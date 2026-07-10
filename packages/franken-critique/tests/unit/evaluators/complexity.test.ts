@@ -253,6 +253,47 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
   });
 
+  it('flags declarations with nested generic return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(a, b, c, d, e, f): Promise<Map<string, number>> { return Promise.resolve(new Map()); }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags arrows with parenthesized return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const complex = (a, b, c, d, e, f): (string | number) => { return a; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags grouped arrow initializers', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const complex = ((a, b, c, d, e, f) => { return a; });`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('keeps ternary defaults with comparisons out of type parsing', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(a = cond ? foo : x < y, b, c, d, e, f) { return a; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags long functions with keyof object return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = `function longFn(): keyof { a: string } {\n${lines.join('\n')}\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
+  });
+
   it('flags deeply nested code', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;
