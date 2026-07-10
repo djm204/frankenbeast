@@ -780,7 +780,7 @@ dist/index.d.ts     # TypeScript declarations
 dist/index.d.ts.map # TypeScript declaration map
 ```
 
-The build is plain `tsc` and the output is **ESM-only** (`"type": "module"`). The `exports` map has `types` and `import` conditions but no `require` entry, so the package cannot be `require()`d from CommonJS — consumers must use `import` (or a dynamic `import()` from CJS).
+The build is plain `tsc` and the output is **ESM-only** (`"type": "module"`). The package does **not** emit CommonJS artifacts such as `dist/index.cjs` or `dist/index.d.cts`, and consumers must use `import` (or a dynamic `import()` from CJS).
 
 ---
 
