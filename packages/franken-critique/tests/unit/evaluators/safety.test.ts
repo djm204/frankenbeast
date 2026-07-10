@@ -154,6 +154,54 @@ describe('SafetyEvaluator', () => {
     ]);
   });
 
+  it('surfaces timeout findings from evaluate when worker evaluation exceeds timeout', async () => {
+    const hangingWorker = {
+      once: vi.fn(),
+      terminate: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const createRegexWorker = vi.fn(() => hangingWorker);
+    const evaluator = new SafetyEvaluator(
+      createMockGuardrailsPort([
+        {
+          id: 'slow-warn-real-path',
+          description: 'slow worker path',
+          pattern: 'safe-pattern',
+          severity: 'warn',
+        },
+      ]),
+      {
+        createRegexWorker,
+      },
+    );
+    const timeoutMs = (
+      evaluator as unknown as {
+        regexEvaluationTimeoutMs(contentLength: number): number;
+      }
+    ).regexEvaluationTimeoutMs('large review payload'.length);
+
+    vi.useFakeTimers();
+    try {
+      const resultPromise = evaluator.evaluate(createInput('large review payload'));
+      await vi.advanceTimersByTimeAsync(timeoutMs);
+
+      const result = await resultPromise;
+
+      expect(createRegexWorker).toHaveBeenCalledTimes(1);
+      expect(hangingWorker.once).toHaveBeenCalledTimes(2);
+      expect(hangingWorker.terminate).toHaveBeenCalledTimes(1);
+      expect(result.verdict).toBe('pass');
+      expect(result.findings).toEqual([
+        expect.objectContaining({
+          message: expect.stringContaining('Safety rule regex evaluation timed out'),
+          severity: 'warning',
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('scales runtime regex timeout budget with input size', () => {
     const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
       regexEvaluationTimeoutMs(contentLength: number): number;
