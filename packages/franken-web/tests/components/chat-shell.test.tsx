@@ -1238,6 +1238,26 @@ describe('ChatShell', () => {
     expect(headerCreateButton.hasAttribute('disabled')).toBe(false);
   });
 
+  it('keeps create-agent enabled when selected agent detail fails after state loads', async () => {
+    window.location.hash = '#/beasts';
+    mockGetAgent.mockRejectedValue(new Error('Agent detail unavailable'));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent detail unavailable')).toBeDefined();
+    });
+
+    const headerCreateButton = screen.getByRole('button', { name: /^\+ create agent$/i });
+    expect(headerCreateButton.hasAttribute('disabled')).toBe(false);
+  });
+
   it('renders initializing agents in the beasts list', async () => {
     window.location.hash = '#/beasts';
     mockListAgents.mockResolvedValue([

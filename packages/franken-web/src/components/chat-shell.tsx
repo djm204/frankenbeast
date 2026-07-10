@@ -433,8 +433,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     let cancelled = false;
 
     async function refreshBeasts() {
+      let catalog: Awaited<ReturnType<typeof client.getCatalog>>;
+      let agents: Awaited<ReturnType<typeof client.listAgents>>;
+      let runs: Awaited<ReturnType<typeof client.listRuns>>;
+      let containerRuntime: Awaited<ReturnType<typeof client.getContainerRuntimeStatus>>;
       try {
-        const [catalog, agents, runs, containerRuntime] = await Promise.all([
+        [catalog, agents, runs, containerRuntime] = await Promise.all([
           client.getCatalog(),
           client.listAgents(),
           client.listRuns(),
@@ -446,15 +450,25 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         if (cancelled) {
           return;
         }
-        setBeastError(null);
-        setBeastCreationUnavailableReason(null);
-        setBeastCatalog(catalog);
-        setBeastAgents(agents);
-        setBeastRuns(runs);
-        setBeastContainerRuntime(containerRuntime);
-        const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? agents[0]?.id ?? null : null);
-        setSelectedBeastAgentId(currentAgentId);
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          setBeastError(message);
+          setBeastCreationUnavailableReason(message);
+        }
+        return;
+      }
 
+      setBeastError(null);
+      setBeastCreationUnavailableReason(null);
+      setBeastCatalog(catalog);
+      setBeastAgents(agents);
+      setBeastRuns(runs);
+      setBeastContainerRuntime(containerRuntime);
+      const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? agents[0]?.id ?? null : null);
+      setSelectedBeastAgentId(currentAgentId);
+
+      try {
         if (currentAgentId) {
           const detail = await client.getAgent(currentAgentId);
           if (!cancelled) {
@@ -477,7 +491,6 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         if (!cancelled) {
           const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
           setBeastError(message);
-          setBeastCreationUnavailableReason(message);
         }
       }
     }
