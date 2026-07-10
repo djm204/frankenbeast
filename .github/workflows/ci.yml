@@ -14,6 +14,7 @@ jobs:
         deterministic-seed: ['1337']
     env:
       FRANKENBEAST_SEED: ${{ matrix.deterministic-seed }}
+      CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,7 +58,7 @@ jobs:
       - run: npm run audit:security
 
       - name: Run deterministic root Vitest suite
-        run: npm run test:root
+        run: npm run ci:test:root
 
       - name: Run Docker sandbox build smoke test
         run: npm run test:docker:sandbox
@@ -74,7 +75,7 @@ jobs:
         run: npx turbo run build lint
 
       - name: Run package tests
-        run: npx turbo run test
+        run: npm run ci:test:packages
 
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs

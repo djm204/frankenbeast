@@ -38,7 +38,7 @@ describe('code comment debt marker scanner', () => {
 
     expect(packageJson.scripts?.['audit:todos']).toBe('node scripts/audit-todo-markers.mjs');
     expect(packageJson.scripts?.['lint:security']).toContain('node scripts/audit-todo-markers.mjs');
-    expect(workflow).toContain('npm run test:root');
+    expect(workflow).toContain('npm run ci:test:root');
     expect(workflow).not.toMatch(/npm run test:root --/);
     expect(workflow).toContain('npm run audit:todos');
   });
