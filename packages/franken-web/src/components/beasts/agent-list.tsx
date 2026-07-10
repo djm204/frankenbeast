@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
-import type { BeastRunSummary, TrackedAgentSummary } from '../../lib/beast-api';
+import { TRACKED_AGENT_STATUSES, type BeastRunSummary, type TrackedAgentSummary } from '../../lib/beast-api';
 import { AgentRow, type Density } from './agent-row';
 
 interface AgentListProps {
@@ -52,7 +52,7 @@ export function AgentList({ agents, runs, selectedAgentId, onSelectAgent, onCrea
             text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
         >
           <option value="">All statuses</option>
-          {['running', 'initializing', 'dispatching', 'stopped', 'completed', 'failed'].map((s) => (
+          {TRACKED_AGENT_STATUSES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
