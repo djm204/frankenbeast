@@ -2,11 +2,40 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { execSync } from 'node:child_process';
+import { load } from 'js-yaml';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
 const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
+
+function parseWorkflowYaml(source: string): Record<string, unknown> {
+  let workflow: unknown;
+  try {
+    workflow = load(source);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`YAML parse error: ${message}`);
+  }
+
+  if (typeof workflow !== 'object' || workflow === null || Array.isArray(workflow)) {
+    throw new Error('YAML workflow must parse to an object');
+  }
+
+  return workflow as Record<string, unknown>;
+}
+
+function expectRecord(value: unknown, label: string): Record<string, unknown> {
+  expect(value, `${label} should be an object`).toBeTypeOf('object');
+  expect(value, `${label} should be present`).not.toBeNull();
+  expect(Array.isArray(value), `${label} should not be an array`).toBe(false);
+  return value as Record<string, unknown>;
+}
+
+function expectSteps(job: Record<string, unknown>): Array<Record<string, unknown>> {
+  expect(Array.isArray(job.steps)).toBe(true);
+  return job.steps as Array<Record<string, unknown>>;
+}
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
@@ -15,39 +44,56 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
 
   describe('workflow configuration', () => {
     let content: string;
+    let workflow: Record<string, unknown>;
 
     beforeAll(() => {
       content = readFileSync(CI_PATH, 'utf-8');
+      workflow = parseWorkflowYaml(content);
+    });
+
+    it('rejects syntactically invalid CI workflow YAML even when a name is present', () => {
+      expect(() =>
+        parseWorkflowYaml(`name: CI
+on:
+  push:
+    branches: [main
+`),
+      ).toThrow(/YAML/);
     });
 
     it('is valid YAML (parseable by node)', () => {
-      // Use node's built-in JSON to validate after converting with a simple check
-      // At minimum, it should not throw when we try to parse it
-      expect(content.length).toBeGreaterThan(0);
-      expect(content).toContain('name:');
+      expect(() => parseWorkflowYaml(content)).not.toThrow();
     });
 
     it('has a workflow name', () => {
-      expect(content).toMatch(/^name:/m);
+      expect(workflow.name).toBe('CI');
     });
 
     it('triggers on push to main', () => {
-      expect(content).toMatch(/on:/);
-      expect(content).toMatch(/push:/);
-      expect(content).toMatch(/branches:.*\[?.*main.*\]?/);
+      const triggers = expectRecord(workflow.on, 'workflow.on');
+      const push = expectRecord(triggers.push, 'workflow.on.push');
+      expect(push.branches).toEqual(['main']);
     });
 
     it('triggers on pull_request to main', () => {
-      expect(content).toMatch(/pull_request:/);
+      const triggers = expectRecord(workflow.on, 'workflow.on');
+      const pullRequest = expectRecord(triggers.pull_request, 'workflow.on.pull_request');
+      expect(pullRequest.branches).toEqual(['main']);
     });
 
     it('uses Node.js 22', () => {
-      expect(content).toContain('node-version');
-      expect(content).toMatch(/node-version.*['"]?22['"]?/);
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
+      expect(setupNode).toBeTruthy();
+      const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
+      expect(setupNodeWith['node-version']).toBe('22');
     });
 
     it('runs npm ci for deterministic installs', () => {
-      expect(content).toContain('npm ci');
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+      expect(expectSteps(buildTestLint).some((step) => step.run === 'npm ci')).toBe(true);
     });
 
     it('runs the guarded security audit after deterministic installs', () => {
@@ -101,17 +147,27 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
     });
 
     it('uses actions/setup-node with npm cache', () => {
-      expect(content).toContain('actions/setup-node');
-      expect(content).toMatch(/cache.*npm/);
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
+      expect(setupNode).toBeTruthy();
+      const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
+      expect(setupNodeWith.cache).toBe('npm');
     });
 
     it('uses actions/checkout with full history for root verification tests', () => {
-      expect(content).toContain('actions/checkout');
-      expect(content).toMatch(/actions\/checkout@v4[\s\S]*fetch-depth:\s*0/);
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+      const checkout = expectSteps(buildTestLint).find((step) => step.uses === 'actions/checkout@v4');
+      expect(checkout).toBeTruthy();
+      const checkoutWith = expectRecord(checkout?.with, 'actions/checkout.with');
+      expect(checkoutWith['fetch-depth']).toBe(0);
     });
 
     it('runs on ubuntu-latest', () => {
-      expect(content).toContain('ubuntu-latest');
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+      expect(buildTestLint['runs-on']).toBe('ubuntu-latest');
     });
   });
 });
