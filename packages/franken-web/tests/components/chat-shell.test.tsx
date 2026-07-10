@@ -701,9 +701,14 @@ describe('ChatShell', () => {
     });
   });
 
-  it('shows pending and failure feedback for network service actions', async () => {
+  it('shows pending and failure feedback for valid network service actions', async () => {
     window.location.hash = '#/network';
     let rejectStart!: (error: Error) => void;
+    mockNetworkGetStatus.mockResolvedValueOnce({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      services: [{ id: 'chat-server', status: 'stopped' }],
+    });
     mockNetworkStart.mockImplementationOnce(() => new Promise((_, reject) => {
       rejectStart = reject;
     }));
