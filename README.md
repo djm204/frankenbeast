@@ -336,8 +336,8 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 
 ## Prerequisites
 
-- **Node.js** `>=22.13.0 <23 || >=24.0.0 <26` (see `.nvmrc` for the pinned local default; npm enforces this with `engine-strict=true`)
-- **npm** >= 10.0.0
+- **Node.js** `>=22.13.0 <23 || >=24.0.0 <26` (the local default is pinned in [.nvmrc](.nvmrc); npm enforces this with `engine-strict=true`, and CI exercises the same pinned baseline)
+- **npm** 11.5.1 via the root `packageManager` pin
 
 ### Optional
 

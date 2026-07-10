@@ -81,13 +81,14 @@ on:
       expect(pullRequest.branches).toEqual(['main']);
     });
 
-    it('uses Node.js 22', () => {
+    it('uses the repository-pinned minimum supported Node.js version', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
       const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
-      expect(setupNodeWith['node-version']).toBe('22');
+      expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+      expect(setupNodeWith['node-version']).toBeUndefined();
     });
 
     it('runs npm ci for deterministic installs', () => {
@@ -102,9 +103,11 @@ on:
     });
 
     it('enables Corepack and verifies the packageManager-pinned npm before installing', () => {
+      expect(content).toContain('npm install -g corepack@0.34.4');
       expect(content).toContain('corepack enable npm');
       expect(content).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
       expect(content).toContain('node scripts/check-package-manager.mjs');
+      expect(content.indexOf('npm install -g corepack@0.34.4')).toBeLessThan(content.indexOf('corepack enable npm'));
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
@@ -175,6 +178,22 @@ on:
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith.cache).toBe('npm');
+    });
+
+    it('uses the pinned minimum Node.js version in every CI setup-node step', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const nvmrc = readFileSync(resolve(ROOT, '.nvmrc'), 'utf-8').trim();
+
+      for (const [jobName, jobConfig] of Object.entries(jobs)) {
+        const job = expectRecord(jobConfig, `jobs.${jobName}`);
+        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v4')) {
+          const setupNodeWith = expectRecord(step.with, `${jobName}.actions/setup-node.with`);
+          expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+          expect(setupNodeWith['node-version']).toBeUndefined();
+        }
+      }
+
+      expect(nvmrc).toBe('22.13.0');
     });
 
     it('uses actions/checkout with full history for root verification tests', () => {

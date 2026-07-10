@@ -22,11 +22,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Enable packageManager-pinned npm
         run: |
+          npm install -g corepack@0.34.4
           corepack enable npm
           corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 
@@ -93,11 +94,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Enable packageManager-pinned npm
         run: |
+          npm install -g corepack@0.34.4
           corepack enable npm
           corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 
