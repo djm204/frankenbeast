@@ -35,11 +35,8 @@ export class GhostDependencyEvaluator implements Evaluator {
     const seen = new Set<string>();
 
     for (const specifier of extractDependencySpecifiers(input.content)) {
-      // Skip relative imports
-      if (specifier.startsWith('.')) continue;
-
-      // Skip absolute local paths used by dynamic import() loaders.
-      if (specifier.startsWith('/')) continue;
+      // Skip local imports, including absolute paths/URLs used by dynamic loaders.
+      if (isLocalImportSpecifier(specifier)) continue;
 
       // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
       if (isNodeBuiltinSpecifier(specifier)) continue;
@@ -74,6 +71,15 @@ export class GhostDependencyEvaluator implements Evaluator {
 
 function isNodeBuiltinSpecifier(specifier: string): boolean {
   return isBuiltin(specifier);
+}
+
+function isLocalImportSpecifier(specifier: string): boolean {
+  return (
+    specifier.startsWith('.') ||
+    specifier.startsWith('/') ||
+    specifier.startsWith('file:') ||
+    /^[A-Za-z]:/.test(specifier)
+  );
 }
 
 function extractDependencySpecifiers(content: string): string[] {
@@ -264,7 +270,7 @@ function canStartNativeDynamicImport(
 
   const statementStart = content.lastIndexOf(';', importIndex - 1);
   const prefix = content.slice(statementStart + 1, importIndex);
-  const isTernaryBranch = prefix.includes('?');
+  const isTernaryBranch = hasTernaryBranchMarker(prefix);
   const endsAfterTypeAnnotation = /:\s*$/.test(prefix);
 
   return !(
@@ -280,7 +286,20 @@ function isSpreadOperand(content: string, dotIndex: number): boolean {
 }
 
 function isInsideTypeDeclaration(prefix: string): boolean {
-  return /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix);
+  return (
+    /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
+    !/\n\s*(?:const|let|var|await|return|throw|if|for|while|switch|try|function|class)\b/.test(
+      prefix,
+    )
+  );
+}
+
+function hasTernaryBranchMarker(prefix: string): boolean {
+  const questionIndex = prefix.lastIndexOf('?');
+  if (questionIndex === -1) return false;
+
+  const afterQuestion = skipWhitespace(prefix, questionIndex + 1);
+  return prefix[afterQuestion] !== ':';
 }
 
 function isLikelyObjectLiteralValue(content: string, importIndex: number): boolean {

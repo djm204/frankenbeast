@@ -137,6 +137,8 @@ describe('GhostDependencyEvaluator', () => {
     const content = `
       const local = await import('./local-plugin.js');
       const absoluteLocal = await import('/tmp/generated/plugin.mjs');
+      const fileUrlLocal = await import('file:///tmp/generated/plugin.mjs');
+      const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
       const fs = await import('node:fs/promises');
     `;
     const result = await evaluator.evaluate(createInput(content));
@@ -176,6 +178,8 @@ describe('GhostDependencyEvaluator', () => {
         ? import('ghost-package').Ghost
         : import('another-ghost').Ghost;
       type GhostModule = typeof import('ghost-package');
+      function typedParam(dep?: import('ghost-package').Ghost) {}
+      class TypedField { dep?: import('ghost-package').Ghost }
       const plugin = loader.import('unknown-lib');
       this.#import('private-loader');
     `;
@@ -195,13 +199,15 @@ describe('GhostDependencyEvaluator', () => {
         plugin: import('another-ghost')
       };
       const selected = ready ? import('zod') : import('missing-branch');
+      type AlreadyDeclared = {}
+      const semicolonlessRuntime = await import('semicolonless-ghost');
       const runtimeTypeof = typeof import('runtime-ghost');
       await import('zod', { with: makeOptions(require('unknown-lib')) });
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(7);
+    expect(result.findings).toHaveLength(8);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('ghost-package'),
@@ -209,6 +215,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('spread-ghost'),
         expect.stringContaining('another-ghost'),
         expect.stringContaining('missing-branch'),
+        expect.stringContaining('semicolonless-ghost'),
         expect.stringContaining('runtime-ghost'),
         expect.stringContaining('unknown-lib'),
       ]),
