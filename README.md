@@ -557,9 +557,16 @@ npm test
 # Per-package tests via Turborepo
 npx turbo run test --filter=franken-brain
 
-# Orchestrator E2E tests
-cd packages/franken-orchestrator && npm run test:e2e
+# Orchestrator E2E tests (sets E2E=true and delegates to @franken/orchestrator)
+npm run test:e2e
 ```
+
+The E2E suites are opt-in and remain outside the regular `npm test` path. Before
+running them from a clean checkout, run the dependency-aware root build with
+`npm run build`, install a real `claude` CLI on `PATH`, and provide a valid
+`ANTHROPIC_API_KEY` in the environment. The root `test:e2e` script delegates to
+the workspace script, which sets `E2E=true` for the gated suites and forwards
+Vitest arguments after `--`.
 
 ## Local Dev Environment
 
