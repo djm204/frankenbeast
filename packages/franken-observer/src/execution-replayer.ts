@@ -1,6 +1,8 @@
 import type { AuditEvent } from './audit-event.js';
 import { AuditTrail } from './audit-event.js';
 
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
 export interface ExecutionTimeline {
   runId: string;
   startTime: string;
@@ -102,8 +104,12 @@ export class ExecutionReplayer {
   }
 
   private parseEventTimestamp(event: AuditEvent, context: string): number {
-    const timestampMs = new Date(event.timestamp).getTime();
-    if (!Number.isFinite(timestampMs)) {
+    const timestampMs = Date.parse(event.timestamp);
+    if (
+      !ISO_TIMESTAMP_PATTERN.test(event.timestamp) ||
+      !Number.isFinite(timestampMs) ||
+      new Date(timestampMs).toISOString() !== event.timestamp
+    ) {
       throw new Error(
         `Invalid audit event timestamp during replay (${context}): eventId=${event.eventId}, phase=${event.phase}, type=${event.type}, timestamp=${JSON.stringify(event.timestamp)}`,
       );

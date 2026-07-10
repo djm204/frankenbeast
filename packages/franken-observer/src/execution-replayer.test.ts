@@ -101,6 +101,18 @@ describe('ExecutionReplayer', () => {
     );
   });
 
+  it('rejects parseable but malformed timestamps', () => {
+    const trail = buildTrail([
+      { type: 'phase.start', phase: 'planning', provider: 'claude-cli' },
+      { type: 'phase.end', phase: 'planning', provider: 'claude-cli' },
+    ]);
+    corruptTimestamp(trail, 1, '2026-02-31T00:00:00.000Z');
+
+    expect(() => replayer.replay(trail)).toThrow(
+      /Invalid audit event timestamp during replay \(phase planning\): eventId=.*phase=planning, type=phase\.end, timestamp="2026-02-31T00:00:00.000Z"/,
+    );
+  });
+
   it('generates human-readable summary', () => {
     const trail = buildTrail([
       { type: 'phase.start', phase: 'planning', provider: 'claude-cli' },
