@@ -55,6 +55,29 @@ describe('AgentList', () => {
     expect(onCreate).toHaveBeenCalled();
   });
 
+  it('disables empty-state create when agent creation is unavailable', () => {
+    const onCreate = vi.fn();
+    render(
+      <AgentList
+        agents={[]}
+        runs={[]}
+        selectedAgentId={null}
+        onSelectAgent={vi.fn()}
+        onCreateAgent={onCreate}
+        createAgentDisabled={true}
+        createAgentDisabledReason="Beast API is not available."
+      />,
+    );
+
+    const createButton = screen.getByRole('button', { name: /create your first agent/i });
+    expect(createButton).toBeTruthy();
+    expect(createButton.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('Beast API is not available.')).toBeTruthy();
+
+    fireEvent.click(createButton);
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
   it('shows execution mode from the agent dispatch run rather than an older run', () => {
     const linkedAgent = { ...agents[0]!, dispatchRunId: 'run-new' };
     const runs: BeastRunSummary[] = [

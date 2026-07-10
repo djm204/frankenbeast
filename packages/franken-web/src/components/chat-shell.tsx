@@ -287,6 +287,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const beastAgentsRef = useRef<TrackedAgentSummary[]>([]);
   const beastAgentDetailRef = useRef<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
+  const [beastCreationUnavailableReason, setBeastCreationUnavailableReason] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
   const [pendingBeastAgentActions, setPendingBeastAgentActions] = useState<Record<string, AgentLifecycleAction | undefined>>({});
   const pendingBeastAgentActionsRef = useRef<Record<string, AgentLifecycleAction | undefined>>({});
@@ -377,6 +378,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const composerSessionKey = preserveComposerDraft
     ? `anonymous:${sessionSeed}`
     : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
+  const beastCreationDisabled = Boolean(beastCreationUnavailableReason);
 
   useEffect(() => {
     if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
@@ -434,8 +436,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     let cancelled = false;
 
     async function refreshBeasts() {
+      let catalog: Awaited<ReturnType<typeof client.getCatalog>>;
+      let agents: Awaited<ReturnType<typeof client.listAgents>>;
+      let runs: Awaited<ReturnType<typeof client.listRuns>>;
+      let containerRuntime: Awaited<ReturnType<typeof client.getContainerRuntimeStatus>>;
       try {
-        const [catalog, agents, runs, containerRuntime] = await Promise.all([
+        [catalog, agents, runs, containerRuntime] = await Promise.all([
           client.getCatalog(),
           client.listAgents(),
           client.listRuns(),
@@ -447,14 +453,25 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         if (cancelled) {
           return;
         }
-        setBeastError(null);
-        setBeastCatalog(catalog);
-        setBeastAgents(agents);
-        setBeastRuns(runs);
-        setBeastContainerRuntime(containerRuntime);
-        const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? agents[0]?.id ?? null : null);
-        setSelectedBeastAgentId(currentAgentId);
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          setBeastError(message);
+          setBeastCreationUnavailableReason(message);
+        }
+        return;
+      }
 
+      setBeastError(null);
+      setBeastCreationUnavailableReason(null);
+      setBeastCatalog(catalog);
+      setBeastAgents(agents);
+      setBeastRuns(runs);
+      setBeastContainerRuntime(containerRuntime);
+      const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? agents[0]?.id ?? null : null);
+      setSelectedBeastAgentId(currentAgentId);
+
+      try {
         if (currentAgentId) {
           const detail = await client.getAgent(currentAgentId);
           if (!cancelled) {
@@ -475,7 +492,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         }
       } catch (error) {
         if (!cancelled) {
-          setBeastError(error instanceof Error ? error.message : 'Unable to load Beast dispatch state.');
+          const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          setBeastError(message);
         }
       }
     }
@@ -1027,7 +1045,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             catalog={beastCatalog}
             runs={beastRuns}
             containerRuntime={beastContainerRuntime}
-            disabled={false}
+            disabled={beastCreationDisabled}
             error={beastError}
             logs={beastAgentDetail?.run?.logs ?? []}
             pendingAgentActions={pendingBeastAgentActions}

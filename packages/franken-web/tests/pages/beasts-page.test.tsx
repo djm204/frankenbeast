@@ -56,6 +56,27 @@ describe('BeastsPage', () => {
     expect(screen.getByText('Identity')).toBeTruthy();
   });
 
+  it('disables every create-agent entry point when the Beast API is unavailable', () => {
+    render(
+      <BeastsPage
+        {...baseProps}
+        agents={[]}
+        disabled={true}
+        error="Beast API not available"
+      />,
+    );
+
+    const headerCreateButton = screen.getByRole('button', { name: /^\+ create agent$/i });
+    const emptyStateCreateButton = screen.getByRole('button', { name: /create your first agent/i });
+
+    expect(headerCreateButton.hasAttribute('disabled')).toBe(true);
+    expect(emptyStateCreateButton.hasAttribute('disabled')).toBe(true);
+    expect(screen.getAllByText('Beast API not available').length).toBeGreaterThan(0);
+
+    fireEvent.click(emptyStateCreateButton);
+    expect(screen.queryByText('Identity')).toBeNull();
+  });
+
   it('drives wizard workflow choices from backend catalog prop', () => {
     render(<BeastsPage {...baseProps} catalog={[{
       id: 'custom-beast',
