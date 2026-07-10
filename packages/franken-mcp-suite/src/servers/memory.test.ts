@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createToolDefsForServer } from '../shared/tool-registry.js';
 import { createMemoryServer } from './memory.js';
 
 describe('Memory Server', () => {
@@ -87,5 +88,41 @@ describe('Memory Server', () => {
     const forgetResult = await forgetTool.handler({ key: 'adr' });
     expect(brain.forget).toHaveBeenCalledWith('adr');
     expect(forgetResult.content[0]!.text).toContain('Removed memory: adr');
+  });
+
+  it('rejects invalid query limits before calling the brain adapter', async () => {
+    for (const invalidLimit of ['abc', 'NaN', 'Infinity', '0', '-1']) {
+      const brain = {
+        query: vi.fn().mockResolvedValue([]),
+        store: vi.fn(),
+        frontload: vi.fn(),
+        forget: vi.fn(),
+      };
+      const server = createMemoryServer({ brain });
+      const result = await server.callTool('fbeast_memory_query', { query: 'adr', limit: invalidLimit });
+
+      expect(result.isError, invalidLimit).toBe(true);
+      expect(result.content[0]!.text).toContain('limit must be a positive integer');
+      expect(brain.query, invalidLimit).not.toHaveBeenCalled();
+    }
+  });
+
+  it('applies shared registry query limit defaults and validation', async () => {
+    const brain = {
+      query: vi.fn().mockResolvedValue([]),
+      store: vi.fn(),
+      frontload: vi.fn(),
+      forget: vi.fn(),
+    };
+    const queryTool = createToolDefsForServer('memory', { brain }).find((t) => t.name === 'fbeast_memory_query')!;
+
+    await queryTool.handler({ query: 'adr' });
+    await queryTool.handler({ query: 'adr', limit: '7' });
+    const invalidResult = await queryTool.handler({ query: 'adr', limit: 'NaN' });
+
+    expect(brain.query).toHaveBeenNthCalledWith(1, { query: 'adr', limit: 20 });
+    expect(brain.query).toHaveBeenNthCalledWith(2, { query: 'adr', limit: 7 });
+    expect(invalidResult.isError).toBe(true);
+    expect(brain.query).toHaveBeenCalledTimes(2);
   });
 });

@@ -69,7 +69,7 @@ npm --workspace @franken/web run dev:chat
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. `dev:chat` proxies API calls to the local chat server on `http://127.0.0.1:3737`; production deployments should use a TLS-terminated frontend/API URL instead of the local dev proxy.
 
-If the backend uses a different port, keep browser requests same-origin and point the Vite proxy at that backend:
+If the backend uses a different port, keep browser requests same-origin and point the Vite proxy at that backend. Leave `VITE_API_URL` unset for local Vite development; use `VITE_API_PROXY_TARGET` for chat/API traffic and `VITE_BEAST_API_PROXY_TARGET` when Beast controls run on a separate backend:
 
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
