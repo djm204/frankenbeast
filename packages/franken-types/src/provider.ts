@@ -156,7 +156,7 @@ export interface ProviderCritiqueFinding {
  */
 export type CritiqueResult = ProviderCritiqueFinding;
 
-// --- Skill Loading Types (used by Phase 5 SkillManager + Phase 8 Beast Loop) ---
+// --- Skill Loading Types (used by SkillManager provider translation + Beast Loop spawn wiring) ---
 
 export interface ProviderSkillConfig {
   tools?: ToolDefinition[];
