@@ -10,7 +10,7 @@ import {
   type BeastWorktreeAllocation,
   type GitWorktreeIsolationConfig,
 } from './git-worktree-isolation.js';
-import { isoNow, wallClockNow } from '@franken/types';
+import { wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -753,6 +753,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       status,
       finishedAt,
       stopReason,
+      latestExitCode: null,
     });
     const finishEvent = {
       attemptId: attempt.id,
