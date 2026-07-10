@@ -92,6 +92,18 @@ describe('SseConnectionTicketStore', () => {
     },
   );
 
+  it('rejects cleanupIntervalMs values above Node timer delay limits before scheduling cleanup', () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    try {
+      expect(() => new SseConnectionTicketStore({ cleanupIntervalMs: 2_147_483_648 })).toThrow(
+        /cleanupIntervalMs must be at most 2147483647 milliseconds/,
+      );
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
+  });
+
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
     'rejects invalid consumedRetentionMs value %s',
     (consumedRetentionMs) => {

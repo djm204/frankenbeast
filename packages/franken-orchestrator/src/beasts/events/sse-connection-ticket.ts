@@ -21,12 +21,21 @@ export type SseTicketStatus = 'valid' | 'invalid' | 'reused';
 
 const DEFAULT_TICKET_TTL_MS = 30_000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
+const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
 const MIN_CONSUMED_RETENTION_MS = 600_000;
 
-function resolvePositiveDurationMs(name: string, value: number | undefined, defaultValue: number): number {
+function resolvePositiveDurationMs(
+  name: string,
+  value: number | undefined,
+  defaultValue: number,
+  maxValue?: number,
+): number {
   const resolved = value ?? defaultValue;
   if (!Number.isSafeInteger(resolved) || resolved <= 0) {
     throw new RangeError(`${name} must be a finite positive integer number of milliseconds`);
+  }
+  if (maxValue !== undefined && resolved > maxValue) {
+    throw new RangeError(`${name} must be at most ${maxValue} milliseconds`);
   }
   return resolved;
 }
@@ -56,6 +65,7 @@ export class SseConnectionTicketStore {
       'cleanupIntervalMs',
       options?.cleanupIntervalMs,
       DEFAULT_CLEANUP_INTERVAL_MS,
+      MAX_NODE_TIMER_DELAY_MS,
     );
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupMs);
     this.cleanupInterval.unref?.();
