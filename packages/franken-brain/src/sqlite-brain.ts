@@ -467,6 +467,9 @@ export class SqliteBrain implements IBrain {
         brain.working.restore(snapshot.working);
         brain.working.flushToDb();
 
+        brain.db.prepare(`DELETE FROM episodic_events`).run();
+        brain.db.prepare(`DELETE FROM checkpoints`).run();
+
         for (const event of snapshot.episodic) {
           insertEvent.run(
             event.type,

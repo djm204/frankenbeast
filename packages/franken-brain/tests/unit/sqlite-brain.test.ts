@@ -416,6 +416,43 @@ describe('SqliteBrain', () => {
       brain2.close();
     });
 
+    it('hydrate() replaces existing persistent database rows without duplicating snapshot data', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        brain.working.set('task', 'snapshot');
+        brain.episodic.record({
+          type: 'success',
+          summary: 'hydrated once only',
+          createdAt: '2026-07-10T00:00:00Z',
+        });
+        brain.recovery.checkpoint({
+          runId: 'run-1',
+          phase: 'execution',
+          step: 1,
+          context: {},
+          timestamp: '2026-07-10T00:01:00Z',
+        });
+        const snapshot = brain.serialize();
+
+        const first = SqliteBrain.hydrate(snapshot, dbPath);
+        first.close();
+        const second = SqliteBrain.hydrate(snapshot, dbPath);
+
+        expect(second.working.snapshot()).toEqual({ task: 'snapshot' });
+        expect(second.episodic.count()).toBe(1);
+        expect(second.episodic.recent(10).map(event => event.summary)).toEqual([
+          'hydrated once only',
+        ]);
+        expect(second.recovery.listCheckpoints()).toHaveLength(1);
+        expect(second.recovery.lastCheckpoint()?.runId).toBe('run-1');
+        second.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('round-trips with null checkpoint', () => {
       brain.working.set('key', 'val');
       const snapshot = brain.serialize();
