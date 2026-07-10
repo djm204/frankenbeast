@@ -8,6 +8,7 @@ import type {
 } from '../lib/beast-api';
 import { AgentList } from '../components/beasts/agent-list';
 import { AgentDetailPanel } from '../components/beasts/agent-detail-panel';
+import type { AgentLifecycleAction } from '../components/beasts/agent-action-bar';
 import { WizardDialog } from '../components/beasts/wizard-dialog';
 import { useBeastStore } from '../stores/beast-store';
 
@@ -20,6 +21,7 @@ interface BeastsPageProps {
   disabled: boolean;
   error: string | null;
   logs: string[];
+  pendingAgentActions?: Record<string, AgentLifecycleAction | undefined>;
   selectedAgentId: string | null;
   onClose: () => void;
   onLaunch: (config: Record<string, unknown>) => Promise<void>;
@@ -42,6 +44,7 @@ export function BeastsPage({
   disabled,
   error,
   logs,
+  pendingAgentActions = {},
   selectedAgentId,
   onClose,
   onLaunch,
@@ -113,6 +116,7 @@ export function BeastsPage({
           detail={agentDetail}
           logs={logs}
           onClose={onClose}
+          pendingAction={pendingAgentActions[agentDetail.agent.id] ?? null}
           onStart={() => onStart(agentDetail.agent.id)}
           onStop={() => onStop(agentDetail.agent.id)}
           onRestart={() => onRestart(agentDetail.agent.id)}
