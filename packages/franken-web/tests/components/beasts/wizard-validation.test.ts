@@ -60,6 +60,15 @@ describe('wizard validation', () => {
     expect(errors).toEqual({});
   });
 
+  it.each([
+    ['chunk-plan output directory', { workflowType: 'chunk-plan', designDocPath: 'docs/design.md', outputDir: 'C:\\fakepath\\chunks' }, 'outputDir'],
+    ['martin-loop chunk directory', { workflowType: 'martin-loop', provider: 'codex', objective: 'Implement chunks', chunkDirectory: 'C:\\fakepath\\chunks' }, 'chunkDir'],
+  ])('rejects browser fakepath values for %s', (_label, workflowValues, errorKey) => {
+    const errors = validateWizardStep(1, { 1: workflowValues });
+
+    expect(errors[errorKey]).toBe('Directory path must be a repo-relative path, not a browser fake path.');
+  });
+
   it('rejects martin-loop when backend-required fields are missing', () => {
     const errors = validateWizardStep(1, {
       1: { workflowType: 'martin-loop', provider: '', objective: '   ' },
