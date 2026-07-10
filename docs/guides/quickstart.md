@@ -69,7 +69,7 @@ npm run typecheck
 npm test
 ```
 
-Root scripts currently include `build`, `typecheck`, `test`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts.
+Root scripts currently include `build`, `typecheck`, `test`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
 ## 5. Try the orchestrator CLI
 
@@ -144,4 +144,7 @@ npm run test:root
 
 # Single package via Turbo filter
 npx turbo run test --filter=franken-brain
+
+# Explicit opt-in live benchmark suite (sets FBEAST_LIVE_BENCH_E2E=1)
+npm run test:live:bench
 ```
