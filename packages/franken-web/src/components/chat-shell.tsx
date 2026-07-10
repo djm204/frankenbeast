@@ -1006,8 +1006,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               if (!beastClient) return;
               void beastClient.deleteAgent(agentId).then(() => {
                 shouldAutoSelectBeastAgentRef.current = false;
-                selectedBeastAgentIdRef.current = null;
-                setSelectedBeastAgentId((current) => current === agentId ? null : current);
+                setSelectedBeastAgentId((current) => {
+                  if (current !== agentId) return current;
+                  selectedBeastAgentIdRef.current = null;
+                  return null;
+                });
                 setBeastAgentDetail((current) => current?.agent.id === agentId ? null : current);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((err) => {
