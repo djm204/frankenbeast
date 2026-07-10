@@ -204,6 +204,18 @@ describe('MultiAdapter', () => {
       await expect(multi.listTraceIds()).rejects.toThrow('listTraceIds')
     })
 
+    it('throws an aggregate error when failures leave only empty list results', async () => {
+      const failingList: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockResolvedValue(null),
+        listTraceIds: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+      }
+      const emptyFallback = new InMemoryAdapter()
+      const multi = new MultiAdapter({ adapters: [failingList, emptyFallback] })
+
+      await expect(multi.listTraceIds()).rejects.toThrow('listTraceIds')
+    })
+
     it('returns an empty list when every list adapter rejects and throwOnError is false', async () => {
       const failingList: ExportAdapter = {
         flush: vi.fn().mockResolvedValue(undefined),

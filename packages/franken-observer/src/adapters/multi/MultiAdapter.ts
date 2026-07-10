@@ -79,14 +79,16 @@ export class MultiAdapter implements ExportAdapter {
     const sets = results.filter((r): r is PromiseFulfilledResult<string[]> => r.status === 'fulfilled').map(r => r.value)
     const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
 
-    if (this.throwOnError && sets.length === 0 && failed.length > 0) {
+    const traceIds = sets.flat()
+
+    if (this.throwOnError && traceIds.length === 0 && failed.length > 0) {
       throw this.createReadAggregateError(
         'listTraceIds',
         failed.map(f => f.reason),
       )
     }
 
-    return [...new Set(sets.flat())]
+    return [...new Set(traceIds)]
   }
 
   private createReadAggregateError(operation: string, errors: unknown[]): AggregateError {
