@@ -193,10 +193,10 @@ describe('fbeast main CLI', () => {
     mockExit.mockRestore();
   });
 
-  it('launches Windows .cmd shims through cmd.exe without enabling shell mode', async () => {
+  it('resolves Windows npm .cmd shims for non-mcp passthrough commands', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const binDir = tmpDir();
-    const shimPath = join(binDir, 'frankenbeast.CMD');
+    const shimPath = join(binDir, 'frankenbeast.cmd');
     writeFileSync(shimPath, '@echo off\r\n');
     vi.stubEnv('PATH', binDir);
     vi.stubEnv('PATHEXT', '.COM;.EXE;.BAT;.CMD');
