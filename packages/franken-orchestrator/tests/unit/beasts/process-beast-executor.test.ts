@@ -761,6 +761,40 @@ describe('ProcessBeastExecutor', () => {
     });
   });
 
+  it('clears stale failure telemetry when an operator-stopped process exits by signal', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let capturedCallbacks: ProcessCallbacks | undefined;
+    const supervisor = {
+      spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+        capturedCallbacks = callbacks as ProcessCallbacks;
+        return { pid: 777 };
+      }),
+      stop: vi.fn(async () => {
+        capturedCallbacks?.onExit(null, 'SIGTERM');
+      }),
+      kill: vi.fn(async () => {}),
+    };
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, { defaultStopTimeoutMs: 100 });
+    const run = createTestRun(repo);
+    repo.updateRun(run.id, {
+      status: 'failed',
+      stopReason: 'signal_SIGTERM',
+      latestExitCode: 143,
+      finishedAt: '2026-03-10T00:00:01.000Z',
+    });
+
+    const attempt = await executor.start(run, martinLoopDefinition);
+    await executor.stop(run.id, attempt.id);
+
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'stopped',
+      stopReason: 'operator_stop',
+    });
+    expect(repo.getRun(run.id)?.latestExitCode).toBeUndefined();
+  });
+
   it('clears operator-stop bookkeeping when stop dispatch fails', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
