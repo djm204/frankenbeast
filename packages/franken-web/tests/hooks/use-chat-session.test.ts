@@ -333,7 +333,7 @@ describe('useChatSession', () => {
     expect(result.current.messages).toContainEqual(expect.objectContaining({
       id: clientMessageId,
       receipt: 'failed',
-      canRetry: false,
+      canRetry: true,
     }));
     expect(result.current.errorBanners[0]).toMatchObject({
       action: 'reconnect',
@@ -1029,6 +1029,48 @@ describe('useChatSession', () => {
     });
 
     expect(mockApprove).toHaveBeenCalledWith('chat-1', false);
+  });
+
+  it('clears approval resolving state after protocol errors so users can retry', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    expect(result.current.approvalResolving).toBe(true);
+
+    act(() => socket.message({ type: 'message.accepted', timestamp: '2026-03-09T00:00:07Z' }));
+
+    await waitFor(() => {
+      expect(result.current.approvalResolving).toBe(false);
+      expect(result.current.approvalError).toContain('invalid response');
+    });
+
+    await act(async () => {
+      await result.current.approve(false);
+    });
+
+    expect(socket.sent).toHaveLength(2);
+    expect(JSON.parse(socket.sent[1] ?? '{}')).toMatchObject({
+      type: 'approval.respond',
+      approved: false,
+    });
   });
 
   it('preserves streamed messages after HTTP approval fallback', async () => {

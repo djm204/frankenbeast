@@ -568,7 +568,11 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     function handleProtocolError(message: string) {
       setStatus('error');
       setConnectionStatus('error');
-      failAllPendingSends(new Error(message), false);
+      failAllPendingSends(new Error(message));
+      if (approvalResolvingRef.current) {
+        updateApprovalResolving(false);
+        setApprovalError('The chat server sent an invalid response while resolving approval. Try again if approval is still pending.');
+      }
       addErrorBanner(makeBanner(
         'Chat protocol error',
         message,
