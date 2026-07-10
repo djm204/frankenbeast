@@ -601,7 +601,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
 
         %% === Orchestrator wiring ===
         BL_INGEST -- "sanitize" --> FW_IN
-        BL_INGEST -- "hydrate" --> MEM_BRAIN
+        BL_INGEST -- "hydrate" --> MEM_ADAPT
         BL_PLAN -- "plan" --> PL_INTENT
         BL_PLAN -- "critique" --> CR_LOOP
         BL_EXEC -- "resolve" --> SK_REG
@@ -653,7 +653,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
         GOV_TRIG -- "budget check" --> OB_CB
 
         %% === MOD-08: Reflection pulse ===
-        HB_REFL -- "pulse() result" --> HB_DISP
+        BL_CLOSE -- "optional pulse()" --> HB_REFL
 
         %% === MOD-08 → MOD-05: Observability ===
         HB_DET -- "getTraces()<br/>getTokenSpend()" --> OB_TRACE
