@@ -26,6 +26,7 @@
     "local:verify-setup": "tsx scripts/verify-setup.ts",
     "test": "turbo run test",
     "test:ci": "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages",
+    "test:e2e": "npm run test:e2e --workspace @franken/orchestrator",
     "test:live:bench": "turbo run test:live --filter=@franken/live-bench",
     "ci:test:root": "node scripts/retry-ci-command.mjs -- npm run test:root",
     "ci:test:packages": "node scripts/retry-ci-command.mjs -- npx turbo run test",
