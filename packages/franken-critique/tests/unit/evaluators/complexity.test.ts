@@ -693,6 +693,14 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
   });
 
+  it('keeps unclosed conditional return types from becoming function bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function external(a, b, c, d, e, f): T extends { id: string`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
+  });
+
   it('flags deeply nested code', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `if (a) { if (b) { if (c) { if (d) { if (e) { doThing(); } } } } }`;

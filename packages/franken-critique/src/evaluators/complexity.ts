@@ -151,7 +151,9 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
     if (char === '{' && typeDepth === 0) {
       const returnTypeObjectLikely =
         expectTypeOperand ||
-        ['keyof', 'is', 'asserts'].includes(previousIdentifier(content, i - 1));
+        ['keyof', 'is', 'asserts', 'extends', 'infer'].includes(
+          previousIdentifier(content, i - 1),
+        );
       const closeIndex = findMatchingDelimiter(content, i, '{', '}');
       if (closeIndex === -1) return returnTypeObjectLikely ? -1 : i;
       let nextIndex = closeIndex + 1;
