@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.6.15](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.14...franken-critique-v0.6.15) (2026-07-10)
+
+
+### Bug Fixes
+
+* **critique:** count only top-level parameters ([#1404](https://github.com/djm204/frankenbeast/issues/1404)) ([15875a2](https://github.com/djm204/frankenbeast/commit/15875a28545f6d6227619787c94114b6d0846d84))
+* **critique:** cover plural port scanner codex findings ([#1308](https://github.com/djm204/frankenbeast/issues/1308)) ([067a461](https://github.com/djm204/frankenbeast/commit/067a4612b686fc2c016a54e59bb163ff81e0d269))
+* **critique:** detect port literals in config shapes ([#1290](https://github.com/djm204/frankenbeast/issues/1290)) ([5afe588](https://github.com/djm204/frankenbeast/commit/5afe58808d31798c5fd6e4bce26d833069c0bc8a))
+* **critique:** ignore bare Node built-ins in ghost dependency checks ([186d2fa](https://github.com/djm204/frankenbeast/commit/186d2fadf9971c7d80d8936c98998fa4d1b91bb1)), closes [#1208](https://github.com/djm204/frankenbeast/issues/1208)
+* **critique:** isolate evaluator exceptions ([d5c2e2a](https://github.com/djm204/frankenbeast/commit/d5c2e2a57021cc5088bb9e6634873c9cdd704a8f)), closes [#1210](https://github.com/djm204/frankenbeast/issues/1210)
+* **critique:** preserve loop warning verdicts ([715a1de](https://github.com/djm204/frankenbeast/commit/715a1de089d9071b7bf218bff7790dd0d544345a)), closes [#1160](https://github.com/djm204/frankenbeast/issues/1160)
+* **critique:** track failure history internally ([#979](https://github.com/djm204/frankenbeast/issues/979)) ([a224802](https://github.com/djm204/frankenbeast/commit/a22480256f5805f2ff4fe04fb9ede66f5135f430))
+* **critique:** validate hardcoded IPv4 octets ([#1380](https://github.com/djm204/frankenbeast/issues/1380)) ([1f1c109](https://github.com/djm204/frankenbeast/commit/1f1c109c7cd41613db33e2baadaff7cf7ffb2fe4))
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+* **web:** secure chat websocket authentication ([679b15d](https://github.com/djm204/frankenbeast/commit/679b15dfbd8cc592ed04b67339230494a5586a8c)), closes [#703](https://github.com/djm204/frankenbeast/issues/703)
+
+
+### Miscellaneous
+
+* **types:** disambiguate critique contracts ([#1360](https://github.com/djm204/frankenbeast/issues/1360)) ([ddd0bd0](https://github.com/djm204/frankenbeast/commit/ddd0bd0b1dfc8a5a0d2a78cd9b4a570e7974e57f))
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Tests
+
+* remove obfuscated eval usage from issue 520 fixtures ([#903](https://github.com/djm204/frankenbeast/issues/903)) ([fc22747](https://github.com/djm204/frankenbeast/commit/fc22747c3b5aac6337396181df2c0dc6618f5046))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.1 to 0.8.2
+
 ## [0.6.14](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.13...franken-critique-v0.6.14) (2026-07-08)
 
 

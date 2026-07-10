@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.2.5](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.4...live-bench-v0.2.5) (2026-07-10)
+
+
+### Bug Fixes
+
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Tests
+
+* **live-bench:** restore live test target ([#1347](https://github.com/djm204/frankenbeast/issues/1347)) ([d85dc55](https://github.com/djm204/frankenbeast/commit/d85dc55652bc0480c0e4fc7126c51371f289e89b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.14 to 0.7.15
+
 ## [0.2.4](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.3...live-bench-v0.2.4) (2026-07-08)
 
 

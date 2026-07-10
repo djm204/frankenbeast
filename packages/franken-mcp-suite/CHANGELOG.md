@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.2.5](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.4...franken-mcp-suite-v0.2.5) (2026-07-10)
+
+
+### Bug Fixes
+
+* **governor:** reload firewall security profile ([#1358](https://github.com/djm204/frankenbeast/issues/1358)) ([40d34c0](https://github.com/djm204/frankenbeast/commit/40d34c0f999b713fc6dde628ffdd5d758f8ae011))
+* **mcp-suite:** harden project MCP config paths ([#1349](https://github.com/djm204/frankenbeast/issues/1349)) ([8b6d184](https://github.com/djm204/frankenbeast/commit/8b6d184a904faf958a4192e1a575f985f540f1e5))
+* **mcp-suite:** keep json client config project-scoped ([#1313](https://github.com/djm204/frankenbeast/issues/1313)) ([492335d](https://github.com/djm204/frankenbeast/commit/492335d661eebd47db71ec3396bf3ba848cd30fa))
+* **mcp-suite:** preserve Windows shim trailing backslashes ([7320ce3](https://github.com/djm204/frankenbeast/commit/7320ce3a5e2d372964d42846023b78b8b94aa9a0))
+* **mcp-suite:** quote Codex hook command paths ([9b6ff3d](https://github.com/djm204/frankenbeast/commit/9b6ff3d62831ada2547252bb58a43f216c6043e1)), closes [#1236](https://github.com/djm204/frankenbeast/issues/1236)
+* **mcp:** avoid global settings path crossover ([#1295](https://github.com/djm204/frankenbeast/issues/1295)) ([7aaec80](https://github.com/djm204/frankenbeast/commit/7aaec80ab9974be07f580c965a340b24c55a3c79))
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **mcp:** reject unknown critique evaluators ([5251af7](https://github.com/djm204/frankenbeast/commit/5251af77d48279fa2775cddbd5d68123e89c0582))
+* **mcp:** reject unsupported recovery memory type ([#907](https://github.com/djm204/frankenbeast/issues/907)) ([62867ea](https://github.com/djm204/frankenbeast/commit/62867ea63a7a8662bbc6464ac26d5590a232d824))
+* **mcp:** surface unknown model costs ([#1293](https://github.com/djm204/frankenbeast/issues/1293)) ([1656e5d](https://github.com/djm204/frankenbeast/commit/1656e5dd9f7927234e7831127226cc734295aae2)), closes [#1163](https://github.com/djm204/frankenbeast/issues/1163)
+* **mcp:** validate stored planner DAGs ([#1408](https://github.com/djm204/frankenbeast/issues/1408)) ([1d86aa5](https://github.com/djm204/frankenbeast/commit/1d86aa5c129e91ea0ed464c19678c09a97f22429))
+* quote hook script db paths to prevent shell injection ([#900](https://github.com/djm204/frankenbeast/issues/900)) ([2b469e8](https://github.com/djm204/frankenbeast/commit/2b469e8358726a78600db1f56ba3e0f87b2b1b44))
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+
+
+### Documentation
+
+* **agents:** make fbeast MCP instructions conditional ([#1309](https://github.com/djm204/frankenbeast/issues/1309)) ([1433a1d](https://github.com/djm204/frankenbeast/commit/1433a1d416a7f2d797ed42c2d1998d646eec3ca3))
+* **mcp:** document skill health endpoint ([#1385](https://github.com/djm204/frankenbeast/issues/1385)) ([4c87b69](https://github.com/djm204/frankenbeast/commit/4c87b6983538d4030e8663d0d82f8ef92dec636e))
+* **mcp:** update local link recovery advice ([439dee4](https://github.com/djm204/frankenbeast/commit/439dee42d20320d8bb26ef2504ccfde499ef29a4)), closes [#1209](https://github.com/djm204/frankenbeast/issues/1209)
+* **readme:** clarify init backend setup ([#1384](https://github.com/djm204/frankenbeast/issues/1384)) ([fd0fbc9](https://github.com/djm204/frankenbeast/commit/fd0fbc956f41b2ceddddf2b7bfb2378366dd7827))
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Tests
+
+* **mcp:** cover post-tool option termination ([8c9231b](https://github.com/djm204/frankenbeast/commit/8c9231b3673165f2672c2af94d2f66aaeeaedd73)), closes [#914](https://github.com/djm204/frankenbeast/issues/914)
+* **mcp:** guard README tool inventory ([31f516f](https://github.com/djm204/frankenbeast/commit/31f516f1cfd45c3c32a96a855b7153236f6bd766)), closes [#1131](https://github.com/djm204/frankenbeast/issues/1131)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.1 to 0.8.2
+    * @franken/brain bumped from 0.7.3 to 0.7.4
+    * @franken/critique bumped from 0.6.14 to 0.6.15
+    * @franken/governor bumped from 0.5.12 to 0.5.13
+    * @franken/observer bumped from 0.7.14 to 0.7.15
+    * @franken/orchestrator bumped from 0.42.0 to 0.42.1
+    * @franken/planner bumped from 0.4.12 to 0.4.13
+
 ## [0.2.4](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.3...franken-mcp-suite-v0.2.4) (2026-07-08)
 
 

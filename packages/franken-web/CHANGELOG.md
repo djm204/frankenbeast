@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.2.4](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.3...franken-web-v0.2.4) (2026-07-10)
+
+
+### Bug Fixes
+
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **orchestrator:** block chat input while approval pending ([#1316](https://github.com/djm204/frankenbeast/issues/1316)) ([7d67c0f](https://github.com/djm204/frankenbeast/commit/7d67c0fa8de42db1e79c9cc05d89a9f3a20129d4)), closes [#1154](https://github.com/djm204/frankenbeast/issues/1154)
+* **web:** align Create Agent workflow configs ([#1312](https://github.com/djm204/frankenbeast/issues/1312)) ([940e945](https://github.com/djm204/frankenbeast/commit/940e945bcd0e1f7015282d905cf16597d2dc459a))
+* **web:** drive beast wizard from catalog definitions ([#1378](https://github.com/djm204/frankenbeast/issues/1378)) ([9b6bfeb](https://github.com/djm204/frankenbeast/commit/9b6bfebfc42eccfd0bcc17cb92d0379cbfc23537))
+* **web:** read chunk-plan design docs from workflow config ([0dbff10](https://github.com/djm204/frankenbeast/commit/0dbff10e004753212b3792f4976c7389da8c88f7))
+* **web:** refresh chat socket token after errors ([aac89ac](https://github.com/djm204/frankenbeast/commit/aac89acc6ca2455d3a8889c81d6f670dc8c046ce)), closes [#1258](https://github.com/djm204/frankenbeast/issues/1258)
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+* **web:** secure chat websocket authentication ([679b15d](https://github.com/djm204/frankenbeast/commit/679b15dfbd8cc592ed04b67339230494a5586a8c)), closes [#703](https://github.com/djm204/frankenbeast/issues/703)
+* **web:** surface Events and Logs fullscreen failures ([7d7dc21](https://github.com/djm204/frankenbeast/commit/7d7dc21858d7f97844550d281b9a5e1ac7fbad0f)), closes [#1332](https://github.com/djm204/frankenbeast/issues/1332)
+* **web:** surface network API structured errors ([8bfb416](https://github.com/djm204/frankenbeast/commit/8bfb416acf5cfc315dee23a9ed6ed6605aa35cca)), closes [#1244](https://github.com/djm204/frankenbeast/issues/1244)
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+* **web:** fix Vite environment table ([#1328](https://github.com/djm204/frankenbeast/issues/1328)) ([b7c4697](https://github.com/djm204/frankenbeast/commit/b7c46976cf37330f90df6cfeeece50a3efe95c7b)), closes [#1198](https://github.com/djm204/frankenbeast/issues/1198)
+
+
+### Tests
+
+* **web:** cover analytics JSON copy rejection ([fb0d97b](https://github.com/djm204/frankenbeast/commit/fb0d97b61f3cd8e12248e0edd0cca246f4e98be2)), closes [#1250](https://github.com/djm204/frankenbeast/issues/1250)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.1 to 0.8.2
+
 ## [0.2.3](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.2...franken-web-v0.2.3) (2026-07-08)
 
 
