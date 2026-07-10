@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { createInterface, type Interface } from 'node:readline';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
@@ -8,6 +7,7 @@ import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../http/ws-chat-server.js';
+import { deterministicUuid } from '@franken/types';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from './network-url.js';
 
 
@@ -236,7 +236,7 @@ export async function runManagedChatRepl(options: {
 
       session.socket.send(JSON.stringify({
         type: 'message.send',
-        clientMessageId: randomUUID(),
+        clientMessageId: deterministicUuid('packages/franken-orchestrator/src/network/chat-attach.ts'),
         content: input,
       }));
       await awaitRemoteReply(session.socket, verbose);

@@ -16,6 +16,16 @@ export {
   createTraceId,
 } from './ids.js';
 
+export type { SeededRandom } from './deterministic.js';
+export {
+  deterministicUuid,
+  hashSeed,
+  isoNow,
+  now,
+  seededRandom,
+  wallClockNow,
+} from './deterministic.js';
+
 // Severity
 export type {
   Severity,

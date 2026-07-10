@@ -1,5 +1,6 @@
 import { SqliteBrain } from '@franken/brain';
 import Database from 'better-sqlite3';
+import { isoNow } from '@franken/types';
 
 function configureBrainAdapterDb(db: Database.Database): void {
   db.pragma('journal_mode = WAL');
@@ -110,7 +111,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         brain.episodic.record({
           type: 'success',
           summary: `${input.key}: ${input.value}`,
-          createdAt: new Date().toISOString(),
+          createdAt: isoNow(),
         });
         return;
       }

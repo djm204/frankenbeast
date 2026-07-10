@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import type { IGovernorModule, ApprovalPayload, ApprovalOutcome } from '../deps.js';
+import { deterministicUuid, now as deterministicNow } from '@franken/types';
 
 export type GovernorDecision = ApprovalOutcome['decision'];
 
@@ -49,8 +49,8 @@ export class GovernorPortAdapter implements IGovernorModule {
     this.gateway = deps.gateway;
     this.projectId = deps.projectId;
     this.defaultDecision = deps.defaultDecision;
-    this.idFactory = deps.idFactory ?? randomUUID;
-    this.clock = deps.clock ?? (() => new Date());
+    this.idFactory = deps.idFactory ?? (() => deterministicUuid('governor-approval'));
+    this.clock = deps.clock ?? (() => new Date(deterministicNow()));
   }
 
   async requestApproval(request: ApprovalPayload): Promise<ApprovalOutcome> {

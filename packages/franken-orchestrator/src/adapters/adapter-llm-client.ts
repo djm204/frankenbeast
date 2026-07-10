@@ -1,4 +1,5 @@
 import type { ILlmClient } from '@franken/types';
+import { now as deterministicNow, seededRandom } from '@franken/types';
 
 type UnifiedRequest = {
   id: string;
@@ -59,7 +60,7 @@ export class AdapterLlmClient implements ILlmClient {
   }
 
   async complete(prompt: string): Promise<string> {
-    const requestId = `llm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const model = this.defaultModel;
     
     const request: UnifiedRequest = {

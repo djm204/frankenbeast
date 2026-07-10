@@ -6,6 +6,7 @@ import {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from '../security/signature-verifier.js';
+import { now as deterministicNow } from '@franken/types';
 import { SessionTokenStore } from '../security/session-token-store.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
@@ -295,7 +296,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       requestId: body.requestId,
       decision,
       respondedBy,
-      respondedAt: new Date(),
+      respondedAt: new Date(deterministicNow()),
       ...(feedback !== undefined ? { feedback } : {}),
       ...(signature !== undefined ? { signature } : {}),
     });
@@ -472,7 +473,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       requestId,
       decision,
       respondedBy: payload.user?.id ?? payload.user?.username ?? 'slack',
-      respondedAt: new Date(),
+      respondedAt: new Date(deterministicNow()),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
 

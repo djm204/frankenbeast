@@ -5,6 +5,7 @@ import type {
   TrackedAgentEvent,
   TrackedAgentInitAction,
 } from '../types.js';
+import { isoNow } from '@franken/types';
 import { UnknownTrackedAgentError } from '../errors.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 
@@ -43,7 +44,7 @@ export interface TrackedAgentDetail {
 export class AgentService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
-    private readonly now: () => string = () => new Date().toISOString(),
+    private readonly now: () => string = () => isoNow(),
   ) {}
 
   createAgent(request: CreateTrackedAgentRequest): TrackedAgent {

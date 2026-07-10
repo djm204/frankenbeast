@@ -7,6 +7,7 @@ import type { TranscriptMessage } from '../chat/types.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
 import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
+import { isoNow } from '@franken/types';
 
 
 function printLine(...args: unknown[]): void {
@@ -189,7 +190,7 @@ export class ChatRepl {
       const session = this.sessionStore.get(id);
       if (session && session.projectId === this.projectId && session.state === 'active') {
         session.transcript = this.transcript;
-        session.updatedAt = new Date().toISOString();
+        session.updatedAt = isoNow();
         this.sessionStore.save(session);
         return;
       }
@@ -197,7 +198,7 @@ export class ChatRepl {
 
     const session = this.sessionStore.create(this.projectId);
     session.transcript = this.transcript;
-    session.updatedAt = new Date().toISOString();
+    session.updatedAt = isoNow();
     this.sessionStore.save(session);
   }
 }

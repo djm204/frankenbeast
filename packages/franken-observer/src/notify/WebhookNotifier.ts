@@ -1,5 +1,6 @@
 import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
 
+import { seededRandom } from '@franken/types';
 export interface WebhookRetryOptions {
   /** Maximum number of retry attempts after the initial try. Default: 0 (no retry). */
   maxRetries: number
@@ -91,7 +92,7 @@ export class WebhookNotifier {
       if (attempt > 0 && this.retry) {
         const { baseDelayMs, maxDelayMs, jitter } = this.retry
         const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
-        const jittered = jitter ? base + Math.random() * baseDelayMs : base
+        const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
         const delay = Math.min(jittered, maxDelayMs)
         await this.sleepFn(delay)
       }

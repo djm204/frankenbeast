@@ -4,6 +4,7 @@ import { CachedLlmClient } from './cached-llm-client.js';
 import { LlmCacheStore } from './llm-cache-store.js';
 import { LlmCachePolicy } from './llm-cache-policy.js';
 import { ProviderSessionStore } from './provider-session-store.js';
+import { now as deterministicNow, seededRandom } from '@franken/types';
 
 interface CliSessionMetadata {
   sessionKey: string;
@@ -89,7 +90,7 @@ export class CachedCliLlmClient implements ILlmClient {
   }
 
   private async invoke(prompt: string, cacheSessionKey?: string): Promise<{ content: string; sessionId?: string | undefined }> {
-    const requestId = `llm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const request = {
       id: requestId,
       provider: 'adapter',

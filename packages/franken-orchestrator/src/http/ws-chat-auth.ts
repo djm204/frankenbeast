@@ -1,6 +1,6 @@
 import { TransportSecurityService } from './security/transport-security.js';
 import { createHash } from 'node:crypto';
-
+import { wallClockNow } from '@franken/types';
 export const CHAT_SOCKET_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 export interface IssueSessionTokenOptions {
@@ -59,12 +59,12 @@ export class ChatSocketSessionTicketStore {
     if (this.consumed.has(fingerprint)) {
       return false;
     }
-    this.consumed.set(fingerprint, tokenExpiresAt(token) ?? Date.now() + CHAT_SOCKET_TOKEN_TTL_MS);
+    this.consumed.set(fingerprint, tokenExpiresAt(token) ?? wallClockNow() + CHAT_SOCKET_TOKEN_TTL_MS);
     return true;
   }
 
   private cleanup(): void {
-    const now = Date.now();
+    const now = wallClockNow();
     for (const [fingerprint, expiresAt] of this.consumed) {
       if (expiresAt < now) {
         this.consumed.delete(fingerprint);

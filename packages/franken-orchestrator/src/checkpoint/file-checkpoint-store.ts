@@ -237,7 +237,7 @@ export class FileCheckpointStore implements ICheckpointStore {
 
   /** Write-to-temp + fsync + rename + dir fsync so readers never observe a torn file. */
   private atomicWriteFile(targetPath: string, payload: string): void {
-    const tmpPath = `${targetPath}.tmp.${process.pid}.${this.writeCounter++}`;
+    const tmpPath = `${targetPath}.tmp.${this.writeCounter++}.${this.lockToken}`;
     try {
       const fd = openSync(tmpPath, 'w');
       try {
@@ -317,7 +317,7 @@ export class FileCheckpointStore implements ICheckpointStore {
     }
 
     // Filename-safe (no colons — they are invalid on Windows outside the drive prefix).
-    const reapPath = `${lockPath}.reap.${process.pid}-${this.lockToken}`;
+    const reapPath = `${lockPath}.reap.${this.lockToken}`;
     try {
       renameSync(lockPath, reapPath);
       unlinkSync(reapPath);

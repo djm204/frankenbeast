@@ -9,6 +9,7 @@ import type {
   ExecutionState,
   EpisodicEventType,
 } from '@franken/types';
+import { isoNow } from '@franken/types';
 
 // --- Working Memory ---
 
@@ -73,7 +74,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const upsert = this.db.prepare(
       `INSERT OR REPLACE INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`,
     );
-    const now = new Date().toISOString();
+    const now = isoNow();
     const tx = this.db.transaction(() => {
       this.db.prepare(`DELETE FROM working_memory`).run();
       for (const [key, value] of this.store) {
@@ -397,7 +398,7 @@ export class SqliteBrain implements IBrain {
     this.flush();
     return {
       version: 1,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
       working: this.working.snapshot(),
       episodic: this.episodic.recent(100),
       checkpoint: this.recovery.lastCheckpoint(),

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { CritiquePipeline } from '../pipeline/critique-pipeline.js';
+import { wallClockNow } from '@franken/types';
 
 const ReviewRequestSchema = z.object({
   code: z.string(),
@@ -34,7 +35,7 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
     const limit = options.rateLimitPerMinute;
     app.use('/v1/*', async (c, next) => {
       const ip = c.req.header('x-forwarded-for') ?? 'unknown';
-      const now = Date.now();
+      const now = wallClockNow();
       const entry = requestCounts.get(ip);
 
       if (entry && entry.resetAt > now) {

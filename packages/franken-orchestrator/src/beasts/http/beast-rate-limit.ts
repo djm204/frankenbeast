@@ -1,5 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import { HttpError } from '../../http/middleware.js';
+import { wallClockNow } from '@franken/types';
 
 export interface BeastRateLimitOptions {
   max: number;
@@ -20,7 +21,7 @@ export class InMemoryRateLimiter {
     if (this.options.max <= 0) {
       return { allowed: false, remaining: 0 };
     }
-    const now = Date.now();
+    const now = wallClockNow();
     const current = this.counters.get(key);
     if (!current || current.resetAt <= now) {
       this.counters.set(key, {

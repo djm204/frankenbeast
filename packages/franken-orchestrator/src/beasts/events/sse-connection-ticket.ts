@@ -1,5 +1,4 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-
 interface TicketEntry {
   token: string;
   scope?: string | undefined;

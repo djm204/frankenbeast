@@ -2,6 +2,7 @@ import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 import type { AuditTrail } from '@franken/observer';
 import { createAuditEvent } from '@franken/observer';
 import type { ReplayContentStoreLike, ReplayRecord, ReplayRecordKind } from '../replay/replay-content-store.js';
+import { isoNow } from '@franken/types';
 
 export interface ReplayCaptureRecord {
   readonly kind: ReplayRecordKind;
@@ -83,7 +84,7 @@ export class AuditTrailObserverAdapter implements IObserverModule {
       version: 1,
       kind: record.kind,
       runId: record.runId,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
       ...(record.provider ? { provider: record.provider } : {}),
       ...(record.model ? { model: record.model } : {}),
       ...(record.toolName ? { toolName: record.toolName } : {}),

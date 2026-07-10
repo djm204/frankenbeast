@@ -1,6 +1,7 @@
 import type { TokenSpend } from '@franken/types';
 import type { BeastPhase } from '../types.js';
 import type { PlanGraph } from '../deps.js';
+import { isoNow, wallClockNow } from '@franken/types';
 
 /** Audit entry recording a module action during the Beast Loop. */
 export interface AuditEntry {
@@ -49,13 +50,13 @@ export class BeastContext {
     this.projectId = projectId;
     this.sessionId = sessionId;
     this.userInput = userInput;
-    this.startTime = Date.now();
+    this.startTime = wallClockNow();
   }
 
   /** Append an audit entry. */
   addAudit(module: string, action: string, detail: unknown): void {
     this.audit.push({
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
       module,
       action,
       detail,
@@ -64,6 +65,6 @@ export class BeastContext {
 
   /** Elapsed time since context creation. */
   elapsedMs(): number {
-    return Date.now() - this.startTime;
+    return wallClockNow() - this.startTime;
   }
 }

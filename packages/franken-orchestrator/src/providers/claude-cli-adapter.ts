@@ -10,6 +10,7 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
+import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
@@ -280,7 +281,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
               } else if (record['type'] === 'tool_use') {
                 yield {
                   type: 'tool_use',
-                  id: (record['id'] as string) ?? crypto.randomUUID(),
+                  id: (record['id'] as string) ?? deterministicUuid('packages/franken-orchestrator/src/providers/claude-cli-adapter.ts'),
                   name: record['name'] as string,
                   input: record['input'] ?? {},
                 };

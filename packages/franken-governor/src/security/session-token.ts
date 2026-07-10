@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import type { SessionToken } from '../core/types.js';
+import { randomUUID } from 'node:crypto';
 
 export interface CreateSessionTokenParams {
   readonly approvalId: string;

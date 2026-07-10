@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import { createSqliteStore } from '../shared/sqlite-store.js';
+import { randomUUID } from 'node:crypto';
 
 export interface PlannerTask {
   id: string;
@@ -47,7 +47,7 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
       // not a planning engine. Real decomposition requires an LLM, and since this
       // MCP tool is called BY an LLM (Claude Code), injecting a second LLM call
       // here would be circular. The caller refines this scaffold as needed.
-      const planId = randomUUID().slice(0, 8);
+      const planId = createUniquePlanId(store);
       const tasks: PlannerTask[] = [
         { id: 't1', title: `Analyze requirements for: ${input.objective}`, deps: [], status: 'pending' },
         { id: 't2', title: 'Design solution architecture', deps: ['t1'], status: 'pending' },
@@ -134,6 +134,18 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
 
     return decodeStoredPlan(row.dag);
   }
+}
+
+function createUniquePlanId(store: ReturnType<typeof createSqliteStore>): string {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const planId = randomUUID().slice(0, 8);
+    const existing = store.db.prepare('SELECT 1 FROM plans WHERE id = ?').get(planId);
+    if (!existing) {
+      return planId;
+    }
+  }
+
+  return randomUUID();
 }
 
 function decodeStoredPlan(rawDag: string): { kind: 'found'; plan: StoredPlan } | { kind: 'corrupt'; reason: string } {

@@ -14,6 +14,7 @@ import type {
   AnalyticsSeverity,
   AnalyticsSummary,
 } from './types.js';
+import { wallClockNow } from '@franken/types';
 
 interface AuditRow {
   id: number;
@@ -557,7 +558,7 @@ function cutoffFor(timeWindow: string | undefined): Date | null {
   const amount = Number(match[1]);
   const unit = match[2];
   const milliseconds = unit === 'h' ? amount * 60 * 60 * 1000 : amount * 24 * 60 * 60 * 1000;
-  return new Date(Date.now() - milliseconds);
+  return new Date(wallClockNow() - milliseconds);
 }
 
 function roundUsd(value: number): number {

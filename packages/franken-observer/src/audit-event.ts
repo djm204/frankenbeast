@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import { hashContent } from './utils/crypto.js';
+import { deterministicUuid, wallClockNow } from '@franken/types';
 
 export interface AuditEvent {
   eventId: string;
@@ -95,8 +95,8 @@ export function createAuditEvent(
   options: CreateAuditEventOptions,
 ): AuditEvent {
   const event: AuditEvent = {
-    eventId: randomUUID(),
-    timestamp: new Date().toISOString(),
+    eventId: deterministicUuid('packages/franken-observer/src/audit-event.ts'),
+    timestamp: new Date(wallClockNow()).toISOString(),
     phase: options.phase,
     provider: options.provider,
     type,

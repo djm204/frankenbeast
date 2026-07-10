@@ -34,6 +34,7 @@ import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
   BeastLoopDeps, IPlannerModule, ICritiqueModule, IGovernorModule,
 } from '../deps.js';
+import { deterministicUuid, now as deterministicNow, wallClockNow } from '@franken/types';
 import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
 import type { ProviderConfig } from '../providers/provider-config.js';
@@ -255,12 +256,13 @@ function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
     ? basename(options.planDirOverride).replace(/\/$/, '')
     : basename(paths.plansDir) === 'plans' ? 'session' : basename(paths.plansDir);
   const checkpointFile = resolve(paths.buildDir, `${planName}.checkpoint`);
-  const now = new Date();
+  const now = new Date(wallClockNow());
   const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const uniqueSuffix = deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts:log-file');
   return {
     planName,
     checkpointFile,
-    logFile: resolve(paths.buildDir, `${planName}-${ts}-build.log`),
+    logFile: resolve(paths.buildDir, `${planName}-${ts}-${uniqueSuffix}-build.log`),
   };
 }
 
@@ -333,7 +335,7 @@ async function createObserverDeps(
   const replayAuditRoot = resolve(options.paths.root, '.fbeast', 'audit');
   const replayStore = new ReplayContentStore(replayAuditRoot);
   const observerBridge = new CliObserverBridge({ budgetLimitUsd: config.budget, replayStore });
-  const runSessionId = options.runSessionId ?? `cli-session-${Date.now()}`;
+  const runSessionId = options.runSessionId ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
   if (config.enableTracing) {
     observerBridge.startTrace(runSessionId);
   }
@@ -545,7 +547,7 @@ async function createCritiqueDeps(
       tokenBudget: Number.POSITIVE_INFINITY,
       costBudgetUsd: config.budget,
       consensusThreshold: options.critiqueConsensusThreshold ?? 0.7,
-      sessionId: `cli-critique-${Date.now()}`,
+      sessionId: `cli-critique-${deterministicNow()}`,
       taskId: 'plan-review',
     },
   });

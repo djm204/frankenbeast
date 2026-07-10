@@ -1,3 +1,4 @@
+import { now as deterministicNow } from '@franken/types';
 export type SpanStatus = 'active' | 'completed' | 'error'
 export type TraceStatus = 'active' | 'completed' | 'error'
 
@@ -44,7 +45,7 @@ export interface TraceValidationIssue {
 }
 
 export interface TraceValidationOptions {
-  /** Clock override for deterministic tests. Defaults to Date.now(). */
+  /** Clock override for deterministic tests. Defaults to deterministicNow(). */
   now?: number
   /**
    * When set, active spans older than this threshold are considered timed out.

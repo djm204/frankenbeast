@@ -1,5 +1,6 @@
 import type { Task, TaskId } from './types.js';
 import { CyclicDependencyError, DuplicateTaskError, TaskNotFoundError } from './errors.js';
+import { now as deterministicNow } from '@franken/types';
 
 export type { CyclicDependencyError, DuplicateTaskError, TaskNotFoundError };
 
@@ -255,5 +256,5 @@ export class PlanGraph {
 }
 
 export function createPlanVersion(graph: PlanGraph, reason: string): PlanVersion {
-  return { version: graph.version, graph, reason, timestamp: new Date() };
+  return { version: graph.version, graph, reason, timestamp: new Date(deterministicNow()) };
 }

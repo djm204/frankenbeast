@@ -3,6 +3,7 @@ import { BeastContext, type AuditEntry } from '../context/franken-context.js';
 import type { BeastPhase } from '../types.js';
 import type { PlanGraph } from '../deps.js';
 import type { TokenSpend } from '@franken/types';
+import { isoNow } from '@franken/types';
 
 /** Serializable snapshot of a BeastContext. */
 export interface ContextSnapshot {
@@ -55,7 +56,7 @@ export function serializeContext(ctx: BeastContext): ContextSnapshot {
     checkpointPath: ctx.checkpointPath,
     tokenSpend: ctx.tokenSpend,
     audit: ctx.audit,
-    savedAt: new Date().toISOString(),
+    savedAt: isoNow(),
   };
 }
 

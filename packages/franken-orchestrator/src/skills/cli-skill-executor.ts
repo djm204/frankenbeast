@@ -4,6 +4,7 @@ import type { SkillInput, SkillResult, ICheckpointStore, ILogger } from '../deps
 import type { MartinLoop } from './martin-loop.js';
 import type { GitBranchIsolator } from './git-branch-isolator.js';
 import type { FileChunkSessionStore } from '../session/chunk-session-store.js';
+import { isoNow } from '@franken/types';
 
 // ── Number formatting ──
 
@@ -808,7 +809,7 @@ export class CliSkillExecutor {
     sessionStore.save({
       ...session,
       lastKnownGoodCommit: commitHash,
-      updatedAt: new Date().toISOString(),
+      updatedAt: isoNow(),
     });
   }
 }
