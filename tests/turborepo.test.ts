@@ -65,6 +65,21 @@ describe('Turborepo configuration', () => {
       expect(liveBenchTask.env).toContain('FBEAST_LIVE_BENCH_E2E');
     });
 
+    it('defines a deterministic integration test task across packages', () => {
+      const turbo = readJson('turbo.json');
+      const integrationTask = turbo.tasks?.['test:integration'];
+      expect(integrationTask).toBeDefined();
+      expect(integrationTask.env).toContain('INTEGRATION');
+    });
+
+    it('defines an uncached opt-in eval test task across packages', () => {
+      const turbo = readJson('turbo.json');
+      const evalTask = turbo.tasks?.['test:eval'];
+      expect(evalTask).toBeDefined();
+      expect(evalTask.cache).toBe(false);
+      expect(evalTask.env).toContain('EVAL');
+    });
+
     it('defines typecheck task', () => {
       const turbo = readJson('turbo.json');
       expect(turbo.tasks?.typecheck).toBeDefined();
@@ -134,6 +149,24 @@ describe('Turborepo configuration', () => {
 
     it('exposes the live-bench live suite through an explicit root script', () => {
       expect(rootPkg.scripts['test:live:bench']).toBe('turbo run test:live --filter=@franken/live-bench');
+    });
+
+    it('exposes deterministic integration suites through an explicit root script', () => {
+      const integrationScript = rootPkg.scripts['test:integration'];
+      expect(integrationScript).toContain('turbo run test:integration');
+      expect(integrationScript.split(' ')).toEqual(
+        expect.arrayContaining([
+          '--filter=@franken/brain',
+          '--filter=@franken/critique',
+          '--filter=@franken/governor',
+          '--filter=@franken/observer',
+          '--filter=@franken/orchestrator',
+        ]),
+      );
+    });
+
+    it('exposes eval suites through an explicit opt-in root script', () => {
+      expect(rootPkg.scripts['test:eval']).toBe('turbo run test:eval --filter=@franken/observer');
     });
   });
 

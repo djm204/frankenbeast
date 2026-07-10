@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — Root test entrypoint filters
+- For root Turbo entrypoints that expose package-local optional suites, filter to workspaces with real scripts/tests so `turbo run <task>` does not schedule `<NONEXISTENT>` package tasks. Verify both `--dry=json` task selection and at least one actual root command run; dry-run alone can hide package-local no-test failures.
+- If eval/LLM-judge tests are named by directory (for example `src/evals/**/*.test.ts`) rather than `*.eval.test.ts`, update Vitest include/exclude rules so `EVAL=true` discovers them and default `npm test` keeps them opt-in.
+
 ## 2026-07-10 — Beast panel dialog portal isolation
 - When a modal/alert is portaled from inside a slide-in panel, gate panel-level outside-click and Escape handlers against both existing and new dialog markers (for example `[data-beast-panel-portal]` plus `[data-beast-dialog-layer]`) so cross-branch/merge differences don't regress behavior.
 - Normalize pointer event targets before portal detection (handle text nodes and text-node parents) so clicks on dialog copy/titles are still treated as dialog interactions, preventing accidental panel closure.

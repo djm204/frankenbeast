@@ -69,7 +69,7 @@ npm run typecheck
 npm test
 ```
 
-Root scripts currently include `build`, `typecheck`, `test`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
+Root scripts currently include `build`, `typecheck`, `test`, `test:integration`, `test:eval`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. `test:integration` runs deterministic workspace integration suites through Turborepo, while `test:eval` and `test:live:bench` are explicit opt-ins outside default `npm test`; `test:live:bench` delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
 ## 5. Try the orchestrator CLI
 
@@ -141,6 +141,12 @@ npm test
 
 # Root-level Vitest tests only
 npm run test:root
+
+# Deterministic workspace integration suites exposed from the repo root
+npm run test:integration
+
+# Explicit opt-in eval/LLM-judge suites exposed from the repo root
+npm run test:eval
 
 # Single package via Turbo filter
 npx turbo run test --filter=franken-brain
