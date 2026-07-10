@@ -134,18 +134,22 @@ describe('GhostDependencyEvaluator', () => {
 
   it('ignores relative and node built-in dynamic import expressions', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
-    const content = `
-      const local = await import('./local-plugin.js');
-      const absoluteLocal = await import('/tmp/generated/plugin.mjs');
-      const fileUrlLocal = await import('file:///tmp/generated/plugin.mjs');
-      const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
-      const fs = await import('node:fs/promises');
-    `;
-    const result = await evaluator.evaluate(createInput(content));
+    it('ignores relative, URL, and node built-in dynamic import expressions', async () => {
+      const evaluator = new GhostDependencyEvaluator(knownPackages);
+      const content = `
+        const local = await import('./local-plugin.js');
+        const absoluteLocal = await import('/tmp/generated/plugin.mjs');
+        const fileUrlLocal = await import('file:///tmp/generated/plugin.mjs');
+        const dataUrl = await import('data:text/javascript,export default 1');
+        const browserUrl = await import('https://cdn.example.test/plugin.mjs');
+        const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
+        const fs = await import('node:fs/promises');
+      `;
+      const result = await evaluator.evaluate(createInput(content));
 
-    expect(result.verdict).toBe('pass');
-    expect(result.findings).toHaveLength(0);
-  });
+      expect(result.verdict).toBe('pass');
+      expect(result.findings).toHaveLength(0);
+    });
 
   it('detects dynamic import expressions with comments and import attributes', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
@@ -178,6 +182,8 @@ describe('GhostDependencyEvaluator', () => {
         ? import('ghost-package').Ghost
         : import('another-ghost').Ghost;
       type GhostModule = typeof import('ghost-package');
+      const p: Promise<import('ghost-package').Ghost> = Promise.resolve({} as never);
+      const cast = value as import('ghost-package').Ghost;
       function typedParam(dep?: import('ghost-package').Ghost) {}
       class TypedField { dep?: import('ghost-package').Ghost }
       const plugin = loader.import('unknown-lib');
@@ -201,13 +207,18 @@ describe('GhostDependencyEvaluator', () => {
       const selected = ready ? import('zod') : import('missing-branch');
       type AlreadyDeclared = {}
       const semicolonlessRuntime = await import('semicolonless-ghost');
+      interface PreviousDeclaration {}
+      load(import('post-interface-ghost'));
       const runtimeTypeof = typeof import('runtime-ghost');
       await import('zod', { with: makeOptions(require('unknown-lib')) });
+      const quoted = { 'plugin': import('quoted-key-ghost') };
+      const numeric = { 1: import('numeric-key-ghost') };
+      const computed = { [pluginName]: import('computed-key-ghost') };
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(8);
+    expect(result.findings).toHaveLength(12);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('ghost-package'),
@@ -216,8 +227,12 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('another-ghost'),
         expect.stringContaining('missing-branch'),
         expect.stringContaining('semicolonless-ghost'),
+        expect.stringContaining('post-interface-ghost'),
         expect.stringContaining('runtime-ghost'),
         expect.stringContaining('unknown-lib'),
+        expect.stringContaining('quoted-key-ghost'),
+        expect.stringContaining('numeric-key-ghost'),
+        expect.stringContaining('computed-key-ghost'),
       ]),
     );
   });

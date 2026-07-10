@@ -78,6 +78,7 @@ function isLocalImportSpecifier(specifier: string): boolean {
     specifier.startsWith('.') ||
     specifier.startsWith('/') ||
     specifier.startsWith('file:') ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(specifier) ||
     /^[A-Za-z]:/.test(specifier)
   );
 }
@@ -272,8 +273,10 @@ function canStartNativeDynamicImport(
   const prefix = content.slice(statementStart + 1, importIndex);
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
   const endsAfterTypeAnnotation = /:\s*$/.test(prefix);
+  const isNestedTypeReference = /(?:\bas\s*|\bsatisfies\s*|<\s*)$/.test(prefix);
 
   return !(
+    isNestedTypeReference ||
     isInsideTypeDeclaration(prefix) ||
     (endsAfterTypeAnnotation &&
       !isTernaryBranch &&
@@ -289,6 +292,9 @@ function isInsideTypeDeclaration(prefix: string): boolean {
   return (
     /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !/\n\s*(?:const|let|var|await|return|throw|if|for|while|switch|try|function|class)\b/.test(
+      prefix,
+    ) &&
+    !/\}\s*\n\s*(?:[A-Za-z_$][\w$]*\s*\(|(?:await\s+)?import\s*\()/.test(
       prefix,
     )
   );
@@ -308,10 +314,52 @@ function isLikelyObjectLiteralValue(content: string, importIndex: number): boole
 
   let i = colonIndex - 1;
   while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
-  while (i >= 0 && isIdentifierCharacter(content[i]!)) i -= 1;
+
+  if (content[i] === "'" || content[i] === '"') {
+    i = skipQuotedKeyBackward(content, i);
+  } else if (content[i] === ']') {
+    i = skipBalancedKeyBackward(content, i);
+  } else if (/[0-9]/.test(content[i] ?? '')) {
+    while (i >= 0 && /[0-9._]/.test(content[i]!)) i -= 1;
+  } else {
+    while (i >= 0 && isIdentifierCharacter(content[i]!)) i -= 1;
+  }
+
   while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
 
   return content[i] === '{' || content[i] === ',';
+}
+
+function skipQuotedKeyBackward(content: string, quoteIndex: number): number {
+  const quote = content[quoteIndex]!;
+
+  for (let i = quoteIndex - 1; i >= 0; i -= 1) {
+    if (content[i] !== quote) continue;
+
+    let backslashCount = 0;
+    for (let j = i - 1; j >= 0 && content[j] === '\\'; j -= 1) {
+      backslashCount += 1;
+    }
+
+    if (backslashCount % 2 === 0) return i - 1;
+  }
+
+  return quoteIndex - 1;
+}
+
+function skipBalancedKeyBackward(content: string, closeIndex: number): number {
+  let depth = 0;
+
+  for (let i = closeIndex; i >= 0; i -= 1) {
+    const ch = content[i]!;
+    if (ch === ']') depth += 1;
+    if (ch === '[') {
+      depth -= 1;
+      if (depth === 0) return i - 1;
+    }
+  }
+
+  return closeIndex - 1;
 }
 
 function readRequireSpecifier(
