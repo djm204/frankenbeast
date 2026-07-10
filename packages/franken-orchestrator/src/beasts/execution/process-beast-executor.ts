@@ -413,44 +413,52 @@ export class ProcessBeastExecutor implements BeastExecutor {
             earlyStderrLines.push(redactedLine);
           }
         },
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          const errorCode = (error as NodeJS.ErrnoException).code;
-          const failedAt = new Date(wallClockNow()).toISOString();
+        onExit: (code, signal) => {
+          if (attemptId) {
+            this.handleProcessExit(run.id, attemptId, code, signal, [...stderrTail], configuredSecrets);
+          } else {
+            earlyExit = { code, signal };
+          }
+        },
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorCode = (error as NodeJS.ErrnoException).code;
+      const failedAt = new Date(wallClockNow()).toISOString();
 
-          this.repository.updateRun(run.id, {
-            status: 'failed',
-            finishedAt: failedAt,
-            stopReason: 'spawn_failed',
-          });
+      this.repository.updateRun(run.id, {
+        status: 'failed',
+        finishedAt: failedAt,
+        stopReason: 'spawn_failed',
+      });
 
-          const spawnFailedEvent = {
-            type: 'run.spawn_failed' as const,
-            payload: {
-              error: errorMessage,
-              ...(errorCode ? { code: errorCode } : {}),
-              command: processSpec.command,
-              args: [...processSpec.args],
-            },
-            createdAt: failedAt,
-          };
-          this.repository.appendEvent(run.id, spawnFailedEvent);
-          this.options.eventBus?.publish({
-            type: 'run.event',
-            data: { runId: run.id, event: spawnFailedEvent },
-          });
+      const spawnFailedEvent = {
+        type: 'run.spawn_failed' as const,
+        payload: {
+          error: errorMessage,
+          ...(errorCode ? { code: errorCode } : {}),
+          command: processSpec.command,
+          args: [...processSpec.args],
+        },
+        createdAt: failedAt,
+      };
+      this.repository.appendEvent(run.id, spawnFailedEvent);
+      this.options.eventBus?.publish({
+        type: 'run.event',
+        data: { runId: run.id, event: spawnFailedEvent },
+      });
 
-          // Clean up config file and worktree allocation written before spawn
-          this.cleanupRunResources(run.id);
+      // Clean up config file and worktree allocation written before spawn
+      this.cleanupRunResources(run.id);
 
-          this.options.eventBus?.publish({
-            type: 'run.status',
-            data: { runId: run.id, status: 'failed' as const, updatedAt: failedAt },
-          });
+      this.options.eventBus?.publish({
+        type: 'run.status',
+        data: { runId: run.id, status: 'failed' as const, updatedAt: failedAt },
+      });
 
-          this.options.onRunStatusChange?.(run.id);
-          throw error;
-        }
+      this.options.onRunStatusChange?.(run.id);
+      throw error;
+    }
 
     const startedAt = new Date(wallClockNow()).toISOString();
     const attempt = this.repository.createAttempt(run.id, {
