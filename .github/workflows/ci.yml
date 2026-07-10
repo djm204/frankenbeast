@@ -29,6 +29,23 @@ jobs:
 
       - run: npm ci
 
+      - name: Dependency vulnerability audit
+        run: npm run audit:dependencies
+
+      - name: Dependency major-version freshness check
+        run: npm run deps:outdated:major
+
+      - name: Generate CycloneDX dependency SBOM
+        run: npm sbom --sbom-format cyclonedx > "${RUNNER_TEMP}/sbom.cyclonedx.json"
+
+      - name: Upload dependency SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-sbom-cyclonedx
+          path: ${{ runner.temp }}/sbom.cyclonedx.json
+          if-no-files-found: error
+          retention-days: 30
+
       - run: npm run audit:security
 
       - name: Run deterministic root Vitest suite
