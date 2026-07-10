@@ -61,6 +61,17 @@ describe('PlanGraph — construction', () => {
     expect(g.getDependencies(createTaskId('b'))).toContain(createTaskId('a'));
   });
 
+  it('addTask synchronizes the stored task dependsOn with declared deps', () => {
+    const b = makeTask('b');
+    const g = PlanGraph.empty().addTask(makeTask('a')).addTask(b, [createTaskId('a')]);
+
+    expect(g.getTask(createTaskId('b'))?.dependsOn).toEqual([createTaskId('a')]);
+    expect(g.getTasks().find((task) => task.id === createTaskId('b'))?.dependsOn).toEqual([
+      createTaskId('a'),
+    ]);
+    expect(b.dependsOn).toEqual([]);
+  });
+
   it('getTasks returns all tasks in insertion order', () => {
     const [a, b] = [makeTask('a'), makeTask('b')];
     const g = PlanGraph.empty().addTask(a).addTask(b);
@@ -90,7 +101,7 @@ describe('PlanGraph — topoSort', () => {
       .addTask(c, [createTaskId('b')]);
     const sorted = g.topoSort();
     expect(sorted[0]).toEqual(a);
-    expect(sorted[2]).toEqual(c);
+    expect(sorted[2]?.id).toBe(c.id);
     expect(sorted).toHaveLength(3);
   });
 
@@ -106,7 +117,7 @@ describe('PlanGraph — topoSort', () => {
       .addTask(d, [createTaskId('b'), createTaskId('c')]);
     const sorted = g.topoSort();
     expect(sorted[0]).toEqual(a);
-    expect(sorted[3]).toEqual(d);
+    expect(sorted[3]?.id).toBe(d.id);
   });
 
   it('two independent tasks both appear in result', () => {
@@ -215,6 +226,17 @@ describe('PlanGraph — removeTask', () => {
       .addTask(makeTask('b'), [createTaskId('a')]);
     const g2 = g.removeTask(createTaskId('a'));
     expect(g2.getDependencies(createTaskId('b'))).toEqual([]);
+  });
+
+  it('synchronizes stored task dependsOn after stripping a removed dependency', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+    const g2 = g.removeTask(createTaskId('a'));
+
+    expect(g2.getTask(createTaskId('b'))?.dependsOn).toEqual([]);
+    expect(g2.getTasks()).toEqual([makeTask('b')]);
+    expect(g.getTask(createTaskId('b'))?.dependsOn).toEqual([createTaskId('a')]);
   });
 
   it('throws TaskNotFoundError for unknown id', () => {
