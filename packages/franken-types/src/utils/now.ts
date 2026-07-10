@@ -2,6 +2,7 @@ import { createSeededRandom } from './seededRandom.js';
 
 const DEFAULT_EPOCH_MS = Date.UTC(2026, 0, 1, 0, 0, 0);
 const DAY_MS = 86_400_000;
+const ORIGINAL_DATE_NOW = Date.now;
 
 function currentSeed(): string | undefined {
   const maybeProcess = globalThis as typeof globalThis & {
@@ -15,7 +16,7 @@ let activeNow: number | undefined;
 
 export function now(): number {
   const seed = currentSeed();
-  if (!seed) {
+  if (!seed || Date.now !== ORIGINAL_DATE_NOW) {
     return Date.now();
   }
 
