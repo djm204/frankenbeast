@@ -345,6 +345,47 @@ describe('npm workspaces configuration', () => {
     });
   });
 
+  describe('workspace lint coverage', () => {
+    const packageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `packages/${entry.name}/package.json`);
+
+    it('gives every workspace an explicit lint script and ESLint config', () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const packageDir = path.replace(/\/package\.json$/, '');
+
+        expect(pkg.scripts?.lint, `${path} must define scripts.lint so Turbo cannot silently skip it`).toBeDefined();
+        expect(
+          existsSync(join(ROOT, packageDir, 'eslint.config.js')),
+          `${packageDir} must carry an explicit ESLint config`,
+        ).toBe(true);
+      }
+    });
+
+    it('documents the lint posture for every workspace', () => {
+      const lintCoverageDoc = readFileSync(join(ROOT, 'docs/lint-coverage.md'), 'utf8');
+
+      expect(lintCoverageDoc).toContain('npm run lint');
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const packageDir = path.replace(/\/package\.json$/, '');
+
+        expect(lintCoverageDoc, `${pkg.name} must be documented in docs/lint-coverage.md`).toContain(
+          `| \`${pkg.name}\` | \`${packageDir}\` |`,
+        );
+      }
+    });
+
+    it('uses filesystem-safe module URL conversion in the lint coverage audit', () => {
+      const auditScript = readFileSync(join(ROOT, 'scripts/check-workspace-lint-coverage.mjs'), 'utf8');
+
+      expect(auditScript).toContain('fileURLToPath');
+      expect(auditScript).toContain("fileURLToPath(new URL('..', import.meta.url))");
+      expect(auditScript).not.toContain("new URL('..', import.meta.url).pathname");
+    });
+  });
+
   describe('no file: dependencies remain anywhere', () => {
     const allPackages = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
