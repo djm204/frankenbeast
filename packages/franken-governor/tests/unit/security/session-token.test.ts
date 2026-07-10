@@ -47,6 +47,7 @@ describe('createSessionToken', () => {
     ['Infinity', Number.POSITIVE_INFINITY],
     ['zero', 0],
     ['negative', -1],
+    ['overflow', Number.MAX_SAFE_INTEGER],
   ])('rejects %s ttlMs values', (_name, ttlMs) => {
     expect(() => createSessionToken({
       approvalId: 'req-001',

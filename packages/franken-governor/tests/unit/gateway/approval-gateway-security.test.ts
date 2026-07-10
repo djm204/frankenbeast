@@ -264,6 +264,7 @@ describe('ApprovalGateway — security integration', () => {
     ['Infinity', Number.POSITIVE_INFINITY],
     ['zero', 0],
     ['negative', -1],
+    ['overflow', Number.MAX_SAFE_INTEGER],
   ])('rejects invalid %s sessionTokenTtlMs config before contacting the channel', (_name, sessionTokenTtlMs) => {
     const channel = makeFakeChannel();
     const auditRecorder = makeFakeAuditRecorder();
