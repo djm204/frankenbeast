@@ -17,6 +17,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run --fileParallelism=false",
+    "test:coverage": "vitest run --coverage --fileParallelism=false",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm --prefix ../.. run build"
   },

@@ -25,6 +25,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "mkdir -p ../../.tmp/franken-types && TMPDIR=\"$PWD/../../.tmp/franken-types\" vitest run --maxWorkers=1",
+    "test:coverage": "mkdir -p ../../.tmp/franken-types && TMPDIR=\"$PWD/../../.tmp/franken-types\" vitest run --coverage --maxWorkers=1",
     "test:watch": "vitest",
     "prepublishOnly": "npm --prefix ../.. run build"
   },

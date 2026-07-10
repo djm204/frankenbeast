@@ -70,6 +70,37 @@ describe('npm workspaces configuration', () => {
       expect(rootPkg.devDependencies?.turbo).toBeDefined();
       expect(isAtLeast(rootPkg.devDependencies.turbo, '2.10.3')).toBe(true);
     });
+
+    it('fans out coverage through workspace package scripts instead of root-only Vitest', () => {
+      expect(rootPkg.scripts?.['test:coverage']).toContain('turbo run test:coverage');
+      expect(rootPkg.scripts?.['test:coverage']).toContain('--filter="./packages/*"');
+      expect(rootPkg.scripts?.['test:coverage:root']).toBe('vitest run --coverage');
+    });
+  });
+
+  describe('workspace coverage scripts', () => {
+    const packageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `packages/${entry.name}/package.json`);
+
+    it('registers a Turbo coverage task for package workspaces', () => {
+      const turbo = readJson('turbo.json');
+      expect(turbo.tasks?.['test:coverage']).toBeDefined();
+      expect(turbo.tasks?.['test:coverage']?.dependsOn).toContain('^build');
+      expect(turbo.tasks?.['test:coverage']?.outputs).toContain('coverage/**');
+    });
+
+    it('exposes coverage consistently for every tested package workspace', () => {
+      const missingCoverage = packageJsonPaths
+        .map((path) => ({ path, pkg: readPkg(path) }))
+        .filter(({ pkg }) => pkg.scripts?.test && !pkg.scripts?.['test:coverage'])
+        .map(({ path }) => path);
+
+      expect(
+        missingCoverage,
+        'tested package workspaces must expose test:coverage or be explicitly excluded',
+      ).toEqual([]);
+    });
   });
 
   describe('Vitest toolchain security floor', () => {
