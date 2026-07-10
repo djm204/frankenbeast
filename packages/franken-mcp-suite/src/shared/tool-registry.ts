@@ -38,6 +38,25 @@ function splitCsvArg(value: unknown, fallback?: string[]): string[] | undefined 
   return parsed.length > 0 ? parsed : fallback;
 }
 
+const DEFAULT_MEMORY_QUERY_LIMIT = 20;
+const MAX_MEMORY_QUERY_LIMIT = 1000;
+
+function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: DEFAULT_MEMORY_QUERY_LIMIT };
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
+  }
+  const raw = typeof value === 'string' ? value.trim() : String(value);
+  if (raw.length === 0) {
+    return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > MAX_MEMORY_QUERY_LIMIT) {
+    return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
+  }
+  return { ok: true, value: parsed };
+}
+
 export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
   return {
     brain: createBrainAdapter(dbPath),
@@ -89,7 +108,11 @@ const TOOLS: ToolFull[] = [
     makeHandler: ({ brain }) => async (args) => {
       const query = String(args['query']);
       const type = args['type'] ? String(args['type']) : undefined;
-      const limit = args['limit'] ? Number(args['limit']) : 20;
+      const parsedLimit = parseMemoryQueryLimit(args['limit']);
+      if (!parsedLimit.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_query ${parsedLimit.message}` }], isError: true };
+      }
+      const limit = parsedLimit.value;
       const rows = await brain.query(type ? { query, type, limit } : { query, limit });
       if (rows.length === 0) {
         return { content: [{ type: 'text', text: `No memory entries found for query: "${query}"` }] };
