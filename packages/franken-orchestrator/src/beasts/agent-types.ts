@@ -1,17 +1,9 @@
+import { TRACKED_AGENT_STATUSES } from '@franken/types';
+import type { TrackedAgentStatus } from '@franken/types';
 import type { BeastDispatchSource, BeastExecutionMode, ModuleConfig } from './types.js';
 
-export const TRACKED_AGENT_STATUSES = [
-  'initializing',
-  'awaiting_approval',
-  'dispatching',
-  'running',
-  'completed',
-  'failed',
-  'stopped',
-  'deleted',
-] as const;
-
-export type TrackedAgentStatus = (typeof TRACKED_AGENT_STATUSES)[number];
+export { TRACKED_AGENT_STATUSES };
+export type { TrackedAgentStatus };
 
 export const TRACKED_AGENT_INIT_ACTION_KINDS = [
   'design-interview',
