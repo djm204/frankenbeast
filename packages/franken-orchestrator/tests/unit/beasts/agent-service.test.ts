@@ -145,7 +145,7 @@ describe('AgentService', () => {
     expect(existsSync(worktreePath)).toBe(true);
   });
 
-  it('hides soft-deleted tracked agents from list and detail lookups', async () => {
+  it('keeps soft-deleted tracked agents available for list and detail audit views', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-service-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const service = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
@@ -165,7 +165,9 @@ describe('AgentService', () => {
     service.updateAgent(agent.id, { status: 'stopped' });
     service.softDeleteAgent(agent.id);
 
-    expect(service.listAgents()).toEqual([]);
-    expect(() => service.getAgent(agent.id)).toThrow(`Unknown tracked agent: ${agent.id}`);
+    expect(service.listAgents().map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: agent.id, status: 'deleted' },
+    ]);
+    expect(service.getAgent(agent.id).status).toBe('deleted');
   });
 });

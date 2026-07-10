@@ -65,12 +65,12 @@ export class AgentService {
   }
 
   listAgents(): TrackedAgent[] {
-    return this.repository.listTrackedAgents().filter((agent) => isVisibleAgent(agent));
+    return this.repository.listTrackedAgents();
   }
 
   getAgent(agentId: string): TrackedAgent {
     const agent = this.repository.getTrackedAgent(agentId);
-    if (!agent || !isVisibleAgent(agent)) {
+    if (!agent) {
       throw new UnknownTrackedAgentError(agentId);
     }
     return agent;
@@ -119,8 +119,4 @@ export class AgentService {
       updatedAt: this.now(),
     });
   }
-}
-
-function isVisibleAgent(agent: TrackedAgent): boolean {
-  return agent.status !== 'deleted';
 }
