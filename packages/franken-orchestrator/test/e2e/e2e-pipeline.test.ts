@@ -35,7 +35,14 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-describe.skipIf(!process.env['E2E'])('E2E Pipeline', () => {
+const hasE2eProviderCredentials = (): boolean => Boolean(
+  process.env['ANTHROPIC_API_KEY'] ||
+  process.env['OPENAI_API_KEY'] ||
+  process.env['GOOGLE_API_KEY'] ||
+  process.env['GEMINI_API_KEY'],
+);
+
+describe.skipIf(!process.env['E2E'] || !hasE2eProviderCredentials())('E2E Pipeline', () => {
   let tmpDir: string;
   const designDoc = resolve(__dirname, 'test-design-doc.md');
   const cliBin = resolve(__dirname, '../../dist/cli/run.js');
@@ -105,23 +112,69 @@ describe.skipIf(!process.env['E2E'])('E2E Pipeline', () => {
 });
 
 /** Detect API/infra failures that shouldn't count as test failures. */
+function hasPipelineBoundary(result: { stdout: string; stderr: string }): boolean {
+  const combined = result.stdout + result.stderr;
+  return combined.includes('[planner]') || combined.includes('[martin]');
+}
+
 function isApiRelatedFailure(result: {
   stdout: string;
   stderr: string;
 }): boolean {
   const combined = result.stdout + result.stderr;
-  return (
-    combined.includes('rate limit') ||
-    combined.includes('rate_limit') ||
-    combined.includes('overloaded') ||
-    combined.includes('ENOTFOUND') ||
-    combined.includes('429') ||
-    combined.includes('503') ||
-    combined.includes('ANTHROPIC_API_KEY') ||
-    combined.includes('authentication') ||
-    combined.includes('Could not connect')
-  );
+  return hasPipelineBoundary(result) &&
+    (
+      /rate ?limit/i.test(combined) ||
+      /rate_limit/i.test(combined) ||
+      /\b429\b/.test(combined) ||
+      /\b503\b/.test(combined) ||
+      /overloaded/i.test(combined) ||
+      /usage limit/i.test(combined) ||
+      /ANTHROPIC_API_KEY/i.test(combined) ||
+      /OPENAI_API_KEY/i.test(combined) ||
+      /GOOGLE_API_KEY/i.test(combined) ||
+      /GEMINI_API_KEY/i.test(combined) ||
+      /Could not connect to (?:Anthropic|OpenAI|Gemini|claude|codex|provider)/i.test(combined)
+    );
 }
+
+describe('isApiRelatedFailure helper', () => {
+  it('returns true for provider errors after planner boundary', () => {
+    expect(
+      isApiRelatedFailure({
+        stdout: '[planner] Rate limit: retry after 30s',
+        stderr: '',
+      }),
+    ).toBe(true);
+  });
+
+  it('returns false when auth-like text appears before planner', () => {
+    expect(
+      isApiRelatedFailure({
+        stdout: 'authentication required for git access\n',
+        stderr: '',
+      }),
+    ).toBe(false);
+  });
+
+  it('returns false for auth-like provider signals before pipeline starts', () => {
+    expect(
+      isApiRelatedFailure({
+        stdout: 'Could not connect to provider metadata service\n',
+        stderr: '',
+      }),
+    ).toBe(false);
+  });
+
+  it('returns false when rate limiting occurs before planner starts', () => {
+    expect(
+      isApiRelatedFailure({
+        stdout: 'status 429 from bootstrap service\n',
+        stderr: '',
+      }),
+    ).toBe(false);
+  });
+});
 
 /** Spawn frankenbeast CLI as a subprocess, piping "y" for review approval. */
 function runFrankenbeast(
