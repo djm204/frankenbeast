@@ -72,14 +72,22 @@ function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRun
   return runWithContainerFields(run, attemptsForContainerRun(run, deps));
 }
 
+function beastRunNotFound(runId: string): HttpError {
+  return new HttpError(404, 'BEAST_RUN_NOT_FOUND', `Beast run '${runId}' was not found`);
+}
+
+function throwKnownRunError(runId: string, error: unknown): never {
+  if (error instanceof UnknownBeastRunError) {
+    throw beastRunNotFound(runId);
+  }
+  throw error;
+}
+
 async function requireKnownRunAction(runId: string, action: () => Promise<BeastRun>): Promise<BeastRun> {
   try {
     return await action();
   } catch (error) {
-    if (error instanceof UnknownBeastRunError) {
-      throw new HttpError(404, 'BEAST_RUN_NOT_FOUND', `Beast run '${runId}' was not found`);
-    }
-    throw error;
+    throwKnownRunError(runId, error);
   }
 }
 
@@ -193,6 +201,9 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   app.get('/v1/beasts/runs/:runId', (c) => {
     const runId = c.req.param('runId');
     const run = deps.runs.getRun(runId);
+    if (!run) {
+      throw beastRunNotFound(runId);
+    }
     const attempts = deps.runs.listAttempts(runId);
     return c.json({
       data: {
@@ -204,19 +215,29 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   });
 
   app.get('/v1/beasts/runs/:runId/events', (c) => {
-    return c.json({
-      data: {
-        events: deps.runs.listEvents(c.req.param('runId')),
-      },
-    });
+    const runId = c.req.param('runId');
+    try {
+      return c.json({
+        data: {
+          events: deps.runs.listEvents(runId),
+        },
+      });
+    } catch (error) {
+      throwKnownRunError(runId, error);
+    }
   });
 
   app.get('/v1/beasts/runs/:runId/logs', async (c) => {
-    return c.json({
-      data: {
-        logs: await deps.runs.readLogs(c.req.param('runId')),
-      },
-    });
+    const runId = c.req.param('runId');
+    try {
+      return c.json({
+        data: {
+          logs: await deps.runs.readLogs(runId),
+        },
+      });
+    } catch (error) {
+      throwKnownRunError(runId, error);
+    }
   });
 
   app.post('/v1/beasts/runs/:runId/start', async (c) => {
