@@ -59,3 +59,6 @@
 
 ## 2026-07-10 — Network stop/restart target validation
 - Validate stop and restart target IDs through `filterNetworkServices` before invoking supervisor operations, so unknown names fail fast with 400 instead of becoming no-op successes. Keep this as a shared pattern for all service-targeted control-plane endpoints where missing resources must be surfaced as client errors.
+
+## 2026-07-10 — MCP stdio health probes
+- MCP stdio probes need stream-level `stdin` error handling for early-exiting commands, and Content-Length parsing must buffer bytes rather than UTF-16 strings. Add regressions for non-ASCII framed JSON bodies and split `Content-Length` headers before retriggering Codex.

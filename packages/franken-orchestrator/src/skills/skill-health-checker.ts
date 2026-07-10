@@ -87,7 +87,7 @@ export class SkillHealthChecker {
     return new Promise((resolve) => {
       let proc: ChildProcessWithoutNullStreams;
       let settled = false;
-      let stdoutBuffer = '';
+      let stdoutBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
       let timer: NodeJS.Timeout;
 
       const settle = (status: McpHealthStatus) => {
@@ -121,8 +121,15 @@ export class SkillHealthChecker {
           settle(code === 0 ? 'connected' : 'error');
         });
 
+        proc.stdin.on('error', () => {
+          settle('error');
+        });
+
         proc.stdout.on('data', (chunk: Buffer | string) => {
-          stdoutBuffer += chunk.toString('utf8');
+          stdoutBuffer = Buffer.concat([
+            stdoutBuffer,
+            Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8'),
+          ]);
           const messages = readMcpMessages(stdoutBuffer);
           stdoutBuffer = messages.remaining;
           if (messages.messages.some(isSuccessfulInitializeResponse)) {
@@ -159,7 +166,7 @@ interface JsonRpcMessage {
 
 interface ReadMessagesResult {
   messages: JsonRpcMessage[];
-  remaining: string;
+  remaining: Buffer<ArrayBufferLike>;
 }
 
 function formatMcpMessage(message: unknown): string {
@@ -167,33 +174,39 @@ function formatMcpMessage(message: unknown): string {
   return `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`;
 }
 
-function readMcpMessages(input: string): ReadMessagesResult {
+function readMcpMessages(input: Buffer<ArrayBufferLike>): ReadMessagesResult {
   const messages: JsonRpcMessage[] = [];
   let remaining = input;
 
-  while (remaining.length > 0) {
+  while (remaining.byteLength > 0) {
     const headerEnd = remaining.indexOf('\r\n\r\n');
     if (headerEnd !== -1) {
-      const headers = remaining.slice(0, headerEnd);
+      const headers = remaining.subarray(0, headerEnd).toString('ascii');
       const lengthMatch = /^content-length:\s*(\d+)$/im.exec(headers);
       if (!lengthMatch) {
-        remaining = remaining.slice(headerEnd + 4);
+        remaining = remaining.subarray(headerEnd + 4);
         continue;
       }
 
       const bodyLength = Number(lengthMatch[1]);
       const bodyStart = headerEnd + 4;
       const bodyEnd = bodyStart + bodyLength;
-      if (remaining.length < bodyEnd) {
+      if (remaining.byteLength < bodyEnd) {
         break;
       }
 
-      const parsed = tryParseJsonRpcMessage(remaining.slice(bodyStart, bodyEnd));
+      const parsed = tryParseJsonRpcMessage(
+        remaining.subarray(bodyStart, bodyEnd).toString('utf8'),
+      );
       if (parsed) {
         messages.push(parsed);
       }
-      remaining = remaining.slice(bodyEnd);
+      remaining = remaining.subarray(bodyEnd);
       continue;
+    }
+
+    if (looksLikePartialContentLengthHeader(remaining)) {
+      break;
     }
 
     const newlineIndex = remaining.indexOf('\n');
@@ -201,14 +214,20 @@ function readMcpMessages(input: string): ReadMessagesResult {
       break;
     }
 
-    const parsed = tryParseJsonRpcMessage(remaining.slice(0, newlineIndex).trim());
+    const parsed = tryParseJsonRpcMessage(
+      remaining.subarray(0, newlineIndex).toString('utf8').trim(),
+    );
     if (parsed) {
       messages.push(parsed);
     }
-    remaining = remaining.slice(newlineIndex + 1);
+    remaining = remaining.subarray(newlineIndex + 1);
   }
 
   return { messages, remaining };
+}
+
+function looksLikePartialContentLengthHeader(input: Buffer<ArrayBufferLike>): boolean {
+  return /^content-length\s*:/i.test(input.toString('ascii'));
 }
 
 function tryParseJsonRpcMessage(raw: string): JsonRpcMessage | undefined {

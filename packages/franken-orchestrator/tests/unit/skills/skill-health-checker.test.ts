@@ -7,10 +7,14 @@ vi.mock('node:child_process', async () => {
   const { EventEmitter } = await import('node:events');
   return {
     spawn: vi.fn(() => {
+      const stdin = Object.assign(new EventEmitter(), {
+        write: vi.fn(),
+        end: vi.fn(),
+      });
       const proc = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
         stderr: new EventEmitter(),
-        stdin: { write: vi.fn(), end: vi.fn() },
+        stdin,
         kill: vi.fn(),
         pid: 123,
         exitCode: null,
@@ -108,6 +112,88 @@ describe('SkillHealthChecker', () => {
     expect(proc.kill).toHaveBeenCalledTimes(1);
   });
 
+  it('returns error instead of crashing when stdin rejects an initialize probe', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    proc.stdin.write.mockImplementation(() => {
+      setTimeout(() => {
+        proc.stdin.emit('error', new Error('write EPIPE'));
+      }, 10);
+      return false;
+    });
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+    const config: McpConfig = {
+      mcpServers: {
+        exitsEarly: { command: 'true' },
+      },
+    };
+
+    const result = await checker.getStatus('epipe', config, { trustMcpServerCommands: true });
+
+    expect(result.status).toBe('error');
+  });
+
+  it('parses framed initialize responses by UTF-8 byte length', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    proc.stdin.write.mockImplementation(() => {
+      setTimeout(() => {
+        proc.stdout.emit('data', formatMcpMessage({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            serverInfo: { name: 'servidor-salud-é', version: '1.0.0' },
+          },
+        }));
+      }, 10);
+      return true;
+    });
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+    const config: McpConfig = {
+      mcpServers: {
+        localized: { command: 'node', args: ['server.js'] },
+      },
+    };
+
+    const result = await checker.getStatus('localized', config, { trustMcpServerCommands: true });
+
+    expect(result.status).toBe('connected');
+  });
+
+  it('preserves partial Content-Length frame headers across stdout chunks', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    proc.stdin.write.mockImplementation(() => {
+      const message = formatMcpMessage({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          serverInfo: { name: 'chunked-test-server', version: '1.0.0' },
+        },
+      });
+      const headerSplit = message.indexOf('\r\n') + 2;
+      setTimeout(() => {
+        proc.stdout.emit('data', message.slice(0, headerSplit));
+        proc.stdout.emit('data', message.slice(headerSplit));
+      }, 10);
+      return true;
+    });
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+    const config: McpConfig = {
+      mcpServers: {
+        chunked: { command: 'node', args: ['server.js'] },
+      },
+    };
+
+    const result = await checker.getStatus('chunked', config, { trustMcpServerCommands: true });
+
+    expect(result.status).toBe('connected');
+  });
+
   it('returns unknown and cleans up when a trusted MCP server stays open without responding', async () => {
     vi.useFakeTimers();
     const { spawn } = await import('node:child_process');
@@ -158,10 +244,14 @@ describe('SkillHealthChecker', () => {
 });
 
 function makeMockProcess() {
+  const stdin = Object.assign(new EventEmitter(), {
+    write: vi.fn(),
+    end: vi.fn(),
+  });
   return Object.assign(new EventEmitter(), {
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
-    stdin: { write: vi.fn(), end: vi.fn() },
+    stdin,
     kill: vi.fn(function kill(this: { killed: boolean }) {
       this.killed = true;
     }),
