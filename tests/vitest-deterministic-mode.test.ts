@@ -65,12 +65,53 @@ describe('deterministic Vitest mode', () => {
       const nowDescriptor = Object.getOwnPropertyDescriptor(Date, 'now');
       expect(nowDescriptor?.configurable).toBe(true);
       expect(nowDescriptor?.writable).toBe(true);
+      expect(Math.abs(Date.now() - originalDate.now())).toBeLessThan(1_000);
       const start = Date.now();
       await new Promise((resolveTimer) => setTimeout(resolveTimer, 20));
       expect(Date.now() - start).toBeGreaterThanOrEqual(15);
     } finally {
       globalThis.Date = originalDate;
       Math.random = originalRandom;
+      if (originalInstallMarker === undefined) {
+        delete globalObject.__frankenDeterministicModeInstalled;
+      } else {
+        globalObject.__frankenDeterministicModeInstalled = originalInstallMarker;
+      }
+    }
+  });
+
+  it('derives independent installed random streams per Vitest worker', () => {
+    const originalDate = globalThis.Date;
+    const originalRandom = Math.random;
+    const originalPoolId = process.env['VITEST_POOL_ID'];
+    const globalObject = globalThis as typeof globalThis & {
+      __frankenDeterministicModeInstalled?: string;
+    };
+    const originalInstallMarker = globalObject.__frankenDeterministicModeInstalled;
+
+    try {
+      delete globalObject.__frankenDeterministicModeInstalled;
+      globalThis.Date = originalDate;
+      process.env['VITEST_POOL_ID'] = '1';
+      installDeterministicMode('worker-seed-test');
+      const workerOneValues = [Math.random(), Math.random()];
+
+      delete globalObject.__frankenDeterministicModeInstalled;
+      globalThis.Date = originalDate;
+      Math.random = originalRandom;
+      process.env['VITEST_POOL_ID'] = '2';
+      installDeterministicMode('worker-seed-test');
+      const workerTwoValues = [Math.random(), Math.random()];
+
+      expect(workerOneValues).not.toEqual(workerTwoValues);
+    } finally {
+      globalThis.Date = originalDate;
+      Math.random = originalRandom;
+      if (originalPoolId === undefined) {
+        delete process.env['VITEST_POOL_ID'];
+      } else {
+        process.env['VITEST_POOL_ID'] = originalPoolId;
+      }
       if (originalInstallMarker === undefined) {
         delete globalObject.__frankenDeterministicModeInstalled;
       } else {

@@ -46,15 +46,20 @@ export function installDeterministicMode(seed = process.env['FRANKENBEAST_SEED']
   const globalObject = globalThis as typeof globalThis & {
     __frankenDeterministicModeInstalled?: string;
   };
-  if (globalObject.__frankenDeterministicModeInstalled === seed) {
+  const workerId = process.env['VITEST_POOL_ID']
+    ?? process.env['VITEST_WORKER_ID']
+    ?? process.env['VITEST_WORKER_POOL_ID']
+    ?? process.env['JEST_WORKER_ID']
+    ?? 'main';
+  const installedSeed = `${seed}:worker:${workerId}`;
+  if (globalObject.__frankenDeterministicModeInstalled === installedSeed) {
     return;
   }
 
-  const rng = seededRandom(seed);
+  const rng = seededRandom(installedSeed);
   const OriginalDate = Date as DateConstructorWithOriginal;
-  const deterministicEpoch = createDeterministicClock(seed)();
   const realStart = OriginalDate.now();
-  const clock = (): number => deterministicEpoch + Math.max(OriginalDate.now() - realStart, 0);
+  const clock = (): number => realStart + Math.max(OriginalDate.now() - realStart, 0);
 
   Math.random = rng;
 
@@ -88,5 +93,5 @@ export function installDeterministicMode(seed = process.env['FRANKENBEAST_SEED']
   });
 
   globalThis.Date = DeterministicDate as DateConstructor;
-  globalObject.__frankenDeterministicModeInstalled = seed;
+  globalObject.__frankenDeterministicModeInstalled = installedSeed;
 }
