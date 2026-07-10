@@ -544,6 +544,7 @@ describe('BeastRunService', () => {
       status: 'failed',
       stopReason: 'spawn_failed',
     });
+    await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
     expect(repo.listEvents(run.id).map((event) => event.type)).toEqual(['run.created', 'run.spawn_failed']);
   });
 

@@ -70,8 +70,10 @@ export class BeastRunService {
       this.syncTrackedAgent(updated);
       return updated;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       const currentRun = this.repository.getRun(run.id);
       if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
+        await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
         this.syncTrackedAgent(currentRun);
         return currentRun;
       }
@@ -86,7 +88,6 @@ export class BeastRunService {
       }
 
       const failedAt = isoNow();
-      const errorMessage = error instanceof Error ? error.message : String(error);
       const { failedRun, publications } = this.repository.transaction(() => {
         const updatedRun = this.repository.updateRun(run.id, {
           status: 'failed',
