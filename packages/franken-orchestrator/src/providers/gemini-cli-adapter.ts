@@ -90,6 +90,11 @@ export class GeminiCliAdapter implements ILlmProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
+      const spawnState: { message: string | undefined } = { message: undefined };
+      proc.once('error', (error) => {
+        spawnState.message = error.message;
+      });
+
       const userContent = request.messages
         .map((m) =>
           typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
@@ -98,7 +103,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       proc.stdin!.write(userContent);
       proc.stdin!.end();
 
-      yield* this.parseStream(proc);
+      yield* this.parseStream(proc, spawnState);
     } finally {
       if (managedContextFileName) this.removeManagedGeminiMd(contextWorkingDir, managedContextFileName);
       rmSync(contextWorkingDir, { recursive: true, force: true });
@@ -494,8 +499,14 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
+    spawnState: { message: string | undefined },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
+    proc.once('error', () => {
+      if (!rl.closed) {
+        rl.close();
+      }
+    });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let emittedText = false;
@@ -683,6 +694,15 @@ export class GeminiCliAdapter implements ILlmProvider {
       const exitCode = await new Promise<number | null>((resolve) => {
         proc.on('close', resolve);
       });
+      if (spawnState.message) {
+        streamCompleted = true;
+        yield {
+          type: 'error',
+          error: `gemini process failed to start: ${spawnState.message}`,
+          retryable: false,
+        };
+        return;
+      }
       if (exitCode !== 0 && exitCode !== null) {
         yield {
           type: 'error',

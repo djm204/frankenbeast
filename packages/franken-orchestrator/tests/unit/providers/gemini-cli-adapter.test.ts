@@ -35,6 +35,30 @@ function mockSpawn(stdoutLines: string[], exitCode = 0) {
   return proc;
 }
 
+function mockSpawnError(errorMessage = 'spawn command not found') {
+  const stdout = new PassThrough();
+  const stdin = new PassThrough();
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    pid: 1,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
+  });
+  (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
+  setImmediate(() => {
+    proc.emit('error', Object.assign(new Error(errorMessage), { code: 'ENOENT' }));
+    setImmediate(() => {
+      stdout.end();
+      proc.exitCode = 127;
+      proc.emit('close', 127);
+    });
+  });
+  return proc;
+}
+
 async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
   const events: LlmStreamEvent[] = [];
   for await (const e of iterable) events.push(e);
@@ -234,6 +258,19 @@ describe('GeminiCliAdapter', () => {
   });
 
   describe('execute()', () => {
+    it('handles spawn failure errors without leaking unhandled events', async () => {
+      const proc = mockSpawnError('gemini: command not found');
+      const events = await collectEvents(adapter.execute({ systemPrompt: 'sys', messages: [{ role: 'user', content: 'Hi' }] }));
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual({
+        type: 'error',
+        error: expect.stringContaining('gemini process failed to start: gemini: command not found'),
+        retryable: false,
+      });
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
     it('parses stream-json text events', async () => {
       mockSpawn([
         JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 30 } } }),
