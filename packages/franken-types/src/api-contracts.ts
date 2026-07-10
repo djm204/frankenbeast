@@ -192,6 +192,19 @@ export interface BeastSseSnapshot {
   agents?: Array<Partial<TrackedAgentSummary> & { id: string }>;
 }
 
+export const TRACKED_AGENT_STATUSES = [
+  'initializing',
+  'awaiting_approval',
+  'dispatching',
+  'running',
+  'completed',
+  'failed',
+  'stopped',
+  'deleted',
+] as const;
+
+export type TrackedAgentStatus = (typeof TRACKED_AGENT_STATUSES)[number];
+
 export interface BeastSseAgentStatusEvent {
   agentId: string;
   status: string;

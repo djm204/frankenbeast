@@ -6,7 +6,14 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
-    "test": {},
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/vitest-*.ts",
+        "$TURBO_ROOT$/packages/*/src/**"
+      ],
+      "env": ["INTEGRATION", "E2E", "EVAL", "DOCKER_BUILD"]
+    },
     "test:ci": {
       "dependsOn": ["build"]
     },

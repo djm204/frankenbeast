@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatShell, buildInitAction } from '../../src/components/chat-shell.js';
+import { BeastApiError } from '../../src/lib/beast-api.js';
 import { FALLBACK_BEAST_CATALOG } from '../../src/components/beasts/wizard-catalog.js';
 import { useDashboardStore } from '../../src/stores/dashboard-store.js';
+import { useBeastStore } from '../../src/stores/beast-store.js';
 
 const mockListSessions = vi.fn().mockResolvedValue([
   {
@@ -236,7 +238,28 @@ vi.mock('../../src/lib/api.js', () => ({
 }));
 
 vi.mock('../../src/lib/beast-api.js', () => ({
+  BeastApiError: class BeastApiError extends Error {
+    constructor(
+      message: string,
+      public readonly status: number,
+      public readonly code?: string,
+      public readonly details?: unknown,
+    ) {
+      super(message);
+      this.name = 'BeastApiError';
+    }
+  },
   MODULE_CONFIG_KEYS: ['firewall', 'skills', 'memory', 'planner', 'critique', 'governor', 'heartbeat'],
+  TRACKED_AGENT_STATUSES: [
+    'initializing',
+    'awaiting_approval',
+    'dispatching',
+    'running',
+    'completed',
+    'failed',
+    'stopped',
+    'deleted',
+  ],
   BeastApiClient: vi.fn(function (this: {
     getCatalog: typeof mockGetCatalog;
     listAgents: typeof mockListAgents;
@@ -320,6 +343,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   useDashboardStore.getState().reset();
+  useBeastStore.getState().resetWizard();
   latestBeastEventHandlers = null;
   mockSubscribeToEvents.mockImplementation((handlers: Record<string, (event: unknown) => void>) => {
     latestBeastEventHandlers = handlers;
@@ -701,9 +725,14 @@ describe('ChatShell', () => {
     });
   });
 
-  it('shows pending and failure feedback for network service actions', async () => {
+  it('shows pending and failure feedback for valid network service actions', async () => {
     window.location.hash = '#/network';
     let rejectStart!: (error: Error) => void;
+    mockNetworkGetStatus.mockResolvedValueOnce({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      services: [{ id: 'chat-server', status: 'stopped' }],
+    });
     mockNetworkStart.mockImplementationOnce(() => new Promise((_, reject) => {
       rejectStart = reject;
     }));
@@ -857,6 +886,97 @@ describe('ChatShell', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Beasts' })).toBeDefined();
     expect(mockListAgents).toHaveBeenCalled();
+  });
+
+  it('refreshes the beasts fleet after Create Agent auto-dispatch failures', async () => {
+    window.location.hash = '#/beasts';
+    mockCreateAgent.mockRejectedValueOnce(new BeastApiError(
+      "Dispatch failed for tracked agent 'agent-failed': outputDir is required",
+      409,
+      'AGENT_DISPATCH_FAILED',
+      { agentId: 'agent-failed' },
+    ));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
+    });
+    const initialListCalls = mockListAgents.mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: /^\+ create agent$/i }));
+    act(() => {
+      useBeastStore.getState().setStepValues(0, { name: 'Dispatch Failure Agent' });
+      useBeastStore.getState().setStepValues(1, {
+        workflowType: 'martin-loop',
+        provider: 'codex',
+        objective: 'Implement chunks',
+        chunkDirectory: 'tasks/chunks',
+      });
+      useBeastStore.setState({ wizardStep: 7, highestCompleted: 6 });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /launch agent/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Dispatch failed for tracked agent');
+    });
+    await waitFor(() => {
+      expect(mockListAgents.mock.calls.length).toBeGreaterThan(initialListCalls);
+    });
+  });
+
+  it('keeps deleted audit rows from being auto-selected on the beasts page', async () => {
+    window.location.hash = '#/beasts';
+    const deletedAgent = {
+      id: 'agent-deleted',
+      definitionId: 'chunk-plan',
+      status: 'deleted',
+      source: 'chat',
+      createdByUser: 'chat-session:sess-1',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/deleted.md',
+        config: { designDocPath: 'docs/plans/deleted.md' },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: { designDocPath: 'docs/plans/deleted.md' },
+      chatSessionId: 'sess-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:03.000Z',
+    };
+    const activeAgent = {
+      ...deletedAgent,
+      id: 'agent-active',
+      status: 'stopped',
+      updatedAt: '2026-03-11T00:00:02.000Z',
+    };
+    mockListAgents.mockResolvedValue([deletedAgent, activeAgent]);
+    mockGetAgent.mockImplementation(async (agentId: string) => ({
+      agent: agentId === 'agent-active' ? activeAgent : deletedAgent,
+      events: [],
+    }));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('agent-deleted')).toBeDefined();
+      expect(screen.getByText('agent-active')).toBeDefined();
+      expect(mockGetAgent).toHaveBeenCalledWith('agent-active');
+    });
+    expect(mockGetAgent).not.toHaveBeenCalledWith('agent-deleted');
   });
 
   it('applies Beast SSE status and log updates incrementally', async () => {

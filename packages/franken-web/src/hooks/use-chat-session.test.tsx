@@ -290,7 +290,12 @@ describe('useChatSession error banners', () => {
     const retriedMessageId = result.current.messages.find((message) => message.role === 'user')!.id;
     act(() => {
       MockWebSocket.instances[0]!.onmessage?.({
-        data: JSON.stringify({ type: 'message.accepted', clientMessageId: retriedMessageId }),
+        data: JSON.stringify({
+          type: 'message.accepted',
+          clientMessageId: retriedMessageId,
+          sessionId: 'session-1',
+          timestamp: '2026-07-05T00:00:01.000Z',
+        }),
       });
     });
     await act(async () => {
@@ -555,16 +560,27 @@ describe('useChatSession error banners', () => {
     const userMessageId = result.current.messages.find((message) => message.role === 'user')!.id;
     act(() => {
       MockWebSocket.instances[0]!.onmessage?.({
-        data: JSON.stringify({ type: 'message.accepted', clientMessageId: userMessageId }),
+        data: JSON.stringify({
+          type: 'message.accepted',
+          clientMessageId: userMessageId,
+          sessionId: 'session-1',
+          timestamp: '2026-01-01T10:29:30.090Z',
+        }),
       });
       MockWebSocket.instances[0]!.onmessage?.({
-        data: JSON.stringify({ type: 'message.delivered', clientMessageId: userMessageId }),
+        data: JSON.stringify({
+          type: 'message.delivered',
+          clientMessageId: userMessageId,
+          timestamp: '2026-01-01T10:29:30.100Z',
+        }),
       });
       MockWebSocket.instances[0]!.onmessage?.({
         data: JSON.stringify({
           type: 'session.ready',
+          sessionId: 'session-1',
           transcript: [],
           pendingApproval: null,
+          state: 'active',
           projectId: 'project-1',
         }),
       });

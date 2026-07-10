@@ -943,7 +943,7 @@ describe('agent routes integration', () => {
     });
   });
 
-  it('soft-deletes stopped tracked agents so they disappear from the dashboard list', async () => {
+  it('soft-deletes stopped tracked agents while keeping them visible for audit filters', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
@@ -958,9 +958,9 @@ describe('agent routes integration', () => {
         initAction: {
           kind: 'design-interview',
           command: '/interview',
-          config: { goal: 'Delete from dashboard' },
+          config: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md' },
         },
-        initConfig: { goal: 'Delete from dashboard' },
+        initConfig: { goal: 'Delete from dashboard', outputPath: 'docs/delete-design.md' },
       }),
     });
     expect(createResponse.status).toBe(201);
@@ -987,15 +987,33 @@ describe('agent routes integration', () => {
         authorization: `Bearer ${operatorToken}`,
       },
     });
-    const list = await listResponse.json() as { data: { agents: Array<{ id: string }> } };
-    expect(list.data.agents).toEqual([]);
+    const list = await listResponse.json() as { data: { agents: Array<{ id: string; status: string }> } };
+    expect(list.data.agents.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: created.data.id, status: 'deleted' },
+    ]);
 
     const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
       headers: {
         authorization: `Bearer ${operatorToken}`,
       },
     });
-    expect(detailResponse.status).toBe(404);
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as { data: { agent: { id: string; status: string } } };
+    expect(detail.data.agent).toMatchObject({ id: created.data.id, status: 'deleted' });
+
+    const stopAgainResponse = await app.request(`/v1/beasts/agents/${created.data.id}/stop`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(stopAgainResponse.status).toBe(409);
+    expect(await stopAgainResponse.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_DELETED',
+        message: `Tracked agent '${created.data.id}' has been deleted`,
+      },
+    });
   });
 
   it('patches tracked agent identity and module configuration', async () => {
@@ -1142,6 +1160,7 @@ describe('agent routes integration', () => {
         config: {},
       },
       initConfig: {},
+      autoDispatch: false,
     });
 
     const r1 = await app.request('/v1/beasts/agents', { method: 'POST', headers, body });
@@ -1153,7 +1172,7 @@ describe('agent routes integration', () => {
     expect(r3.status).toBe(429);
   });
 
-  it('marks agent as failed when dispatch throws instead of leaving orphaned initializing agents', async () => {
+  it('returns an explicit error when dispatch throws after creating the tracked agent', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
@@ -1180,11 +1199,21 @@ describe('agent routes integration', () => {
       }),
     });
 
-    expect(createResponse.status).toBe(201);
-    const created = await createResponse.json() as { data: { id: string; status: string } };
-    expect(created.data.status).toBe('failed');
+    expect(createResponse.status).toBe(409);
+    const created = await createResponse.json() as {
+      error: {
+        code: string;
+        message: string;
+        details: { agentId: string; dispatchError: string; agent: { id: string; status: string } };
+      };
+    };
+    expect(created.error.code).toBe('AGENT_DISPATCH_FAILED');
+    expect(created.error.message).toContain('Dispatch failed for tracked agent');
+    expect(created.error.details.agentId).toBeTruthy();
+    expect(created.error.details.dispatchError).toContain('outputDir');
+    expect(created.error.details.agent.status).toBe('failed');
 
-    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.error.details.agentId}`, {
       headers: { authorization: `Bearer ${operatorToken}` },
     });
     const detail = await detailResponse.json() as {
@@ -1235,9 +1264,8 @@ describe('agent routes integration', () => {
       headers: { authorization: `Bearer ${operatorToken}` },
     });
 
-    // Verify the agent is stopped, then use the restart endpoint which already works for stopped
-    // The real test: use the start endpoint with a failed agent (via dispatch failure test above)
-    // Instead, create a new agent with invalid config so it becomes 'failed' with no dispatchRunId
+    // Verify the agent is stopped, then use the restart endpoint which already works for stopped.
+    // The real test: use the start endpoint with a failed agent created by an auto-dispatch failure.
     const failedResponse = await app.request('/v1/beasts/agents', {
       method: 'POST',
       headers,
@@ -1253,13 +1281,15 @@ describe('agent routes integration', () => {
         },
       }),
     });
-    expect(failedResponse.status).toBe(201);
-    const failedAgent = await failedResponse.json() as { data: { id: string; status: string } };
-    expect(failedAgent.data.status).toBe('failed');
+    expect(failedResponse.status).toBe(409);
+    const failedAgent = await failedResponse.json() as {
+      error: { details: { agentId: string; agent: { status: string } } };
+    };
+    expect(failedAgent.error.details.agent.status).toBe('failed');
 
     // Starting a failed agent without a dispatchRunId will try dispatchDetachedAgent
     // which will also fail (same bad config), but the status guard should NOT be the blocker
-    const startResponse = await app.request(`/v1/beasts/agents/${failedAgent.data.id}/start`, {
+    const startResponse = await app.request(`/v1/beasts/agents/${failedAgent.error.details.agentId}/start`, {
       method: 'POST',
       headers: { authorization: `Bearer ${operatorToken}` },
     });

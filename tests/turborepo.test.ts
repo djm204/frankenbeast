@@ -27,6 +27,28 @@ describe('Turborepo configuration', () => {
       expect(testTask.dependsOn).toBeUndefined();
     });
 
+    it('hashes cross-package Vitest source aliases and root setup scripts for cached test tasks', () => {
+      const turbo = readJson('turbo.json');
+      const testTask = turbo.tasks?.test;
+      expect(testTask).toBeDefined();
+      expect(testTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/scripts/vitest-*.ts',
+          '$TURBO_ROOT$/packages/*/src/**',
+        ]),
+      );
+    });
+
+    it('hashes suite-selection environment variables for cached test tasks', () => {
+      const turbo = readJson('turbo.json');
+      const testTask = turbo.tasks?.test;
+      expect(testTask).toBeDefined();
+      expect(testTask.env).toEqual(
+        expect.arrayContaining(['INTEGRATION', 'E2E', 'EVAL', 'DOCKER_BUILD']),
+      );
+    });
+
     it('defines test:ci task with package build dependency for CI ordering', () => {
       const turbo = readJson('turbo.json');
       const testCiTask = turbo.tasks?.['test:ci'];
@@ -44,6 +66,33 @@ describe('Turborepo configuration', () => {
       const lintTask = turbo.tasks?.lint;
       expect(lintTask).toBeDefined();
       expect(lintTask.dependsOn).toBeUndefined();
+    });
+  });
+
+  describe('franken-web package turbo.json', () => {
+    it('hashes the root manifest for cached web builds and tests that read the root version', () => {
+      const turbo = readJson('packages/franken-web/turbo.json');
+      expect(turbo.extends).toEqual(['//']);
+
+      const buildTask = turbo.tasks?.build;
+      expect(buildTask).toBeDefined();
+      expect(buildTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/package.json',
+        ]),
+      );
+
+      const testTask = turbo.tasks?.test;
+      expect(testTask).toBeDefined();
+      expect(testTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/package.json',
+          '$TURBO_ROOT$/scripts/vitest-*.ts',
+          '$TURBO_ROOT$/packages/*/src/**',
+        ]),
+      );
     });
   });
 
@@ -83,10 +132,15 @@ describe('Turborepo configuration', () => {
     });
   });
 
-  describe('.gitignore includes .turbo', () => {
+  describe('.gitignore includes generated workspace artifacts', () => {
     it('has .turbo entry', () => {
       const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
       expect(gitignore).toMatch(/^\.turbo$/m);
+    });
+
+    it('ignores the root .tmp directory used by package test scripts', () => {
+      const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+      expect(gitignore).toMatch(/^\.tmp\/$/m);
     });
   });
 

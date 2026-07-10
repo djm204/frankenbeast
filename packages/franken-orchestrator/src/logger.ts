@@ -37,7 +37,7 @@ export class ConsoleLogger implements ILogger {
   }
 
   warn(msg: string, _data?: unknown): void {
-    console.warn(formatLine('[beast:warn]', msg));
+    printLine(formatLine('[beast:warn]', msg));
   }
 
   error(msg: string, _data?: unknown): void {

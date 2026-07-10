@@ -5,6 +5,7 @@ import { codexServerName } from './codex-server-names.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 
 function tmpDir(): string {
@@ -267,6 +268,33 @@ describe('fbeast init', () => {
     expect(afterCmd).toContain('cd "$p"');
     expect(afterCmd).not.toContain('do;');
     expect(afterCmd).toContain('gemini-after-tool.sh');
+  });
+
+  it('quotes Gemini hook commands so hostile project roots cannot inject shell commands', () => {
+    const parent = tmpDir();
+    dirs.push(parent);
+    const marker = join(parent, 'gemini-injection-marker');
+    const root = join(parent, `project with spaces ; $(touch ${marker}) and quote's`);
+    mkdirSync(root, { recursive: true });
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const beforeCmd = (settings.hooks.BeforeTool[0] as any).hooks[0].command as string;
+    const result = spawnSync(beforeCmd, {
+      cwd: parent,
+      env: { ...process.env, GEMINI_PROJECT_ROOT: root, FBEAST_DISABLE_HOOKS: '1' },
+      shell: true,
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+    expect(beforeCmd).toContain('script=');
+    expect(beforeCmd).toContain('.fbeast/hooks/gemini-before-tool.sh');
+    expect(beforeCmd).toContain('exec "$executable"');
+    expect(beforeCmd).not.toContain(root);
   });
 
   it('merges Gemini hooks without clobbering existing BeforeTool entries', () => {
