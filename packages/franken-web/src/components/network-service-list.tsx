@@ -39,7 +39,8 @@ function canStartService(service: NetworkServiceItem): boolean {
 }
 
 function canStopOrRestartService(service: NetworkServiceItem): boolean {
-  return !service.inProcess && normalizeServiceStatus(service.status) === 'running';
+  const status = normalizeServiceStatus(service.status);
+  return !service.inProcess && (status === 'running' || status === 'stale');
 }
 
 export function NetworkServiceList({

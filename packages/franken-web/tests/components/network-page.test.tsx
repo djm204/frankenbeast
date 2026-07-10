@@ -74,6 +74,11 @@ describe('NetworkPage', () => {
             status: 'stopped',
             explanation: 'Dashboard is offline',
           },
+          {
+            id: 'worker',
+            status: 'stale',
+            explanation: 'Healthcheck failed',
+          },
         ]}
         status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
       />,
@@ -82,10 +87,12 @@ describe('NetworkPage', () => {
     const runningStart = screen.getByRole('button', { name: 'Start chat-server' });
     const stoppedStop = screen.getByRole('button', { name: 'Stop dashboard' });
     const stoppedRestart = screen.getByRole('button', { name: 'Restart dashboard' });
+    const staleStart = screen.getByRole('button', { name: 'Start worker' });
 
     expect(runningStart).toHaveProperty('disabled', true);
     expect(stoppedStop).toHaveProperty('disabled', true);
     expect(stoppedRestart).toHaveProperty('disabled', true);
+    expect(staleStart).toHaveProperty('disabled', true);
 
     fireEvent.click(runningStart);
     fireEvent.click(stoppedStop);
@@ -100,6 +107,10 @@ describe('NetworkPage', () => {
     await waitFor(() => expect(screen.getByText('Restarted chat-server.')).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: 'Start dashboard' }));
     await waitFor(() => expect(screen.getByText('Started dashboard.')).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: 'Stop worker' }));
+    await waitFor(() => expect(screen.getByText('Stopped worker.')).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: 'Restart worker' }));
+    await waitFor(() => expect(screen.getByText('Restarted worker.')).toBeDefined());
     fireEvent.change(screen.getByLabelText('Network mode'), { target: { value: 'insecure' } });
     fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'gpt-5' } });
     fireEvent.change(screen.getByLabelText('Chat host'), { target: { value: '0.0.0.0' } });
@@ -109,7 +120,9 @@ describe('NetworkPage', () => {
 
     expect(onStart).toHaveBeenCalledWith('dashboard');
     expect(onStop).toHaveBeenCalledWith('chat-server');
+    expect(onStop).toHaveBeenCalledWith('worker');
     expect(onRestart).toHaveBeenCalledWith('chat-server');
+    expect(onRestart).toHaveBeenCalledWith('worker');
     expect(onSaveConfig).toHaveBeenCalledWith([
       'network.mode=insecure',
       'chat.model=gpt-5',
