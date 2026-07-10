@@ -471,7 +471,7 @@ describe('BeastApiClient', () => {
     }
   });
 
-  it('passes the last received SSE event id when reconnecting with a fresh ticket', async () => {
+  it('passes the last successfully parsed SSE event id when reconnecting with a fresh ticket', async () => {
     vi.useFakeTimers();
     const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
     const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
@@ -493,15 +493,21 @@ describe('BeastApiClient', () => {
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
 
     try {
-      const unsubscribe = await client.subscribeToEvents({ runStatus: vi.fn(), error: vi.fn() });
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ runStatus: vi.fn(), runLog: vi.fn(), error: onError });
 
       listeners[0]?.['run.status']?.({
         data: JSON.stringify({ runId: 'run-1', status: 'running' }),
         lastEventId: '42',
       });
+      listeners[0]?.['run.log']?.({
+        data: '{malformed-json',
+        lastEventId: '43',
+      });
       listeners[0]?.error?.({ data: '' });
       await vi.advanceTimersByTimeAsync(1_000);
 
+      expect(onError).toHaveBeenCalledWith(expect.any(SyntaxError));
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
         'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=42',
