@@ -258,6 +258,7 @@ export function buildInitAction(
       kind: 'martin-loop',
       command: 'martin-loop',
       config,
+      ...(chatSessionId ? { chatSessionId } : {}),
     };
   }
 
@@ -1064,7 +1065,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const initAction = buildInitAction(definitionId, config, selectedSessionId);
               try {
-                await beastClient.createAgent({ definitionId, initAction, initConfig: config, executionMode });
+                await beastClient.createAgent({
+                  definitionId,
+                  initAction,
+                  initConfig: config,
+                  executionMode,
+                  ...(selectedSessionId ? { chatSessionId: selectedSessionId } : {}),
+                });
                 setBeastRefreshNonce((current) => current + 1);
               } catch (error) {
                 if (error instanceof BeastApiError && error.code === 'AGENT_DISPATCH_FAILED') {

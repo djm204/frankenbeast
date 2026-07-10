@@ -1,6 +1,18 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatShell } from './chat-shell';
+import { buildInitAction, ChatShell } from './chat-shell';
+
+const mocks = vi.hoisted(() => ({
+  createAgent: vi.fn(),
+  launchConfig: {
+    executionMode: 'process',
+    workflow: {
+      workflowType: 'martin-loop',
+      provider: 'codex',
+      objective: 'Implement chunks',
+    },
+  },
+}));
 
 vi.mock('../hooks/use-chat-session', () => ({
   useChatSession: () => ({
@@ -52,11 +64,13 @@ vi.mock('../lib/network-api', () => ({
 
 vi.mock('../lib/beast-api', () => ({
   BeastApiClient: class {
+    createAgent = mocks.createAgent;
     listCatalog = vi.fn().mockResolvedValue([]);
     listAgents = vi.fn().mockResolvedValue([]);
     listRuns = vi.fn().mockResolvedValue([]);
     getContainerRuntime = vi.fn().mockResolvedValue(undefined);
     subscribe = vi.fn().mockResolvedValue(() => undefined);
+    subscribeToEvents = vi.fn().mockResolvedValue(() => undefined);
   },
 }));
 
@@ -73,7 +87,9 @@ vi.mock('../pages/dashboard-page', () => ({
 }));
 
 vi.mock('../pages/beasts-page', () => ({
-  BeastsPage: () => <div>Beasts module</div>,
+  BeastsPage: ({ onLaunch }: { onLaunch: (config: Record<string, unknown>) => Promise<void> }) => (
+    <button type="button" onClick={() => { void onLaunch(mocks.launchConfig); }}>Launch test Beast</button>
+  ),
 }));
 
 vi.mock('../pages/analytics-page', () => ({
@@ -106,6 +122,8 @@ describe('ChatShell route heading', () => {
   });
 
   beforeEach(() => {
+    mocks.createAgent.mockReset();
+    mocks.createAgent.mockResolvedValue({ id: 'agent-1' });
     window.location.hash = '#/network';
     window.matchMedia = vi.fn().mockReturnValue({
       matches: false,
@@ -149,5 +167,38 @@ describe('ChatShell route heading', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Chat' })).toBeTruthy();
     expect(screen.queryByRole('heading', { level: 2, name: 'Sessions' })).toBeNull();
     expect(window.location.hash).toBe('#/chat');
+  });
+
+  it('preserves the selected chat session when launching the default martin-loop Beast workflow', async () => {
+    window.location.hash = '#/beasts';
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" sessionId="chat-session-42" version="0.2.1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Launch test Beast' }));
+
+    await waitFor(() => expect(mocks.createAgent).toHaveBeenCalledTimes(1));
+    expect(mocks.createAgent).toHaveBeenCalledWith(expect.objectContaining({
+      definitionId: 'martin-loop',
+      chatSessionId: 'chat-session-42',
+      initAction: expect.objectContaining({
+        kind: 'martin-loop',
+        chatSessionId: 'chat-session-42',
+      }),
+    }));
+  });
+});
+
+describe('buildInitAction', () => {
+  it('carries chat session context for every supported Beast workflow', () => {
+    const config = {
+      designDocPath: 'docs/design.md',
+      workflow: { docPath: 'docs/fallback.md' },
+    };
+
+    for (const definitionId of ['design-interview', 'chunk-plan', 'martin-loop']) {
+      expect(buildInitAction(definitionId, config, 'chat-session-42')).toEqual(expect.objectContaining({
+        kind: definitionId,
+        chatSessionId: 'chat-session-42',
+      }));
+    }
   });
 });
