@@ -6,7 +6,7 @@ import type {
   ProviderSkillConfig,
   ToolDefinition,
 } from '@franken/types';
-import { now as deterministicNow } from '@franken/types';
+import { deterministicUuid } from '@franken/types';
 
 export interface TranslatorSkillInput {
   name: string;
@@ -64,7 +64,7 @@ export class ProviderSkillTranslator {
     const content = JSON.stringify({ mcpServers: merged }, null, 2);
     const tempPath = join(
       tmpdir(),
-      `frankenbeast-mcp-${deterministicNow()}.json`,
+      `frankenbeast-mcp-${process.pid}-${deterministicUuid('provider-skill-translator:claude')}.json`,
     );
 
     return {
@@ -87,7 +87,7 @@ export class ProviderSkillTranslator {
     const content = JSON.stringify({ mcpServers: merged }, null, 2);
     const tempPath = join(
       tmpdir(),
-      `frankenbeast-codex-mcp-${deterministicNow()}.json`,
+      `frankenbeast-codex-mcp-${process.pid}-${deterministicUuid('provider-skill-translator:codex')}.json`,
     );
 
     return {
@@ -109,7 +109,7 @@ export class ProviderSkillTranslator {
     const content = JSON.stringify({ mcpServers: merged }, null, 2);
     const tempPath = join(
       tmpdir(),
-      `frankenbeast-gemini-settings-${deterministicNow()}.json`,
+      `frankenbeast-gemini-settings-${process.pid}-${deterministicUuid('provider-skill-translator:gemini')}.json`,
     );
 
     return {

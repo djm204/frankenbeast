@@ -79,6 +79,8 @@ function nowState(seed: string): number {
 }
 
 function dateNowIsMocked(): boolean {
+  const dateConstructor = Date as DateConstructor & { __frankenOriginalDate?: DateConstructor };
+  if (dateConstructor.__frankenOriginalDate) return false;
   return !Function.prototype.toString.call(Date.now).includes('[native code]');
 }
 

@@ -1,4 +1,4 @@
-import { isoNow, now as deterministicNow } from '@franken/types';
+import { isoNow, wallClockNow } from '@franken/types';
 /**
  * MartinLoop — the smarter loop.
  *
@@ -442,7 +442,7 @@ export class MartinLoop {
 
     while (iteration < config.maxIterations) {
       iteration++;
-      const startTime = deterministicNow();
+      const startTime = wallClockNow();
 
       const resolved = this.registry.get(activeProvider);
       let renderedPrompt = config.prompt;
@@ -558,7 +558,7 @@ export class MartinLoop {
         throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
       }
 
-      const durationMs = deterministicNow() - startTime;
+      const durationMs = wallClockNow() - startTime;
       // For stream-json providers, use the pre-cleaned output from StreamLineBuffer.
       // For non-stream-json providers, normalize the raw stdout via the provider.
       const normalizedStdout = resolved.supportsStreamJson()
