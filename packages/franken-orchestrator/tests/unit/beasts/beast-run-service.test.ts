@@ -441,6 +441,108 @@ describe('BeastRunService', () => {
     }));
   });
 
+  it('records a new start failure when a run with a prior attempt fails before creating another attempt', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async () => {
+          throw new Error('config invalid');
+        }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Retry failed work',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: false,
+    });
+    repo.createAttempt(run.id, {
+      status: 'failed',
+      startedAt: '2026-03-10T00:00:00.000Z',
+    });
+    repo.updateRun(run.id, {
+      status: 'failed',
+      finishedAt: '2026-03-10T00:01:00.000Z',
+      stopReason: 'exit_1',
+    });
+
+    const failed = await runs.start(run.id, 'operator');
+
+    expect(failed).toMatchObject({
+      status: 'failed',
+      stopReason: 'start_failed',
+      attemptCount: 1,
+    });
+    expect(repo.listEvents(run.id).at(-1)).toMatchObject({
+      type: 'run.start_failed',
+      payload: { error: 'config invalid' },
+    });
+  });
+
+  it('preserves executor-recorded spawn failures instead of rewriting them', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => {
+          const failedAt = '2026-03-10T00:02:00.000Z';
+          repo.updateRun(run.id, {
+            status: 'failed',
+            finishedAt: failedAt,
+            stopReason: 'spawn_failed',
+          });
+          repo.appendEvent(run.id, {
+            type: 'run.spawn_failed',
+            payload: { error: 'spawn ENOENT' },
+            createdAt: failedAt,
+          });
+          throw new Error('spawn ENOENT');
+        }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Spawn work',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: false,
+    });
+
+    const failed = await runs.start(run.id, 'operator');
+
+    expect(failed).toMatchObject({
+      status: 'failed',
+      stopReason: 'spawn_failed',
+    });
+    expect(repo.listEvents(run.id).map((event) => event.type)).toEqual(['run.created', 'run.spawn_failed']);
+  });
+
   it('does not overwrite a run that already started when a later start step throws', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

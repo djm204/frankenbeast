@@ -62,6 +62,8 @@ export class BeastRunService {
   async start(runId: string, _actor: string): Promise<BeastRun> {
     const run = this.requireRun(runId);
     const definition = this.getDefinitionOrThrow(run.definitionId);
+    const priorAttemptId = run.currentAttemptId;
+    const priorAttemptCount = run.attemptCount;
     try {
       await this.executorFor(run).start(run, definition);
       const updated = this.requireRun(runId);
@@ -69,7 +71,17 @@ export class BeastRunService {
       return updated;
     } catch (error) {
       const currentRun = this.repository.getRun(run.id);
-      if (currentRun?.currentAttemptId) {
+      if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
+        this.syncTrackedAgent(currentRun);
+        return currentRun;
+      }
+      if (
+        currentRun
+        && (
+          (currentRun.currentAttemptId !== undefined && currentRun.currentAttemptId !== priorAttemptId)
+          || currentRun.attemptCount > priorAttemptCount
+        )
+      ) {
         throw error;
       }
 
