@@ -66,18 +66,18 @@ describe('npm workspaces configuration', () => {
         .filter((entry) => entry.isDirectory())
         .map((entry) => `packages/${entry.name}/package.json`),
     ];
-    const getDirectDependency = (pkg: Record<string, Record<string, string> | undefined>, dependencyName: string) => {
-      for (const dependencySection of [
-        'dependencies',
-        'devDependencies',
-        'optionalDependencies',
-        'peerDependencies',
-      ]) {
-        const version = pkg[dependencySection]?.[dependencyName];
-        if (version !== undefined) return version;
-      }
-      return undefined;
-    };
+    const dependencySections = [
+      'dependencies',
+      'devDependencies',
+      'optionalDependencies',
+      'peerDependencies',
+    ] as const;
+    const getDirectDependencies = (pkg: Record<string, Record<string, string> | undefined>, dependencyName: string) => dependencySections
+      .map((dependencySection) => ({
+        dependencySection,
+        version: pkg[dependencySection]?.[dependencyName],
+      }))
+      .filter((entry): entry is { dependencySection: typeof dependencySections[number]; version: string } => entry.version !== undefined);
     const majorOf = (version: string) => majorMinorPatch(version)[0];
 
     it('keeps workspace Vitest declarations on the root Vitest major', () => {
@@ -89,28 +89,32 @@ describe('npm workspaces configuration', () => {
 
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
-        const vitest = getDirectDependency(pkg, 'vitest');
-        if (vitest === undefined) continue;
+        const vitestDeclarations = getDirectDependencies(pkg, 'vitest');
 
-        expect(
-          majorOf(vitest),
-          `vitest in ${path} must stay on root major ${rootVitestMajor}`,
-        ).toBe(rootVitestMajor);
+        for (const { dependencySection, version } of vitestDeclarations) {
+          expect(
+            majorOf(version),
+            `vitest in ${path} ${dependencySection} must stay on root major ${rootVitestMajor}`,
+          ).toBe(rootVitestMajor);
+        }
       }
     });
 
     it('keeps workspace coverage-v8 declarations on the same major as Vitest', () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
-        const vitest = getDirectDependency(pkg, 'vitest');
-        const coverage = getDirectDependency(pkg, '@vitest/coverage-v8');
-        if (coverage === undefined) continue;
+        const vitestDeclarations = getDirectDependencies(pkg, 'vitest');
+        const coverageDeclarations = getDirectDependencies(pkg, '@vitest/coverage-v8');
+        if (coverageDeclarations.length === 0) continue;
 
-        expect(vitest, `${path} declares @vitest/coverage-v8 without vitest`).toBeDefined();
-        expect(
-          majorOf(coverage),
-          `@vitest/coverage-v8 in ${path} must match vitest major`,
-        ).toBe(majorOf(vitest));
+        expect(vitestDeclarations.length, `${path} declares @vitest/coverage-v8 without vitest`).toBeGreaterThan(0);
+        const vitestMajors = new Set(vitestDeclarations.map(({ version }) => majorOf(version)));
+        for (const { dependencySection, version } of coverageDeclarations) {
+          expect(
+            vitestMajors.has(majorOf(version)),
+            `@vitest/coverage-v8 in ${path} ${dependencySection} must match a declared vitest major`,
+          ).toBe(true);
+        }
       }
     });
 
