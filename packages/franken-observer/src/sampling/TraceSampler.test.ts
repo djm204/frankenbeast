@@ -110,6 +110,20 @@ describe('RateLimitedSampler', () => {
     expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: Number.NaN })).toThrow(RangeError)
     expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: Number.POSITIVE_INFINITY })).toThrow(RangeError)
   })
+
+  it('throws RangeError when maxPerWindow is not greater than zero', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 0, windowMs: 1000 })).toThrow(RangeError)
+    expect(() => new RateLimitedSampler({ maxPerWindow: -1, windowMs: 1000 })).toThrow(RangeError)
+  })
+
+  it('throws RangeError when maxPerWindow is not finite', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: Number.NaN, windowMs: 1000 })).toThrow(
+      RangeError,
+    )
+    expect(() =>
+      new RateLimitedSampler({ maxPerWindow: Number.POSITIVE_INFINITY, windowMs: 1000 }),
+    ).toThrow(RangeError)
+  })
 })
 
 // ── SamplingAdapter ──────────────────────────────────────────────────────────
