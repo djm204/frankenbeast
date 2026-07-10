@@ -11,7 +11,6 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
-import { now as deterministicNow } from '@franken/types';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -329,7 +328,7 @@ export class FileCheckpointStore implements ICheckpointStore {
 
   private withLock(fn: () => void): void {
     const lockPath = `${this.checkpointPath}.lock`;
-    const deadline = deterministicNow() + this.lockTimeoutMs;
+    const deadline = Date.now() + this.lockTimeoutMs;
     for (;;) {
       try {
         const fd = openSync(lockPath, 'wx');
@@ -344,7 +343,7 @@ export class FileCheckpointStore implements ICheckpointStore {
           throw error;
         }
         this.tryReapLock(lockPath);
-        if (deterministicNow() >= deadline) {
+        if (Date.now() >= deadline) {
           throw new Error(`Timed out acquiring checkpoint lock: ${lockPath}`);
         }
         sleepSync(LOCK_RETRY_MS);
