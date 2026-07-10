@@ -192,7 +192,155 @@ describe('ChatGateway', () => {
     );
   });
 
-  it('close() does not throw', () => {
-    expect(() => gateway.close()).not.toThrow();
+  it('evicts least-recently used route metadata when the session cache reaches its cap', async () => {
+    gateway = new ChatGateway(runtime, { routeMetadataMaxEntries: 2 });
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'one',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U2',
+      externalChannelId: 'C2',
+      externalMessageId: 'M2',
+      text: 'two',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const firstSessionId = (runtime.processInbound as ReturnType<typeof vi.fn>).mock.calls[0]![0].sessionId;
+    const secondSessionId = (runtime.processInbound as ReturnType<typeof vi.fn>).mock.calls[1]![0].sessionId;
+
+    // Touch the first session so the second session becomes the LRU entry.
+    await gateway.handleAction('slack', firstSessionId, 'approve');
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U3',
+      externalChannelId: 'C3',
+      externalMessageId: 'M3',
+      text: 'three',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    (slackAdapter.send as ReturnType<typeof vi.fn>).mockClear();
+
+    await gateway.handleAction('slack', firstSessionId, 'approve');
+    expect(slackAdapter.send).toHaveBeenLastCalledWith(
+      firstSessionId,
+      expect.objectContaining({ metadata: expect.objectContaining({ channelId: 'C1' }) }),
+    );
+
+    await gateway.handleAction('slack', secondSessionId, 'approve');
+    expect(slackAdapter.send).toHaveBeenLastCalledWith(
+      secondSessionId,
+      expect.not.objectContaining({ metadata: expect.anything() }),
+    );
+  });
+
+  it('keeps action route metadata stable while runtime processing is in flight', async () => {
+    let resolveAction!: (result: CommsInboundResult) => void;
+    const actionResult = new Promise<CommsInboundResult>((resolve) => {
+      resolveAction = resolve;
+    });
+    runtime = {
+      processInbound: vi.fn((input) => {
+        if (input.externalUserId === 'system') return actionResult;
+        return Promise.resolve({ text: 'pong', status: 'reply' } satisfies CommsInboundResult);
+      }),
+    };
+    gateway = new ChatGateway(runtime, { routeMetadataMaxEntries: 2 });
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'one',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U2',
+      externalChannelId: 'C2',
+      externalMessageId: 'M2',
+      text: 'two',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+    const firstSessionId = (runtime.processInbound as ReturnType<typeof vi.fn>).mock.calls[0]![0].sessionId;
+
+    (slackAdapter.send as ReturnType<typeof vi.fn>).mockClear();
+    const action = gateway.handleAction('slack', firstSessionId, 'approve');
+    await Promise.resolve();
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U3',
+      externalChannelId: 'C3',
+      externalMessageId: 'M3',
+      text: 'three',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U4',
+      externalChannelId: 'C4',
+      externalMessageId: 'M4',
+      text: 'four',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    resolveAction({ text: 'approved', status: 'reply' });
+    await action;
+
+    expect(slackAdapter.send).toHaveBeenLastCalledWith(
+      firstSessionId,
+      expect.objectContaining({ metadata: expect.objectContaining({ channelId: 'C1' }) }),
+    );
+  });
+
+  it('close() clears remembered route metadata', async () => {
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'ping',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+    const sessionId = (runtime.processInbound as ReturnType<typeof vi.fn>).mock.calls[0]![0].sessionId;
+    (slackAdapter.send as ReturnType<typeof vi.fn>).mockClear();
+
+    gateway.close();
+    await gateway.handleAction('slack', sessionId, 'approve');
+
+    expect(slackAdapter.send).toHaveBeenLastCalledWith(
+      sessionId,
+      expect.not.objectContaining({ metadata: expect.anything() }),
+    );
+  });
+
+  it('rejects invalid route metadata cache limits', () => {
+    expect(() => new ChatGateway(runtime, { routeMetadataMaxEntries: 0 })).toThrow(
+      'routeMetadataMaxEntries must be a positive safe integer',
+    );
   });
 });
