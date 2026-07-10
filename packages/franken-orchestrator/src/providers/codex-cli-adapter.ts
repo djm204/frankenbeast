@@ -136,9 +136,7 @@ export class CodexCliAdapter implements ILlmProvider {
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
     proc.once('error', () => {
-      if (!rl.closed) {
-        rl.close();
-      }
+      rl.close();
     });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;

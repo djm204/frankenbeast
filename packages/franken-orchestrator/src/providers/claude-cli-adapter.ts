@@ -56,7 +56,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    let spawnState: { message: string | undefined } = { message: undefined };
+    const spawnState: { message: string | undefined } = { message: undefined };
     proc.once('error', (error) => {
       spawnState.message = error.message;
     });
@@ -149,9 +149,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
     proc.once('error', () => {
-      if (!rl.closed) {
-        rl.close();
-      }
+      rl.close();
     });
     let currentToolUse: { id: string; name: string; inputJson: string } | null =
       null;
