@@ -16,6 +16,50 @@ export interface BeastExecutors {
   readonly container: BeastExecutor;
 }
 
+const SHARED_RUNTIME_CONFIG_KEYS = [
+  'skills',
+  'gitConfig',
+  'llmConfig',
+  'promptConfig',
+  'model',
+  'maxDurationMs',
+  'maxTotalTokens',
+  'reflection',
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown | undefined {
+  switch (key) {
+    case 'skills':
+      return Array.isArray(value) && value.every((skill) => typeof skill === 'string') ? value : undefined;
+    case 'gitConfig':
+    case 'llmConfig':
+    case 'promptConfig':
+      return isRecord(value) ? value : undefined;
+    case 'model':
+      return typeof value === 'string' ? value : undefined;
+    case 'maxDurationMs':
+    case 'maxTotalTokens':
+      return typeof value === 'number' ? value : undefined;
+    case 'reflection':
+      return typeof value === 'boolean' ? value : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function pickSharedRuntimeConfig(config: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    SHARED_RUNTIME_CONFIG_KEYS.flatMap((key) => {
+      const value = normalizeSharedRuntimeConfigValue(key, config[key]);
+      return value !== undefined ? [[key, value]] : [];
+    }),
+  );
+}
+
 export interface CreateBeastRunRequest {
   readonly definitionId: string;
   readonly config: Readonly<Record<string, unknown>>;
@@ -53,12 +97,18 @@ export class BeastDispatchService {
         // Real validation error — surface it
         throw firstAttempt.error;
       }
-      // Extract only the keys the schema knows about
+      // Extract only the keys the schema knows about, then restore shared runtime
+      // config accepted by the spawned process contract (for example dashboard
+      // selected skills and git workflow policy). Wizard review metadata remains
+      // stripped so strict definition schemas are still protected from unknowns.
       const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
       const stripped = shape
         ? Object.fromEntries(Object.entries(request.config).filter(([k]) => k in shape))
         : request.config;
-      config = definition.configSchema.parse(stripped);
+      config = {
+        ...definition.configSchema.parse(stripped),
+        ...pickSharedRuntimeConfig(request.config),
+      };
     }
     const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
     const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig

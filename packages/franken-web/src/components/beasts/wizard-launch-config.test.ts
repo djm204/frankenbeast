@@ -30,6 +30,66 @@ describe('buildWizardLaunchConfig', () => {
     expect(config).not.toHaveProperty('prompts');
   });
 
+  it('splits module toggles into backend-consumed moduleConfig without deep module settings', () => {
+    const config = buildWizardLaunchConfig({
+      3: {
+        firewall: true,
+        skills: false,
+        firewallConfig: { ruleSet: 'strict' },
+        customFlag: true,
+      },
+    });
+
+    expect(config.moduleConfig).toEqual({ firewall: true, skills: false });
+    expect(config.modules).toEqual({
+      firewall: true,
+      skills: false,
+      firewallConfig: { ruleSet: 'strict' },
+      customFlag: true,
+    });
+  });
+
+  it('maps selected skills, llm targets, and git workflow settings into backend-consumed run config keys', () => {
+    expect(buildWizardLaunchConfig({
+      2: {
+        defaultProvider: 'openai',
+        defaultModel: 'gpt-5.3-codex-spark',
+        overrides: {
+          planning: { provider: 'anthropic', model: 'claude-sonnet-4-6', useDefault: false },
+          critique: { provider: 'openai', model: 'gpt-5.5', useDefault: true },
+        },
+      },
+      4: { selectedSkills: ['code-review', 'testing'] },
+      6: {
+        preset: 'feature-branch-worktree',
+        baseBranch: 'develop',
+        branchPattern: 'fix/{agent-name}/{id}',
+        prCreation: true,
+        commitConvention: 'conventional',
+        mergeStrategy: 'squash',
+      },
+    })).toMatchObject({
+      llmConfig: {
+        default: { provider: 'openai', model: 'gpt-5.3-codex-spark' },
+        overrides: { planning: { provider: 'anthropic', model: 'claude-sonnet-4-6' } },
+      },
+      skills: ['code-review', 'testing'],
+      gitConfig: {
+        preset: 'feature-branch-worktree',
+        baseBranch: 'develop',
+        branchPattern: 'fix/',
+        prCreation: 'auto',
+        mergeStrategy: 'squash',
+      },
+    });
+  });
+
+  it('normalizes an emptied skills step to an empty run-config skills array', () => {
+    expect(buildWizardLaunchConfig({
+      4: { selectedSkills: [] },
+    })).toMatchObject({ skills: [] });
+  });
+
   it('maps martin loop fields to backend init config keys', () => {
     expect(buildWizardLaunchConfig({
       1: { workflowType: 'martin-loop', provider: 'codex', objective: 'Implement chunks', chunkDirectory: 'tasks/chunks' },

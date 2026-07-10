@@ -59,6 +59,50 @@ describe('BeastDispatchService', () => {
     expect(metrics.render()).toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
   });
 
+  it('preserves shared runtime config keys when strict definition parsing strips wizard metadata', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async () => repo.createAttempt('placeholder', { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        workflow: { workflowType: 'martin-loop' },
+        provider: 'claude',
+        objective: 'Implement the dispatch panel',
+        chunkDirectory: 'docs/chunks',
+        skills: { selectedSkills: [] },
+        gitConfig: { preset: 'feature-branch', baseBranch: 'develop', prCreation: 'auto', mergeStrategy: 'squash' },
+        llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      executionMode: 'process',
+    });
+
+    expect(run.configSnapshot).toEqual({
+      provider: 'claude',
+      objective: 'Implement the dispatch panel',
+      chunkDirectory: 'docs/chunks',
+      gitConfig: { preset: 'feature-branch', baseBranch: 'develop', prCreation: 'auto', mergeStrategy: 'squash' },
+      llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
+    });
+  });
+
   it('links tracked agents to dispatch and backfills the run id', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
