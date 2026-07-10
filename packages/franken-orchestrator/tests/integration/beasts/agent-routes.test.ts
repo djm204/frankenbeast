@@ -943,7 +943,7 @@ describe('agent routes integration', () => {
     });
   });
 
-  it('soft-deletes stopped tracked agents so they disappear from the dashboard list', async () => {
+  it('soft-deletes stopped tracked agents while keeping them visible for audit filters', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {
       authorization: `Bearer ${operatorToken}`,
@@ -987,15 +987,33 @@ describe('agent routes integration', () => {
         authorization: `Bearer ${operatorToken}`,
       },
     });
-    const list = await listResponse.json() as { data: { agents: Array<{ id: string }> } };
-    expect(list.data.agents).toEqual([]);
+    const list = await listResponse.json() as { data: { agents: Array<{ id: string; status: string }> } };
+    expect(list.data.agents.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: created.data.id, status: 'deleted' },
+    ]);
 
     const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
       headers: {
         authorization: `Bearer ${operatorToken}`,
       },
     });
-    expect(detailResponse.status).toBe(404);
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as { data: { agent: { id: string; status: string } } };
+    expect(detail.data.agent).toMatchObject({ id: created.data.id, status: 'deleted' });
+
+    const stopAgainResponse = await app.request(`/v1/beasts/agents/${created.data.id}/stop`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(stopAgainResponse.status).toBe(409);
+    expect(await stopAgainResponse.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_DELETED',
+        message: `Tracked agent '${created.data.id}' has been deleted`,
+      },
+    });
   });
 
   it('patches tracked agent identity and module configuration', async () => {

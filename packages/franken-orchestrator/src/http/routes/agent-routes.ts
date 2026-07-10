@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
-import { UnknownTrackedAgentError } from '../../beasts/errors.js';
+import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts/errors.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
@@ -182,7 +182,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     const agentId = c.req.param('agentId');
     const body = validateBody(PatchAgentConfigBody, await parseJsonBody(c));
     try {
-      const current = deps.agents.getAgent(agentId);
+      const current = getMutableAgent(deps, agentId);
       const hasIdentityPatch = body.name !== undefined || body.description !== undefined;
       const updated = deps.agents.updateAgent(agentId, {
         ...(hasIdentityPatch ? { initConfig: patchInitConfigIdentity(current.initConfig, body) } : {}),
@@ -224,7 +224,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.post('/v1/beasts/agents/:agentId/start', async (c) => {
     const agentId = c.req.param('agentId');
     try {
-      const agent = deps.agents.getAgent(agentId);
+      const agent = getMutableAgent(deps, agentId);
       if (agent.status !== 'stopped' && agent.status !== 'failed' && agent.status !== 'completed') {
         throw new HttpError(
           409,
@@ -274,7 +274,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.post('/v1/beasts/agents/:agentId/stop', async (c) => {
     const agentId = c.req.param('agentId');
     try {
-      const agent = deps.agents.getAgent(agentId);
+      const agent = getMutableAgent(deps, agentId);
       if (agent.dispatchRunId) {
         const run = await deps.runs.stop(agent.dispatchRunId, 'operator');
         deps.agents.appendEvent(agentId, {
@@ -311,7 +311,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.post('/v1/beasts/agents/:agentId/restart', async (c) => {
     const agentId = c.req.param('agentId');
     try {
-      const agent = deps.agents.getAgent(agentId);
+      const agent = getMutableAgent(deps, agentId);
       if (agent.dispatchRunId) {
         const existingRun = deps.runs.getRun(agent.dispatchRunId);
         const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
@@ -361,7 +361,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.post('/v1/beasts/agents/:agentId/kill', async (c) => {
     const agentId = c.req.param('agentId');
     try {
-      const agent = deps.agents.getAgent(agentId);
+      const agent = getMutableAgent(deps, agentId);
       if (!agent.dispatchRunId) {
         throw new HttpError(
           409,
@@ -401,7 +401,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.post('/v1/beasts/agents/:agentId/resume', async (c) => {
     const agentId = c.req.param('agentId');
     try {
-      const agent = deps.agents.getAgent(agentId);
+      const agent = getMutableAgent(deps, agentId);
       if (!agent.dispatchRunId) {
         throw new HttpError(
           409,
@@ -444,7 +444,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.delete('/v1/beasts/agents/:agentId', (c) => {
     const agentId = c.req.param('agentId');
     try {
-      const agent = deps.agents.getAgent(agentId);
+      const agent = getMutableAgent(deps, agentId);
       if (agent.status !== 'stopped' && agent.status !== 'failed' && agent.status !== 'completed') {
         throw new HttpError(
           409,
@@ -473,6 +473,24 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   });
 
   return app;
+}
+
+function getMutableAgent(
+  deps: AgentRoutesDeps,
+  agentId: string,
+): ReturnType<AgentService['getAgent']> {
+  try {
+    return deps.agents.getMutableAgent(agentId);
+  } catch (error) {
+    if (!(error instanceof DeletedTrackedAgentError)) {
+      throw error;
+    }
+    throw new HttpError(
+      409,
+      'TRACKED_AGENT_DELETED',
+      `Tracked agent '${agentId}' has been deleted`,
+    );
+  }
 }
 
 function shouldDispatchOnCreate(kind: z.infer<typeof CreateAgentBody>['initAction']['kind']): boolean {
@@ -521,7 +539,7 @@ async function dispatchDetachedAgent(
   deps: AgentRoutesDeps,
   agentId: string,
 ) {
-  const agent = deps.agents.getAgent(agentId);
+  const agent = getMutableAgent(deps, agentId);
   if (!deps.dispatch || !shouldDispatchOnCreate(agent.initAction.kind)) {
     throw new HttpError(
       409,

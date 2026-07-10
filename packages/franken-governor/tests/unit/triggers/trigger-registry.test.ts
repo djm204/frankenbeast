@@ -52,4 +52,33 @@ describe('TriggerRegistry', () => {
     expect(result.triggerId).toBe('a');
     expect(secondCalled).toBe(false);
   });
+
+  it('converts evaluator exceptions into a deterministic critical trigger result', () => {
+    let secondCalled = false;
+    const registry = new TriggerRegistry([
+      {
+        triggerId: 'stale-trigger',
+        evaluate: () => {
+          throw new Error('missing expected field');
+        },
+      },
+      {
+        triggerId: 'later-trigger',
+        evaluate: () => {
+          secondCalled = true;
+          return { triggered: true, triggerId: 'later-trigger', reason: 'later', severity: 'high' };
+        },
+      },
+    ]);
+
+    const result = registry.evaluateAll({});
+
+    expect(result).toEqual({
+      triggered: true,
+      triggerId: 'stale-trigger',
+      reason: "Trigger 'stale-trigger' evaluation failed: missing expected field",
+      severity: 'critical',
+    });
+    expect(secondCalled).toBe(false);
+  });
 });

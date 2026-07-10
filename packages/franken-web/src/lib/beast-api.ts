@@ -1,4 +1,4 @@
-import { MODULE_CONFIG_KEYS } from '@franken/types';
+import { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 import type {
   ApiDataEnvelope,
   ApiErrorEnvelope,
@@ -23,7 +23,7 @@ import type {
   TrackedAgentSummary,
 } from '@franken/types';
 
-export { MODULE_CONFIG_KEYS } from '@franken/types';
+export { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 export type {
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,

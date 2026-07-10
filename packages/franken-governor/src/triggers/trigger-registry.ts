@@ -1,4 +1,5 @@
 import type { TriggerResult } from '../core/types.js';
+import { evaluateTrigger } from './evaluate-trigger.js';
 import type { TriggerEvaluator } from './trigger-evaluator.js';
 
 export class TriggerRegistry {
@@ -6,7 +7,7 @@ export class TriggerRegistry {
 
   evaluateAll(context: unknown): TriggerResult {
     for (const evaluator of this.evaluators) {
-      const result = evaluator.evaluate(context);
+      const result = evaluateTrigger(evaluator, context);
       if (result.triggered) {
         return result;
       }
