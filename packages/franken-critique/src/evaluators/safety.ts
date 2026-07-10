@@ -45,7 +45,7 @@ export class SafetyEvaluator implements Evaluator {
     this.guardrails = guardrails;
     this.createRegexWorker =
       options?.createRegexWorker ??
-      ((pattern, content) =>
+      ((pattern, content): Worker =>
         new Worker(
           `
         import { parentPort, workerData } from 'node:worker_threads';
