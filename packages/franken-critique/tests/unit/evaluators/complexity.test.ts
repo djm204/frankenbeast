@@ -499,6 +499,47 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
   });
 
+  it('ignores semicolonless ambient declarations before other declarations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'declare function external(a, b, c, d, e, f): { ok: boolean }',
+      'interface Shape { ok: boolean }',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
+  });
+
+  it('ignores semicolonless overloads without return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'function parse(a, b, c, d, e, f)',
+      'function parse(a, b) { return a; }',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
+  });
+
+  it('ignores exported signatures before later declarations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'export function external(a, b, c, d, e, f): { ok: boolean }',
+      'export interface Shape { ok: boolean }',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
+  });
+
+  it('flags expression-bodied arrows with parenthesized return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const complex = (a, b, c, d, e, f): (string | number) => a;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
 
   it('flags generic arrow functions with function type constraints', async () => {
     const evaluator = new ComplexityEvaluator();

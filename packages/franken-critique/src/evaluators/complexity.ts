@@ -65,14 +65,53 @@ function skipWhitespace(content: string, index: number): number {
   return nextIndex;
 }
 
+function startsWithDeclarationKeyword(content: string, index: number): boolean {
+  const declarationKeywords = [
+    'declare',
+    'export',
+    'interface',
+    'type',
+    'class',
+    'enum',
+    'namespace',
+    'module',
+    'function',
+  ];
+
+  return declarationKeywords.some(
+    (keyword) =>
+      content.startsWith(keyword, index) &&
+      !/[A-Za-z0-9_$]/.test(content[index + keyword.length] ?? ''),
+  );
+}
+
+function isPreviousKeyword(
+  content: string,
+  beforeIndex: number,
+  keyword: string,
+): boolean {
+  return previousIdentifier(content, beforeIndex) === keyword;
+}
+
 function findBodyOpenAfterSignature(content: string, startIndex: number): number {
   let inReturnType = false;
   let typeDepth = 0;
   let expectTypeOperand = false;
+  let crossedLineBreak = false;
 
   for (let i = startIndex; i < content.length; i++) {
     const char = content[i] ?? '';
     const isWhitespace = /\s/.test(char);
+
+    if (char === '\n' || char === '\r') {
+      crossedLineBreak = true;
+    } else if (
+      crossedLineBreak &&
+      !isWhitespace &&
+      startsWithDeclarationKeyword(content, i)
+    ) {
+      return -1;
+    }
 
     if (!inReturnType) {
       if (char === '{') return i;
@@ -211,16 +250,17 @@ function findArrowToken(content: string, startIndex: number): number {
       if (previousSignificant === ')') {
         let nextIndex = i + 2;
         nextIndex = skipWhitespace(content, nextIndex);
-        if (content[nextIndex] === '{') {
-          const closeIndex = findMatchingDelimiter(content, nextIndex, '{', '}');
-          if (closeIndex === -1) return -1;
-          let afterObjectIndex = closeIndex + 1;
-          afterObjectIndex = skipWhitespace(content, afterObjectIndex);
-          if (
-            !['=', '|', '&', '?', ':'].includes(content[afterObjectIndex] ?? '')
-          ) {
-            return i;
-          }
+        if (content[nextIndex] !== '{') {
+          return i;
+        }
+        const closeIndex = findMatchingDelimiter(content, nextIndex, '{', '}');
+        if (closeIndex === -1) return -1;
+        let afterObjectIndex = closeIndex + 1;
+        afterObjectIndex = skipWhitespace(content, afterObjectIndex);
+        if (
+          !['=', '|', '&', '?', ':'].includes(content[afterObjectIndex] ?? '')
+        ) {
+          return i;
         }
       } else {
         return i;
@@ -255,6 +295,9 @@ function collectFunctionBlocks(content: string): FunctionBlock[] {
   const blocks: FunctionBlock[] = [];
 
   for (const match of content.matchAll(/function\s+\w+/g)) {
+    if (isPreviousKeyword(content, (match.index ?? 0) - 1, 'declare')) {
+      continue;
+    }
     let paramsOpenIndex = (match.index ?? 0) + match[0].length;
     paramsOpenIndex = skipWhitespace(content, paramsOpenIndex);
     if (content[paramsOpenIndex] === '<') {
