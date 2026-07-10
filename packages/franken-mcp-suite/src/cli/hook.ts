@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
-import { deterministicUuid } from '@franken/types';
 
 /** Env var carrying the governor context (policy-relevant command text). */
 export const TOOL_CONTEXT_ENV = 'FBEAST_TOOL_CONTEXT';
@@ -34,7 +34,7 @@ export function defaultHookDeps(dbPath?: string): HookDeps {
     sessionId: () =>
       process.env['FBEAST_SESSION_ID']
       ?? process.env['CLAUDE_SESSION_ID']
-      ?? deterministicUuid('packages/franken-mcp-suite/src/cli/hook.ts'),
+      ?? randomUUID(),
     readContext: () => process.env[TOOL_CONTEXT_ENV] ?? '',
   };
 }

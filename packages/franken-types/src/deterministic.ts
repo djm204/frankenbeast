@@ -1,3 +1,4 @@
+const DEFAULT_EPOCH_MS = Date.UTC(2026, 0, 1, 0, 0, 0);
 const MODULUS = 0x100000000;
 const DEFAULT_SEED = 'frankenbeast';
 
@@ -53,12 +54,31 @@ export const seededRandom: SeededRandom = {
   },
 };
 
-export function now(): number {
+export function wallClockNow(): number {
   return Date.now();
 }
 
-export function wallClockNow(): number {
-  return Date.now();
+const nowStateBySeed = new Map<string, { offset: number; tick: number }>();
+
+function nowState(seed: string): { offset: number; tick: number } {
+  let state = nowStateBySeed.get(seed);
+  if (!state) {
+    state = {
+      offset: Math.floor(createSeededRandom(`clock:${seed}`).random() * 86_400_000),
+      tick: 0,
+    };
+    nowStateBySeed.set(seed, state);
+  }
+  return state;
+}
+
+export function now(): number {
+  const seed = activeSeed();
+  if (!seed) {
+    return wallClockNow();
+  }
+  const state = nowState(seed);
+  return DEFAULT_EPOCH_MS + state.offset + state.tick++;
 }
 
 export function isoNow(): string {

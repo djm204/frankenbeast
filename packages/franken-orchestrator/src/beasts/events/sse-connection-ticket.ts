@@ -1,5 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
-import { deterministicUuid } from '@franken/types';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 interface TicketEntry {
   token: string;
   scope?: string | undefined;
@@ -43,7 +42,7 @@ export class SseConnectionTicketStore {
   }
 
   issue(token: string, scope?: string | undefined): string {
-    const ticket = deterministicUuid('packages/franken-orchestrator/src/beasts/events/sse-connection-ticket.ts');
+    const ticket = randomUUID();
     this.tickets.set(ticket, {
       token,
       scope,

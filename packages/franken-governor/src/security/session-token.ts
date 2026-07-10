@@ -1,5 +1,5 @@
 import type { SessionToken } from '../core/types.js';
-import { deterministicUuid, now as deterministicNow } from '@franken/types';
+import { randomUUID } from 'node:crypto';
 
 export interface CreateSessionTokenParams {
   readonly approvalId: string;
@@ -9,10 +9,10 @@ export interface CreateSessionTokenParams {
 }
 
 export function createSessionToken(params: CreateSessionTokenParams): SessionToken {
-  const now = new Date(deterministicNow());
+  const now = new Date();
 
   return {
-    tokenId: deterministicUuid('packages/franken-governor/src/security/session-token.ts'),
+    tokenId: randomUUID(),
     approvalId: params.approvalId,
     scope: params.scope,
     grantedBy: params.grantedBy,
