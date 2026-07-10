@@ -255,6 +255,39 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('ignores semicolonless overload signatures before implementations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'function parse(a, b, c, d, e, f): void',
+      'function parse(a, b) { return a; }',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
+  it('does not let nested default comparisons hide top-level parameters', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex({ x = a < b }, c = d > e, p1, p2, p3, p4) { return x; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      true,
+    );
+  });
+
+  it('keeps generic call commas nested inside default values', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function ok(value = make<string, number>(), a, b, c, d): void { return value; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('parameter'))).toBe(
+      false,
+    );
+  });
+
   it('counts parameters for wrapped generic arrow functions', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `const fn = (<T,>(a, b, c, d, e, f) => { return a; });`;

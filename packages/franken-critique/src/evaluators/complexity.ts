@@ -202,6 +202,15 @@ function hasFunctionBodyAfterParameterList(
       angleDepth === 0
     ) {
       return false;
+    } else if (
+      char === '\n' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      angleDepth === 0 &&
+      !/^\s*\{/.test(content.slice(index + 1))
+    ) {
+      return false;
     }
 
     const nextIndex = index + 1;
@@ -263,6 +272,68 @@ function hasGenericCloseBeforeTopLevelComma(
       if (angleDepth === 0) {
         return true;
       }
+    } else if (
+      char === ',' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      angleDepth === 1
+    ) {
+      if (!hasUnmatchedAngleCloseBeforeNextTopLevelComma(params, index)) {
+        return false;
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasUnmatchedAngleCloseBeforeNextTopLevelComma(
+  params: string,
+  commaIndex: number,
+): boolean {
+  let nestedAngleDepth = 0;
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+
+  for (let index = commaIndex + 1; index < params.length; index++) {
+    const char = params[index];
+    if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      if (parenDepth === 0) return false;
+      parenDepth--;
+    } else if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      if (braceDepth === 0) return false;
+      braceDepth--;
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      if (bracketDepth === 0) return false;
+      bracketDepth--;
+    } else if (char === '<') {
+      nestedAngleDepth++;
+    } else if (char === '>' && params[index - 1] !== '=') {
+      if (
+        nestedAngleDepth === 0 &&
+        parenDepth === 0 &&
+        braceDepth === 0 &&
+        bracketDepth === 0
+      ) {
+        return true;
+      }
+      nestedAngleDepth = Math.max(0, nestedAngleDepth - 1);
+    } else if (
+      (char === ',' || char === '=' || char === ':') &&
+      nestedAngleDepth === 0 &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0
+    ) {
+      return false;
     }
   }
 
@@ -276,7 +347,6 @@ function countTopLevelParameters(params: string): number {
   let braceDepth = 0;
   let bracketDepth = 0;
   let angleDepth = 0;
-  let currentParameterHasDefaultValue = false;
 
   for (let index = 0; index < params.length; index++) {
     const char = params[index];
@@ -300,21 +370,20 @@ function countTopLevelParameters(params: string): number {
     } else if (char === ']') {
       bracketDepth = Math.max(0, bracketDepth - 1);
     } else if (
-      char === '=' &&
-      params[index + 1] !== '>' &&
+      char === '<' &&
       parenDepth === 0 &&
       braceDepth === 0 &&
       bracketDepth === 0 &&
-      angleDepth === 0
-    ) {
-      currentParameterHasDefaultValue = true;
-    } else if (
-      char === '<' &&
-      !currentParameterHasDefaultValue &&
       hasGenericCloseBeforeTopLevelComma(params, index)
     ) {
       angleDepth++;
-    } else if (char === '>' && previousChar !== '=') {
+    } else if (
+      char === '>' &&
+      parenDepth === 0 &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      previousChar !== '='
+    ) {
       angleDepth = Math.max(0, angleDepth - 1);
     } else if (
       char === ',' &&
@@ -325,7 +394,6 @@ function countTopLevelParameters(params: string): number {
     ) {
       count++;
       hasParameterContent = false;
-      currentParameterHasDefaultValue = false;
     }
   }
 
