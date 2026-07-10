@@ -56,5 +56,12 @@
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "frankenbeast",
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "agent-tools"
+  ]
 }

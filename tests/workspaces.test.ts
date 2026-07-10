@@ -300,6 +300,23 @@ describe('npm workspaces configuration', () => {
       expect(readme).toMatch(/## License\n\nMIT\n?$/);
     });
 
+    it('keeps publishable package discovery metadata intentional', () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        if (pkg.private === true) continue;
+
+        expect(typeof pkg.description, `${path} must describe the package for npm discovery`).toBe('string');
+        expect(pkg.description.trim().length, `${path} must use a non-empty package description`).toBeGreaterThan(0);
+        expect(Array.isArray(pkg.keywords), `${path} must declare npm keywords`).toBe(true);
+        expect(pkg.keywords.length, `${path} must include at least one npm keyword`).toBeGreaterThan(0);
+        expect(pkg.keywords, `${path} must include the shared frankenbeast discovery keyword`).toContain('frankenbeast');
+        if (pkg.author !== undefined) {
+          expect(typeof pkg.author, `${path} author must be a string when declared`).toBe('string');
+          expect(pkg.author.trim().length, `${path} must not declare an empty author`).toBeGreaterThan(0);
+        }
+      }
+    });
+
     it('builds dist artifacts before publishing publishable packages', () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
