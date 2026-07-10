@@ -26,6 +26,7 @@ export default defineConfig({
     alias: createFrankenSourceAliases(import.meta.url),
   },
   test: {
+    setupFiles: [new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url).pathname],
     globals: false,
     environment: 'node',
     include: runMixed

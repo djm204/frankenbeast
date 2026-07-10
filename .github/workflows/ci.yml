@@ -9,6 +9,11 @@ on:
 jobs:
   build-test-lint:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        deterministic-seed: ['1337']
+    env:
+      FRANKENBEAST_SEED: ${{ matrix.deterministic-seed }}
     steps:
       - uses: actions/checkout@v4
         with:

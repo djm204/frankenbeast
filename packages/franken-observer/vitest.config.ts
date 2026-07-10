@@ -10,6 +10,7 @@ export default defineConfig({
     alias: createFrankenSourceAliases(import.meta.url),
   },
   test: {
+    setupFiles: [new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url).pathname],
     // Default: unit tests only.
     // INTEGRATION=true → integration tests only.
     // EVAL=true        → eval (LLM-judge) tests only.

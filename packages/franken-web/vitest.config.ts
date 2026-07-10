@@ -16,6 +16,7 @@ export default defineConfig({
     __FRANKENBEAST_VERSION__: JSON.stringify(rootPackageJson.version),
   },
   test: {
+    setupFiles: [new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url).pathname],
     environment: 'jsdom',
     globals: false,
   },

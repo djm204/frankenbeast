@@ -113,6 +113,7 @@ export default defineConfig({
     },
   },
   test: {
+    setupFiles: [new URL('./scripts/vitest-deterministic-setup.ts', import.meta.url).pathname],
     // Default root CI suite: deterministic repository policy/config tests only.
     // INTEGRATION=true or an explicit tests/integration path opts into root integration tests.
     // E2E=true or an explicit e2e path opts into root end-to-end tests.
