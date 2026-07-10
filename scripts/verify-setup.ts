@@ -8,7 +8,7 @@ function printLine(...args: unknown[]): void {
  * Verify local development setup.
  * Checks that all required services and configs are available.
  *
- * Usage: npx tsx scripts/verify-setup.ts
+ * Usage: npm run local:verify-setup
  */
 
 interface CheckResult {

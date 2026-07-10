@@ -8,7 +8,7 @@ function printLine(...args: unknown[]): void {
  * Seed script: populates ChromaDB with example project data
  * for local development and testing.
  *
- * Usage: npx tsx scripts/seed.ts
+ * Usage: npm run local:seed
  */
 
 const CHROMA_URL = process.env['CHROMA_URL'] ?? 'http://localhost:8000';

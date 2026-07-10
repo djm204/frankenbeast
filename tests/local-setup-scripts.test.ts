@@ -51,6 +51,23 @@ describe('local setup scripts', () => {
     expect(source).not.toContain('/api/v1/heartbeat');
   });
 
+  it('exposes discoverable npm scripts for local seed and setup verification', () => {
+    const manifest = JSON.parse(read('package.json')) as { scripts?: Record<string, string> };
+    const readme = read('README.md');
+    const onboarding = read('ONBOARDING.md');
+    const seedScript = read('scripts/seed.ts');
+    const verifyScript = read('scripts/verify-setup.ts');
+
+    expect(manifest.scripts?.['local:seed']).toBe('tsx scripts/seed.ts');
+    expect(manifest.scripts?.['local:verify-setup']).toBe('tsx scripts/verify-setup.ts');
+    expect(readme).toContain('npm run local:seed');
+    expect(readme).toContain('npm run local:verify-setup');
+    expect(onboarding).toContain('npm run local:seed');
+    expect(onboarding).toContain('npm run local:verify-setup');
+    expect(seedScript).toContain('Usage: npm run local:seed');
+    expect(verifyScript).toContain('Usage: npm run local:verify-setup');
+  });
+
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {
     const compose = read('docker-compose.yml');
 

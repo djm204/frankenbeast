@@ -574,10 +574,10 @@ docker compose up -d
 # custom Tempo endpoints through TempoAdapter options instead.
 
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
-npx tsx scripts/seed.ts
+npm run local:seed
 
 # Verify everything is running. This probes the same CHROMA_URL endpoint.
-npx tsx scripts/verify-setup.ts
+npm run local:verify-setup
 ```
 
 ## Secret Management
