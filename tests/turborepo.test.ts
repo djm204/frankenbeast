@@ -177,6 +177,18 @@ describe('Turborepo configuration', () => {
       expect(ciWorkflow).toContain('run: npm run lint');
     });
 
+    it('CI runs the root typecheck Turbo task explicitly', () => {
+      const ciWorkflow = readFileSync(
+        join(ROOT, '.github/workflows/ci.yml'),
+        'utf8',
+      );
+
+      expect(rootPkg.scripts.typecheck).toBe('turbo run typecheck');
+      expect(ciWorkflow).toContain('run: npx turbo run build typecheck');
+      expect(ciWorkflow).not.toContain('run: npx turbo run build lint');
+      expect(ciWorkflow).not.toContain('run: npx turbo run build typecheck lint');
+    });
+
     it('does not have test:all (redundant with turbo)', () => {
       expect(rootPkg.scripts['test:all']).toBeUndefined();
     });

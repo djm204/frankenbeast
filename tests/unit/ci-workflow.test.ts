@@ -37,6 +37,16 @@ function expectSteps(job: Record<string, unknown>): Array<Record<string, unknown
   return job.steps as Array<Record<string, unknown>>;
 }
 
+function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
+  const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+  const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+  const step = expectSteps(buildTestLint).find(
+    (candidate) => candidate.run === 'npx turbo run build typecheck',
+  );
+  expect(step, 'CI should explicitly gate build and typecheck through Turbo').toBeTruthy();
+  return step as Record<string, unknown>;
+}
+
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
   it('ci.yml file exists', () => {
     expect(existsSync(CI_PATH)).toBe(true);
@@ -111,13 +121,15 @@ on:
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
-    it('builds and runs the explicit lint gate before the shared CI test target', () => {
-      expect(content).toContain('npx turbo run build');
-      expect(content).toMatch(/npx turbo run build[\s\S]*npm run lint[\s\S]*npm run test:ci/);
+    it('explicitly gates build, typecheck, and the root lint coverage check before running the shared CI test target', () => {
+      const buildTypecheckStep = expectBuildTypecheckStep(workflow);
+      expect(buildTypecheckStep.name).toBe('Run package build and typecheck');
+      expect(content).toMatch(/npx turbo run build typecheck[\s\S]*npm run lint[\s\S]*npm run test:ci/);
       const workspaceLintStep = '\n        run: npm run lint\n';
-      expect(content.indexOf('npx turbo run build')).toBeLessThan(content.indexOf(workspaceLintStep));
+      expect(content.indexOf('npx turbo run build typecheck')).toBeLessThan(content.indexOf(workspaceLintStep));
       expect(content.indexOf(workspaceLintStep)).toBeLessThan(content.indexOf('npm run test:ci'));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
+      expect(content).not.toContain('npx turbo run build typecheck lint');
     });
 
     it('runs the deterministic root Vitest suite through the shared CI test script', () => {
@@ -166,8 +178,8 @@ on:
       expect(content).not.toContain('run: npx turbo run test');
     });
 
-    it('documents the package build, workspace lint, and shared CI test target in step names', () => {
-      expect(content).toMatch(/name:\s*Run package build/);
+    it('documents the package build, typecheck, workspace lint, and shared CI test targets in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build and typecheck/);
       expect(content).toMatch(/name:\s*Run workspace lint gate/);
       expect(content).toMatch(/name:\s*Run CI test suite/);
     });
