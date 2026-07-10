@@ -80,6 +80,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       }
       if (sessionsResult.status === 'fulfilled') {
         setSessions(sessionsResult.value);
+      } else {
+        setSessions((current) => {
+          if (!filters.sessionId) return [];
+          const activeSession = current.find((session) => session.id === filters.sessionId);
+          return [activeSession ?? { id: filters.sessionId, lastActivityAt: '', eventCount: 0, failureCount: 0 }];
+        });
       }
       setOverviewError(errors.length > 0 ? errors.join('; ') : null);
       setIsOverviewLoading(false);
@@ -100,7 +106,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       setEventPage(eventsResult);
     }).catch((error: unknown) => {
       if (cancelled) return;
-      setEventPage((current) => current ? { ...current, events: [] } : null);
+      setEventPage({ events: [], total: 0, page, pageSize });
       setEventsError(error instanceof Error ? error.message : 'Unable to load analytics.');
     }).finally(() => {
       if (!cancelled) {
@@ -117,7 +123,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const totalEvents = eventPage?.total ?? 0;
   const currentPage = page;
   const currentPageSize = eventPage?.pageSize ?? pageSize;
-  const totalPages = Math.max(1, Math.ceil(totalEvents / currentPageSize));
+  const totalPages = Math.max(currentPage, 1, Math.ceil(totalEvents / currentPageSize));
   const canGoPrevious = currentPage > 1 && !isEventsLoading;
   const canGoNext = currentPage < totalPages && !isEventsLoading;
   const loadError = [overviewError, eventsError].filter(Boolean).join('; ') || null;
