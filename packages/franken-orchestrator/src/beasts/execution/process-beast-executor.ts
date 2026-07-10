@@ -461,27 +461,40 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
 
     const startedAt = new Date(wallClockNow()).toISOString();
-    const attempt = this.repository.createAttempt(run.id, {
-      status: 'running',
-      pid: handle.pid,
-      startedAt,
-      executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
-        backend: 'process',
-        command: processSpec.command,
-        args: [...processSpec.args],
-        ...(worktree
-          ? {
-              worktreeIsolation: true,
-              worktreePath: worktree.worktreePath,
-              worktreeBranch: worktree.branchName,
-              worktreeCreated: worktree.created,
-              worktreeAgentId: worktree.agentId,
-              worktreeExecutionCwd: worktree.executionCwd,
-              worktreeProjectRoot: worktree.projectRoot,
-            }
-          : {}),
-      },
-    });
+    let attempt: BeastRunAttempt;
+    try {
+      attempt = this.repository.createAttempt(run.id, {
+        status: 'running',
+        pid: handle.pid,
+        startedAt,
+        executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
+          backend: 'process',
+          command: processSpec.command,
+          args: [...processSpec.args],
+          ...(worktree
+            ? {
+                worktreeIsolation: true,
+                worktreePath: worktree.worktreePath,
+                worktreeBranch: worktree.branchName,
+                worktreeCreated: worktree.created,
+                worktreeAgentId: worktree.agentId,
+                worktreeExecutionCwd: worktree.executionCwd,
+                worktreeProjectRoot: worktree.projectRoot,
+              }
+            : {}),
+        },
+      });
+    } catch (error) {
+      try {
+        await this.supervisor.kill(handle.pid);
+      } catch {
+        // Preserve the original attempt-persistence failure while still
+        // releasing pre-attempt config/worktree resources below.
+      } finally {
+        this.cleanupRunResources(run.id);
+      }
+      throw error;
+    }
 
     // Once an attempt owns the worktree, preserve it for PR/merge or debugging per ADR-028.
     // The pending allocation map is only for pre-attempt spawn failures.
