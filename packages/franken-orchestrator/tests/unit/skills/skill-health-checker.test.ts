@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { McpConfig } from '@franken/types';
 import { SkillHealthChecker } from '../../../src/skills/skill-health-checker.js';
 
@@ -12,9 +13,14 @@ vi.mock('node:child_process', async () => {
         stdin: { write: vi.fn(), end: vi.fn() },
         kill: vi.fn(),
         pid: 123,
+        exitCode: null,
+        killed: false,
       });
-      // Simulate process exiting successfully after 100ms
-      setTimeout(() => proc.emit('close', 0), 100);
+      // Simulate process exiting successfully after 100ms.
+      setTimeout(() => {
+        proc.exitCode = 0;
+        proc.emit('close', 0);
+      }, 100);
       return proc;
     }),
   };
@@ -25,6 +31,11 @@ describe('SkillHealthChecker', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('does not spawn manifest commands without explicit trust', async () => {
@@ -61,6 +72,64 @@ describe('SkillHealthChecker', () => {
     expect(result.serverStatuses).toHaveLength(1);
   });
 
+  it('returns connected when a long-running trusted MCP server responds to initialize', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    proc.stdin.write.mockImplementation((message: string) => {
+      expect(message).toContain('Content-Length:');
+      expect(message).toContain('"method":"initialize"');
+      setTimeout(() => {
+        proc.stdout.emit('data', formatMcpMessage({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            serverInfo: { name: 'healthy-test-server', version: '1.0.0' },
+          },
+        }));
+      }, 10);
+      return true;
+    });
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+
+    const config: McpConfig = {
+      mcpServers: {
+        github: { command: 'node', args: ['server.js'] },
+      },
+    };
+
+    const result = await checker.getStatus('github', config, { trustMcpServerCommands: true });
+
+    expect(result.status).toBe('connected');
+    expect(result.serverStatuses).toEqual([
+      { serverName: 'github', status: 'connected' },
+    ]);
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns unknown and cleans up when a trusted MCP server stays open without responding', async () => {
+    vi.useFakeTimers();
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+    const config: McpConfig = {
+      mcpServers: {
+        silent: { command: 'node', args: ['silent-server.js'] },
+      },
+    };
+
+    const resultPromise = checker.getStatus('silent', config, { trustMcpServerCommands: true });
+    await vi.advanceTimersByTimeAsync(2000);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('unknown');
+    expect(result.serverStatuses).toEqual([
+      { serverName: 'silent', status: 'unknown' },
+    ]);
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
   it('handles multiple trusted servers', async () => {
     const config: McpConfig = {
       mcpServers: {
@@ -74,14 +143,8 @@ describe('SkillHealthChecker', () => {
 
   it('returns error when trusted spawn fails', async () => {
     const { spawn } = await import('node:child_process');
-    const { EventEmitter } = await import('node:events');
+    const proc = makeMockProcess();
     (spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
-      const proc = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-        stdin: { write: vi.fn(), end: vi.fn() },
-        kill: vi.fn(),
-      });
       setTimeout(() => proc.emit('error', new Error('not found')), 10);
       return proc;
     });
@@ -93,3 +156,22 @@ describe('SkillHealthChecker', () => {
     expect(result.status).toBe('error');
   });
 });
+
+function makeMockProcess() {
+  return Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    stdin: { write: vi.fn(), end: vi.fn() },
+    kill: vi.fn(function kill(this: { killed: boolean }) {
+      this.killed = true;
+    }),
+    pid: 123,
+    exitCode: null as number | null,
+    killed: false,
+  });
+}
+
+function formatMcpMessage(message: unknown): string {
+  const body = JSON.stringify(message);
+  return `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`;
+}
