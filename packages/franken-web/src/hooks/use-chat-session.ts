@@ -294,7 +294,7 @@ function preserveLocalRecoveryMessages(
     }
 
     if (consumeSnapshotMatch(message)) {
-      if (message.role === 'user' && message.receipt === 'failed') {
+      if (message.role === 'user' && (message.receipt === 'failed' || (message.receipt === 'accepted' && message.canRetry === false))) {
         clearedFailedDrafts.push(message.content);
       }
       return [];
@@ -897,7 +897,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           );
           setMessages((current) => [
             ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
-            { ...optimisticMessage, receipt: 'accepted' },
+            { ...optimisticMessage, receipt: 'accepted', canRetry: false },
           ]);
           addErrorBanner(makeBanner(
             'Message sent; refresh failed',

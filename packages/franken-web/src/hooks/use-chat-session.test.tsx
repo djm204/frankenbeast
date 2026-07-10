@@ -312,6 +312,16 @@ describe('useChatSession error banners', () => {
         jsonResponse(sessionResponse()),
         jsonResponse({ data: { tier: 'cheap' } }),
         jsonResponse({ error: { message: 'refresh failed' } }, 500),
+        jsonResponse(sessionResponse({
+          transcript: [
+            {
+              id: 'server-user-accepted-after-refresh',
+              role: 'user',
+              content: 'launch beast',
+              timestamp: '2026-07-06T00:00:00.000Z',
+            },
+          ],
+        })),
       ],
     });
     vi.stubGlobal('fetch', fetch);
@@ -342,6 +352,19 @@ describe('useChatSession error banners', () => {
       code: 'session_refresh_failed',
       actionLabel: 'Refresh chat',
     });
+
+    const refreshBanner = result.current.errorBanners[0]!;
+    act(() => {
+      void result.current.retryError(refreshBanner.id);
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toContainEqual(expect.objectContaining({
+        id: 'server-user-accepted-after-refresh',
+        content: 'launch beast',
+      }));
+    });
+    expect(result.current.clearedFailedDraft).toMatchObject({ content: 'launch beast' });
   });
 
   it('rejects sends attempted before a session id exists', async () => {
