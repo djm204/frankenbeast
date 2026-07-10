@@ -17,8 +17,18 @@ export interface PlanGraphFromTasksOptions {
 }
 
 function cloneUnknown<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if (typeof value === 'function') {
+    throw new TypeError('Task metadata cannot contain functions because they cannot be cloned safely');
+  }
+
   if (value === null || typeof value !== 'object') {
     return value;
+  }
+
+  try {
+    return structuredClone(value);
+  } catch {
+    // Fall back to targeted cloning for runtimes/values not covered by structuredClone.
   }
 
   const existing = seen.get(value);
@@ -37,6 +47,14 @@ function cloneUnknown<T>(value: T, seen = new WeakMap<object, unknown>()): T {
 
   if (value instanceof Date) {
     return new Date(value.getTime()) as T;
+  }
+
+  if (value instanceof URL) {
+    return new URL(value.href) as T;
+  }
+
+  if (value instanceof RegExp) {
+    return new RegExp(value.source, value.flags) as T;
   }
 
   if (value instanceof Set) {
@@ -59,13 +77,18 @@ function cloneUnknown<T>(value: T, seen = new WeakMap<object, unknown>()): T {
 
   const prototype = Object.getPrototypeOf(value) as unknown;
   if (prototype !== Object.prototype && prototype !== null) {
-    return value;
+    throw new TypeError('Task metadata contains an unsupported mutable object');
   }
 
-  const clone: Record<string, unknown> = {};
+  const clone: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   seen.set(value, clone);
   for (const [key, objectValue] of Object.entries(value as Record<string, unknown>)) {
-    clone[key] = cloneUnknown(objectValue, seen);
+    Object.defineProperty(clone, key, {
+      value: cloneUnknown(objectValue, seen),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
   return clone as T;
 }

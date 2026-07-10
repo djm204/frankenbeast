@@ -96,6 +96,25 @@ describe('PlanGraph — construction', () => {
     });
   });
 
+  it('clones mutable metadata values and preserves __proto__ as data', () => {
+    const task = makeTask('t-1', {
+      metadata: {
+        bytes: new Uint8Array([1, 2, 3]),
+        ...JSON.parse('{"__proto__":{"polluted":true}}'),
+      },
+    });
+    const g = PlanGraph.empty().addTask(task);
+
+    (task.metadata?.bytes as Uint8Array)[0] = 9;
+    const snapshot = g.getTask(createTaskId('t-1')) as Task;
+    (snapshot.metadata?.bytes as Uint8Array)[1] = 8;
+
+    const stored = g.getTask(createTaskId('t-1')) as Task;
+    expect(Array.from(stored.metadata?.bytes as Uint8Array)).toEqual([1, 2, 3]);
+    expect(Object.hasOwn(stored.metadata as object, '__proto__')).toBe(true);
+    expect((stored.metadata as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
   it('isolates stored tasks from mutations to getTask, getTasks, and topoSort results', () => {
     const g = PlanGraph.empty()
       .addTask(makeTask('a', { requiredSkills: ['setup'] }))
