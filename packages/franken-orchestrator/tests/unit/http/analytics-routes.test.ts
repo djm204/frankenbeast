@@ -88,6 +88,7 @@ describe('analytics routes', () => {
     ['/events?page=-1', 'page'],
     ['/events?page=0', 'page'],
     ['/events?page=abc', 'page'],
+    [`/events?page=${'9'.repeat(400)}`, 'page'],
   ])('rejects malformed pagination value %s before reading analytics data', async (path, parameter) => {
     const service = mockAnalyticsService();
     const app = createAnalyticsRoutes({ analytics: service });

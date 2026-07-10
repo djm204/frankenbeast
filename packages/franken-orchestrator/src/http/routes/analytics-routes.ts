@@ -128,5 +128,6 @@ function readPositiveInteger(value: string | undefined): PositiveIntegerResult {
   if (!/^[1-9]\d*$/.test(value)) {
     return { ok: false };
   }
-  return { ok: true, value: Number(value) };
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? { ok: true, value: parsed } : { ok: false };
 }
