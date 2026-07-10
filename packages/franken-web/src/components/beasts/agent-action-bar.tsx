@@ -44,8 +44,12 @@ function ConfirmDangerAction({
         </button>
       </AlertDialog.Trigger>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay data-beast-dialog-layer="overlay" className="fixed inset-0 bg-black/50 z-[60]" />
-        <AlertDialog.Content data-beast-dialog-layer="content" className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md">
+        <AlertDialog.Overlay data-beast-dialog-layer="overlay" data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
+        <AlertDialog.Content
+          data-beast-dialog-layer="content"
+          data-beast-panel-portal="true"
+          className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md"
+        >
           <AlertDialog.Title className="text-beast-text font-semibold">{title}</AlertDialog.Title>
           <AlertDialog.Description className="text-beast-muted text-sm mt-2">
             {description}
@@ -86,8 +90,12 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracke
                 </button>
               </AlertDialog.Trigger>
               <AlertDialog.Portal>
-                <AlertDialog.Overlay data-beast-dialog-layer="overlay" className="fixed inset-0 bg-black/50 z-[60]" />
-                <AlertDialog.Content data-beast-dialog-layer="content" className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md">
+                <AlertDialog.Overlay data-beast-dialog-layer="overlay" data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
+                <AlertDialog.Content
+                  data-beast-dialog-layer="content"
+                  data-beast-panel-portal="true"
+                  className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md"
+                >
                   <AlertDialog.Title className="text-beast-text font-semibold">Force Restart</AlertDialog.Title>
                   <AlertDialog.Description className="text-beast-muted text-sm mt-2">
                     Force restart will interrupt the agent mid-turn. Continue?
@@ -126,7 +134,7 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracke
         <ConfirmDangerAction
           label="Delete"
           title="Delete tracked agent"
-          description={`Delete ${agentLabel}? This removes the tracked agent from the Beasts dashboard.`}
+          description={`Delete ${agentLabel}? This soft-deletes it and removes it from the dashboard history.`}
           confirmLabel="Delete agent"
           onConfirm={onDelete}
         />

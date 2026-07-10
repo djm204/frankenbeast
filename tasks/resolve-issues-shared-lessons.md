@@ -1,10 +1,15 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — Beast panel dialog portal isolation
+- When a modal/alert is portaled from inside a slide-in panel, gate panel-level outside-click and Escape handlers against both existing and new dialog markers (for example `[data-beast-panel-portal]` plus `[data-beast-dialog-layer]`) so cross-branch/merge differences don't regress behavior.
+- Normalize pointer event targets before portal detection (handle text nodes and text-node parents) so clicks on dialog copy/titles are still treated as dialog interactions, preventing accidental panel closure.
+- Prefer passing explicit fallback labels (`agentLabel ?? agent.id`) into destructive confirmations and cover blank-name paths with regression tests to preserve user-visible context.
+
 ## 2026-07-10 — Observer replay timestamp validation
-- Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant regressions (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
+- Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant guards (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
 ## 2026-07-10 — Parallel planner deadlock guard
-- In ParallelPlanner execution, don't allow the "no tasks ready" path to continue silently as success. Keep cycle checks explicit and fail fast with a clear `CyclicDependencyError` (or similar) before running task waves, and add a unit test that proves executor is never called when readiness stalls due to a dependency cycle.
+
 - When `@codex review` is usage-limited, classify it as a blocker state and do not merge until a new trigger can produce a current-head clean response.
 
 ## 2026-07-09 — Franken-web beast wizard catalog data
