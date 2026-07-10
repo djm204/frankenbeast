@@ -91,7 +91,7 @@
   },
   {
     "name": "@types/node",
-    "dependent": "issue-1414-merge",
+    "dependent": "frankenbeast",
     "location": "node_modules/@types/node",
     "currentMajor": 25,
     "latestMajor": 26,
@@ -281,7 +281,7 @@
   },
   {
     "name": "typescript",
-    "dependent": "issue-1414-merge",
+    "dependent": "frankenbeast",
     "location": "node_modules/typescript",
     "currentMajor": 5,
     "latestMajor": 7,

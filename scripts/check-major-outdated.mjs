@@ -23,6 +23,10 @@ function buildWorkspaceDependentNames() {
   let rootPackage;
   try {
     rootPackage = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8'));
+    if (typeof rootPackage.name === 'string' && rootPackage.name.trim()) {
+      aliases.set(rootPackage.name, rootPackage.name);
+      aliases.set(repoRoot.split('/').pop() ?? rootPackage.name, rootPackage.name);
+    }
   } catch {
     return aliases;
   }
