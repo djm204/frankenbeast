@@ -7,7 +7,7 @@ Current public API: `SqliteBrain`, `WorkingMemoryLimitError`, `DEFAULT_WORKING_M
 ## Requirements
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26` for the current package/runtime workflow
-- npm 10+
+- npm 11.5.1 via the repository `packageManager` setting
 - `better-sqlite3` (runtime dependency)
 
 ## Installation
