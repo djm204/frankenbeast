@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { createDeterministicClock, seededRandom } from '../scripts/vitest-deterministic-mode.js';
+import { createDeterministicClock, installDeterministicMode, seededRandom } from '../scripts/vitest-deterministic-mode.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const DETERMINISTIC_SETUP = 'vitest-deterministic-setup.ts';
@@ -13,6 +13,7 @@ const VITEST_CONFIGS = [
   'packages/franken-critique/vitest.config.ts',
   'packages/franken-critique/vitest.integration.config.ts',
   'packages/franken-governor/vitest.config.ts',
+  'packages/live-bench/vitest.config.ts',
   'packages/franken-mcp-suite/vitest.config.ts',
   'packages/franken-observer/vitest.config.ts',
   'packages/franken-orchestrator/vitest.config.ts',
@@ -39,6 +40,37 @@ describe('deterministic Vitest mode', () => {
     expect(values).toEqual([second(), second(), second()]);
     expect(values[1]).toBe(values[0] + 1);
     expect(values[2]).toBe(values[1] + 1);
+  });
+
+  it('preserves Date constructor and callable behavior when deterministic mode is installed', () => {
+    const originalDate = globalThis.Date;
+    const originalRandom = Math.random;
+    const globalObject = globalThis as typeof globalThis & {
+      __frankenDeterministicModeInstalled?: string;
+    };
+    const originalInstallMarker = globalObject.__frankenDeterministicModeInstalled;
+
+    try {
+      delete globalObject.__frankenDeterministicModeInstalled;
+      globalThis.Date = originalDate;
+      Math.random = originalRandom;
+
+      installDeterministicMode('callable-date-test');
+
+      expect(() => Date()).not.toThrow();
+      expect(typeof Date()).toBe('string');
+      expect(new Date()).toBeInstanceOf(originalDate);
+      expect(Date.parse('2026-01-01T00:00:00.000Z')).toBe(originalDate.parse('2026-01-01T00:00:00.000Z'));
+      expect(Date.UTC(2026, 0, 1)).toBe(originalDate.UTC(2026, 0, 1));
+    } finally {
+      globalThis.Date = originalDate;
+      Math.random = originalRandom;
+      if (originalInstallMarker === undefined) {
+        delete globalObject.__frankenDeterministicModeInstalled;
+      } else {
+        globalObject.__frankenDeterministicModeInstalled = originalInstallMarker;
+      }
+    }
   });
 
   it('wires the deterministic setup file into every Vitest suite config', () => {

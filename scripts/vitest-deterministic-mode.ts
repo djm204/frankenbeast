@@ -36,6 +36,7 @@ export function now(): number {
 const deterministicClock = createDeterministicClock();
 
 type DateConstructorWithOriginal = DateConstructor & { __frankenOriginalDate?: DateConstructor };
+type DateConstructorArguments = [] | ConstructorParameters<DateConstructor>;
 
 export function installDeterministicMode(seed = process.env['FRANKENBEAST_SEED']): void {
   if (!seed) {
@@ -55,19 +56,28 @@ export function installDeterministicMode(seed = process.env['FRANKENBEAST_SEED']
 
   Math.random = rng;
 
-  class DeterministicDate extends OriginalDate {
-    constructor(...args: [] | ConstructorParameters<DateConstructor>) {
-      if (args.length === 0) {
-        super(clock());
-      } else {
-        super(...args);
-      }
+  const DeterministicDate = function deterministicDate(
+    this: Date,
+    ...args: DateConstructorArguments
+  ): Date | string {
+    if (!new.target) {
+      return new OriginalDate(clock()).toString();
     }
 
-    static now(): number {
-      return clock();
+    if (args.length === 0) {
+      return new OriginalDate(clock());
     }
-  }
+
+    return new OriginalDate(...args);
+  } as DateConstructorWithOriginal;
+
+  Object.setPrototypeOf(DeterministicDate, OriginalDate);
+  Object.defineProperty(DeterministicDate, 'prototype', {
+    value: OriginalDate.prototype,
+  });
+  Object.defineProperty(DeterministicDate, 'now', {
+    value: () => clock(),
+  });
 
   Object.defineProperty(DeterministicDate, '__frankenOriginalDate', {
     value: OriginalDate.__frankenOriginalDate ?? OriginalDate,
