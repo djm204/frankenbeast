@@ -1,5 +1,6 @@
 import type { ApprovalChannel } from '../gateway/approval-channel.js';
 import type { ApprovalRequest, ApprovalResponse, ResponseCode } from '../core/types.js';
+import { now as deterministicNow } from '@franken/types';
 
 export interface ReadlineAdapter {
   question(prompt: string): Promise<string>;
@@ -33,7 +34,7 @@ export class CliChannel implements ApprovalChannel {
       requestId: request.requestId,
       decision,
       respondedBy: this.operatorName,
-      respondedAt: new Date(),
+      respondedAt: new Date(deterministicNow()),
     };
 
     if (decision === 'REGEN') {

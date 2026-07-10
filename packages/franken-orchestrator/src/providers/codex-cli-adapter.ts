@@ -10,6 +10,7 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
+import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 
@@ -152,7 +153,7 @@ export class CodexCliAdapter implements ILlmProvider {
         } else if (type === 'function_call' || type === 'tool_call') {
           yield {
             type: 'tool_use',
-            id: (parsed['id'] as string) ?? crypto.randomUUID(),
+            id: (parsed['id'] as string) ?? deterministicUuid('packages/franken-orchestrator/src/providers/codex-cli-adapter.ts'),
             name: parsed['name'] as string,
             input: parsed['arguments'] ?? parsed['input'] ?? {},
           };

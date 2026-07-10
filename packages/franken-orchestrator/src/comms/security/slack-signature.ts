@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Context, Next } from 'hono';
+import { now as deterministicNow } from '@franken/types';
 
 export interface SlackSignatureOptions {
   signingSecret: string;
@@ -21,7 +22,7 @@ export function slackSignatureMiddleware(options: SlackSignatureOptions) {
     }
 
     // 1. Replay attack prevention (5 minutes window)
-    const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300;
+    const fiveMinutesAgo = Math.floor(deterministicNow() / 1000) - 300;
     if (parseInt(timestamp, 10) < fiveMinutesAgo) {
       return c.json({ error: 'Signature expired' }, 401);
     }

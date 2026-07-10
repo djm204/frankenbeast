@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
 import { atomicWriteFileSync, readJsonFileOrQuarantine } from './atomic-file.js';
+import { isoNow } from '@franken/types';
 
 export class FileChunkSessionSnapshotStore {
   constructor(private readonly rootDir: string) {}
@@ -10,7 +11,7 @@ export class FileChunkSessionSnapshotStore {
   writeSnapshot(session: ChunkSession, reason: string): string {
     const dir = this.snapshotDir(session.planName, session.chunkId, session.taskId);
     mkdirSync(dir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const ts = isoNow().replace(/[:.]/g, '-');
     const file = join(dir, `${ts}-gen-${session.compactionGeneration}-${reason}.json`);
     atomicWriteFileSync(file, JSON.stringify(session, null, 2));
     return file;

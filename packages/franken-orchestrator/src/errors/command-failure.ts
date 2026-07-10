@@ -1,3 +1,4 @@
+import { now as deterministicNow } from '@franken/types';
 export type CommandFailureKind = 'rate_limit' | 'timeout' | 'spawn_error' | 'command_failed';
 
 export interface CommandFailure {
@@ -61,7 +62,7 @@ export function parseResetTimeText(text: string): { sleepSeconds: number; source
   const isoMatch = text.match(/resets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i);
   if (isoMatch?.[1]) {
     const resetAt = new Date(isoMatch[1]).getTime();
-    const now = Date.now();
+    const now = deterministicNow();
     if (resetAt > now) return { sleepSeconds: Math.ceil((resetAt - now) / 1000), source: 'reset-at timestamp' };
   }
 
@@ -69,7 +70,7 @@ export function parseResetTimeText(text: string): { sleepSeconds: number; source
   if (epochMatch?.[1]) {
     const epoch = parseInt(epochMatch[1], 10);
     const resetMs = epoch > 1e12 ? epoch : epoch * 1000;
-    const now = Date.now();
+    const now = deterministicNow();
     if (resetMs > now) return { sleepSeconds: Math.ceil((resetMs - now) / 1000), source: 'x-ratelimit-reset epoch' };
   }
 

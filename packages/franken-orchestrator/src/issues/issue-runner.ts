@@ -12,6 +12,7 @@ import type {
   ISkillsModule,
   SkillDescriptor,
 } from '../deps.js';
+import { isoNow } from '@franken/types';
 import type { GithubIssue, TriageResult, IssueOutcome } from './types.js';
 import type { IssueGraphBuilder } from './issue-graph-builder.js';
 import type { GitBranchIsolator } from '../skills/git-branch-isolator.js';
@@ -79,7 +80,7 @@ function findTriage(triages: readonly TriageResult[], issueNumber: number): Tria
 function appendIssueLog(logFile: string | undefined, message: string): void {
   if (!logFile) return;
   mkdirSync(dirname(logFile), { recursive: true });
-  appendFileSync(logFile, `[${new Date().toISOString()}] ${message}\n`);
+  appendFileSync(logFile, `[${isoNow()}] ${message}\n`);
 }
 
 function issueCompletionKey(taskId: string): string {

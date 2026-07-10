@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { isoNow } from '@franken/types';
 
 export class BeastLogStore {
   constructor(private readonly logDir: string) {}
@@ -9,7 +10,7 @@ export class BeastLogStore {
     attemptId: string,
     stream: 'stdout' | 'stderr',
     message: string,
-    createdAt = new Date().toISOString(),
+    createdAt = isoNow(),
   ): Promise<void> {
     const filePath = this.resolvePath(runId, attemptId);
     try {

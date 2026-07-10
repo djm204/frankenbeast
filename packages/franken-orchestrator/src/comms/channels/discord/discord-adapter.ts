@@ -4,6 +4,7 @@ import type {
   ChannelCapabilities,
   ChannelType
 } from '../../core/types.js';
+import { isoNow } from '@franken/types';
 
 export interface DiscordAdapterOptions {
   token: string;
@@ -80,7 +81,7 @@ export class DiscordAdapter implements ChannelAdapter {
         {
           description: message.text,
           color: message.status === 'approval' ? 0xffaa00 : 0x00ff00,
-          timestamp: new Date().toISOString(),
+          timestamp: isoNow(),
         }
       ];
       payload.content = ''; // Use embed description instead of content

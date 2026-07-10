@@ -14,6 +14,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
+import { deterministicUuid, now as deterministicNow } from '@franken/types';
 import type {
   ILlmProvider,
   LlmRequest,
@@ -261,7 +262,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   private managedContextFileName(): string {
-    return `FRANKENBEAST_GEMINI_${crypto.randomUUID()}.md`;
+    return `FRANKENBEAST_GEMINI_${deterministicUuid('packages/franken-orchestrator/src/providers/gemini-cli-adapter.ts')}.md`;
   }
 
   private contextFileNames(context: Record<string, unknown>, managedContextFileName: string): string[] {
@@ -464,7 +465,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private writeFileAtomically(path: string, content: string): void {
     const writePath = this.isSymlink(path) ? this.resolveSymlinkTarget(path) : path;
-    const tmpPath = `${writePath}.${process.pid}.${Date.now()}.tmp`;
+    const tmpPath = `${writePath}.${deterministicUuid('gemini-cli-atomic-write')}.${deterministicNow()}.tmp`;
     const existingMode = existsSync(writePath) ? statSync(writePath).mode : undefined;
     writeFileSync(tmpPath, content);
     if (existingMode !== undefined) {
@@ -582,7 +583,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           if (block?.['type'] === 'tool_use') {
             yield {
               type: 'tool_use',
-              id: (block['id'] as string) ?? crypto.randomUUID(),
+              id: (block['id'] as string) ?? deterministicUuid('packages/franken-orchestrator/src/providers/gemini-cli-adapter.ts'),
               name: block['name'] as string,
               input: block['input'] ?? {},
             };
@@ -591,7 +592,7 @@ export class GeminiCliAdapter implements ILlmProvider {
         } else if (type === 'tool_use') {
           yield {
             type: 'tool_use',
-            id: (parsed['tool_id'] as string) ?? (parsed['id'] as string) ?? crypto.randomUUID(),
+            id: (parsed['tool_id'] as string) ?? (parsed['id'] as string) ?? deterministicUuid('packages/franken-orchestrator/src/providers/gemini-cli-adapter.ts'),
             name: (parsed['tool_name'] as string) ?? (parsed['name'] as string),
             input: parsed['parameters'] ?? parsed['input'] ?? {},
           };

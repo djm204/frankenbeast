@@ -1,5 +1,6 @@
 import { resolve, basename, dirname, relative, isAbsolute } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { now as deterministicNow } from '@franken/types';
 
 export interface ProjectPaths {
   root: string;
@@ -79,7 +80,7 @@ export function generatePlanName(designDocPath?: string): string {
       .replace(/^\d{4}-\d{2}-\d{2}-?/, ''); // strip leading date prefix if present
     if (name.length > 0) return name;
   }
-  const now = new Date();
+  const now = new Date(deterministicNow());
   const date = now.toISOString().slice(0, 10);
   return `plan-${date}`;
 }

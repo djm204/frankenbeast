@@ -4,6 +4,7 @@ import { serializeToolCallEvidence } from '../evidence/tool-call-evidence.js';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../types.js';
 import { LIVE_BENCH_TOOL_CALL_EVIDENCE_ARTIFACT } from '../types.js';
 import type { FixtureStore } from './fixture-store.js';
+import { isoNow } from '@franken/types';
 
 export interface WorkspaceProvisionerConfig {
   readonly fixtures: FixtureStore;
@@ -100,7 +101,7 @@ export class WorkspaceProvisioner {
       clientVersion: row.clientVersion,
       hostClass: row.hostClass,
       runTimestamp: row.runTimestamp,
-      provisionedAt: new Date().toISOString(),
+      provisionedAt: isoNow(),
     };
     writeFileSync(environmentPath, `${JSON.stringify(environment, null, 2)}\n`, 'utf8');
     writeFileSync(toolCallEvidencePath, serializeToolCallEvidence([]), 'utf8');

@@ -2,6 +2,7 @@ import type { MemoryPort, CritiqueLesson } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
+import { isoNow } from '@franken/types';
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -55,7 +56,7 @@ export class LessonRecorder {
             ? `Corrected in iteration ${passingIteration.index}`
             : 'Unknown correction',
           taskId,
-          timestamp: new Date().toISOString(),
+          timestamp: isoNow(),
         });
       }
     }

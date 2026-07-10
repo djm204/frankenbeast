@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { AuditTrail, assertAuditEventArray } from './audit-event.js';
 import type { ReplayRecord } from './replay/replay-record.js';
+import { isoNow } from '@franken/types';
 
 export interface PersistedAuditTrail {
   version: 1;
@@ -100,7 +101,7 @@ export class AuditTrailStore {
     const artifact: PersistedAuditTrail = {
       version: 1,
       runId,
-      createdAt: new Date().toISOString(),
+      createdAt: isoNow(),
       events: trail.toJSON(),
     };
     writeFileSync(filePath, JSON.stringify(artifact, null, 2));

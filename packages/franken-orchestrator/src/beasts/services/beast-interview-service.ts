@@ -3,6 +3,7 @@ import type {
   BeastInterviewPrompt,
   BeastInterviewSession,
 } from '../types.js';
+import { isoNow } from '@franken/types';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 
@@ -21,7 +22,7 @@ export class BeastInterviewService {
 
   start(definitionId: string): BeastInterviewSession & { currentPrompt?: BeastInterviewPrompt | undefined } {
     const definition = this.getDefinitionOrThrow(definitionId);
-    const now = new Date().toISOString();
+    const now = isoNow();
     const session = this.repository.createInterviewSession({
       definitionId,
       status: 'active',
@@ -77,7 +78,7 @@ export class BeastInterviewService {
       ...session.answers,
       [prompt.key]: coerceAnswer(prompt, answer),
     };
-    const now = new Date().toISOString();
+    const now = isoNow();
     const nextPrompt = currentPrompt(definition, nextAnswers);
     const nextStatus = nextPrompt ? 'active' : 'completed';
     const updated = this.repository.updateInterviewSession(session.id, {

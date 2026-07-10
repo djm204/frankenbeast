@@ -1,5 +1,6 @@
 import type { TranscriptMessage } from './types.js';
 import { ModelTier } from './types.js';
+import { isoNow } from '@franken/types';
 
 export interface TokenTotals {
   cheap: number;
@@ -18,7 +19,7 @@ export class Transcript {
   }): void {
     this._messages.push({
       ...msg,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
     });
   }
 

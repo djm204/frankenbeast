@@ -1,5 +1,5 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
-
+import { timingSafeEqual } from 'node:crypto';
+import { deterministicUuid, now as deterministicNow } from '@franken/types';
 interface TicketEntry {
   token: string;
   scope?: string | undefined;
@@ -43,11 +43,11 @@ export class SseConnectionTicketStore {
   }
 
   issue(token: string, scope?: string | undefined): string {
-    const ticket = randomUUID();
+    const ticket = deterministicUuid('packages/franken-orchestrator/src/beasts/events/sse-connection-ticket.ts');
     this.tickets.set(ticket, {
       token,
       scope,
-      expiresAt: Date.now() + this.ttlMs,
+      expiresAt: deterministicNow() + this.ttlMs,
     });
     return ticket;
   }
@@ -57,7 +57,7 @@ export class SseConnectionTicketStore {
     if (!entry) {
       const consumedExpiry = this.consumedTickets.get(ticket);
       if (consumedExpiry !== undefined) {
-        if (Date.now() <= consumedExpiry) {
+        if (deterministicNow() <= consumedExpiry) {
           return 'reused';
         }
         // Retention window elapsed — forget it and treat as invalid.
@@ -68,7 +68,7 @@ export class SseConnectionTicketStore {
 
     this.tickets.delete(ticket);
 
-    if (Date.now() > entry.expiresAt) {
+    if (deterministicNow() > entry.expiresAt) {
       return 'invalid';
     }
     if (entry.scope !== scope) {
@@ -85,7 +85,7 @@ export class SseConnectionTicketStore {
       return 'invalid';
     }
 
-    this.consumedTickets.set(ticket, Date.now() + this.consumedRetentionMs);
+    this.consumedTickets.set(ticket, deterministicNow() + this.consumedRetentionMs);
     return 'valid';
   }
 
@@ -94,7 +94,7 @@ export class SseConnectionTicketStore {
   }
 
   private cleanup(): void {
-    const now = Date.now();
+    const now = deterministicNow();
     for (const [ticket, entry] of this.tickets) {
       if (now > entry.expiresAt) {
         this.tickets.delete(ticket);

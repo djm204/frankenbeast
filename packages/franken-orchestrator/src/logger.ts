@@ -1,11 +1,12 @@
 import type { ILogger } from './deps.js';
+import { isoNow } from '@franken/types';
 
 
 function printLine(...args: unknown[]): void {
   console.info(...args);
 }
 function formatLine(prefix: string, msg: string): string {
-  const timestamp = new Date().toISOString();
+  const timestamp = isoNow();
   return `${timestamp} ${prefix} ${msg}`;
 }
 

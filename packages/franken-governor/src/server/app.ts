@@ -6,6 +6,7 @@ import {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from '../security/signature-verifier.js';
+import { now as deterministicNow } from '@franken/types';
 import { SessionTokenStore } from '../security/session-token-store.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
@@ -295,7 +296,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       requestId: body.requestId,
       decision,
       respondedBy,
-      respondedAt: new Date(),
+      respondedAt: new Date(deterministicNow()),
       ...(feedback !== undefined ? { feedback } : {}),
       ...(signature !== undefined ? { signature } : {}),
     });
@@ -397,7 +398,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     const tsSeconds = Number(timestamp);
     if (
       !Number.isFinite(tsSeconds) ||
-      Math.abs(Date.now() / 1000 - tsSeconds) > SLACK_MAX_TIMESTAMP_SKEW_SECONDS
+      Math.abs(deterministicNow() / 1000 - tsSeconds) > SLACK_MAX_TIMESTAMP_SKEW_SECONDS
     ) {
       return c.json({ error: { message: 'Stale or invalid Slack timestamp' } }, 401);
     }
@@ -472,7 +473,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       requestId,
       decision,
       respondedBy: payload.user?.id ?? payload.user?.username ?? 'slack',
-      respondedAt: new Date(),
+      respondedAt: new Date(deterministicNow()),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
 

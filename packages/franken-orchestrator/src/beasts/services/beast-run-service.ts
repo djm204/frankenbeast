@@ -5,6 +5,7 @@ import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js'
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import type { BeastExecutors } from './beast-dispatch-service.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
+import { isoNow } from '@franken/types';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
@@ -64,7 +65,7 @@ export class BeastRunService {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
     if (!attemptId) {
-      const stoppedAt = new Date().toISOString();
+      const stoppedAt = isoNow();
       const updated = this.repository.transaction(() => {
         const stoppedRun = this.repository.updateRun(run.id, {
           status: 'stopped',
@@ -164,7 +165,7 @@ export class BeastRunService {
       return;
     }
 
-    const updatedAt = new Date().toISOString();
+    const updatedAt = isoNow();
     const publications = this.repository.transaction(() => {
       this.repository.updateTrackedAgent(trackedAgentId, {
         status,
@@ -194,7 +195,7 @@ export class BeastRunService {
             ...(run.latestExitCode !== undefined ? { exitCode: run.latestExitCode } : {}),
             ...(run.stopReason ? { stopReason: run.stopReason } : {}),
           },
-          createdAt: new Date().toISOString(),
+          createdAt: isoNow(),
         };
         this.repository.appendTrackedAgentEvent(trackedAgentId, agentEvent);
         pendingPublications.push({

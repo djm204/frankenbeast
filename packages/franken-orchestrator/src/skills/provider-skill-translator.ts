@@ -6,6 +6,7 @@ import type {
   ProviderSkillConfig,
   ToolDefinition,
 } from '@franken/types';
+import { now as deterministicNow } from '@franken/types';
 
 export interface TranslatorSkillInput {
   name: string;
@@ -63,7 +64,7 @@ export class ProviderSkillTranslator {
     const content = JSON.stringify({ mcpServers: merged }, null, 2);
     const tempPath = join(
       tmpdir(),
-      `frankenbeast-mcp-${Date.now()}.json`,
+      `frankenbeast-mcp-${deterministicNow()}.json`,
     );
 
     return {
@@ -86,7 +87,7 @@ export class ProviderSkillTranslator {
     const content = JSON.stringify({ mcpServers: merged }, null, 2);
     const tempPath = join(
       tmpdir(),
-      `frankenbeast-codex-mcp-${Date.now()}.json`,
+      `frankenbeast-codex-mcp-${deterministicNow()}.json`,
     );
 
     return {
@@ -108,7 +109,7 @@ export class ProviderSkillTranslator {
     const content = JSON.stringify({ mcpServers: merged }, null, 2);
     const tempPath = join(
       tmpdir(),
-      `frankenbeast-gemini-settings-${Date.now()}.json`,
+      `frankenbeast-gemini-settings-${deterministicNow()}.json`,
     );
 
     return {

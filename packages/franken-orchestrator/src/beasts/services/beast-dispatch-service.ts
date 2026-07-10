@@ -5,6 +5,7 @@ import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js'
 import type { BeastExecutor } from '../execution/beast-executor.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
+import { isoNow } from '@franken/types';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
@@ -64,8 +65,8 @@ export class BeastDispatchService {
       ? { ...config, modules: moduleConfig }
       : config;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
-    const createdAt = new Date().toISOString();
-    const linkedAt = new Date().toISOString();
+    const createdAt = isoNow();
+    const linkedAt = isoNow();
     const run = this.repository.transaction(() => {
       if (request.trackedAgentId) {
         this.repository.requireTrackedAgent(request.trackedAgentId);
@@ -127,7 +128,7 @@ export class BeastDispatchService {
         }
         if (updated.trackedAgentId) {
           const agentStatus = updated.status === 'running' ? 'running' : 'dispatching';
-          const updatedAt = new Date().toISOString();
+          const updatedAt = isoNow();
           this.repository.updateTrackedAgent(updated.trackedAgentId, {
             status: agentStatus,
             updatedAt,
@@ -139,7 +140,7 @@ export class BeastDispatchService {
         }
         return updated;
       } catch (error) {
-        const failedAt = new Date().toISOString();
+        const failedAt = isoNow();
         const errorMessage = error instanceof Error ? error.message : String(error);
         const failedRun = this.repository.transaction(() => {
           const updatedRun = this.repository.updateRun(run.id, {

@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
@@ -16,6 +15,7 @@ import type {
   TrackedAgentInitAction,
   TrackedAgentStatus,
 } from '../types.js';
+import { deterministicUuid } from '@franken/types';
 import { UnknownTrackedAgentError } from '../errors.js';
 import { BEAST_SQLITE_SCHEMA_STATEMENTS } from './sqlite-schema.js';
 
@@ -178,7 +178,7 @@ type TrackedAgentEventRow = {
 };
 
 function prefixedId(prefix: string): string {
-  return `${prefix}_${randomUUID()}`;
+  return `${prefix}_${deterministicUuid('packages/franken-orchestrator/src/beasts/repository/sqlite-beast-repository.ts')}`;
 }
 
 export class SQLiteBeastRepository {

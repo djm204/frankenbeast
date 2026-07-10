@@ -7,6 +7,7 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
+import { deterministicUuid, now as deterministicNow } from '@franken/types';
 import { dirname } from 'node:path';
 
 let writeCounter = 0;
@@ -39,7 +40,7 @@ function fsyncDir(dirPath: string): void {
  * The parent directory must already exist.
  */
 export function atomicWriteFileSync(filePath: string, contents: string): void {
-  const tmpPath = `${filePath}.tmp.${process.pid}.${writeCounter++}`;
+  const tmpPath = `${filePath}.tmp.${writeCounter++}.${deterministicUuid('atomic-file-write')}`;
   try {
     const fd = openSync(tmpPath, 'w');
     try {
@@ -62,7 +63,7 @@ export function atomicWriteFileSync(filePath: string, contents: string): void {
 
 /** Moves a file aside so a corrupt payload cannot poison future reads or list scans. */
 export function quarantineFile(filePath: string): string | undefined {
-  const quarantinePath = `${filePath}.corrupt.${Date.now()}.${process.pid}`;
+  const quarantinePath = `${filePath}.corrupt.${deterministicNow()}.${deterministicUuid('atomic-file-quarantine')}`;
   try {
     renameSync(filePath, quarantinePath);
     return quarantinePath;

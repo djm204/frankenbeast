@@ -3,6 +3,7 @@ import { discordSignatureMiddleware } from '../../security/discord-signature.js'
 import { DiscordInteractionSchema, DiscordInteractionType } from './discord-schemas.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
 import type { SessionMapper } from '../../core/session-mapper.js';
+import { isoNow } from '@franken/types';
 
 export interface DiscordRouterOptions {
   gateway: ChatGateway;
@@ -63,7 +64,7 @@ export function discordRouter(options: DiscordRouterOptions) {
         externalChannelId: channelId,
         externalMessageId: interaction.id,
         text,
-        receivedAt: new Date().toISOString(),
+        receivedAt: isoNow(),
         rawEvent: body,
       });
 

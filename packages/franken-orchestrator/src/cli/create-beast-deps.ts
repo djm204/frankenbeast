@@ -1,9 +1,7 @@
 import { SqliteBrain } from '@franken/brain';
 import { ProviderRegistry } from '../providers/provider-registry.js';
-import {
-  createLlmProvider,
-  type ProviderConfig,
-} from '../providers/provider-config.js';
+import { createLlmProvider, type ProviderConfig } from '../providers/provider-config.js';
+import { now as deterministicNow } from '@franken/types';
 import {
   buildMiddlewareChain,
   resolveSecurityConfig,
@@ -185,7 +183,7 @@ export function createBeastDeps(
     governor: existingDeps.governor,
     heartbeat,
     logger: existingDeps.logger,
-    clock: existingDeps.clock ?? (() => new Date()),
+    clock: existingDeps.clock ?? (() => new Date(deterministicNow())),
     mcp,
 
     // Direct access to new components

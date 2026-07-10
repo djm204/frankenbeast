@@ -3,6 +3,7 @@ import type {
   CommsInboundInput,
   CommsInboundResult,
 } from './comms-runtime-port.js';
+import { isoNow } from '@franken/types';
 import type { OutboundMessageStatus } from './types.js';
 import type { ChatRuntime, ChatRuntimeState } from '../../chat/runtime.js';
 import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
@@ -93,7 +94,7 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       ? result.pendingApprovalDescription
         ? {
             description: result.pendingApprovalDescription,
-            requestedAt: new Date().toISOString(),
+            requestedAt: isoNow(),
             ...result.pendingApprovalContext,
           }
         : session.state === 'pending_approval' ? session.pendingApproval ?? null : null

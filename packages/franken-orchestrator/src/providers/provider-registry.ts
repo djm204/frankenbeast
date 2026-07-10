@@ -4,6 +4,7 @@ import type {
   LlmRequest,
   LlmStreamEvent,
 } from '@franken/types';
+import { isoNow } from '@franken/types';
 import type { IBrain } from '@franken/types';
 import { TokenAggregator, type AggregatedTokenUsage } from './token-aggregator.js';
 import { truncateSnapshot } from './format-handoff.js';
@@ -179,7 +180,7 @@ export class ProviderRegistry {
       phase: 'provider-failover',
       step: 0,
       context: { lastError: lastError?.message },
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
     });
 
     const exhaustionReason = attemptedProviders === 0

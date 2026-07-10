@@ -1,6 +1,6 @@
 import { chmodSync, closeSync, fsyncSync, lstatSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { deterministicUuid } from '@franken/types';
 
 export function parseJsonObjectWithComments(content: string): Record<string, unknown> {
   const parsed = JSON.parse(stripJsonCommentsAndTrailingCommas(content));
@@ -19,7 +19,7 @@ export function writeJsonFileAtomic(path: string, value: unknown): void {
   const targetPath = resolveAtomicWriteTarget(path);
   const existingMode = getExistingFileMode(targetPath);
   const dir = dirname(targetPath);
-  const tempPath = join(dir, `.${basename(targetPath)}.tmp-${process.pid}-${randomUUID()}`);
+  const tempPath = join(dir, `.${basename(targetPath)}.tmp-${deterministicUuid('settings-json-atomic-write')}`);
 
   try {
     writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx', mode: existingMode });

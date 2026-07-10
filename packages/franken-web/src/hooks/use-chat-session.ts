@@ -7,6 +7,7 @@ import {
   type TokenTotals,
   type TranscriptMessage,
 } from '../lib/api';
+import { deterministicUuid, isoNow, seededRandom } from '@franken/types';
 
 export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'offline' | 'error';
@@ -172,10 +173,10 @@ function makeBanner(
 
 function makeId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+    return deterministicUuid('packages/franken-web/src/hooks/use-chat-session.ts');
   }
 
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${seededRandom.random().toString(36).slice(2, 10)}`;
 }
 
 function normalizeTranscript(messages: TranscriptMessage[]): ChatMessage[] {
@@ -201,7 +202,7 @@ function appendOrUpdateAssistantMessage(
       : event.content,
     timestamp: event.type === 'assistant.message.complete'
       ? event.timestamp
-      : (existingIndex >= 0 ? messages[existingIndex]!.timestamp : new Date().toISOString()),
+      : (existingIndex >= 0 ? messages[existingIndex]!.timestamp : isoNow()),
     ...(event.modelTier ? { modelTier: event.modelTier } : {}),
     streaming: event.type === 'assistant.message.delta',
   };
@@ -214,7 +215,7 @@ function appendOrUpdateAssistantMessage(
 }
 
 function activityEventsFromApproveResult(result: ApproveResult, approved: boolean): ActivityEvent[] {
-  const timestamp = new Date().toISOString();
+  const timestamp = isoNow();
   return [
     {
       type: 'turn.approval.resolved',
@@ -848,7 +849,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       id: clientMessageId,
       role: 'user',
       content,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
       receipt: 'sending',
     };
     const optimisticAdd = Boolean(socket && socket.readyState === 1);
@@ -998,7 +999,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             type: 'assistant.message.complete',
             messageId: makeId('assistant'),
             content: display.content,
-            timestamp: new Date().toISOString(),
+            timestamp: isoNow(),
           }), withSnapshot);
         });
         setPendingApproval(refreshed.pendingApproval ?? null);

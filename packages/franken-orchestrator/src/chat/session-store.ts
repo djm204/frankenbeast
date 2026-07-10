@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, readdirSync, unlinkSync, mkdirSync } from 
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { ChatSessionSchema, type ChatSession } from './types.js';
+import { isoNow, now as deterministicNow } from '@franken/types';
 
 export interface ISessionStore {
   create(projectId: string): ChatSession;
@@ -20,8 +21,8 @@ export class FileSessionStore implements ISessionStore {
   }
 
   create(projectId: string): ChatSession {
-    const id = `chat-${Date.now()}-${randomBytes(2).toString('hex')}`;
-    const now = new Date().toISOString();
+    const id = `chat-${deterministicNow()}-${randomBytes(2).toString('hex')}`;
+    const now = isoNow();
     const session: ChatSession = {
       id,
       projectId,

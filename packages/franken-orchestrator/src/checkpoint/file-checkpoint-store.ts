@@ -11,6 +11,7 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
+import { now as deterministicNow } from '@franken/types';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -237,7 +238,7 @@ export class FileCheckpointStore implements ICheckpointStore {
 
   /** Write-to-temp + fsync + rename + dir fsync so readers never observe a torn file. */
   private atomicWriteFile(targetPath: string, payload: string): void {
-    const tmpPath = `${targetPath}.tmp.${process.pid}.${this.writeCounter++}`;
+    const tmpPath = `${targetPath}.tmp.${this.writeCounter++}.${this.lockToken}`;
     try {
       const fd = openSync(tmpPath, 'w');
       try {
@@ -292,7 +293,7 @@ export class FileCheckpointStore implements ICheckpointStore {
           // Owner identity cannot be verified (no start time available):
           // the age ceiling is the only backstop against PID reuse.
           try {
-            if (Date.now() - statSync(lockPath).mtimeMs < LIVE_LOCK_AGE_CEILING_MS) {
+            if (deterministicNow() - statSync(lockPath).mtimeMs < LIVE_LOCK_AGE_CEILING_MS) {
               return;
             }
           } catch {
@@ -308,7 +309,7 @@ export class FileCheckpointStore implements ICheckpointStore {
       // timing out before the fallback can fire.
       const reapAgeMs = Math.min(UNREADABLE_LOCK_REAP_MS, this.lockTimeoutMs / 2);
       try {
-        if (Date.now() - statSync(lockPath).mtimeMs < reapAgeMs) {
+        if (deterministicNow() - statSync(lockPath).mtimeMs < reapAgeMs) {
           return;
         }
       } catch {
@@ -317,7 +318,7 @@ export class FileCheckpointStore implements ICheckpointStore {
     }
 
     // Filename-safe (no colons — they are invalid on Windows outside the drive prefix).
-    const reapPath = `${lockPath}.reap.${process.pid}-${this.lockToken}`;
+    const reapPath = `${lockPath}.reap.${this.lockToken}`;
     try {
       renameSync(lockPath, reapPath);
       unlinkSync(reapPath);
@@ -328,7 +329,7 @@ export class FileCheckpointStore implements ICheckpointStore {
 
   private withLock(fn: () => void): void {
     const lockPath = `${this.checkpointPath}.lock`;
-    const deadline = Date.now() + this.lockTimeoutMs;
+    const deadline = deterministicNow() + this.lockTimeoutMs;
     for (;;) {
       try {
         const fd = openSync(lockPath, 'wx');
@@ -343,7 +344,7 @@ export class FileCheckpointStore implements ICheckpointStore {
           throw error;
         }
         this.tryReapLock(lockPath);
-        if (Date.now() >= deadline) {
+        if (deterministicNow() >= deadline) {
           throw new Error(`Timed out acquiring checkpoint lock: ${lockPath}`);
         }
         sleepSync(LOCK_RETRY_MS);

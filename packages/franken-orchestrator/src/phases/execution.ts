@@ -13,6 +13,7 @@ import type {
   ICheckpointStore,
   SkillDescriptor,
 } from '../deps.js';
+import { isoNow, now as deterministicNow } from '@franken/types';
 import type { TaskOutcome } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -738,7 +739,7 @@ async function recordFailureTrace(memory: IMemoryModule, task: PlanTask, summary
     taskId: task.id,
     summary,
     outcome: 'failure',
-    timestamp: new Date().toISOString(),
+    timestamp: isoNow(),
   });
 }
 
@@ -815,7 +816,7 @@ async function executeTask(
   config?: Pick<OrchestratorConfig, 'enableTracing'>,
 ): Promise<TaskOutcome> {
   ctx.retryCount = (ctx.retryCount ?? 0) + 1;
-  const startTime = Date.now();
+  const startTime = deterministicNow();
   const span = config?.enableTracing ? observer.startSpan(`task:${task.id}`) : undefined;
   logger.info('Execution: task start', {
     taskId: task.id,
@@ -895,7 +896,7 @@ async function executeTask(
         taskId: task.id,
         summary: task.objective,
         outcome: 'success',
-        timestamp: new Date().toISOString(),
+        timestamp: isoNow(),
       });
 
       ctx.addAudit('executor', 'task:complete', {
@@ -910,7 +911,7 @@ async function executeTask(
       });
       logger.debug('Execution: task timing', {
         taskId: task.id,
-        durationMs: Date.now() - startTime,
+        durationMs: deterministicNow() - startTime,
         tokensUsed: 0,
       });
 
@@ -955,7 +956,7 @@ async function executeTask(
       taskId: task.id,
       summary: task.objective,
       outcome: 'success',
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
     });
 
     ctx.addAudit('executor', 'task:complete', { taskId: task.id, tokensUsed, output });
@@ -966,7 +967,7 @@ async function executeTask(
     });
     logger.debug('Execution: task timing', {
       taskId: task.id,
-      durationMs: Date.now() - startTime,
+      durationMs: deterministicNow() - startTime,
       tokensUsed,
     });
     return { taskId: task.id, status: 'success', output };
@@ -979,7 +980,7 @@ async function executeTask(
     logger.error('Execution: task failed', { taskId: task.id, error: errorMsg });
     logger.debug('Execution: task timing', {
       taskId: task.id,
-      durationMs: Date.now() - startTime,
+      durationMs: deterministicNow() - startTime,
       tokensUsed: 0,
     });
     return { taskId: task.id, status: 'failure', error: errorMsg };

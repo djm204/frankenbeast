@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import type {
   Trace,
   Span,
@@ -7,15 +6,16 @@ import type {
   TraceValidationOptions,
   TraceValidationResult,
 } from './types.js'
+import { deterministicUuid, now as deterministicNow } from '@franken/types';
 import type { LoopDetector } from '../incident/LoopDetector.js'
 
 export const TraceContext = {
   createTrace(goal: string): Trace {
     return {
-      id: randomUUID(),
+      id: deterministicUuid('packages/franken-observer/src/core/TraceContext.ts'),
       goal,
       status: 'active',
-      startedAt: Date.now(),
+      startedAt: deterministicNow(),
       spans: [],
     }
   },
@@ -25,12 +25,12 @@ export const TraceContext = {
       throw new Error(`Cannot start span on a ${trace.status} trace (id: ${trace.id})`)
     }
     const span: Span = {
-      id: randomUUID(),
+      id: deterministicUuid('packages/franken-observer/src/core/TraceContext.ts'),
       traceId: trace.id,
       parentSpanId: options.parentSpanId,
       name: options.name,
       status: 'active',
-      startedAt: Date.now(),
+      startedAt: deterministicNow(),
       metadata: {},
       thoughtBlocks: [],
     }
@@ -42,7 +42,7 @@ export const TraceContext = {
     if (span.status !== 'active') {
       throw new Error(`Cannot end span that is already ${span.status} (id: ${span.id})`)
     }
-    span.endedAt = Date.now()
+    span.endedAt = deterministicNow()
     span.durationMs = span.endedAt - span.startedAt
     span.status = options.status ?? 'completed'
     if (options.errorMessage !== undefined) {
@@ -55,12 +55,12 @@ export const TraceContext = {
     if (trace.status !== 'active') {
       throw new Error(`Cannot end trace that is already ${trace.status} (id: ${trace.id})`)
     }
-    trace.endedAt = Date.now()
+    trace.endedAt = deterministicNow()
     trace.status = 'completed'
   },
 
   validateTrace(trace: Trace, options: TraceValidationOptions = {}): TraceValidationResult {
-    const now = options.now ?? Date.now()
+    const now = options.now ?? deterministicNow()
     const issues = trace.spans
       .filter(span => span.status === 'active')
       .map(span => {
