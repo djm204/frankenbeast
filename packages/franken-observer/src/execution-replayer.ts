@@ -45,19 +45,24 @@ export class ExecutionReplayer {
       throw new Error('Cannot replay empty audit trail');
     }
 
+    this.validateEventTimestamps(events);
+
     const phases = this.groupByPhase(events);
     const switches = this.extractProviderSwitches(events);
     const errors = this.extractErrors(events);
 
-    const startTime = events[0]!.timestamp;
-    const endTime = events[events.length - 1]!.timestamp;
+    const startEvent = events[0]!;
+    const endEvent = events[events.length - 1]!;
+    const startTime = startEvent.timestamp;
+    const endTime = endEvent.timestamp;
 
     return {
       runId: this.extractRunId(events),
       startTime,
       endTime,
       totalDurationMs:
-        new Date(endTime).getTime() - new Date(startTime).getTime(),
+        this.parseEventTimestamp(endEvent, 'execution timeline end') -
+        this.parseEventTimestamp(startEvent, 'execution timeline start'),
       phases,
       providerSwitches: switches,
       errors,
@@ -73,17 +78,37 @@ export class ExecutionReplayer {
       phaseMap.set(event.phase, existing);
     }
 
-    return [...phaseMap.entries()].map(([phase, phaseEvents]) => ({
-      phase,
-      startTime: phaseEvents[0]!.timestamp,
-      endTime: phaseEvents[phaseEvents.length - 1]!.timestamp,
-      durationMs:
-        new Date(phaseEvents[phaseEvents.length - 1]!.timestamp).getTime() -
-        new Date(phaseEvents[0]!.timestamp).getTime(),
-      provider: phaseEvents[phaseEvents.length - 1]!.provider,
-      eventCount: phaseEvents.length,
-      events: phaseEvents,
-    }));
+    return [...phaseMap.entries()].map(([phase, phaseEvents]) => {
+      const startEvent = phaseEvents[0]!;
+      const endEvent = phaseEvents[phaseEvents.length - 1]!;
+      return {
+        phase,
+        startTime: startEvent.timestamp,
+        endTime: endEvent.timestamp,
+        durationMs:
+          this.parseEventTimestamp(endEvent, `phase ${phase} end`) -
+          this.parseEventTimestamp(startEvent, `phase ${phase} start`),
+        provider: endEvent.provider,
+        eventCount: phaseEvents.length,
+        events: phaseEvents,
+      };
+    });
+  }
+
+  private validateEventTimestamps(events: readonly AuditEvent[]): void {
+    for (const event of events) {
+      this.parseEventTimestamp(event, `phase ${event.phase}`);
+    }
+  }
+
+  private parseEventTimestamp(event: AuditEvent, context: string): number {
+    const timestampMs = new Date(event.timestamp).getTime();
+    if (!Number.isFinite(timestampMs)) {
+      throw new Error(
+        `Invalid audit event timestamp during replay (${context}): eventId=${event.eventId}, phase=${event.phase}, type=${event.type}, timestamp=${JSON.stringify(event.timestamp)}`,
+      );
+    }
+    return timestampMs;
   }
 
   private extractProviderSwitches(
