@@ -128,7 +128,11 @@ export class BeastDispatchService {
           throw new Error(`Beast run disappeared after start: ${run.id}`);
         }
         if (updated.trackedAgentId) {
-          const agentStatus = updated.status === 'running' ? 'running' : 'dispatching';
+          const agentStatus = updated.status === 'running'
+            ? 'running'
+            : updated.status === 'pending_approval'
+              ? 'awaiting_approval'
+              : 'dispatching';
           const updatedAt = new Date(wallClockNow()).toISOString();
           this.repository.updateTrackedAgent(updated.trackedAgentId, {
             status: agentStatus,
