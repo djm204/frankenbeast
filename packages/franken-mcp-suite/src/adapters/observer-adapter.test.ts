@@ -483,4 +483,39 @@ describe('ObserverAdapter', () => {
       },
     ]);
   });
+
+  it('rejects non-finite and negative cost rows before persistence', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const invalidInputs = [
+      { promptTokens: Number.NaN, completionTokens: 0 },
+      { promptTokens: Number.POSITIVE_INFINITY, completionTokens: 0 },
+      { promptTokens: -1, completionTokens: 0 },
+      { promptTokens: 1.5, completionTokens: 0 },
+      { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 },
+      { promptTokens: 0, completionTokens: Number.NaN },
+      { promptTokens: 0, completionTokens: Number.POSITIVE_INFINITY },
+      { promptTokens: 0, completionTokens: -1 },
+      { promptTokens: 0, completionTokens: 1.5 },
+      { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { promptTokens: 0, completionTokens: 0, costUsd: Number.NaN },
+      { promptTokens: 0, completionTokens: 0, costUsd: Number.POSITIVE_INFINITY },
+      { promptTokens: 0, completionTokens: 0, costUsd: -0.01 },
+    ];
+
+    for (const input of invalidInputs) {
+      await expect(observer.logCost({
+        sessionId: 'sess-invalid-cost',
+        model: 'gpt-4o',
+        ...input,
+      })).rejects.toThrow(/finite (safe )?non-negative/);
+    }
+
+    await expect(observer.cost({ sessionId: 'sess-invalid-cost' })).resolves.toMatchObject({
+      totalPromptTokens: 0,
+      totalCompletionTokens: 0,
+      totalCostUsd: 0,
+      byModel: [],
+    });
+  });
 });
