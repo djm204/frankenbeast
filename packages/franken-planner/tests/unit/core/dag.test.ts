@@ -77,6 +77,46 @@ describe('PlanGraph — construction', () => {
     const g = PlanGraph.empty().addTask(a).addTask(b);
     expect(g.getTasks()).toEqual([a, b]);
   });
+
+  it('isolates stored tasks from mutations to the original task object', () => {
+    const task = makeTask('t-1', {
+      requiredSkills: ['planner'],
+      metadata: { nested: { priority: 'low' } },
+    });
+    const g = PlanGraph.empty().addTask(task);
+
+    task.status = 'completed';
+    task.requiredSkills.push('unexpected');
+    (task.metadata as { nested: { priority: string } }).nested.priority = 'high';
+
+    expect(g.getTask(createTaskId('t-1'))).toMatchObject({
+      status: 'pending',
+      requiredSkills: ['planner'],
+      metadata: { nested: { priority: 'low' } },
+    });
+  });
+
+  it('isolates stored tasks from mutations to getTask, getTasks, and topoSort results', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a', { requiredSkills: ['setup'] }))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+
+    const fromGetTask = g.getTask(createTaskId('b')) as Task;
+    fromGetTask.status = 'completed';
+    fromGetTask.dependsOn.push(createTaskId('ghost'));
+
+    const fromGetTasks = g.getTasks().find((task) => task.id === createTaskId('a')) as Task;
+    fromGetTasks.requiredSkills.push('mutated');
+
+    const fromTopoSort = g.topoSort().find((task) => task.id === createTaskId('b')) as Task;
+    fromTopoSort.dependsOn.length = 0;
+
+    expect(g.getTask(createTaskId('b'))?.status).toBe('pending');
+    expect(g.getTask(createTaskId('a'))?.requiredSkills).toEqual(['setup']);
+    expect(g.getTask(createTaskId('b'))?.dependsOn).toEqual([createTaskId('a')]);
+    expect(g.getDependencies(createTaskId('b'))).toEqual([createTaskId('a')]);
+    expect(g.topoSort().map((task) => task.id)).toEqual([createTaskId('a'), createTaskId('b')]);
+  });
 });
 
 // ─── Topological Sort ────────────────────────────────────────────────────────
