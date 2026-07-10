@@ -361,6 +361,10 @@ describe('ws chat server', () => {
       risk: 'Requires explicit approval before execution.',
       sessionId: session.id,
     }));
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: 'turn.execution.complete',
+      data: { status: 'pending_approval' },
+    }));
     expect(store.get(session.id)?.pendingApproval).toEqual(expect.objectContaining({
       description: 'deploy staging',
       tool: 'execution',
