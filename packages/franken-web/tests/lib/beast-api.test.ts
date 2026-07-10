@@ -88,6 +88,46 @@ describe('BeastApiClient', () => {
     );
   });
 
+  it('rejects createAgent when the API reports an auto-dispatch failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({
+        error: {
+          code: 'AGENT_DISPATCH_FAILED',
+          message: "Dispatch failed for tracked agent 'agent-1': Invalid chunk-plan config: outputDir is required",
+          details: {
+            agentId: 'agent-1',
+            dispatchError: 'Invalid chunk-plan config: outputDir is required',
+          },
+        },
+      }),
+    });
+
+    const errorPromise = client.createAgent({
+      definitionId: 'chunk-plan',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: { designDocPath: 'docs/plans/design.md' },
+      },
+      initConfig: { designDocPath: 'docs/plans/design.md' },
+    });
+
+    await expect(errorPromise).rejects.toThrow(
+      "Dispatch failed for tracked agent 'agent-1': Invalid chunk-plan config: outputDir is required (HTTP 409, AGENT_DISPATCH_FAILED)",
+    );
+    await expect(errorPromise).rejects.toMatchObject({
+      name: 'BeastApiError',
+      status: 409,
+      code: 'AGENT_DISPATCH_FAILED',
+      details: {
+        agentId: 'agent-1',
+        dispatchError: 'Invalid chunk-plan config: outputDir is required',
+      },
+    });
+  });
+
   it('controls existing beast runs once dispatch has happened', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

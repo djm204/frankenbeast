@@ -146,7 +146,18 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         message: `Dispatch failed: ${errorMessage}`,
         payload: { error: errorMessage },
       });
-      return c.json({ data: deps.agents.getAgent(agent.id) }, 201);
+      const failedAgent = deps.agents.getAgent(agent.id);
+      return c.json({
+        error: {
+          code: 'AGENT_DISPATCH_FAILED',
+          message: `Dispatch failed for tracked agent '${agent.id}': ${errorMessage}`,
+          details: {
+            agentId: agent.id,
+            dispatchError: errorMessage,
+            agent: failedAgent,
+          },
+        },
+      }, 409);
     }
 
     return c.json({ data: deps.agents.getAgent(agent.id) }, 201);
