@@ -76,6 +76,13 @@ describe('CI Workflow (.github/workflows/ci.yml)', () => {
       expect(content.indexOf('npm run test:root')).toBeLessThan(content.indexOf('npx turbo run test'));
     });
 
+    it('runs CI test commands with a fixed deterministic seed matrix', () => {
+      expect(content).toContain('deterministic-seed');
+      expect(content).toContain("deterministic-seed: ['1337']");
+      expect(content).toContain('FRANKENBEAST_SEED: ${{ matrix.deterministic-seed }}');
+      expect(content.indexOf('FRANKENBEAST_SEED')).toBeLessThan(content.indexOf('npm run test:root'));
+    });
+
     it('documents the root-suite and package-Turbo CI split in step names', () => {
       expect(content).toMatch(/name:\s*Run package build and lint/);
       expect(content).toMatch(/name:\s*Run package tests/);

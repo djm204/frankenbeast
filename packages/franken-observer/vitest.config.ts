@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { readVitestFlags } from '../../scripts/vitest-env.js'
 import { createFrankenSourceAliases } from '../../scripts/vitest-source-aliases.js'
+import { fileURLToPath } from 'node:url';
 const vitestFlags = readVitestFlags(['INTEGRATION', 'EVAL'])
 const isIntegration = vitestFlags.INTEGRATION
 const isEval = vitestFlags.EVAL
@@ -10,6 +11,7 @@ export default defineConfig({
     alias: createFrankenSourceAliases(import.meta.url),
   },
   test: {
+    setupFiles: [fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url))],
     // Default: unit tests only.
     // INTEGRATION=true → integration tests only.
     // EVAL=true        → eval (LLM-judge) tests only.
