@@ -338,6 +338,41 @@ describe('ChatShell route heading', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('surfaces a stale service action refresh when the superseding manual refresh fails', async () => {
+    let resolveStaleActionRefresh!: (status: { mode: string; secureBackend: string; services: Array<{ id: string; status: string; inProcess: boolean }> }) => void;
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat', status: 'running', inProcess: false }],
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveStaleActionRefresh = resolve;
+      }))
+      .mockRejectedValueOnce(new Error('HTTP 503'));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    expect(await screen.findByText('chat')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network status: HTTP 503');
+
+    await act(async () => {
+      resolveStaleActionRefresh({
+        mode: 'insecure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat', status: 'running', inProcess: false }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('Unable to restart chat'))).toBe(true);
+    });
+  });
+
   it('surfaces a service action failure when the follow-up status refresh is rejected', async () => {
     networkApiMocks.getStatus
       .mockResolvedValueOnce({

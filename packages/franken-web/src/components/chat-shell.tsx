@@ -314,6 +314,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [networkLogsError, setNetworkLogsError] = useState<string | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const networkStatusRequestIdRef = useRef(0);
+  const networkStatusSuccessRequestIdRef = useRef(0);
   const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
@@ -378,6 +379,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       if (statusRequestId === networkStatusRequestIdRef.current) {
         if (statusResult.status === 'fulfilled') {
           setNetworkStatus(statusResult.value);
+          networkStatusSuccessRequestIdRef.current = statusRequestId;
           setNetworkError(null);
         } else {
           setNetworkError(`Unable to load network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
@@ -399,14 +401,21 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     return client.getStatus()
       .then((nextStatus) => {
         if (statusRequestId !== networkStatusRequestIdRef.current) {
-          return;
+          if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
+            return;
+          }
+          throw new Error('Network status refresh was superseded before it completed.');
         }
         setNetworkStatus(nextStatus);
+        networkStatusSuccessRequestIdRef.current = statusRequestId;
         setNetworkError(null);
       })
       .catch((error: unknown) => {
         if (statusRequestId !== networkStatusRequestIdRef.current) {
-          return;
+          if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
+            return;
+          }
+          throw new Error('Network status refresh was superseded before it completed.');
         }
         throw error;
       });
@@ -1206,6 +1215,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   if (statusRequestId === networkStatusRequestIdRef.current) {
                     if (statusResult.status === 'fulfilled') {
                       setNetworkStatus(statusResult.value);
+                      networkStatusSuccessRequestIdRef.current = statusRequestId;
                       setNetworkError(null);
                     } else {
                       setNetworkError(`Unable to refresh network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
