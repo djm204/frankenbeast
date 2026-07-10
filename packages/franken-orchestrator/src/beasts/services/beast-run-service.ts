@@ -73,9 +73,45 @@ export class BeastRunService {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const currentRun = this.repository.getRun(run.id);
       if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
+        const failedAt = currentRun.finishedAt;
         await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
-        this.syncTrackedAgent(currentRun);
+        const publications: Array<Omit<BeastSseEvent, 'id'>> = [];
+        if (currentRun.trackedAgentId) {
+          const trackedAgent = this.repository.getTrackedAgent(currentRun.trackedAgentId);
+          if (trackedAgent && trackedAgent.status !== 'deleted') {
+            this.repository.transaction(() => {
+              this.repository.updateTrackedAgent(currentRun.trackedAgentId!, {
+                status: 'failed',
+                dispatchRunId: currentRun.id,
+                updatedAt: failedAt,
+              });
+              publications.push({
+                type: 'agent.status',
+                data: { agentId: currentRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
+              });
+              const failedEvent = {
+                level: 'error' as const,
+                type: 'agent.dispatch.failed',
+                message: `Failed to start Beast run ${currentRun.id}`,
+                payload: { runId: currentRun.id, error: errorMessage },
+                createdAt: failedAt,
+              };
+              this.repository.appendTrackedAgentEvent(currentRun.trackedAgentId!, failedEvent);
+              publications.push({
+                type: 'agent.event',
+                data: { agentId: currentRun.trackedAgentId, event: failedEvent },
+              });
+            });
+          }
+        }
+        for (const publication of publications) {
+          this.serviceOptions.eventBus?.publish(publication);
+        }
         return currentRun;
+      }
+      const priorAttempt = priorAttemptId ? this.repository.getAttempt(priorAttemptId) : undefined;
+      if (priorAttempt?.status === 'running') {
+        throw error;
       }
       if (
         currentRun
@@ -91,6 +127,7 @@ export class BeastRunService {
       const { failedRun, publications } = this.repository.transaction(() => {
         const updatedRun = this.repository.updateRun(run.id, {
           status: 'failed',
+          startedAt: null,
           finishedAt: failedAt,
           currentAttemptId: null,
           latestExitCode: null,

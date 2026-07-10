@@ -40,7 +40,7 @@ interface CreateAttemptInput {
 interface UpdateRunPatch {
   status?: BeastRunStatus | undefined;
   configSnapshot?: Readonly<Record<string, unknown>> | undefined;
-  startedAt?: string | undefined;
+  startedAt?: string | null | undefined;
   finishedAt?: string | undefined;
   currentAttemptId?: string | null | undefined;
   attemptCount?: number | undefined;
@@ -283,7 +283,11 @@ export class SQLiteBeastRepository {
       ...current,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.configSnapshot !== undefined ? { configSnapshot: patch.configSnapshot } : {}),
-      ...(patch.startedAt !== undefined ? { startedAt: patch.startedAt } : {}),
+      ...(patch.startedAt !== undefined
+        ? patch.startedAt === null
+          ? { startedAt: undefined }
+          : { startedAt: patch.startedAt }
+        : {}),
       ...(patch.finishedAt !== undefined ? { finishedAt: patch.finishedAt } : {}),
       ...(patch.currentAttemptId !== undefined
         ? patch.currentAttemptId === null
