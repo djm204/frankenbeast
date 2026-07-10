@@ -662,12 +662,43 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
   });
 
+  it('keeps keyword suffixes in multiline return annotations from hiding implementation bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = [
+      'function longFn():',
+      '  Myinterface {',
+      ...lines,
+      '  return undefined;',
+      '}',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
+  });
+
   it('flags parameter count even when a parsed function body is unclosed', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f) { if (a) { return b; }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags typed parameter count even when a parsed function body is unclosed', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(a, b, c, d, e, f): void { if (a) { return b; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('keeps unclosed conditional return types from becoming function bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function external(a, b, c, d, e, f): T extends { id: string`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
   });
 
   it('flags deeply nested code', async () => {
