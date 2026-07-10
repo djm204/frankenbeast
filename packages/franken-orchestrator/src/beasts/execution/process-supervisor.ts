@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, spawn as defaultSpawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { BeastProcessSpec } from '../types.js';
@@ -23,6 +23,7 @@ export interface ProcessSupervisorLike {
 
 export interface ProcessSupervisorOptions {
   readonly projectRoot?: string | undefined;
+  readonly spawn?: typeof defaultSpawn;
 }
 
 function allowlistedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
@@ -74,6 +75,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     };
     let recordExit: (code: number | null, signal: string | null) => void = () => undefined;
 
+    const spawn = this.options.spawn ?? defaultSpawn;
     const child = spawn(spec.command, [...spec.args], {
       cwd: spec.cwd,
       env: {
@@ -96,6 +98,8 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       child.removeListener('exit', recordExit);
       child.removeListener('close', recordExit);
     };
+
+    let maybeFireExit: () => void = () => undefined;
 
     const onError = (error: Error) => {
       callbacks.onStderr(`Process spawn failed for ${spec.command}: ${error.message}`);
@@ -142,7 +146,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     const pid = child.pid;
     this.processes.set(pid, child);
 
-    const maybeFireExit = () => {
+    maybeFireExit = () => {
       if (!exitFired && stdoutClosed && stderrClosed && exitInfo) {
         cleanupProcess();
         exitFired = true;

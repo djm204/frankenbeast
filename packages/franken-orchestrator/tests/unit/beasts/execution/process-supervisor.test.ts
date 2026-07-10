@@ -2,7 +2,6 @@ import { EventEmitter } from 'node:events';
 import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import * as nodeChildProcess from 'node:child_process';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProcessSupervisor } from '../../../../src/beasts/execution/process-supervisor.js';
 import type { ProcessCallbacks } from '../../../../src/beasts/execution/process-supervisor.js';
@@ -126,7 +125,9 @@ describe('ProcessSupervisor', () => {
         }),
       };
 
-      const spawnSpy = vi.spyOn(nodeChildProcess, 'spawn').mockReturnValue(fakeChild as never);
+      supervisor = new ProcessSupervisor({
+        spawn: vi.fn(() => fakeChild as never),
+      });
 
       const spawnPromise = supervisor.spawn(makeSpec(), callbacks);
       handlers.error?.(new Error('runtime pipe break'));
@@ -144,7 +145,6 @@ describe('ProcessSupervisor', () => {
       handlers.exit?.(1, null);
       expect(callbacks.onExit).toHaveBeenCalledTimes(1);
 
-      spawnSpy.mockRestore();
       await spawnPromise;
     });
 
