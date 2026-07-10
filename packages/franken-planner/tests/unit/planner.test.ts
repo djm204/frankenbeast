@@ -371,7 +371,8 @@ describe('Planner — self-correction loop', () => {
   it('recovers failed dynamic sub-tasks within their recursive sub-graph', async () => {
     const parent = makeTask('parent');
     const child = makeTask('child');
-    const graph = PlanGraph.empty().addTask(parent);
+    const sibling = makeTask('sibling');
+    const graph = PlanGraph.empty().addTask(parent).addTask(sibling);
     const executedTaskIds: TaskId[] = [];
     const executor = vi.fn().mockImplementation((task: Task) => {
       executedTaskIds.push(task.id);
@@ -411,6 +412,14 @@ describe('Planner — self-correction loop', () => {
       createTaskId('child'),
       createTaskId('fix-child-attempt-1'),
       createTaskId('child'),
+      createTaskId('sibling'),
+    ]);
+    if (result.status !== 'completed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('parent'),
+      createTaskId('fix-child-attempt-1'),
+      createTaskId('child'),
+      createTaskId('sibling'),
     ]);
   });
 });

@@ -74,6 +74,7 @@ export class Planner {
     const recoveryAttemptsByTask = new Map<TaskId, number>();
     const completedTaskIds = new Set<TaskId>();
     const completedTaskResults = new Map<TaskId, TaskResult>();
+    const recoveryContinuationGraphs: PlanGraph[] = [];
 
     for (;;) {
       let result: PlanResult;
@@ -91,6 +92,11 @@ export class Planner {
 
       if (result.status === 'completed') {
         Planner.recordCompletedTasks(result.taskResults, completedTaskIds, completedTaskResults);
+        const continuationGraph = recoveryContinuationGraphs.shift();
+        if (continuationGraph) {
+          currentGraph = continuationGraph;
+          continue;
+        }
         return { status: 'completed', taskResults: Array.from(completedTaskResults.values()) };
       }
       if (result.status !== 'failed') return result; // defensive: unexpected status
@@ -108,6 +114,7 @@ export class Planner {
           recoveryGraph,
           attempt
         );
+        recoveryContinuationGraphs.unshift(...(result.recoveryContinuationGraphs ?? []));
         recoveryAttemptsByTask.set(failedTaskLineage, attempt);
       } catch (recoveryErr) {
         if (

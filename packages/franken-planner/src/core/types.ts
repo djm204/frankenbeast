@@ -66,6 +66,12 @@ export type PlanResult =
        * graph, e.g. a recursive dynamic expansion sub-graph.
        */
       recoveryGraph?: PlanGraph;
+      /**
+       * Outer graphs to resume, nearest first, after the owning recovery graph
+       * completes. Recursive planners use this to recover nested dynamic tasks
+       * without losing the parent plan context.
+       */
+      recoveryContinuationGraphs?: PlanGraph[];
     }
   | { status: 'aborted'; reason: string }
   | { status: 'rationale_rejected'; taskId: TaskId };
