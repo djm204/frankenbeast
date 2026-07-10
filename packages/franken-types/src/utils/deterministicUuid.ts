@@ -9,7 +9,7 @@ function hash128(input: string): number[] {
   let h4 = 0x9e3779b9;
 
   for (const char of input) {
-    const code = char.charCodeAt(0);
+    const code = char.codePointAt(0) ?? 0;
     h1 = Math.imul(h1 ^ code, 2654435761);
     h2 = Math.imul(h2 ^ code, 1597334677);
     h3 = Math.imul(h3 ^ code, 2246822507);

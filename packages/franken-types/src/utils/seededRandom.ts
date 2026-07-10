@@ -11,7 +11,7 @@ function currentSeed(): string | undefined {
 function hashSeed(seed: string): number {
   let hash = 2166136261;
   for (const char of seed) {
-    hash ^= char.charCodeAt(0);
+    hash ^= char.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;

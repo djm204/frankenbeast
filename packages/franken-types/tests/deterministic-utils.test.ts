@@ -29,6 +29,14 @@ describe('deterministic utilities', () => {
     expect(first()).not.toBe(different());
   });
 
+  it('keeps non-BMP Unicode seeds distinct', () => {
+    const smile = createSeededRandom('😀');
+    const grin = createSeededRandom('😁');
+
+    expect([smile(), smile(), smile()]).not.toEqual([grin(), grin(), grin()]);
+    expect(deterministicUuid('😀', 1)).not.toBe(deterministicUuid('😁', 1));
+  });
+
   it('uses FRANKENBEAST_SEED for module-level random values', () => {
     setSeed('stable-env-seed');
     const first = random();
