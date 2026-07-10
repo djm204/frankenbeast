@@ -168,12 +168,16 @@ on:
       expect(content).toContain("CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}");
       expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
       expect(packageJson.scripts?.['ci:test:packages']).toBe('node scripts/retry-ci-command.mjs -- npx turbo run test');
+      expect(packageJson.scripts?.['ci:test:planner-integration']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner',
+      );
       expect(packageJson.scripts?.['test:ci']).toBe(
-        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages',
+        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration',
       );
       expect(content).toContain('npm run test:ci');
       expect(content).not.toContain('run: npm run ci:test:root');
       expect(content).not.toContain('run: npm run ci:test:packages');
+      expect(content).not.toContain('run: npm run ci:test:planner-integration');
       expect(content).not.toContain('run: npm run test:root');
       expect(content).not.toContain('run: npx turbo run test');
     });
