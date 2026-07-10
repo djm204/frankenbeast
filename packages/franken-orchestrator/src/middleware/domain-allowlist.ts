@@ -4,6 +4,49 @@ import type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
 const URL_PATTERN =
   /https?:\/\/([a-zA-Z0-9.-]+(?:\.[a-zA-Z]{2,}))(\/[^\s)'"]*)?/g;
 
+const MAX_TOOL_INPUT_SCAN_CHARS = 10_000;
+
+interface SerializedToolInput {
+  readonly text: string;
+  readonly lossy: boolean;
+}
+
+function serializeToolInputForDomainScan(input: unknown): SerializedToolInput {
+  const seen = new WeakSet<object>();
+  let lossy = false;
+
+  try {
+    const text = JSON.stringify(input, (_key, value: unknown) => {
+      if (typeof value === 'bigint') {
+        lossy = true;
+        return value.toString();
+      }
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          lossy = true;
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
+
+    if (text === undefined) {
+      lossy = true;
+      return { text: '', lossy };
+    }
+
+    if (text.length > MAX_TOOL_INPUT_SCAN_CHARS) {
+      lossy = true;
+      return { text: text.slice(0, MAX_TOOL_INPUT_SCAN_CHARS), lossy };
+    }
+
+    return { text, lossy };
+  } catch {
+    return { text: '', lossy: true };
+  }
+}
+
 export class DomainBlockedError extends Error {
   constructor(
     public readonly domain: string,
@@ -62,8 +105,13 @@ export class DomainAllowlistMiddleware implements LlmMiddleware {
     // Scan tool call inputs for URLs
     if (response.toolCalls) {
       for (const tc of response.toolCalls) {
-        const inputStr = JSON.stringify(tc.input);
-        for (const domain of this.extractDomains(inputStr)) {
+        const input = serializeToolInputForDomainScan(tc.input);
+        if (input.lossy) {
+          this.logger?.(
+            `[security] Tool call "${tc.name}" input could not fully serialize for domain allowlist scanning`,
+          );
+        }
+        for (const domain of this.extractDomains(input.text)) {
           if (!this.isDomainAllowed(domain)) {
             this.logger?.(
               `[security] Tool call "${tc.name}" contains blocked domain: ${domain}`,
