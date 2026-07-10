@@ -10,12 +10,43 @@
  *   node scripts/check-major-outdated.mjs --baseline path/to/baseline.json
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultBaseline = resolve(repoRoot, 'scripts/major-outdated-baseline.json');
+const workspaceDependentNames = buildWorkspaceDependentNames();
+
+function buildWorkspaceDependentNames() {
+  const aliases = new Map([['<root>', '<root>']]);
+  let rootPackage;
+  try {
+    rootPackage = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8'));
+  } catch {
+    return aliases;
+  }
+  for (const pattern of rootPackage.workspaces ?? []) {
+    if (typeof pattern !== 'string' || !pattern.endsWith('/*')) continue;
+    const base = resolve(repoRoot, pattern.slice(0, -2));
+    if (!existsSync(base)) continue;
+    for (const child of readdirSync(base, { withFileTypes: true })) {
+      if (!child.isDirectory()) continue;
+      const packagePath = resolve(base, child.name, 'package.json');
+      if (!existsSync(packagePath)) continue;
+      try {
+        const workspacePackage = JSON.parse(readFileSync(packagePath, 'utf8'));
+        if (typeof workspacePackage.name === 'string' && workspacePackage.name.trim()) {
+          aliases.set(child.name, workspacePackage.name);
+          aliases.set(workspacePackage.name, workspacePackage.name);
+        }
+      } catch {
+        // Ignore malformed workspace manifests; npm will report them during install/checks.
+      }
+    }
+  }
+  return aliases;
+}
 
 function usage() {
   console.error('Usage: node scripts/check-major-outdated.mjs [--input npm-outdated.json] [--baseline baseline.json]');
@@ -41,13 +72,9 @@ function parseArgs(argv) {
   return args;
 }
 
-function readOutdatedJson(input) {
-  if (input) {
-    return readFileSync(input, 'utf8');
-  }
-
+function readNpmOutdated(args) {
   try {
-    return execFileSync('npm', ['outdated', '--json', '--workspaces', '--include-workspace-root'], {
+    return execFileSync('npm', ['outdated', '--json', ...args], {
       encoding: 'utf8',
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -63,6 +90,46 @@ function readOutdatedJson(input) {
     }
     process.exit(2);
   }
+}
+
+function parseOutdatedReport(raw, label) {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (hasNpmError(parsed)) {
+      const detail = typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error);
+      console.error(`npm outdated reported an error for ${label}: ${detail}`);
+      process.exit(2);
+    }
+    return parsed;
+  } catch (error) {
+    console.error(`npm outdated ${label} did not produce valid JSON.`);
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(2);
+  }
+}
+
+function mergeReports(...reports) {
+  const merged = {};
+  for (const report of reports) {
+    for (const row of toRows(report)) {
+      const bucket = merged[row.name] ?? [];
+      bucket.push(row);
+      merged[row.name] = bucket;
+    }
+  }
+  return merged;
+}
+
+function readOutdatedJson(input) {
+  if (input) {
+    return readFileSync(input, 'utf8');
+  }
+
+  const rootReport = parseOutdatedReport(readNpmOutdated([]), 'root/dependency scan');
+  const workspaceReport = parseOutdatedReport(readNpmOutdated(['--workspaces', '--include-workspace-root']), 'workspace dependency scan');
+  return JSON.stringify(mergeReports(rootReport, workspaceReport));
 }
 
 function parseMajor(version) {
@@ -92,13 +159,18 @@ function hasNpmError(report) {
 
 function normalizeIdentity(identity) {
   if (typeof identity !== 'string' || !identity.trim()) return '<root>';
-  const normalized = identity.replaceAll('\\\\', '/');
-  const root = repoRoot.replaceAll('\\\\', '/');
+  const normalized = identity.replaceAll('\\', '/');
+  const root = repoRoot.replaceAll('\\', '/');
   return normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : normalized;
 }
 
+function normalizeDependent(dependent) {
+  const identity = normalizeIdentity(dependent ?? '<root>');
+  return workspaceDependentNames.get(identity) ?? identity;
+}
+
 function baselineKey(entry) {
-  return `${entry.name}:${normalizeIdentity(entry.dependent ?? '<root>')}:${normalizeIdentity(entry.location ?? '<unknown-location>')}:${entry.currentMajor}->${entry.latestMajor}`;
+  return `${entry.name}:${normalizeDependent(entry.dependent)}:${normalizeIdentity(entry.location ?? '<unknown-location>')}:${entry.currentMajor}->${entry.latestMajor}`;
 }
 
 function readBaseline(path) {
@@ -155,6 +227,7 @@ export function findMajorOutdated(report) {
       };
     })
     .filter((entry) => entry.currentMajor !== null && entry.latestMajor !== null && entry.latestMajor > entry.currentMajor)
+    .filter((entry, _index, entries) => entries.findIndex((candidate) => baselineKey(candidate) === baselineKey(entry)) === _index)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
