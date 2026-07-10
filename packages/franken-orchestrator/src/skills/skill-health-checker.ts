@@ -135,7 +135,9 @@ export class SkillHealthChecker {
           ]);
           const messages = readMcpMessages(stdoutBuffer);
           stdoutBuffer = messages.remaining;
-          if (messages.messages.some(isSuccessfulInitializeResponse)) {
+          if (messages.messages.some(isFailedInitializeResponse)) {
+            settle('error');
+          } else if (messages.messages.some(isSuccessfulInitializeResponse)) {
             settle('connected');
           }
         });
@@ -251,4 +253,10 @@ function isSuccessfulInitializeResponse(message: JsonRpcMessage): boolean {
     && message.id === MCP_INITIALIZE_ID
     && message.result !== undefined
     && message.error === undefined;
+}
+
+function isFailedInitializeResponse(message: JsonRpcMessage): boolean {
+  return message.jsonrpc === '2.0'
+    && message.id === MCP_INITIALIZE_ID
+    && message.error !== undefined;
 }

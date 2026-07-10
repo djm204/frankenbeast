@@ -196,6 +196,33 @@ describe('SkillHealthChecker', () => {
     expect(result.status).toBe('connected');
   });
 
+  it('returns error when a trusted MCP server rejects initialize then exits cleanly', async () => {
+    const { spawn } = await import('node:child_process');
+    const proc = makeMockProcess();
+    proc.stdin.write.mockImplementation(() => {
+      setTimeout(() => {
+        proc.stdout.emit('data', formatMcpMessage({
+          jsonrpc: '2.0',
+          id: 1,
+          error: { code: -32602, message: 'Unsupported protocol version' },
+        }));
+        proc.exitCode = 0;
+        proc.emit('close', 0);
+      }, 10);
+      return true;
+    });
+    (spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(proc);
+    const config: McpConfig = {
+      mcpServers: {
+        rejecting: { command: 'node', args: ['server.js'] },
+      },
+    };
+
+    const result = await checker.getStatus('rejecting', config, { trustMcpServerCommands: true });
+
+    expect(result.status).toBe('error');
+  });
+
   it('returns unknown and cleans up when a trusted MCP server stays open without responding', async () => {
     vi.useFakeTimers();
     const { spawn } = await import('node:child_process');
