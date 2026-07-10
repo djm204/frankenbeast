@@ -14,6 +14,16 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+const networkApiMocks = vi.hoisted(() => ({
+  getConfig: vi.fn(),
+  getLogs: vi.fn(),
+  getStatus: vi.fn(),
+  restart: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
+  updateConfig: vi.fn(),
+}));
+
 vi.mock('../hooks/use-chat-session', () => ({
   useChatSession: () => ({
     activity: [],
@@ -48,17 +58,13 @@ vi.mock('../lib/api', () => ({
 
 vi.mock('../lib/network-api', () => ({
   NetworkApiClient: class {
-    getStatus = vi.fn().mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
-    getConfig = vi.fn().mockResolvedValue({
-      network: { mode: 'secure', secureBackend: 'local-encrypted' },
-      chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
-    });
-    getLogs = vi.fn().mockResolvedValue({ logs: [] });
-    restart = vi.fn().mockResolvedValue(undefined);
-    updateConfig = vi.fn().mockResolvedValue({
-      network: { mode: 'secure', secureBackend: 'local-encrypted' },
-      chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
-    });
+    getStatus = networkApiMocks.getStatus;
+    getConfig = networkApiMocks.getConfig;
+    getLogs = networkApiMocks.getLogs;
+    restart = networkApiMocks.restart;
+    start = networkApiMocks.start;
+    stop = networkApiMocks.stop;
+    updateConfig = networkApiMocks.updateConfig;
   },
 }));
 
@@ -138,6 +144,20 @@ describe('ChatShell route heading', () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     });
+    vi.clearAllMocks();
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig.mockResolvedValue({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
+    networkApiMocks.getLogs.mockResolvedValue({ logs: [] });
+    networkApiMocks.restart.mockResolvedValue(undefined);
+    networkApiMocks.start.mockResolvedValue(undefined);
+    networkApiMocks.stop.mockResolvedValue(undefined);
+    networkApiMocks.updateConfig.mockResolvedValue({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
   });
 
   it('uses the active route label as the primary heading and demotes project context to metadata', () => {
@@ -214,9 +234,39 @@ describe('ChatShell route heading', () => {
       }),
     }));
   });
+
+  it('surfaces a failed network refresh instead of leaving stale status silently visible', async () => {
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({ mode: 'secure', secureBackend: 'local-encrypted', services: [] })
+      .mockRejectedValueOnce(new Error('HTTP 503'));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network status: HTTP 503');
+  });
+
+  it('surfaces a service action failure when the follow-up status refresh is rejected', async () => {
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat', status: 'running', inProcess: false }],
+      })
+      .mockRejectedValueOnce(new Error('HTTP 502'));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    expect(await screen.findByText('chat')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to restart chat: HTTP 502');
+  });
 });
 
-describe('buildInitAction', () => {
+ describe('buildInitAction', () => {
   it('carries chat session context for every supported Beast workflow', () => {
     const config = {
       designDocPath: 'docs/design.md',
@@ -229,5 +279,6 @@ describe('buildInitAction', () => {
         chatSessionId: 'chat-session-42',
       }));
     }
+
   });
 });

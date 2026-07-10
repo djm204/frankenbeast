@@ -115,6 +115,10 @@ function routeFromHash(hash: string): RouteId {
   return PRIMARY_NAV_ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
 }
 
+function networkErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
   const route = ROUTES.find((item) => item.id === routeId)!;
 
@@ -308,6 +312,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [selectedNetworkLogServiceId, setSelectedNetworkLogServiceId] = useState<string | undefined>(undefined);
   const [networkLogsLoading, setNetworkLogsLoading] = useState(false);
   const [networkLogsError, setNetworkLogsError] = useState<string | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
   const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
@@ -370,6 +375,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     void Promise.allSettled([client.getStatus(), client.getConfig()]).then(([statusResult, configResult]) => {
       if (statusResult.status === 'fulfilled') {
         setNetworkStatus(statusResult.value);
+        setNetworkError(null);
+      } else {
+        setNetworkError(`Unable to load network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
       }
       if (configResult.status === 'fulfilled') {
         setNetworkConfig(configResult.value);
@@ -1158,6 +1166,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         ) : route === 'network' ? (
           <NetworkPage
             config={networkConfig}
+            error={networkError}
             logs={networkLogs}
             logsError={networkLogsError}
             logsLoading={networkLogsLoading}
@@ -1173,6 +1182,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 .then(([statusResult, logsResult]) => {
                   if (statusResult.status === 'fulfilled') {
                     setNetworkStatus(statusResult.value);
+                    setNetworkError(null);
+                  } else {
+                    setNetworkError(`Unable to refresh network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
                   }
                   if (requestId !== networkLogsRequestIdRef.current) {
                     return;
@@ -1194,13 +1206,17 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onRestart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.restart(serviceId).then(() => {
-                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+                return client.getStatus().then((nextStatus) => {
+                  setNetworkStatus(nextStatus);
+                  setNetworkError(null);
+                });
               });
             }}
             onSaveConfig={(assignments) => {
               const client = new NetworkApiClient(baseUrl);
               return client.updateConfig(assignments).then((nextConfig) => {
                 setNetworkConfig(nextConfig);
+                setNetworkError(null);
               });
             }}
             onSelectLogService={(serviceId) => {
@@ -1239,13 +1255,19 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onStart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.start(serviceId).then(() => {
-                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+                return client.getStatus().then((nextStatus) => {
+                  setNetworkStatus(nextStatus);
+                  setNetworkError(null);
+                });
               });
             }}
             onStop={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.stop(serviceId).then(() => {
-                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+                return client.getStatus().then((nextStatus) => {
+                  setNetworkStatus(nextStatus);
+                  setNetworkError(null);
+                });
               });
             }}
             selectedLogServiceId={selectedNetworkLogServiceId}
