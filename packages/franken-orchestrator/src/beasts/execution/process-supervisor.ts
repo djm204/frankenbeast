@@ -68,8 +68,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     let exitInfo: { code: number | null; signal: string | null } | undefined;
     let exitFired = false;
     let cleanupStarted = false;
-    let forceCloseStdout: (() => void) | undefined;
-    let forceCloseStderr: (() => void) | undefined;
+    const forceClose = {
+      stdout: undefined as (() => void) | undefined,
+      stderr: undefined as (() => void) | undefined,
+    };
     let recordExit: (code: number | null, signal: string | null) => void = () => undefined;
 
     const child = spawn(spec.command, [...spec.args], {
@@ -117,13 +119,13 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
           if (!child.stdout) {
             stdoutClosed = true;
           }
-          forceCloseStdout?.();
+          forceClose.stdout?.();
         }
         if (!stderrClosed) {
           if (!child.stderr) {
             stderrClosed = true;
           }
-          forceCloseStderr?.();
+          forceClose.stderr?.();
         }
         maybeFireExit();
       });
@@ -222,17 +224,17 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       };
     };
 
-    forceCloseStdout = child.stdout
+    forceClose.stdout = child.stdout
       ? wireLineReader(child.stdout, callbacks.onStdout, markStdoutClosed)
       : undefined;
-    if (!forceCloseStdout) {
+    if (!forceClose.stdout) {
       stdoutClosed = true;
     }
 
-    forceCloseStderr = child.stderr
+    forceClose.stderr = child.stderr
       ? wireLineReader(child.stderr, callbacks.onStderr, markStderrClosed)
       : undefined;
-    if (!forceCloseStderr) {
+    if (!forceClose.stderr) {
       stderrClosed = true;
     }
 
@@ -240,10 +242,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       exitInfo = { code, signal };
       setImmediate(() => {
         if (!stdoutClosed) {
-          forceCloseStdout?.();
+          forceClose.stdout?.();
         }
         if (!stderrClosed) {
-          forceCloseStderr?.();
+          forceClose.stderr?.();
         }
         maybeFireExit();
       });
