@@ -20,7 +20,7 @@ import {
   requestSizeLimit,
   validateBody,
 } from '../middleware.js';
-import { now as deterministicNow } from '@franken/types';
+import { wallClockNow } from '@franken/types';
 import { TransportSecurityService } from '../security/transport-security.js';
 import type { BeastRun, BeastRunAttempt } from '../../beasts/types.js';
 
@@ -268,14 +268,14 @@ let containerRuntimeStatusCache: {
 } | undefined;
 let containerRuntimeStatusProbe: Promise<ContainerRuntimeStatus> | undefined;
 
-async function getContainerRuntimeStatus(now = deterministicNow()): Promise<ContainerRuntimeStatus> {
+async function getContainerRuntimeStatus(now = wallClockNow()): Promise<ContainerRuntimeStatus> {
   if (containerRuntimeStatusCache && now - containerRuntimeStatusCache.checkedAt < CONTAINER_RUNTIME_STATUS_CACHE_MS) {
     return containerRuntimeStatusCache.status;
   }
 
   containerRuntimeStatusProbe ??= probeContainerRuntime()
     .then((status) => {
-      containerRuntimeStatusCache = { checkedAt: deterministicNow(), status };
+      containerRuntimeStatusCache = { checkedAt: wallClockNow(), status };
       return status;
     })
     .finally(() => {

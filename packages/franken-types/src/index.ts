@@ -18,7 +18,6 @@ export {
 
 export type { SeededRandom } from './deterministic.js';
 export {
-  createSeededRandom,
   deterministicUuid,
   hashSeed,
   isoNow,
