@@ -51,6 +51,9 @@ describe('StepModules numeric configuration', () => {
   it('rejects invalid planner, critique, and heartbeat numeric config before launch validation passes', () => {
     const stepValues = {
       3: {
+        planner: true,
+        critique: true,
+        heartbeat: true,
         plannerConfig: {
           maxDagDepth: 0,
           parallelTaskLimit: Number.POSITIVE_INFINITY,
@@ -72,9 +75,11 @@ describe('StepModules numeric configuration', () => {
     expect(errors['heartbeatConfig.reflectionInterval']).toContain('Reflection Interval');
   });
 
-  it('rejects malformed config sections without throwing', () => {
+  it('rejects malformed enabled config sections without throwing', () => {
     const errors = validateWizardStep(3, {
       3: {
+        planner: true,
+        heartbeat: true,
         plannerConfig: true,
         heartbeatConfig: 'bad',
       },
@@ -82,5 +87,18 @@ describe('StepModules numeric configuration', () => {
 
     expect(errors.plannerConfig).toContain('malformed');
     expect(errors.heartbeatConfig).toContain('malformed');
+  });
+
+  it('ignores stale config from disabled modules', () => {
+    const errors = validateWizardStep(3, {
+      3: {
+        heartbeat: false,
+        heartbeatConfig: {
+          reflectionInterval: 3,
+        },
+      },
+    });
+
+    expect(errors['heartbeatConfig.reflectionInterval']).toBeUndefined();
   });
 });

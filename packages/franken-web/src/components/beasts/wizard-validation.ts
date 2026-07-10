@@ -22,6 +22,7 @@ type WorkflowValues = {
 
 const MODULE_NUMERIC_FIELDS = [
   {
+    moduleKey: 'planner',
     configKey: 'plannerConfig',
     field: 'maxDagDepth',
     label: 'Max DAG Depth',
@@ -29,6 +30,7 @@ const MODULE_NUMERIC_FIELDS = [
     max: 50,
   },
   {
+    moduleKey: 'planner',
     configKey: 'plannerConfig',
     field: 'parallelTaskLimit',
     label: 'Parallel Task Limit',
@@ -36,6 +38,7 @@ const MODULE_NUMERIC_FIELDS = [
     max: 20,
   },
   {
+    moduleKey: 'critique',
     configKey: 'critiqueConfig',
     field: 'maxIterations',
     label: 'Max Iterations',
@@ -43,6 +46,7 @@ const MODULE_NUMERIC_FIELDS = [
     max: 10,
   },
   {
+    moduleKey: 'heartbeat',
     configKey: 'heartbeatConfig',
     field: 'reflectionInterval',
     label: 'Reflection Interval',
@@ -97,6 +101,8 @@ function addModuleNumericErrors(errors: WizardValidationErrors, values: Record<s
   if (!values) return;
 
   for (const fieldSpec of MODULE_NUMERIC_FIELDS) {
+    if (values[fieldSpec.moduleKey] !== true) continue;
+
     const config = values[fieldSpec.configKey];
     if (config === undefined) continue;
     if (!isRecordObject(config)) {
