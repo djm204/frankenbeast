@@ -23,7 +23,52 @@ function ActionButton({ label, onClick, variant = 'default' }: {
   return <button type="button" onClick={onClick} className={styles}>{label}</button>;
 }
 
-export function AgentActionBar({ status, hasLinkedRun, agentLabel, onStart, onStop, onRestart, onResume, onDelete, onKill }: AgentActionBarProps) {
+function ConfirmDangerAction({
+  label,
+  title,
+  description,
+  confirmLabel,
+  onConfirm,
+}: {
+  label: string;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog.Root>
+      <AlertDialog.Trigger asChild>
+        <button type="button" className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-beast-danger/20 text-beast-danger hover:bg-beast-danger/30 border border-beast-danger/30">
+          {label}
+        </button>
+      </AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay data-beast-dialog-layer="overlay" data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
+        <AlertDialog.Content
+          data-beast-dialog-layer="content"
+          data-beast-panel-portal="true"
+          className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md"
+        >
+          <AlertDialog.Title className="text-beast-text font-semibold">{title}</AlertDialog.Title>
+          <AlertDialog.Description className="text-beast-muted text-sm mt-2">
+            {description}
+          </AlertDialog.Description>
+          <div className="flex gap-3 mt-4 justify-end">
+            <AlertDialog.Cancel asChild>
+              <button type="button" className="px-3 py-1.5 rounded-lg text-sm bg-beast-control text-beast-text border border-beast-border">Cancel</button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action asChild>
+              <button type="button" onClick={onConfirm} className="px-3 py-1.5 rounded-lg text-sm bg-beast-danger text-white">{confirmLabel}</button>
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
+export function AgentActionBar({ status, hasLinkedRun, agentLabel = 'this tracked agent', onStart, onStop, onRestart, onResume, onDelete, onKill }: AgentActionBarProps) {
   const [forceRestart, setForceRestart] = useState(false);
 
   const isInitOrDispatch = status === 'initializing' || status === 'dispatching';
@@ -45,8 +90,9 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel, onStart, onSt
                 </button>
               </AlertDialog.Trigger>
               <AlertDialog.Portal>
-                <AlertDialog.Overlay data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
+                <AlertDialog.Overlay data-beast-dialog-layer="overlay" data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
                 <AlertDialog.Content
+                  data-beast-dialog-layer="content"
                   data-beast-panel-portal="true"
                   className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md"
                 >
@@ -68,7 +114,13 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel, onStart, onSt
           ) : (
             <ActionButton label="Restart" onClick={onRestart} />
           )}
-          <ActionButton label="Kill" onClick={onKill} variant="danger" />
+          <ConfirmDangerAction
+            label="Kill"
+            title="Kill tracked agent"
+            description={`Kill ${agentLabel}? This interrupts the linked run immediately and cannot be undone from the dashboard.`}
+            confirmLabel="Kill agent"
+            onConfirm={onKill}
+          />
           <label className="flex items-center gap-1.5 text-xs text-beast-subtle ml-2 cursor-pointer">
             <input type="checkbox" checked={forceRestart} onChange={(e) => setForceRestart(e.target.checked)} className="accent-beast-danger" />
             Force
@@ -79,33 +131,13 @@ export function AgentActionBar({ status, hasLinkedRun, agentLabel, onStart, onSt
       {(isStopped || isTerminal) && <ActionButton label="Start" onClick={onStart} />}
       {isStopped && hasLinkedRun && <ActionButton label="Resume" onClick={onResume} />}
       {(isStopped || isTerminal) && (
-        <AlertDialog.Root>
-          <AlertDialog.Trigger asChild>
-            <button type="button" className="px-3 py-1.5 rounded-lg text-sm font-medium bg-beast-danger/20 text-beast-danger hover:bg-beast-danger/30 border border-beast-danger/30">
-              Delete
-            </button>
-          </AlertDialog.Trigger>
-          <AlertDialog.Portal>
-            <AlertDialog.Overlay data-beast-panel-portal="true" className="fixed inset-0 bg-black/50 z-[60]" />
-            <AlertDialog.Content
-              data-beast-panel-portal="true"
-              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-beast-panel border border-beast-border rounded-xl p-6 z-[60] max-w-md"
-            >
-              <AlertDialog.Title className="text-beast-text font-semibold">Delete tracked agent</AlertDialog.Title>
-              <AlertDialog.Description className="text-beast-muted text-sm mt-2">
-                Delete {agentLabel ? <span className="font-medium text-beast-text">{agentLabel}</span> : 'this tracked agent'}? This soft-deletes it and removes it from the dashboard history.
-              </AlertDialog.Description>
-              <div className="flex gap-3 mt-4 justify-end">
-                <AlertDialog.Cancel asChild>
-                  <button type="button" className="px-3 py-1.5 rounded-lg text-sm bg-beast-control text-beast-text border border-beast-border">Cancel</button>
-                </AlertDialog.Cancel>
-                <AlertDialog.Action asChild>
-                  <button type="button" onClick={onDelete} className="px-3 py-1.5 rounded-lg text-sm bg-beast-danger text-white">Delete agent</button>
-                </AlertDialog.Action>
-              </div>
-            </AlertDialog.Content>
-          </AlertDialog.Portal>
-        </AlertDialog.Root>
+        <ConfirmDangerAction
+          label="Delete"
+          title="Delete tracked agent"
+          description={`Delete ${agentLabel}? This soft-deletes it and removes it from the dashboard history.`}
+          confirmLabel="Delete agent"
+          onConfirm={onDelete}
+        />
       )}
     </div>
   );

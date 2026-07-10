@@ -21,6 +21,47 @@ describe('ModelAttribution', () => {
       expect(row.successfulCalls).toBe(1)
       expect(row.failedCalls).toBe(1)
     })
+
+    it.each([
+      ['negative prompt tokens', { promptTokens: -1, completionTokens: 0 }],
+      ['negative completion tokens', { promptTokens: 0, completionTokens: -1 }],
+      ['fractional prompt tokens', { promptTokens: 1.5, completionTokens: 0 }],
+      ['fractional completion tokens', { promptTokens: 0, completionTokens: 1.5 }],
+      ['unsafe prompt tokens', { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 }],
+      ['unsafe completion tokens', { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 }],
+    ])('rejects %s before mutating state', (_name, tokens) => {
+      const attr = new ModelAttribution(DEFAULT_PRICING)
+      attr.record({ model: 'gpt-4o', promptTokens: 100, completionTokens: 50, success: true })
+      const before = attr.report()
+
+      expect(() =>
+        attr.record({
+          model: 'gpt-4o',
+          promptTokens: tokens.promptTokens,
+          completionTokens: tokens.completionTokens,
+          success: false,
+        }),
+      ).toThrow(RangeError)
+
+      expect(attr.report()).toEqual(before)
+    })
+
+    it('rejects token totals that would overflow before mutating state', () => {
+      const attr = new ModelAttribution(DEFAULT_PRICING)
+      attr.record({
+        model: 'gpt-4o',
+        promptTokens: Number.MAX_SAFE_INTEGER,
+        completionTokens: 0,
+        success: true,
+      })
+      const before = attr.report()
+
+      expect(() =>
+        attr.record({ model: 'gpt-4o', promptTokens: 1, completionTokens: 0, success: false }),
+      ).toThrow(RangeError)
+
+      expect(attr.report()).toEqual(before)
+    })
   })
 
   describe('report()', () => {
