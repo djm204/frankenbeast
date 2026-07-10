@@ -1,3 +1,4 @@
+import type { ChangeEventHandler } from 'react';
 import * as Accordion from '@radix-ui/react-accordion';
 import { useBeastStore } from '../../../stores/beast-store';
 import { ProviderModelSelect, type ProviderOption } from '../shared/provider-model-select';
@@ -99,6 +100,22 @@ export function StepModules() {
 const inputClass = 'w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent';
 const labelClass = 'block text-xs font-medium text-beast-muted mb-1.5';
 
+function boundedIntegerChangeHandler(
+  min: number,
+  max: number,
+  update: (value: number) => void,
+): ChangeEventHandler<HTMLInputElement> {
+  return (event) => {
+    const rawValue = event.target.value;
+    if (!/^\d+$/.test(rawValue)) return;
+
+    const parsed = Number(rawValue);
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max) return;
+
+    update(parsed);
+  };
+}
+
 function renderModuleConfig(
   moduleKey: string,
   config: Record<string, unknown>,
@@ -177,7 +194,7 @@ function renderModuleConfig(
               min={1}
               max={50}
               value={(config.maxDagDepth as number) ?? 10}
-              onChange={(e) => update('maxDagDepth', Number(e.target.value))}
+              onChange={boundedIntegerChangeHandler(1, 50, (value) => update('maxDagDepth', value))}
               className={inputClass}
             />
           </div>
@@ -189,7 +206,7 @@ function renderModuleConfig(
               min={1}
               max={20}
               value={(config.parallelTaskLimit as number) ?? 4}
-              onChange={(e) => update('parallelTaskLimit', Number(e.target.value))}
+              onChange={boundedIntegerChangeHandler(1, 20, (value) => update('parallelTaskLimit', value))}
               className={inputClass}
             />
           </div>
@@ -207,7 +224,7 @@ function renderModuleConfig(
               min={1}
               max={10}
               value={(config.maxIterations as number) ?? 3}
-              onChange={(e) => update('maxIterations', Number(e.target.value))}
+              onChange={boundedIntegerChangeHandler(1, 10, (value) => update('maxIterations', value))}
               className={inputClass}
             />
           </div>
@@ -268,7 +285,7 @@ function renderModuleConfig(
               min={10}
               max={600}
               value={(config.reflectionInterval as number) ?? 60}
-              onChange={(e) => update('reflectionInterval', Number(e.target.value))}
+              onChange={boundedIntegerChangeHandler(10, 600, (value) => update('reflectionInterval', value))}
               className={inputClass}
             />
           </div>

@@ -20,6 +20,37 @@ type WorkflowValues = {
   chunkDir?: unknown;
 };
 
+const MODULE_NUMERIC_FIELDS = [
+  {
+    configKey: 'plannerConfig',
+    field: 'maxDagDepth',
+    label: 'Max DAG Depth',
+    min: 1,
+    max: 50,
+  },
+  {
+    configKey: 'plannerConfig',
+    field: 'parallelTaskLimit',
+    label: 'Parallel Task Limit',
+    min: 1,
+    max: 20,
+  },
+  {
+    configKey: 'critiqueConfig',
+    field: 'maxIterations',
+    label: 'Max Iterations',
+    min: 1,
+    max: 10,
+  },
+  {
+    configKey: 'heartbeatConfig',
+    field: 'reflectionInterval',
+    label: 'Reflection Interval',
+    min: 10,
+    max: 600,
+  },
+] as const;
+
 function isBlank(value: unknown): boolean {
   return typeof value !== 'string' || value.trim().length === 0;
 }
@@ -58,6 +89,20 @@ function validateCatalogPrompt(
   }
 }
 
+function addModuleNumericErrors(errors: WizardValidationErrors, values: Record<string, unknown> | undefined): void {
+  if (!values) return;
+
+  for (const fieldSpec of MODULE_NUMERIC_FIELDS) {
+    const config = values[fieldSpec.configKey] as Record<string, unknown> | undefined;
+    if (!config || !(fieldSpec.field in config)) continue;
+
+    const value = config[fieldSpec.field];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < fieldSpec.min || value > fieldSpec.max) {
+      errors[`${fieldSpec.configKey}.${fieldSpec.field}`] = `${fieldSpec.label} must be a whole number from ${fieldSpec.min} to ${fieldSpec.max}.`;
+    }
+  }
+}
+
 export function validateWizardStep(
   step: number,
   stepValues: WizardStepValues,
@@ -87,6 +132,10 @@ export function validateWizardStep(
     for (const prompt of selectedDefinition?.interviewPrompts ?? []) {
       validateCatalogPrompt(errors, values, prompt);
     }
+  }
+
+  if (step === 3) {
+    addModuleNumericErrors(errors, stepValues[3]);
   }
 
   if (step === 7) {
