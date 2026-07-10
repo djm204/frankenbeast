@@ -62,9 +62,6 @@ jobs:
 
       - run: npm run audit:security
 
-      - name: Run deterministic root Vitest suite
-        run: npm run ci:test:root
-
       - name: Run Docker sandbox build smoke test
         run: npm run test:docker:sandbox
 
@@ -79,8 +76,8 @@ jobs:
       - name: Run package build and lint
         run: npx turbo run build lint
 
-      - name: Run package tests
-        run: npm run ci:test:packages
+      - name: Run CI test suite
+        run: npm run test:ci
 
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs
