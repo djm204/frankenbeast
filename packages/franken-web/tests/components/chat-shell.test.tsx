@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatShell, buildInitAction } from '../../src/components/chat-shell.js';
+import { FALLBACK_BEAST_CATALOG } from '../../src/components/beasts/wizard-catalog.js';
 import { useDashboardStore } from '../../src/stores/dashboard-store.js';
 
 const mockListSessions = vi.fn().mockResolvedValue([
@@ -469,6 +470,18 @@ describe('buildInitAction', () => {
       kind: 'chunk-plan',
       command: '/plan --design-doc docs/from-normalized.md',
     });
+  });
+
+  it('keeps every fallback wizard workflow aligned with an init action kind', () => {
+    for (const workflow of FALLBACK_BEAST_CATALOG) {
+      expect(buildInitAction(workflow.id, { workflow: { workflowType: workflow.id } }, undefined).kind).toBe(workflow.id);
+    }
+  });
+
+  it('rejects unsupported wizard definitions instead of coercing them to martin-loop', () => {
+    expect(() => buildInitAction('issues-agent', {
+      workflow: { workflowType: 'issues-agent' },
+    }, undefined)).toThrow(/Unsupported Beast workflow definition/);
   });
 });
 

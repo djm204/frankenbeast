@@ -251,11 +251,15 @@ export function buildInitAction(
     };
   }
 
-  return {
-    kind: 'martin-loop',
-    command: 'martin-loop',
-    config,
-  };
+  if (definitionId === 'martin-loop') {
+    return {
+      kind: 'martin-loop',
+      command: 'martin-loop',
+      config,
+    };
+  }
+
+  throw new Error(`Unsupported Beast workflow definition: ${definitionId}`);
 }
 
 export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
