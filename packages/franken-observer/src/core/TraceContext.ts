@@ -6,7 +6,7 @@ import type {
   TraceValidationOptions,
   TraceValidationResult,
 } from './types.js'
-import { deterministicUuid, now as deterministicNow } from '@franken/types';
+import { deterministicUuid, wallClockNow } from '@franken/types';
 import type { LoopDetector } from '../incident/LoopDetector.js'
 
 export const TraceContext = {
@@ -15,7 +15,7 @@ export const TraceContext = {
       id: deterministicUuid('packages/franken-observer/src/core/TraceContext.ts'),
       goal,
       status: 'active',
-      startedAt: deterministicNow(),
+      startedAt: wallClockNow(),
       spans: [],
     }
   },
@@ -30,7 +30,7 @@ export const TraceContext = {
       parentSpanId: options.parentSpanId,
       name: options.name,
       status: 'active',
-      startedAt: deterministicNow(),
+      startedAt: wallClockNow(),
       metadata: {},
       thoughtBlocks: [],
     }
@@ -42,7 +42,7 @@ export const TraceContext = {
     if (span.status !== 'active') {
       throw new Error(`Cannot end span that is already ${span.status} (id: ${span.id})`)
     }
-    span.endedAt = deterministicNow()
+    span.endedAt = wallClockNow()
     span.durationMs = span.endedAt - span.startedAt
     span.status = options.status ?? 'completed'
     if (options.errorMessage !== undefined) {
@@ -55,12 +55,12 @@ export const TraceContext = {
     if (trace.status !== 'active') {
       throw new Error(`Cannot end trace that is already ${trace.status} (id: ${trace.id})`)
     }
-    trace.endedAt = deterministicNow()
+    trace.endedAt = wallClockNow()
     trace.status = 'completed'
   },
 
   validateTrace(trace: Trace, options: TraceValidationOptions = {}): TraceValidationResult {
-    const now = options.now ?? deterministicNow()
+    const now = options.now ?? wallClockNow()
     const issues = trace.spans
       .filter(span => span.status === 'active')
       .map(span => {
