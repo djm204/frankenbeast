@@ -12,6 +12,10 @@
     "./path-containment": {
       "import": "./dist/path-containment.js",
       "types": "./dist/path-containment.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils/index.js",
+      "types": "./dist/utils/index.d.ts"
     }
   },
   "files": [

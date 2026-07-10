@@ -156,4 +156,22 @@ describe('StepWorkflow', () => {
       expect(useBeastStore.getState().stepValues[1]?.executionMode).toBe('process');
     });
   });
+
+  it('stores process immediately when selecting a catalog beast whose default container runtime is unavailable', () => {
+    render(<StepWorkflow catalog={[{
+      id: 'container-default-beast',
+      label: 'Container Default Beast',
+      description: 'Defaults to an unavailable container runtime',
+      executionModeDefault: 'container',
+      containerRuntime: { available: false, reason: 'Docker daemon is offline' },
+      interviewPrompts: [],
+    }]} />);
+
+    fireEvent.click(screen.getByText('Container Default Beast'));
+
+    expect(useBeastStore.getState().stepValues[1]).toMatchObject({
+      workflowType: 'container-default-beast',
+      executionMode: 'process',
+    });
+  });
 });

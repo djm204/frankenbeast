@@ -83,7 +83,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRunt
     }
 
     clearValidationErrors(wizardStep);
-    onLaunch(buildWizardLaunchConfig(stepValues, catalog));
+    onLaunch(buildWizardLaunchConfig(stepValues, catalog, containerRuntime));
   }
 
   function handleNext() {

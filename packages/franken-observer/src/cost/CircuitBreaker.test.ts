@@ -29,6 +29,15 @@ describe('CircuitBreaker', () => {
       expect(result.limitUsd).toBe(0.50)
       expect(result.spendUsd).toBe(0.75)
     })
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative values', -0.01],
+    ])('throws RangeError for invalid spendUsd: %s', (_label, spendUsd) => {
+      expect(() => breaker.check(spendUsd)).toThrow(RangeError)
+      expect(() => breaker.check(spendUsd)).toThrow('spendUsd must be a finite non-negative number')
+    })
   })
 
   describe('HITL event emission', () => {
@@ -106,6 +115,15 @@ describe('CircuitBreaker', () => {
       const strict = new CircuitBreaker({ limitUsd: 0.01 })
       expect(strict.check(0.011).tripped).toBe(true)
       expect(strict.check(0.010).tripped).toBe(false)
+    })
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative values', -0.01],
+    ])('throws RangeError for invalid limitUsd: %s', (_label, limitUsd) => {
+      expect(() => new CircuitBreaker({ limitUsd })).toThrow(RangeError)
+      expect(() => new CircuitBreaker({ limitUsd })).toThrow('limitUsd must be a finite non-negative number')
     })
   })
 })

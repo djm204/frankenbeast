@@ -8,7 +8,7 @@ import { UnknownTrackedAgentError } from '../../beasts/errors.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';
-import { BeastRunService } from '../../beasts/services/beast-run-service.js';
+import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -70,6 +70,17 @@ function attemptsForContainerRun(run: BeastRun | undefined, deps: BeastRoutesDep
 
 function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRunResponse | undefined {
   return runWithContainerFields(run, attemptsForContainerRun(run, deps));
+}
+
+async function requireKnownRunAction(runId: string, action: () => Promise<BeastRun>): Promise<BeastRun> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof UnknownBeastRunError) {
+      throw new HttpError(404, 'BEAST_RUN_NOT_FOUND', `Beast run '${runId}' was not found`);
+    }
+    throw error;
+  }
 }
 
 const ModuleConfigSchema = z.object({
@@ -209,22 +220,26 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   });
 
   app.post('/v1/beasts/runs/:runId/start', async (c) => {
-    const run = await deps.runs.start(c.req.param('runId'), 'operator');
+    const runId = c.req.param('runId');
+    const run = await requireKnownRunAction(runId, () => deps.runs.start(runId, 'operator'));
     return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/stop', async (c) => {
-    const run = await deps.runs.stop(c.req.param('runId'), 'operator');
+    const runId = c.req.param('runId');
+    const run = await requireKnownRunAction(runId, () => deps.runs.stop(runId, 'operator'));
     return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/kill', async (c) => {
-    const run = await deps.runs.kill(c.req.param('runId'), 'operator');
+    const runId = c.req.param('runId');
+    const run = await requireKnownRunAction(runId, () => deps.runs.kill(runId, 'operator'));
     return c.json({ data: runResponse(run, deps) });
   });
 
   app.post('/v1/beasts/runs/:runId/restart', async (c) => {
-    const run = await deps.runs.restart(c.req.param('runId'), 'operator');
+    const runId = c.req.param('runId');
+    const run = await requireKnownRunAction(runId, () => deps.runs.restart(runId, 'operator'));
     return c.json({ data: runResponse(run, deps) });
   });
 

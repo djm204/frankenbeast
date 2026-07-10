@@ -349,6 +349,26 @@ describe('beast routes', () => {
     });
   });
 
+  it.each(['start', 'stop', 'kill', 'restart'] as const)(
+    'returns a structured 404 when the %s action targets an unknown run',
+    async (action) => {
+      const { app, operatorToken } = createBeastApp();
+
+      const response = await app.request(`/v1/beasts/runs/missing-run-id/${action}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        error: {
+          code: 'BEAST_RUN_NOT_FOUND',
+          message: "Beast run 'missing-run-id' was not found",
+        },
+      });
+    },
+  );
+
   it('supports interview start and answer flow', async () => {
     const { app, operatorToken } = createBeastApp();
     const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
