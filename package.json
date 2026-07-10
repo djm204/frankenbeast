@@ -31,7 +31,7 @@
     "test:root": "vitest run",
     "test:docker:sandbox": "node scripts/run-docker-sandbox-smoke.mjs",
     "test:root:watch": "vitest",
-    "test:coverage": "npm run test:coverage:root && turbo run test:coverage --filter=\"./packages/*\" --concurrency=1 -- --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0",
+    "test:coverage": "npm run test:coverage:root && turbo run test:coverage --filter=\"./packages/*\" --concurrency=1",
     "test:coverage:root": "vitest run --coverage"
   },
   "devDependencies": {
