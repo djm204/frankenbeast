@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — W3C tracestate sanitization before serialization
+- `parseTracestate`/`formatTracestate` should enforce W3C key/value constraints and member limits before exposing user-controlled values in headers.
+- Treat malformed list entries (invalid key grammar, control characters, commas, duplicate keys, oversized members, and member-count overflow) as drop/ignore cases during parse and emit only sanitized key/value pairs on format/inject.
+- For issue-1116, adding targeted regression tests for these edge cases prevented malformed `tracestate` strings from entering outbound headers in observer propagation paths.
+
 ## 2026-07-10 — Observer replay timestamp validation
 - Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant regressions (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
