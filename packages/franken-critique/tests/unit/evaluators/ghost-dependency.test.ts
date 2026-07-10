@@ -141,6 +141,7 @@ describe('GhostDependencyEvaluator', () => {
       const dataUrl = await import('data:text/javascript,export default 1');
       const browserUrl = await import('https://cdn.example.test/plugin.mjs');
       const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
+      const importMap = await import('#internal/tool');
       const fs = await import('node:fs/promises');
     `;
     const result = await evaluator.evaluate(createInput(content));
@@ -181,6 +182,11 @@ describe('GhostDependencyEvaluator', () => {
       type GhostModule = typeof import('ghost-package');
       const p: Promise<import('ghost-package').Ghost> = Promise.resolve({} as never);
       const unionType: Promise<string | import('ghost-package').Ghost> = Promise.resolve({} as never);
+      const commaType = value as Foo<Bar, import('ghost-package').Ghost>;
+      const multiField: { name: string, plugin: import('ghost-package').Plugin } = { name: 'x' };
+      const conditional: T extends true ? import('ghost-package').Ghost : string = fallback;
+      function generic<T extends import('ghost-package').Ghost>() {}
+      class Box<T = import('ghost-package').Ghost> {}
       const cast = value as import('ghost-package').Ghost;
       function typedParam(dep?: import('ghost-package').Ghost) {}
       class TypedField { dep?: import('ghost-package').Ghost }
@@ -202,18 +208,23 @@ describe('GhostDependencyEvaluator', () => {
       const logicalOr = fallback || import('logical-or-ghost');
       type T = {}
       void import('void-after-type-ghost');
+      type U = {}
+      (async () => import('iife-after-type-ghost'))();
+      async function awaited(): Promise<void> { await import('awaited-function-ghost'); }
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(5);
+    expect(result.findings).toHaveLength(7);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
         expect.stringContaining('logical-and-ghost'),
         expect.stringContaining('logical-or-ghost'),
         expect.stringContaining('void-after-type-ghost'),
+        expect.stringContaining('iife-after-type-ghost'),
+        expect.stringContaining('awaited-function-ghost'),
         expect.stringContaining('switch-case-ghost'),
       ]),
     );

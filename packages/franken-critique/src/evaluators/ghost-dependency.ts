@@ -77,6 +77,7 @@ function isLocalImportSpecifier(specifier: string): boolean {
   return (
     specifier.startsWith('.') ||
     specifier.startsWith('/') ||
+    specifier.startsWith('#') ||
     specifier.startsWith('file:') ||
     /^[A-Za-z][A-Za-z0-9+.-]*:/.test(specifier) ||
     /^[A-Za-z]:/.test(specifier)
@@ -289,6 +290,13 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
   if (/(?:\bas\s*|\bsatisfies\s*)$/.test(prefix)) return true;
 
   const trimmed = prefix.trimEnd();
+  if (
+    /(?:,|\bextends\b|=)$/.test(trimmed) &&
+    trimmed.lastIndexOf('<') > trimmed.lastIndexOf('>')
+  ) {
+    return true;
+  }
+
   const operator = trimmed.at(-1);
   if (operator === '<') return true;
 
@@ -303,7 +311,7 @@ function isInsideTypeDeclaration(prefix: string): boolean {
     !/\n\s*(?:const|let|var|await|return|throw|if|for|while|switch|try|function|class)\b/.test(
       prefix,
     ) &&
-    !/\}\s*\n\s*(?:void\s*$|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
+    !/\}\s*\n\s*(?:void\s*$|\(|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
       prefix,
     )
   );
@@ -315,12 +323,14 @@ function isInsideTypeAnnotation(
   importIndex: number,
   isTernaryBranch: boolean,
 ): boolean {
-  if (isTernaryBranch) return false;
+  if (isTernaryBranch && !isInsideConditionalType(prefix)) return false;
 
   const annotationIndex = prefix.lastIndexOf(':');
   if (annotationIndex === -1) return false;
 
   const beforeAnnotation = prefix.slice(0, annotationIndex);
+  if (/:\s*\{[^}]*$/.test(beforeAnnotation)) return true;
+
   const outerAnnotationIndex = beforeAnnotation.lastIndexOf(':');
   if (outerAnnotationIndex !== -1) {
     const outerAnnotationSuffix = beforeAnnotation.slice(outerAnnotationIndex + 1);
@@ -335,12 +345,19 @@ function isInsideTypeAnnotation(
 
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (/[=;]/.test(annotationSuffix)) return false;
-  if (/^\s*(?:return|throw|void)\b/.test(annotationSuffix)) return false;
-  if (/\{[\s\S]*\b(?:return|throw|void|case|default)\b/.test(annotationSuffix)) {
+  if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
+  if (/\{[\s\S]*\b(?:return|throw|void|await|case|default)\b/.test(annotationSuffix)) {
     return false;
   }
 
   return !isLikelyObjectLiteralValue(content, importIndex);
+}
+
+function isInsideConditionalType(prefix: string): boolean {
+  const questionIndex = prefix.lastIndexOf('?');
+  if (questionIndex === -1) return false;
+
+  return /\bextends\b/.test(prefix.slice(0, questionIndex));
 }
 
 function hasTernaryBranchMarker(prefix: string): boolean {
