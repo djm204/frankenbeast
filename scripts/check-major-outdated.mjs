@@ -98,7 +98,7 @@ function normalizeIdentity(identity) {
 }
 
 function baselineKey(entry) {
-  return `${entry.name}:${normalizeIdentity(entry.location ?? entry.dependent ?? '<root>')}:${entry.currentMajor}->${entry.latestMajor}`;
+  return `${entry.name}:${normalizeIdentity(entry.dependent ?? '<root>')}:${normalizeIdentity(entry.location ?? '<unknown-location>')}:${entry.currentMajor}->${entry.latestMajor}`;
 }
 
 function readBaseline(path) {
@@ -127,12 +127,13 @@ function readBaseline(path) {
         console.error(`Invalid major-outdated baseline versions for ${entry.name}.`);
         process.exit(2);
       }
-      const identity = entry.location ?? entry.dependent ?? '<root>';
-      if (typeof identity !== 'string' || !identity.trim()) {
+      const dependent = entry.dependent ?? '<root>';
+      const location = entry.location ?? '<unknown-location>';
+      if (typeof dependent !== 'string' || !dependent.trim() || typeof location !== 'string' || !location.trim()) {
         console.error(`Invalid major-outdated baseline identity for ${entry.name}.`);
         process.exit(2);
       }
-      return baselineKey({ name: entry.name, location: identity, currentMajor, latestMajor });
+      return baselineKey({ name: entry.name, dependent, location, currentMajor, latestMajor });
     }),
   );
 }
@@ -190,8 +191,9 @@ if (unapprovedGaps.length === 0) {
 
 console.error(`FAIL: ${unapprovedGaps.length} direct dependenc${unapprovedGaps.length === 1 ? 'y is' : 'ies are'} behind the latest major release without a baseline entry:`);
 for (const gap of unapprovedGaps) {
-  const where = gap.location ? ` (${gap.location})` : '';
-  console.error(`- ${gap.name}${where}: current ${gap.current}, wanted ${gap.wanted ?? 'unknown'}, latest ${gap.latest}`);
+  const where = [gap.dependent, gap.location].filter(Boolean).join(' at ');
+  const suffix = where ? ` (${where})` : '';
+  console.error(`- ${gap.name}${suffix}: current ${gap.current}, wanted ${gap.wanted ?? 'unknown'}, latest ${gap.latest}`);
 }
 console.error('\nUpdate these dependencies or add an intentional baseline entry before merging.');
 process.exit(1);

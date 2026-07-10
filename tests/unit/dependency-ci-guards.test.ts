@@ -82,10 +82,11 @@ describe('dependency CI guards for issue #1414', () => {
         wanted: '18.3.1',
         latest: '19.2.7',
         location: 'packages/franken-web/node_modules/react',
+        dependent: 'franken-web',
       },
     };
 
-    const result = runOutdatedGuard(report, [{ name: 'react', location: 'packages/franken-web/node_modules/react', currentMajor: 18, latestMajor: 19 }]);
+    const result = runOutdatedGuard(report, [{ name: 'react', dependent: 'franken-web', location: 'packages/franken-web/node_modules/react', currentMajor: 18, latestMajor: 19 }]);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('baseline-approved major gap');
@@ -99,21 +100,24 @@ describe('dependency CI guards for issue #1414', () => {
             current: '18.3.1',
             wanted: '18.3.1',
             latest: '19.2.7',
-            location: 'packages/franken-web/node_modules/react',
+            location: 'node_modules/react',
+            dependent: 'franken-web',
           },
           {
             current: '18.3.1',
             wanted: '18.3.1',
             latest: '19.2.7',
-            location: 'packages/franken-new/node_modules/react',
+            location: 'node_modules/react',
+            dependent: 'franken-new',
           },
         ],
       },
-      [{ name: 'react', location: 'packages/franken-web/node_modules/react', currentMajor: 18, latestMajor: 19 }],
+      [{ name: 'react', dependent: 'franken-web', location: 'node_modules/react', currentMajor: 18, latestMajor: 19 }],
     );
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('packages/franken-new/node_modules/react');
+    expect(result.stderr).toContain('franken-new');
+    expect(result.stderr).toContain('node_modules/react');
   });
 
   it('passes when dependencies are only behind within their current major', () => {
