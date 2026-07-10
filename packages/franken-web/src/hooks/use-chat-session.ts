@@ -7,7 +7,13 @@ import {
   type TokenTotals,
   type TranscriptMessage,
 } from '../lib/api';
-import { deterministicUuid, isoNow, seededRandom } from '@franken/types';
+import {
+  ServerSocketEventSchema,
+  type ServerSocketEvent,
+  deterministicUuid,
+  isoNow,
+  seededRandom,
+} from '@franken/types';
 
 export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'offline' | 'error';
@@ -73,68 +79,6 @@ export interface UseChatSessionResult {
   tier: string | null;
   tokenTotals: TokenTotals;
 }
-
-type ServerSocketEvent =
-  | {
-    type: 'session.ready';
-    sessionId: string;
-    projectId: string;
-    transcript: TranscriptMessage[];
-    state: string;
-    pendingApproval?: PendingApproval | null;
-  }
-  | {
-    type: 'message.accepted' | 'message.delivered';
-    clientMessageId: string;
-    timestamp: string;
-  }
-  | {
-    type: 'message.read';
-    clientMessageId?: string;
-    messageId?: string;
-    timestamp: string;
-  }
-  | { type: 'assistant.typing.start'; timestamp: string }
-  | {
-    type: 'assistant.message.delta';
-    messageId: string;
-    chunk: string;
-    modelTier?: string;
-  }
-  | {
-    type: 'assistant.message.complete';
-    messageId: string;
-    content: string;
-    modelTier?: string;
-    timestamp: string;
-  }
-  | {
-    type: 'turn.execution.start' | 'turn.execution.progress' | 'turn.execution.complete';
-    data?: Record<string, unknown>;
-    timestamp: string;
-  }
-  | {
-    type: 'turn.approval.requested';
-    description: string;
-    timestamp: string;
-    tool?: string;
-    command?: string;
-    risk?: string;
-    affectedFiles?: string[];
-    sessionId?: string;
-  }
-  | {
-    type: 'turn.approval.resolved';
-    approved: boolean;
-    timestamp: string;
-  }
-  | {
-    type: 'turn.error';
-    code: string;
-    message: string;
-    timestamp: string;
-  }
-  | { type: 'pong'; timestamp: string };
 
 const EMPTY_TOKEN_TOTALS: TokenTotals = {
   cheap: 0,
@@ -621,6 +565,19 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       refreshSession();
     }
 
+    function handleProtocolError(message: string) {
+      setStatus('error');
+      setConnectionStatus('error');
+      failAllPendingSends(new Error(message), false);
+      addErrorBanner(makeBanner(
+        'Chat protocol error',
+        message,
+        'reconnect',
+        'Reconnect chat',
+        'invalid_socket_event',
+      ));
+    }
+
     const socket = new WebSocket(
       clientRef.current.socketUrl(sessionId, socketToken),
       clientRef.current.socketProtocols(socketToken),
@@ -633,13 +590,23 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onmessage = (event) => {
-      let payload: ServerSocketEvent;
+      let decoded: unknown;
 
       try {
-        payload = JSON.parse(event.data as string) as ServerSocketEvent;
+        decoded = JSON.parse(event.data as string);
       } catch {
+        handleProtocolError('The chat server sent invalid JSON over the WebSocket. Reconnect to refresh the session state.');
         return;
       }
+
+      const parsed = ServerSocketEventSchema.safeParse(decoded);
+      if (!parsed.success) {
+        const detail = parsed.error.issues[0]?.message ?? 'The event did not match the expected schema.';
+        handleProtocolError(`The chat server sent an invalid event: ${detail}`);
+        return;
+      }
+
+      const payload = parsed.data;
 
       switch (payload.type) {
         case 'session.ready':

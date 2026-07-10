@@ -61,8 +61,12 @@ class MockWebSocket {
   }
 
   message(payload: unknown) {
+    this.rawMessage(JSON.stringify(payload));
+  }
+
+  rawMessage(data: string) {
     this.onmessage?.(
-      new MessageEvent('message', { data: JSON.stringify(payload) }),
+      new MessageEvent('message', { data }),
     );
   }
 
@@ -252,6 +256,35 @@ describe('useChatSession', () => {
     expect(result.current.connectionStatus).toBe('connected');
   });
 
+  it.each([
+    ['invalid JSON', (socket: MockWebSocket) => socket.rawMessage('{not json')],
+    ['malformed known event', (socket: MockWebSocket) => socket.message({ type: 'assistant.message.delta', messageId: 'assistant-1' })],
+    ['unknown event type', (socket: MockWebSocket) => socket.message({ type: 'session.unknown', timestamp: '2026-03-09T00:00:01Z' })],
+  ])('surfaces %s as a recoverable websocket protocol error without mutating chat state', async (_name, sendInvalidEvent) => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      sendInvalidEvent(socket);
+    });
+
+    expect(result.current.connectionStatus).toBe('error');
+    expect(result.current.status).toBe('error');
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.activity).toHaveLength(0);
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Chat protocol error',
+      action: 'reconnect',
+      code: 'invalid_socket_event',
+    });
+  });
+
   it('falls back to HTTP send when the websocket is not ready', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -269,6 +302,43 @@ describe('useChatSession', () => {
     expect(mockGetSession).toHaveBeenCalledWith('chat-1');
     expect(socket.sent).toHaveLength(0);
     expect(result.current.status).toBe('idle');
+  });
+
+  it('rejects malformed accepted events instead of resolving pending websocket sends', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('Wait for malformed ack');
+    });
+    const clientMessageId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.message({
+        type: 'message.accepted',
+        timestamp: '2026-03-09T00:00:01Z',
+      });
+    });
+
+    await expect(sendPromise).rejects.toThrow('invalid event');
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: clientMessageId,
+      receipt: 'failed',
+      canRetry: false,
+    }));
+    expect(result.current.errorBanners[0]).toMatchObject({
+      action: 'reconnect',
+      code: 'invalid_socket_event',
+    });
   });
 
   it('refreshes approval metadata when an HTTP fallback send is blocked', async () => {
@@ -428,6 +498,7 @@ describe('useChatSession', () => {
       socket.message({
         type: 'message.accepted',
         clientMessageId: retryId,
+        sessionId: 'chat-1',
         timestamp: '2026-03-09T00:00:02Z',
       });
     });
@@ -504,7 +575,7 @@ describe('useChatSession', () => {
     });
     const firstId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: firstId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: firstId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await firstSend;
@@ -516,7 +587,7 @@ describe('useChatSession', () => {
     });
     const secondId = (JSON.parse(socket.sent[1] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: secondId, timestamp: '2026-03-09T00:00:02Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: secondId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:02Z' });
     });
     await act(async () => {
       await secondSend;
@@ -556,7 +627,7 @@ describe('useChatSession', () => {
     });
     const firstId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: firstId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: firstId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await firstSend;
@@ -616,7 +687,7 @@ describe('useChatSession', () => {
     });
     const slashId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: slashId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: slashId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await slashSend;
@@ -672,7 +743,7 @@ describe('useChatSession', () => {
     }));
 
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId, timestamp: '2026-03-09T00:00:02Z' });
+      socket.message({ type: 'message.accepted', clientMessageId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:02Z' });
     });
 
     expect(result.current.messages).toContainEqual(expect.objectContaining({
@@ -746,7 +817,7 @@ describe('useChatSession', () => {
     const clientMessageId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
 
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await sendPromise;
@@ -1061,6 +1132,7 @@ describe('useChatSession', () => {
       socket.message({
         type: 'message.accepted',
         clientMessageId: outbound.clientMessageId,
+        sessionId: 'chat-1',
         timestamp: '2026-03-09T00:00:01Z',
       });
     });
