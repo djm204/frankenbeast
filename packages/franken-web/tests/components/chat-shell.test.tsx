@@ -845,6 +845,53 @@ describe('ChatShell', () => {
     expect(mockListAgents).toHaveBeenCalled();
   });
 
+  it('keeps deleted audit rows from being auto-selected on the beasts page', async () => {
+    window.location.hash = '#/beasts';
+    const deletedAgent = {
+      id: 'agent-deleted',
+      definitionId: 'chunk-plan',
+      status: 'deleted',
+      source: 'chat',
+      createdByUser: 'chat-session:sess-1',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/deleted.md',
+        config: { designDocPath: 'docs/plans/deleted.md' },
+        chatSessionId: 'sess-1',
+      },
+      initConfig: { designDocPath: 'docs/plans/deleted.md' },
+      chatSessionId: 'sess-1',
+      createdAt: '2026-03-11T00:00:00.000Z',
+      updatedAt: '2026-03-11T00:00:03.000Z',
+    };
+    const activeAgent = {
+      ...deletedAgent,
+      id: 'agent-active',
+      status: 'stopped',
+      updatedAt: '2026-03-11T00:00:02.000Z',
+    };
+    mockListAgents.mockResolvedValue([deletedAgent, activeAgent]);
+    mockGetAgent.mockImplementation(async (agentId: string) => ({
+      agent: agentId === 'agent-active' ? activeAgent : deletedAgent,
+      events: [],
+    }));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('agent-deleted')).toBeDefined();
+      expect(screen.getByText('agent-active')).toBeDefined();
+      expect(mockGetAgent).toHaveBeenCalledWith('agent-active');
+    });
+    expect(mockGetAgent).not.toHaveBeenCalledWith('agent-deleted');
+  });
+
   it('applies Beast SSE status and log updates incrementally', async () => {
     window.location.hash = '#/beasts';
     render(

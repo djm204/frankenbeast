@@ -449,7 +449,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         setBeastAgents(agents);
         setBeastRuns(runs);
         setBeastContainerRuntime(containerRuntime);
-        const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? agents[0]?.id ?? null : null);
+        const autoSelectedAgentId = agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
+        const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
         setSelectedBeastAgentId(currentAgentId);
 
         if (currentAgentId) {
@@ -1004,7 +1005,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onDelete={(agentId) => {
               if (!beastClient) return;
               void beastClient.deleteAgent(agentId).then(() => {
+                shouldAutoSelectBeastAgentRef.current = false;
+                selectedBeastAgentIdRef.current = null;
                 setSelectedBeastAgentId((current) => current === agentId ? null : current);
+                setBeastAgentDetail((current) => current?.agent.id === agentId ? null : current);
                 setBeastRefreshNonce((current) => current + 1);
               }).catch((err) => {
                 setBeastError(err instanceof Error ? err.message : 'Unable to delete tracked agent.');
