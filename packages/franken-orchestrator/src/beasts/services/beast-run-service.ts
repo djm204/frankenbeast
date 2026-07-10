@@ -62,10 +62,59 @@ export class BeastRunService {
   async start(runId: string, _actor: string): Promise<BeastRun> {
     const run = this.requireRun(runId);
     const definition = this.getDefinitionOrThrow(run.definitionId);
-    await this.executorFor(run).start(run, definition);
-    const updated = this.requireRun(runId);
-    this.syncTrackedAgent(updated);
-    return updated;
+    try {
+      await this.executorFor(run).start(run, definition);
+      const updated = this.requireRun(runId);
+      this.syncTrackedAgent(updated);
+      return updated;
+    } catch (error) {
+      const failedAt = isoNow();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const { failedRun, publications } = this.repository.transaction(() => {
+        const updatedRun = this.repository.updateRun(run.id, {
+          status: 'failed',
+          finishedAt: failedAt,
+          stopReason: 'start_failed',
+        });
+        this.repository.appendEvent(run.id, {
+          type: 'run.start_failed',
+          payload: { error: errorMessage },
+          createdAt: failedAt,
+        });
+
+        const pendingPublications: Array<Omit<BeastSseEvent, 'id'>> = [];
+        if (updatedRun.trackedAgentId) {
+          this.repository.updateTrackedAgent(updatedRun.trackedAgentId, {
+            status: 'failed',
+            dispatchRunId: updatedRun.id,
+            updatedAt: failedAt,
+          });
+          pendingPublications.push({
+            type: 'agent.status',
+            data: { agentId: updatedRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
+          });
+          const failedEvent = {
+            level: 'error' as const,
+            type: 'agent.dispatch.failed',
+            message: `Failed to start Beast run ${updatedRun.id}`,
+            payload: { runId: updatedRun.id, error: errorMessage },
+            createdAt: failedAt,
+          };
+          this.repository.appendTrackedAgentEvent(updatedRun.trackedAgentId, failedEvent);
+          pendingPublications.push({
+            type: 'agent.event',
+            data: { agentId: updatedRun.trackedAgentId, event: failedEvent },
+          });
+        }
+
+        return { failedRun: updatedRun, publications: pendingPublications };
+      });
+      await this.appendLogSafely(run.id, 'system', 'stderr', `start_failed: ${errorMessage}`);
+      for (const publication of publications) {
+        this.serviceOptions.eventBus?.publish(publication);
+      }
+      return failedRun;
+    }
   }
 
   async stop(runId: string, _actor: string): Promise<BeastRun> {
@@ -117,6 +166,19 @@ export class BeastRunService {
       await this.stop(runId, actor);
     }
     return this.start(runId, actor);
+  }
+
+  private async appendLogSafely(
+    runId: string,
+    attemptId: string,
+    stream: 'stdout' | 'stderr',
+    message: string,
+  ): Promise<void> {
+    try {
+      await this.logs.append(runId, attemptId, stream, message);
+    } catch {
+      // Logging is best-effort and must not turn a persisted run into an API failure.
+    }
   }
 
   private executorFor(run: BeastRun) {
