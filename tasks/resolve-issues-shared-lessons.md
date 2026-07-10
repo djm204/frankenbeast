@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — Codex usage-limit handling in issue-to-PR flow
+- If `@codex review` immediately responds with usage-limit, treat it as a hard blocker for the merge gate and stop extra polling. Resume review only after credits are restored and a fresh trigger can produce a current-head clean response.
+
 ## 2026-07-10 — Observer replay timestamp validation
 - Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant regressions (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
