@@ -27,6 +27,28 @@ describe('Turborepo configuration', () => {
       expect(testTask.dependsOn).toBeUndefined();
     });
 
+    it('hashes cross-package Vitest source aliases and root setup scripts for cached test tasks', () => {
+      const turbo = readJson('turbo.json');
+      const testTask = turbo.tasks?.test;
+      expect(testTask).toBeDefined();
+      expect(testTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/scripts/vitest-*.ts',
+          '$TURBO_ROOT$/packages/*/src/**',
+        ]),
+      );
+    });
+
+    it('hashes suite-selection environment variables for cached test tasks', () => {
+      const turbo = readJson('turbo.json');
+      const testTask = turbo.tasks?.test;
+      expect(testTask).toBeDefined();
+      expect(testTask.env).toEqual(
+        expect.arrayContaining(['INTEGRATION', 'E2E', 'EVAL', 'DOCKER_BUILD']),
+      );
+    });
+
     it('defines test:ci task with package build dependency for CI ordering', () => {
       const turbo = readJson('turbo.json');
       const testCiTask = turbo.tasks?.['test:ci'];
