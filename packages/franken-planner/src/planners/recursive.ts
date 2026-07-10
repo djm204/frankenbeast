@@ -75,7 +75,16 @@ export class RecursivePlanner implements PlanningStrategy {
         const subGraph = this._buildSubGraph(result.newTasks, completedTaskIdsForExpansion);
         const subResult = await this._exec(subGraph, context, depth + 1, completedTaskIdsForExpansion);
         if (subResult.status !== 'completed') {
-          return subResult;
+          if (subResult.status !== 'failed') return subResult;
+          return {
+            ...subResult,
+            taskResults: [...allResults, result, ...subResult.taskResults],
+            recoveryGraph: subResult.recoveryGraph ?? subGraph,
+            recoveryContinuationGraphs: [
+              ...(subResult.recoveryContinuationGraphs ?? []),
+              graph,
+            ],
+          };
         }
         allResults.push(result, ...subResult.taskResults);
       } else {
