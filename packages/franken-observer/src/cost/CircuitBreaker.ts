@@ -38,7 +38,12 @@ export class CircuitBreaker {
       if (!this.tripped) {
         this.tripped = true
         for (const handler of this.handlers) {
-          handler(result)
+          try {
+            handler(result)
+          } catch {
+            // Preserve the circuit breaker's non-blocking contract: listener
+            // failures are isolated so every registered handler is attempted.
+          }
         }
       }
     } else {
