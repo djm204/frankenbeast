@@ -67,6 +67,13 @@ function withValidTarget(
   }
 }
 
+function assertKnownRunningTarget(services: Array<{ id: string }>, target: string): void {
+  if (target === 'all' || services.some((service) => service.id === target)) {
+    return;
+  }
+  throw new HttpError(400, 'UNKNOWN_NETWORK_SERVICE_TARGET', `Unknown network service target: ${target}`);
+}
+
 export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   const app = new Hono();
 
@@ -140,15 +147,8 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.post('/v1/network/stop', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
-    const config = deps.getConfig();
-    withValidTarget(
-      resolveNetworkServices(config, {
-        repoRoot: deps.root,
-        configFile: deps.configFile,
-        allowTrustedProviderCommandOverrides: deps.allowTrustedProviderCommandOverrides,
-      }),
-      body.target,
-    );
+    const status = await supervisor.status();
+    assertKnownRunningTarget(status.services, body.target);
     await supervisor.stop(body.target);
     return c.json({ data: { ok: true } });
   });
