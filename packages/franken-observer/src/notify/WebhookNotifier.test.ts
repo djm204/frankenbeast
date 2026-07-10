@@ -6,6 +6,8 @@ import { LoopDetector } from '../incident/LoopDetector.js'
 describe('WebhookNotifier', () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
+  const drainAsync = () => Promise.resolve()
+
   beforeEach(() => {
     mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
   })
@@ -125,8 +127,7 @@ describe('WebhookNotifier', () => {
         void notifier.send({ type: 'circuit-breaker', ...result })
       })
       breaker.check(1.0) // below limit
-      // Give the event loop a tick — no delivery should happen
-      await new Promise(r => setTimeout(r, 0))
+      await drainAsync()
       expect(mockFetch).not.toHaveBeenCalled()
     })
   })
