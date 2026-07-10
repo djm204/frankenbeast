@@ -257,6 +257,25 @@ describe('SqliteBrain', () => {
       const results = brain.episodic.recall('test event', 1);
       expect(results).toHaveLength(1);
     });
+
+    it('recall() handles very large keyword sets without exceeding SQLite query limits', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'early match kw0000',
+        createdAt: '2026-07-10T00:00:00.000Z',
+      }));
+      brain.episodic.record(makeEvent({
+        summary: 'late match kw1199',
+        createdAt: '2026-07-10T00:01:00.000Z',
+      }));
+
+      const query = Array.from({ length: 1200 }, (_, i) => `kw${String(i).padStart(4, '0')}`).join(' ');
+
+      expect(() => brain.episodic.recall(query, 10)).not.toThrow();
+      expect(brain.episodic.recall(query, 10).map(event => event.summary)).toEqual([
+        'late match kw1199',
+        'early match kw0000',
+      ]);
+    });
   });
 
   describe('recovery memory', () => {
