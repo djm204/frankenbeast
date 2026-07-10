@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
 import { atomicWriteFileSync, readJsonFileOrQuarantine } from './atomic-file.js';
-import { isoNow } from '@franken/types';
+import { wallClockNow } from '@franken/types';
 
 export class FileChunkSessionSnapshotStore {
   constructor(private readonly rootDir: string) {}
