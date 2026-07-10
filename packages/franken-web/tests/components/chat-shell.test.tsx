@@ -655,6 +655,26 @@ describe('ChatShell', () => {
     });
   });
 
+  it('surfaces initial network status load failures before config settles', async () => {
+    window.location.hash = '#/network';
+    const slowConfig = deferred<{ network: { mode: 'secure'; secureBackend: 'local-encrypted' }; chat: { model: string; enabled: boolean; host: string; port: number } }>();
+    mockNetworkGetStatus.mockRejectedValueOnce(new Error('status endpoint unavailable'));
+    mockNetworkGetConfig.mockReturnValueOnce(slowConfig.promise);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Unable to load network status: status endpoint unavailable');
+    });
+
+    act(() => {
+      slowConfig.resolve({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+    });
+  });
+
   it('fetches network logs when a service is selected on the Network page', async () => {
     window.location.hash = '#/network';
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);

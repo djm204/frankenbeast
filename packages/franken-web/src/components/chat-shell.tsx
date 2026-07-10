@@ -376,22 +376,26 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   useEffect(() => {
     const client = new NetworkApiClient(baseUrl);
     const statusRequestId = ++networkStatusRequestIdRef.current;
-    void Promise.allSettled([client.getStatus(), client.getConfig()]).then(([statusResult, configResult]) => {
-      if (statusRequestId === networkStatusRequestIdRef.current) {
-        if (statusResult.status === 'fulfilled') {
-          setNetworkStatus(statusResult.value);
+    void client.getStatus()
+      .then((nextStatus) => {
+        if (statusRequestId === networkStatusRequestIdRef.current) {
+          setNetworkStatus(nextStatus);
           networkStatusSuccessRequestIdRef.current = statusRequestId;
           networkStatusSettledRequestIdRef.current = statusRequestId;
           setNetworkError(null);
-        } else {
-          networkStatusSettledRequestIdRef.current = statusRequestId;
-          setNetworkError(`Unable to load network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
         }
-      }
-      if (configResult.status === 'fulfilled') {
-        setNetworkConfig(configResult.value);
-      }
-    });
+      })
+      .catch((error: unknown) => {
+        if (statusRequestId === networkStatusRequestIdRef.current) {
+          networkStatusSettledRequestIdRef.current = statusRequestId;
+          setNetworkError(`Unable to load network status: ${networkErrorMessage(error, 'Request failed.')}`);
+        }
+      });
+    void client.getConfig()
+      .then((nextConfig) => {
+        setNetworkConfig(nextConfig);
+      })
+      .catch(() => undefined);
   }, [baseUrl]);
 
   const composerSessionKey = preserveComposerDraft
