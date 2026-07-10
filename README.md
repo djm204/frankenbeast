@@ -13,6 +13,20 @@
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
 
+## 🚀 One-click onboarding
+
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation, then run the repository bootstrap script:
+
+```bash
+npm run bootstrap -- --no-docker
+```
+
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. To preview the checks without changing files or installing packages, run:
+
+```bash
+./scripts/bootstrap.sh --dry-run
+```
+
 ## Latest release announcement
 
 [Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0) is the latest Frankenbeast release line. It packages the recent one-click onboarding cleanup, security hardening across MCP, observer, orchestrator, governor, and web surfaces, plus deterministic mode improvements for repeatable validation, recovery, and release gates.
