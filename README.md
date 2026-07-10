@@ -354,7 +354,7 @@ npm test
 npm run test:root
 ```
 
-See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup guide including Docker services.
+See [ONBOARDING.md](ONBOARDING.md) for the complete first-time setup checklist, including prerequisites, bootstrap, UI startup, troubleshooting, and secret backends. See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the shorter setup guide including Docker services.
 
 ## Run the Dashboard with MCP Mode
 
