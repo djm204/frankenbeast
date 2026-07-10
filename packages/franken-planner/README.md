@@ -35,24 +35,24 @@ PlanResult
 
 ### Key modules
 
-| Path                                      | Responsibility                                                    |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| `src/planner.ts`                          | Top-level `Planner` orchestrator — wires every component          |
-| `src/core/dag.ts`                         | Immutable `PlanGraph` DAG with topological sort                   |
-| `src/core/types.ts`                       | Domain types: `Task`, `TaskResult`, `PlanResult`, `Intent`        |
-| `src/core/errors.ts`                      | Typed error hierarchy                                             |
-| `src/planners/linear.ts`                  | `LinearPlanner` — sequential topological execution                |
-| `src/planners/parallel.ts`                | `ParallelPlanner` — wave-based concurrent dispatch                |
-| `src/planners/recursive.ts`               | `RecursivePlanner` — depth-limited task expansion                 |
-| `src/cot/rationale-enforcer.ts`           | `RationaleEnforcer` — derives a `RationaleBlock` from a `Task`    |
-| `src/cot/cot-gate.ts`                     | `buildCoTExecutor` — wraps `TaskExecutor` with CoT verification   |
-| `src/hitl/types.ts`                       | `HITLGate` interface and approval result types                    |
-| `src/hitl/plan-exporter.ts`               | `PlanExporter` — renders `PlanGraph` as Markdown checklist        |
-| `src/hitl/plan-modifier.ts`               | `applyModifications` — applies `TaskModification[]` to a graph    |
-| `src/hitl/stub-hitl-gate.ts`              | Internal `StubHITLGate` test double (not a public package export) |
-| `src/recovery/error-ingester.ts`          | `ErrorIngester` — classifies errors against known patterns        |
-| `src/recovery/recovery-plan-generator.ts` | `RecoveryPlanGenerator` — injects a fix-it task into the graph    |
-| `src/recovery/recovery-controller.ts`     | `RecoveryController` — orchestrates recovery with circuit breaker |
+| Path | Responsibility |
+|------|---------------|
+| `src/planner.ts` | Top-level `Planner` orchestrator — wires every component |
+| `src/core/dag.ts` | Immutable `PlanGraph` DAG with topological sort |
+| `src/core/types.ts` | Domain types: `Task`, `TaskResult`, `PlanResult`, `Intent` |
+| `src/core/errors.ts` | Typed error hierarchy |
+| `src/planners/linear.ts` | `LinearPlanner` — sequential topological execution |
+| `src/planners/parallel.ts` | `ParallelPlanner` — wave-based concurrent dispatch |
+| `src/planners/recursive.ts` | `RecursivePlanner` — depth-limited task expansion |
+| `src/cot/rationale-enforcer.ts` | `RationaleEnforcer` — derives a `RationaleBlock` from a `Task` |
+| `src/cot/cot-gate.ts` | `buildCoTExecutor` — wraps `TaskExecutor` with CoT verification |
+| `src/hitl/types.ts` | `HITLGate` interface and approval result types |
+| `src/hitl/plan-exporter.ts` | `PlanExporter` — renders `PlanGraph` as Markdown checklist |
+| `src/hitl/plan-modifier.ts` | `applyModifications` — applies `TaskModification[]` to a graph |
+| `src/hitl/stub-hitl-gate.ts` | Internal `StubHITLGate` test double (not a public package export) |
+| `src/recovery/error-ingester.ts` | `ErrorIngester` — classifies errors against known patterns |
+| `src/recovery/recovery-plan-generator.ts` | `RecoveryPlanGenerator` — injects a fix-it task into the graph |
+| `src/recovery/recovery-controller.ts` | `RecoveryController` — orchestrates recovery with circuit breaker |
 
 ---
 
@@ -76,13 +76,13 @@ class BrowserConfirmHITLGate implements HITLGate {
 }
 
 const planner = new Planner(
-  guardrailsModule, // GuardrailsModule — sanitizes raw input
-  graphBuilder, // GraphBuilder — converts Intent to PlanGraph
-  taskExecutor, // TaskExecutor — executes a single Task
+  guardrailsModule,   // GuardrailsModule — sanitizes raw input
+  graphBuilder,       // GraphBuilder — converts Intent to PlanGraph
+  taskExecutor,       // TaskExecutor — executes a single Task
   new BrowserConfirmHITLGate(), // HITLGate — approve / modify / abort the plan
   new LinearPlanner(),
   new RecoveryController(memoryModule),
-  selfCritiqueModule // optional SelfCritiqueModule — enables CoT enforcement
+  selfCritiqueModule  // optional SelfCritiqueModule — enables CoT enforcement
 );
 
 const result = await planner.plan('Build and deploy the authentication service');
@@ -91,10 +91,10 @@ const result = await planner.plan('Build and deploy the authentication service')
 
 ### Choosing a strategy
 
-| Strategy           | When to use                                     |
-| ------------------ | ----------------------------------------------- |
-| `LinearPlanner`    | Sequential tasks where ordering matters         |
-| `ParallelPlanner`  | Independent tasks that can run concurrently     |
+| Strategy | When to use |
+|----------|------------|
+| `LinearPlanner` | Sequential tasks where ordering matters |
+| `ParallelPlanner` | Independent tasks that can run concurrently |
 | `RecursivePlanner` | Tasks that may expand into sub-tasks at runtime |
 
 ### HITL approval
