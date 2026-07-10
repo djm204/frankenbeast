@@ -58,6 +58,49 @@ describe('AgentDetailPanel', () => {
     expect(screen.getByText('Stop')).toBeTruthy();
   });
 
+  it('keeps portaled action confirmations from closing the slide-in panel before confirm click', () => {
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Kill' }));
+    const confirmButton = screen.getByRole('button', { name: 'Kill agent' });
+    fireEvent.mouseDown(confirmButton);
+    expect(handlers.onClose).not.toHaveBeenCalled();
+    fireEvent.click(confirmButton);
+
+    expect(handlers.onKill).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps dialog backdrop and Escape events from closing the slide-in panel', () => {
+    render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Kill' }));
+    const overlay = document.querySelector('[data-beast-dialog-layer="overlay"]');
+    expect(overlay).toBeTruthy();
+    fireEvent.mouseDown(overlay!);
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(handlers.onClose).not.toHaveBeenCalled();
+  });
+
+  it('identifies destructive confirmations by id when the saved agent name is blank', () => {
+    render(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          name: '   ',
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Kill' }));
+
+    expect(screen.getByText(/Kill agent-1\?/)).toBeTruthy();
+  });
+
   it('shows edit form when Edit mode is selected', () => {
     render(<AgentDetailPanel isOpen={true} detail={detail} logs={[]} {...handlers} />);
     fireEvent.click(screen.getByText('Edit'));
