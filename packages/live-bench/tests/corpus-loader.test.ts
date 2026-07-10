@@ -61,6 +61,29 @@ describe('corpus loader', () => {
     expect(() => loadTaskFile(taskPath)).toThrow(/Invalid benchmark task/);
   });
 
+  it('rejects benchmark tasks with empty assertion arrays', () => {
+    const root = tempCorpus();
+
+    const emptyExpectedArtifactsPath = writeTask(root, 'core/empty-artifacts.task.json', {
+      ...validTask,
+      expectedArtifacts: [],
+    });
+    const emptyRequiredChecksPath = writeTask(root, 'core/empty-checks.task.json', {
+      ...validTask,
+      taskId: 'empty-checks',
+      requiredChecks: [],
+    });
+    const emptyToolParamsPath = writeTask(root, 'core/empty-tool-params.task.json', {
+      ...validTask,
+      taskId: 'empty-tool-params',
+      requiredChecks: [{ type: 'tool-call', tool: 'write_file', requiredParams: [] }],
+    });
+
+    expect(() => loadTaskFile(emptyExpectedArtifactsPath)).toThrow(/Invalid benchmark task/);
+    expect(() => loadTaskFile(emptyRequiredChecksPath)).toThrow(/Invalid benchmark task/);
+    expect(() => loadTaskFile(emptyToolParamsPath)).toThrow(/Invalid benchmark task/);
+  });
+
   it('rejects unknown normalized task and check fields', () => {
     const root = tempCorpus();
     const taskPath = writeTask(root, 'core/unknown-fields.task.json', {
