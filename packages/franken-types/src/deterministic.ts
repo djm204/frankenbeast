@@ -3,7 +3,6 @@ import { deterministicUuid as deterministicUuidFromCounter } from './utils/deter
 const DEFAULT_EPOCH_MS = Date.UTC(2026, 0, 1, 0, 0, 0);
 const MODULUS = 0x100000000;
 const DEFAULT_SEED = 'frankenbeast';
-const ORIGINAL_DATE_NOW = Date.now;
 
 function activeSeed(): string | undefined {
   const globalWithProcess = globalThis as typeof globalThis & {
@@ -72,9 +71,13 @@ function nowState(seed: string): number {
   return state;
 }
 
+function dateNowIsMocked(): boolean {
+  return !Function.prototype.toString.call(Date.now).includes('[native code]');
+}
+
 export function now(): number {
   const seed = activeSeed();
-  if (!seed || Date.now !== ORIGINAL_DATE_NOW) {
+  if (!seed || dateNowIsMocked()) {
     return wallClockNow();
   }
   return nowState(seed);
