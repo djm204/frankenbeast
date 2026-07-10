@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import {
   readFileSync,
@@ -14,7 +15,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
-import { deterministicUuid, now as deterministicNow } from '@franken/types';
+import { deterministicUuid } from '@franken/types';
 import type {
   ILlmProvider,
   LlmRequest,
@@ -465,7 +466,7 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private writeFileAtomically(path: string, content: string): void {
     const writePath = this.isSymlink(path) ? this.resolveSymlinkTarget(path) : path;
-    const tmpPath = `${writePath}.${deterministicUuid('gemini-cli-atomic-write')}.${deterministicNow()}.tmp`;
+    const tmpPath = `${writePath}.${process.pid}.${randomUUID()}.tmp`;
     const existingMode = existsSync(writePath) ? statSync(writePath).mode : undefined;
     writeFileSync(tmpPath, content);
     if (existingMode !== undefined) {

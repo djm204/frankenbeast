@@ -10,7 +10,7 @@ import {
   type BeastWorktreeAllocation,
   type GitWorktreeIsolationConfig,
 } from './git-worktree-isolation.js';
-import { isoNow } from '@franken/types';
+import { isoNow, wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -460,7 +460,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       throw error;
     }
 
-    const startedAt = isoNow();
+    const startedAt = new Date(wallClockNow()).toISOString();
     const attempt = this.repository.createAttempt(run.id, {
       status: 'running',
       pid: handle.pid,
@@ -632,7 +632,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
 
     const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : code != null ? `exit_code_${code}` : 'unknown_exit';
-    const finishedAt = isoNow();
+    const finishedAtMs = wallClockNow();
+    const finishedAt = new Date(finishedAtMs).toISOString();
 
     this.repository.updateAttempt(attemptId, {
       status,
@@ -650,9 +651,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     const eventType = code === 0 ? 'attempt.finished' : 'attempt.failed';
     const attemptRecord = this.repository.getAttempt(attemptId);
-    const durationMs = attemptRecord?.startedAt
-      ? new Date(finishedAt).getTime() - new Date(attemptRecord.startedAt).getTime()
-      : undefined;
+    const durationMs = attemptRecord?.startedAt ? finishedAtMs - new Date(attemptRecord.startedAt).getTime() : undefined;
     const redactedStderrTail = code !== 0 ? redactFailureStderrTail(stderrTail, configuredSecrets) : [];
     const exitEvent = {
       attemptId,

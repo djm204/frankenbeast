@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { BeastLoop } from '../beast-loop.js';
@@ -27,7 +28,6 @@ import type { ChunkDefinition } from './file-writer.js';
 import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { ProviderCommandOverridePolicyConfig } from '../config/provider-command-override-policy.js';
-import { deterministicUuid } from '@franken/types';
 
 
 function printLine(...args: unknown[]): void {
@@ -413,7 +413,7 @@ export class Session {
   private async runExecute(): Promise<BeastResult> {
     const { paths, planDirOverride, budget } = this.config;
     const chunkDir = planDirOverride ?? paths.plansDir;
-    const runSessionId = deterministicUuid('packages/franken-orchestrator/src/cli/session.ts');
+    const runSessionId = randomUUID();
 
     const { deps, logger, finalize } = await createCliDeps({
       ...this.buildDepOptions(),
