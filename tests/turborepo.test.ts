@@ -108,6 +108,12 @@ describe('Turborepo configuration', () => {
       const lintTask = turbo.tasks?.lint;
       expect(lintTask).toBeDefined();
       expect(lintTask.dependsOn).toBeUndefined();
+      expect(lintTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/eslint.workspace.config.js',
+        ]),
+      );
     });
   });
 
@@ -165,6 +171,18 @@ describe('Turborepo configuration', () => {
       expect(rootPkg.scripts.typecheck).toBe('turbo run typecheck');
     });
 
+    it('lint script checks workspace coverage before running Turbo lint', () => {
+      expect(rootPkg.scripts.lint).toBe(
+        'node scripts/check-workspace-lint-coverage.mjs && turbo run lint',
+      );
+
+      const ciWorkflow = readFileSync(
+        join(ROOT, '.github/workflows/ci.yml'),
+        'utf8',
+      );
+      expect(ciWorkflow).toContain('run: npm run lint');
+    });
+
     it('CI runs the root typecheck Turbo task explicitly', () => {
       const ciWorkflow = readFileSync(
         join(ROOT, '.github/workflows/ci.yml'),
@@ -172,8 +190,9 @@ describe('Turborepo configuration', () => {
       );
 
       expect(rootPkg.scripts.typecheck).toBe('turbo run typecheck');
-      expect(ciWorkflow).toContain('run: npx turbo run build typecheck lint');
+      expect(ciWorkflow).toContain('run: npx turbo run build typecheck');
       expect(ciWorkflow).not.toContain('run: npx turbo run build lint');
+      expect(ciWorkflow).not.toContain('run: npx turbo run build typecheck lint');
     });
 
     it('does not have test:all (redundant with turbo)', () => {

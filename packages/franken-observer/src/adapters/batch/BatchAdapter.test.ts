@@ -36,6 +36,62 @@ function deferred<T = void>(): {
   return { promise, resolve, reject }
 }
 
+// ── options ───────────────────────────────────────────────────────────────────
+
+describe('BatchAdapter — options', () => {
+  it.each([
+    Number.NaN,
+    Infinity,
+    0,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])('rejects invalid maxBatchSize: %s', maxBatchSize => {
+    expect(() => new BatchAdapter({
+      adapter: new InMemoryAdapter(),
+      maxBatchSize,
+    })).toThrow(RangeError)
+  })
+
+  it.each([
+    Number.NaN,
+    Infinity,
+    0,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])('rejects invalid flushIntervalMs: %s', flushIntervalMs => {
+    const setIntervalFn = vi.fn()
+
+    expect(() => new BatchAdapter({
+      adapter: new InMemoryAdapter(),
+      flushIntervalMs,
+      setInterval: setIntervalFn,
+    })).toThrow(RangeError)
+    expect(setIntervalFn).not.toHaveBeenCalled()
+  })
+
+  it('accepts valid integer boundaries for batch size and timer options', async () => {
+    const inner = new InMemoryAdapter()
+    const setIntervalFn = vi.fn().mockReturnValue(42 as unknown as ReturnType<typeof globalThis.setInterval>)
+    const clearIntervalFn = vi.fn()
+    const batch = new BatchAdapter({
+      adapter: inner,
+      maxBatchSize: 1,
+      flushIntervalMs: 1,
+      setInterval: setIntervalFn,
+      clearInterval: clearIntervalFn,
+    })
+
+    await batch.flush(makeTrace('valid-boundary'))
+    expect(await inner.listTraceIds()).toEqual(['valid-boundary'])
+    expect(setIntervalFn).toHaveBeenCalledWith(expect.any(Function), 1)
+
+    await batch.stop()
+    expect(clearIntervalFn).toHaveBeenCalledWith(42)
+  })
+})
+
 // ── buffering ─────────────────────────────────────────────────────────────────
 
 describe('BatchAdapter — buffering', () => {
