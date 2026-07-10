@@ -193,6 +193,32 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('detects runtime imports around TypeScript annotation syntax', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `
+      const cfg: { plugin: import('object-type-ghost').Plugin } = {};
+      async function load(): Promise<unknown> { return import('typed-function-ghost'); }
+      const logicalAnd = ready && import('logical-and-ghost');
+      const logicalOr = fallback || import('logical-or-ghost');
+      type T = {}
+      void import('void-after-type-ghost');
+      switch (kind) { case 'plugin': return import('switch-case-ghost'); }
+    `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(5);
+    expect(result.findings.map((finding) => finding.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('typed-function-ghost'),
+        expect.stringContaining('logical-and-ghost'),
+        expect.stringContaining('logical-or-ghost'),
+        expect.stringContaining('void-after-type-ghost'),
+        expect.stringContaining('switch-case-ghost'),
+      ]),
+    );
+  });
+
   it('detects dynamic imports used as object values and nested option expressions', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `

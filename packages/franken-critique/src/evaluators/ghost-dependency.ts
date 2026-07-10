@@ -272,7 +272,7 @@ function canStartNativeDynamicImport(
   const statementStart = content.lastIndexOf(';', importIndex - 1);
   const prefix = content.slice(statementStart + 1, importIndex);
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
-  const isNestedTypeReference = /(?:\bas\s*|\bsatisfies\s*|[<|&]\s*)$/.test(prefix);
+  const isNestedTypeReference = endsInsideNestedTypeReference(prefix);
 
   return !(
     isNestedTypeReference ||
@@ -285,13 +285,25 @@ function isSpreadOperand(content: string, dotIndex: number): boolean {
   return content.slice(dotIndex - 2, dotIndex + 1) === '...';
 }
 
+function endsInsideNestedTypeReference(prefix: string): boolean {
+  if (/(?:\bas\s*|\bsatisfies\s*)$/.test(prefix)) return true;
+
+  const trimmed = prefix.trimEnd();
+  const operator = trimmed.at(-1);
+  if (operator === '<') return true;
+
+  if (operator !== '|' && operator !== '&') return false;
+
+  return trimmed.at(-2) !== operator;
+}
+
 function isInsideTypeDeclaration(prefix: string): boolean {
   return (
     /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !/\n\s*(?:const|let|var|await|return|throw|if|for|while|switch|try|function|class)\b/.test(
       prefix,
     ) &&
-    !/\}\s*\n\s*(?:[A-Za-z_$][\w$]*\s*\(|(?:await\s+)?import\s*\()/.test(
+    !/\}\s*\n\s*(?:void\s*$|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
       prefix,
     )
   );
@@ -308,8 +320,25 @@ function isInsideTypeAnnotation(
   const annotationIndex = prefix.lastIndexOf(':');
   if (annotationIndex === -1) return false;
 
+  const beforeAnnotation = prefix.slice(0, annotationIndex);
+  const outerAnnotationIndex = beforeAnnotation.lastIndexOf(':');
+  if (outerAnnotationIndex !== -1) {
+    const outerAnnotationSuffix = beforeAnnotation.slice(outerAnnotationIndex + 1);
+    if (
+      outerAnnotationSuffix.includes('{') &&
+      !outerAnnotationSuffix.includes('}') &&
+      !/[=;]/.test(outerAnnotationSuffix)
+    ) {
+      return true;
+    }
+  }
+
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (/[=;]/.test(annotationSuffix)) return false;
+  if (/^\s*(?:return|throw|void)\b/.test(annotationSuffix)) return false;
+  if (/\{[\s\S]*\b(?:return|throw|void|case|default)\b/.test(annotationSuffix)) {
+    return false;
+  }
 
   return !isLikelyObjectLiteralValue(content, importIndex);
 }
