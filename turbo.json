@@ -17,6 +17,11 @@
     "test:ci": {
       "dependsOn": ["build"]
     },
+    "test:live": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "env": ["FBEAST_LIVE_BENCH_E2E"]
+    },
     "typecheck": {
       "dependsOn": ["^build"]
     },

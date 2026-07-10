@@ -56,6 +56,15 @@ describe('Turborepo configuration', () => {
       expect(testCiTask.dependsOn).toContain('build');
     });
 
+    it('defines an explicit live-bench live test task', () => {
+      const turbo = readJson('turbo.json');
+      const liveBenchTask = turbo.tasks?.['test:live'];
+      expect(liveBenchTask).toBeDefined();
+      expect(liveBenchTask.cache).toBe(false);
+      expect(liveBenchTask.dependsOn).toContain('build');
+      expect(liveBenchTask.env).toContain('FBEAST_LIVE_BENCH_E2E');
+    });
+
     it('defines typecheck task', () => {
       const turbo = readJson('turbo.json');
       expect(turbo.tasks?.typecheck).toBeDefined();
@@ -121,6 +130,10 @@ describe('Turborepo configuration', () => {
 
     it('keeps test:root:watch as vitest for dev', () => {
       expect(rootPkg.scripts['test:root:watch']).toBe('vitest');
+    });
+
+    it('exposes the live-bench live suite through an explicit root script', () => {
+      expect(rootPkg.scripts['test:live:bench']).toBe('turbo run test:live --filter=@franken/live-bench');
     });
   });
 
