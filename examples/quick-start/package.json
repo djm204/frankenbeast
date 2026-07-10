@@ -1,0 +1,13 @@
+{
+  "name": "frankenbeast-quick-start-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal project scaffolded by Frankenbeast's create-project script.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=22.13.0 <23 || >=24.0.0 <26"
+  }
+}

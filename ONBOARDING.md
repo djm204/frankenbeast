@@ -62,6 +62,14 @@ Use this checklist for a first local checkout or when rebuilding a development e
   - Dashboard/Beast controls: `FRANKENBEAST_BEAST_OPERATOR_TOKEN`, kept server-side only.
   - Provider API keys and the local-encrypted `FRANKENBEAST_PASSPHRASE` must be present in the process environment for commands that read `process.env` directly. Export them in the shell or launch wrapper that starts `frankenbeast`, `chat-server`, or CI jobs; do not assume writing them to `.env` alone makes every runtime path load them.
 
+- [ ] Optional: create a standalone project from the quick-start example. The script copies `examples/quick-start`, creates `.env` from `.env.example`, and runs `npm ci` in the new directory:
+
+  ```bash
+  npm run create:project -- quick-start ../my-frankenbeast-app
+  cd ../my-frankenbeast-app
+  npm start
+  ```
+
 - [ ] Build the workspace packages:
 
   ```bash
