@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createChatApp } from '../../../src/http/chat-app.js';
@@ -46,6 +46,119 @@ describe('network routes', () => {
     expect(body.data.network.mode).toBe('insecure');
   });
 
+  it.each(['start', 'stop', 'restart'] as const)(
+    'returns 400 for unknown network service target on %s',
+    async (action) => {
+      mkdirSync(TMP, { recursive: true });
+      let config = defaultConfig();
+      const app = createChatApp({
+        sessionStoreDir: join(TMP, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('hello') },
+        projectName: 'network-project',
+        networkControl: {
+          root: TMP,
+          frankenbeastDir: TMP,
+          configFile: join(TMP, 'config.json'),
+          getConfig: () => config,
+          setConfig: (nextConfig) => {
+            config = nextConfig;
+          },
+        },
+      });
+
+      const response = await app.request(`/v1/network/${action}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ target: 'not-a-service' }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: {
+          code: 'UNKNOWN_NETWORK_SERVICE_TARGET',
+          message: 'Unknown network service target: not-a-service',
+        },
+      });
+    },
+  );
+
+  it('allows idempotent stops for known service IDs when no service is running', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const app = createChatApp({
+      sessionStoreDir: join(TMP, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'network-project',
+      networkControl: {
+        root: TMP,
+        frankenbeastDir: TMP,
+        configFile: join(TMP, 'config.json'),
+        getConfig: () => defaultConfig(),
+        setConfig: () => {},
+      },
+    });
+
+    const response = await app.request('/v1/network/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ target: 'chat-server' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { ok: true } });
+  });
+
+  it('stops persisted running services even after they are disabled in config', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const stateFile = join(TMP, 'network/state.json');
+    mkdirSync(join(TMP, 'network'), { recursive: true });
+    writeFileSync(stateFile, JSON.stringify({
+      mode: 'secure',
+      secureBackend: 'local-encrypted',
+      detached: true,
+      startedAt: '2026-07-10T00:00:00.000Z',
+      services: [{
+        id: 'dashboard-web',
+        pid: 0,
+        detached: true,
+        dependsOn: [],
+        startedAt: '2026-07-10T00:00:00.000Z',
+        status: 'started',
+      }],
+    }), 'utf8');
+    let config = defaultConfig();
+    config = {
+      ...config,
+      dashboard: {
+        ...config.dashboard,
+        enabled: false,
+      },
+    };
+    const app = createChatApp({
+      sessionStoreDir: join(TMP, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'network-project',
+      networkControl: {
+        root: TMP,
+        frankenbeastDir: TMP,
+        configFile: join(TMP, 'config.json'),
+        getConfig: () => config,
+        setConfig: (nextConfig) => {
+          config = nextConfig;
+        },
+      },
+    });
+
+    const response = await app.request('/v1/network/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ target: 'dashboard-web' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { ok: true } });
+    expect(existsSync(stateFile)).toBe(false);
+  });
+
   it('preserves already-approved provider command overrides when persisting config updates', async () => {
     mkdirSync(TMP, { recursive: true });
     const configFile = join(TMP, 'config.json');
@@ -63,6 +176,7 @@ describe('network routes', () => {
         },
       },
     };
+
     const app = createChatApp({
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('hello') },
