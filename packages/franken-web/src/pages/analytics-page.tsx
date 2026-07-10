@@ -124,6 +124,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const currentPage = page;
   const currentPageSize = eventPage?.pageSize ?? pageSize;
   const totalPages = Math.max(currentPage, 1, Math.ceil(totalEvents / currentPageSize));
+  const loadedRangeLabel = formatEventRange(currentPage, currentPageSize, totalEvents);
   const canGoPrevious = currentPage > 1 && !isEventsLoading;
   const canGoNext = currentPage < totalPages && !isEventsLoading;
   const loadError = [overviewError, eventsError].filter(Boolean).join('; ') || null;
@@ -339,7 +340,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
       <section className="analytics-pagination" aria-label="Analytics pagination">
         <div>
-          Page {currentPage} of {totalPages} · {totalEvents} events
+          {loadedRangeLabel} · Page {currentPage} of {totalPages}
         </div>
         <div className="analytics-pagination__actions">
           <button
@@ -394,6 +395,13 @@ function filtersForSessionOptions(filters: AnalyticsFilters): AnalyticsFilters {
   const sessionFilters = { ...filters };
   delete sessionFilters.sessionId;
   return sessionFilters;
+}
+
+function formatEventRange(page: number, pageSize: number, total: number): string {
+  if (total <= 0) return 'Showing 0 of 0 events';
+  const start = Math.min(total, (page - 1) * pageSize + 1);
+  const end = Math.min(total, page * pageSize);
+  return `Showing ${start}–${end} of ${total} events`;
 }
 
 function MetricCard({
