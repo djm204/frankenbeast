@@ -80,8 +80,13 @@ describe('SkillHealthChecker', () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
     proc.stdin.write.mockImplementation((message: string) => {
-      expect(message).toContain('Content-Length:');
-      expect(message).toContain('"method":"initialize"');
+      expect(message).not.toContain('Content-Length:');
+      expect(message.endsWith('\n')).toBe(true);
+      expect(JSON.parse(message)).toMatchObject({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+      });
       setTimeout(() => {
         proc.stdout.emit('data', formatMcpMessage({
           jsonrpc: '2.0',
@@ -221,6 +226,7 @@ describe('SkillHealthChecker', () => {
     const result = await checker.getStatus('rejecting', config, { trustMcpServerCommands: true });
 
     expect(result.status).toBe('error');
+    expect(proc.kill).toHaveBeenCalledTimes(1);
   });
 
   it('returns unknown and cleans up when a trusted MCP server stays open without responding', async () => {

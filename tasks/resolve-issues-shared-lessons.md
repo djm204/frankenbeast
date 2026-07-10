@@ -62,3 +62,4 @@
 
 ## 2026-07-10 — MCP stdio health probes
 - MCP stdio probes need stream-level `stdin` error handlers that defer EPIPE to the process close/timeout path, and Content-Length parsing must buffer bytes rather than UTF-16 strings. Add regressions for clean-exit EPIPE races, explicit initialize error responses before close(0), non-ASCII framed JSON bodies, and split `Content-Length` headers before retriggering Codex.
+- For SDK-backed stdio MCP servers, send newline-delimited JSON initialize requests while still accepting framed responses; on explicit initialize error responses, kill the still-running probe child instead of treating generic error status as a reason to skip cleanup.

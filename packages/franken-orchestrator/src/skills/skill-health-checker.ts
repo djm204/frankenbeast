@@ -90,13 +90,16 @@ export class SkillHealthChecker {
       let stdoutBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
       let timer: NodeJS.Timeout;
 
-      const settle = (status: McpHealthStatus) => {
+      const settle = (
+        status: McpHealthStatus,
+        { killRunningProcess = true }: { killRunningProcess?: boolean } = {},
+      ) => {
         if (settled) {
           return;
         }
         settled = true;
         clearTimeout(timer);
-        if (status !== 'error' && proc.exitCode === null && !proc.killed) {
+        if (killRunningProcess && proc.exitCode === null && !proc.killed) {
           proc.kill();
         }
         resolve(status);
@@ -114,11 +117,11 @@ export class SkillHealthChecker {
         }, HEALTH_CHECK_TIMEOUT_MS);
 
         proc.on('error', () => {
-          settle('error');
+          settle('error', { killRunningProcess: false });
         });
 
         proc.on('close', (code) => {
-          settle(code === 0 ? 'connected' : 'error');
+          settle(code === 0 ? 'connected' : 'error', { killRunningProcess: false });
         });
 
         proc.stdin.on('error', () => {
@@ -176,7 +179,7 @@ interface ReadMessagesResult {
 
 function formatMcpMessage(message: unknown): string {
   const body = JSON.stringify(message);
-  return `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`;
+  return `${body}\n`;
 }
 
 function readMcpMessages(input: Buffer<ArrayBufferLike>): ReadMessagesResult {
