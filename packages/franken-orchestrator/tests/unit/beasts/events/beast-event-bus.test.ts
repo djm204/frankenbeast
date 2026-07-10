@@ -125,6 +125,55 @@ describe('BeastEventBus', () => {
     expect(missed[1].id).toBe(3);
   });
 
+  it('isolates listener mutations from later listeners and replay state', () => {
+    const bus = new BeastEventBus();
+    const received: BeastSseEvent[] = [];
+
+    bus.subscribe((event) => {
+      event.id = 999;
+      event.type = 'corrupted';
+      event.data.status = 'debug';
+      event.data.extra = 'listener-only';
+    });
+    bus.subscribe((event) => received.push(event));
+
+    bus.publish({
+      type: 'agent.status',
+      data: { agentId: 'a1', status: 'running', nested: { phase: 'boot' } },
+    });
+
+    expect(received).toEqual([
+      {
+        id: 1,
+        type: 'agent.status',
+        data: { agentId: 'a1', status: 'running', nested: { phase: 'boot' } },
+      },
+    ]);
+    expect(bus.replaySince(0)).toEqual([
+      {
+        id: 1,
+        type: 'agent.status',
+        data: { agentId: 'a1', status: 'running', nested: { phase: 'boot' } },
+      },
+    ]);
+  });
+
+  it('returns replay copies so callers cannot mutate retained buffered events', () => {
+    const bus = new BeastEventBus();
+
+    bus.publish({ type: 'run.log', data: { runId: 'r1', line: 'original', meta: { level: 'info' } } });
+
+    const firstReplay = bus.replaySince(0);
+    firstReplay[0].id = 42;
+    firstReplay[0].type = 'corrupted';
+    firstReplay[0].data.line = 'mutated';
+    (firstReplay[0].data.meta as Record<string, unknown>).level = 'debug';
+
+    expect(bus.replaySince(0)).toEqual([
+      { id: 1, type: 'run.log', data: { runId: 'r1', line: 'original', meta: { level: 'info' } } },
+    ]);
+  });
+
   it('evicts oldest events when buffer exceeds maxBufferSize', () => {
     const bus = new BeastEventBus(3); // buffer limited to 3
     bus.publish({ type: 'e', data: { n: 1 } });
