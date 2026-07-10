@@ -1,3 +1,5 @@
+import { deterministicUuid as deterministicUuidFromCounter } from './utils/deterministicUuid.js';
+
 const DEFAULT_EPOCH_MS = Date.UTC(2026, 0, 1, 0, 0, 0);
 const MODULUS = 0x100000000;
 const DEFAULT_SEED = 'frankenbeast';
@@ -12,7 +14,7 @@ function activeSeed(): string | undefined {
 export function hashSeed(seed: string): number {
   let hash = 2166136261;
   for (const char of seed) {
-    hash ^= char.charCodeAt(0);
+    hash ^= char.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
@@ -58,15 +60,12 @@ export function wallClockNow(): number {
   return Date.now();
 }
 
-const nowStateBySeed = new Map<string, { offset: number; tick: number }>();
+const nowStateBySeed = new Map<string, number>();
 
-function nowState(seed: string): { offset: number; tick: number } {
+function nowState(seed: string): number {
   let state = nowStateBySeed.get(seed);
-  if (!state) {
-    state = {
-      offset: Math.floor(createSeededRandom(`clock:${seed}`).random() * 86_400_000),
-      tick: 0,
-    };
+  if (state === undefined) {
+    state = DEFAULT_EPOCH_MS + Math.floor(createSeededRandom(`clock:${seed}`).random() * 86_400_000);
     nowStateBySeed.set(seed, state);
   }
   return state;
@@ -77,8 +76,7 @@ export function now(): number {
   if (!seed) {
     return wallClockNow();
   }
-  const state = nowState(seed);
-  return DEFAULT_EPOCH_MS + state.offset + state.tick++;
+  return nowState(seed);
 }
 
 export function isoNow(): string {
@@ -103,7 +101,11 @@ function randomUuidFromRuntime(): string {
   return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
 }
 
-export function deterministicUuid(namespace = 'default'): string {
+export function deterministicUuid(namespace = 'default', explicitCounter?: number): string {
+  if (explicitCounter !== undefined) {
+    return deterministicUuidFromCounter(namespace, explicitCounter);
+  }
+
   const seed = activeSeed();
   if (!seed) {
     return randomUuidFromRuntime();

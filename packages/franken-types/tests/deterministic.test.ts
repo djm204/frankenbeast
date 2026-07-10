@@ -51,7 +51,7 @@ describe('deterministic helpers', () => {
       secondId: deterministicUuid('unit'),
     }));
 
-    expect(values.secondNow).toBe(values.firstNow + 1);
+    expect(values.secondNow).toBe(values.firstNow);
     expect(values.iso).toMatch(/^2026-01-01T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(values.firstId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(values.secondId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
