@@ -588,6 +588,22 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
   });
 
+  it('keeps declaration keywords inside multiline return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = [
+      'function makeResult(): Promise<{',
+      '  type: string;',
+      '}> {',
+      ...lines,
+      "  return Promise.resolve({ type: 'ok' });",
+      '}',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
+  });
+
   it('flags long block arrows with non-object function return annotations', async () => {
     const evaluator = new ComplexityEvaluator();
     const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);

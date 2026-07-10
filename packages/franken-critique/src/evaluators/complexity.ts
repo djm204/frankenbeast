@@ -113,6 +113,7 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
       crossedLineBreak = true;
     } else if (
       crossedLineBreak &&
+      typeDepth === 0 &&
       !isWhitespace &&
       startsWithDeclarationKeyword(content, i)
     ) {
