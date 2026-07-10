@@ -270,16 +270,17 @@ function tomlString(value: string): string {
 
 function projectRootHookCommand(scriptPath: string): string {
   const normalizedPath = scriptPath.split('\\').join('/');
-  const executablePath = `./${normalizedPath}`;
   const lookup = [
+    `script=${shellQuote(normalizedPath)}`,
+    'executable="./$script"',
     `p=\${CLAUDE_PROJECT_DIR:-\${GEMINI_PROJECT_ROOT:-}}`,
-    `if [ -n "$p" ] && [ -x "$p/${normalizedPath}" ]; then cd "$p" && exec "${executablePath}"; fi`,
+    'if [ -n "$p" ] && [ -x "$p/$script" ]; then cd "$p" && exec "$executable"; fi',
     'd=$PWD',
     'while [ "$d" != / ]; do '
-      + `if [ -x "$d/${normalizedPath}" ]; then cd "$d" && exec "${executablePath}"; fi; `
+      + 'if [ -x "$d/$script" ]; then cd "$d" && exec "$executable"; fi; '
       + 'd=$(dirname "$d")',
     'done',
-    `echo "fbeast hook script not found: ${normalizedPath}" >&2`,
+    'echo "fbeast hook script not found: $script" >&2',
     'exit 127',
   ].join('; ');
   return `sh -c ${shellQuote(lookup)}`;
