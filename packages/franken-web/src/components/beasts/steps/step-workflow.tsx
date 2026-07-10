@@ -11,6 +11,10 @@ interface StepWorkflowProps {
 
 const DEFAULT_CONTAINER_UNAVAILABLE_REASON = 'Container runtime availability has not been reported by the backend.';
 
+function isContainerRuntimeUnavailable(status: BeastContainerRuntimeStatus | undefined): boolean {
+  return status?.available === false;
+}
+
 export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
   const { stepValues, setStepValues } = useBeastStore();
   const values = (stepValues[1] ?? {}) as { workflowType?: string; executionMode?: BeastExecutionMode; [key: string]: unknown };
@@ -38,7 +42,10 @@ export function StepWorkflow({ catalog, containerRuntime }: StepWorkflowProps) {
     }
 
     const nextWorkflow = workflows.find((entry) => entry.id === id);
-    const executionMode = values.executionMode ?? nextWorkflow?.executionModeDefault;
+    const requestedExecutionMode = values.executionMode ?? nextWorkflow?.executionModeDefault;
+    const executionMode = requestedExecutionMode === 'container' && isContainerRuntimeUnavailable(nextWorkflow?.containerRuntime ?? containerRuntime)
+      ? 'process'
+      : requestedExecutionMode;
     setStepValues(1, { workflowType: id, ...(executionMode ? { executionMode } : {}) });
   }
 

@@ -1,4 +1,4 @@
-import type { BeastCatalogEntry } from '../../lib/beast-api';
+import type { BeastCatalogEntry, BeastContainerRuntimeStatus, BeastExecutionMode } from '../../lib/beast-api';
 import { findCatalogEntry, getPromptValue, isBlankCatalogValue } from './wizard-catalog';
 
 export const WIZARD_SECTION_KEYS = ['identity', 'workflow', 'llm', 'modules', 'skills', 'prompts', 'git'] as const;
@@ -8,6 +8,22 @@ type WizardStepValues = Record<number, Record<string, unknown> | undefined>;
 interface PromptFile {
   name?: unknown;
   content?: unknown;
+}
+
+function resolveLaunchExecutionMode(
+  workflow: Record<string, unknown> | undefined,
+  selectedWorkflow: BeastCatalogEntry | undefined,
+  containerRuntime: BeastContainerRuntimeStatus | undefined,
+): BeastExecutionMode {
+  const requestedMode = workflow?.executionMode === 'process' || workflow?.executionMode === 'container'
+    ? workflow.executionMode
+    : 'process';
+
+  if (requestedMode === 'container' && (selectedWorkflow?.containerRuntime ?? containerRuntime)?.available === false) {
+    return 'process';
+  }
+
+  return requestedMode;
 }
 
 function buildPromptFrontload(prompts: Record<string, unknown> | undefined): string | undefined {
@@ -32,6 +48,7 @@ function buildPromptFrontload(prompts: Record<string, unknown> | undefined): str
 export function buildWizardLaunchConfig(
   stepValues: WizardStepValues,
   catalog?: readonly BeastCatalogEntry[],
+  containerRuntime?: BeastContainerRuntimeStatus,
 ): Record<string, unknown> {
   const config: Record<string, unknown> = {};
 
@@ -50,11 +67,7 @@ export function buildWizardLaunchConfig(
     config.promptConfig = { text: promptFrontload };
     delete config.prompts;
   }
-  if (workflow?.executionMode === 'process' || workflow?.executionMode === 'container') {
-    config.executionMode = workflow.executionMode;
-  } else {
-    config.executionMode = 'process';
-  }
+  config.executionMode = resolveLaunchExecutionMode(workflow, selectedWorkflow, containerRuntime);
 
   if (selectedWorkflow && workflow) {
     for (const prompt of selectedWorkflow.interviewPrompts) {
