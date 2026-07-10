@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 const packagesDir = join(root, 'packages');
 const docsPath = join(root, 'docs', 'lint-coverage.md');
 const docs = existsSync(docsPath) ? readFileSync(docsPath, 'utf8') : '';

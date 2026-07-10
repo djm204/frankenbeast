@@ -108,6 +108,12 @@ describe('Turborepo configuration', () => {
       const lintTask = turbo.tasks?.lint;
       expect(lintTask).toBeDefined();
       expect(lintTask.dependsOn).toBeUndefined();
+      expect(lintTask.inputs).toEqual(
+        expect.arrayContaining([
+          '$TURBO_DEFAULT$',
+          '$TURBO_ROOT$/eslint.workspace.config.js',
+        ]),
+      );
     });
   });
 

@@ -376,6 +376,14 @@ describe('npm workspaces configuration', () => {
         );
       }
     });
+
+    it('uses filesystem-safe module URL conversion in the lint coverage audit', () => {
+      const auditScript = readFileSync(join(ROOT, 'scripts/check-workspace-lint-coverage.mjs'), 'utf8');
+
+      expect(auditScript).toContain('fileURLToPath');
+      expect(auditScript).toContain("fileURLToPath(new URL('..', import.meta.url))");
+      expect(auditScript).not.toContain("new URL('..', import.meta.url).pathname");
+    });
   });
 
   describe('no file: dependencies remain anywhere', () => {
