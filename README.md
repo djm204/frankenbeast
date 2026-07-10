@@ -607,7 +607,7 @@ Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config
 ```bash
 frankenbeast init   # interactive — prompts for a passphrase, generates and stores the token
 ```
-When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`. For CI/CD, set `FRANKENBEAST_PASSPHRASE` in the environment; `frankenbeast init --non-interactive` verifies an already-complete `.fbeast/config.json` and init state rather than creating a fresh vault.
+When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`. For CI/headless runtime flows, set `FRANKENBEAST_PASSPHRASE` in the environment so runtime commands can decrypt the local vault in `.fbeast/config.json` without prompting; this is used by commands like `frankenbeast run`, not as a replacement for interactive setup.
 
 **OS keychain:**
 ```json
