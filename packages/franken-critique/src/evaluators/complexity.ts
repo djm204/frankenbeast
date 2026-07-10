@@ -299,6 +299,8 @@ function hasUnmatchedAngleCloseBeforeNextTopLevelComma(
 
   for (let index = commaIndex + 1; index < params.length; index++) {
     const char = params[index];
+    if (char === undefined) continue;
+
     if (char === '(') {
       parenDepth++;
     } else if (char === ')') {
