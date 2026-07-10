@@ -67,6 +67,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     let stderrClosed = false;
     let exitInfo: { code: number | null; signal: string | null } | undefined;
     let exitFired = false;
+    let cleanupStarted = false;
+    let forceCloseStdout: (() => void) | undefined;
+    let forceCloseStderr: (() => void) | undefined;
+    let recordExit: (code: number | null, signal: string | null) => void = () => undefined;
 
     const child = spawn(spec.command, [...spec.args], {
       cwd: spec.cwd,
@@ -77,17 +81,55 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    child.once('error', (error) => {
-      const failedPid = child.pid;
-      if (failedPid) {
-        this.processes.delete(failedPid);
+    const cleanupProcess = () => {
+      if (cleanupStarted) {
+        return;
       }
+      cleanupStarted = true;
+
+      if (child.pid) {
+        this.processes.delete(child.pid);
+      }
+      child.removeListener('error', onError);
+      child.removeListener('exit', recordExit);
+      child.removeListener('close', recordExit);
+    };
+
+    const onError = (error: Error) => {
       callbacks.onStderr(`Process spawn failed for ${spec.command}: ${error.message}`);
-      if (!exitFired) {
-        exitFired = true;
-        callbacks.onExit(1, null);
+      if (!exitInfo) {
+        exitInfo = { code: 1, signal: null };
       }
-    });
+      cleanupProcess();
+      if (child.pid) {
+        try {
+          child.kill('SIGTERM');
+        } catch (killError) {
+          const killCode = (killError as NodeJS.ErrnoException).code;
+          if (killCode !== 'ESRCH') {
+            throw killError;
+          }
+        }
+      }
+
+      setImmediate(() => {
+        if (!stdoutClosed) {
+          if (!child.stdout) {
+            stdoutClosed = true;
+          }
+          forceCloseStdout?.();
+        }
+        if (!stderrClosed) {
+          if (!child.stderr) {
+            stderrClosed = true;
+          }
+          forceCloseStderr?.();
+        }
+        maybeFireExit();
+      });
+    };
+
+    child.once('error', onError);
 
     if (!child.pid) {
       throw new Error(
@@ -100,8 +142,8 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     const maybeFireExit = () => {
       if (!exitFired && stdoutClosed && stderrClosed && exitInfo) {
+        cleanupProcess();
         exitFired = true;
-        this.processes.delete(pid);
         callbacks.onExit(exitInfo.code, exitInfo.signal);
       }
     };
@@ -180,21 +222,21 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       };
     };
 
-    const forceCloseStdout = child.stdout
+    forceCloseStdout = child.stdout
       ? wireLineReader(child.stdout, callbacks.onStdout, markStdoutClosed)
       : undefined;
     if (!forceCloseStdout) {
       stdoutClosed = true;
     }
 
-    const forceCloseStderr = child.stderr
+    forceCloseStderr = child.stderr
       ? wireLineReader(child.stderr, callbacks.onStderr, markStderrClosed)
       : undefined;
     if (!forceCloseStderr) {
       stderrClosed = true;
     }
 
-    const recordExit = (code: number | null, signal: string | null) => {
+    recordExit = (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
       setImmediate(() => {
         if (!stdoutClosed) {
