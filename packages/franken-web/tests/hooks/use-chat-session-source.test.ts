@@ -5,7 +5,12 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/hooks/use-chat-session.ts'), 'utf8');
 
 describe('useChatSession source hygiene', () => {
-  const patchAdditionMarker = new RegExp(`^\\s*${'\\+'}\\s*(?:\\/\\/|const|if|try|catch|socket|set|return|throw|await|for|function)\\b`, 'm');
+  const patchAdditionMarker = new RegExp(`^\\s*${'\\+'}\\s*(?:\\/\\/|const|if|try|catch|socket|set\\w*|return|throw|await|for|function)\\b`, 'm');
+
+  it('matches unresolved patch markers before setter calls', () => {
+    expect("+        setStatus('idle')").toMatch(patchAdditionMarker);
+    expect("+        setConnectionStatus('reconnecting')").toMatch(patchAdditionMarker);
+  });
 
   it('keeps the send implementation free of unresolved patch markers', () => {
     const sendStart = source.indexOf('async function send(content: string): Promise<void> {');
