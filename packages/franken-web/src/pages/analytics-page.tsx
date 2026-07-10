@@ -81,7 +81,11 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       if (sessionsResult.status === 'fulfilled') {
         setSessions(sessionsResult.value);
       } else {
-        setSessions([]);
+        setSessions((current) => {
+          if (!filters.sessionId) return [];
+          const activeSession = current.find((session) => session.id === filters.sessionId);
+          return [activeSession ?? { id: filters.sessionId, lastActivityAt: '', eventCount: 0, failureCount: 0 }];
+        });
       }
       setOverviewError(errors.length > 0 ? errors.join('; ') : null);
       setIsOverviewLoading(false);

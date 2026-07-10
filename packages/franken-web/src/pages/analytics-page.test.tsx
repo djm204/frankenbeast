@@ -215,9 +215,13 @@ describe('AnalyticsPage', () => {
     expect(screen.getByText('3')).toBeTruthy();
   });
 
-  it('clears stale session options when a filtered session refresh fails', async () => {
+  it('clears stale session options while preserving the active session when a filtered session refresh fails', async () => {
     const client = mockClient();
     vi.mocked(client.fetchSessions)
+      .mockResolvedValueOnce([
+        { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 2, failureCount: 1 },
+        { id: 'session-b', lastActivityAt: '2026-04-28T12:02:00.000Z', eventCount: 1, failureCount: 0 },
+      ])
       .mockResolvedValueOnce([
         { id: 'session-a', lastActivityAt: '2026-04-28T12:00:00.000Z', eventCount: 2, failureCount: 1 },
         { id: 'session-b', lastActivityAt: '2026-04-28T12:02:00.000Z', eventCount: 1, failureCount: 0 },
@@ -228,10 +232,17 @@ describe('AnalyticsPage', () => {
 
     expect(await screen.findByRole('option', { name: 'session-b' })).toBeTruthy();
 
+    fireEvent.change(screen.getByLabelText('Session'), { target: { value: 'session-a' } });
+    await waitFor(() => {
+      expect(client.fetchSessions).toHaveBeenLastCalledWith({ timeWindow: '24h' });
+    });
+
     fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'denied' } });
 
     expect(await screen.findByText('sessions timeout')).toBeTruthy();
     await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'session-a' })).toBeTruthy();
+      expect(screen.getByLabelText('Session')).toHaveProperty('value', 'session-a');
       expect(screen.queryByRole('option', { name: 'session-b' })).toBeNull();
     });
   });
