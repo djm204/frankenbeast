@@ -68,7 +68,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
     void Promise.allSettled([
       client.fetchSummary(filters),
-      client.fetchSessions(filters),
+      client.fetchSessions(filtersForSessionOptions(filters)),
     ]).then(([summaryResult, sessionsResult]) => {
       if (cancelled) return;
       const errors = [summaryResult, sessionsResult]
@@ -382,6 +382,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       )}
     </main>
   );
+}
+
+function filtersForSessionOptions(filters: AnalyticsFilters): AnalyticsFilters {
+  const sessionFilters = { ...filters };
+  delete sessionFilters.sessionId;
+  return sessionFilters;
 }
 
 function MetricCard({
