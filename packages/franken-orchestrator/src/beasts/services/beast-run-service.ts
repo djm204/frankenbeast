@@ -10,6 +10,13 @@ export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
 }
 
+export class UnknownBeastRunError extends Error {
+  constructor(public readonly runId: string) {
+    super(`Unknown Beast run: ${runId}`);
+    this.name = 'UnknownBeastRunError';
+  }
+}
+
 export class BeastRunService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -120,7 +127,7 @@ export class BeastRunService {
   private requireRun(runId: string): BeastRun {
     const run = this.repository.getRun(runId);
     if (!run) {
-      throw new Error(`Unknown Beast run: ${runId}`);
+      throw new UnknownBeastRunError(runId);
     }
     this.getDefinitionOrThrow(run.definitionId);
     return run;
