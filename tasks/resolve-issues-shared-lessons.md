@@ -82,3 +82,7 @@
 ## 2026-07-10 — MCP stdio health probes
 - MCP stdio probes need stream-level `stdin` error handlers that defer EPIPE to the process close/timeout path, and Content-Length parsing must buffer bytes rather than UTF-16 strings. Add regressions for clean-exit EPIPE races, explicit initialize error responses before close(0), non-ASCII framed JSON bodies, and split `Content-Length` headers before retriggering Codex.
 - For SDK-backed stdio MCP servers, send newline-delimited JSON initialize requests while still accepting framed responses; on explicit initialize error responses, kill the still-running probe child instead of treating generic error status as a reason to skip cleanup.
+
+## 2026-07-10 — Network page stale refresh races
+- Network action/status refresh fixes need promise-order regressions: cover a superseded action refresh settling before the newer manual refresh, and keep the action pending until the newer status request succeeds or fails.
+- Surface Network status refresh failures independently from selected-service log refreshes; a slow/hung log request must not delay the operator-facing status alert.

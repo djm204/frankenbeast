@@ -315,6 +315,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [networkError, setNetworkError] = useState<string | null>(null);
   const networkStatusRequestIdRef = useRef(0);
   const networkStatusSuccessRequestIdRef = useRef(0);
+  const networkStatusSettledRequestIdRef = useRef(0);
   const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
@@ -380,8 +381,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         if (statusResult.status === 'fulfilled') {
           setNetworkStatus(statusResult.value);
           networkStatusSuccessRequestIdRef.current = statusRequestId;
+          networkStatusSettledRequestIdRef.current = statusRequestId;
           setNetworkError(null);
         } else {
+          networkStatusSettledRequestIdRef.current = statusRequestId;
           setNetworkError(`Unable to load network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
         }
       }
@@ -398,25 +401,42 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   const refreshNetworkStatusAfterAction = (client: NetworkApiClient): Promise<void> => {
     const statusRequestId = ++networkStatusRequestIdRef.current;
+    const waitForSupersedingStatusRefresh = (): Promise<void> => new Promise((resolve, reject) => {
+      const checkSupersedingStatus = () => {
+        if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
+          resolve();
+          return;
+        }
+        if (networkStatusSettledRequestIdRef.current > statusRequestId) {
+          reject(new Error('Network status refresh was superseded before a newer refresh succeeded.'));
+          return;
+        }
+        window.setTimeout(checkSupersedingStatus, 25);
+      };
+      checkSupersedingStatus();
+    });
     return client.getStatus()
       .then((nextStatus) => {
         if (statusRequestId !== networkStatusRequestIdRef.current) {
           if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
-            return;
+            return undefined;
           }
-          throw new Error('Network status refresh was superseded before it completed.');
+          return waitForSupersedingStatusRefresh();
         }
         setNetworkStatus(nextStatus);
         networkStatusSuccessRequestIdRef.current = statusRequestId;
+        networkStatusSettledRequestIdRef.current = statusRequestId;
         setNetworkError(null);
+        return undefined;
       })
       .catch((error: unknown) => {
         if (statusRequestId !== networkStatusRequestIdRef.current) {
           if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
-            return;
+            return undefined;
           }
-          throw new Error('Network status refresh was superseded before it completed.');
+          return waitForSupersedingStatusRefresh();
         }
+        networkStatusSettledRequestIdRef.current = statusRequestId;
         throw error;
       });
   };
@@ -1210,30 +1230,40 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 setNetworkLogsLoading(true);
                 setNetworkLogsError(null);
               }
-              void Promise.allSettled([client.getStatus(), logServiceId ? client.getLogs(logServiceId) : Promise.resolve(null)])
-                .then(([statusResult, logsResult]) => {
+              void client.getStatus()
+                .then((nextStatus) => {
                   if (statusRequestId === networkStatusRequestIdRef.current) {
-                    if (statusResult.status === 'fulfilled') {
-                      setNetworkStatus(statusResult.value);
-                      networkStatusSuccessRequestIdRef.current = statusRequestId;
-                      setNetworkError(null);
-                    } else {
-                      setNetworkError(`Unable to refresh network status: ${networkErrorMessage(statusResult.reason, 'Request failed.')}`);
-                    }
+                    setNetworkStatus(nextStatus);
+                    networkStatusSuccessRequestIdRef.current = statusRequestId;
+                    networkStatusSettledRequestIdRef.current = statusRequestId;
+                    setNetworkError(null);
                   }
+                })
+                .catch((error: unknown) => {
+                  if (statusRequestId === networkStatusRequestIdRef.current) {
+                    networkStatusSettledRequestIdRef.current = statusRequestId;
+                    setNetworkError(`Unable to refresh network status: ${networkErrorMessage(error, 'Request failed.')}`);
+                  }
+                });
+              if (!logServiceId) {
+                return;
+              }
+              void client.getLogs(logServiceId)
+                .then((logsResult) => {
                   if (requestId !== networkLogsRequestIdRef.current) {
                     return;
                   }
-                  if (logsResult.status === 'fulfilled' && logsResult.value) {
-                    setNetworkLogs(logsResult.value.logs);
-                    setNetworkLogsError(null);
-                  } else if (logServiceId && logsResult.status === 'rejected') {
+                  setNetworkLogs(logsResult.logs);
+                  setNetworkLogsError(null);
+                })
+                .catch((error: unknown) => {
+                  if (requestId === networkLogsRequestIdRef.current) {
                     setNetworkLogs([]);
-                    setNetworkLogsError(logsResult.reason instanceof Error ? logsResult.reason.message : 'Unable to refresh logs.');
+                    setNetworkLogsError(error instanceof Error ? error.message : 'Unable to refresh logs.');
                   }
                 })
                 .finally(() => {
-                  if (requestId === networkLogsRequestIdRef.current && logServiceId) {
+                  if (requestId === networkLogsRequestIdRef.current) {
                     setNetworkLogsLoading(false);
                   }
                 });
