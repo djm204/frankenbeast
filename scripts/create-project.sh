@@ -25,9 +25,9 @@ if [[ -z "$example_name" ]]; then
   exit 64
 fi
 
-if [[ ! "$example_name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+if [[ ! "$example_name" =~ ^[A-Za-z0-9._-]+$ || "$example_name" == "." || "$example_name" == ".." ]]; then
   printf 'Invalid example name: %s\n' "$example_name" >&2
-  printf 'Example names may only contain letters, numbers, dots, underscores, and hyphens.\n' >&2
+  printf 'Example names may only contain letters, numbers, dots, underscores, and hyphens, and may not be . or ..\n' >&2
   exit 64
 fi
 
@@ -39,7 +39,21 @@ if [[ ! -d "$example_dir" ]]; then
   printf 'Unknown example: %s\n' "$example_name" >&2
   printf 'Available examples:\n' >&2
   if [[ -d "$repo_root/examples" ]]; then
-    find "$repo_root/examples" -mindepth 1 -maxdepth 1 -type d -printf '  %f\n' | sort >&2
+    available_examples=()
+    while IFS= read -r available_example; do
+      available_examples+=("$available_example")
+    done < <(
+      for example_path in "$repo_root/examples"/*; do
+        [[ -d "$example_path" ]] || continue
+        basename -- "$example_path"
+      done | sort
+    )
+
+    if (( ${#available_examples[@]} > 0 )); then
+      printf '  %s\n' "${available_examples[@]}" >&2
+    else
+      printf '  (none)\n' >&2
+    fi
   else
     printf '  (none)\n' >&2
   fi
@@ -58,7 +72,7 @@ if [[ -e "$target_dir" ]]; then
     printf 'Target exists and is not a directory: %s\n' "$target_dir" >&2
     exit 73
   fi
-  if [[ -n "$(find "$target_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  if [[ -n "$(find "$target_dir"/. -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
     printf 'Target directory is not empty: %s\n' "$target_dir" >&2
     exit 73
   fi

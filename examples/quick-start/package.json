@@ -5,7 +5,7 @@
   "description": "Minimal project scaffolded by Frankenbeast's create-project script.",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node --env-file=.env src/index.js"
   },
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"

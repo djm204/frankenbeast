@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -210,9 +210,31 @@ describe('local setup scripts', () => {
       expect(script).toContain('examples/$example_name');
       expect(script).toContain('npm ci');
       expect(script).toContain('.env.example');
+      expect(script).not.toContain('-printf');
       expect(existsSync(join(ROOT, 'examples/quick-start/package-lock.json'))).toBe(true);
       expect(read('README.md')).toContain('npm run create:project -- quick-start');
       expect(read('ONBOARDING.md')).toContain('npm run create:project -- quick-start');
+
+      const dotExample = spawnSync('bash', [scriptPath, '..', join(tempRoot, 'dot-example')], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(dotExample.status).toBe(64);
+      expect(dotExample.stderr).toContain('Invalid example name: ..');
+
+      const realTarget = join(tempRoot, 'real-target');
+      const linkedTarget = join(tempRoot, 'linked-target');
+      mkdirSync(realTarget);
+      writeFileSync(join(realTarget, 'README.md'), 'existing project\n');
+      symlinkSync(realTarget, linkedTarget, 'dir');
+      const symlinkResult = spawnSync('bash', [scriptPath, 'quick-start', linkedTarget], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(symlinkResult.status).toBe(73);
+      expect(symlinkResult.stderr).toContain('Target directory is not empty');
 
       const result = spawnSync('bash', [scriptPath, 'quick-start', target], {
         cwd: ROOT,
@@ -227,6 +249,12 @@ describe('local setup scripts', () => {
       expect(existsSync(join(target, 'package-lock.json'))).toBe(true);
       expect(result.stdout).toContain('up to date');
 
+      const scaffoldManifest = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8')) as {
+        scripts?: Record<string, string>;
+      };
+      expect(scaffoldManifest.scripts?.start).toBe('node --env-file=.env src/index.js');
+      writeFileSync(join(target, '.env'), 'FRANKENBEAST_EXAMPLE_MESSAGE=Custom scaffold message\n');
+
       const start = spawnSync('npm', ['start'], {
         cwd: target,
         encoding: 'utf8',
@@ -234,7 +262,7 @@ describe('local setup scripts', () => {
       });
 
       expect(start.status, start.stderr || start.stdout).toBe(0);
-      expect(start.stdout).toContain('Hello from Frankenbeast');
+      expect(start.stdout).toContain('Custom scaffold message');
     } finally {
       rmSync(tempRoot, { force: true, recursive: true });
     }
