@@ -122,7 +122,10 @@ export class SkillHealthChecker {
         });
 
         proc.stdin.on('error', () => {
-          settle('error');
+          // Defer to the process error/close/timeout paths. Some commands exit
+          // successfully before reading the initialize probe; in that case the
+          // stdin stream can emit EPIPE before close(0), and the clean-exit
+          // fallback should remain connected.
         });
 
         proc.stdout.on('data', (chunk: Buffer | string) => {

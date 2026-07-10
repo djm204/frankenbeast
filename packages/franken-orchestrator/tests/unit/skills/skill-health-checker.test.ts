@@ -112,12 +112,14 @@ describe('SkillHealthChecker', () => {
     expect(proc.kill).toHaveBeenCalledTimes(1);
   });
 
-  it('returns error instead of crashing when stdin rejects an initialize probe', async () => {
+  it('defers stdin EPIPE to the process close status', async () => {
     const { spawn } = await import('node:child_process');
     const proc = makeMockProcess();
     proc.stdin.write.mockImplementation(() => {
       setTimeout(() => {
         proc.stdin.emit('error', new Error('write EPIPE'));
+        proc.exitCode = 0;
+        proc.emit('close', 0);
       }, 10);
       return false;
     });
@@ -130,7 +132,7 @@ describe('SkillHealthChecker', () => {
 
     const result = await checker.getStatus('epipe', config, { trustMcpServerCommands: true });
 
-    expect(result.status).toBe('error');
+    expect(result.status).toBe('connected');
   });
 
   it('parses framed initialize responses by UTF-8 byte length', async () => {
