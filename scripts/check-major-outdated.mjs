@@ -53,9 +53,21 @@ function parseMajor(version) {
 
 function toRows(report) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) return [];
-  return Object.entries(report)
-    .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value))
-    .map(([name, value]) => ({ name, ...value }));
+  return Object.entries(report).flatMap(([name, value]) => {
+    if (Array.isArray(value)) {
+      return value
+        .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+        .map((entry) => ({ name, ...entry }));
+    }
+    if (value && typeof value === 'object') {
+      return [{ name, ...value }];
+    }
+    return [];
+  });
+}
+
+function hasNpmError(report) {
+  return Boolean(report && typeof report === 'object' && !Array.isArray(report) && 'error' in report);
 }
 
 export function findMajorOutdated(report) {
@@ -90,6 +102,12 @@ try {
 } catch (error) {
   console.error('npm outdated did not produce valid JSON.');
   console.error(error instanceof Error ? error.message : String(error));
+  process.exit(2);
+}
+
+if (hasNpmError(parsed)) {
+  const detail = typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error);
+  console.error(`npm outdated reported an error instead of dependency data: ${detail}`);
   process.exit(2);
 }
 

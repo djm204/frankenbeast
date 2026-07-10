@@ -44,6 +44,37 @@ describe('dependency CI guards for issue #1414', () => {
     expect(result.stderr).not.toContain('acorn');
   });
 
+  it('flattens npm workspace arrays before checking major gaps', () => {
+    const result = runOutdatedGuard({
+      zod: [
+        {
+          current: '3.25.0',
+          wanted: '4.0.0',
+          latest: '4.2.0',
+          location: 'packages/franken-web/node_modules/zod',
+        },
+        {
+          current: '3.25.0',
+          wanted: '3.25.1',
+          latest: '4.2.0',
+          location: 'packages/franken-orchestrator/node_modules/zod',
+        },
+      ],
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('zod');
+    expect(result.stderr).toContain('packages/franken-web');
+  });
+
+  it('fails closed when npm outdated returns an error JSON object', () => {
+    const result = runOutdatedGuard({ error: { code: 'E403', summary: 'forbidden' } });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('npm outdated reported an error');
+    expect(result.stderr).toContain('E403');
+  });
+
   it('passes when dependencies are only behind within their current major', () => {
     const result = runOutdatedGuard({
       typescript: {
