@@ -1,6 +1,7 @@
 import { MODULE_CONFIG_KEYS } from '@franken/types';
 import type {
   ApiDataEnvelope,
+  ApiErrorEnvelope,
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
   BeastInterviewPrompt,
@@ -44,6 +45,18 @@ export type {
   TrackedAgentInitAction,
   TrackedAgentSummary,
 } from '@franken/types';
+
+export class BeastApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string,
+    public readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'BeastApiError';
+  }
+}
 
 export class BeastApiClient {
   constructor(private readonly baseUrl: string) {}
@@ -272,7 +285,7 @@ export class BeastApiClient {
       headers,
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw await this.toError(response);
     }
     return response.json() as Promise<T>;
   }
@@ -285,8 +298,29 @@ export class BeastApiClient {
       headers,
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw await this.toError(response);
     }
+  }
+
+  private async toError(response: Response): Promise<BeastApiError> {
+    const fallbackMessage = `HTTP ${response.status}`;
+    try {
+      const body = await response.json() as ApiErrorEnvelope;
+      const serverMessage = body.error?.message;
+      if (serverMessage) {
+        const code = body.error.code;
+        const codeSuffix = code ? `, ${code}` : '';
+        return new BeastApiError(
+          `${serverMessage} (HTTP ${response.status}${codeSuffix})`,
+          response.status,
+          code,
+          body.error.details,
+        );
+      }
+    } catch {
+      // Fall through with HTTP status message for empty, malformed, or non-JSON bodies.
+    }
+    return new BeastApiError(fallbackMessage, response.status);
   }
 }
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BeastApiClient } from '../../src/lib/beast-api';
+import { BeastApiClient, BeastApiError } from '../../src/lib/beast-api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -231,7 +231,55 @@ describe('BeastApiClient', () => {
       }),
     });
 
-    await expect(client.killAgent('agent-1')).rejects.toThrow('HTTP 409');
+    const errorPromise = client.killAgent('agent-1');
+
+    await expect(errorPromise).rejects.toThrow(
+      "Tracked agent 'agent-1' has no linked run to kill (HTTP 409, TRACKED_AGENT_NOT_KILLABLE)",
+    );
+    await expect(errorPromise).rejects.toMatchObject({
+      name: 'BeastApiError',
+      status: 409,
+      code: 'TRACKED_AGENT_NOT_KILLABLE',
+    });
+  });
+
+  it('surfaces structured errors for void Beasts API requests', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({
+        error: {
+          code: 'BEAST_DELETE_UNAVAILABLE',
+          message: 'Beast deletion is temporarily unavailable',
+          details: { retryAfterMs: 1_000 },
+        },
+      }),
+    });
+
+    const errorPromise = client.deleteAgent('agent-1');
+
+    await expect(errorPromise).rejects.toThrow(
+      'Beast deletion is temporarily unavailable (HTTP 503, BEAST_DELETE_UNAVAILABLE)',
+    );
+    await expect(errorPromise).rejects.toMatchObject({
+      name: 'BeastApiError',
+      status: 503,
+      code: 'BEAST_DELETE_UNAVAILABLE',
+      details: { retryAfterMs: 1_000 },
+    });
+  });
+
+  it('falls back to the HTTP status when Beasts API error bodies are malformed', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: () => Promise.reject(new SyntaxError('not json')),
+    });
+
+    const errorPromise = client.killAgent('agent-1');
+
+    await expect(errorPromise).rejects.toThrow('HTTP 502');
+    await expect(errorPromise).rejects.toBeInstanceOf(BeastApiError);
   });
 
   it('opens the ticket-authenticated Beast event stream', async () => {
