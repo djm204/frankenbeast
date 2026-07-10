@@ -286,6 +286,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const beastAgentsRef = useRef<TrackedAgentSummary[]>([]);
   const beastAgentDetailRef = useRef<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
+  const [beastCreationUnavailableReason, setBeastCreationUnavailableReason] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
   const selectedBeastAgentIdRef = useRef<string | null>(null);
   const shouldAutoSelectBeastAgentRef = useRef(true);
@@ -374,7 +375,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const composerSessionKey = preserveComposerDraft
     ? `anonymous:${sessionSeed}`
     : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
-  const beastCreationDisabled = Boolean(beastError);
+  const beastCreationDisabled = Boolean(beastCreationUnavailableReason);
 
   useEffect(() => {
     if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
@@ -446,6 +447,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           return;
         }
         setBeastError(null);
+        setBeastCreationUnavailableReason(null);
         setBeastCatalog(catalog);
         setBeastAgents(agents);
         setBeastRuns(runs);
@@ -473,7 +475,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         }
       } catch (error) {
         if (!cancelled) {
-          setBeastError(error instanceof Error ? error.message : 'Unable to load Beast dispatch state.');
+          const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          setBeastError(message);
+          setBeastCreationUnavailableReason(message);
         }
       }
     }

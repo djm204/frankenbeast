@@ -1213,6 +1213,31 @@ describe('ChatShell', () => {
     expect(screen.queryByText('Identity')).toBeNull();
   });
 
+  it('keeps create-agent enabled for non-creation Beast event errors after state loads', async () => {
+    window.location.hash = '#/beasts';
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('agent-1')).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.error?.(new Error('SSE disconnected'));
+
+    await waitFor(() => {
+      expect(screen.getByText('SSE disconnected')).toBeDefined();
+    });
+
+    const headerCreateButton = screen.getByRole('button', { name: /^\+ create agent$/i });
+    expect(headerCreateButton.hasAttribute('disabled')).toBe(false);
+  });
+
   it('renders initializing agents in the beasts list', async () => {
     window.location.hash = '#/beasts';
     mockListAgents.mockResolvedValue([
