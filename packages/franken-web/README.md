@@ -43,7 +43,7 @@ The frontend uses same-origin API paths at runtime:
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
 
-If you use a non-default backend port in local development, set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side:
+If you use a non-default backend port in local development, keep `VITE_API_URL` unset and set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side. When Beast controls run on a different backend, set `VITE_BEAST_API_PROXY_TARGET` separately:
 
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
@@ -88,7 +88,7 @@ VITE_PROJECT_ID=my-project
 
 | Variable | Purpose |
 | --- | --- |
-| `VITE_API_URL` | Legacy/reserved API base URL. Leave unset; the current web client intentionally ignores this value and always calls same-origin paths so browser requests stay behind the server-side proxy/BFF. |
+| `VITE_API_URL` | Legacy/reserved API base URL. Leave unset in Vite dev mode; the current web client intentionally ignores this value and always calls same-origin paths so browser requests stay behind the server-side proxy/BFF. Do not use it to select a custom local backend port. |
 | `VITE_API_PROXY_TARGET` | Backend target for the same-origin Vite dev proxy. Defaults to `http://127.0.0.1:3737`; set this when the backend runs on another port, for example `VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm run dev`. |
 | `VITE_BEAST_API_PROXY_TARGET` | Beast daemon target when it differs from `VITE_API_PROXY_TARGET`, for example when Beast controls use a separate local orchestrator port. |
 | `VITE_PROJECT_ID` | Optional project identifier for scoping chat sessions. Defaults to `default`. |

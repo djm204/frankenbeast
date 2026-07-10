@@ -54,7 +54,7 @@ npm --workspace @franken/web run dev:chat
 
 That proxies same-origin browser requests to `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
-If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target. Leave `VITE_API_URL` unset in local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` stay on the Vite origin while the dev server forwards them to the backend.
+If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target. Leave `VITE_API_URL` unset in local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` stay on the Vite origin while the dev server forwards them to the backend. If Beast controls run on a separate backend, set `VITE_BEAST_API_PROXY_TARGET` as well.
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
@@ -98,8 +98,10 @@ Only bind to `0.0.0.0` when you actually need remote access.
 `The UI loads but does not connect`
 
 - make sure the backend is running on the same URL as `VITE_API_PROXY_TARGET`
+- if Beast routes use a separate server, make sure `VITE_BEAST_API_PROXY_TARGET` matches that URL
 - check that the backend printed the expected localhost URL
-- if you changed host or port, update `VITE_API_PROXY_TARGET` to match
+- if you changed host or port, update the proxy env vars to match
+- do not try to fix local Vite-dev REST failures by setting `VITE_API_URL`; keep requests same-origin through the proxy
 
 `WebSocket is rejected from another origin`
 
