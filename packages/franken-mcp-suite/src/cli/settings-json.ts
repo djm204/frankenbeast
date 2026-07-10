@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, fsyncSync, lstatSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, copyFileSync, fsyncSync, lstatSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -12,6 +12,22 @@ export function parseJsonObjectWithComments(content: string): Record<string, unk
 
 export function readSettingsJson(content: string): Record<string, unknown> {
   return parseJsonObjectWithComments(content);
+}
+
+export function recoverInvalidJsonFile(path: string, error: unknown): Record<string, unknown> {
+  const backupPath = join(dirname(path), `${basename(path)}.invalid-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.bak`);
+  copyFileSync(path, backupPath);
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`fbeast: ${path} is not valid JSON (${reason}); backed it up to ${backupPath} and will recreate it.`);
+  return {};
+}
+
+export function readJsonObjectFileOrRecover(path: string, content: string): Record<string, unknown> {
+  try {
+    return parseJsonObjectWithComments(content);
+  } catch (error) {
+    return recoverInvalidJsonFile(path, error);
+  }
 }
 
 export function writeJsonFileAtomic(path: string, value: unknown): void {
