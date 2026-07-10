@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SseConnectionTicketStore } from '../../../../src/beasts/events/sse-connection-ticket.js';
 
 describe('SseConnectionTicketStore', () => {
@@ -67,6 +67,39 @@ describe('SseConnectionTicketStore', () => {
     expect(shortStore.validate(ticket, 'operator-token-123')).toBe(false);
     shortStore.destroy();
   });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    'rejects invalid ticket ttlMs value %s',
+    (ttlMs) => {
+      expect(() => new SseConnectionTicketStore({ ttlMs })).toThrow(
+        /ttlMs must be a finite positive integer number of milliseconds/,
+      );
+    },
+  );
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    'rejects invalid cleanupIntervalMs value %s before scheduling cleanup',
+    (cleanupIntervalMs) => {
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+      try {
+        expect(() => new SseConnectionTicketStore({ cleanupIntervalMs })).toThrow(
+          /cleanupIntervalMs must be a finite positive integer number of milliseconds/,
+        );
+        expect(setIntervalSpy).not.toHaveBeenCalled();
+      } finally {
+        setIntervalSpy.mockRestore();
+      }
+    },
+  );
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    'rejects invalid consumedRetentionMs value %s',
+    (consumedRetentionMs) => {
+      expect(() => new SseConnectionTicketStore({ consumedRetentionMs })).toThrow(
+        /consumedRetentionMs must be a finite positive integer number of milliseconds/,
+      );
+    },
+  );
 
   it('rejects unknown tickets', () => {
     expect(store.validate('nonexistent-uuid', 'operator-token-123')).toBe(false);
