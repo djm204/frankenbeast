@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.44.1](https://github.com/djm204/frankenbeast/compare/v0.44.0...v0.44.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **ci:** add workflow linting to CI pipeline ([#1068](https://github.com/djm204/frankenbeast/issues/1068)) ([d7c3dfe](https://github.com/djm204/frankenbeast/commit/d7c3dfea80f5c4b1549bed3cfef4438ba65b9358))
+* **critique:** detect port literals in config shapes ([#1290](https://github.com/djm204/frankenbeast/issues/1290)) ([5afe588](https://github.com/djm204/frankenbeast/commit/5afe58808d31798c5fd6e4bce26d833069c0bc8a))
+* **governor:** reload firewall security profile ([#1358](https://github.com/djm204/frankenbeast/issues/1358)) ([40d34c0](https://github.com/djm204/frankenbeast/commit/40d34c0f999b713fc6dde628ffdd5d758f8ae011))
+* **mcp:** reject unsupported recovery memory type ([#907](https://github.com/djm204/frankenbeast/issues/907)) ([62867ea](https://github.com/djm204/frankenbeast/commit/62867ea63a7a8662bbc6464ac26d5590a232d824))
+* **orchestrator:** handle CLI provider result frames ([#1279](https://github.com/djm204/frankenbeast/issues/1279)) ([807af5e](https://github.com/djm204/frankenbeast/commit/807af5e2afaa47fa511172be2f09bfed27d15c1b))
+* **orchestrator:** harden generic comms gateway ([#1365](https://github.com/djm204/frankenbeast/issues/1365)) ([de36fea](https://github.com/djm204/frankenbeast/commit/de36fea36f0132a6d872486b22b8c0370129d169))
+* quote hook script db paths to prevent shell injection ([#900](https://github.com/djm204/frankenbeast/issues/900)) ([2b469e8](https://github.com/djm204/frankenbeast/commit/2b469e8358726a78600db1f56ba3e0f87b2b1b44))
+* **security:** scrub telegram webhook tokens from proxied paths ([#905](https://github.com/djm204/frankenbeast/issues/905)) ([3471078](https://github.com/djm204/frankenbeast/commit/347107887ea05c680f2f8979e04fa251ee3d6200))
+* **web:** drive beast wizard from catalog definitions ([#1378](https://github.com/djm204/frankenbeast/issues/1378)) ([9b6bfeb](https://github.com/djm204/frankenbeast/commit/9b6bfebfc42eccfd0bcc17cb92d0379cbfc23537))
+* **web:** secure chat websocket authentication ([679b15d](https://github.com/djm204/frankenbeast/commit/679b15dfbd8cc592ed04b67339230494a5586a8c)), closes [#703](https://github.com/djm204/frankenbeast/issues/703)
+
+
+### Documentation
+
+* add onboarding checklist ([#1422](https://github.com/djm204/frankenbeast/issues/1422)) ([a071ec2](https://github.com/djm204/frankenbeast/commit/a071ec2be562cd9f6014298e5e87302a0c6cd9dd)), closes [#1409](https://github.com/djm204/frankenbeast/issues/1409)
+* **agents:** make fbeast MCP instructions conditional ([#1309](https://github.com/djm204/frankenbeast/issues/1309)) ([1433a1d](https://github.com/djm204/frankenbeast/commit/1433a1d416a7f2d797ed42c2d1998d646eec3ca3))
+* **architecture:** refresh CLI resume wiring notes ([4c74f33](https://github.com/djm204/frankenbeast/commit/4c74f335ad33ce795812186165b170889a7418ac))
+* **beasts:** document FBEAST_ROOT override ([d913a1c](https://github.com/djm204/frankenbeast/commit/d913a1c76fe431cfd14b71e00fe18d0d760714e6)), closes [#1251](https://github.com/djm204/frankenbeast/issues/1251)
+* **cli:** document external beast daemon URL ([#1371](https://github.com/djm204/frankenbeast/issues/1371)) ([a48b0e9](https://github.com/djm204/frankenbeast/commit/a48b0e90fd58bc53a58bb77feab55da70c950ffa))
+* **deploy-beasts:** refresh dashboard workflow guidance ([61e221b](https://github.com/djm204/frankenbeast/commit/61e221bddb618b7df6521d8ceb145785700970ee)), closes [#1202](https://github.com/djm204/frankenbeast/issues/1202)
+* **env:** clarify Beast operator token example ([dfd98cd](https://github.com/djm204/frankenbeast/commit/dfd98cd6c923aeb63cfdf3189881115e76ae99ed))
+* **env:** clarify local Tempo endpoints ([7a5def4](https://github.com/djm204/frankenbeast/commit/7a5def487903ac033d930baa31d80c37776d0ad5))
+* **env:** document network managed mode ([88eaddf](https://github.com/djm204/frankenbeast/commit/88eaddf6a0c7938306f3012dfcfb0686838d56c0)), closes [#1330](https://github.com/djm204/frankenbeast/issues/1330)
+* **env:** document Ollama base URL ([#1376](https://github.com/djm204/frankenbeast/issues/1376)) ([20047bc](https://github.com/djm204/frankenbeast/commit/20047bc8ef0d5f6b3cab3241e474c11dd7d38b18))
+* fix broken internal markdown links ([#1374](https://github.com/djm204/frankenbeast/issues/1374)) ([51068df](https://github.com/djm204/frankenbeast/commit/51068df99e04355d51ae54bae07d0d83001c9681))
+* **issues:** archive stale pre-consolidation issue docs ([#1361](https://github.com/djm204/frankenbeast/issues/1361)) ([b55fd2a](https://github.com/djm204/frankenbeast/commit/b55fd2a0feaea993e27ef704da54ae64e98b1fbb))
+* **mcp:** align external-agent local link guidance ([#1322](https://github.com/djm204/frankenbeast/issues/1322)) ([edf0ea8](https://github.com/djm204/frankenbeast/commit/edf0ea84ea0943a694f86ada7fb029674890ddd7)), closes [#1206](https://github.com/djm204/frankenbeast/issues/1206)
+* **mcp:** document skill health endpoint ([#1385](https://github.com/djm204/frankenbeast/issues/1385)) ([4c87b69](https://github.com/djm204/frankenbeast/commit/4c87b6983538d4030e8663d0d82f8ef92dec636e))
+* **mcp:** refresh walkthrough tool inventory ([c0c011f](https://github.com/djm204/frankenbeast/commit/c0c011f6b9eff50f165d16306575baa93b48cbfb)), closes [#1137](https://github.com/djm204/frankenbeast/issues/1137)
+* **mcp:** update local link recovery advice ([439dee4](https://github.com/djm204/frankenbeast/commit/439dee42d20320d8bb26ef2504ccfde499ef29a4)), closes [#1209](https://github.com/djm204/frankenbeast/issues/1209)
+* **network:** clarify secureBackend default ([4201dc7](https://github.com/djm204/frankenbeast/commit/4201dc78649096ec975861cbd0f53300d8873033)), closes [#1204](https://github.com/djm204/frankenbeast/issues/1204)
+* **network:** document managed network marker ([4d2edf7](https://github.com/djm204/frankenbeast/commit/4d2edf78e457e8e612203559fb72ea98effd335d)), closes [#1257](https://github.com/djm204/frankenbeast/issues/1257)
+* **providers:** clarify historical adapter status ([#1292](https://github.com/djm204/frankenbeast/issues/1292)) ([f0d346e](https://github.com/djm204/frankenbeast/commit/f0d346e46e2b680375808cb78f4cf28fbf5ba829))
+* **ramp-up:** link canonical workspace inventory ([#1336](https://github.com/djm204/frankenbeast/issues/1336)) ([1e18afd](https://github.com/djm204/frankenbeast/commit/1e18afd5fce36e86fb44040c90cd094f958653bf))
+* **ramp-up:** update non-interactive init limitation ([#1390](https://github.com/djm204/frankenbeast/issues/1390)) ([e6e7975](https://github.com/djm204/frankenbeast/commit/e6e7975b6ada31b9c6c4b598cbe368eb1f95a4dd)), closes [#1098](https://github.com/djm204/frankenbeast/issues/1098)
+* **readme:** align ChromaDB env variable names ([dcbcc5f](https://github.com/djm204/frankenbeast/commit/dcbcc5f2cabcc1f8e6d2027b4e8b5c24282c6518)), closes [#1256](https://github.com/djm204/frankenbeast/issues/1256)
+* **readme:** align provider extension guidance ([f851fc6](https://github.com/djm204/frankenbeast/commit/f851fc66e0bd51270ca4d6d33616d098f9c88476)), closes [#1149](https://github.com/djm204/frankenbeast/issues/1149)
+* **readme:** clarify heartbeat adapter wiring ([#1389](https://github.com/djm204/frankenbeast/issues/1389)) ([e71850a](https://github.com/djm204/frankenbeast/commit/e71850ace98da4b47cb2c6accb4114c9293e4b42))
+* **readme:** clarify init backend setup ([#1384](https://github.com/djm204/frankenbeast/issues/1384)) ([fd0fbc9](https://github.com/djm204/frankenbeast/commit/fd0fbc956f41b2ceddddf2b7bfb2378366dd7827))
+* **readme:** clarify init backend setup ([#1394](https://github.com/djm204/frankenbeast/issues/1394)) ([0d26efe](https://github.com/djm204/frankenbeast/commit/0d26efe226c185ea0edbc03c21501dc3d92f5216))
+* **readme:** document Chroma URL setup ([#1335](https://github.com/djm204/frankenbeast/issues/1335)) ([a9cf18d](https://github.com/djm204/frankenbeast/commit/a9cf18d3221d636264933c0bbd99ff48a223b03d))
+* **readme:** document module env toggles ([9107641](https://github.com/djm204/frankenbeast/commit/9107641ba5acc67dd66362718c36f3c8447db24f)), closes [#1248](https://github.com/djm204/frankenbeast/issues/1248)
+* refresh assistant rule regeneration guidance ([9f99c2d](https://github.com/djm204/frankenbeast/commit/9f99c2d6eae268575f3d2659b793837c0304b876)), closes [#1147](https://github.com/djm204/frankenbeast/issues/1147)
+* refresh Claude workspace package map ([c391019](https://github.com/djm204/frankenbeast/commit/c391019f89b99893c1dd4fac349e78d6039c6a50))
+* refresh project overview ([#1392](https://github.com/djm204/frankenbeast/issues/1392)) ([5e8de36](https://github.com/djm204/frankenbeast/commit/5e8de36038357ac424d395add8aea539dc8e1efa))
+* **release:** announce v0.45.0 release plan ([87af008](https://github.com/djm204/frankenbeast/commit/87af0083ad18f369dd749a9631bc347ba25c6ec7)), closes [#1419](https://github.com/djm204/frankenbeast/issues/1419)
+* **run-cli-beast:** clarify local CLI link flow ([88ce363](https://github.com/djm204/frankenbeast/commit/88ce363b7cb85dfcf98b8d639071142b5a6e9d9b))
+* **run-cli-beast:** clarify supported beast providers ([485ae29](https://github.com/djm204/frankenbeast/commit/485ae2944f80904ff0bf601a84fc96257dbba637))
+* **security:** warn about Grafana default credentials ([b6f8212](https://github.com/djm204/frankenbeast/commit/b6f82120acbc1c21ed43212c3f0501f6238dd238))
+* **web:** clarify Vite proxy target for backend ports ([#1381](https://github.com/djm204/frankenbeast/issues/1381)) ([fabd8c3](https://github.com/djm204/frankenbeast/commit/fabd8c3f55cfab83c41af44a8f097ac21cb1963b))
+
+
+### Tests
+
+* **ci:** run deterministic root Vitest suite ([#1359](https://github.com/djm204/frankenbeast/issues/1359)) ([9f2c370](https://github.com/djm204/frankenbeast/commit/9f2c370440aafbc4adda775cfdb918e3a81db769))
+* **docs:** guard local ADR links ([#1397](https://github.com/djm204/frankenbeast/issues/1397)) ([bb2d324](https://github.com/djm204/frankenbeast/commit/bb2d3245af6ade1a5d09042797ea2d8377a906ce))
+* **env:** guard against stale firewall example ([60b9fa1](https://github.com/djm204/frankenbeast/commit/60b9fa1f421763ceae04e63a55db57ea51fe1fda)), closes [#1158](https://github.com/djm204/frankenbeast/issues/1158)
+* **live-bench:** restore live test target ([#1347](https://github.com/djm204/frankenbeast/issues/1347)) ([d85dc55](https://github.com/djm204/frankenbeast/commit/d85dc55652bc0480c0e4fc7126c51371f289e89b))
+* make Docker sandbox smoke coverage explicit ([5cd61dc](https://github.com/djm204/frankenbeast/commit/5cd61dc8f9c9d6c9cda13f1297da4561107b70be)), closes [#927](https://github.com/djm204/frankenbeast/issues/927)
+* **release:** require explicit workspace release policy ([#1346](https://github.com/djm204/frankenbeast/issues/1346)) ([e6feeee](https://github.com/djm204/frankenbeast/commit/e6feeee5fc9f10c9baf3fd2fb9e01410f1619536)), closes [#1233](https://github.com/djm204/frankenbeast/issues/1233)
+* remove obfuscated eval usage from issue 520 fixtures ([#903](https://github.com/djm204/frankenbeast/issues/903)) ([fc22747](https://github.com/djm204/frankenbeast/commit/fc22747c3b5aac6337396181df2c0dc6618f5046))
+* **security:** cover issue 506 secret examples ([a4960cd](https://github.com/djm204/frankenbeast/commit/a4960cdf7bbaa4a852516e4e98e2cfa136fbba7d)), closes [#506](https://github.com/djm204/frankenbeast/issues/506)
+
 ## [0.44.0](https://github.com/djm204/frankenbeast/compare/v0.43.1...v0.44.0) (2026-07-08)
 
 

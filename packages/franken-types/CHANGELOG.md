@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.8.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.8.1...franken-types-v0.8.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **types:** validate provider token usage counts ([#1348](https://github.com/djm204/frankenbeast/issues/1348)) ([e2387f3](https://github.com/djm204/frankenbeast/commit/e2387f32c91a04452da269c022e8297d81f8ab94))
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+* **web:** secure chat websocket authentication ([679b15d](https://github.com/djm204/frankenbeast/commit/679b15dfbd8cc592ed04b67339230494a5586a8c)), closes [#703](https://github.com/djm204/frankenbeast/issues/703)
+
+
+### Miscellaneous
+
+* **types:** disambiguate critique contracts ([#1360](https://github.com/djm204/frankenbeast/issues/1360)) ([ddd0bd0](https://github.com/djm204/frankenbeast/commit/ddd0bd0b1dfc8a5a0d2a78cd9b4a570e7974e57f))
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Tests
+
+* **types:** fail when no tests are discovered ([8817b8b](https://github.com/djm204/frankenbeast/commit/8817b8b29c3a20af1fee5d0593669ae1b28fb15b)), closes [#970](https://github.com/djm204/frankenbeast/issues/970)
+
 ## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.8.0...franken-types-v0.8.1) (2026-07-08)
 
 
