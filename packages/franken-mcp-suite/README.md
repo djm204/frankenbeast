@@ -69,11 +69,13 @@ npm --workspace @franken/web run dev:chat
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. `dev:chat` proxies API calls to the local chat server on `http://127.0.0.1:3737`; production deployments should use a TLS-terminated frontend/API URL instead of the local dev proxy.
 
-If the backend uses a different port, keep browser requests same-origin and point the Vite proxy at that backend:
+If the backend uses a different port, keep browser requests same-origin and point the Vite proxy at that backend. Leave `VITE_API_URL` unset for local Vite development; use `VITE_API_PROXY_TARGET` for chat/API traffic and `VITE_BEAST_API_PROXY_TARGET` when Beast controls run on a separate backend:
 
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
+VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4050 \
+  npm --workspace @franken/web run dev
 ```
 
 For Beast controls, run the orchestrator/backend setup flow with `frankenbeast init` (distinct from `fbeast mcp init`) and keep the Vite proxy's auth source aligned with the backend project. For same-repo runs, either set `FRANKENBEAST_BEAST_OPERATOR_TOKEN` in the repo root `.env` or let the proxy resolve the token from the configured secret backend; default `local-encrypted` proxy resolution also requires `FRANKENBEAST_PASSPHRASE` in the Vite process environment. For the external `/path/to/your-project` workflow above, prefer the server-side env token path because the dev proxy resolves default local encrypted vaults relative to the Frankenbeast repo root. `FRANKENBEAST_CONFIG_FILE=/path/to/your-project/.fbeast/config.json` (or `FRANKENBEAST_CONFIG_PATH`) points the proxy at that external config file, but it does not move the local encrypted vault root. The Vite dev proxy reads these values server-side without exposing them to the browser. The root README's Secret Management section documents `frankenbeast init`, `--verify`, `--repair`, `--non-interactive`, and secret-backend prerequisites.

@@ -405,11 +405,13 @@ npm --workspace @franken/web run dev:chat
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. By default the dashboard talks to the chat server through TLS-preferred API defaults and reads the same observer, governor, cost, and Beast data written by MCP mode in that project.
 
-If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend. Leave `VITE_API_URL` unset for local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` continue flowing through the dev proxy.
+If you run the backend on a different port, keep browser requests same-origin and point the Vite dev proxy at that backend. Leave `VITE_API_URL` unset for local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` continue flowing through the dev proxy. If Beast controls use a separate backend, set `VITE_BEAST_API_PROXY_TARGET` for that target too.
 
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
-VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
+VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4050 \
+  npm --workspace @franken/web run dev
 ```
 
 For Beast controls, set the operator token once in the repo root `.env` so the backend and Vite dev proxy can read it server-side:
