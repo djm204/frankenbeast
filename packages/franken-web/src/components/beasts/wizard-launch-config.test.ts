@@ -87,8 +87,17 @@ describe('buildWizardLaunchConfig', () => {
         baseBranch: 'develop',
         branchPattern: 'fix/',
         prCreation: 'auto',
+        commitConvention: 'conventional',
         mergeStrategy: 'squash',
       },
+    });
+  });
+
+  it('preserves an intentionally blank branch pattern so users can clear the default prefix', () => {
+    expect(buildWizardLaunchConfig({
+      6: { branchPattern: '   ' },
+    })).toMatchObject({
+      gitConfig: { branchPattern: '' },
     });
   });
 

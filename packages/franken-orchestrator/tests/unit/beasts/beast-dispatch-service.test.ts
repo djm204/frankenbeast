@@ -86,7 +86,7 @@ describe('BeastDispatchService', () => {
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
         skills: { selectedSkills: [] },
-        gitConfig: { preset: 'feature-branch', baseBranch: 'develop', prCreation: true, mergeStrategy: 'squash' },
+        gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: true, mergeStrategy: 'squash', commitConvention: 'conventional' },
         llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
       },
       dispatchedBy: 'dashboard',
@@ -98,7 +98,7 @@ describe('BeastDispatchService', () => {
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
-      gitConfig: { preset: 'feature-branch', baseBranch: 'develop', prCreation: 'auto', mergeStrategy: 'squash' },
+      gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
       llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
     });
   });

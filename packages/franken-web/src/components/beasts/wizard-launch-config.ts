@@ -167,10 +167,13 @@ function buildGitConfig(git: Record<string, unknown> | undefined): Record<string
   if (!git) return undefined;
 
   const gitConfig: Record<string, unknown> = {};
-  for (const key of ['preset', 'baseBranch', 'branchPattern', 'mergeStrategy'] as const) {
+  for (const key of ['preset', 'baseBranch', 'mergeStrategy', 'commitConvention'] as const) {
     if (typeof git[key] === 'string' && git[key].trim().length > 0) {
-      gitConfig[key] = key === 'branchPattern' ? normalizeBranchPattern(git[key]) : git[key];
+      gitConfig[key] = git[key];
     }
+  }
+  if (typeof git.branchPattern === 'string') {
+    gitConfig.branchPattern = normalizeBranchPattern(git.branchPattern.trim());
   }
   if (typeof git.prCreation === 'boolean') {
     gitConfig.prCreation = git.prCreation ? 'auto' : 'disabled';

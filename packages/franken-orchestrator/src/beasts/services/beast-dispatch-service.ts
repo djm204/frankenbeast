@@ -35,10 +35,13 @@ function normalizeGitConfig(value: unknown): Record<string, unknown> | undefined
   if (!isRecord(value)) return undefined;
 
   const gitConfig: Record<string, unknown> = {};
-  for (const key of ['preset', 'baseBranch', 'branchPattern'] as const) {
+  for (const key of ['preset', 'baseBranch', 'commitConvention'] as const) {
     if (typeof value[key] === 'string' && value[key].trim().length > 0) {
       gitConfig[key] = value[key];
     }
+  }
+  if (typeof value.branchPattern === 'string') {
+    gitConfig.branchPattern = value.branchPattern;
   }
   if (value.prCreation === true) {
     gitConfig.prCreation = 'auto';

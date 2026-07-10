@@ -41,8 +41,10 @@ describe('RunConfigLoader', () => {
         },
         gitConfig: {
           baseBranch: 'develop',
+          branchPattern: '',
           prCreation: 'auto',
           mergeStrategy: 'squash',
+          commitConvention: 'conventional',
         },
         promptConfig: {
           text: 'You are a helpful assistant.',
@@ -63,7 +65,9 @@ describe('RunConfigLoader', () => {
       expect(result.modules?.firewall).toBe(true);
       expect(result.modules?.memory).toBe(false);
       expect(result.gitConfig?.baseBranch).toBe('develop');
+      expect(result.gitConfig?.branchPattern).toBe('');
       expect(result.gitConfig?.prCreation).toBe('auto');
+      expect(result.gitConfig?.commitConvention).toBe('conventional');
       expect(result.promptConfig?.text).toBe('You are a helpful assistant.');
       expect(result.promptConfig?.files).toEqual(['context.md']);
       expect(result.maxTotalTokens).toBe(100000);

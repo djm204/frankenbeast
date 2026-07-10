@@ -15,7 +15,7 @@ import { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
 import { ChunkSessionGc } from '../session/chunk-session-gc.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
-import { CachedCliLlmClient } from '../cache/cached-cli-llm-client.js';
+import { CachedCliLlmClient, type LlmCacheHint } from '../cache/cached-cli-llm-client.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
 import { bridgeToBeastConfig, bridgeToExistingDeps } from './dep-bridge.js';
 import { createBeastDeps, type ConsolidatedDeps } from './create-beast-deps.js';
@@ -33,6 +33,7 @@ import { ReplayContentStore } from '../replay/replay-content-store.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
   BeastLoopDeps, IPlannerModule, ICritiqueModule, IGovernorModule,
+  IFirewallModule, IMemoryModule, ISkillsModule, IHeartbeatModule,
 } from '../deps.js';
 import { deterministicUuid, now as deterministicNow, wallClockNow } from '@franken/types';
 import type { RunConfig } from './run-config-loader.js';
@@ -124,6 +125,22 @@ const stubCritique: ICritiqueModule = {
 const stubGovernor: IGovernorModule = {
   requestApproval: async () => ({ decision: 'approved' as const }),
 };
+const stubFirewall: IFirewallModule = {
+  runPipeline: async (input: string) => ({ sanitizedText: input, violations: [], blocked: false }),
+};
+const stubMemory: IMemoryModule = {
+  frontload: async () => {},
+  getContext: async () => ({ adrs: [], knownErrors: [], rules: [] }),
+  recordTrace: async () => {},
+};
+const stubSkills: ISkillsModule = {
+  hasSkill: () => false,
+  getAvailableSkills: () => [],
+  execute: async (skillId: string) => { throw new Error(`Skills module is disabled; cannot execute ${skillId}`); },
+};
+const stubHeartbeat: IHeartbeatModule = {
+  pulse: async () => ({ summary: 'Heartbeat module disabled.', improvements: [], techDebt: [] }),
+};
 
 function issueArtifactsFor(paths: ProjectPaths, issueNumber: number): IssueRuntimeArtifacts {
   const planName = `issue-${issueNumber}`;
@@ -163,6 +180,7 @@ function discoverWorkspacePackages(root: string): string[] {
 interface EffectiveCliConfig {
   provider: string;
   model?: string | undefined;
+  llmOverrides?: Record<string, { provider?: string | undefined; model?: string | undefined }> | undefined;
   baseBranch: string;
   budget: number;
   branchPattern: string;
@@ -172,10 +190,13 @@ interface EffectiveCliConfig {
   skills?: string[] | undefined;
   enableTracing: boolean;
   modules: {
+    firewall: boolean;
+    skills: boolean;
     memory: boolean;
     planner: boolean;
     critique: boolean;
     governor: boolean;
+    heartbeat: boolean;
   };
 }
 
@@ -203,9 +224,13 @@ interface ExecutionStackDeps {
   gitIso: GitBranchIsolator;
 }
 
+interface CachedLlmLike {
+  complete(prompt: string, hint?: LlmCacheHint): Promise<string>;
+}
+
 interface LlmDeps {
   cliLlmAdapter: CliLlmAdapter;
-  cachedLlm: CachedCliLlmClient;
+  cachedLlm: CachedLlmLike;
 }
 
 interface CliExecutorDeps {
@@ -221,6 +246,7 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
       ?? options.provider,
     model: options.runConfig?.llmConfig?.default?.model
       ?? options.runConfig?.model,
+    llmOverrides: options.runConfig?.llmConfig?.overrides,
     baseBranch: options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch,
     budget: options.budget,
     branchPattern: options.runConfig?.gitConfig?.branchPattern ?? 'feat/',
@@ -230,10 +256,13 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
     skills: options.runConfig?.skills,
     enableTracing: options.orchestratorConfig?.enableTracing ?? false,
     modules: {
+      firewall: effectiveModules?.firewall ?? (process.env.FRANKENBEAST_MODULE_FIREWALL !== 'false'),
+      skills: effectiveModules?.skills ?? (process.env.FRANKENBEAST_MODULE_SKILLS !== 'false'),
       memory: effectiveModules?.memory ?? (process.env.FRANKENBEAST_MODULE_MEMORY !== 'false'),
       planner: effectiveModules?.planner ?? (process.env.FRANKENBEAST_MODULE_PLANNER !== 'false'),
       critique: effectiveModules?.critique ?? (process.env.FRANKENBEAST_MODULE_CRITIQUE !== 'false'),
       governor: effectiveModules?.governor ?? (process.env.FRANKENBEAST_MODULE_GOVERNOR !== 'false'),
+      heartbeat: effectiveModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
     },
   };
 }
@@ -384,22 +413,37 @@ function createExecutionStack(
   };
 }
 
-function createLlmDeps(
+class OperationRoutingLlmClient implements CachedLlmLike {
+  constructor(
+    private readonly fallback: CachedLlmLike,
+    private readonly byOperation: ReadonlyMap<string, CachedLlmLike>,
+  ) {}
+
+  complete(prompt: string, hint?: LlmCacheHint): Promise<string> {
+    const operation = hint?.operation;
+    return (operation ? this.byOperation.get(operation) : undefined)?.complete(prompt, hint)
+      ?? this.fallback.complete(prompt, hint);
+  }
+}
+
+function createCachedCliLlmClient(
   options: CliDepOptions,
-  config: EffectiveCliConfig,
+  providerName: string,
+  model: string | undefined,
   artifacts: SessionArtifacts,
   observer: ObserverDepsBundle,
   stack: ExecutionStackDeps,
-): LlmDeps {
-  const resolvedProvider = stack.registry.get(config.provider);
-  const override = options.providersConfig?.[config.provider];
-  const observerDeps = (config.enableTracing
+  operation: string,
+): { adapter: CliLlmAdapter; client: CachedCliLlmClient } {
+  const resolvedProvider = stack.registry.get(providerName);
+  const override = options.providersConfig?.[providerName];
+  const observerDeps = (options.orchestratorConfig?.enableTracing
     ? observer.observerBridge.observerDeps
     : observer.observerBridge.disabledObserverDeps) as never;
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: options.adapterWorkingDir ?? options.paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
-    ...((config.model ?? options.adapterModel) != null ? { model: (config.model ?? options.adapterModel)! } : {}),
+    ...((model ?? override?.model ?? options.adapterModel) != null ? { model: (model ?? override?.model ?? options.adapterModel)! } : {}),
     ...(options.chatMode ? { chatMode: true } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
     replayRunId: () => observer.observerBridge.getActiveSessionId() ?? observer.runSessionId,
@@ -412,23 +456,64 @@ function createLlmDeps(
   new AdapterLlmClient(
     cliLlmAdapter,
     observerDeps,
-    config.provider,
+    providerName,
   );
 
+  const effectiveModel = override?.model ?? model ?? options.adapterModel ?? providerName;
   const cachedLlm = new CachedCliLlmClient({
     cacheRootDir: options.paths.llmCacheDir,
     cliAdapter: cliLlmAdapter,
     projectId: options.paths.root,
-    provider: config.provider,
-    model: override?.model ?? config.model ?? options.adapterModel ?? config.provider,
-    operation: 'cli-session',
-    workId: `session:${artifacts.planName}`,
-    stablePrefix: 'surface:cli',
+    provider: providerName,
+    model: effectiveModel,
+    operation,
+    workId: `session:${artifacts.planName}:${operation}`,
+    stablePrefix: `surface:cli:${operation}`,
     workPrefix: `plan:${artifacts.planName}`,
     observer: observerDeps,
   });
 
-  return { cliLlmAdapter, cachedLlm };
+  return { adapter: cliLlmAdapter, client: cachedLlm };
+}
+
+function createLlmDeps(
+  options: CliDepOptions,
+  config: EffectiveCliConfig,
+  artifacts: SessionArtifacts,
+  observer: ObserverDepsBundle,
+  stack: ExecutionStackDeps,
+): LlmDeps {
+  const defaultLlm = createCachedCliLlmClient(
+    options,
+    config.provider,
+    config.model,
+    artifacts,
+    observer,
+    stack,
+    'cli-session',
+  );
+
+  const byOperation = new Map<string, CachedLlmLike>();
+  for (const [operation, override] of Object.entries(config.llmOverrides ?? {})) {
+    const operationProvider = override.provider ?? config.provider;
+    const operationModel = override.model ?? (operationProvider === config.provider ? config.model : undefined);
+    byOperation.set(operation, createCachedCliLlmClient(
+      options,
+      operationProvider,
+      operationModel,
+      artifacts,
+      observer,
+      stack,
+      operation,
+    ).client);
+  }
+
+  return {
+    cliLlmAdapter: defaultLlm.adapter,
+    cachedLlm: byOperation.size > 0
+      ? new OperationRoutingLlmClient(defaultLlm.client, byOperation)
+      : defaultLlm.client,
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -686,7 +771,7 @@ function createConsolidatedDeps(
   governor: IGovernorModule,
 ): ConsolidatedDeps {
   const runConfigOverrides: import('../deps.js').RunConfigOverrides | undefined =
-    config.skills?.length
+    config.skills !== undefined
       ? { allowedSkills: config.skills }
       : undefined;
 
@@ -715,7 +800,7 @@ function createConsolidatedDeps(
 function createSkillDeps(consolidated: ConsolidatedDeps, allowedSkills?: string[] | undefined): BeastLoopDeps['skills'] {
   const baseSkills = consolidated.skills;
   const cliSkillCompat = (id: string) => id.startsWith('cli:');
-  return allowedSkills?.length
+  return allowedSkills !== undefined
     ? {
         hasSkill: (id: string) => cliSkillCompat(id) || baseSkills.getAvailableSkills().some((s) => (
           s.id === id && (allowedSkills.includes(s.id) || Boolean(s.parentSkillId && allowedSkills.includes(s.parentSkillId)))
@@ -867,7 +952,10 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     );
     const deps: BeastLoopDeps = {
       ...consolidated,
-      skills: createSkillDeps(consolidated, config.skills),
+      firewall: config.modules.firewall ? consolidated.firewall : stubFirewall,
+      skills: config.modules.skills ? createSkillDeps(consolidated, config.skills) : stubSkills,
+      memory: config.modules.memory ? consolidated.memory : stubMemory,
+      heartbeat: config.modules.heartbeat ? consolidated.heartbeat : stubHeartbeat,
     };
     const issueDeps = createIssueDeps(options, options.paths, stack, executor, llm);
     finalize = appendAuditFinalize(finalize, observer, consolidated);
