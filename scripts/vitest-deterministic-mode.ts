@@ -1,26 +1,8 @@
+import { createSeededRandom } from '../packages/franken-types/src/utils/seededRandom.js';
+
 const DEFAULT_EPOCH_MS = Date.UTC(2026, 0, 1, 0, 0, 0);
-const MODULUS = 0x100000000;
 
-function hashSeed(seed: string): number {
-  let hash = 2166136261;
-  for (const char of seed) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-export function seededRandom(seed = process.env['FRANKENBEAST_SEED'] ?? 'frankenbeast'): () => number {
-  let state = hashSeed(seed) || 0x6d2b79f5;
-
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / MODULUS;
-  };
-}
+export const seededRandom = createSeededRandom;
 
 export function createDeterministicClock(seed = process.env['FRANKENBEAST_SEED'] ?? 'frankenbeast'): () => number {
   let tick = 0;
