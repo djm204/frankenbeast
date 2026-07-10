@@ -145,7 +145,12 @@ describe('local setup scripts', () => {
     expect(script).toContain('GRAFANA_USER=admin');
     expect(script).toContain('npm ci');
     expect(script).toContain('docker compose up -d');
+    expect(readme).toContain('## 🚀 One-click onboarding');
+    expect(readme).toContain('[Frankenbeast onboarding checklist](ONBOARDING.md)');
+    expect(readme).toContain('[`scripts/bootstrap.sh`](scripts/bootstrap.sh)');
     expect(readme).toContain('npm run bootstrap -- --no-docker');
+    expect(readme).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(onboarding).toMatch(/^---\ntitle: Frankenbeast Onboarding Checklist\ndescription: /);
     expect(onboarding).toContain('./scripts/bootstrap.sh --dry-run');
     expect(quickstart).toContain('./scripts/bootstrap.sh --dry-run');
     expect(ci).toContain('Validate bootstrap dry-run');
