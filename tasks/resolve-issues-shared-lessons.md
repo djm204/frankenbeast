@@ -1,7 +1,12 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — CLI entrypoint regression coverage
+- For process-boundary behavior, add Vitest smoke tests that execute the published binary (`node_modules/.bin/<bin>`) with real args/argv and assert both stdout/stderr and exit codes; this catches drift in bin wiring and command handling that pure unit tests of loader/provisioner logic can miss.
+- Before merge, prefer adding a dedicated temporary corpus fixture and include both success (`list`), usage (`list` missing arg), and failure (`unknown command`, invalid path) coverage in a single CLI test file.
+- If Codex hits usage limits during a required review round, classify that as a hard blocker and record the exact limit-state so a fresh PR/worker can continue once credits reset.
+
 ## 2026-07-10 — Observer replay timestamp validation
-- Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant regressions (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
+- Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant guards (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
 ## 2026-07-10 — Parallel planner deadlock guard
 - In ParallelPlanner execution, don't allow the "no tasks ready" path to continue silently as success. Keep cycle checks explicit and fail fast with a clear `CyclicDependencyError` (or similar) before running task waves, and add a unit test that proves executor is never called when readiness stalls due to a dependency cycle.
