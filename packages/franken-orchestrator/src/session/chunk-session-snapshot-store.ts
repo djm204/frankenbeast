@@ -61,16 +61,25 @@ export class FileChunkSessionSnapshotStore {
    * Restores the most recent snapshot, skipping (and quarantining) any
    * corrupt files it encounters along the way so a single damaged snapshot
    * cannot hide older, still-usable ones.
+   *
+   * Unscoped restores intentionally fail closed when multiple task-scoped
+   * sessions share a chunk id. Without a task id, newest-by-filename ordering
+   * cannot tell which task owns the requested restore.
    */
   restoreLatest(planName: string, chunkId: string, taskId?: string): ChunkSession | undefined {
     const files = this.list(planName, chunkId, taskId);
-    for (let i = files.length - 1; i >= 0; i--) {
-      const session = readJsonFileOrQuarantine<ChunkSession>(files[i]!);
-      if (session) {
-        return session;
+    const sessions = files
+      .map((filePath) => readJsonFileOrQuarantine<ChunkSession>(filePath))
+      .filter((session): session is ChunkSession => session !== undefined);
+
+    if (!taskId) {
+      const matchingTaskIds = new Set(sessions.map((session) => session.taskId ?? ''));
+      if (matchingTaskIds.size > 1) {
+        return undefined;
       }
     }
-    return undefined;
+
+    return sessions.at(-1);
   }
 
   private snapshotDir(planName: string, chunkId: string, taskId?: string): string {
