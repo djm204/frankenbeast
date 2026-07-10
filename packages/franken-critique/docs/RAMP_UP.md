@@ -25,7 +25,7 @@ The `@franken/orchestrator` currently skips the reflection phase by using a stub
 ```bash
 npm run build            # tsc
 npm test                 # vitest run (unit)
-npm run test:integration # full loop verification
+npm run test:integration # full critique loop verification
 ```
 
 ## Dependencies

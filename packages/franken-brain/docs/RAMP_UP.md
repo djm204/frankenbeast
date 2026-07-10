@@ -24,7 +24,7 @@ The `@franken/orchestrator` currently bypasses this package. While the logic her
 ```bash
 npm run build          # tsc
 npm run test           # vitest run (unit)
-npm run test:integration # requires SQLite/ChromaDB mocks
+npm run test:integration # serialize/hydrate lifecycle coverage
 ```
 
 ## Dependencies
