@@ -5,6 +5,19 @@ export const WIZARD_SECTION_KEYS = ['identity', 'workflow', 'llm', 'modules', 's
 
 type WizardStepValues = Record<number, Record<string, unknown> | undefined>;
 
+const MODULE_NUMBER_BOUNDS = {
+  plannerConfig: {
+    maxDagDepth: { min: 1, max: 50 },
+    parallelTaskLimit: { min: 1, max: 20 },
+  },
+  critiqueConfig: {
+    maxIterations: { min: 1, max: 10 },
+  },
+  heartbeatConfig: {
+    reflectionInterval: { min: 10, max: 600 },
+  },
+} as const;
+
 interface PromptFile {
   name?: unknown;
   content?: unknown;
@@ -45,6 +58,37 @@ function buildPromptFrontload(prompts: Record<string, unknown> | undefined): str
   return parts.length > 0 ? parts.join('\n\n---\n\n') : undefined;
 }
 
+function sanitizeModuleNumber(value: unknown, min: number, max: number): number | undefined {
+  if (typeof value === 'string' && value.trim().length === 0) return undefined;
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function sanitizeModuleConfig(modules: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!modules) return undefined;
+
+  const nextModules = { ...modules };
+  for (const [configKey, fields] of Object.entries(MODULE_NUMBER_BOUNDS)) {
+    const current = nextModules[configKey];
+    if (!current || typeof current !== 'object' || Array.isArray(current)) continue;
+
+    const nextConfig = { ...(current as Record<string, unknown>) };
+    for (const [field, bounds] of Object.entries(fields)) {
+      if (!(field in nextConfig)) continue;
+      const sanitized = sanitizeModuleNumber(nextConfig[field], bounds.min, bounds.max);
+      if (sanitized === undefined) {
+        delete nextConfig[field];
+      } else {
+        nextConfig[field] = sanitized;
+      }
+    }
+    nextModules[configKey] = nextConfig;
+  }
+
+  return nextModules;
+}
+
 export function buildWizardLaunchConfig(
   stepValues: WizardStepValues,
   catalog?: readonly BeastCatalogEntry[],
@@ -59,6 +103,7 @@ export function buildWizardLaunchConfig(
   }
 
   const workflow = config.workflow as Record<string, unknown> | undefined;
+  config.modules = sanitizeModuleConfig(config.modules as Record<string, unknown> | undefined);
   const selectedWorkflow = typeof workflow?.workflowType === 'string'
     ? findCatalogEntry(catalog, workflow.workflowType)
     : undefined;

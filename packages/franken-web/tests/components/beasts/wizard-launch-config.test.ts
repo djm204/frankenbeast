@@ -35,4 +35,23 @@ describe('buildWizardLaunchConfig', () => {
 
     expect(config.executionMode).toBe('process');
   });
+
+  it('sanitizes positive-only module numeric values before launch', () => {
+    const config = buildWizardLaunchConfig({
+      3: {
+        planner: true,
+        plannerConfig: { maxDagDepth: 0, parallelTaskLimit: '99' },
+        critique: true,
+        critiqueConfig: { maxIterations: '' },
+        heartbeat: true,
+        heartbeatConfig: { reflectionInterval: 0 },
+      },
+    });
+
+    expect(config.modules).toMatchObject({
+      plannerConfig: { maxDagDepth: 1, parallelTaskLimit: 20 },
+      critiqueConfig: {},
+      heartbeatConfig: { reflectionInterval: 10 },
+    });
+  });
 });
