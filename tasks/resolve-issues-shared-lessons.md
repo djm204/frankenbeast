@@ -8,6 +8,10 @@
 ## 2026-07-10 — Codex usage limits in review loop
 - If `@codex review` immediately returns usage-limit comments, classify the review state as blocked/review unavailable for this round and avoid further triggers. Re-run only after credits/enablement is restored, and prefer a short-lived monitor rather than repeated immediate retries.
 
+## 2026-07-10 — Governor test-lane isolation
+- Separate test lanes with explicit command-level includes (`test` and `test:unit` on `tests/unit/**/*.test.ts`) and keep `test:integration` targeting `tests/integration` directly; this avoids brittle glob assumptions and ensures a future integration file in `tests/integration/` is never picked up by default test runs even if naming drifts.
+- In npm scripts, prefer explicit directory/file arguments (`tests/integration`) over globbed wildcards when passing `vitest run`, because shell glob expansion can vary and hide files in CI/local environments if `**` is interpreted unexpectedly.
+
 ## 2026-07-10 — Observer replay timestamp validation
 - Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant guards (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
