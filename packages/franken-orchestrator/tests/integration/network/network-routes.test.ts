@@ -46,6 +46,42 @@ describe('network routes', () => {
     expect(body.data.network.mode).toBe('insecure');
   });
 
+  it.each(['start', 'stop', 'restart'] as const)(
+    'returns 400 for unknown network service target on %s',
+    async (action) => {
+      mkdirSync(TMP, { recursive: true });
+      let config = defaultConfig();
+      const app = createChatApp({
+        sessionStoreDir: join(TMP, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('hello') },
+        projectName: 'network-project',
+        networkControl: {
+          root: TMP,
+          frankenbeastDir: TMP,
+          configFile: join(TMP, 'config.json'),
+          getConfig: () => config,
+          setConfig: (nextConfig) => {
+            config = nextConfig;
+          },
+        },
+      });
+
+      const response = await app.request(`/v1/network/${action}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ target: 'not-a-service' }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: {
+          code: 'UNKNOWN_NETWORK_SERVICE_TARGET',
+          message: 'Unknown network service target: not-a-service',
+        },
+      });
+    },
+  );
+
   it('preserves already-approved provider command overrides when persisting config updates', async () => {
     mkdirSync(TMP, { recursive: true });
     const configFile = join(TMP, 'config.json');
@@ -63,6 +99,7 @@ describe('network routes', () => {
         },
       },
     };
+
     const app = createChatApp({
       sessionStoreDir: join(TMP, 'chat'),
       llm: { complete: vi.fn().mockResolvedValue('hello') },
@@ -71,7 +108,6 @@ describe('network routes', () => {
         root: TMP,
         frankenbeastDir: TMP,
         configFile,
-        allowTrustedProviderCommandOverrides: true,
         getConfig: () => config,
         setConfig: (nextConfig) => {
           config = nextConfig;

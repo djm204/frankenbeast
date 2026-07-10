@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../../network/network-config-paths.js';
-import { filterNetworkServices, resolveNetworkServices } from '../../network/network-registry.js';
+import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../../network/network-registry.js';
 import { NetworkLogStore } from '../../network/network-logs.js';
 import { redactSensitiveConfig } from '../../network/network-secrets.js';
 import { NetworkStateStore } from '../../network/network-state-store.js';
@@ -51,6 +51,20 @@ function createSupervisor(frankenbeastDir: string): NetworkSupervisor {
     healthcheck: healthcheckNetworkService,
     preflightService: preflightNetworkService,
   });
+}
+
+function withValidTarget(
+  services: ReturnType<typeof resolveNetworkServices>,
+  target: string,
+): ResolvedNetworkService[] {
+  try {
+    return filterNetworkServices(services, target);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Unknown network service')) {
+      throw new HttpError(400, 'UNKNOWN_NETWORK_SERVICE_TARGET', error.message);
+    }
+    throw error;
+  }
 }
 
 export function networkRoutes(deps: NetworkRoutesDeps): Hono {
@@ -106,7 +120,7 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
     const config = deps.getConfig();
-    const services = filterNetworkServices(
+    const services = withValidTarget(
       resolveNetworkServices(config, {
         repoRoot: deps.root,
         configFile: deps.configFile,
@@ -126,16 +140,8 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
   app.post('/v1/network/stop', async (c) => {
     const body = validateBody(TargetBody, await parseJsonBody(c));
     const supervisor = createSupervisor(deps.frankenbeastDir);
-    await supervisor.stop(body.target);
-    return c.json({ data: { ok: true } });
-  });
-
-  app.post('/v1/network/restart', async (c) => {
-    const body = validateBody(TargetBody, await parseJsonBody(c));
-    const supervisor = createSupervisor(deps.frankenbeastDir);
-    await supervisor.stop(body.target);
     const config = deps.getConfig();
-    const services = filterNetworkServices(
+    withValidTarget(
       resolveNetworkServices(config, {
         repoRoot: deps.root,
         configFile: deps.configFile,
@@ -143,6 +149,23 @@ export function networkRoutes(deps: NetworkRoutesDeps): Hono {
       }),
       body.target,
     );
+    await supervisor.stop(body.target);
+    return c.json({ data: { ok: true } });
+  });
+
+  app.post('/v1/network/restart', async (c) => {
+    const body = validateBody(TargetBody, await parseJsonBody(c));
+    const supervisor = createSupervisor(deps.frankenbeastDir);
+    const config = deps.getConfig();
+    const services = withValidTarget(
+      resolveNetworkServices(config, {
+        repoRoot: deps.root,
+        configFile: deps.configFile,
+        allowTrustedProviderCommandOverrides: deps.allowTrustedProviderCommandOverrides,
+      }),
+      body.target,
+    );
+    await supervisor.stop(body.target);
     const state = await supervisor.up({
       services,
       detached: true,
