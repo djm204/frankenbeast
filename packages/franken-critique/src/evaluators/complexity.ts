@@ -69,6 +69,7 @@ function startsWithDeclarationKeyword(content: string, index: number): boolean {
   const declarationKeywords = [
     'declare',
     'export',
+    'import',
     'interface',
     'type',
     'class',
@@ -78,11 +79,16 @@ function startsWithDeclarationKeyword(content: string, index: number): boolean {
     'function',
   ];
 
-  return declarationKeywords.some(
-    (keyword) =>
-      content.startsWith(keyword, index) &&
-      !/[A-Za-z0-9_$]/.test(content[index + keyword.length] ?? ''),
-  );
+  return declarationKeywords.some((keyword) => {
+    if (!content.startsWith(keyword, index)) return false;
+    if (/[A-Za-z0-9_$]/.test(content[index + keyword.length] ?? '')) {
+      return false;
+    }
+    if (keyword !== 'import') return true;
+
+    const nextIndex = skipWhitespace(content, index + keyword.length);
+    return content[nextIndex] !== '(';
+  });
 }
 
 function isPreviousKeyword(
@@ -124,7 +130,7 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
     }
 
     if (typeDepth === 0 && char === '=' && content[i + 1] === '>') {
-      expectTypeOperand = true;
+      expectTypeOperand = content[skipWhitespace(content, i + 2)] === '{';
       i++;
       continue;
     }
@@ -233,6 +239,39 @@ function findInitializerParamsOpen(content: string, startIndex: number): number 
   return -1;
 }
 
+function hasTopLevelArrowAhead(content: string, startIndex: number): boolean {
+  let angleDepth = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+
+  for (let i = startIndex; i < content.length - 1; i++) {
+    const char = content[i] ?? '';
+    if (char === '<') angleDepth++;
+    if (char === '(') parenDepth++;
+    if (char === '[') bracketDepth++;
+    if (char === '{') braceDepth++;
+    if (char === '>' && !isArrowGreaterThan(content, i)) {
+      angleDepth = Math.max(0, angleDepth - 1);
+    }
+    if (char === ')') parenDepth = Math.max(0, parenDepth - 1);
+    if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+    if (char === '}') braceDepth = Math.max(0, braceDepth - 1);
+
+    if (
+      angleDepth === 0 &&
+      parenDepth === 0 &&
+      bracketDepth === 0 &&
+      braceDepth === 0
+    ) {
+      if (char === ';') return false;
+      if (char === '=' && content[i + 1] === '>') return true;
+    }
+  }
+
+  return false;
+}
+
 function findArrowToken(content: string, startIndex: number): number {
   const index = skipWhitespace(content, startIndex);
 
@@ -251,6 +290,11 @@ function findArrowToken(content: string, startIndex: number): number {
         let nextIndex = i + 2;
         nextIndex = skipWhitespace(content, nextIndex);
         if (content[nextIndex] !== '{') {
+          if (hasTopLevelArrowAhead(content, nextIndex)) {
+            previousSignificant = '>';
+            i++;
+            continue;
+          }
           return i;
         }
         const closeIndex = findMatchingDelimiter(content, nextIndex, '{', '}');

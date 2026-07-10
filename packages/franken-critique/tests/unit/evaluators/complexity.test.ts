@@ -540,6 +540,33 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
   });
 
+  it('flags declarations with function-type return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(a, b, c, d, e, f): () => void { return () => {}; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags block arrows with function-type return annotations', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `const complex = (a, b, c, d, e, f): () => void => { return () => {}; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('ignores semicolonless signatures before imports', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'export function external(a, b, c, d, e, f): void',
+      "import { Shape } from './shape'",
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
+  });
+
 
   it('flags generic arrow functions with function type constraints', async () => {
     const evaluator = new ComplexityEvaluator();
