@@ -5,6 +5,7 @@ import { ApprovalGateway, type AuditRecorder } from './approval-gateway.js';
 import type { SignatureVerifier } from '../security/signature-verifier.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { BudgetTrigger, type BudgetTriggerContext } from '../triggers/budget-trigger.js';
+import { evaluateTrigger } from '../triggers/evaluate-trigger.js';
 import { SkillTrigger, type SkillTriggerContext } from '../triggers/skill-trigger.js';
 import type { RationaleBlock, VerificationResult } from '@franken/types';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
@@ -113,7 +114,7 @@ export class GovernorCritiqueAdapter {
       // from the rationale + injected sources, so it must not be fed a
       // RationaleBlock it was never typed for (see issue #490).
       if (triggerContext.skip) continue;
-      const result = evaluator.evaluate(triggerContext.context);
+      const result = evaluateTrigger(evaluator, triggerContext.context);
       if (result.triggered) return result;
     }
     return { triggered: false, triggerId: 'none' };

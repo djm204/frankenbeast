@@ -328,4 +328,42 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     await adapter.verifyRationale(rationale);
     expect(seen).toEqual([rationale]);
   });
+
+  it('turns evaluator exceptions into the same fail-closed approval request as TriggerRegistry', async () => {
+    const channel = makeFakeChannel('ABORT');
+    let laterCalled = false;
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [
+        {
+          triggerId: 'stale-trigger',
+          evaluate: () => {
+            throw new Error('missing expected field');
+          },
+        },
+        {
+          triggerId: 'later-trigger',
+          evaluate: () => {
+            laterCalled = true;
+            return { triggered: true, triggerId: 'later-trigger', reason: 'later', severity: 'high' };
+          },
+        },
+      ],
+      projectId: 'proj-001',
+    });
+
+    const result = await adapter.verifyRationale(makeRationale());
+
+    expect(result.verdict).toBe('rejected');
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger).toEqual({
+      triggered: true,
+      triggerId: 'stale-trigger',
+      reason: "Trigger 'stale-trigger' evaluation failed: missing expected field",
+      severity: 'critical',
+    });
+    expect(laterCalled).toBe(false);
+  });
 });
