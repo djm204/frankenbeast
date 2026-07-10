@@ -23,6 +23,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:ci": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {

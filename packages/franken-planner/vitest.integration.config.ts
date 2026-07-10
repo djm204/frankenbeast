@@ -11,18 +11,6 @@ export default defineConfig({
       fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url)),
     ],
     environment: 'node',
-    include: ['tests/unit/**/*.test.ts'],
-    exclude: ['tests/integration/**/*.integration.test.ts'],
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'lcov', 'html'],
-      include: ['src/**/*.ts'],
-      thresholds: {
-        statements: 80,
-        branches: 80,
-        functions: 80,
-        lines: 80,
-      },
-    },
+    include: ['tests/integration/**/*.integration.test.ts'],
   },
 });

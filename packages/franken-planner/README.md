@@ -131,12 +131,14 @@ Pass a `SelfCritiqueModule` to enable Chain-of-Thought verification before each 
 npm install         # from repo root
 npm --workspace franken-planner test
 npm --workspace franken-planner run test:ci
+npm --workspace franken-planner run test:integration
 npm --workspace franken-planner run typecheck
 npm --workspace franken-planner run lint
 npm --workspace franken-planner run build
 
 # Or, from packages/franken-planner:
 npm test
+npm run test:integration
 npm run typecheck
 npm run build
 ```
@@ -160,6 +162,7 @@ tests/
 ```
 
 All real implementations are used in integration tests; only external I/O (LLMs, disk) is stubbed.
+The default `npm test` and coverage `npm run test:ci` lanes are scoped to `tests/unit/**/*.test.ts`; use `npm run test:integration` to run `tests/integration/**/*.integration.test.ts` explicitly.
 
 ---
 
