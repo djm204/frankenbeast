@@ -31,11 +31,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function normalizeGitConfig(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+
+  const gitConfig: Record<string, unknown> = {};
+  for (const key of ['preset', 'baseBranch', 'branchPattern'] as const) {
+    if (typeof value[key] === 'string' && value[key].trim().length > 0) {
+      gitConfig[key] = value[key];
+    }
+  }
+  if (value.prCreation === true) {
+    gitConfig.prCreation = 'auto';
+  } else if (value.prCreation === false) {
+    gitConfig.prCreation = 'disabled';
+  } else if (value.prCreation === 'auto' || value.prCreation === 'manual' || value.prCreation === 'disabled') {
+    gitConfig.prCreation = value.prCreation;
+  }
+  if (value.mergeStrategy === 'merge' || value.mergeStrategy === 'squash' || value.mergeStrategy === 'rebase') {
+    gitConfig.mergeStrategy = value.mergeStrategy;
+  }
+  if (typeof value.disableBranding === 'boolean') {
+    gitConfig.disableBranding = value.disableBranding;
+  }
+
+  return Object.keys(gitConfig).length > 0 ? gitConfig : undefined;
+}
+
 function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown | undefined {
   switch (key) {
     case 'skills':
       return Array.isArray(value) && value.every((skill) => typeof skill === 'string') ? value : undefined;
     case 'gitConfig':
+      return normalizeGitConfig(value);
     case 'llmConfig':
     case 'promptConfig':
       return isRecord(value) ? value : undefined;

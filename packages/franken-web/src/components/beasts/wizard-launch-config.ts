@@ -18,6 +18,15 @@ const MODULE_NUMBER_BOUNDS = {
   },
 } as const;
 
+const CLI_PROVIDER_BY_WIZARD_PROVIDER: Record<string, string> = {
+  anthropic: 'claude',
+  openai: 'codex',
+  gemini: 'gemini',
+  'gemini-api': 'gemini',
+  claude: 'claude',
+  codex: 'codex',
+};
+
 interface PromptFile {
   name?: unknown;
   content?: unknown;
@@ -93,7 +102,7 @@ function buildModuleConfig(modules: Record<string, unknown> | undefined): Record
   if (!modules) return undefined;
 
   const moduleConfig = Object.fromEntries(
-    MODULE_CONFIG_KEYS.flatMap((key: string) => (typeof modules[key] === 'boolean' ? [[key, modules[key]]] : [])),
+    MODULE_CONFIG_KEYS.map((key: string) => [key, modules[key] === true]),
   );
 
   return Object.keys(moduleConfig).length > 0 ? moduleConfig : undefined;
@@ -104,13 +113,20 @@ function buildSelectedSkills(skills: Record<string, unknown> | undefined): strin
   return skills.selectedSkills.filter((skill): skill is string => typeof skill === 'string' && skill.trim().length > 0);
 }
 
+function normalizeWizardProvider(provider: unknown): string | undefined {
+  if (typeof provider !== 'string') return undefined;
+  const trimmed = provider.trim();
+  return trimmed.length > 0 ? CLI_PROVIDER_BY_WIZARD_PROVIDER[trimmed] : undefined;
+}
+
 function buildLlmConfig(llm: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!llm) return undefined;
 
   const llmConfig: Record<string, unknown> = {};
   const defaultConfig: Record<string, string> = {};
-  if (typeof llm.defaultProvider === 'string' && llm.defaultProvider.trim().length > 0) {
-    defaultConfig.provider = llm.defaultProvider;
+  const defaultProvider = normalizeWizardProvider(llm.defaultProvider);
+  if (defaultProvider) {
+    defaultConfig.provider = defaultProvider;
   }
   if (typeof llm.defaultModel === 'string' && llm.defaultModel.trim().length > 0) {
     defaultConfig.model = llm.defaultModel;
@@ -124,8 +140,9 @@ function buildLlmConfig(llm: Record<string, unknown> | undefined): Record<string
       Object.entries(llm.overrides as Record<string, Record<string, unknown>>).flatMap(([action, override]) => {
         if (override.useDefault !== false) return [];
         const actionConfig: Record<string, string> = {};
-        if (typeof override.provider === 'string' && override.provider.trim().length > 0) {
-          actionConfig.provider = override.provider;
+        const overrideProvider = normalizeWizardProvider(override.provider);
+        if (overrideProvider) {
+          actionConfig.provider = overrideProvider;
         }
         if (typeof override.model === 'string' && override.model.trim().length > 0) {
           actionConfig.model = override.model;

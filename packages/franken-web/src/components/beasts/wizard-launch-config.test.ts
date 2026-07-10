@@ -40,7 +40,15 @@ describe('buildWizardLaunchConfig', () => {
       },
     });
 
-    expect(config.moduleConfig).toEqual({ firewall: true, skills: false });
+    expect(config.moduleConfig).toEqual({
+      firewall: true,
+      skills: false,
+      memory: false,
+      planner: false,
+      critique: false,
+      governor: false,
+      heartbeat: false,
+    });
     expect(config.modules).toEqual({
       firewall: true,
       skills: false,
@@ -70,8 +78,8 @@ describe('buildWizardLaunchConfig', () => {
       },
     })).toMatchObject({
       llmConfig: {
-        default: { provider: 'openai', model: 'gpt-5.3-codex-spark' },
-        overrides: { planning: { provider: 'anthropic', model: 'claude-sonnet-4-6' } },
+        default: { provider: 'codex', model: 'gpt-5.3-codex-spark' },
+        overrides: { planning: { provider: 'claude', model: 'claude-sonnet-4-6' } },
       },
       skills: ['code-review', 'testing'],
       gitConfig: {
