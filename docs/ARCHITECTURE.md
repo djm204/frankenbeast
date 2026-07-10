@@ -496,16 +496,13 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
 
         subgraph "MOD-03: Franken Brain"
             direction TB
-            MEM_WORK["Working Memory<br/>In-process turns"]
-            MEM_EPIS["Episodic Memory<br/>SQLite traces"]
-            MEM_SEM["Semantic Memory<br/>ChromaDB vectors"]
-            MEM_ORCH["Memory Orchestrator"]
-            MEM_PII["PII Guards<br/>Decorator pattern"]
-            MEM_ORCH --> MEM_WORK
-            MEM_ORCH --> MEM_EPIS
-            MEM_ORCH --> MEM_SEM
-            MEM_PII -.-> MEM_EPIS
-            MEM_PII -.-> MEM_SEM
+            MEM_BRAIN["SqliteBrain<br/>Current public API"]
+            MEM_WORK["Working Memory<br/>In-process key/value"]
+            MEM_EPIS["Episodic Memory<br/>SQLite events"]
+            MEM_RECOV["Recovery Memory<br/>SQLite checkpoints"]
+            MEM_BRAIN --> MEM_WORK
+            MEM_BRAIN --> MEM_EPIS
+            MEM_BRAIN --> MEM_RECOV
         end
 
         subgraph "MOD-04: Franken Planner"
@@ -602,7 +599,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
 
         %% === Orchestrator wiring ===
         BL_INGEST -- "sanitize" --> FW_IN
-        BL_INGEST -- "hydrate" --> MEM_ORCH
+        BL_INGEST -- "hydrate" --> MEM_BRAIN
         BL_PLAN -- "plan" --> PL_INTENT
         BL_PLAN -- "critique" --> CR_LOOP
         BL_EXEC -- "resolve" --> SK_REG
@@ -625,7 +622,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
         PL_DAG -- "getAvailableSkills()<br/>hasSkill()" --> SK_REG
 
         %% === MOD-04 → MOD-03: Context loading ===
-        PL_DAG -- "getADRs()<br/>getKnownErrors()<br/>getProjectContext()" --> MEM_ORCH
+        PL_DAG -- "getKnownErrors()<br/>getProjectContext()" --> MEM_BRAIN
         PL_EXEC -- "recordToolResult()" --> MEM_EPIS
 
         %% === MOD-04 → MOD-07: CoT verification ===
@@ -635,7 +632,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
         CR_DET -- "getSafetyRules()<br/>executeSandbox()" --> FW_IN
 
         %% === MOD-06 → MOD-03: ADRs + lessons ===
-        CR_DET -- "searchADRs()" --> MEM_SEM
+        CR_DET -- "read ADR docs" --> BL_PLAN
         CR_LESSON -- "recordLesson()" --> MEM_EPIS
 
         %% === MOD-06 → MOD-05: Token spend ===
@@ -654,7 +651,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
         GOV_TRIG -- "budget check" --> OB_CB
 
         %% === MOD-08 → MOD-03: Traces + lessons ===
-        HB_REFL -- "getRecentTraces()<br/>getSuccesses/Failures()<br/>recordLesson()" --> MEM_ORCH
+        HB_REFL -- "getRecentTraces()<br/>getSuccesses/Failures()<br/>recordLesson()" --> MEM_BRAIN
 
         %% === MOD-08 → MOD-05: Observability ===
         HB_DET -- "getTraces()<br/>getTokenSpend()" --> OB_TRACE
@@ -719,7 +716,7 @@ This diagram shows the logical/target module topology. The `franken-mcp` subgrap
         class BL_INGEST,BL_PLAN,BL_EXEC,BL_CLOSE,BL_BREAK orchestrator
         class FW_IN,FW_ADAPT,FW_OUT firewall
         class SK_REG,SK_DISC,SK_VAL skills
-        class MEM_WORK,MEM_EPIS,MEM_SEM,MEM_ORCH,MEM_PII brain
+        class MEM_BRAIN,MEM_WORK,MEM_EPIS,MEM_RECOV brain
         class PL_INTENT,PL_DAG,PL_STRAT,PL_COT,PL_EXEC,PL_RECOV,PL_HITL planner
         class OB_TRACE,OB_COST,OB_CB,OB_EXPORT,OB_EVAL,OB_LOOP observer
         class CR_PIPE,CR_DET,CR_HEUR,CR_BREAK,CR_LOOP,CR_LESSON critique
