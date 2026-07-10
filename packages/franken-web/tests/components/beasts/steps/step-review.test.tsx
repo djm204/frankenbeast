@@ -48,6 +48,37 @@ describe('StepReview', () => {
     expect(screen.getByText('Design interview output path is required.')).toBeTruthy();
   });
 
+  it('renders only canonical enabled module toggles in the modules summary', () => {
+    useBeastStore.getState().setStepValues(3, {
+      firewall: true,
+      planner: false,
+      firewallConfig: { ruleSet: 'strict' },
+      plannerConfig: { maxDagDepth: 12 },
+      arbitraryConfig: { enabled: true },
+    });
+
+    render(<StepReview />);
+
+    expect(screen.getByText('firewall')).toBeTruthy();
+    expect(screen.queryByText('planner')).toBeNull();
+    expect(screen.queryByText('firewallConfig')).toBeNull();
+    expect(screen.queryByText('plannerConfig')).toBeNull();
+    expect(screen.queryByText('arbitraryConfig')).toBeNull();
+  });
+
+  it('shows no selected modules when only deep config objects are present', () => {
+    useBeastStore.getState().setStepValues(3, {
+      firewallConfig: { ruleSet: 'strict' },
+      heartbeatConfig: { interval: 60 },
+    });
+
+    render(<StepReview />);
+
+    expect(screen.getByText('None selected')).toBeTruthy();
+    expect(screen.queryByText('firewallConfig')).toBeNull();
+    expect(screen.queryByText('heartbeatConfig')).toBeNull();
+  });
+
   it('has edit links that call setWizardStep', () => {
     render(<StepReview />);
     const editLinks = screen.getAllByText('Edit');
