@@ -8,7 +8,15 @@ export interface CreateSessionTokenParams {
   readonly ttlMs: number;
 }
 
+export function assertValidSessionTokenTtl(ttlMs: number): void {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new RangeError('Session token ttlMs must be a positive finite number');
+  }
+}
+
 export function createSessionToken(params: CreateSessionTokenParams): SessionToken {
+  assertValidSessionTokenTtl(params.ttlMs);
+
   const now = new Date();
 
   return {

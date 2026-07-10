@@ -259,6 +259,25 @@ describe('ApprovalGateway — security integration', () => {
     expect(auditRecorder.record).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['zero', 0],
+    ['negative', -1],
+  ])('rejects invalid %s sessionTokenTtlMs config before contacting the channel', (_name, sessionTokenTtlMs) => {
+    const channel = makeFakeChannel();
+    const auditRecorder = makeFakeAuditRecorder();
+
+    expect(() => new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config: { ...defaultConfig(), sessionTokenTtlMs },
+      sessionTokenStore: new SessionTokenStore(),
+    })).toThrow(ApprovalConfigurationError);
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+    expect(auditRecorder.record).not.toHaveBeenCalled();
+  });
+
   it('constructs a verifier from config.signingSecret and accepts a valid signature', async () => {
     const signingSecret = 'secret-from-config';
     const verifier = new SignatureVerifier(signingSecret);

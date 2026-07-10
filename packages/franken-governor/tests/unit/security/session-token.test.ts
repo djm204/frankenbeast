@@ -41,4 +41,18 @@ describe('createSessionToken', () => {
 
     expect(token.grantedBy).toBe('alice');
   });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['zero', 0],
+    ['negative', -1],
+  ])('rejects %s ttlMs values', (_name, ttlMs) => {
+    expect(() => createSessionToken({
+      approvalId: 'req-001',
+      scope: 'deploy',
+      grantedBy: 'human',
+      ttlMs,
+    })).toThrow(RangeError);
+  });
 });
