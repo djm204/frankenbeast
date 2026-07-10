@@ -13,6 +13,7 @@ import {
   type BeastCatalogEntry,
   type BeastRunDetail,
   type BeastRunSummary,
+  type ModuleConfig,
   type TrackedAgentDetail,
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
@@ -1061,7 +1062,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const initAction = buildInitAction(definitionId, config, selectedSessionId);
-              await beastClient.createAgent({ definitionId, initAction, initConfig: config, executionMode });
+              const moduleConfig = config.moduleConfig && typeof config.moduleConfig === 'object' && !Array.isArray(config.moduleConfig)
+                ? config.moduleConfig as ModuleConfig
+                : undefined;
+              await beastClient.createAgent({
+                definitionId,
+                initAction,
+                initConfig: config,
+                executionMode,
+                ...(moduleConfig ? { moduleConfig } : {}),
+              });
               setBeastRefreshNonce((current) => current + 1);
             }}
             onDelete={(agentId) => {
