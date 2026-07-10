@@ -64,9 +64,22 @@ export class BeastRunService {
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const priorAttemptId = run.currentAttemptId;
     const priorAttemptCount = run.attemptCount;
+    const trackedAgentStatusBeforeStart = run.trackedAgentId
+      ? this.repository.getTrackedAgent(run.trackedAgentId)?.status
+      : undefined;
     try {
       await this.executorFor(run).start(run, definition);
-      const updated = this.requireRun(runId);
+      let updated = this.requireRun(runId);
+      if (
+        updated.status === 'running'
+        && (updated.finishedAt !== undefined || updated.stopReason !== undefined || updated.latestExitCode !== undefined)
+      ) {
+        updated = this.repository.updateRun(runId, {
+          finishedAt: null,
+          latestExitCode: null,
+          stopReason: null,
+        });
+      }
       this.syncTrackedAgent(updated);
       return updated;
     } catch (error) {
@@ -83,7 +96,7 @@ export class BeastRunService {
       }
       const priorAttempt = priorAttemptId ? this.repository.getAttempt(priorAttemptId) : undefined;
       if (priorAttempt?.status === 'running') {
-        this.repository.updateRun(run.id, {
+        const restoredRun = this.repository.updateRun(run.id, {
           status: run.status,
           startedAt: run.startedAt ?? priorAttempt.startedAt,
           finishedAt: run.finishedAt ?? null,
@@ -91,6 +104,7 @@ export class BeastRunService {
           latestExitCode: run.latestExitCode ?? null,
           stopReason: run.stopReason ?? null,
         });
+        this.syncTrackedAgent(restoredRun);
         throw error;
       }
       if (currentRun?.status === 'failed' && currentRun.finishedAt && currentRun.finishedAt !== run.finishedAt) {
@@ -105,16 +119,7 @@ export class BeastRunService {
           const pendingPublications: Array<Omit<BeastSseEvent, 'id'>> = [];
           if (normalizedRun.trackedAgentId) {
             const trackedAgent = this.repository.getTrackedAgent(normalizedRun.trackedAgentId);
-            if (trackedAgent && trackedAgent.status !== 'deleted' && trackedAgent.status !== 'failed') {
-              this.repository.updateTrackedAgent(normalizedRun.trackedAgentId, {
-                status: 'failed',
-                dispatchRunId: normalizedRun.id,
-                updatedAt: failedAt,
-              });
-              pendingPublications.push({
-                type: 'agent.status',
-                data: { agentId: normalizedRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
-              });
+            if (trackedAgent && trackedAgent.status !== 'deleted') {
               const failedEvent = {
                 level: 'error' as const,
                 type: 'agent.dispatch.failed',
@@ -122,11 +127,28 @@ export class BeastRunService {
                 payload: { runId: normalizedRun.id, error: errorMessage },
                 createdAt: failedAt,
               };
-              this.repository.appendTrackedAgentEvent(normalizedRun.trackedAgentId, failedEvent);
-              pendingPublications.push({
-                type: 'agent.event',
-                data: { agentId: normalizedRun.trackedAgentId, event: failedEvent },
-              });
+              if (trackedAgent.status !== 'failed') {
+                this.repository.updateTrackedAgent(normalizedRun.trackedAgentId, {
+                  status: 'failed',
+                  dispatchRunId: normalizedRun.id,
+                  updatedAt: failedAt,
+                });
+                pendingPublications.push({
+                  type: 'agent.status',
+                  data: { agentId: normalizedRun.trackedAgentId, status: 'failed', updatedAt: failedAt },
+                });
+                this.repository.appendTrackedAgentEvent(normalizedRun.trackedAgentId, failedEvent);
+                pendingPublications.push({
+                  type: 'agent.event',
+                  data: { agentId: normalizedRun.trackedAgentId, event: failedEvent },
+                });
+              } else if (trackedAgentStatusBeforeStart === 'failed') {
+                this.repository.appendTrackedAgentEvent(normalizedRun.trackedAgentId, failedEvent);
+                pendingPublications.push({
+                  type: 'agent.event',
+                  data: { agentId: normalizedRun.trackedAgentId, event: failedEvent },
+                });
+              }
             }
           }
           return { failedRun: normalizedRun, publications: pendingPublications };

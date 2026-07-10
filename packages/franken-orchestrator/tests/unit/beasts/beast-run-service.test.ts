@@ -744,6 +744,25 @@ describe('BeastRunService', () => {
     expect(failed.latestExitCode).toBeUndefined();
     expect(failed.startedAt).toBeUndefined();
     await expect(runs.readLogs(run.id)).resolves.toContainEqual(expect.stringContaining('start_failed: spawn ENOENT'));
+
+    executors.process.start.mockImplementationOnce(async (retryRun: { id: string }) => {
+      repo.createAttempt(retryRun.id, {
+        status: 'running',
+        pid: 444,
+        startedAt: '2026-03-10T00:04:00.000Z',
+        executorMetadata: { backend: 'process' },
+      });
+    });
+
+    const retried = await runs.start(run.id, 'operator');
+
+    expect(retried).toMatchObject({
+      status: 'running',
+      attemptCount: 2,
+    });
+    expect(retried.finishedAt).toBeUndefined();
+    expect(retried.latestExitCode).toBeUndefined();
+    expect(retried.stopReason).toBeUndefined();
   });
 
   it('does not overwrite a live run when an executor-recorded duplicate start failure occurs', async () => {
