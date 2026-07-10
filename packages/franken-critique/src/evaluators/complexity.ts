@@ -128,12 +128,14 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
     if (char === '<' || char === '(' || char === '[' || char === '{') {
       typeDepth++;
     } else if (
-      (char === '>' && !isArrowGreaterThan(content, i)) ||
+      char === '>' ||
       char === ')' ||
       char === ']' ||
       char === '}'
     ) {
-      typeDepth = Math.max(0, typeDepth - 1);
+      if (!(char === '>' && content[i - 1] === '=')) {
+        typeDepth = Math.max(0, typeDepth - 1);
+      }
     } else if (char === ';' && typeDepth === 0) {
       return -1;
     }
@@ -171,15 +173,25 @@ function skipAsyncAndTypeParameters(content: string, startIndex: number): number
 
 function findInitializerParamsOpen(content: string, startIndex: number): number {
   let paramsOpenIndex = skipAsyncAndTypeParameters(content, startIndex);
-  if (paramsOpenIndex === -1 || content[paramsOpenIndex] !== '(') return -1;
 
-  while (true) {
-    const groupedIndex = skipAsyncAndTypeParameters(content, paramsOpenIndex + 1);
-    if (groupedIndex === -1 || content[groupedIndex] !== '(') {
+  while (paramsOpenIndex !== -1 && content[paramsOpenIndex] === '(') {
+    const paramsCloseIndex = findMatchingDelimiter(
+      content,
+      paramsOpenIndex,
+      '(',
+      ')',
+    );
+    if (paramsCloseIndex === -1) return -1;
+    if (findArrowToken(content, paramsCloseIndex + 1) !== -1) {
       return paramsOpenIndex;
     }
+
+    const groupedIndex = skipAsyncAndTypeParameters(content, paramsOpenIndex + 1);
+    if (groupedIndex === -1 || content[groupedIndex] !== '(') return -1;
     paramsOpenIndex = groupedIndex;
   }
+
+  return -1;
 }
 
 function findArrowToken(content: string, startIndex: number): number {
@@ -221,12 +233,14 @@ function findArrowToken(content: string, startIndex: number): number {
     if (char === '<' || char === '(' || char === '[' || char === '{') {
       typeDepth++;
     } else if (
-      (char === '>' && !isArrowGreaterThan(content, i)) ||
+      char === '>' ||
       char === ')' ||
       char === ']' ||
       char === '}'
     ) {
-      typeDepth = Math.max(0, typeDepth - 1);
+      if (!(char === '>' && content[i - 1] === '=')) {
+        typeDepth = Math.max(0, typeDepth - 1);
+      }
     } else if (char === ';' && typeDepth === 0) {
       return -1;
     }
