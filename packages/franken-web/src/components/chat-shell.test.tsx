@@ -304,6 +304,40 @@ describe('ChatShell route heading', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('ignores stale service action refresh failures after a newer manual refresh succeeds', async () => {
+    let rejectStaleActionRefresh!: (error: Error) => void;
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat', status: 'running', inProcess: false }],
+      })
+      .mockImplementationOnce(() => new Promise((_, reject) => {
+        rejectStaleActionRefresh = reject;
+      }))
+      .mockResolvedValueOnce({
+        mode: 'insecure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat', status: 'running', inProcess: false }],
+      });
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    expect(await screen.findByText('chat')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart chat' }));
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(await screen.findByText('insecure')).toBeTruthy();
+
+    await act(async () => {
+      rejectStaleActionRefresh(new Error('HTTP 500'));
+    });
+
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('surfaces a service action failure when the follow-up status refresh is rejected', async () => {
     networkApiMocks.getStatus
       .mockResolvedValueOnce({

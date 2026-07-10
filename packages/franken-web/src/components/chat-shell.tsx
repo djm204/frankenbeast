@@ -396,13 +396,20 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   const refreshNetworkStatusAfterAction = (client: NetworkApiClient): Promise<void> => {
     const statusRequestId = ++networkStatusRequestIdRef.current;
-    return client.getStatus().then((nextStatus) => {
-      if (statusRequestId !== networkStatusRequestIdRef.current) {
-        return;
-      }
-      setNetworkStatus(nextStatus);
-      setNetworkError(null);
-    });
+    return client.getStatus()
+      .then((nextStatus) => {
+        if (statusRequestId !== networkStatusRequestIdRef.current) {
+          return;
+        }
+        setNetworkStatus(nextStatus);
+        setNetworkError(null);
+      })
+      .catch((error: unknown) => {
+        if (statusRequestId !== networkStatusRequestIdRef.current) {
+          return;
+        }
+        throw error;
+      });
   };
 
   useEffect(() => {
