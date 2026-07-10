@@ -1063,14 +1063,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               const workflow = config.workflow as Record<string, unknown> | undefined;
               const definitionId = String(workflow?.workflowType ?? 'martin-loop');
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
-              const initAction = buildInitAction(definitionId, config, selectedSessionId);
+              const launchChatSessionId = selectedSessionId ?? activeSessionId ?? undefined;
+              const initAction = buildInitAction(definitionId, config, launchChatSessionId);
               try {
                 await beastClient.createAgent({
                   definitionId,
                   initAction,
                   initConfig: config,
                   executionMode,
-                  ...(selectedSessionId ? { chatSessionId: selectedSessionId } : {}),
+                  ...(launchChatSessionId ? { chatSessionId: launchChatSessionId } : {}),
                 });
                 setBeastRefreshNonce((current) => current + 1);
               } catch (error) {

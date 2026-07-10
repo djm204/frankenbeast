@@ -65,6 +65,8 @@ vi.mock('../lib/network-api', () => ({
 vi.mock('../lib/beast-api', () => ({
   BeastApiClient: class {
     createAgent = mocks.createAgent;
+    getCatalog = vi.fn().mockResolvedValue([]);
+    getContainerRuntimeStatus = vi.fn().mockResolvedValue(undefined);
     listCatalog = vi.fn().mockResolvedValue([]);
     listAgents = vi.fn().mockResolvedValue([]);
     listRuns = vi.fn().mockResolvedValue([]);
@@ -87,8 +89,14 @@ vi.mock('../pages/dashboard-page', () => ({
 }));
 
 vi.mock('../pages/beasts-page', () => ({
-  BeastsPage: ({ onLaunch }: { onLaunch: (config: Record<string, unknown>) => Promise<void> }) => (
-    <button type="button" onClick={() => { void onLaunch(mocks.launchConfig); }}>Launch test Beast</button>
+  BeastsPage: ({
+    disabled,
+    onLaunch,
+  }: {
+    disabled?: boolean;
+    onLaunch: (config: Record<string, unknown>) => Promise<void>;
+  }) => (
+    <button type="button" disabled={disabled} onClick={() => { void onLaunch(mocks.launchConfig); }}>Launch test Beast</button>
   ),
 }));
 
@@ -173,7 +181,9 @@ describe('ChatShell route heading', () => {
     window.location.hash = '#/beasts';
 
     render(<ChatShell baseUrl="http://localhost:3737" projectId="default" sessionId="chat-session-42" version="0.2.1" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Launch test Beast' }));
+    const launchButton = await screen.findByRole('button', { name: 'Launch test Beast' });
+    expect((launchButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(launchButton);
 
     await waitFor(() => expect(mocks.createAgent).toHaveBeenCalledTimes(1));
     expect(mocks.createAgent).toHaveBeenCalledWith(expect.objectContaining({
@@ -182,6 +192,25 @@ describe('ChatShell route heading', () => {
       initAction: expect.objectContaining({
         kind: 'martin-loop',
         chatSessionId: 'chat-session-42',
+      }),
+    }));
+  });
+
+  it('falls back to the active chat session when launching the default martin-loop Beast workflow', async () => {
+    window.location.hash = '#/beasts';
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    const launchButton = await screen.findByRole('button', { name: 'Launch test Beast' });
+    expect((launchButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(launchButton);
+
+    await waitFor(() => expect(mocks.createAgent).toHaveBeenCalledTimes(1));
+    expect(mocks.createAgent).toHaveBeenCalledWith(expect.objectContaining({
+      definitionId: 'martin-loop',
+      chatSessionId: 'session-1',
+      initAction: expect.objectContaining({
+        kind: 'martin-loop',
+        chatSessionId: 'session-1',
       }),
     }));
   });
