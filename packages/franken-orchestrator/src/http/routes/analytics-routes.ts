@@ -18,7 +18,10 @@ const TIME_WINDOWS = ['24h', '7d', '30d', 'all'] as const;
 const TIME_WINDOW_SET = new Set<string>(TIME_WINDOWS);
 
 type FiltersResult = { ok: true; filters: AnalyticsFilters } | { ok: false };
-type PageRequestResult = { ok: true; request: AnalyticsPageRequest } | { ok: false };
+type PageRequestResult =
+  | { ok: true; request: AnalyticsPageRequest }
+  | { ok: false; reason: 'invalid_time_window' }
+  | { ok: false; reason: 'invalid_pagination'; parameter: 'page' | 'pageSize' };
 
 export function createAnalyticsRoutes(deps: AnalyticsRouteDeps): Hono {
   const app = new Hono();
@@ -37,7 +40,9 @@ export function createAnalyticsRoutes(deps: AnalyticsRouteDeps): Hono {
 
   app.get('/events', async (c) => {
     const result = readPageRequest(c.req.query());
-    if (!result.ok) return invalidTimeWindow(c);
+    if (!result.ok) {
+      return result.reason === 'invalid_pagination' ? invalidPagination(c, result.parameter) : invalidTimeWindow(c);
+    }
     return c.json(await deps.analytics.listEvents(result.request));
   });
 
@@ -55,17 +60,23 @@ export function createAnalyticsRoutes(deps: AnalyticsRouteDeps): Hono {
 function readPageRequest(query: Record<string, string>): PageRequestResult {
   const filters = readFilters(query);
   if (!filters.ok) {
-    return filters;
+    return { ok: false, reason: 'invalid_time_window' };
   }
   const page = readPositiveInteger(query['page']);
+  if (!page.ok) {
+    return { ok: false, reason: 'invalid_pagination', parameter: 'page' };
+  }
   const pageSize = readPositiveInteger(query['pageSize']);
+  if (!pageSize.ok) {
+    return { ok: false, reason: 'invalid_pagination', parameter: 'pageSize' };
+  }
 
   return {
     ok: true,
     request: {
       ...filters.filters,
-      ...(page ? { page } : {}),
-      ...(pageSize ? { pageSize } : {}),
+      ...(page.value ? { page: page.value } : {}),
+      ...(pageSize.value ? { pageSize: pageSize.value } : {}),
     },
   };
 }
@@ -97,10 +108,25 @@ function invalidTimeWindow(c: Context) {
   }, 400);
 }
 
-function readPositiveInteger(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
+function invalidPagination(c: Context, parameter: 'page' | 'pageSize') {
+  return c.json({
+    error: {
+      message: 'Invalid Analytics pagination parameter',
+      code: 'invalid_pagination',
+      parameter,
+      expected: 'positive integer',
+    },
+  }, 400);
+}
+
+type PositiveIntegerResult = { ok: true; value?: number } | { ok: false };
+
+function readPositiveInteger(value: string | undefined): PositiveIntegerResult {
+  if (value === undefined || value === '') {
+    return { ok: true };
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  if (!/^[1-9]\d*$/.test(value)) {
+    return { ok: false };
+  }
+  return { ok: true, value: Number(value) };
 }
