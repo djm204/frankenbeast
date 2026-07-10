@@ -784,7 +784,7 @@ describe('ChatShell', () => {
     });
   });
 
-  it('keeps service action success feedback when the follow-up status refresh fails', async () => {
+  it('shows service action error feedback when the follow-up status refresh fails', async () => {
     window.location.hash = '#/network';
     mockNetworkGetStatus
       .mockResolvedValueOnce({
@@ -800,8 +800,7 @@ describe('ChatShell', () => {
 
     await waitFor(() => {
       expect(mockNetworkRestart).toHaveBeenCalledWith('chat-server');
-      expect(screen.getByText('Restarted chat-server.')).toBeDefined();
-      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('alert').textContent).toContain('Unable to restart chat-server: status endpoint unavailable');
     });
     await waitFor(() => expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2));
   });
