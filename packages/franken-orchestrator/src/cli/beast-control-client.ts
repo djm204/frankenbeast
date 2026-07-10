@@ -12,7 +12,7 @@ export function createBeastControlClient(paths: ProjectPaths, serviceBundle?: Be
     stopRun: (runId: string, actor: string) => services.runs.stop(runId, actor),
     restartRun: (runId: string, actor: string) => services.runs.restart(runId, actor),
     resumeAgent: async (agentId: string, actor: string) => {
-      const agent = services.agents.getAgent(agentId);
+      const agent = services.agents.getMutableAgent(agentId);
       if (!agent.dispatchRunId) {
         throw new Error(`Tracked agent '${agentId}' has no linked run to resume`);
       }

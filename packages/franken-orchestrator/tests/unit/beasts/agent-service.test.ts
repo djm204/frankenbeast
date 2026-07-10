@@ -169,5 +169,6 @@ describe('AgentService', () => {
       { id: agent.id, status: 'deleted' },
     ]);
     expect(service.getAgent(agent.id).status).toBe('deleted');
+    expect(() => service.getMutableAgent(agent.id)).toThrow(`Tracked agent '${agent.id}' has been deleted`);
   });
 });

@@ -6,7 +6,7 @@ import type {
   TrackedAgentInitAction,
 } from '../types.js';
 import { isoNow } from '@franken/types';
-import { UnknownTrackedAgentError } from '../errors.js';
+import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../errors.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 
 export interface CreateTrackedAgentRequest {
@@ -72,6 +72,14 @@ export class AgentService {
     const agent = this.repository.getTrackedAgent(agentId);
     if (!agent) {
       throw new UnknownTrackedAgentError(agentId);
+    }
+    return agent;
+  }
+
+  getMutableAgent(agentId: string): TrackedAgent {
+    const agent = this.getAgent(agentId);
+    if (agent.status === 'deleted') {
+      throw new DeletedTrackedAgentError(agentId);
     }
     return agent;
   }

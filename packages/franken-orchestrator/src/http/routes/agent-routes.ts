@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
-import { UnknownTrackedAgentError } from '../../beasts/errors.js';
+import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts/errors.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
@@ -479,15 +479,18 @@ function getMutableAgent(
   deps: AgentRoutesDeps,
   agentId: string,
 ): ReturnType<AgentService['getAgent']> {
-  const agent = deps.agents.getAgent(agentId);
-  if (agent.status === 'deleted') {
+  try {
+    return deps.agents.getMutableAgent(agentId);
+  } catch (error) {
+    if (!(error instanceof DeletedTrackedAgentError)) {
+      throw error;
+    }
     throw new HttpError(
       409,
       'TRACKED_AGENT_DELETED',
       `Tracked agent '${agentId}' has been deleted`,
     );
   }
-  return agent;
 }
 
 function shouldDispatchOnCreate(kind: z.infer<typeof CreateAgentBody>['initAction']['kind']): boolean {
