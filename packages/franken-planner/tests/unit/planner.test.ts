@@ -427,7 +427,56 @@ describe('Planner — self-correction loop', () => {
   });
 });
 
-describe('Planner — strategy domain exceptions', () => {
+describe('Planner — domain exceptions', () => {
+  it('converts cyclic graph export errors before HITL into failed plan results', async () => {
+    const a = makeTask('a');
+    const b = makeTask('b');
+    const graph = PlanGraph.createWithRawEdges(
+      new Map([
+        [a.id, a],
+        [b.id, b],
+      ]),
+      new Map([
+        [a.id, new Set([b.id])],
+        [b.id, new Set([a.id])],
+      ])
+    );
+    const hitlGate: HITLGate = { requestApproval: vi.fn().mockResolvedValue({ decision: 'approved' }) };
+    const recovery = { recover: vi.fn() };
+
+    const { planner } = buildPlanner({ graph, hitlGate, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBeInstanceOf(CyclicDependencyError);
+    expect(hitlGate.requestApproval).not.toHaveBeenCalled();
+    expect(recovery.recover).not.toHaveBeenCalled();
+  });
+
+  it('converts graph builder recursion depth errors into failed plan results', async () => {
+    const error = new RecursionDepthExceededError(11);
+    const graphBuilder: GraphBuilder = { build: vi.fn().mockRejectedValue(error) };
+    const recovery = { recover: vi.fn() };
+    const planner = new Planner(
+      makeGuardrails(),
+      graphBuilder,
+      vi.fn().mockResolvedValue(success('t-1')),
+      new StubHITLGate(),
+      new LinearPlanner(),
+      recovery
+    );
+
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBe(error);
+    expect(recovery.recover).not.toHaveBeenCalled();
+  });
+
   it('converts cyclic dependency errors from strategies into failed plan results', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1'));
     const error = new CyclicDependencyError('Graph contains a cycle');

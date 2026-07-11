@@ -47,6 +47,20 @@ export class Planner {
   ) {}
 
   async plan(rawInput: string): Promise<PlanResult> {
+    try {
+      return await this.executePlan(rawInput);
+    } catch (err) {
+      if (err instanceof RationaleRejectedError) {
+        return { status: 'rationale_rejected', taskId: createTaskId(err.taskId) };
+      }
+      if (Planner.isStrategyDomainError(err)) {
+        return Planner.toStrategyDomainFailure(err);
+      }
+      throw err;
+    }
+  }
+
+  private async executePlan(rawInput: string): Promise<PlanResult> {
     // 1. Sanitize via MOD-01
     const intent = await this.guardrails.getSanitizedIntent(rawInput);
 
