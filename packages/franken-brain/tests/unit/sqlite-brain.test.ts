@@ -444,6 +444,62 @@ describe('SqliteBrain', () => {
         'early match kw0000',
       ]);
     });
+
+    it('skips corrupt persisted details while keeping healthy recent and failure rows available', () => {
+      brain.episodic.record(makeEvent({
+        type: 'failure',
+        summary: 'older healthy failure',
+        createdAt: '2026-07-10T00:00:00.000Z',
+        details: { marker: 'healthy' },
+      }));
+      brain.episodic.record(makeEvent({
+        type: 'failure',
+        summary: 'newer corrupt failure',
+        createdAt: '2026-07-10T00:01:00.000Z',
+        details: { marker: 'corrupt-me' },
+      }));
+      brain.episodic.record(makeEvent({
+        type: 'success',
+        summary: 'newest healthy success',
+        createdAt: '2026-07-10T00:02:00.000Z',
+        details: { marker: 'healthy' },
+      }));
+
+      const db = (brain as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary = ?`).run('{', 'newer corrupt failure');
+
+      expect(() => brain.episodic.recent(2)).not.toThrow();
+      expect(brain.episodic.recent(2).map(event => event.summary)).toEqual([
+        'newest healthy success',
+        'older healthy failure',
+      ]);
+
+      expect(() => brain.episodic.recentFailures(1)).not.toThrow();
+      expect(brain.episodic.recentFailures(1).map(event => event.summary)).toEqual([
+        'older healthy failure',
+      ]);
+    });
+
+    it('skips corrupt persisted details during recall', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'healthy searchable event',
+        createdAt: '2026-07-10T00:00:00.000Z',
+        details: { marker: 'searchable' },
+      }));
+      brain.episodic.record(makeEvent({
+        summary: 'corrupt searchable event',
+        createdAt: '2026-07-10T00:01:00.000Z',
+        details: { marker: 'searchable' },
+      }));
+
+      const db = (brain as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary = ?`).run('{', 'corrupt searchable event');
+
+      expect(() => brain.episodic.recall('searchable', 10)).not.toThrow();
+      expect(brain.episodic.recall('searchable', 10).map(event => event.summary)).toEqual([
+        'healthy searchable event',
+      ]);
+    });
   });
 
   describe('recovery memory', () => {
@@ -513,6 +569,19 @@ describe('SqliteBrain', () => {
       const last = brain.recovery.lastCheckpoint();
       expect(last).not.toBeNull();
       expect(last!.step).toBe(3);
+    });
+
+    it('falls back to the newest valid checkpoint when later persisted state is corrupt', () => {
+      brain.recovery.checkpoint(makeState({ step: 1, timestamp: '2026-07-10T00:00:00.000Z' }));
+      brain.recovery.checkpoint(makeState({ step: 2, timestamp: '2026-07-10T00:01:00.000Z' }));
+
+      const db = (brain as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } }).db;
+      db.prepare(`UPDATE checkpoints SET state = ? WHERE id = (SELECT MAX(id) FROM checkpoints)`).run('{');
+
+      expect(() => brain.recovery.lastCheckpoint()).not.toThrow();
+      expect(brain.recovery.lastCheckpoint()?.step).toBe(1);
+      expect(() => brain.serialize()).not.toThrow();
+      expect(brain.serialize().checkpoint?.step).toBe(1);
     });
 
     it('lastCheckpoint() returns null when empty', () => {

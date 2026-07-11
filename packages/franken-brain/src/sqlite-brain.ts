@@ -412,7 +412,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
 
     if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
-      return this.recallKeywordChunk(keywords, limit).map(row => rowToEvent(row));
+      return rowsToEvents(this.recallKeywordChunk(keywords), limit);
     }
 
     const rowsById = new Map<number, EpisodicRow & { relevance_score: number }>();
@@ -433,7 +433,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       || b.id - a.id,
     );
 
-    return (limit < 0 ? sortedRows : sortedRows.slice(0, limit)).map(rowToEvent);
+    return rowsToEvents(sortedRows, limit);
   }
 
   private recallKeywordChunk(
@@ -472,17 +472,17 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     const rows = this.db
       .prepare(
         `SELECT * FROM episodic_events WHERE type = 'failure'
-         ORDER BY created_at DESC LIMIT ?`,
+         ORDER BY created_at DESC`,
       )
-      .all(n) as EpisodicRow[];
-    return rows.map(rowToEvent);
+      .all() as EpisodicRow[];
+    return rowsToEvents(rows, n);
   }
 
   recent(n = 10): EpisodicEvent[] {
     const rows = this.db
-      .prepare(`SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ?`)
-      .all(n) as EpisodicRow[];
-    return rows.map(rowToEvent);
+      .prepare(`SELECT * FROM episodic_events ORDER BY created_at DESC`)
+      .all() as EpisodicRow[];
+    return rowsToEvents(rows, n);
   }
 
   count(): number {
@@ -523,11 +523,16 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 
   lastCheckpoint(): ExecutionState | null {
-    const row = this.db
-      .prepare(`SELECT * FROM checkpoints ORDER BY id DESC LIMIT 1`)
-      .get() as CheckpointRow | undefined;
-    if (!row) return null;
-    return JSON.parse(row.state) as ExecutionState;
+    const rows = this.db
+      .prepare(`SELECT * FROM checkpoints ORDER BY id DESC`)
+      .all() as CheckpointRow[];
+    for (const row of rows) {
+      const state = parseCheckpointState(row);
+      if (state !== null) {
+        return state;
+      }
+    }
+    return null;
   }
 
   listCheckpoints(): Array<{ id: string; timestamp: string }> {
@@ -702,7 +707,29 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
   }
 }
 
-function rowToEvent(row: EpisodicRow): EpisodicEvent {
+function rowsToEvents(rows: EpisodicRow[], limit: number): EpisodicEvent[] {
+  const events: EpisodicEvent[] = [];
+  for (const row of rows) {
+    const event = rowToEvent(row);
+    if (event) {
+      events.push(event);
+      if (limit >= 0 && events.length >= limit) {
+        break;
+      }
+    }
+  }
+  return events;
+}
+
+function parseCheckpointState(row: CheckpointRow): ExecutionState | null {
+  try {
+    return JSON.parse(row.state) as ExecutionState;
+  } catch {
+    return null;
+  }
+}
+
+function rowToEvent(row: EpisodicRow): EpisodicEvent | null {
   const event: EpisodicEvent = {
     id: row.id,
     type: row.type as EpisodicEventType,
@@ -710,6 +737,12 @@ function rowToEvent(row: EpisodicRow): EpisodicEvent {
     createdAt: row.created_at,
   };
   if (row.step) event.step = row.step;
-  if (row.details) event.details = JSON.parse(row.details) as Record<string, unknown>;
+  if (row.details) {
+    try {
+      event.details = JSON.parse(row.details) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
   return event;
 }
