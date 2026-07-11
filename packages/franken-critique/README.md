@@ -103,6 +103,20 @@ Recorded critique lessons also carry a `reviewerFeedback` object so worker retro
 
 Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create reviewer-feedback captures. This keeps broken tooling noise from being promoted as durable agent-learning guidance.
 
+## Post-PR lesson extraction template
+
+Recorded critique lessons include `postPrLessonExtractionTemplate`, a deterministic prompt/template for the post-PR moment after review or merge evidence exists. PM/liveness tooling can hand the template to an LLM or worker to extract one reusable lesson without inventing missing evidence.
+
+The template requires these evidence inputs before promotion:
+
+- linked issue or task identifier;
+- PR URL or merge/review artifact;
+- reviewer finding or failure mode that motivated the correction;
+- correction applied in the final PR head;
+- regression test, verifier, or explicit reason no code-level regression applies.
+
+Its output schema is intentionally narrow: `issueNumber`, `prUrl`, `sourceFinding`, `correctionApplied`, `reusableLesson`, `regressionEvidence`, and `followUpNeeded`. If any required evidence is missing, tooling should set `followUpNeeded: true` and surface the template's `insufficientEvidenceGuidance` instead of promoting a guessed lesson. Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create the template.
+
 ## Lesson experiment sandbox
 
 New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.

@@ -25,6 +25,7 @@ export type {
   LessonExperimentSandbox,
   ReviewerFeedbackLessonEntry,
   ReviewerFeedbackLessonCapture,
+  PostPrLessonExtractionTemplate,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,

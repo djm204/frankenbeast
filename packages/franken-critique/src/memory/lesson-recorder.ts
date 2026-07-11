@@ -1,4 +1,9 @@
-import type { MemoryPort, CritiqueLesson, ReviewerFeedbackLessonCapture } from '../types/contracts.js';
+import type {
+  MemoryPort,
+  CritiqueLesson,
+  ReviewerFeedbackLessonCapture,
+  PostPrLessonExtractionTemplate,
+} from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
@@ -12,6 +17,34 @@ const LESSON_EXPERIMENT_SANDBOX_REASON =
 
 const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
   'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
+
+const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
+  templateId: 'post-pr-lesson-extraction-v1',
+  trigger: 'after-pr-review-or-merge',
+  instructions: [
+    'Inspect the linked issue, PR description, final diff, reviewer feedback, and verification evidence before extracting a durable lesson.',
+    'Extract only lessons that are reusable for future workers; do not restate one-off implementation details as policy.',
+    'If required evidence is missing, set followUpNeeded to true and use insufficientEvidenceGuidance instead of inventing a lesson.',
+  ],
+  requiredEvidence: [
+    'Linked issue or task identifier',
+    'PR URL or merge/review artifact',
+    'Reviewer finding or failure mode that motivated the correction',
+    'Correction applied in the final PR head',
+    'Regression test, verifier, or explicit reason no code-level regression applies',
+  ],
+  outputSchema: {
+    issueNumber: 'number-or-null',
+    prUrl: 'string-or-null',
+    sourceFinding: 'string',
+    correctionApplied: 'string',
+    reusableLesson: 'string',
+    regressionEvidence: 'string',
+    followUpNeeded: 'boolean',
+  },
+  insufficientEvidenceGuidance:
+    'Do not promote a post-PR lesson until the issue/PR, source finding, correction, and verification evidence are all available.',
+};
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -98,12 +131,22 @@ export class LessonRecorder {
             evalResult.evaluatorName,
             critiqueFindings,
           ),
+          postPrLessonExtractionTemplate: createPostPrLessonExtractionTemplate(),
         });
       }
     }
 
     return lessons;
   }
+}
+
+function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {
+  return {
+    ...POST_PR_LESSON_EXTRACTION_TEMPLATE,
+    instructions: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.instructions],
+    requiredEvidence: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.requiredEvidence],
+    outputSchema: { ...POST_PR_LESSON_EXTRACTION_TEMPLATE.outputSchema },
+  };
 }
 
 function createReviewerFeedbackCapture(
