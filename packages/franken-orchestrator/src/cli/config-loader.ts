@@ -1,4 +1,6 @@
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
@@ -68,6 +70,66 @@ function removeTrustFields(value: unknown): void {
   delete value['trustedCommandPaths'];
 }
 
+function hasCommandTrustFields(value: unknown): boolean {
+  return isRecord(value)
+    && ('trustCommandOverride' in value || 'trustedCommandPaths' in value);
+}
+
+function repositoryLocalConfigHasCommandTrust(fileConfig: Partial<OrchestratorConfig>): boolean {
+  const root = fileConfig as Record<string, unknown>;
+
+  const providers = root['providers'];
+  if (isRecord(providers) && isRecord(providers['overrides'])) {
+    if (Object.values(providers['overrides']).some(hasCommandTrustFields)) {
+      return true;
+    }
+  }
+
+  const consolidatedProviders = root['consolidatedProviders'];
+  return Array.isArray(consolidatedProviders) && consolidatedProviders.some(hasCommandTrustFields);
+}
+
+function safeRealpath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function isPathInsideOrEqual(candidate: string, container: string): boolean {
+  const rel = relative(container, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sepForPath()}`) && !isAbsolute(rel));
+}
+
+function sepForPath(): string {
+  return process.platform === 'win32' ? '\\' : '/';
+}
+
+function isRepositoryLocalConfig(configPath: string, defaultConfigPath: string | undefined): boolean {
+  if (defaultConfigPath === undefined) {
+    return false;
+  }
+
+  const resolvedConfig = resolve(configPath);
+  const resolvedDefault = resolve(defaultConfigPath);
+  const defaultConfigDir = dirname(resolvedDefault);
+  const hasRepositoryLocalDefaultShape = basename(defaultConfigDir) === '.fbeast'
+    && basename(resolvedDefault) === 'config.json';
+  if (!hasRepositoryLocalDefaultShape) {
+    return false;
+  }
+
+  const repositoryRoot = dirname(defaultConfigDir);
+  if (isPathInsideOrEqual(resolvedConfig, repositoryRoot)) {
+    return true;
+  }
+
+  const realConfig = safeRealpath(resolvedConfig);
+  const realRepositoryRoot = safeRealpath(repositoryRoot);
+  return isPathInsideOrEqual(realConfig, realRepositoryRoot);
+}
+
 function isJsonSyntaxError(error: unknown): error is SyntaxError {
   return error instanceof SyntaxError;
 }
@@ -124,7 +186,15 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
   if (configPath) {
     try {
       fileConfig = await fromFile(configPath);
-      if (!args.config && !args.trustProviderCommandOverrides) {
+      const repositoryLocal = isRepositoryLocalConfig(configPath, defaultConfigPath);
+      if (repositoryLocal) {
+        if (args.trustProviderCommandOverrides && repositoryLocalConfigHasCommandTrust(fileConfig)) {
+          throw new Error(
+            'Refusing repo-configured command override trust fields; '
+              + 'repository-local config cannot define trustCommandOverride or trustedCommandPaths. '
+              + 'Use an explicit operator-owned config file for trusted provider command overrides.',
+          );
+        }
         fileConfig = stripRepositoryLocalCommandTrust(fileConfig);
       }
     } catch (error) {

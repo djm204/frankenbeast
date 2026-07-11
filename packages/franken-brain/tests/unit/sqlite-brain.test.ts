@@ -173,6 +173,25 @@ describe('SqliteBrain', () => {
       hydrated.close();
     });
 
+    it('constructor hydration honors stricter custom working memory limits', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const roomy = new SqliteBrain(dbPath, { maxEntries: 3 });
+        roomy.working.set('a', 1);
+        roomy.working.set('b', 2);
+        roomy.flush();
+        roomy.close();
+
+        expect(() => new SqliteBrain(dbPath, { maxEntries: 1 })).toThrow(
+          WorkingMemoryLimitError,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('keeps previous state when restore() exceeds limits', () => {
       const bounded = new SqliteBrain(':memory:', { maxEntries: 2 });
       bounded.working.set('keep', 'me');
@@ -238,6 +257,103 @@ describe('SqliteBrain', () => {
       const snapshot = brain.serialize();
       // Working memory data is in the snapshot
       expect(snapshot.working).toEqual({ task: 'test-flush' });
+    });
+
+    it('persists only changed working-memory rows on subsequent flushes', () => {
+      const db = (brain as unknown as {
+        db: {
+          exec: (sql: string) => void;
+          prepare: (sql: string) => { all: () => Array<{ action: string; key: string }> };
+        };
+      }).db;
+
+      brain.working.set('alpha', 'one');
+      brain.working.set('beta', 'two');
+      brain.working.set('gamma', 'three');
+      brain.flush();
+
+      db.exec(`
+        CREATE TEMP TABLE working_memory_audit (action TEXT NOT NULL, key TEXT NOT NULL);
+        CREATE TEMP TRIGGER working_memory_audit_delete
+        AFTER DELETE ON working_memory
+        BEGIN
+          INSERT INTO working_memory_audit (action, key) VALUES ('delete', OLD.key);
+        END;
+        CREATE TEMP TRIGGER working_memory_audit_insert
+        AFTER INSERT ON working_memory
+        BEGIN
+          INSERT INTO working_memory_audit (action, key) VALUES ('insert', NEW.key);
+        END;
+        CREATE TEMP TRIGGER working_memory_audit_update
+        AFTER UPDATE ON working_memory
+        BEGIN
+          INSERT INTO working_memory_audit (action, key) VALUES ('update', NEW.key);
+        END;
+      `);
+
+      brain.working.set('beta', 'two-updated');
+      brain.flush();
+
+      const auditRows = db.prepare('SELECT action, key FROM working_memory_audit').all();
+      expect(new Set(auditRows.map(row => row.key))).toEqual(new Set(['beta']));
+    });
+
+    it('deletes only removed persisted working-memory rows on flush', () => {
+      const db = (brain as unknown as {
+        db: {
+          exec: (sql: string) => void;
+          prepare: (sql: string) => { all: () => Array<{ action: string; key: string }> };
+        };
+      }).db;
+
+      brain.working.restore({ keep: true, remove: false, alsoKeep: 3 });
+      brain.flush();
+
+      db.exec(`
+        CREATE TEMP TABLE working_memory_delete_audit (action TEXT NOT NULL, key TEXT NOT NULL);
+        CREATE TEMP TRIGGER working_memory_delete_audit_delete
+        AFTER DELETE ON working_memory
+        BEGIN
+          INSERT INTO working_memory_delete_audit (action, key) VALUES ('delete', OLD.key);
+        END;
+        CREATE TEMP TRIGGER working_memory_delete_audit_insert
+        AFTER INSERT ON working_memory
+        BEGIN
+          INSERT INTO working_memory_delete_audit (action, key) VALUES ('insert', NEW.key);
+        END;
+      `);
+
+      expect(brain.working.delete('remove')).toBe(true);
+      brain.flush();
+
+      const auditRows = db.prepare('SELECT action, key FROM working_memory_delete_audit').all();
+      expect(auditRows).toEqual([{ action: 'delete', key: 'remove' }]);
+    });
+
+    it('deletes externally added persisted rows when flushing a stale cleared instance', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('local', 'value');
+        stale.flush();
+
+        const concurrent = new SqliteBrain(dbPath);
+        concurrent.working.set('external', 'value');
+        concurrent.flush();
+        concurrent.close();
+
+        stale.working.clear();
+        stale.flush();
+        stale.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.keys()).toEqual([]);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -370,6 +486,12 @@ describe('SqliteBrain', () => {
 
       const row = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
       expect(row).toBeUndefined();
+
+      db.exec(`DROP TRIGGER fail_checkpoint_insert`);
+      brain.recovery.checkpoint(makeState({ step: 4 }));
+
+      const recovered = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
+      expect(recovered?.value).toBe('"value1"');
     });
 
     it('lastCheckpoint() returns most recent', () => {
