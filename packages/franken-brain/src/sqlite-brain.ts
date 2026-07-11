@@ -8,6 +8,8 @@ import type {
   EpisodicEvent,
   ExecutionState,
   EpisodicEventType,
+  LearningCooldownOptions,
+  LearningRecordResult,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
 
@@ -369,6 +371,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
 const SQLITE_VARIABLE_LIMIT = 999;
 const RECALL_VARIABLES_PER_KEYWORD = 4;
 const CORRUPT_JSON_SCAN_BATCH_SIZE = 100;
+const DEFAULT_LEARNING_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const RECALL_LIMIT_VARIABLES = 1;
 const MAX_RECALL_KEYWORDS_PER_QUERY = Math.floor(
   (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) / RECALL_VARIABLES_PER_KEYWORD,
@@ -387,6 +390,56 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   constructor(private db: Database.Database) {}
 
   record(event: EpisodicEvent): void {
+    this.insertEvent(event);
+  }
+
+  recordLearning(
+    event: EpisodicEvent,
+    options: LearningCooldownOptions = {},
+  ): LearningRecordResult {
+    const key = normalizeLearningKey(
+      options.key ?? readLearningKey(event) ?? `${event.step ?? ''}:${event.summary}`,
+    );
+    const cooldownMs = options.cooldownMs ?? DEFAULT_LEARNING_COOLDOWN_MS;
+    const eventTimeMs = Date.parse(event.createdAt);
+
+    if (!key) {
+      throw new Error('Learning cooldown key must not be empty');
+    }
+    if (!Number.isInteger(cooldownMs) || cooldownMs < 0) {
+      throw new RangeError('Learning cooldown must be a non-negative integer number of milliseconds');
+    }
+    if (!Number.isFinite(eventTimeMs)) {
+      throw new Error(`Learning event createdAt must be a valid ISO timestamp: ${event.createdAt}`);
+    }
+
+    if (cooldownMs > 0) {
+      const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
+      if (existingEvent) {
+        return {
+          recorded: false,
+          reason: 'cooldown',
+          key,
+          cooldownMs,
+          existingEvent,
+          cooldownUntil: new Date(Date.parse(existingEvent.createdAt) + cooldownMs).toISOString(),
+        };
+      }
+    }
+
+    this.insertEvent({
+      ...event,
+      details: {
+        ...(event.details ?? {}),
+        learningKey: key,
+        learningCooldownMs: cooldownMs,
+      },
+    });
+
+    return { recorded: true, key, cooldownMs };
+  }
+
+  private insertEvent(event: EpisodicEvent): void {
     this.db
       .prepare(
         `INSERT INTO episodic_events (type, step, summary, details, created_at)
@@ -399,6 +452,31 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         event.details ? JSON.stringify(event.details) : null,
         event.createdAt,
       );
+  }
+
+  private findLearningCooldownEvent(
+    key: string,
+    eventTimeMs: number,
+    cooldownMs: number,
+  ): EpisodicEvent | null {
+    const cooldownStart = new Date(eventTimeMs - cooldownMs).toISOString();
+    const eventTime = new Date(eventTimeMs).toISOString();
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM episodic_events
+         WHERE created_at >= ? AND created_at <= ?
+         ORDER BY created_at DESC, id DESC`,
+      )
+      .all(cooldownStart, eventTime) as EpisodicRow[];
+
+    for (const row of rows) {
+      const existingEvent = rowToEvent(row);
+      if (existingEvent && learningKeyForEvent(existingEvent) === key) {
+        return existingEvent;
+      }
+    }
+
+    return null;
   }
 
   recall(query: string, limit = 10): EpisodicEvent[] {
@@ -701,6 +779,21 @@ const STOPWORDS = new Set([
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');
+}
+
+function normalizeLearningKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function readLearningKey(event: EpisodicEvent): string | undefined {
+  const key = event.details?.learningKey;
+  return typeof key === 'string' ? key : undefined;
+}
+
+function learningKeyForEvent(event: EpisodicEvent): string {
+  return normalizeLearningKey(
+    readLearningKey(event) ?? `${event.step ?? ''}:${event.summary}`,
+  );
 }
 
 function chunkArray<T>(values: T[], size: number): T[][] {

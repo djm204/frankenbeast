@@ -67,11 +67,14 @@ export type {
   IRecoveryMemory,
   EpisodicEventType,
   EpisodicEvent,
+  LearningCooldownOptions,
+  LearningRecordResult,
   ExecutionState,
   BrainSnapshot,
 } from './brain.js';
 export {
   EpisodicEventSchema,
+  LearningCooldownOptionsSchema,
   ExecutionStateSchema,
   BrainSnapshotSchema,
 } from './brain.js';

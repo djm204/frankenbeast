@@ -210,6 +210,11 @@ describe('Brain interfaces (type-level)', () => {
   it('IEpisodicMemory has required methods', () => {
     const em: IEpisodicMemory = {
       record: (_event: EpisodicEvent) => {},
+      recordLearning: (_event: EpisodicEvent) => ({
+        recorded: true,
+        key: 'lesson',
+        cooldownMs: 86_400_000,
+      }),
       recall: (_query: string, _limit?: number) => [],
       recentFailures: (_n?: number) => [],
       recent: (_n?: number) => [],
