@@ -113,6 +113,34 @@ describe('ComplexityEvaluator', () => {
     );
   });
 
+  it('preserves code after postfix division when scanning for later nesting', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = [
+      'function score(items, total) {',
+      '  let index = 0;',
+      '  const ratio = index++ / total;',
+      '  if (ratio > 0) {',
+      '    if (items.length > 1) {',
+      '      if (items[0]) {',
+      '        if (items[1]) {',
+      '          if (items[2]) {',
+      '            return items[index];',
+      '          }',
+      '        }',
+      '      }',
+      '    }',
+      '  }',
+      '  return null;',
+      '}',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('nesting'))).toBe(
+      true,
+    );
+  });
+
   it('does not treat JSX closing tags as regex literals', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `const el = <div></div>; if (a) { if (b) { if (c) { if (d) { if (e) { work(); } } } } }`;
@@ -662,12 +690,43 @@ describe('ComplexityEvaluator', () => {
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
   });
 
+  it('keeps keyword suffixes in multiline return annotations from hiding implementation bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const lines = Array.from({ length: 60 }, (_, i) => `  const x${i}: number = ${i};`);
+    const content = [
+      'function longFn():',
+      '  Myinterface {',
+      ...lines,
+      '  return undefined;',
+      '}',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('long'))).toBe(true);
+  });
+
   it('flags parameter count even when a parsed function body is unclosed', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function complex(a, b, c, d, e, f) { if (a) { return b; }`;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('flags typed parameter count even when a parsed function body is unclosed', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function complex(a, b, c, d, e, f): void { if (a) { return b; }`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(true);
+  });
+
+  it('keeps unclosed conditional return types from becoming function bodies', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = `function external(a, b, c, d, e, f): T extends { id: string`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((finding) => finding.message.includes('parameter'))).toBe(false);
   });
 
   it('flags deeply nested code', async () => {
@@ -688,6 +747,40 @@ describe('ComplexityEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
+    expect(result.findings.some((f) => f.message.includes('long'))).toBe(true);
+  });
+
+  it('counts nested named function body braces toward function length', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const prefix = [
+      '  if (enabled) {',
+      "    const config = { mode: 'strict' };",
+      '    if (config.mode) {',
+      '      use(config);',
+      '    }',
+      '  }',
+    ];
+    const lines = Array.from({ length: 51 }, (_, i) => `  const x${i} = ${i};`);
+    const content = `function longNested() {\n${prefix.concat(lines).join('\n')}\n}`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.findings.some((f) => f.message.includes('long'))).toBe(true);
+  });
+
+  it('counts nested arrow function body braces toward function length', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const prefix = [
+      '  if (enabled) {',
+      "    const config = { mode: 'strict' };",
+      '    if (config.mode) {',
+      '      use(config);',
+      '    }',
+      '  }',
+    ];
+    const lines = Array.from({ length: 51 }, (_, i) => `  const x${i} = ${i};`);
+    const content = `const longNested = () => {\n${prefix.concat(lines).join('\n')}\n};`;
+    const result = await evaluator.evaluate(createInput(content));
+
     expect(result.findings.some((f) => f.message.includes('long'))).toBe(true);
   });
 

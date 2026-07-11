@@ -7,6 +7,8 @@ node_modules
 .turbo
 .tmp/
 dist
+coverage/
+packages/*/coverage/
 # Frankenbeast project-local state (build logs, checkpoints, plans)
 .frankenbeast/
 # fbeast MCP suite data

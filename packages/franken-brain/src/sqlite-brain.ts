@@ -35,6 +35,13 @@ export class WorkingMemoryLimitError extends Error {
   }
 }
 
+function cloneStoredWorkingMemoryValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
 class SqliteWorkingMemory implements IWorkingMemory {
   private store = new Map<string, unknown>();
   private sizes = new Map<string, number>();
@@ -193,7 +200,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   get(key: string): unknown {
-    return this.store.get(key);
+    return cloneStoredWorkingMemoryValue(this.store.get(key));
   }
 
   /**
@@ -284,7 +291,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const result: Record<string, unknown> = {};
     for (const [key, value] of this.store) {
       Object.defineProperty(result, key, {
-        value,
+        value: cloneStoredWorkingMemoryValue(value),
         enumerable: true,
         configurable: true,
         writable: true,

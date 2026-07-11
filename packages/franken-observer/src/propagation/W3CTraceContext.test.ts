@@ -40,11 +40,23 @@ describe('parseTraceparent', () => {
     expect(parseTraceparent(`00-${TRACE_ID}-${SPAN_ID}-02`)?.sampled).toBe(false)
   })
 
-  it('accepts future version bytes (forwards compatibility)', () => {
-    const result = parseTraceparent(`ff-${TRACE_ID}-${SPAN_ID}-01`)
+  it('accepts non-ff future version bytes with extra fields for forwards compatibility', () => {
+    const result = parseTraceparent(`01-${TRACE_ID}-${SPAN_ID}-01-extra`)
     expect(result).not.toBeNull()
     expect(result?.traceId).toBe(TRACE_ID)
     expect(result?.parentSpanId).toBe(SPAN_ID)
+  })
+
+  it('returns null for forbidden ff version bytes', () => {
+    expect(parseTraceparent(`ff-${TRACE_ID}-${SPAN_ID}-01`)).toBeNull()
+  })
+
+  it('returns null for version 00 headers with extra fields', () => {
+    expect(parseTraceparent(`00-${TRACE_ID}-${SPAN_ID}-01-extra`)).toBeNull()
+  })
+
+  it('returns null for malformed version bytes', () => {
+    expect(parseTraceparent(`0g-${TRACE_ID}-${SPAN_ID}-01`)).toBeNull()
   })
 
   it('returns null for null input', () => {
@@ -115,8 +127,16 @@ describe('formatTraceparent', () => {
     expect(() => formatTraceparent({ traceId: 'short', parentSpanId: SPAN_ID, sampled: true })).toThrow()
   })
 
+  it('throws for an all-zeros traceId', () => {
+    expect(() => formatTraceparent({ traceId: ZEROS_32, parentSpanId: SPAN_ID, sampled: true })).toThrow()
+  })
+
   it('throws for a parentSpanId that is not 16 hex chars', () => {
     expect(() => formatTraceparent({ traceId: TRACE_ID, parentSpanId: 'short', sampled: true })).toThrow()
+  })
+
+  it('throws for an all-zeros parentSpanId', () => {
+    expect(() => formatTraceparent({ traceId: TRACE_ID, parentSpanId: ZEROS_16, sampled: true })).toThrow()
   })
 
   it('roundtrips cleanly with parseTraceparent', () => {

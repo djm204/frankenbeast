@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { load } from 'js-yaml';
@@ -8,6 +8,20 @@ const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
 const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
+const NPMRC_PATH = resolve(ROOT, '.npmrc');
+
+function packageManifestPaths(): string[] {
+  const packageDirs = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => resolve(ROOT, 'packages', entry.name, 'package.json'))
+    .filter((path) => existsSync(path));
+
+  return [resolve(ROOT, 'package.json'), ...packageDirs];
+}
+
+function readJsonFile<T>(path: string): T {
+  return JSON.parse(readFileSync(path, 'utf-8')) as T;
+}
 
 function parseWorkflowYaml(source: string): Record<string, unknown> {
   let workflow: unknown;
@@ -224,6 +238,27 @@ on:
       expect(nvmrc).toBe('22.13.0');
     });
 
+    it('does not schedule unsupported Node 20 test jobs', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const serializedJobs = JSON.stringify(jobs);
+
+      expect(serializedJobs).not.toContain('"node-version":');
+      expect(serializedJobs).not.toMatch(/\b20(?:\.\d+)?\b/);
+    });
+
+    it('keeps package engines aligned with the Node baseline exercised in CI', () => {
+      const rootPackage = readJsonFile<{ engines?: { node?: string } }>(resolve(ROOT, 'package.json'));
+      const rootNodeRange = rootPackage.engines?.node;
+      expect(rootNodeRange).toBe('>=22.13.0 <23 || >=24.0.0 <26');
+      expect(rootNodeRange).not.toContain('20');
+      expect(readFileSync(NPMRC_PATH, 'utf-8')).toContain('engine-strict=true');
+
+      for (const manifestPath of packageManifestPaths()) {
+        const manifest = readJsonFile<{ name?: string; engines?: { node?: string } }>(manifestPath);
+        expect(manifest.engines?.node, `${manifest.name ?? manifestPath} should match root Node engines`).toBe(rootNodeRange);
+      }
+    });
+
     it('uses actions/checkout with full history for root verification tests', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
@@ -242,50 +277,111 @@ on:
 });
 
 describe('release-please.yml publishes released npm packages', () => {
+  let content: string;
+  let workflow: Record<string, unknown>;
+  let jobs: Record<string, unknown>;
+  let releasePlease: Record<string, unknown>;
+  let publishNpm: Record<string, unknown>;
+  let releaseStep: Record<string, unknown>;
+
+  beforeAll(() => {
+    content = readFileSync(RELEASE_PATH, 'utf-8');
+    workflow = parseWorkflowYaml(content);
+    jobs = expectRecord(workflow.jobs, 'release workflow jobs');
+    releasePlease = expectRecord(jobs['release-please'], 'jobs.release-please');
+    publishNpm = expectRecord(jobs['publish-npm'], 'jobs.publish-npm');
+    const matchingReleaseStep = expectSteps(releasePlease).find(
+      (step) => step.uses === 'googleapis/release-please-action@v4',
+    );
+    if (!matchingReleaseStep) {
+      throw new Error('release-please action step should be present');
+    }
+    releaseStep = matchingReleaseStep;
+  });
+
   it('release-please.yml exists', () => {
     expect(existsSync(RELEASE_PATH)).toBe(true);
   });
 
-  it('references correct config-file path', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('config-file: release-please-config.json');
+  it('rejects syntactically invalid release workflow YAML even when release keys are present', () => {
+    expect(() =>
+      parseWorkflowYaml(`name: Release Please
+on:
+  push:
+    branches: [main
+jobs:
+  release-please:
+    steps:
+      - uses: googleapis/release-please-action@v4
+`),
+    ).toThrow(/YAML/);
   });
 
-  it('references correct manifest-file path', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('manifest-file: .release-please-manifest.json');
+  it('is valid YAML and triggers only on push to main', () => {
+    expect(workflow.name).toBe('Release Please');
+    const triggers = expectRecord(workflow.on, 'release workflow on');
+    const push = expectRecord(triggers.push, 'release workflow on.push');
+    expect(push.branches).toEqual(['main']);
+    expect(triggers.pull_request).toBeUndefined();
+  });
+
+  it('keeps release-please permissions scoped to the release job', () => {
+    expect(expectRecord(workflow.permissions, 'release workflow root permissions')).toEqual({ contents: 'read' });
+    expect(expectRecord(releasePlease.permissions, 'release-please permissions')).toEqual({
+      contents: 'write',
+      'pull-requests': 'write',
+    });
+  });
+
+  it('anchors config-file and manifest-file under the release-please action step', () => {
+    expect(releaseStep.id).toBe('release');
+    const releaseWith = expectRecord(releaseStep.with, 'release-please action with');
+    expect(releaseWith['config-file']).toBe('release-please-config.json');
+    expect(releaseWith['manifest-file']).toBe('.release-please-manifest.json');
   });
 
   it('exposes release-please released paths to a publish job', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('paths_released: ${{ steps.release.outputs.paths_released }}');
-    expect(content).toContain('publish-npm:');
-    expect(content).toContain('PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}');
+    expect(expectRecord(releasePlease.outputs, 'release-please outputs').paths_released).toBe(
+      '${{ steps.release.outputs.paths_released }}',
+    );
+    expect(publishNpm.needs).toBe('release-please');
+    expect(expectRecord(publishNpm.env, 'publish-npm env').PATHS_RELEASED).toBe(
+      '${{ needs.release-please.outputs.paths_released }}',
+    );
   });
 
   it('authenticates npm only in the publish step with the NPM_TOKEN secret and registry auth', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('registry-url: https://registry.npmjs.org');
-    expect(content).toMatch(/- name: Publish released npm packages\n\s+env:\n\s+NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
+    const publishSteps = expectSteps(publishNpm);
+    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v4');
+    expect(setupNode).toBeTruthy();
+    expect(expectRecord(setupNode?.with, 'publish setup-node with')['registry-url']).toBe('https://registry.npmjs.org');
+
+    const publishStep = publishSteps.find((step) => step.name === 'Publish released npm packages');
+    expect(publishStep).toBeTruthy();
+    expect(expectRecord(publishStep?.env, 'publish step env').NODE_AUTH_TOKEN).toBe('${{ secrets.NPM_TOKEN }}');
   });
 
   it('keeps OIDC scoped to the publish job only', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toMatch(/permissions:\n\s+contents: read\n\njobs:/);
-    expect(content).toMatch(/publish-npm:[\s\S]*permissions:\n\s+contents: read\n\s+id-token: write/);
+    expect(expectRecord(workflow.permissions, 'release workflow root permissions')).toEqual({ contents: 'read' });
+    expect(expectRecord(publishNpm.permissions, 'publish-npm permissions')).toEqual({
+      contents: 'read',
+      'id-token': 'write',
+    });
   });
 
   it('validates build, typecheck, test, and lint before release records are created', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('validate-release:');
-    expect(content).toContain('release-please:\n    needs: validate-release');
-    expect(content).toMatch(/Validate release before creating tags[\s\S]*turbo run build typecheck lint[\s\S]*turbo run test/);
-    expect(content.indexOf('turbo run build typecheck lint')).toBeLessThan(content.indexOf('turbo run test'));
-    expect(content).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
+    const validateRelease = expectRecord(jobs['validate-release'], 'jobs.validate-release');
+    expect(releasePlease.needs).toBe('validate-release');
+    const validationStep = expectSteps(validateRelease).find((step) => step.name === 'Validate release before creating tags');
+    expect(validationStep).toBeTruthy();
+    const validationRun = String(validationStep?.run ?? '');
+    expect(validationRun).toContain('turbo run build typecheck lint');
+    expect(validationRun).toContain('turbo run test');
+    expect(validationRun.indexOf('turbo run build typecheck lint')).toBeLessThan(validationRun.indexOf('turbo run test'));
+    expect(validationRun).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
   });
 
   it('enforces the packageManager-pinned npm before release installs and publishes', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
     expect(content.match(/corepack enable npm/g)?.length).toBe(2);
     expect(content.match(/node scripts\/check-package-manager\.mjs/g)?.length).toBe(2);
     expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
@@ -303,11 +399,12 @@ describe('release-please.yml publishes released npm packages', () => {
   });
 
   it('defers npm token enforcement until a public package needs publishing', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    const tokenCheckIndex = content.indexOf('NPM_TOKEN secret is required to publish $name@$version');
-    const privateSkipIndex = content.indexOf('Skipping $package_path: package is private');
+    const publishStep = expectSteps(publishNpm).find((step) => step.name === 'Publish released npm packages');
+    const publishRun = String(publishStep?.run ?? '');
+    const tokenCheckIndex = publishRun.indexOf('NPM_TOKEN secret is required to publish $name@$version');
+    const privateSkipIndex = publishRun.indexOf('Skipping $package_path: package is private');
     expect(tokenCheckIndex).toBeGreaterThan(privateSkipIndex);
-    expect(content).toContain('npm publish "$package_path" --access public --provenance');
+    expect(publishRun).toContain('npm publish "$package_path" --access public --provenance');
   });
 });
 

@@ -208,6 +208,47 @@ describe('SqliteBrain', () => {
       brain.working.set('complex', complex);
       expect(brain.working.get('complex')).toEqual(complex);
     });
+
+    it('returns defensive clones from get() so callers cannot mutate accounted state', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+      const persistent = new SqliteBrain(dbPath);
+      const validated = { nested: { steps: ['validated'] } };
+
+      try {
+        persistent.working.set('rules', validated);
+        const accountedBytes = persistent.working.usage().totalBytes;
+        const returned = persistent.working.get('rules') as { nested: { steps: string[] } };
+
+        returned.nested.steps.push('unvalidated'.repeat(100));
+
+        expect(persistent.working.get('rules')).toEqual(validated);
+        expect(persistent.working.usage().totalBytes).toBe(accountedBytes);
+
+        persistent.serialize();
+        persistent.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('rules')).toEqual(validated);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('returns defensive clones from snapshot() so callers cannot mutate accounted state', () => {
+      const validated = { nested: { items: [{ name: 'validated' }] } };
+      brain.working.set('rules', validated);
+      const accountedBytes = brain.working.usage().totalBytes;
+
+      const snap = brain.working.snapshot() as { rules: { nested: { items: Array<{ name: string }> } } };
+      snap.rules.nested.items[0].name = 'unvalidated';
+      snap.rules.nested.items.push({ name: 'oversized'.repeat(100) });
+
+      expect(brain.working.snapshot()).toEqual({ rules: validated });
+      expect(brain.working.get('rules')).toEqual(validated);
+      expect(brain.working.usage().totalBytes).toBe(accountedBytes);
+    });
   });
 
   describe('flush()', () => {

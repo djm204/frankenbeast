@@ -92,19 +92,18 @@ export class SpanRedactor implements ExportAdapter {
 
   private redactSpan(span: Span): Span {
     const metadata = this.redactMetadata(span.metadata)
-    const thoughtBlocks = this.redactThoughtBlocks ? [] : span.thoughtBlocks
-    if (metadata === span.metadata && thoughtBlocks === span.thoughtBlocks) return span
+    const thoughtBlocks = this.redactThoughtBlocks ? [] : [...span.thoughtBlocks]
     return { ...span, metadata, thoughtBlocks }
   }
 
   private redactMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
-    if (this.rules.length === 0) return metadata
-
     const result: Record<string, unknown> = { ...metadata }
+    if (this.rules.length === 0) return result
+
     for (const [key] of Object.entries(metadata)) {
       for (const rule of this.rules) {
         const matches =
-          typeof rule.key === 'string' ? rule.key === key : rule.key.test(key)
+          typeof rule.key === 'string' ? rule.key === key : SpanRedactor.testRegExpKey(rule.key, key)
         if (!matches) continue
         if (rule.action === 'remove') {
           delete result[key]
@@ -114,5 +113,9 @@ export class SpanRedactor implements ExportAdapter {
       }
     }
     return result
+  }
+
+  private static testRegExpKey(pattern: RegExp, key: string): boolean {
+    return new RegExp(pattern.source, pattern.flags).test(key)
   }
 }

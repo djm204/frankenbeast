@@ -68,6 +68,10 @@ function removeTrustFields(value: unknown): void {
   delete value['trustedCommandPaths'];
 }
 
+function isJsonSyntaxError(error: unknown): error is SyntaxError {
+  return error instanceof SyntaxError;
+}
+
 /**
  * Repository-local config is an untrusted input from the checked-out project.
  * It may request provider command overrides, but it must not be able to
@@ -124,7 +128,9 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
         fileConfig = stripRepositoryLocalCommandTrust(fileConfig);
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || args.config) {
+      const missingDefaultConfig = (error as NodeJS.ErrnoException).code === 'ENOENT' && !args.config;
+      const malformedDefaultInitConfig = isJsonSyntaxError(error) && args.subcommand === 'init' && !args.config;
+      if (!missingDefaultConfig && !malformedDefaultInitConfig) {
         throw error;
       }
     }
