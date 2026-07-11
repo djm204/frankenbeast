@@ -71,6 +71,38 @@ describe('OnePasswordStore', () => {
       expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
     });
 
+    it('uses the same encoded item title for URL-unsafe keys across store and resolve', async () => {
+      const key = 'comms/slack@workspace.botTokenRef';
+      const encodedTitle = 'frankenbeast/comms%2Fslack%40workspace.botTokenRef';
+      mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
+      mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
+      mock.responses.set('read', { stdout: RESOLVED_SLACK_BOT_TOKEN, stderr: '', exitCode: 0 });
+
+      await store.store(key, TEST_SLACK_BOT_TOKEN);
+      const value = await store.resolve(key);
+
+      expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: ['item', 'get', encodedTitle, '--vault=frankenbeast'],
+      });
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: [
+          'item',
+          'create',
+          '--category=Login',
+          `--title=${encodedTitle}`,
+          '--vault=frankenbeast',
+          `password=${TEST_SLACK_BOT_TOKEN}`,
+        ],
+      });
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: ['read', `op://frankenbeast/${encodedTitle}/password`],
+      });
+    });
+
     it('returns undefined when secret not found', async () => {
       mock.responses.set('read', { stdout: '', stderr: 'not found', exitCode: 1 });
       const value = await store.resolve('nonexistent');
@@ -83,6 +115,20 @@ describe('OnePasswordStore', () => {
       mock.responses.set('item delete', { stdout: '', stderr: '', exitCode: 0 });
       await expect(store.delete('comms.slack.botTokenRef')).resolves.not.toThrow();
     });
+
+    it('deletes URL-unsafe keys using the encoded item title', async () => {
+      mock.responses.set('item delete', { stdout: '', stderr: '', exitCode: 0 });
+      await store.delete('comms/slack@workspace.botTokenRef');
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: [
+          'item',
+          'delete',
+          'frankenbeast/comms%2Fslack%40workspace.botTokenRef',
+          '--vault=frankenbeast',
+        ],
+      });
+    });
   });
 
   describe('keys', () => {
@@ -91,12 +137,17 @@ describe('OnePasswordStore', () => {
         stdout: JSON.stringify([
           { title: 'frankenbeast/comms.slack.botTokenRef' },
           { title: 'frankenbeast/network.operatorTokenRef' },
+          { title: 'frankenbeast/comms%2Fslack%40workspace.botTokenRef' },
         ]),
         stderr: '',
         exitCode: 0,
       });
       const allKeys = await store.keys();
-      expect(allKeys).toEqual(['comms.slack.botTokenRef', 'network.operatorTokenRef']);
+      expect(allKeys).toEqual([
+        'comms.slack.botTokenRef',
+        'network.operatorTokenRef',
+        'comms/slack@workspace.botTokenRef',
+      ]);
     });
   });
 });
