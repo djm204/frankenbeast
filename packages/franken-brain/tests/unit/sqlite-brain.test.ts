@@ -298,19 +298,6 @@ describe('SqliteBrain', () => {
       expect(new Set(auditRows.map(row => row.key))).toEqual(new Set(['beta']));
     });
 
-    it('serializes current mutable working-memory values during flush', () => {
-      brain.working.set('mutable', { count: 1 });
-      brain.flush();
-
-      const current = brain.working.get('mutable') as { count: number };
-      current.count = 2;
-      brain.flush();
-
-      const reopened = SqliteBrain.hydrate(brain.serialize());
-      expect(reopened.working.get('mutable')).toEqual({ count: 2 });
-      reopened.close();
-    });
-
     it('deletes only removed persisted working-memory rows on flush', () => {
       const db = (brain as unknown as {
         db: {

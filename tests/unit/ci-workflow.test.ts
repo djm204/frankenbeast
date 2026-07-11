@@ -291,7 +291,7 @@ describe('release-please.yml publishes released npm packages', () => {
     releasePlease = expectRecord(jobs['release-please'], 'jobs.release-please');
     publishNpm = expectRecord(jobs['publish-npm'], 'jobs.publish-npm');
     const matchingReleaseStep = expectSteps(releasePlease).find(
-      (step) => step.uses === 'googleapis/release-please-action@v4',
+      (step) => step.uses === 'googleapis/release-please-action@v5',
     );
     if (!matchingReleaseStep) {
       throw new Error('release-please action step should be present');
@@ -312,7 +312,7 @@ on:
 jobs:
   release-please:
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
 `),
     ).toThrow(/YAML/);
   });
