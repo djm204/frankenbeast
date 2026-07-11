@@ -135,8 +135,13 @@ export class FileChunkSessionSnapshotStore {
       return false;
     }
     const normalized = this.normalizeStorageKey(storageKey);
+    const hasTaskStyleNamespace = normalized.includes(':') || normalized.includes('/');
     const lastTaskSegment = normalized.split(/[:/]/).at(-1) ?? normalized;
-    return /^\d+_[A-Za-z0-9_]+$/.test(lastTaskSegment);
+    return hasTaskStyleNamespace && this.looksLikeChunkSegment(lastTaskSegment);
+  }
+
+  private looksLikeChunkSegment(segment: string): boolean {
+    return /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+$/.test(segment);
   }
 
   private storageKeyMayContainChunk(storageKey: string, chunkId: string): boolean {

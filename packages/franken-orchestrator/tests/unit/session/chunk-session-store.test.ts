@@ -426,6 +426,36 @@ describe('FileChunkSessionSnapshotStore', () => {
     expect(snapshots.restoreLatest('demo-plan', 'cli:01_demo')).toBeUndefined();
   });
 
+  it('restoreLatest() without a taskId ignores unrelated generated hyphenated corrupt chunks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-hyphenated-unrelated-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:issue-2',
+      chunkId: 'issue-2',
+      promiseTag: 'ISSUE_2_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+
+    for (const [chunkId, taskId] of [
+      ['issue-1', 'impl:issue-1'],
+      ['define-types', 'impl:define-types'],
+      ['issue-10/chunk-1', 'impl:issue-10/chunk-1'],
+    ] as const) {
+      const corruptDir = join(root, 'demo-plan', chunkSessionStorageKey(chunkId, taskId));
+      mkdirSync(corruptDir, { recursive: true });
+      writeFileSync(join(corruptDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+    }
+
+    expect(snapshots.restoreLatest('demo-plan', 'issue-2')?.promiseTag).toBe('ISSUE_2_DONE');
+  });
+
   it('list() without a taskId skips a corrupt snapshot instead of throwing', () => {
     const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-list-corrupt-'));
     tmpDirs.push(root);
