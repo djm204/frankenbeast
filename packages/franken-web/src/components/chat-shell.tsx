@@ -1327,12 +1327,10 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             }}
             onSaveConfig={(assignments) => {
               const client = new NetworkApiClient(baseUrl);
-              const configRequestId = ++networkConfigRequestIdRef.current;
               return client.updateConfig(assignments).then((nextConfig) => {
-                if (configRequestId === networkConfigRequestIdRef.current) {
-                  setNetworkConfig(nextConfig);
-                  setNetworkConfigError(null);
-                }
+                networkConfigRequestIdRef.current += 1;
+                setNetworkConfig(nextConfig);
+                setNetworkConfigError(null);
               });
             }}
             onSelectLogService={(serviceId) => {

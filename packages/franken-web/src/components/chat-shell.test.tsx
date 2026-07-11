@@ -377,6 +377,46 @@ describe('ChatShell route heading', () => {
     expect(screen.queryByDisplayValue('stale-model')).toBeNull();
   });
 
+  it('applies save responses even when a newer manual refresh resolves first', async () => {
+    let resolveSave!: (value: unknown) => void;
+    let resolveRefresh!: (value: unknown) => void;
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
+    networkApiMocks.updateConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'saved-model' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolveRefresh({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+    });
+
+    await act(async () => {
+      resolveSave({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'saved-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('Saved network config changes.')).toBeTruthy());
+    expect(screen.getByDisplayValue('saved-model')).toBeDefined();
+    expect(screen.queryByDisplayValue('initial-model')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Save config' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('ignores stale refresh failures after a newer network refresh succeeds', async () => {
     let rejectStaleRefresh!: (error: Error) => void;
     networkApiMocks.getStatus
