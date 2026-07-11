@@ -50,6 +50,53 @@ export interface LessonTestTraceabilityEntry {
   readonly verificationCommand: string;
 }
 
+/**
+ * Safety metadata for newly learned critique lessons.
+ *
+ * New lessons are recorded as experimental so PM and liveness tooling can inspect them without
+ * treating one recovered critique loop as enough evidence to promote or retire production guidance.
+ */
+export interface LessonExperimentSandbox {
+  /** New lessons start in the experiment sandbox until a human or promotion job verifies them. */
+  readonly state: 'experimental';
+  /** Promotion is intentionally blocked while the lesson is still in the sandbox. */
+  readonly promotionBlocked: true;
+  /** Operator-facing reason explaining why this lesson is quarantined. */
+  readonly reason: string;
+  /** Deterministic criteria required before PM handoffs can promote or retire the lesson. */
+  readonly exitCriteria: readonly string[];
+  /** Targeted command that verifies the sandbox metadata contract itself. */
+  readonly verificationCommand: string;
+}
+
+/** A normalized reviewer finding captured alongside a learned critique lesson. */
+export interface ReviewerFeedbackLessonEntry {
+  /** Iteration where the reviewer feedback was emitted. */
+  readonly sourceIteration: number;
+  /** Evaluator/reviewer that emitted the feedback. */
+  readonly evaluatorName: string;
+  /** Original reviewer finding message. */
+  readonly message: string;
+  /** Severity assigned by the reviewer. */
+  readonly severity: string;
+  /** Optional source location supplied by the reviewer. */
+  readonly location?: string;
+  /** Optional reviewer suggestion captured for future workers. */
+  readonly suggestion?: string;
+}
+
+/** Structured reviewer feedback attached to a learned critique lesson. */
+export interface ReviewerFeedbackLessonCapture {
+  /** Operator-facing summary of the feedback that produced the lesson. */
+  readonly summary: string;
+  /** Findings from the failed reviewer pass that should guide future workers. */
+  readonly findings: readonly ReviewerFeedbackLessonEntry[];
+  /** Whether every captured feedback item included an actionable suggestion. */
+  readonly suggestionsComplete: boolean;
+  /** Deterministic guidance for PM handoffs when suggestions are missing. */
+  readonly missingSuggestionGuidance?: string;
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -59,6 +106,10 @@ export interface CritiqueLesson {
   readonly timestamp: string;
   /** Present for lessons recorded by LessonRecorder; absent legacy lessons are unverified. */
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
+  /** Present for new lessons that must remain quarantined until independently verified. */
+  readonly experimentSandbox?: LessonExperimentSandbox;
+  /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
+  readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

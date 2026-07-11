@@ -126,3 +126,6 @@
 
 ## 2026-07-11 — Chunk snapshot restore corrupt-task ambiguity
 - Unscoped chunk-session snapshot restore must fail closed when corrupt task-scoped snapshots could belong to another task for the requested chunk. Normalize encoded task storage keys, keep already-quarantined `*.json.corrupt.*` entries in ambiguity scans, cover generated recovery task IDs (`fix-harden:<chunk>-attempt-*`), and treat opaque task IDs conservatively unless the task key clearly names a different chunk.
+
+## 2026-07-11 — Vite Beast proxy documentation examples
+- For docs with copyable foreground service recipes, split long-running services into clearly labeled terminals, quote placeholder env values so Bash does not parse `<...>` as redirection, and repeat server-side token exports in every process that needs to inject Beast proxy auth (daemon, chat-server, and Vite dev server).

@@ -113,6 +113,123 @@ describe('LessonRecorder', () => {
     ]);
   });
 
+  it('captures reviewer feedback messages, suggestions, severities, and source locations with the lesson', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'PR summary omits the verification command',
+            severity: 'warning',
+            location: 'pull-request-body',
+            suggestion: 'Add the exact targeted test command and result to the PR description.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'review-feedback-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.reviewerFeedback).toEqual({
+      summary: 'PR summary omits the verification command',
+      findings: [
+        {
+          sourceIteration: 0,
+          evaluatorName: 'reviewer',
+          message: 'PR summary omits the verification command',
+          severity: 'warning',
+          location: 'pull-request-body',
+          suggestion: 'Add the exact targeted test command and result to the PR description.',
+        },
+      ],
+      suggestionsComplete: true,
+    });
+  });
+
+  it('marks reviewer-feedback lessons with missing suggestions for PM follow-up', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          { message: 'Review identified a handoff gap without remediation guidance', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'missing-suggestion-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.reviewerFeedback).toEqual({
+      summary: 'Review identified a handoff gap without remediation guidance',
+      findings: [
+        {
+          sourceIteration: 0,
+          evaluatorName: 'reviewer',
+          message: 'Review identified a handoff gap without remediation guidance',
+          severity: 'critical',
+        },
+      ],
+      suggestionsComplete: false,
+      missingSuggestionGuidance:
+        'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.',
+    });
+  });
+
+  it('sandboxes new lessons as experimental and blocks promotion until verified', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'factuality', [
+          { message: 'handoff cited an unverified file path', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'sandbox-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.experimentSandbox).toEqual({
+      state: 'experimental',
+      promotionBlocked: true,
+      reason:
+        'New critique lessons are experimental until their traceability map and regression evidence are independently verified.',
+      exitCriteria: [
+        'Confirm at least one lesson-to-test traceability entry is present.',
+        'Run the listed verification command and attach the evidence to the PM handoff.',
+        'Promote or retire the lesson only after review confirms the regression covers the source finding.',
+      ],
+      verificationCommand:
+        'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+    });
+  });
+
+  it('does not create an experimental sandbox entry for failing iterations with no actionable finding', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [createIteration(0, 'fail', 'empty-failure'), createIteration(1, 'pass')],
+    };
+
+    await recorder.record(result, 'sandbox-task');
+
+    expect(port.recordLesson).not.toHaveBeenCalled();
+  });
+
   it('does not create traceability entries for infrastructure-only evaluator exceptions', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
