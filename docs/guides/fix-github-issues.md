@@ -18,10 +18,14 @@
   npm --workspace @franken/orchestrator exec -- frankenbeast issues --help
   ```
 
-  For real issue runs through the workspace fallback, include both `--base-dir` and `--repo`: `--base-dir` points generated branches, plans, and artifacts at the repository whose issues you want to fix, while `--repo` prevents GitHub repo inference from using the Frankenbeast checkout selected by `npm --workspace`.
+  For preview or real issue runs through the workspace fallback, include both `--base-dir` and `--repo`: `--base-dir` points generated branches, plans, and artifacts at the repository whose issues you want to fix, while `--repo` prevents GitHub repo inference from using the Frankenbeast checkout selected by `npm --workspace`. Keep `--dry-run` for triage previews, and remove it when you are ready to execute approved fixes.
 
   ```bash
+  # Preview only
   npm --workspace @franken/orchestrator exec -- frankenbeast issues --base-dir /path/to/target-repo --repo owner/repo --dry-run
+
+  # Execute approved fixes
+  npm --workspace @franken/orchestrator exec -- frankenbeast issues --base-dir /path/to/target-repo --repo owner/repo --label critical
   ```
 
   See [Running the CLI Beast Harness](./run-cli-beast.md) for the full local CLI setup, including the paired `fbeast` MCP flow.
