@@ -108,7 +108,12 @@ function fsyncDirectory(dirPath: string): void {
     // durability best-effort failures here.
   } finally {
     if (directory !== undefined) {
-      fs.closeSync(directory);
+      try {
+        fs.closeSync(directory);
+      } catch {
+        // Directory fsync/close is a durability best-effort only. Do not report
+        // an already-renamed artifact as failed because cleanup close failed.
+      }
     }
   }
 }
@@ -133,6 +138,14 @@ function writeTempFile(finalPath: string, contents: string): string {
     fs.writeFileSync(file, contents);
     fs.fsyncSync(file);
   } catch (error) {
+    if (file !== undefined) {
+      try {
+        fs.closeSync(file);
+      } catch {
+        // Preserve the original write/fsync error.
+      }
+      file = undefined;
+    }
     cleanupTempFile(tempPath);
     throw error;
   } finally {
