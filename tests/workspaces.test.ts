@@ -535,23 +535,67 @@ describe("npm workspaces configuration", () => {
   });
 
   describe("no file: dependencies remain anywhere", () => {
+    const dependencySections = [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ] as const;
+    type DependencySection = (typeof dependencySections)[number];
+    type DependencyEntry = {
+      section: DependencySection;
+      name: string;
+      version: string;
+    };
+    const collectDependencyEntries = (
+      pkg: Partial<Record<DependencySection, Record<string, string>>>,
+    ): DependencyEntry[] =>
+      dependencySections.flatMap((section) =>
+        Object.entries(pkg[section] ?? {}).map(([name, version]) => ({
+          section,
+          name,
+          version,
+        })),
+      );
+
     const allPackages = readdirSync(join(ROOT, "packages"), {
       withFileTypes: true,
     })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
 
+    it("scans every dependency bucket that can carry package specifiers", () => {
+      const entries = collectDependencyEntries({
+        dependencies: { regular: "^1.0.0" },
+        devDependencies: { dev: "^1.0.0" },
+        optionalDependencies: { optional: "file:../optional" },
+        peerDependencies: { peer: "file:../peer" },
+      });
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          {
+            section: "optionalDependencies",
+            name: "optional",
+            version: "file:../optional",
+          },
+          {
+            section: "peerDependencies",
+            name: "peer",
+            version: "file:../peer",
+          },
+        ]),
+      );
+    });
+
     for (const module of allPackages) {
       it(`packages/${module}/package.json has no file: dependencies`, () => {
         const pkg = readPkg(`packages/${module}/package.json`);
-        const allDeps = {
-          ...pkg.dependencies,
-          ...pkg.devDependencies,
-        };
-        for (const [name, version] of Object.entries(allDeps)) {
-          expect(version, `${name} in ${module} uses file: path`).not.toMatch(
-            /^file:/,
-          );
+        for (const { section, name, version } of collectDependencyEntries(pkg)) {
+          expect(
+            version,
+            `${name} in ${module} ${section} uses file: path`,
+          ).not.toMatch(/^file:/);
         }
       });
     }
