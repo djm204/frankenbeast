@@ -11,10 +11,11 @@
   npm run local:verify-cli
   ```
 
-  `local:link` builds the repo and links the workspaces that expose the `fbeast` and `frankenbeast` binaries. If you do not want global links, run issue commands through the orchestrator workspace instead:
+  `local:link` builds the repo and links the workspaces that expose the `fbeast` and `frankenbeast` binaries. If you do not want global links, build the checkout first and run issue commands through the orchestrator workspace. Include `--base-dir` so generated branches, plans, and artifacts target the repository whose issues you want to fix rather than the orchestrator workspace:
 
   ```bash
-  npm --workspace @franken/orchestrator exec -- frankenbeast issues --help
+  npm run build --workspace @franken/orchestrator
+  npm --workspace @franken/orchestrator exec -- frankenbeast issues --base-dir /path/to/target-repo --repo owner/repo --dry-run
   ```
 
   See [Running the CLI Beast Harness](./run-cli-beast.md) for the full local CLI setup, including the paired `fbeast` MCP flow.

@@ -19,8 +19,12 @@ describe('issue #1023 GitHub issues guide CLI setup docs', () => {
 
     expect(guide).toContain('npm run local:link');
     expect(guide).toContain('npm run local:verify-cli');
-    expect(guide).toContain('npm --workspace @franken/orchestrator exec -- frankenbeast issues --help');
+    expect(guide).toContain('npm run build --workspace @franken/orchestrator');
+    expect(guide).toContain(
+      'npm --workspace @franken/orchestrator exec -- frankenbeast issues --base-dir /path/to/target-repo --repo owner/repo --dry-run',
+    );
     expect(guide).toContain('./run-cli-beast.md');
+    expect(guide).toContain('Include `--base-dir`');
   });
 
   it('does not recommend a bare root npm link for the frankenbeast binary', () => {
