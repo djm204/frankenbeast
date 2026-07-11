@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { SpanRedactor } from './SpanRedactor.js'
 import { InMemoryAdapter } from '../export/InMemoryAdapter.js'
 import type { Trace, Span } from '../core/types.js'
+import type { ExportAdapter } from '../export/ExportAdapter.js'
 
 function makeSpan(overrides: Partial<Span> = {}): Span {
   return {
@@ -18,6 +19,25 @@ function makeSpan(overrides: Partial<Span> = {}): Span {
 
 function makeTrace(spans: Span[] = [], id = 'trace-1'): Trace {
   return { id, goal: 'test', status: 'completed', startedAt: Date.now(), spans }
+}
+
+class MutatingAdapter implements ExportAdapter {
+  lastTrace: Trace | null = null
+
+  async flush(trace: Trace): Promise<void> {
+    this.lastTrace = trace
+    const span = trace.spans[0]
+    span.metadata.downstream = 'mutated'
+    span.thoughtBlocks.push('downstream thought')
+  }
+
+  async queryByTraceId(): Promise<Trace | null> {
+    return this.lastTrace
+  }
+
+  async listTraceIds(): Promise<string[]> {
+    return this.lastTrace ? [this.lastTrace.id] : []
+  }
 }
 
 // ── metadata key redaction ────────────────────────────────────────────────────
@@ -197,6 +217,58 @@ describe('SpanRedactor — immutability', () => {
     const trace = makeTrace([span])
     await redactor.flush(trace)
     expect(thoughts).toEqual(['private'])
+  })
+
+  it('defensively clones spans before downstream export when no rules are configured', async () => {
+    const inner = new MutatingAdapter()
+    const span = makeSpan({ metadata: { safe: 'visible' }, thoughtBlocks: ['private'] })
+    const trace = makeTrace([span])
+    const redactor = new SpanRedactor({ adapter: inner, rules: [] })
+
+    await redactor.flush(trace)
+
+    expect(inner.lastTrace!.spans[0]).not.toBe(span)
+    expect(inner.lastTrace!.spans[0].metadata).not.toBe(span.metadata)
+    expect(inner.lastTrace!.spans[0].thoughtBlocks).not.toBe(span.thoughtBlocks)
+    expect(trace.spans[0].metadata).toEqual({ safe: 'visible' })
+    expect(trace.spans[0].thoughtBlocks).toEqual(['private'])
+  })
+
+  it('defensively clones spans before downstream export when rules do not match', async () => {
+    const inner = new MutatingAdapter()
+    const span = makeSpan({ metadata: { safe: 'visible' }, thoughtBlocks: ['private'] })
+    const trace = makeTrace([span])
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: 'credential', action: 'remove' }],
+    })
+
+    await redactor.flush(trace)
+
+    expect(inner.lastTrace!.spans[0]).not.toBe(span)
+    expect(inner.lastTrace!.spans[0].metadata).not.toBe(span.metadata)
+    expect(inner.lastTrace!.spans[0].thoughtBlocks).not.toBe(span.thoughtBlocks)
+    expect(trace.spans[0].metadata).toEqual({ safe: 'visible' })
+    expect(trace.spans[0].thoughtBlocks).toEqual(['private'])
+  })
+
+  it('defensively clones unchanged spans when another span in the trace is redacted', async () => {
+    const inner = new MutatingAdapter()
+    const unchanged = makeSpan({ id: 's1', metadata: { safe: 'visible' }, thoughtBlocks: ['private'] })
+    const redacted = makeSpan({ id: 's2', metadata: { credential: 'secret' }, thoughtBlocks: [] })
+    const trace = makeTrace([unchanged, redacted])
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: 'credential', action: 'remove' }],
+    })
+
+    await redactor.flush(trace)
+
+    expect(inner.lastTrace!.spans[0]).not.toBe(unchanged)
+    expect(inner.lastTrace!.spans[0].metadata).not.toBe(unchanged.metadata)
+    expect(inner.lastTrace!.spans[0].thoughtBlocks).not.toBe(unchanged.thoughtBlocks)
+    expect(trace.spans[0].metadata).toEqual({ safe: 'visible' })
+    expect(trace.spans[0].thoughtBlocks).toEqual(['private'])
   })
 })
 
