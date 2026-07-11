@@ -61,6 +61,16 @@ export type { CritiqueErrorOptions } from './errors/index.js';
 export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
 export { LessonRecorder } from './memory/lesson-recorder.js';
+export {
+  mineCrossTaskBlockerPatterns,
+  normalizeBlockerDescription,
+} from './memory/blocker-pattern-miner.js';
+export type {
+  BlockerPatternExample,
+  BlockerPatternMiningOptions,
+  BlockerPatternMiningResult,
+  CrossTaskBlockerPattern,
+} from './memory/blocker-pattern-miner.js';
 
 // Evaluators
 export { SafetyEvaluator } from './evaluators/safety.js';
