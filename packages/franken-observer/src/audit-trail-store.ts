@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import * as fs from 'node:fs';
+import { basename, join, resolve, sep } from 'node:path';
 import { AuditTrail, assertAuditEventArray } from './audit-event.js';
 import type { ReplayRecord } from './replay/replay-record.js';
 import { isoNow } from '@franken/types';
@@ -9,6 +9,20 @@ export interface PersistedAuditTrail {
   runId: string;
   createdAt: string;
   events: import('./audit-event.js').AuditEvent[];
+}
+
+export class AuditTrailCorruptionError extends Error {
+  readonly runId: string;
+  readonly path: string;
+
+  constructor(runId: string, path: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`Corrupt audit trail for run ${JSON.stringify(runId)} at ${path}: ${detail}`);
+    this.name = 'AuditTrailCorruptionError';
+    this.runId = runId;
+    this.path = path;
+    this.cause = cause;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,6 +97,61 @@ function safeAuditPath(auditDir: string, runId: string, suffix: string): string 
   return filePath;
 }
 
+function fsyncDirectory(dirPath: string): void {
+  let directory: number | undefined;
+  try {
+    directory = fs.openSync(dirPath, 'r');
+    fs.fsyncSync(directory);
+  } catch {
+    // Some platforms/filesystems do not support directory fsync. The temp-file
+    // plus rename sequence is still atomic for readers, so do not fail saves for
+    // durability best-effort failures here.
+  } finally {
+    if (directory !== undefined) {
+      fs.closeSync(directory);
+    }
+  }
+}
+
+function cleanupTempFile(path: string): void {
+  try {
+    fs.rmSync(path, { force: true });
+  } catch {
+    // Best-effort cleanup only; preserve the original write/rename error.
+  }
+}
+
+function writeTempFile(finalPath: string, contents: string): string {
+  const tempPath = join(
+    resolve(finalPath, '..'),
+    `.${basename(finalPath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+  );
+  let file: number | undefined;
+  try {
+    file = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(file, contents);
+    fs.fsyncSync(file);
+  } catch (error) {
+    cleanupTempFile(tempPath);
+    throw error;
+  } finally {
+    if (file !== undefined) {
+      fs.closeSync(file);
+    }
+  }
+  return tempPath;
+}
+
+function commitTempFile(tempPath: string, finalPath: string): void {
+  try {
+    fs.renameSync(tempPath, finalPath);
+    fsyncDirectory(resolve(finalPath, '..'));
+  } catch (error) {
+    cleanupTempFile(tempPath);
+    throw error;
+  }
+}
+
 /**
  * Persists audit trails as JSON files under .fbeast/audit/.
  * One file per run: <runId>.json.
@@ -96,7 +165,8 @@ export class AuditTrailStore {
 
   save(runId: string, trail: AuditTrail, manifest?: readonly ReplayRecord[]): string {
     const filePath = safeAuditPath(this.auditDir, runId, '.json');
-    mkdirSync(this.auditDir, { recursive: true });
+    const replayPath = manifest ? safeAuditPath(this.auditDir, runId, '.replay.json') : undefined;
+    fs.mkdirSync(this.auditDir, { recursive: true });
 
     const artifact: PersistedAuditTrail = {
       version: 1,
@@ -104,24 +174,44 @@ export class AuditTrailStore {
       createdAt: isoNow(),
       events: trail.toJSON(),
     };
-    writeFileSync(filePath, JSON.stringify(artifact, null, 2));
-    if (manifest) {
-      writeFileSync(safeAuditPath(this.auditDir, runId, '.replay.json'), JSON.stringify(manifest, null, 2));
+
+    const auditTempPath = writeTempFile(filePath, JSON.stringify(artifact, null, 2));
+    let replayTempPath: string | undefined;
+    try {
+      if (manifest && replayPath) {
+        replayTempPath = writeTempFile(replayPath, JSON.stringify(manifest, null, 2));
+        // Commit replay before audit so a replay-manifest failure cannot leave a
+        // newly written primary audit that appears fully replayable.
+        commitTempFile(replayTempPath, replayPath);
+        replayTempPath = undefined;
+      }
+      commitTempFile(auditTempPath, filePath);
+    } catch (error) {
+      cleanupTempFile(auditTempPath);
+      if (replayTempPath) {
+        cleanupTempFile(replayTempPath);
+      }
+      throw error;
     }
     return filePath;
   }
 
   load(runId: string): AuditTrail {
     const filePath = safeAuditPath(this.auditDir, runId, '.json');
-    if (!existsSync(filePath)) {
+    if (!fs.existsSync(filePath)) {
       throw new Error(`Audit trail not found: ${filePath}`);
     }
-    const raw = normalizePersistedAuditTrail(JSON.parse(readFileSync(filePath, 'utf-8')) as unknown);
-    assertPersistedAuditTrail(raw);
-    return AuditTrail.fromJSON(raw.events);
+
+    try {
+      const raw = normalizePersistedAuditTrail(JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown);
+      assertPersistedAuditTrail(raw);
+      return AuditTrail.fromJSON(raw.events);
+    } catch (error) {
+      throw new AuditTrailCorruptionError(runId, filePath, error);
+    }
   }
 
   exists(runId: string): boolean {
-    return existsSync(safeAuditPath(this.auditDir, runId, '.json'));
+    return fs.existsSync(safeAuditPath(this.auditDir, runId, '.json'));
   }
 }
