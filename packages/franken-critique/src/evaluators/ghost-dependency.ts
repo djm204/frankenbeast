@@ -412,7 +412,7 @@ function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boo
 
 function endsInsideNestedTypeReference(prefix: string): boolean {
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
-  if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
+  if (/(?:^|[^.])(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
   if (/(?:\bas\s*|\bsatisfies\s*)\(\s*\)\s*=>\s*$/.test(prefixWithoutTrailingTrivia)) {
@@ -432,7 +432,7 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
   }
 
   const operator = trimmed.at(-1);
-  if (operator === '<') return /(?:[A-Z_$][\w$]*|[>\]])<$/.test(trimmed);
+  if (operator === '<') return /(?:[>\]])<$/.test(trimmed);
 
   if (operator !== '|' && operator !== '&') return false;
 
@@ -498,7 +498,16 @@ function isTypeOnlyImportReferenceUse(
     return false;
   }
 
-  if (/(?:\btype\b|\binterface\b|\bimplements\b|\bkeyof\b|\btypeof\b|\bas\b|\bsatisfies\b)[\s\S]*$/.test(trimmed)) {
+  if (/(?:^|[;\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(trimmed)) {
+    return true;
+  }
+  if (/\bdeclare\s+namespace\b[\s\S]*\{\s*type\b[\s\S]*$/.test(trimmed)) {
+    return true;
+  }
+  if (/(?:^|[^.])(?:\bimplements\b|\bkeyof\b|\btypeof\b)\s*(?:\([^)]*)?$/.test(trimmed)) {
+    return true;
+  }
+  if (/(?:^|[^.])(?:\bas\b|\bsatisfies\b)[\s\S]*$/.test(trimmed)) {
     return true;
   }
 
@@ -531,7 +540,7 @@ function stripTrailingTrivia(content: string): string {
 
 function isInsideTypeDeclaration(prefix: string): boolean {
   return (
-    /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
+    /(?:^|[;\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
     !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
@@ -551,7 +560,14 @@ function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
   if (newlineIndex === -1) return false;
 
   const suffix = prefix.slice(newlineIndex + 1);
-  if (!/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix)) return false;
+  if (
+    !/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix) &&
+    !/^\s*(?:export\s+)?(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
+      suffix,
+    )
+  ) {
+    return false;
+  }
 
   const previousLine = prefix.slice(0, newlineIndex).trimEnd();
   return !/[=?:,|&<{([]$/.test(previousLine) && !/\bextends\s*$/.test(previousLine);
@@ -599,6 +615,9 @@ function isInsideTypeAnnotation(
     );
   }
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
+  if (/\n\s*(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(annotationSuffix)) {
+    return false;
+  }
   if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {
     return false;
   }
