@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
@@ -27,6 +27,7 @@ describe('verifyInit', () => {
   let tempDir: string | undefined;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -48,11 +49,13 @@ describe('verifyInit', () => {
     expect(result.messages.join('\n')).toContain('Init state is missing');
   });
 
-  it('reports malformed config JSON without throwing', async () => {
+  it('reports malformed config JSON without throwing and quarantines the file', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
-    const configFile = join(tempDir, '.fbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
-    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    const fbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(fbeastDir, 'config.json');
+    const stateStore = new FileInitStateStore(join(fbeastDir, 'init-state.json'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await mkdir(fbeastDir, { recursive: true });
     await writeFile(configFile, '{"comms": ', 'utf-8');
     await stateStore.save(createEmptyInitState(configFile));
 
@@ -60,6 +63,7 @@ describe('verifyInit', () => {
       configFile,
       stateStore,
     });
+    const files = await readdir(fbeastDir);
 
     expect(result.ok).toBe(false);
     expect(result.issues).toContainEqual(
@@ -69,21 +73,27 @@ describe('verifyInit', () => {
     );
     expect(result.messages.join('\n')).toContain('Config file');
     expect(result.messages.join('\n')).toContain('could not be parsed');
+    expect(files.some((file) => file.startsWith('config.json.corrupt-'))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
   });
 
-  it('reports malformed init state JSON without throwing', async () => {
+  it('reports malformed init state JSON without throwing and quarantines the file', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
-    const configFile = join(tempDir, '.fbeast', 'config.json');
-    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const fbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(fbeastDir, 'config.json');
+    const stateFile = join(fbeastDir, 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
     const config = defaultConfig();
-    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await mkdir(fbeastDir, { recursive: true });
     await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
-    await writeFile(stateStore.filePath, '{"version": ', 'utf-8');
+    await writeFile(stateFile, '{"version": ', 'utf-8');
 
     const result = await verifyInit({
       configFile,
       stateStore,
     });
+    const files = await readdir(fbeastDir);
 
     expect(result.ok).toBe(false);
     expect(result.issues).toContainEqual(
@@ -93,6 +103,10 @@ describe('verifyInit', () => {
     );
     expect(result.messages.join('\n')).toContain('Init state');
     expect(result.messages.join('\n')).toContain('could not be parsed');
+    const stateQuarantine = files.find((file) => file.startsWith('init-state.json.corrupt-'));
+    expect(stateQuarantine).toBeTruthy();
+    await expect(readFile(join(fbeastDir, stateQuarantine ?? ''), 'utf-8')).resolves.toBe('{"version": ');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
   });
 
   it('reports non-object config JSON with an actionable message', async () => {

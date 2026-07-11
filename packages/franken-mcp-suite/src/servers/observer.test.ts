@@ -89,6 +89,48 @@ describe('Observer Server', () => {
     expect(verifyResult.content[0]!.text).toContain('verified');
   });
 
+  it('rejects invalid observer log inputs before calling the observer adapter', async () => {
+    const observer = {
+      log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
+      logCost: vi.fn(),
+      cost: vi.fn(),
+      trail: vi.fn(),
+      verify: vi.fn(),
+    };
+    const logTool = createObserverServer({ observer }).tools.find((t) => t.name === 'fbeast_observer_log')!;
+
+    const invalidCases = [
+      { event: '', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: '   ', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '   ' },
+      { event: 'file_edit', metadata: { ok: true }, sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: ['not', 'json'], sessionId: 'sess-1' },
+    ];
+
+    for (const args of invalidCases) {
+      const result = await logTool.handler(args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('Error: fbeast_observer_log');
+      expect(result.content[0]!.text).not.toContain('Logged event');
+    }
+
+    expect(observer.log).not.toHaveBeenCalled();
+
+    const malformedJsonResult = await logTool.handler({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+
+    expect(malformedJsonResult.isError).toBeUndefined();
+    expect(observer.log).toHaveBeenCalledWith({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+  });
+
   it('rejects invalid cost inputs before calling the observer adapter', async () => {
     const observer = {
       log: vi.fn(),

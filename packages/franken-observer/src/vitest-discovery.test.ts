@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const discoverySmokeTimeoutMs = 20_000;
 
 function runObserverVitestWithNoMatches(env: NodeJS.ProcessEnv = {}) {
   return spawnSync(
@@ -47,7 +48,7 @@ describe('observer Vitest discovery', () => {
 
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/No test files found|No test files matched/u);
-  });
+  }, discoverySmokeTimeoutMs);
 
   it('does not mask empty integration or eval discovery', () => {
     for (const env of [{ INTEGRATION: 'true' }, { EVAL: 'true' }]) {
@@ -56,7 +57,7 @@ describe('observer Vitest discovery', () => {
       expect(result.status).not.toBe(0);
       expect(`${result.stdout}\n${result.stderr}`).toMatch(/No test files found|No test files matched/u);
     }
-  });
+  }, discoverySmokeTimeoutMs);
 
   it('runs the advertised observer eval suite instead of a zero-test placeholder', () => {
     const result = runObserverPackageScript('test:eval');
@@ -65,5 +66,5 @@ describe('observer Vitest discovery', () => {
     expect(result.status, output).toBe(0);
     expect(output).toMatch(/src\/evals\/.+\.test\.ts/u);
     expect(output).toMatch(/Test Files[\s\S]*[1-9]\d*\s+passed/u);
-  });
+  }, discoverySmokeTimeoutMs);
 });

@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { FileInitStateStore } from './init-state-store.js';
 import type { ISecretStore } from '../network/secret-store.js';
+import { readJsonFileOrDefault, warnJsonQuarantined } from './init-json-file.js';
 
 export type InitIssueCode =
   | 'missing-config'
@@ -31,8 +31,13 @@ type JsonReadResult<T> =
   | { status: 'missing' }
   | { status: 'invalid'; message: string };
 
-function describeJsonParseError(error: SyntaxError): string {
-  return error.message ? `Invalid JSON: ${error.message}` : 'Invalid JSON syntax.';
+const missingJson = Symbol('missing-json');
+
+function describeJsonParseError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return `Invalid JSON: ${error.message}`;
+  }
+  return 'Invalid JSON syntax.';
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -40,18 +45,21 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 async function tryReadJson<T>(filePath: string): Promise<JsonReadResult<T>> {
-  try {
-    const raw = await readFile(filePath, 'utf-8');
-    return { status: 'ok', value: JSON.parse(raw) as T };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { status: 'missing' };
-    }
-    if (error instanceof SyntaxError) {
-      return { status: 'invalid', message: describeJsonParseError(error) };
-    }
-    throw error;
+  let corruptMessage: string | undefined;
+  const value = await readJsonFileOrDefault<T | typeof missingJson>(filePath, () => missingJson, {
+    description: 'init verification JSON',
+    onCorrupt: (recovery) => {
+      corruptMessage = describeJsonParseError(recovery.error);
+      warnJsonQuarantined(recovery);
+    },
+  });
+  if (corruptMessage) {
+    return { status: 'invalid', message: corruptMessage };
   }
+  if (value === missingJson) {
+    return { status: 'missing' };
+  }
+  return { status: 'ok', value };
 }
 
 export async function verifyInit(options: {

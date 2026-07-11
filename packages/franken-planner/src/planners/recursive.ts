@@ -1,5 +1,4 @@
 import {
-  DuplicateTaskError,
   RationaleRejectedError,
   RecursionDepthExceededError,
   TaskNotFoundError,
@@ -97,16 +96,18 @@ export class RecursivePlanner implements PlanningStrategy {
 
   private _buildSubGraph(tasks: Task[], completedTaskIds: ReadonlySet<TaskId>): PlanGraph {
     const nodes = new Map<Task['id'], Task>();
+    const uniqueTasks: Task[] = [];
 
     for (const task of tasks) {
       if (nodes.has(task.id)) {
-        throw new DuplicateTaskError(task.id);
+        continue;
       }
       nodes.set(task.id, task);
+      uniqueTasks.push(task);
     }
 
     const edges = new Map<Task['id'], Set<Task['id']>>();
-    const tasksWithInternalDependencies = tasks.map((task) => {
+    const tasksWithInternalDependencies = uniqueTasks.map((task) => {
       const internalDependencies: TaskId[] = [];
       for (const dependencyId of task.dependsOn) {
         if (nodes.has(dependencyId)) {

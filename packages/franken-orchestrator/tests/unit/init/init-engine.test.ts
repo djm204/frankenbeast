@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runInteractiveInit, runRepairInit } from '../../../src/init/init-engine.js';
@@ -26,6 +26,7 @@ describe('runInteractiveInit', () => {
   let tempDir: string | undefined;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -180,5 +181,88 @@ describe('runInteractiveInit', () => {
     expect(result.config.comms.slack.signingSecretRef).toBe('op://existing/slack-signing-secret');
     expect(result.state.selectedModules).toEqual(['chat', 'comms']);
     expect(result.state.selectedCommsTransports).toEqual(['slack']);
+  });
+
+  it('quarantines malformed existing config and continues with defaults', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, '{"chat": {', 'utf-8');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { io } = scriptedIo(
+      'n', // chat default false after corrupt config fallback
+      'y', // dashboard
+      'n', // comms
+      'claude', // provider
+      'secure', // security mode
+    );
+
+    const result = await runInteractiveInit({
+      configFile,
+      stateStore,
+      io,
+    });
+    const files = await readdir(join(tempDir, '.fbeast'));
+    const quarantine = files.find((file) => file.startsWith('config.json.corrupt-'));
+
+    expect(result.config.chat.enabled).toBe(false);
+    expect(result.config.dashboard.enabled).toBe(true);
+    expect(result.config.comms.enabled).toBe(false);
+    expect(quarantine).toBeTruthy();
+    await expect(readFile(join(tempDir, '.fbeast', quarantine ?? ''), 'utf-8')).resolves.toBe('{"chat": {');
+    await expect(readFile(configFile, 'utf-8')).resolves.toContain('"dashboard"');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed orchestrator config JSON'));
+  });
+
+  it('preserves config-backed comms answers when malformed init state is quarantined', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateFile = join(tempDir, '.fbeast', 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
+    const config = defaultConfig();
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify({
+      ...config,
+      chat: { ...config.chat, enabled: true },
+      comms: {
+        ...config.comms,
+        enabled: false,
+        slack: {
+          ...config.comms.slack,
+          enabled: true,
+          appId: 'existing-app',
+          botTokenRef: 'op://existing/slack-bot-token',
+          signingSecretRef: 'op://existing/slack-signing-secret',
+        },
+      },
+      providers: { ...config.providers, default: 'codex' },
+    }), 'utf-8');
+    await writeFile(stateFile, '{"answers": {', 'utf-8');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { io } = scriptedIo(
+      '', // keep chat enabled from config
+      '', // keep dashboard from config
+      '', // keep comms enabled from config
+      '', // keep provider from config
+      '', // keep security mode from config
+      '', // keep slack enabled from config
+      '', // keep app id from config
+      '', // keep bot token ref from config
+      '', // keep signing secret ref from config
+      'n', // discord disabled
+    );
+
+    const result = await runInteractiveInit({
+      configFile,
+      stateStore,
+      io,
+    });
+
+    expect(result.config.providers.default).toBe('codex');
+    expect(result.config.comms.slack.appId).toBe('existing-app');
+    expect(result.config.comms.slack.botTokenRef).toBe('op://existing/slack-bot-token');
+    expect(result.config.comms.slack.signingSecretRef).toBe('op://existing/slack-signing-secret');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init state JSON'));
   });
 });
