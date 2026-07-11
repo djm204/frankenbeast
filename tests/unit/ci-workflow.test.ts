@@ -159,12 +159,19 @@ on:
       );
     });
 
-    it('runs governor integration tests in CI after the shared package test target', () => {
-      expect(content).toMatch(/name:\s*Run package integration tests/);
-      expect(content).toContain('npm run test:integration --workspace=@franken/governor');
-      expect(content.indexOf('npm run test:ci')).toBeLessThan(
-        content.indexOf('npm run test:integration --workspace=@franken/governor'),
+    it('runs governor integration tests through the shared CI test script', () => {
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+
+      expect(packageJson.scripts?.['test:ci']).toContain('npm run ci:test:governor-integration');
+      expect(packageJson.scripts?.['ci:test:governor-integration']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/governor',
       );
+      expect(packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:packages')).toBeLessThan(
+        packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:governor-integration') ?? -1,
+      );
+      expect(content).not.toContain('run: npm run test:integration --workspace=@franken/governor');
     });
 
     it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
@@ -193,13 +200,17 @@ on:
       expect(packageJson.scripts?.['ci:test:planner-integration']).toBe(
         'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner',
       );
+      expect(packageJson.scripts?.['ci:test:governor-integration']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/governor',
+      );
       expect(packageJson.scripts?.['test:ci']).toBe(
-        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration',
+        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:governor-integration',
       );
       expect(content).toContain('npm run test:ci');
       expect(content).not.toContain('run: npm run ci:test:root');
       expect(content).not.toContain('run: npm run ci:test:packages');
       expect(content).not.toContain('run: npm run ci:test:planner-integration');
+      expect(content).not.toContain('run: npm run ci:test:governor-integration');
       expect(content).not.toContain('run: npm run test:root');
       expect(content).not.toContain('run: npx turbo run test');
     });

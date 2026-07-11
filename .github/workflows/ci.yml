@@ -83,9 +83,6 @@ jobs:
       - name: Run CI test suite
         run: npm run test:ci
 
-      - name: Run package integration tests
-        run: npm run test:integration --workspace=@franken/governor
-
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs
 
