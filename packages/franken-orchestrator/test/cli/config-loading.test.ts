@@ -198,6 +198,30 @@ describe('Config file loading', () => {
 
     expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
   });
+
+  it('does not derive a repository boundary from non-standard default config paths', async () => {
+    const defaultConfigPath = join(tmpDir, 'default.json');
+    const configPath = join(tmpDir, 'operator-config.json');
+    writeFileSync(configPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/operator-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/operator-controlled'],
+          },
+        },
+      },
+    }));
+
+    const config = await loadConfig(
+      baseArgs({ config: configPath, trustProviderCommandOverrides: true }),
+      defaultConfigPath,
+    );
+
+    expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
+  });
 });
 
 describe('SessionConfig includes config fields', () => {

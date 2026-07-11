@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
@@ -113,7 +113,18 @@ function isRepositoryLocalConfig(configPath: string, defaultConfigPath: string |
 
   const resolvedConfig = resolve(configPath);
   const resolvedDefault = resolve(defaultConfigPath);
-  const repositoryRoot = dirname(dirname(resolvedDefault));
+  if (resolvedConfig === resolvedDefault) {
+    return true;
+  }
+
+  const defaultConfigDir = dirname(resolvedDefault);
+  const hasRepositoryLocalDefaultShape = basename(defaultConfigDir) === '.fbeast'
+    && basename(resolvedDefault) === 'config.json';
+  if (!hasRepositoryLocalDefaultShape) {
+    return safeRealpath(resolvedConfig) === safeRealpath(resolvedDefault);
+  }
+
+  const repositoryRoot = dirname(defaultConfigDir);
   if (isPathInsideOrEqual(resolvedConfig, repositoryRoot)) {
     return true;
   }
