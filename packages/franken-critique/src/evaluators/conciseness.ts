@@ -17,6 +17,10 @@ const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
   'gi',
 );
+const UNRESOLVED_MARKER_PATTERN = new RegExp(
+  `\\b(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
+  'gi',
+);
 const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
   'i',
@@ -86,7 +90,11 @@ export class ConcisenessEvaluator implements Evaluator {
     content: string,
     findings: EvaluationFinding[],
   ): void {
-    const matches = [...content.matchAll(UNRESOLVED_COMMENT_PATTERN)];
+    const lineMatches = [...content.matchAll(UNRESOLVED_COMMENT_PATTERN)];
+    const blockMatches = [...content.matchAll(BLOCK_COMMENT_PATTERN)].flatMap(
+      (match) => [...match[0].matchAll(UNRESOLVED_MARKER_PATTERN)],
+    );
+    const matches = [...lineMatches, ...blockMatches];
     if (matches.length > 0) {
       const labels = matches.map((m) => m[1]).join(', ');
       findings.push({
