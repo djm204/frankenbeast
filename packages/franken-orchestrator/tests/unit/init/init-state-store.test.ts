@@ -84,11 +84,10 @@ describe('FileInitStateStore', () => {
     expect(fileInfo.mode & 0o777).toBe(0o600);
   });
 
-  it('updates a symlink target instead of replacing the symlink', async () => {
+  it('updates a dangling symlink target instead of replacing the symlink', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
     const targetFile = join(tempDir, 'shared-init-state.json');
     const stateFile = join(tempDir, 'init-state.json');
-    await writeFile(targetFile, '{}', 'utf-8');
     await symlink(targetFile, stateFile);
     const store = new FileInitStateStore(stateFile);
 
@@ -97,5 +96,25 @@ describe('FileInitStateStore', () => {
     const linkInfo = await lstat(stateFile);
     expect(linkInfo.isSymbolicLink()).toBe(true);
     await expect(readFile(targetFile, 'utf-8')).resolves.toContain('/tmp/project/.fbeast/config.json');
+  });
+
+  it('quarantines malformed JSON from a symlink target without replacing the symlink', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const targetFile = join(tempDir, 'shared-init-state.json');
+    const stateFile = join(tempDir, 'init-state.json');
+    await writeFile(targetFile, '{"selectedModules": [', 'utf-8');
+    await symlink(targetFile, stateFile);
+    const store = new FileInitStateStore(stateFile);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await store.load('/tmp/project/.fbeast/config.json');
+
+    const linkInfo = await lstat(stateFile);
+    const files = await readdir(tempDir);
+    const quarantine = files.find((file) => file.startsWith('shared-init-state.json.corrupt-'));
+    expect(linkInfo.isSymbolicLink()).toBe(true);
+    expect(quarantine).toBeTruthy();
+    await expect(readFile(join(tempDir, quarantine ?? ''), 'utf-8')).resolves.toBe('{"selectedModules": [');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init state JSON'));
   });
 });

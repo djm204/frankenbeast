@@ -213,7 +213,7 @@ describe('runInteractiveInit', () => {
       chat: { ...config.chat, enabled: true },
       comms: {
         ...config.comms,
-        enabled: true,
+        enabled: false,
         slack: {
           ...config.comms.slack,
           enabled: true,

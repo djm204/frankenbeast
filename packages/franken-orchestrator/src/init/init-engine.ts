@@ -62,13 +62,13 @@ function initStateFromConfig(configPath: string, config: OrchestratorConfig): In
   const selectedModules: InitModuleId[] = [];
   if (config.chat.enabled) selectedModules.push('chat');
   if (config.dashboard.enabled) selectedModules.push('dashboard');
-  if (config.comms.enabled) selectedModules.push('comms');
 
   const selectedCommsTransports: SupportedCommsTransportId[] = [];
   if (config.comms.slack.enabled) selectedCommsTransports.push('slack');
   if (config.comms.discord.enabled) selectedCommsTransports.push('discord');
   if (config.comms.telegram.enabled) selectedCommsTransports.push('telegram');
   if (config.comms.whatsapp.enabled) selectedCommsTransports.push('whatsapp');
+  if (config.comms.enabled || selectedCommsTransports.length > 0) selectedModules.push('comms');
 
   return {
     ...createEmptyInitState(configPath),

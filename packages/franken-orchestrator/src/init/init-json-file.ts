@@ -1,5 +1,5 @@
-import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, basename } from 'node:path';
+import { chmod, lstat, mkdir, readFile, readlink, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, basename, isAbsolute, resolve as resolvePath } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export interface JsonCorruptionRecovery {
@@ -15,6 +15,26 @@ function isJsonSyntaxError(error: unknown): error is SyntaxError {
 
 function quarantinePathFor(filePath: string): string {
   return `${filePath}.corrupt-${Date.now()}-${process.pid}-${randomUUID()}`;
+}
+
+async function resolveSymlinkTargetPath(filePath: string): Promise<string> {
+  const info = await lstat(filePath);
+  if (!info.isSymbolicLink()) {
+    return filePath;
+  }
+  const linkTarget = await readlink(filePath);
+  return isAbsolute(linkTarget) ? linkTarget : resolvePath(dirname(filePath), linkTarget);
+}
+
+async function resolveExistingOrSymlinkTarget(filePath: string): Promise<string> {
+  try {
+    return await resolveSymlinkTargetPath(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return filePath;
+    }
+    throw error;
+  }
 }
 
 export async function readJsonFileOrDefault<T>(
@@ -41,22 +61,22 @@ export async function readJsonFileOrDefault<T>(
     if (!isJsonSyntaxError(error)) {
       throw error;
     }
-    const quarantinePath = quarantinePathFor(filePath);
-    await rename(filePath, quarantinePath);
+    const targetPath = await resolveExistingOrSymlinkTarget(filePath);
+    const quarantinePath = quarantinePathFor(targetPath);
+    await rename(targetPath, quarantinePath);
     options.onCorrupt?.({ description: options.description, filePath, quarantinePath, error });
     return fallback();
   }
 }
 
 async function resolveAtomicWriteTarget(filePath: string): Promise<{ targetPath: string; mode?: number | undefined }> {
+  const targetPath = await resolveExistingOrSymlinkTarget(filePath);
   try {
-    const linkInfo = await lstat(filePath);
-    const targetPath = linkInfo.isSymbolicLink() ? await realpath(filePath) : filePath;
     const targetInfo = await stat(targetPath);
     return { targetPath, mode: targetInfo.mode & 0o777 };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { targetPath: filePath };
+      return { targetPath };
     }
     throw error;
   }
