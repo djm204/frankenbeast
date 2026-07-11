@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileInitStateStore } from '../../../src/init/init-state-store.js';
@@ -69,5 +69,33 @@ describe('FileInitStateStore', () => {
     const files = await readdir(join(tempDir, 'nested'));
     expect(files).toEqual(['init-state.json']);
     await expect(readFile(stateFile, 'utf-8')).resolves.toContain('/tmp/project/.fbeast/config.json');
+  });
+
+  it('preserves existing file permissions when saving atomically', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const stateFile = join(tempDir, 'init-state.json');
+    await writeFile(stateFile, '{}', 'utf-8');
+    await chmod(stateFile, 0o600);
+    const store = new FileInitStateStore(stateFile);
+
+    await store.save(createEmptyInitState('/tmp/project/.fbeast/config.json'));
+
+    const fileInfo = await lstat(stateFile);
+    expect(fileInfo.mode & 0o777).toBe(0o600);
+  });
+
+  it('updates a symlink target instead of replacing the symlink', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const targetFile = join(tempDir, 'shared-init-state.json');
+    const stateFile = join(tempDir, 'init-state.json');
+    await writeFile(targetFile, '{}', 'utf-8');
+    await symlink(targetFile, stateFile);
+    const store = new FileInitStateStore(stateFile);
+
+    await store.save(createEmptyInitState('/tmp/project/.fbeast/config.json'));
+
+    const linkInfo = await lstat(stateFile);
+    expect(linkInfo.isSymbolicLink()).toBe(true);
+    await expect(readFile(targetFile, 'utf-8')).resolves.toContain('/tmp/project/.fbeast/config.json');
   });
 });

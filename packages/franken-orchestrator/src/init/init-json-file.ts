@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export interface JsonCorruptionRecovery {
@@ -48,12 +48,30 @@ export async function readJsonFileOrDefault<T>(
   }
 }
 
-export async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
+async function resolveAtomicWriteTarget(filePath: string): Promise<{ targetPath: string; mode?: number | undefined }> {
   try {
-    await writeFile(tempPath, JSON.stringify(value, null, 2) + '\n', 'utf-8');
-    await rename(tempPath, filePath);
+    const linkInfo = await lstat(filePath);
+    const targetPath = linkInfo.isSymbolicLink() ? await realpath(filePath) : filePath;
+    const targetInfo = await stat(targetPath);
+    return { targetPath, mode: targetInfo.mode & 0o777 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { targetPath: filePath };
+    }
+    throw error;
+  }
+}
+
+export async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
+  const { targetPath, mode } = await resolveAtomicWriteTarget(filePath);
+  await mkdir(dirname(targetPath), { recursive: true });
+  const tempPath = join(dirname(targetPath), `.${basename(targetPath)}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`);
+  try {
+    await writeFile(tempPath, JSON.stringify(value, null, 2) + '\n', { encoding: 'utf-8', mode });
+    if (mode !== undefined) {
+      await chmod(tempPath, mode);
+    }
+    await rename(tempPath, targetPath);
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;

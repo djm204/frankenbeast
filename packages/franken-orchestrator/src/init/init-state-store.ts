@@ -5,8 +5,8 @@ import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from 
 export class FileInitStateStore {
   constructor(readonly filePath: string) {}
 
-  async load(configPath: string): Promise<InitState> {
-    return readJsonFileOrDefault(this.filePath, () => createEmptyInitState(configPath), {
+  async load(configPath: string, fallback: () => InitState = () => createEmptyInitState(configPath)): Promise<InitState> {
+    return readJsonFileOrDefault(this.filePath, fallback, {
       description: 'init state',
       onCorrupt: warnJsonQuarantined,
     });
