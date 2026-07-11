@@ -214,6 +214,76 @@ describe('useChatSession error banners', () => {
     });
   });
 
+  it('clears the typing indicator when a socket turn errors before completion', async () => {
+    vi.stubGlobal('fetch', chatFetch());
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'assistant.typing.start',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.showTypingIndicator).toBe(true);
+
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn.error',
+          code: 'TOOL_DENIED',
+          message: 'Approval denied by policy.',
+          timestamp: '2026-07-05T00:00:01.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.showTypingIndicator).toBe(false);
+    expect(result.current.activity[0]).toMatchObject({
+      type: 'turn.error',
+      data: { code: 'TOOL_DENIED', message: 'Approval denied by policy.' },
+    });
+  });
+
+  it('clears the typing indicator when the websocket errors mid-turn', async () => {
+    const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2'] });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'assistant.typing.start',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.showTypingIndicator).toBe(true);
+
+    act(() => {
+      MockWebSocket.instances[0]!.onerror?.();
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.showTypingIndicator).toBe(false);
+  });
+
   it('preserves approval metadata on activity events for readable timeline chips', async () => {
     vi.stubGlobal('fetch', chatFetch());
     vi.stubGlobal('WebSocket', MockWebSocket);
