@@ -113,15 +113,11 @@ function isRepositoryLocalConfig(configPath: string, defaultConfigPath: string |
 
   const resolvedConfig = resolve(configPath);
   const resolvedDefault = resolve(defaultConfigPath);
-  if (resolvedConfig === resolvedDefault) {
-    return true;
-  }
-
   const defaultConfigDir = dirname(resolvedDefault);
   const hasRepositoryLocalDefaultShape = basename(defaultConfigDir) === '.fbeast'
     && basename(resolvedDefault) === 'config.json';
   if (!hasRepositoryLocalDefaultShape) {
-    return safeRealpath(resolvedConfig) === safeRealpath(resolvedDefault);
+    return false;
   }
 
   const repositoryRoot = dirname(defaultConfigDir);

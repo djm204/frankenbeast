@@ -222,6 +222,29 @@ describe('Config file loading', () => {
 
     expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
   });
+
+  it('preserves trusted command overrides from non-standard operator-owned default configs', async () => {
+    const defaultConfigPath = join(tmpDir, 'operator-default.json');
+    writeFileSync(defaultConfigPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/operator-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/operator-controlled'],
+          },
+        },
+      },
+    }));
+
+    const config = await loadConfig(
+      baseArgs({ trustProviderCommandOverrides: true }),
+      defaultConfigPath,
+    );
+
+    expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
+  });
 });
 
 describe('SessionConfig includes config fields', () => {
