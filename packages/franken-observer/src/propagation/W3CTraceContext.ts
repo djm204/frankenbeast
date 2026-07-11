@@ -31,7 +31,7 @@ export interface ExtractedTraceContext {
 const RE_HEX_32 = /^[0-9a-f]{32}$/
 const RE_HEX_16 = /^[0-9a-f]{16}$/
 const RE_HEX_02 = /^[0-9a-f]{2}$/
-const RE_TRACESTATE_KEY = /^(?:[a-z0-9][a-z0-9_\-*\/]{0,255}|[a-z0-9][a-z0-9_\-*\/]{0,240}@[a-z][a-z0-9_\-*\/]{0,13})$/
+const RE_TRACESTATE_KEY = /^(?:[a-z][a-z0-9_\-*\/]{0,255}|[a-z0-9][a-z0-9_\-*\/]{0,240}@[a-z][a-z0-9_\-*\/]{0,13})$/
 const ZEROS_32  = '0'.repeat(32)
 const ZEROS_16  = '0'.repeat(16)
 const TRACEPARENT_VERSION_00 = '00'
@@ -49,7 +49,8 @@ function isValidTracestateKey(key: string): boolean {
 function isValidTracestateValue(value: string): boolean {
   if (!value.length || value.length > MAX_TRACESTATE_VALUE_LENGTH) return false
   if (/[=,]/.test(value)) return false
-  if (/[\u0000-\u001f\u007F]/.test(value)) return false
+  if (/[^\u0020-\u007E]/.test(value)) return false
+  if (value.endsWith(' ')) return false
   return true
 }
 
@@ -143,11 +144,13 @@ export function parseTracestate(header: string | null | undefined): Record<strin
   if (!header?.trim()) return {}
 
   const result: Record<string, string> = {}
-  let seenEntries = 0
+  let seenMembers = 0
 
   for (const entry of header.split(',')) {
     const entryTrimmed = entry.trim()
     if (!entryTrimmed) continue
+    if (seenMembers >= MAX_TRACESTATE_ENTRIES) break
+    seenMembers += 1
     if (entryTrimmed.length > MAX_TRACESTATE_ENTRY_LENGTH) continue
 
     const eqIdx = entryTrimmed.indexOf('=')
@@ -156,12 +159,10 @@ export function parseTracestate(header: string | null | undefined): Record<strin
     const key = entryTrimmed.slice(0, eqIdx).trim()
     const value = entryTrimmed.slice(eqIdx + 1).trim()
     if (!key || !value) continue
-    if (seenEntries >= MAX_TRACESTATE_ENTRIES) break
     if (!isValidTracestateKey(key) || !isValidTracestateValue(value)) continue
     if (Object.hasOwn(result, key)) continue
 
     result[key] = value
-    seenEntries += 1
   }
 
   return result
@@ -229,11 +230,12 @@ export function injectIntoHeaders(
   const out: Record<string, string> = { ...existing }
   out['traceparent'] = formatTraceparent(fields)
   if (state !== undefined) {
+    for (const key of Object.keys(out)) {
+      if (key.toLowerCase() === 'tracestate') delete out[key]
+    }
     const tracestate = formatTracestate(state)
     if (tracestate) {
       out['tracestate'] = tracestate
-    } else {
-      delete out['tracestate']
     }
   }
   return out

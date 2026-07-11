@@ -184,6 +184,10 @@ describe('parseTracestate', () => {
     expect(parseTracestate('rojo=abc\nline,congo=xyz')).toEqual({ congo: 'xyz' })
   })
 
+  it('skips entries with non-ASCII values', () => {
+    expect(parseTracestate('rojo=caf\u00e9,congo=xyz,snowman=\u2603')).toEqual({ congo: 'xyz' })
+  })
+
   it('skips duplicate keys after first occurrence', () => {
     expect(parseTracestate('rojo=first,rojo=second,congo=xyz')).toEqual({ rojo: 'first', congo: 'xyz' })
   })
@@ -202,6 +206,18 @@ describe('parseTracestate', () => {
       'vendor/foo': 'abc',
       '1tenant@vendor': 'xyz',
     })
+  })
+
+  it('rejects simple tracestate keys that start with digits', () => {
+    expect(parseTracestate('1vendor=bad,vendor=ok')).toEqual({ vendor: 'ok' })
+  })
+
+  it('counts malformed tracestate members toward the 32-member inbound limit', () => {
+    const header = [
+      ...Array.from({ length: 32 }, (_, i) => `bad.key.${i}=v${i}`),
+      'vendor=value',
+    ].join(',')
+    expect(parseTracestate(header)).toEqual({})
   })
 
   it('rejects tracestate keys with dots', () => {
@@ -232,8 +248,12 @@ describe('formatTracestate', () => {
     expect(formatTracestate({ vendor: 'a=b', good: 'safe' })).toBe('good=safe')
   })
 
-  it('formats W3C-compliant keys and rejects dotted keys', () => {
-    expect(formatTracestate({ 'vendor/foo': 'abc', '1tenant@vendor': 'xyz', 'vendor.foo': 'bad' })).toBe(
+  it('filters non-ASCII and trailing-space values from output', () => {
+    expect(formatTracestate({ vendor: 'caf\u00e9', trailing: 'value ', good: 'safe' })).toBe('good=safe')
+  })
+
+  it('formats W3C-compliant keys and rejects dotted or digit-start simple keys', () => {
+    expect(formatTracestate({ 'vendor/foo': 'abc', '1tenant@vendor': 'xyz', 'vendor.foo': 'bad', '1vendor': 'bad' })).toBe(
       'vendor/foo=abc,1tenant@vendor=xyz',
     )
   })
@@ -337,6 +357,16 @@ describe('injectIntoHeaders', () => {
       { tracestate: 'stale=value' },
     )
     expect('tracestate' in headers).toBe(false)
+  })
+
+  it('clears existing tracestate case-insensitively when provided state sanitizes empty', () => {
+    const headers = injectIntoHeaders(
+      { traceId: TRACE_ID, parentSpanId: SPAN_ID, sampled: true },
+      { 'bad key': 'one,two' },
+      { Tracestate: 'stale=value' },
+    )
+    expect('tracestate' in headers).toBe(false)
+    expect('Tracestate' in headers).toBe(false)
   })
 
   it('merges into an existing headers object', () => {
