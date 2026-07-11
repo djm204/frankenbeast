@@ -54,10 +54,19 @@ npm --workspace @franken/web run dev:chat
 
 That proxies same-origin browser requests to `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
-If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target. Leave `VITE_API_URL` unset in local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` stay on the Vite origin while the dev server forwards them to the backend. If Beast controls run on a separate backend, set `VITE_BEAST_API_PROXY_TARGET` as well.
+If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target. Leave `VITE_API_URL` unset in local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` stay on the Vite origin while the dev server forwards them to the backend.
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
+```
+
+`VITE_BEAST_API_PROXY_TARGET` only affects Beast control routes (`/v1/beasts/*`). It defaults to `VITE_API_PROXY_TARGET`, so leave it unset when chat/API and Beast controls share the same backend. Set it only when Beast controls run on a separate local daemon or backend target:
+
+```bash
+npm --workspace @franken/orchestrator run beasts-daemon -- --port 4051
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
+VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4051 \
+  npm --workspace @franken/web run dev
 ```
 
 Open the URL Vite prints, usually:
