@@ -341,6 +341,51 @@ describe('NetworkPage', () => {
     expect(screen.queryByText('chat.model=fresh-backend-model')).toBeNull();
   });
 
+  it('accepts normalized config returned after a successful save', async () => {
+    const onSaveConfig = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Chat port'), { target: { value: '03737' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
+
+    await waitFor(() => expect(onSaveConfig).toHaveBeenCalledWith(['chat.port=03737']));
+
+    rerender(
+      <NetworkPage
+        config={{
+          ...baseConfig,
+          chat: { ...baseConfig.chat, port: 3737 },
+        }}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('3737')).toBeDefined();
+    expect(screen.getByText('No pending config changes.')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Save config' })).toHaveProperty('disabled', true);
+  });
+
   it('surfaces save errors from the network config API', async () => {
     const onSaveConfig = vi.fn().mockRejectedValue(new Error('HTTP 400'));
 

@@ -133,6 +133,7 @@ function validateForm(state: NetworkConfigFormState): string[] {
 export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps) {
   const initialState = useMemo(() => formStateFromConfig(config), [config]);
   const previousInitialStateRef = useRef<NetworkConfigFormState>(initialState);
+  const shouldAcceptNextConfigRef = useRef(false);
   const [formState, setFormState] = useState<NetworkConfigFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -142,6 +143,13 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
   const canSave = assignments.length > 0 && validationErrors.length === 0 && !isSaving;
 
   useEffect(() => {
+    if (shouldAcceptNextConfigRef.current) {
+      setFormState(initialState);
+      previousInitialStateRef.current = initialState;
+      shouldAcceptNextConfigRef.current = false;
+      setError(null);
+      return;
+    }
     const previousInitialState = previousInitialStateRef.current;
     setFormState((current) => {
       const next: NetworkConfigFormState = { ...initialState };
@@ -171,6 +179,7 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
     setSuccess(null);
     try {
       await onSave(assignments);
+      shouldAcceptNextConfigRef.current = true;
       setSuccess('Saved network config changes.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save network config.');

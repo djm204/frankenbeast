@@ -317,6 +317,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const networkStatusRequestIdRef = useRef(0);
   const networkStatusSuccessRequestIdRef = useRef(0);
   const networkStatusSettledRequestIdRef = useRef(0);
+  const networkConfigRequestIdRef = useRef(0);
   const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
@@ -394,9 +395,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           setNetworkError(`Unable to load network status: ${networkErrorMessage(error, 'Request failed.')}`);
         }
       });
+    const configRequestId = ++networkConfigRequestIdRef.current;
     void client.getConfig()
       .then((nextConfig) => {
-        setNetworkConfig(nextConfig);
+        if (configRequestId === networkConfigRequestIdRef.current) {
+          setNetworkConfig(nextConfig);
+        }
       })
       .catch(() => undefined);
   }, [baseUrl]);
@@ -1278,11 +1282,18 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                     setNetworkError(`Unable to refresh network status: ${networkErrorMessage(error, 'Request failed.')}`);
                   }
                 });
+              const configRequestId = ++networkConfigRequestIdRef.current;
               void client.getConfig()
                 .then((nextConfig) => {
-                  setNetworkConfig(nextConfig);
+                  if (configRequestId === networkConfigRequestIdRef.current) {
+                    setNetworkConfig(nextConfig);
+                  }
                 })
-                .catch(() => undefined);
+                .catch((error: unknown) => {
+                  if (configRequestId === networkConfigRequestIdRef.current) {
+                    setNetworkError(`Unable to refresh network config: ${networkErrorMessage(error, 'Request failed.')}`);
+                  }
+                });
               if (!logServiceId) {
                 return;
               }
