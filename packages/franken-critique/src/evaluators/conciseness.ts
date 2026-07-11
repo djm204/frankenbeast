@@ -37,6 +37,9 @@ function skipQuotedLiteral(content: string, start: number): number {
       index += 2;
       continue;
     }
+    if (quote !== '`' && (current === '\n' || current === '\r')) {
+      return index;
+    }
     if (current === quote) {
       return index + 1;
     }
@@ -46,21 +49,51 @@ function skipQuotedLiteral(content: string, start: number): number {
   return index;
 }
 
-function previousSignificantCharacter(content: string, index: number): string {
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    const current = content[cursor] ?? '';
-    if (!/\s/.test(current)) {
-      return current;
+function previousSignificantIndex(content: string, index: number): number {
+  let cursor = index - 1;
+
+  while (cursor >= 0) {
+    while (cursor >= 0 && /\s/.test(content[cursor] ?? '')) {
+      cursor -= 1;
     }
+
+    if (cursor <= 0) {
+      return cursor;
+    }
+
+    if (content[cursor] === '/' && content[cursor - 1] === '*') {
+      const start = content.lastIndexOf('/*', cursor - 2);
+      if (start === -1) {
+        return cursor;
+      }
+      cursor = start - 1;
+      continue;
+    }
+
+    const lineStart = content.lastIndexOf('\n', cursor) + 1;
+    const linePrefix = content.slice(lineStart, cursor + 1);
+    const lineCommentStart = linePrefix.indexOf('//');
+    if (
+      lineCommentStart !== -1 &&
+      linePrefix.slice(0, lineCommentStart).trim().length === 0
+    ) {
+      cursor = lineStart - 1;
+      continue;
+    }
+
+    return cursor;
   }
-  return '';
+
+  return cursor;
+}
+
+function previousSignificantCharacter(content: string, index: number): string {
+  const cursor = previousSignificantIndex(content, index);
+  return cursor >= 0 ? (content[cursor] ?? '') : '';
 }
 
 function previousSignificantToken(content: string, index: number): string {
-  let cursor = index - 1;
-  while (cursor >= 0 && /\s/.test(content[cursor] ?? '')) {
-    cursor -= 1;
-  }
+  let cursor = previousSignificantIndex(content, index);
 
   const end = cursor + 1;
   while (cursor >= 0 && /[$\w]/.test(content[cursor] ?? '')) {

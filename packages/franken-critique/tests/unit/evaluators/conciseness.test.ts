@@ -185,6 +185,31 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('recovers from prose apostrophes and comment trivia before regex literals', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = [
+      "Don't skip later fenced code markers:",
+      '```ts',
+      `// ${pendingMarker}: fenced code follow-up`,
+      '```',
+      'const re =',
+      '  // docs before regex',
+      `  /[/* ${trackedMarker}: regex data */]/;`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
+          !f.message.includes(trackedMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));
