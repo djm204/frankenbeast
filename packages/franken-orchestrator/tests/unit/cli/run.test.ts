@@ -419,9 +419,27 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any, ['codex', 'claude']);
 
     expect(providers).toEqual([
-      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 0 },
-      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5-codex' },
-      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 2 },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0, model: 'gpt-5-codex' },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 1 },
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 2 },
+    ]);
+  });
+
+  it('does not add an unconfigured claude duplicate for legacy aider provider snapshots', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'aider',
+        fallbackChain: [],
+        overrides: {},
+      },
+    } as any, {
+      getProviders: () => [
+        { name: 'claude-cli', type: 'claude-cli' },
+      ],
+    } as any);
+
+    expect(providers).toEqual([
+      { name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]);
   });
 });

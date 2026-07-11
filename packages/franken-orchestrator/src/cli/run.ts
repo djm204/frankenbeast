@@ -403,6 +403,15 @@ export function assertAnyProviderCliAvailable(
   );
 }
 
+function resolveDashboardProviderType(nameOrType: string, fallbackType?: string): string {
+  if (nameOrType === 'aider') return fallbackType ?? 'claude-cli';
+  try {
+    return resolveProviderType(nameOrType);
+  } catch {
+    return fallbackType ?? 'unknown';
+  }
+}
+
 export function buildDashboardProviderSnapshot(
   config: OrchestratorConfig,
   providerRegistry?: LlmProviderRegistry | undefined,
@@ -421,17 +430,13 @@ export function buildDashboardProviderSnapshot(
   const registryProviders = providerRegistry?.getProviders() ?? [];
   const registryByName = new Map<string, (typeof registryProviders)[number]>();
   const configuredNames = [...new Set([
+    ...extraProviderNames,
     config.providers.default,
     ...(config.providers.fallbackChain ?? []),
-    ...extraProviderNames,
   ].filter(Boolean))];
   const configuredTypes = new Set<string>();
-  for (const name of configuredNames) {
-    try {
-      configuredTypes.add(resolveProviderType(name));
-    } catch {
-      // Custom provider names are still represented by their configured key.
-    }
+  for (const [index, name] of configuredNames.entries()) {
+    configuredTypes.add(resolveDashboardProviderType(name, registryProviders[index]?.type));
   }
 
   const registryNames = registryProviders.flatMap((provider) => {
@@ -444,13 +449,7 @@ export function buildDashboardProviderSnapshot(
     registryByName.set(provider.name, provider);
     registryByName.set(canonicalName, provider);
 
-    const providerType = provider.type || (() => {
-      try {
-        return resolveProviderType(canonicalName);
-      } catch {
-        return undefined;
-      }
-    })();
+    const providerType = provider.type || resolveDashboardProviderType(canonicalName);
     if (configuredNames.includes(canonicalName) || (providerType && configuredTypes.has(providerType))) {
       return [];
     }
@@ -461,14 +460,7 @@ export function buildDashboardProviderSnapshot(
 
   return providerNames.map((name, index) => {
     const registryProvider = registryByName.get(name);
-    let type: string = registryProvider?.type ?? '';
-    if (!type) {
-      try {
-        type = resolveProviderType(name);
-      } catch {
-        type = registryProviders[index]?.type ?? 'unknown';
-      }
-    }
+    const type: string = registryProvider?.type ?? resolveDashboardProviderType(name, registryProviders[index]?.type);
     const model = config.providers.overrides?.[name]?.model;
     return {
       name,
