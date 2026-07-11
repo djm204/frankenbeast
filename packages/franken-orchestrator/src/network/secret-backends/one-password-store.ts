@@ -7,16 +7,7 @@ const VAULT = 'frankenbeast';
 const TITLE_PREFIX = 'frankenbeast/';
 
 function titleForKey(key: string): string {
-  return `${TITLE_PREFIX}${encodeURIComponent(key)}`;
-}
-
-function keyFromTitle(title: string): string {
-  const encodedKey = title.slice(TITLE_PREFIX.length);
-  try {
-    return decodeURIComponent(encodedKey);
-  } catch {
-    return encodedKey;
-  }
+  return `${TITLE_PREFIX}${key}`;
 }
 
 export class OnePasswordStore implements ISecretStore {
@@ -64,8 +55,15 @@ export class OnePasswordStore implements ISecretStore {
   }
 
   async resolve(key: string): Promise<string | undefined> {
-    const ref = `op://${VAULT}/${titleForKey(key)}/password`;
-    const result = await this.runner('op', ['read', ref]);
+    const title = titleForKey(key);
+    const result = await this.runner('op', [
+      'item',
+      'get',
+      title,
+      `--vault=${VAULT}`,
+      '--fields=password',
+      '--reveal',
+    ]);
     if (result.exitCode !== 0) {
       return undefined;
     }
@@ -91,6 +89,6 @@ export class OnePasswordStore implements ISecretStore {
     return items
       .map(item => item.title)
       .filter(title => title.startsWith(TITLE_PREFIX))
-      .map(keyFromTitle);
+      .map(title => title.slice(TITLE_PREFIX.length));
   }
 }
