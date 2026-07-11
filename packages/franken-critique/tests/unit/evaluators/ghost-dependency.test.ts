@@ -200,7 +200,14 @@ describe('GhostDependencyEvaluator', () => {
       class CommentedPlugin implements /* generated */ import('ghost-package').Plugin {}
       const parenthesizedCast = value as (import('ghost-package').Plugin);
       const parenthesizedSatisfies = value satisfies (import('ghost-package').Plugin);
+      const objectTypeAssertion = value as { loader: import('ghost-package').Loader };
+      const tupleAssertion = value as [import('ghost-package').Tuple];
+      const readonlyAssertion = value as readonly import('ghost-package').Readonly[];
       interface Cfg { name: string; plugin: import('ghost-package').Plugin }
+      type InlineObject = { name: string; plugin: import('ghost-package').Plugin };
+      declare namespace N { type T = import('ghost-package').T }
+      type TemplateKey = \`\${import('ghost-package').Name}\`;
+      const url = 'http://example.invalid'; loader.import('ghost-package');
       const plugin = loader.import('unknown-lib');
       loader./* generated */import('unknown-lib');
       this.#import('private-loader');
@@ -234,22 +241,25 @@ describe('GhostDependencyEvaluator', () => {
       void import('void-simple-type-after-ghost');
       interface NewAfterType {}
       new Loader(import('new-after-type-ghost'));
+      interface SameLine {} import('same-line-interface-ghost');
       async function awaited(): Promise<void> { await import('awaited-function-ghost'); }
       const arrow = (opts: Options) => import('arrow-body-ghost');
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
       loadPlugin: import('label-ghost');
       const parenthesized = await import(('parenthesized-ghost'));
       const angleAsserted = await import(<const>'angle-asserted-ghost');
+      const genericAngleAsserted = await import(<Readonly<string>>'generic-angle-ghost');
       const literalAsserted = await import('literal-asserted-ghost' as const);
       const literalSatisfied = await import('literal-satisfied-ghost' satisfies string);
       const runtimeTernary = kind === 'extends' ? fallback : import('ternary-ghost');
       const lessThanRuntime = count < import('less-than-ghost');
+      const compactLessThanRuntime = count<import('compact-less-than-ghost');
       const bitwiseRuntime = flags | import('bitwise-or-ghost');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(23);
+    expect(result.findings).toHaveLength(26);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -270,10 +280,12 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('label-ghost'),
         expect.stringContaining('parenthesized-ghost'),
         expect.stringContaining('angle-asserted-ghost'),
+        expect.stringContaining('generic-angle-ghost'),
         expect.stringContaining('literal-asserted-ghost'),
         expect.stringContaining('literal-satisfied-ghost'),
         expect.stringContaining('ternary-ghost'),
         expect.stringContaining('less-than-ghost'),
+        expect.stringContaining('compact-less-than-ghost'),
         expect.stringContaining('bitwise-or-ghost'),
       ]),
     );

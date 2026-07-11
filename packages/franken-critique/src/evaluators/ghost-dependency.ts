@@ -107,6 +107,10 @@ function extractDependencySpecifiers(content: string): string[] {
     }
 
     if (ch === '`') {
+      if (isTypeOnlyTemplateString(content, i)) {
+        i = skipStringLiteral(content, i);
+        continue;
+      }
       const template = readTemplateString(content, i);
       specifiers.push(...template.specifiers);
       i = template.endIndex;
@@ -297,7 +301,7 @@ function readDynamicImportArgumentSpecifier(
   }
 
   if (content[index] === '<') {
-    const assertionEnd = content.indexOf('>', index + 1);
+    const assertionEnd = findTypeScriptAngleAssertionEnd(content, index);
     if (assertionEnd === -1) return null;
     const assertedStart = skipImportTrivia(content, assertionEnd + 1);
     return readDynamicImportArgumentSpecifier(content, assertedStart);
@@ -355,6 +359,34 @@ function findDynamicImportStatementStart(content: string, importIndex: number): 
   return statementStart;
 }
 
+function isTypeOnlyTemplateString(content: string, templateIndex: number): boolean {
+  const statementStart = findDynamicImportStatementStart(content, templateIndex);
+  const prefix = content.slice(statementStart + 1, templateIndex);
+  const isTernaryBranch = hasTernaryBranchMarker(prefix);
+  return (
+    endsInsideNestedTypeReference(prefix) ||
+    isInsideTypeDeclaration(prefix) ||
+    isInsideTypeAnnotation(prefix, content, templateIndex, isTernaryBranch)
+  );
+}
+
+function findTypeScriptAngleAssertionEnd(content: string, index: number): number {
+  let depth = 0;
+  for (let i = index; i < content.length; i++) {
+    const ch = content[i]!;
+    if (ch === '<') depth += 1;
+    if (ch === '>') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipStringLiteral(content, i);
+    }
+  }
+
+  return -1;
+}
+
 function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boolean {
   const openBraceIndex = content.lastIndexOf('{', semicolonIndex);
   if (openBraceIndex === -1) return false;
@@ -362,12 +394,18 @@ function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boo
   if (closeBraceIndex > openBraceIndex) return false;
 
   const beforeBrace = content.slice(0, openBraceIndex);
-  return /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace);
+  return (
+    /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace) ||
+    /(?:\bas\s*|\bsatisfies\s*|:)\s*$/.test(beforeBrace.trimEnd())
+  );
 }
 
 function endsInsideNestedTypeReference(prefix: string): boolean {
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
   if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
+    return true;
+  }
+  if (/(?:\bas\s*|\bsatisfies\s*)\s*(?:readonly\s*)?(?:\[\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
 
@@ -381,7 +419,7 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
   }
 
   const operator = trimmed.at(-1);
-  if (operator === '<') return !/\s<$/.test(trimmed);
+  if (operator === '<') return /(?:[A-Z_$][\w$]*|[>\]])<$/.test(trimmed);
 
   if (operator !== '|' && operator !== '&') return false;
 
@@ -395,12 +433,12 @@ function stripTrailingTrivia(content: string): string {
 
 function isInsideTypeDeclaration(prefix: string): boolean {
   return (
-    /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
+    /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
     !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
     ) &&
-    !/\}\s*\n\s*(?:export\s+)?$/.test(prefix) &&
+    !/\}\s*(?:export\s+)?$/.test(prefix) &&
     !/\}\s*\n\s*(?:export\s+)?(?:void\s*$|\(|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
       prefix,
     )
@@ -431,6 +469,7 @@ function isInsideTypeAnnotation(
 
   const beforeAnnotation = prefix.slice(0, annotationIndex);
   if (/\bcase\s+[\s\S]*$/.test(beforeAnnotation)) return false;
+  if (/(?:\bas|\bsatisfies)\s*\{[^}]*$/.test(beforeAnnotation)) return true;
   if (/:\s*\{[^}]*$/.test(beforeAnnotation)) return true;
   if (
     /(?:^|[;{}\n])\s*[A-Za-z_$][\w$]*$/.test(beforeAnnotation) &&
@@ -502,6 +541,12 @@ function isLikelyObjectLiteralValue(content: string, importIndex: number): boole
 
   if (content[i] === '{') {
     const beforeBrace = content.slice(0, i).trimEnd();
+    if (/(?:\bas|\bsatisfies)\s*$/.test(beforeBrace)) {
+      return false;
+    }
+    if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=\s*$/.test(beforeBrace)) {
+      return false;
+    }
     if (/\bclass\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?$/.test(beforeBrace)) {
       return false;
     }
@@ -536,8 +581,28 @@ function skipTriviaBackward(content: string, index: number): number {
 
 function isInsideLineCommentBackward(content: string, index: number): boolean {
   const lineStart = content.lastIndexOf('\n', index) + 1;
-  const commentStart = content.lastIndexOf('//', index);
-  return commentStart >= lineStart;
+  let quote: string | null = null;
+
+  for (let i = lineStart; i <= index; i++) {
+    const ch = content[i]!;
+    if (quote) {
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === '/' && content[i + 1] === '/') return true;
+  }
+
+  return false;
 }
 
 function skipQuotedKeyBackward(content: string, quoteIndex: number): number {
