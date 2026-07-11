@@ -21,6 +21,7 @@ export type {
   SandboxResult,
   ADRMatch,
   EpisodicTrace,
+  LessonTestTraceabilityEntry,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,

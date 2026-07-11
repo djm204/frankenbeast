@@ -81,6 +81,61 @@ describe('LessonRecorder', () => {
     );
   });
 
+  it('adds a deterministic lesson-to-test traceability map to recorded lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'Safety Gate', [
+          { message: 'plain HTTP endpoint needs HTTPS', severity: 'critical' },
+        ]),
+        createIteration(2, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'Task 123');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.testTraceability).toEqual([
+      {
+        lessonId: 'task-123:safety-gate:iteration-0',
+        taskId: 'Task 123',
+        evaluatorName: 'Safety Gate',
+        failingIteration: 0,
+        resolvedIteration: 2,
+        sourceFindingMessages: ['plain HTTP endpoint needs HTTPS'],
+        testId: 'task-123:safety-gate:iteration-0:regression',
+        verificationCommand:
+          'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+      },
+    ]);
+  });
+
+  it('does not create traceability entries for infrastructure-only evaluator exceptions', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'adr-compliance', [
+          {
+            message: 'internal evaluator error occurred',
+            severity: 'critical',
+            location: EVALUATOR_EXCEPTION_LOCATION,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-123');
+
+    expect(port.recordLesson).not.toHaveBeenCalled();
+  });
+
   it('includes correction info from the failing iteration', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);

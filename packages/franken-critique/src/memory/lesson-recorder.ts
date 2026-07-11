@@ -4,6 +4,9 @@ import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
 import { isoNow } from '@franken/types';
 
+const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
+  'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
+
 export class LessonRecorder {
   private readonly memory: MemoryPort;
 
@@ -49,18 +52,45 @@ export class LessonRecorder {
       );
 
       if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
+        const resolvedIteration = passingIteration?.index ?? failingIteration.index;
+        const lessonId = createLessonId(taskId, evalResult.evaluatorName, failingIteration.index);
+        const findingMessages = critiqueFindings.map((f) => f.message);
+
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
-          failureDescription: critiqueFindings.map((f) => f.message).join('; '),
+          failureDescription: findingMessages.join('; '),
           correctionApplied: passingIteration
             ? `Corrected in iteration ${passingIteration.index}`
             : 'Unknown correction',
           taskId,
           timestamp: isoNow(),
+          testTraceability: [
+            {
+              lessonId,
+              taskId,
+              evaluatorName: evalResult.evaluatorName,
+              failingIteration: failingIteration.index,
+              resolvedIteration,
+              sourceFindingMessages: findingMessages,
+              testId: `${lessonId}:regression`,
+              verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
+            },
+          ],
         });
       }
     }
 
     return lessons;
   }
+}
+
+function createLessonId(taskId: TaskId, evaluatorName: string, iterationIndex: number): string {
+  return [taskId, evaluatorName, `iteration-${iterationIndex}`]
+    .map((part) => sanitizeLessonIdPart(part))
+    .join(':');
+}
+
+function sanitizeLessonIdPart(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+  return normalized.replace(/^-+|-+$/g, '') || 'unknown';
 }

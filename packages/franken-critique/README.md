@@ -80,6 +80,18 @@ if (result.verdict !== 'pass') {
 
 Use `createReviewer` when a caller has the required guardrails, memory, observability, and known-package dependencies and wants the package's pre-wired reviewer facade instead of assembling a pipeline directly.
 
+## Lesson-to-test traceability
+
+When the critique loop recovers from one or more failing iterations and ends in `pass` or `warn`, `LessonRecorder` records each learned critique lesson with a `testTraceability` map. Each entry includes:
+
+- `lessonId`: a stable identifier derived from task id, evaluator name, and failing iteration.
+- `failingIteration` and `resolvedIteration`: the retry path that produced the lesson.
+- `sourceFindingMessages`: the evaluator findings that motivated the lesson.
+- `testId`: the deterministic regression-test identifier PM handoffs can require before promoting or retiring the lesson.
+- `verificationCommand`: the targeted command that verifies the traceability-map contract.
+
+Infrastructure-only evaluator exceptions are intentionally excluded from the map so operator dashboards do not promote broken tooling as product lessons. PM handoffs should treat lessons without a matching regression `testId` as unverified learning that is not ready for promotion.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.
