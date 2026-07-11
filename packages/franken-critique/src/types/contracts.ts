@@ -50,6 +50,25 @@ export interface LessonTestTraceabilityEntry {
   readonly verificationCommand: string;
 }
 
+/**
+ * Safety metadata for newly learned critique lessons.
+ *
+ * New lessons are recorded as experimental so PM and liveness tooling can inspect them without
+ * treating one recovered critique loop as enough evidence to promote or retire production guidance.
+ */
+export interface LessonExperimentSandbox {
+  /** New lessons start in the experiment sandbox until a human or promotion job verifies them. */
+  readonly state: 'experimental';
+  /** Promotion is intentionally blocked while the lesson is still in the sandbox. */
+  readonly promotionBlocked: true;
+  /** Operator-facing reason explaining why this lesson is quarantined. */
+  readonly reason: string;
+  /** Deterministic criteria required before PM handoffs can promote or retire the lesson. */
+  readonly exitCriteria: readonly string[];
+  /** Targeted command that verifies the sandbox metadata contract itself. */
+  readonly verificationCommand: string;
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -59,6 +78,8 @@ export interface CritiqueLesson {
   readonly timestamp: string;
   /** Present for lessons recorded by LessonRecorder; absent legacy lessons are unverified. */
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
+  /** Present for new lessons that must remain quarantined until independently verified. */
+  readonly experimentSandbox?: LessonExperimentSandbox;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

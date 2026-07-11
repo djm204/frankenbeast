@@ -7,6 +7,9 @@ import { isoNow } from '@franken/types';
 const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
   'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
 
+const LESSON_EXPERIMENT_SANDBOX_REASON =
+  'New critique lessons are experimental until their traceability map and regression evidence are independently verified.';
+
 export class LessonRecorder {
   private readonly memory: MemoryPort;
 
@@ -64,6 +67,17 @@ export class LessonRecorder {
             : 'Unknown correction',
           taskId,
           timestamp: isoNow(),
+          experimentSandbox: {
+            state: 'experimental',
+            promotionBlocked: true,
+            reason: LESSON_EXPERIMENT_SANDBOX_REASON,
+            exitCriteria: [
+              'Confirm at least one lesson-to-test traceability entry is present.',
+              'Run the listed verification command and attach the evidence to the PM handoff.',
+              'Promote or retire the lesson only after review confirms the regression covers the source finding.',
+            ],
+            verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
+          },
           testTraceability: [
             {
               lessonId,
