@@ -476,7 +476,7 @@ function createExecutionStack(
   const gitIso = new GitBranchIsolator({
     baseBranch: config.baseBranch,
     branchPrefix: config.branchPattern,
-    directCommit: config.prCreation === 'disabled' && config.branchPattern.length === 0,
+    directCommit: config.prCreation === 'disabled',
     autoCommit: true,
     workingDir: options.paths.root,
     ...(config.mergeStrategy ? { mergeStrategy: config.mergeStrategy as 'merge' | 'squash' | 'rebase' } : {}),
@@ -817,7 +817,7 @@ function createCliExecutorDeps(
     : undefined;
 
   const executionProviderName = resolveCliRegistryName(options, config.provider);
-  const override = providerOverrideFor(options, config.provider);
+  const override = resolveProviderCommandOverride(options, config.provider, executionProviderName);
   const providerCommands = Object.fromEntries(
     Object.entries(providerCommandOverrides(options))
       .filter(([, providerOverride]) => typeof providerOverride.command === 'string' && providerOverride.command.length > 0)
