@@ -8,7 +8,7 @@ import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { martinLoopDefinition } from '../../../src/beasts/definitions/martin-loop-definition.js';
 import { ProcessBeastExecutor } from '../../../src/beasts/execution/process-beast-executor.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
-import type { ProcessCallbacks } from '../../../src/beasts/execution/process-supervisor.js';
+import { ProcessSupervisor, type ProcessCallbacks } from '../../../src/beasts/execution/process-supervisor.js';
 import type { BeastDefinition } from '../../../src/beasts/types.js';
 
 function createTestRun(repo: SQLiteBeastRepository) {
@@ -1739,6 +1739,39 @@ describe('ProcessBeastExecutor', () => {
         stopReason: 'spawn_failed',
       });
       expect(updatedRun!.finishedAt).toBeDefined();
+    });
+
+    it('records real ProcessSupervisor missing-command error events as run.spawn_failed', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const executor = new ProcessBeastExecutor(repo, logs, new ProcessSupervisor());
+      const run = createTestRun(repo);
+      const missingCommandDefinition = {
+        ...martinLoopDefinition,
+        buildProcessSpec: () => ({
+          command: '/definitely/not-a-real-command-franken-1013',
+          args: [],
+          cwd: workDir,
+          env: {},
+        }),
+      } satisfies BeastDefinition;
+
+      await expect(executor.start(run, missingCommandDefinition)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const updatedRun = repo.getRun(run.id);
+      expect(updatedRun).toMatchObject({
+        status: 'failed',
+        stopReason: 'spawn_failed',
+      });
+
+      const spawnEvent = repo.listEvents(run.id).find((e) => e.type === 'run.spawn_failed');
+      expect(spawnEvent?.payload).toMatchObject({
+        code: 'ENOENT',
+        command: '/definitely/not-a-real-command-franken-1013',
+        args: [],
+      });
+      expect(String(spawnEvent?.payload.error)).toContain('ENOENT');
     });
 
     it('appends run.spawn_failed event with error details', async () => {
