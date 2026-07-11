@@ -92,6 +92,28 @@ When the critique loop recovers from one or more failing iterations and ends in 
 
 Infrastructure-only evaluator exceptions are intentionally excluded from the map so operator dashboards do not promote broken tooling as product lessons. PM handoffs should treat lessons without a matching regression `testId` as unverified learning that is not ready for promotion.
 
+## Learning backlog prioritization report
+
+Use `createLearningBacklogPrioritizationReport()` to turn captured critique lessons into an LLM-friendly PM handoff report. The report is deterministic and structured so liveness tooling can sort the backlog without interpreting prose.
+
+```typescript
+import { createLearningBacklogPrioritizationReport } from '@franken/critique';
+
+const report = createLearningBacklogPrioritizationReport(
+  [
+    {
+      lesson,
+      recurrenceCount: 3,
+      handoffBlocking: true,
+      note: 'Blocks safe worker dispatch until promoted.',
+    },
+  ],
+  { generatedAt: new Date().toISOString(), limit: 10 },
+);
+```
+
+Each active entry includes `rank`, `priority` (`P0`-`P3`), deterministic `score`, `lessonId`, recurrence and handoff signals, regression-verification status, source finding messages, and a `recommendedAction`. Promoted or retired lessons are omitted from `entries` and counted in `omittedPromotedOrRetiredCount`, making it explicit when backlog items are intentionally out of scope. Lessons without `testTraceability` are marked `verifiedByRegression: false` and receive the action `Add regression traceability before promotion.`
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.

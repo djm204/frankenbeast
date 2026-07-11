@@ -2,7 +2,13 @@
 // Public API barrel export
 
 // Types — common
-export type { Severity, Verdict, Score, SessionId, TaskId } from './types/common.js';
+export type {
+  Severity,
+  Verdict,
+  Score,
+  SessionId,
+  TaskId,
+} from './types/common.js';
 
 // Types — evaluation
 export { EVALUATOR_EXCEPTION_LOCATION } from './types/evaluation.js';
@@ -62,6 +68,14 @@ export type { CritiqueErrorOptions } from './errors/index.js';
 export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
 export { LessonRecorder } from './memory/lesson-recorder.js';
+export { createLearningBacklogPrioritizationReport } from './memory/learning-backlog-report.js';
+export type {
+  LearningBacklogInputItem,
+  LearningBacklogPriority,
+  LearningBacklogPrioritizationReport,
+  LearningBacklogReportEntry,
+  LearningBacklogReportOptions,
+} from './memory/learning-backlog-report.js';
 
 // Evaluators
 export { SafetyEvaluator } from './evaluators/safety.js';
