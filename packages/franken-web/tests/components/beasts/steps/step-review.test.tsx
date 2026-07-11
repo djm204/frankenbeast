@@ -97,4 +97,18 @@ describe('StepReview', () => {
     expect(screen.getByText('Design Doc -> Chunk Creation')).toBeTruthy();
     expect(screen.getByText('codex / gpt-5.1')).toBeTruthy();
   });
+
+  it('shows selected prompt file counts on the review step', () => {
+    useBeastStore.getState().setStepValues(5, {
+      files: [
+        { name: 'context.md', content: 'agent context' },
+        { name: 'notes.md', content: 'notes' },
+      ],
+    });
+
+    render(<StepReview />);
+
+    expect(screen.getByText('2 file(s)')).toBeTruthy();
+    expect(screen.queryByText('No prompt frontloading')).toBeNull();
+  });
 });
