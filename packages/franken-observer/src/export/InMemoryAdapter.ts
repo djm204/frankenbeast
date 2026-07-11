@@ -69,7 +69,17 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
   }
 
   if (value instanceof RegExp) {
-    return new RegExp(value.source, value.flags)
+    const cloned = new RegExp(value.source, value.flags)
+    cloned.lastIndex = value.lastIndex
+    return cloned
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return value.slice(0)
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return cloneArrayBufferView(value)
   }
 
   if (value instanceof Map) {
@@ -102,9 +112,12 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
       name: value.name,
       message: value.message,
     }
+    seen.set(value, cloned)
     if (value.stack !== undefined) cloned['stack'] = value.stack
     if ('cause' in value) cloned['cause'] = cloneMetadataValue(value.cause, seen)
-    seen.set(value, cloned)
+    if (value instanceof AggregateError) {
+      cloned['errors'] = cloneMetadataValue(value.errors, seen)
+    }
     for (const [key, nestedValue] of Object.entries(value)) {
       defineMetadataProperty(cloned, key, cloneMetadataValue(nestedValue, seen))
     }
@@ -117,6 +130,21 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
     defineMetadataProperty(cloned, key, cloneMetadataValue(nestedValue, seen))
   }
   return cloned
+}
+
+function cloneArrayBufferView(value: ArrayBufferView): ArrayBufferView {
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) {
+    return Buffer.from(value)
+  }
+
+  const sourceBytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  const clonedBuffer = sourceBytes.slice().buffer as ArrayBuffer
+  if (value instanceof DataView) {
+    return new DataView(clonedBuffer)
+  }
+
+  const constructor = value.constructor as new (buffer: ArrayBuffer) => ArrayBufferView
+  return new constructor(clonedBuffer)
 }
 
 function defineMetadataProperty(

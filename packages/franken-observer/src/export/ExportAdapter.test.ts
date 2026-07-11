@@ -179,6 +179,35 @@ describe('InMemoryAdapter', () => {
       expect(Object.getPrototypeOf(metadata)).toBe(Object.prototype)
     })
 
+    it('preserves binary, RegExp, and cyclic Error metadata snapshots', async () => {
+      const trace = TraceContext.createTrace('complex metadata')
+      const span = TraceContext.startSpan(trace, { name: 'complex metadata span' })
+      const bytes = new Uint8Array([1, 2, 3])
+      const view = new DataView(new Uint8Array([4, 5, 6, 7]).buffer, 1, 2)
+      const regex = /ab/g
+      regex.lastIndex = 2
+      const cyclicError = new Error('cyclic') as Error & { cause?: unknown }
+      cyclicError.cause = cyclicError
+      const aggregate = new AggregateError([cyclicError], 'many')
+      SpanLifecycle.setMetadata(span, { bytes, view, regex, cyclicError, aggregate })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+      bytes[0] = 9
+      regex.lastIndex = 0
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      const metadata = retrieved!.spans[0]!.metadata
+      expect(metadata['bytes']).toEqual(new Uint8Array([1, 2, 3]))
+      expect(Array.from(new Uint8Array((metadata['view'] as DataView).buffer))).toEqual([5, 6])
+      expect(metadata['regex']).toMatchObject({ source: 'ab', flags: 'g', lastIndex: 2 })
+      expect(metadata['cyclicError']).toMatchObject({ name: 'Error', message: 'cyclic' })
+      expect((metadata['cyclicError'] as { cause: unknown }).cause).toBe(metadata['cyclicError'])
+      expect(metadata['aggregate']).toMatchObject({ name: 'AggregateError', message: 'many' })
+      expect((metadata['aggregate'] as { errors: unknown[] }).errors).toHaveLength(1)
+    })
+
     it('warns when exporting a trace that still has active spans', async () => {
       const trace = TraceContext.createTrace('goal')
       TraceContext.startSpan(trace, { name: 'orphaned' })
