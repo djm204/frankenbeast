@@ -46,47 +46,176 @@ function skipQuotedLiteral(content: string, start: number): number {
   return index;
 }
 
+function previousSignificantCharacter(content: string, index: number): string {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const current = content[cursor] ?? '';
+    if (!/\s/.test(current)) {
+      return current;
+    }
+  }
+  return '';
+}
+
+function canStartRegexLiteral(content: string, index: number): boolean {
+  const previous = previousSignificantCharacter(content, index);
+  return previous === '' || '([{=,:;!&|?+-*~^<>'.includes(previous);
+}
+
+function skipRegexLiteral(content: string, start: number): number {
+  let index = start + 1;
+  let inCharacterClass = false;
+
+  while (index < content.length) {
+    const current = content[index];
+    if (current === '\\') {
+      index += 2;
+      continue;
+    }
+    if (current === '[') {
+      inCharacterClass = true;
+    } else if (current === ']') {
+      inCharacterClass = false;
+    } else if (current === '/' && !inCharacterClass) {
+      index += 1;
+      while (/[$\w]/.test(content[index] ?? '')) {
+        index += 1;
+      }
+      return index;
+    }
+    index += 1;
+  }
+
+  return index;
+}
+
 function extractMarkerLabels(pattern: RegExp, comment: string): string[] {
   return [...comment.matchAll(pattern)].flatMap((match) =>
     match[1] ? [match[1]] : [],
   );
 }
 
-function collectUnresolvedCommentMarkerLabels(content: string): string[] {
+function collectLineCommentLabels(
+  content: string,
+  start: number,
+): [string[], number] {
+  const end = content.indexOf('\n', start + 2);
+  const commentEnd = end === -1 ? content.length : end;
+  const comment = content.slice(start, commentEnd);
+  return [extractMarkerLabels(UNRESOLVED_COMMENT_PATTERN, comment), commentEnd];
+}
+
+function collectBlockCommentLabels(
+  content: string,
+  start: number,
+): [string[], number] {
+  const end = content.indexOf('*/', start + 2);
+  const commentEnd = end === -1 ? content.length : end + 2;
+  const comment = content.slice(start, commentEnd);
+  return [extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment), commentEnd];
+}
+
+function collectTemplateLiteralLabels(
+  content: string,
+  start: number,
+): [string[], number] {
   const labels: string[] = [];
-  let index = 0;
+  let index = start + 1;
+
+  while (index < content.length) {
+    const current = content[index];
+    const next = content[index + 1];
+    if (current === '\\') {
+      index += 2;
+      continue;
+    }
+    if (current === '`') {
+      return [labels, index + 1];
+    }
+    if (current === '$' && next === '{') {
+      const [expressionLabels, expressionEnd] = collectCodeLabels(
+        content,
+        index + 2,
+        '}',
+      );
+      labels.push(...expressionLabels);
+      index = expressionEnd;
+      continue;
+    }
+    index += 1;
+  }
+
+  return [labels, index];
+}
+
+function collectCodeLabels(
+  content: string,
+  start = 0,
+  endCharacter?: string,
+): [string[], number] {
+  const labels: string[] = [];
+  let index = start;
 
   while (index < content.length) {
     const current = content[index];
     const next = content[index + 1];
 
-    if (current === '"' || current === "'" || current === '`') {
+    if (endCharacter && current === endCharacter) {
+      return [labels, index + 1];
+    }
+
+    if (current === '"' || current === "'") {
       index = skipQuotedLiteral(content, index);
       continue;
     }
 
+    if (current === '`' && next === '`' && content[index + 2] === '`') {
+      index += 3;
+      continue;
+    }
+
+    if (current === '`') {
+      const [templateLabels, templateEnd] = collectTemplateLiteralLabels(
+        content,
+        index,
+      );
+      labels.push(...templateLabels);
+      index = templateEnd;
+      continue;
+    }
+
     if (current === '/' && next === '/') {
-      const end = content.indexOf('\n', index + 2);
-      const commentEnd = end === -1 ? content.length : end;
-      const comment = content.slice(index, commentEnd);
-      labels.push(...extractMarkerLabels(UNRESOLVED_COMMENT_PATTERN, comment));
+      const [commentLabels, commentEnd] = collectLineCommentLabels(
+        content,
+        index,
+      );
+      labels.push(...commentLabels);
       index = commentEnd;
       continue;
     }
 
     if (current === '/' && next === '*') {
-      const end = content.indexOf('*/', index + 2);
-      const commentEnd = end === -1 ? content.length : end + 2;
-      const comment = content.slice(index, commentEnd);
-      labels.push(...extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment));
+      const [commentLabels, commentEnd] = collectBlockCommentLabels(
+        content,
+        index,
+      );
+      labels.push(...commentLabels);
       index = commentEnd;
+      continue;
+    }
+
+    if (current === '/' && canStartRegexLiteral(content, index)) {
+      index = skipRegexLiteral(content, index);
       continue;
     }
 
     index += 1;
   }
 
-  return labels;
+  return [labels, index];
+}
+
+function collectUnresolvedCommentMarkerLabels(content: string): string[] {
+  return collectCodeLabels(content)[0];
 }
 
 export class ConcisenessEvaluator implements Evaluator {

@@ -132,6 +132,31 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('handles regex literals, template interpolation comments, and markdown fences', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const content = [
+      `const pattern = /[/* ${pendingMarker}: regex data */]/;`,
+      `const value = \`${'${'}answer /* ${trackedMarker}: real interpolation comment */}\`;`,
+      '```ts',
+      `// ${hackMarker}: fenced code comment`,
+      '```',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('2 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));
