@@ -8,4 +8,7 @@
 - [x] Run targeted verification.
   - `npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts` passed (13 tests).
   - `npm run build --workspace @franken/types && npm run typecheck --workspace @franken/critique` passed.
-- [ ] Commit, push, open PR, and request Codex review.
+- [x] Commit, push, open PR, and request Codex review.
+  - Commit: `369ae6ed feat(learning): add lesson rollback workflow`.
+  - PR: https://github.com/djm204/frankenbeast/pull/1881.
+  - Codex review requested: https://github.com/djm204/frankenbeast/pull/1881#issuecomment-4948580894.
