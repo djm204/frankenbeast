@@ -18,11 +18,11 @@
     "build": "tsc",
     "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run tests/unit/**/*.test.ts",
-    "test:unit": "vitest run tests/unit/**/*.test.ts",
+    "test": "vitest run tests/unit",
+    "test:unit": "vitest run tests/unit",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "INTEGRATION=true vitest run tests/integration",
+    "test:integration": "INTEGRATION=true vitest run --config vitest.integration.config.ts",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "keywords": [

@@ -36,6 +36,7 @@ jobs:
           npm run lint:security
           npx turbo run build typecheck lint
           npx turbo run test
+          npm run test:integration --workspace=@franken/governor
 
   release-please:
     needs: validate-release

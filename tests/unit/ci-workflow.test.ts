@@ -159,6 +159,14 @@ on:
       );
     });
 
+    it('runs governor integration tests in CI after the shared package test target', () => {
+      expect(content).toMatch(/name:\s*Run package integration tests/);
+      expect(content).toContain('npm run test:integration --workspace=@franken/governor');
+      expect(content.indexOf('npm run test:ci')).toBeLessThan(
+        content.indexOf('npm run test:integration --workspace=@franken/governor'),
+      );
+    });
+
     it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
       expect(content).toMatch(/name:\s*Validate bootstrap script \(dry-run\)/);
       expect(content).toContain('npm run bootstrap:dry-run');
@@ -377,7 +385,11 @@ jobs:
     const validationRun = String(validationStep?.run ?? '');
     expect(validationRun).toContain('turbo run build typecheck lint');
     expect(validationRun).toContain('turbo run test');
+    expect(validationRun).toContain('npm run test:integration --workspace=@franken/governor');
     expect(validationRun.indexOf('turbo run build typecheck lint')).toBeLessThan(validationRun.indexOf('turbo run test'));
+    expect(validationRun.indexOf('turbo run test')).toBeLessThan(
+      validationRun.indexOf('npm run test:integration --workspace=@franken/governor'),
+    );
     expect(validationRun).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
   });
 
