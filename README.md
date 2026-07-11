@@ -21,7 +21,7 @@ Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBO
 npm run bootstrap -- --no-docker
 ```
 
-The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. To preview the checks without changing files or installing packages, run:
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
 
 ```bash
 ./scripts/bootstrap.sh --dry-run
@@ -602,9 +602,10 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # TLS-terminated endpoint, then export that same endpoint before seed/verify.
 # export CHROMA_URL=https://chromadb.example.com
 
-# Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
-# image versions and mounts ./tempo.yaml so local tracing starts deterministically.
-docker compose up -d
+# Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
+# compose file pins image versions and mounts ./tempo.yaml so local tracing
+# starts deterministically.
+npm run bootstrap -- --services
 
 # Local Tempo exposes OTLP/HTTP writes on http://localhost:4318 for TempoAdapter
 # and readiness on http://localhost:3200/ready for verify-setup. The root
