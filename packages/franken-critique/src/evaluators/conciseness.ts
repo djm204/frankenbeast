@@ -73,11 +73,8 @@ function previousSignificantIndex(content: string, index: number): number {
     const lineStart = content.lastIndexOf('\n', cursor) + 1;
     const linePrefix = content.slice(lineStart, cursor + 1);
     const lineCommentStart = linePrefix.indexOf('//');
-    if (
-      lineCommentStart !== -1 &&
-      linePrefix.slice(0, lineCommentStart).trim().length === 0
-    ) {
-      cursor = lineStart - 1;
+    if (lineCommentStart !== -1) {
+      cursor = lineStart + lineCommentStart - 1;
       continue;
     }
 
@@ -118,7 +115,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
       'delete',
     ].includes(previousToken) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^>'.includes(previous)
+    '([{=,:;!&|?+-*~^>)'.includes(previous)
   );
 }
 
@@ -246,7 +243,9 @@ function collectCodeLabels(
     }
 
     if (current === '`' && next === '`' && content[index + 2] === '`') {
-      index += 3;
+      while (content[index] === '`') {
+        index += 1;
+      }
       continue;
     }
 

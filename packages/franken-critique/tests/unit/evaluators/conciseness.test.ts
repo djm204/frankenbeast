@@ -189,14 +189,15 @@ const x = 1;
     const evaluator = new ConcisenessEvaluator();
     const pendingMarker = ['TO', 'DO'].join('');
     const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
     const content = [
       "Don't skip later fenced code markers:",
-      '```ts',
+      '````ts',
       `// ${pendingMarker}: fenced code follow-up`,
-      '```',
-      'const re =',
-      '  // docs before regex',
+      '````',
+      'const re = // docs before regex',
       `  /[/* ${trackedMarker}: regex data */]/;`,
+      `if (ok) /[/* ${hackMarker}: regex data */]/.test(value);`,
     ].join('\n');
     const result = await evaluator.evaluate(createInput(content));
 
@@ -205,7 +206,8 @@ const x = 1;
         (f) =>
           f.message.includes('1 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
-          !f.message.includes(trackedMarker),
+          !f.message.includes(trackedMarker) &&
+          !f.message.includes(hackMarker),
       ),
     ).toBe(true);
   });
