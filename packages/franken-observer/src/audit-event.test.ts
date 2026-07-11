@@ -149,6 +149,47 @@ describe('AuditTrail', () => {
     expect(result.mismatches).toHaveLength(1);
   });
 
+  it('verify() fails when hashed input content is missing', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: 'hello' });
+    trail.append(event);
+
+    expect(trail.verify(new Map())).toEqual({
+      valid: false,
+      mismatches: [`${event.eventId}: input content missing`],
+    });
+  });
+
+  it('verify() fails when hashed output content is missing', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', output: 'result' });
+    trail.append(event);
+
+    expect(trail.verify(new Map())).toEqual({
+      valid: false,
+      mismatches: [`${event.eventId}: output content missing`],
+    });
+  });
+
+  it('verify() reports only the missing side when one hashed content entry is absent', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, {
+      phase: 'p',
+      provider: 'pr',
+      input: 'hello',
+      output: 'result',
+    });
+    trail.append(event);
+
+    const contentMap = new Map<string, string>();
+    contentMap.set(`${event.eventId}:input`, 'hello');
+
+    expect(trail.verify(contentMap)).toEqual({
+      valid: false,
+      mismatches: [`${event.eventId}: output content missing`],
+    });
+  });
+
   it('verify() checks empty string content against hash', () => {
     const trail = new AuditTrail();
     const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: '' });

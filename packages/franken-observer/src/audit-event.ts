@@ -166,13 +166,17 @@ export class AuditTrail {
     for (const event of this.events) {
       if (event.inputHash) {
         const content = contentMap.get(`${event.eventId}:input`);
-        if (content !== undefined && hashContent(content) !== event.inputHash) {
+        if (content === undefined) {
+          mismatches.push(`${event.eventId}: input content missing`);
+        } else if (hashContent(content) !== event.inputHash) {
           mismatches.push(`${event.eventId}: input hash mismatch`);
         }
       }
       if (event.outputHash) {
         const content = contentMap.get(`${event.eventId}:output`);
-        if (content !== undefined && hashContent(content) !== event.outputHash) {
+        if (content === undefined) {
+          mismatches.push(`${event.eventId}: output content missing`);
+        } else if (hashContent(content) !== event.outputHash) {
           mismatches.push(`${event.eventId}: output hash mismatch`);
         }
       }
