@@ -18,6 +18,10 @@
 ## 2026-07-10 — Observer replay timestamp validation
 - Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant guards (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
+## 2026-07-10 — Deterministic observer negative-path async assertions
+- In observer event-driven tests, avoid `setTimeout(0)` or any wall-clock wait when asserting "no side effect" (e.g., webhook not fired below limit). Use a microtask drain helper (`Promise.resolve()` or a shared async-drain utility) so timing is explicit, deterministic, and aligned with whether handlers run synchronously.
+- Add a dedicated helper in tests when a fire-and-forget integration must assert non-delivery; this keeps suites stable even if internals switch from direct emits to queued microtasks.
+
 ## 2026-07-10 — Parallel planner deadlock guard
 
 - When `@codex review` is usage-limited, classify it as a blocker state and do not merge until a new trigger can produce a current-head clean response.
