@@ -315,10 +315,14 @@ export class Session {
       const currentDefault = currentLlmConfig.default ?? {};
       const providerChanged = planOverride.provider !== undefined
         && planOverride.provider !== currentDefault.provider;
+      const nextOverrides = Object.fromEntries(
+        Object.entries(currentLlmConfig.overrides ?? {}).filter(([operation]) => operation !== 'cli-session'),
+      );
       depOptions.runConfig = {
         ...depOptions.runConfig!,
         llmConfig: {
           ...currentLlmConfig,
+          ...(Object.keys(nextOverrides).length > 0 ? { overrides: nextOverrides } : { overrides: undefined }),
           default: {
             ...currentDefault,
             ...planOverride,

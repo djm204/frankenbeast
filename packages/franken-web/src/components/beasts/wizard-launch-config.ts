@@ -133,8 +133,8 @@ function buildModuleConfig(modules: Record<string, unknown> | undefined): Record
   if (!modules) return undefined;
 
   const moduleConfig = Object.fromEntries(
-    MODULE_CONFIG_KEYS.flatMap((key: string) => (
-      key in modules ? [[key, modules[key] === true]] : []
+    MODULE_CONFIG_KEYS.map((key: string) => (
+      [key, modules[key] === true]
     )),
   );
 
@@ -156,7 +156,7 @@ function normalizeWizardProvider(provider: unknown): string | undefined {
 const LLM_OPERATION_ALIASES_BY_WIZARD_ACTION: Record<string, readonly string[]> = {
   planning: ['plan-build', 'issue-triage', 'issue-graph'],
   execution: ['issues', 'cli-session'],
-  critique: ['critique'],
+  critique: [],
   reflection: ['chunk-session-compaction'],
   chat: ['chat'],
 };

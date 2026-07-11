@@ -335,6 +335,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
       provider: 'claude',
       model: undefined,
     });
+    expect(lastCreateCliDepsOptions?.runConfig?.llmConfig?.overrides?.['cli-session']).toBeUndefined();
   });
 
   it('runPlan() passes LLM directly to LlmGraphBuilder (no ProgressLlmClient spinner)', async () => {

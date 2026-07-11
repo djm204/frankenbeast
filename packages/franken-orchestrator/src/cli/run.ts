@@ -354,8 +354,9 @@ function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): str
   return args.providerSpecified ? args.provider : config.providers.default;
 }
 
-function resolveEffectivePreflightProvider(selectedProvider: string, runConfig: RunConfig | undefined): string {
-  return runConfig?.llmConfig?.default?.provider
+export function resolveEffectivePreflightProvider(selectedProvider: string, runConfig: RunConfig | undefined): string {
+  return runConfig?.llmConfig?.overrides?.['cli-session']?.provider
+    ?? runConfig?.llmConfig?.default?.provider
     ?? runConfig?.provider
     ?? selectedProvider;
 }

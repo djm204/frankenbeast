@@ -414,6 +414,31 @@ describe('dep-factory provider wiring', () => {
     expect(result.deps.skills.hasSkill('project-skill')).toBe(false);
   });
 
+  it('routes custom consolidated CLI providers through their registry provider type', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      runConfig: {
+        objective: 'Use custom consolidated provider',
+        provider: 'prod-claude',
+        llmConfig: {
+          default: { provider: 'prod-claude', model: 'sonnet' },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({ model: 'sonnet' }),
+    );
+  });
+
   it('rejects command overrides from providersConfig unless explicitly trusted', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({

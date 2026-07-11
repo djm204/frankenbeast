@@ -43,6 +43,11 @@ describe('buildWizardLaunchConfig', () => {
     expect(config.moduleConfig).toEqual({
       firewall: true,
       skills: false,
+      memory: false,
+      planner: false,
+      critique: false,
+      governor: false,
+      heartbeat: false,
     });
     expect(config.modules).toEqual({
       firewall: true,
@@ -134,6 +139,16 @@ describe('buildWizardLaunchConfig', () => {
         },
       },
     });
+  });
+
+  it('does not emit critique LLM overrides because critique has its own reviewer wiring', () => {
+    expect(buildWizardLaunchConfig({
+      2: {
+        overrides: {
+          critique: { provider: 'openai', model: 'gpt-5.5', useDefault: false },
+        },
+      },
+    })).not.toHaveProperty('llmConfig.overrides.critique');
   });
 
   it('expands selected git presets even when only the preset id is stored', () => {

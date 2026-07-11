@@ -39,7 +39,7 @@ import type {
 import { deterministicUuid, now as deterministicNow, wallClockNow } from '@franken/types';
 import type { RunConfig } from './run-config-loader.js';
 import type { ProjectPaths } from './project-root.js';
-import type { ProviderConfig } from '../providers/provider-config.js';
+import { resolveProviderCatalogEntry, type ProviderConfig } from '../providers/provider-config.js';
 
 export interface CliDepOptions {
   paths: ProjectPaths;
@@ -247,8 +247,9 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
   const baseProvider = defaultTarget?.provider
     ?? options.runConfig?.provider
     ?? options.provider;
-  const baseModel = defaultTarget?.model
-    ?? options.runConfig?.model;
+  const baseModel = defaultTarget !== undefined
+    ? defaultTarget.model
+    : options.runConfig?.model;
   const executionProvider = executionOverride?.provider;
   return {
     provider: executionProvider ?? baseProvider,
@@ -274,6 +275,18 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
       heartbeat: effectiveModules?.heartbeat ?? (process.env.FRANKENBEAST_MODULE_HEARTBEAT !== 'false'),
     },
   };
+}
+
+function resolveCliRegistryName(options: CliDepOptions, providerName: string): string {
+  if (providerName === 'aider') return 'aider';
+  const configuredProvider = options.orchestratorConfig?.consolidatedProviders
+    ?.find((provider) => provider.name === providerName || provider.type === providerName);
+  const catalogName = configuredProvider?.type ?? providerName;
+  const catalogEntry = resolveProviderCatalogEntry(catalogName);
+  if (!catalogEntry.cliRegistryName) {
+    throw new Error(`Provider "${providerName}" does not support CLI registry execution`);
+  }
+  return catalogEntry.cliRegistryName;
 }
 
 function consolidatedProviderCommandOverrides(
@@ -444,7 +457,8 @@ function createCachedCliLlmClient(
   stack: ExecutionStackDeps,
   operation: string,
 ): { adapter: CliLlmAdapter; client: CachedCliLlmClient } {
-  const resolvedProvider = stack.registry.get(providerName);
+  const registryProviderName = resolveCliRegistryName(options, providerName);
+  const resolvedProvider = stack.registry.get(registryProviderName);
   const override = options.providersConfig?.[providerName];
   const observerDeps = (options.orchestratorConfig?.enableTracing
     ? observer.observerBridge.observerDeps
