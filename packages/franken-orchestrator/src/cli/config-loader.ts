@@ -1,5 +1,6 @@
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
@@ -88,8 +89,38 @@ function repositoryLocalConfigHasCommandTrust(fileConfig: Partial<OrchestratorCo
   return Array.isArray(consolidatedProviders) && consolidatedProviders.some(hasCommandTrustFields);
 }
 
+function safeRealpath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function isPathInsideOrEqual(candidate: string, container: string): boolean {
+  const rel = relative(container, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sepForPath()}`) && !isAbsolute(rel));
+}
+
+function sepForPath(): string {
+  return process.platform === 'win32' ? '\\' : '/';
+}
+
 function isRepositoryLocalConfig(configPath: string, defaultConfigPath: string | undefined): boolean {
-  return defaultConfigPath !== undefined && resolve(configPath) === resolve(defaultConfigPath);
+  if (defaultConfigPath === undefined) {
+    return false;
+  }
+
+  const resolvedConfig = resolve(configPath);
+  const resolvedDefault = resolve(defaultConfigPath);
+  const repositoryRoot = dirname(dirname(resolvedDefault));
+  if (isPathInsideOrEqual(resolvedConfig, repositoryRoot)) {
+    return true;
+  }
+
+  const realConfig = safeRealpath(resolvedConfig);
+  const realRepositoryRoot = safeRealpath(repositoryRoot);
+  return isPathInsideOrEqual(realConfig, realRepositoryRoot);
 }
 
 function isJsonSyntaxError(error: unknown): error is SyntaxError {
