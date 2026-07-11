@@ -27,6 +27,68 @@ const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
 );
 const MAX_COMMENT_RATIO = 0.5;
 
+function skipQuotedLiteral(content: string, start: number): number {
+  const quote = content[start];
+  let index = start + 1;
+
+  while (index < content.length) {
+    const current = content[index];
+    if (current === '\\') {
+      index += 2;
+      continue;
+    }
+    if (current === quote) {
+      return index + 1;
+    }
+    index += 1;
+  }
+
+  return index;
+}
+
+function extractMarkerLabels(pattern: RegExp, comment: string): string[] {
+  return [...comment.matchAll(pattern)].flatMap((match) =>
+    match[1] ? [match[1]] : [],
+  );
+}
+
+function collectUnresolvedCommentMarkerLabels(content: string): string[] {
+  const labels: string[] = [];
+  let index = 0;
+
+  while (index < content.length) {
+    const current = content[index];
+    const next = content[index + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+
+    if (current === '/' && next === '/') {
+      const end = content.indexOf('\n', index + 2);
+      const commentEnd = end === -1 ? content.length : end;
+      const comment = content.slice(index, commentEnd);
+      labels.push(...extractMarkerLabels(UNRESOLVED_COMMENT_PATTERN, comment));
+      index = commentEnd;
+      continue;
+    }
+
+    if (current === '/' && next === '*') {
+      const end = content.indexOf('*/', index + 2);
+      const commentEnd = end === -1 ? content.length : end + 2;
+      const comment = content.slice(index, commentEnd);
+      labels.push(...extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment));
+      index = commentEnd;
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return labels;
+}
+
 export class ConcisenessEvaluator implements Evaluator {
   readonly name = 'conciseness';
   readonly category = 'heuristic' as const;
@@ -90,15 +152,10 @@ export class ConcisenessEvaluator implements Evaluator {
     content: string,
     findings: EvaluationFinding[],
   ): void {
-    const lineMatches = [...content.matchAll(UNRESOLVED_COMMENT_PATTERN)];
-    const blockMatches = [...content.matchAll(BLOCK_COMMENT_PATTERN)].flatMap(
-      (match) => [...match[0].matchAll(UNRESOLVED_MARKER_PATTERN)],
-    );
-    const matches = [...lineMatches, ...blockMatches];
-    if (matches.length > 0) {
-      const labels = matches.map((m) => m[1]).join(', ');
+    const labels = collectUnresolvedCommentMarkerLabels(content);
+    if (labels.length > 0) {
       findings.push({
-        message: `Found ${matches.length} unresolved marker comment(s): ${labels}. Address or track these as issues.`,
+        message: `Found ${labels.length} unresolved marker comment(s): ${labels.join(', ')}. Address or track these as issues.`,
         severity: 'info',
         suggestion:
           'Resolve deferred-work items or convert them to tracked issues',

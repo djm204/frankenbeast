@@ -110,6 +110,28 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('does not count comment-shaped markers inside strings or twice inside block comments', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = `
+const text = "/* ${pendingMarker}: visible to users */";
+const template = \`// ${trackedMarker}: example only\`;
+/* // ${pendingMarker}: real block marker */
+const x = 1;
+`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
+          !f.message.includes(trackedMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));
