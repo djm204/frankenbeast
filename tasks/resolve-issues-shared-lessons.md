@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — Codex usage-limit handling in issue-to-PR flow
+- If `@codex review` immediately responds with usage-limit, treat it as a hard blocker for the merge gate and stop extra polling. Resume review only after credits are restored and a fresh trigger can produce a current-head clean response.
+
 ## 2026-07-10 — E2E API failure skip boundary checks
 - Treat provider-only flake as skippable only when the pipeline reached plan/execute phase (`[planner]` or `[martin]`), not on generic setup/auth strings.
 - Add an E2E precondition skip only for provider credentials the default E2E CLI invocation can actually use; do not let Gemini-only credentials run the default `claude,codex` path without an explicit provider.

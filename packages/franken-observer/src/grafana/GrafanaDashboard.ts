@@ -95,7 +95,8 @@ export interface GrafanaDashboardOptions {
  */
 export function generateGrafanaDashboard(options: GrafanaDashboardOptions = {}): GrafanaDashboard {
   const title = options.title ?? 'Frankenbeast Observer'
-  const uid = options.uid ?? slugify(title)
+  const slug = slugify(title)
+  const uid = options.uid ?? (slug.length > 0 ? slug : 'frankenbeast-observer')
   const dsUid = options.datasourceUid ?? '${datasource}'
   const tags = options.tags ?? ['frankenbeast']
 
