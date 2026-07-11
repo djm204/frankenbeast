@@ -61,4 +61,23 @@ describe('ActivityPane', () => {
 
     expect(screen.getByText((text) => text.includes('BigInt(12)'))).toBeTruthy();
   });
+
+  it('does not mark repeated sibling references as circular', () => {
+    const shared = { message: 'shared runtime payload' };
+    const events: ActivityEvent[] = [
+      {
+        type: 'turn.execution.start',
+        data: {
+          first: shared,
+          second: shared,
+        },
+        timestamp: '2026-07-10T13:00:00.000Z',
+      },
+    ];
+
+    render(<ActivityPane events={events} />);
+
+    expect(screen.getByText((text) => text.includes('"first"') && text.includes('"second"'))).toBeTruthy();
+    expect(screen.queryByText((text) => text.includes('[Circular]'))).toBeNull();
+  });
 });

@@ -172,16 +172,19 @@ function viewModelForActivity(event: ActivityEvent): ActivityViewModel {
 const UNABLE_TO_STRINGIFY_EVENT_DATA = '[unserializable event data]';
 
 function formatEventData(data: Record<string, unknown>): string {
-  const seen = new WeakSet<object>();
-  const replacer = (_key: string, value: unknown): unknown => {
+  const ancestors: object[] = [];
+  const replacer = function (this: unknown, _key: string, value: unknown): unknown {
     if (typeof value === 'bigint') {
       return `BigInt(${value.toString()})`;
     }
     if (typeof value === 'object' && value !== null) {
-      if (seen.has(value)) {
+      while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) {
+        ancestors.pop();
+      }
+      if (ancestors.includes(value)) {
         return '[Circular]';
       }
-      seen.add(value);
+      ancestors.push(value);
     }
     return value;
   };
