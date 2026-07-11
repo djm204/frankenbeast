@@ -760,6 +760,8 @@ EVAL=true npm run test:eval
 npm run test:watch
 ```
 
+All observer test commands fail when their selected glob discovers zero tests. This is intentional: unit, integration, and eval suites should surface renamed or drifted test files instead of reporting a successful empty run.
+
 The package ships an extensive unit test suite. All adapters and integrations are tested with injectable `fetch` functions — no network calls in CI.
 
 ---

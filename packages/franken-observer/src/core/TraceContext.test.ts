@@ -120,6 +120,19 @@ describe('TraceContext', () => {
       TraceContext.endTrace(trace)
       expect(() => TraceContext.endTrace(trace)).toThrow()
     })
+
+    it('throws without completing the trace if any span is still active', () => {
+      const trace = TraceContext.createTrace('goal')
+      const active = TraceContext.startSpan(trace, { name: 'active-step' })
+      const closed = TraceContext.startSpan(trace, { name: 'closed-step' })
+      TraceContext.endSpan(closed)
+
+      expect(() => TraceContext.endTrace(trace)).toThrow(/Cannot end trace with 1 active span/)
+      expect(trace.status).toBe('active')
+      expect(trace.endedAt).toBeUndefined()
+      expect(active.status).toBe('active')
+      expect(active.endedAt).toBeUndefined()
+    })
   })
 
   describe('validateTrace()', () => {

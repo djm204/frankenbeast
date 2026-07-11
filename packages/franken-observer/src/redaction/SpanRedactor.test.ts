@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { SpanRedactor } from './SpanRedactor.js'
 import { InMemoryAdapter } from '../export/InMemoryAdapter.js'
 import type { Trace, Span } from '../core/types.js'
+import type { ExportAdapter } from '../export/ExportAdapter.js'
 
 function makeSpan(overrides: Partial<Span> = {}): Span {
   return {
@@ -18,6 +19,25 @@ function makeSpan(overrides: Partial<Span> = {}): Span {
 
 function makeTrace(spans: Span[] = [], id = 'trace-1'): Trace {
   return { id, goal: 'test', status: 'completed', startedAt: Date.now(), spans }
+}
+
+class MutatingAdapter implements ExportAdapter {
+  lastTrace: Trace | null = null
+
+  async flush(trace: Trace): Promise<void> {
+    this.lastTrace = trace
+    const span = trace.spans[0]
+    span.metadata.downstream = 'mutated'
+    span.thoughtBlocks.push('downstream thought')
+  }
+
+  async queryByTraceId(): Promise<Trace | null> {
+    return this.lastTrace
+  }
+
+  async listTraceIds(): Promise<string[]> {
+    return this.lastTrace ? [this.lastTrace.id] : []
+  }
 }
 
 // ── metadata key redaction ────────────────────────────────────────────────────
@@ -82,6 +102,53 @@ describe('SpanRedactor — metadata rules', () => {
     const meta = stored!.spans[0].metadata
     expect(meta).not.toHaveProperty('api_key')
     expect(meta).not.toHaveProperty('auth_token')
+    expect(meta['model']).toBe('x')
+  })
+
+  it('matches global RegExp rules statelessly across consecutive keys and flushes', async () => {
+    const inner = new InMemoryAdapter()
+    const keyPattern = /^(api|auth)_/g
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: keyPattern, action: 'remove' }],
+    })
+
+    await redactor.flush(
+      makeTrace([makeSpan({ metadata: { api_key: 'k', auth_token: 't', model: 'x' } })]),
+    )
+    await redactor.flush(
+      makeTrace(
+        [makeSpan({ id: 'span-2', metadata: { api_secret: 's', auth_cookie: 'c', safe: true } })],
+        'trace-2',
+      ),
+    )
+
+    const firstMeta = (await inner.queryByTraceId('trace-1'))!.spans[0].metadata
+    expect(firstMeta).not.toHaveProperty('api_key')
+    expect(firstMeta).not.toHaveProperty('auth_token')
+    expect(firstMeta['model']).toBe('x')
+
+    const secondMeta = (await inner.queryByTraceId('trace-2'))!.spans[0].metadata
+    expect(secondMeta).not.toHaveProperty('api_secret')
+    expect(secondMeta).not.toHaveProperty('auth_cookie')
+    expect(secondMeta['safe']).toBe(true)
+    expect(keyPattern.lastIndex).toBe(0)
+  })
+
+  it('matches sticky RegExp rules statelessly', async () => {
+    const inner = new InMemoryAdapter()
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: /^(api|auth)_/y, action: 'mask' }],
+    })
+
+    await redactor.flush(
+      makeTrace([makeSpan({ metadata: { api_key: 'k', auth_token: 't', model: 'x' } })]),
+    )
+
+    const meta = (await inner.queryByTraceId('trace-1'))!.spans[0].metadata
+    expect(meta['api_key']).toBe('[REDACTED]')
+    expect(meta['auth_token']).toBe('[REDACTED]')
     expect(meta['model']).toBe('x')
   })
 
@@ -197,6 +264,58 @@ describe('SpanRedactor — immutability', () => {
     const trace = makeTrace([span])
     await redactor.flush(trace)
     expect(thoughts).toEqual(['private'])
+  })
+
+  it('defensively clones spans before downstream export when no rules are configured', async () => {
+    const inner = new MutatingAdapter()
+    const span = makeSpan({ metadata: { safe: 'visible' }, thoughtBlocks: ['private'] })
+    const trace = makeTrace([span])
+    const redactor = new SpanRedactor({ adapter: inner, rules: [] })
+
+    await redactor.flush(trace)
+
+    expect(inner.lastTrace!.spans[0]).not.toBe(span)
+    expect(inner.lastTrace!.spans[0].metadata).not.toBe(span.metadata)
+    expect(inner.lastTrace!.spans[0].thoughtBlocks).not.toBe(span.thoughtBlocks)
+    expect(trace.spans[0].metadata).toEqual({ safe: 'visible' })
+    expect(trace.spans[0].thoughtBlocks).toEqual(['private'])
+  })
+
+  it('defensively clones spans before downstream export when rules do not match', async () => {
+    const inner = new MutatingAdapter()
+    const span = makeSpan({ metadata: { safe: 'visible' }, thoughtBlocks: ['private'] })
+    const trace = makeTrace([span])
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: 'credential', action: 'remove' }],
+    })
+
+    await redactor.flush(trace)
+
+    expect(inner.lastTrace!.spans[0]).not.toBe(span)
+    expect(inner.lastTrace!.spans[0].metadata).not.toBe(span.metadata)
+    expect(inner.lastTrace!.spans[0].thoughtBlocks).not.toBe(span.thoughtBlocks)
+    expect(trace.spans[0].metadata).toEqual({ safe: 'visible' })
+    expect(trace.spans[0].thoughtBlocks).toEqual(['private'])
+  })
+
+  it('defensively clones unchanged spans when another span in the trace is redacted', async () => {
+    const inner = new MutatingAdapter()
+    const unchanged = makeSpan({ id: 's1', metadata: { safe: 'visible' }, thoughtBlocks: ['private'] })
+    const redacted = makeSpan({ id: 's2', metadata: { credential: 'secret' }, thoughtBlocks: [] })
+    const trace = makeTrace([unchanged, redacted])
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: 'credential', action: 'remove' }],
+    })
+
+    await redactor.flush(trace)
+
+    expect(inner.lastTrace!.spans[0]).not.toBe(unchanged)
+    expect(inner.lastTrace!.spans[0].metadata).not.toBe(unchanged.metadata)
+    expect(inner.lastTrace!.spans[0].thoughtBlocks).not.toBe(unchanged.thoughtBlocks)
+    expect(trace.spans[0].metadata).toEqual({ safe: 'visible' })
+    expect(trace.spans[0].thoughtBlocks).toEqual(['private'])
   })
 })
 

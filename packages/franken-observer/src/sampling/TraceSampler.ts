@@ -37,8 +37,8 @@ export class ProbabilisticSampler implements SamplerStrategy {
   private readonly random: () => number
 
   constructor(probability: number, random: () => number = Math.random) {
-    if (probability < 0 || probability > 1) {
-      throw new RangeError(`probability must be between 0 and 1, got ${probability}`)
+    if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
+      throw new RangeError(`probability must be a finite number between 0 and 1, got ${probability}`)
     }
     this.probability = probability
     this.random = random
@@ -75,6 +75,18 @@ export class RateLimitedSampler implements SamplerStrategy {
   private windowStart: number
 
   constructor(options: RateLimitedSamplerOptions) {
+    if (!Number.isFinite(options.windowMs) || options.windowMs <= 0) {
+      throw new RangeError(`windowMs must be greater than 0, got ${options.windowMs}`)
+    }
+    if (
+      !Number.isFinite(options.maxPerWindow) ||
+      !Number.isSafeInteger(options.maxPerWindow) ||
+      options.maxPerWindow <= 0
+    ) {
+      throw new RangeError(
+        `maxPerWindow must be a positive safe integer, got ${options.maxPerWindow}`,
+      )
+    }
     this.maxPerWindow = options.maxPerWindow
     this.windowMs = options.windowMs
     this.now = options.now ?? Date.now

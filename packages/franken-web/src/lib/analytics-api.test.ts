@@ -49,6 +49,30 @@ describe('AnalyticsApiClient', () => {
     await expect(client.fetchSummary({})).rejects.toThrow('HTTP 500');
   });
 
+  it('throws structured analytics error messages when failed responses include an envelope', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: { message: 'Analytics event not found' } }),
+    });
+
+    const client = new AnalyticsApiClient(BASE_URL);
+    await expect(client.fetchEventDetail('missing-event-id')).rejects.toThrow('Analytics event not found');
+  });
+
+  it('falls back to HTTP status when failed responses have malformed JSON', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new SyntaxError('Unexpected token < in JSON');
+      },
+    });
+
+    const client = new AnalyticsApiClient(BASE_URL);
+    await expect(client.fetchEvents({})).rejects.toThrow('HTTP 502');
+  });
+
   it('does not add Authorization from the browser client', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ totalEvents: 0 }) });
     globalThis.fetch = fetchMock;

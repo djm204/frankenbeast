@@ -36,10 +36,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const hasE2eProviderCredentials = (): boolean => Boolean(
-  process.env['ANTHROPIC_API_KEY'] ||
-  process.env['OPENAI_API_KEY'] ||
-  process.env['GOOGLE_API_KEY'] ||
-  process.env['GEMINI_API_KEY'],
+  process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY'],
 );
 
 describe.skipIf(!process.env['E2E'] || !hasE2eProviderCredentials())('E2E Pipeline', () => {
@@ -111,6 +108,62 @@ describe.skipIf(!process.env['E2E'] || !hasE2eProviderCredentials())('E2E Pipeli
   }, 300_000); // 5 minute timeout
 });
 
+describe('hasE2eProviderCredentials helper', () => {
+  const providerEnvKeys = [
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GOOGLE_API_KEY',
+    'GEMINI_API_KEY',
+  ] as const;
+
+  const withProviderEnv = (
+    env: Partial<Record<(typeof providerEnvKeys)[number], string>>,
+    run: () => void,
+  ) => {
+    const previous = Object.fromEntries(
+      providerEnvKeys.map((key) => [key, process.env[key]]),
+    );
+
+    for (const key of providerEnvKeys) {
+      delete process.env[key];
+    }
+    Object.assign(process.env, env);
+
+    try {
+      run();
+    } finally {
+      for (const key of providerEnvKeys) {
+        const value = previous[key];
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  };
+
+  it('accepts credentials used by the default claude/codex e2e invocation', () => {
+    withProviderEnv({ ANTHROPIC_API_KEY: 'test-key' }, () => {
+      expect(hasE2eProviderCredentials()).toBe(true);
+    });
+
+    withProviderEnv({ OPENAI_API_KEY: 'test-key' }, () => {
+      expect(hasE2eProviderCredentials()).toBe(true);
+    });
+  });
+
+  it('does not accept Gemini-only credentials for the default e2e invocation', () => {
+    withProviderEnv({ GOOGLE_API_KEY: 'test-key' }, () => {
+      expect(hasE2eProviderCredentials()).toBe(false);
+    });
+
+    withProviderEnv({ GEMINI_API_KEY: 'test-key' }, () => {
+      expect(hasE2eProviderCredentials()).toBe(false);
+    });
+  });
+});
+
 /** Detect API/infra failures that shouldn't count as test failures. */
 function hasPipelineBoundary(result: { stdout: string; stderr: string }): boolean {
   const combined = result.stdout + result.stderr;
@@ -130,6 +183,7 @@ function isApiRelatedFailure(result: {
       /\b503\b/.test(combined) ||
       /overloaded/i.test(combined) ||
       /usage limit/i.test(combined) ||
+      /\b(?:ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT)\b/i.test(combined) ||
       /ANTHROPIC_API_KEY/i.test(combined) ||
       /OPENAI_API_KEY/i.test(combined) ||
       /GOOGLE_API_KEY/i.test(combined) ||
@@ -144,6 +198,15 @@ describe('isApiRelatedFailure helper', () => {
       isApiRelatedFailure({
         stdout: '[planner] Rate limit: retry after 30s',
         stderr: '',
+      }),
+    ).toBe(true);
+  });
+
+  it('returns true for provider DNS errors after planner boundary', () => {
+    expect(
+      isApiRelatedFailure({
+        stdout: '[planner] starting generation\n',
+        stderr: 'Error: getaddrinfo ENOTFOUND api.anthropic.com\n',
       }),
     ).toBe(true);
   });

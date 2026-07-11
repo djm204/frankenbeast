@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
@@ -8,8 +8,11 @@ import type {
 } from '../lib/beast-api';
 import { AgentList } from '../components/beasts/agent-list';
 import { AgentDetailPanel } from '../components/beasts/agent-detail-panel';
+import type { AgentLifecycleAction } from '../components/beasts/agent-action-bar';
 import { WizardDialog } from '../components/beasts/wizard-dialog';
 import { useBeastStore } from '../stores/beast-store';
+import { useDashboardStore } from '../stores/dashboard-store';
+import type { DashboardApiClient } from '../lib/dashboard-api';
 
 interface BeastsPageProps {
   agents: TrackedAgentSummary[];
@@ -20,7 +23,9 @@ interface BeastsPageProps {
   disabled: boolean;
   error: string | null;
   logs: string[];
+  pendingAgentActions?: Record<string, AgentLifecycleAction | undefined>;
   selectedAgentId: string | null;
+  dashboardClient: DashboardApiClient;
   onClose: () => void;
   onLaunch: (config: Record<string, unknown>) => Promise<void>;
   onDelete: (agentId: string) => void;
@@ -42,7 +47,9 @@ export function BeastsPage({
   disabled,
   error,
   logs,
+  pendingAgentActions = {},
   selectedAgentId,
+  dashboardClient,
   onClose,
   onLaunch,
   onDelete,
@@ -58,8 +65,22 @@ export function BeastsPage({
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const resetWizard = useBeastStore((s) => s.resetWizard);
+  const setSnapshot = useDashboardStore((s) => s.setSnapshot);
+  const createAgentDisabledReason = error ?? 'Beast API is not available. Configure the operator token/API client before creating agents.';
+
+  useEffect(() => {
+    if (!showWizard) return undefined;
+    let cancelled = false;
+    dashboardClient.fetchSnapshot()
+      .then((snapshot) => {
+        if (!cancelled) setSnapshot(snapshot);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [dashboardClient, setSnapshot, showWizard]);
 
   function handleOpenWizard() {
+    if (disabled) return;
     resetWizard();
     setLaunchError(null);
     setShowWizard(true);
@@ -105,6 +126,8 @@ export function BeastsPage({
         selectedAgentId={selectedAgentId}
         onSelectAgent={onSelectAgent}
         onCreateAgent={handleOpenWizard}
+        createAgentDisabled={disabled}
+        createAgentDisabledReason={disabled ? createAgentDisabledReason : null}
       />
 
       {agentDetail && (
@@ -113,6 +136,7 @@ export function BeastsPage({
           detail={agentDetail}
           logs={logs}
           onClose={onClose}
+          pendingAction={pendingAgentActions[agentDetail.agent.id] ?? null}
           onStart={() => onStart(agentDetail.agent.id)}
           onStop={() => onStop(agentDetail.agent.id)}
           onRestart={() => onRestart(agentDetail.agent.id)}

@@ -328,5 +328,15 @@
     "current": "3.25.76",
     "latest": "4.4.3",
     "reason": "Existing direct major-version gap present when the CI guard was introduced for issue #1414."
+  },
+  {
+    "name": "eslint",
+    "dependent": "frankenbeast",
+    "location": "node_modules/eslint",
+    "currentMajor": 9,
+    "latestMajor": 10,
+    "current": "9.39.4",
+    "latest": "10.6.0",
+    "reason": "Existing direct major-version gap observed while resolving issue #930; keep lint-coverage work scoped away from an ESLint major upgrade."
   }
 ]

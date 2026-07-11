@@ -35,9 +35,18 @@ describe('Planner Server', () => {
 
     const decomposeResult = await decomposeTool.handler({ objective: 'ship', constraints: 'small PRs' });
     expect(planner.decompose).toHaveBeenCalledWith({ objective: 'ship', constraints: 'small PRs' });
-    expect(decomposeResult.content[0]!.text).toContain('p1');
-    expect(decomposeResult.content[0]!.text).toContain('**Provenance:** generic-scaffold');
-    expect(decomposeResult.content[0]!.text).toContain('not by an objective-specific planner');
+    const decomposeText = decomposeResult.content[0]!.text;
+    expect(decomposeText).toContain('p1');
+    expect(decomposeText).toContain('**Provenance:** generic-scaffold');
+    expect(decomposeText).toContain('not by an objective-specific planner');
+    expect(decomposeText).toContain('fbeast_plan_status');
+    expect(decomposeText).not.toContain('fbeast_plan_visualize');
+    const registeredToolNames = new Set(server.tools.map((t) => t.name));
+    const mentionedPlannerTools = [...decomposeText.matchAll(/fbeast_plan_[a-z_]+/g)].map((match) => match[0]);
+    expect(mentionedPlannerTools.length).toBeGreaterThan(0);
+    for (const toolName of mentionedPlannerTools) {
+      expect(registeredToolNames.has(toolName)).toBe(true);
+    }
 
     const visualizeResult = await visualizeTool.handler({ planId: 'p1' });
     expect(planner.visualize).toHaveBeenCalledWith('p1');

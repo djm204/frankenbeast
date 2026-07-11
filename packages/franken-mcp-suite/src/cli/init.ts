@@ -108,7 +108,10 @@ function initJsonClient(options: {
     pruneFbeastMcpServerEntries(settings);
   }
   pruneFbeastMcpServerEntries(mcpConfig);
-  const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
+  const mcpServers = readMcpServersObject(
+    mcpConfig,
+    client === 'claude' ? '.mcp.json' : 'settings.json',
+  );
   const dbPath = client === 'claude' ? '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db' : join('.fbeast', 'beast.db');
   const configPath = join('.fbeast', 'config.json');
   const proxyArgs = ['--db', dbPath, '--config', configPath];
@@ -270,16 +273,17 @@ function tomlString(value: string): string {
 
 function projectRootHookCommand(scriptPath: string): string {
   const normalizedPath = scriptPath.split('\\').join('/');
-  const executablePath = `./${normalizedPath}`;
   const lookup = [
+    `script=${shellQuote(normalizedPath)}`,
+    'executable="./$script"',
     `p=\${CLAUDE_PROJECT_DIR:-\${GEMINI_PROJECT_ROOT:-}}`,
-    `if [ -n "$p" ] && [ -x "$p/${normalizedPath}" ]; then cd "$p" && exec "${executablePath}"; fi`,
+    'if [ -n "$p" ] && [ -x "$p/$script" ]; then cd "$p" && exec "$executable"; fi',
     'd=$PWD',
     'while [ "$d" != / ]; do '
-      + `if [ -x "$d/${normalizedPath}" ]; then cd "$d" && exec "${executablePath}"; fi; `
+      + 'if [ -x "$d/$script" ]; then cd "$d" && exec "$executable"; fi; '
       + 'd=$(dirname "$d")',
     'done',
-    `echo "fbeast hook script not found: ${normalizedPath}" >&2`,
+    'echo "fbeast hook script not found: $script" >&2',
     'exit 127',
   ].join('; ');
   return `sh -c ${shellQuote(lookup)}`;
@@ -499,12 +503,26 @@ function pruneFbeastMcpServerEntries(config: Record<string, unknown>): void {
   config['mcpServers'] = mcpServers;
 }
 
+function readMcpServersObject(
+  config: Record<string, unknown>,
+  configLabel: string,
+): Record<string, unknown> {
+  const mcpServers = config['mcpServers'];
+  if (mcpServers === undefined) return {};
+  if (isObjectRecord(mcpServers)) return mcpServers;
+
+  throw new Error(
+    `fbeast init: ${configLabel} mcpServers must be a JSON object; `
+      + 'remove or replace the existing mcpServers value before running init again.',
+  );
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 // Re-export for test access

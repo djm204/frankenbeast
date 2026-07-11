@@ -206,4 +206,56 @@ describe('AgentDetailPanel', () => {
     rejectSave?.(new Error('HTTP 500'));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 500'));
   });
+
+  it('keeps delete confirmation actions from closing the detail panel as outside clicks', () => {
+    render(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          status: 'stopped',
+          name: 'Review Agent',
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const confirm = screen.getByRole('button', { name: 'Delete agent' });
+
+    fireEvent.mouseDown(confirm);
+    expect(handlers.onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(handlers.onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const overlay = document.querySelector('[data-beast-panel-portal="true"].fixed.inset-0');
+    if (!overlay) throw new Error('Expected delete confirmation overlay');
+    fireEvent.mouseDown(overlay);
+    expect(handlers.onClose).not.toHaveBeenCalled();
+  });
+
+  it('uses the agent id in delete confirmation when the agent name is blank', () => {
+    render(<AgentDetailPanel
+      isOpen={true}
+      detail={{
+        ...detail,
+        agent: {
+          ...detail.agent,
+          id: 'agent-blank-name',
+          status: 'completed',
+          name: '   ',
+        },
+      }}
+      logs={[]}
+      {...handlers}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(screen.getByText(/agent-blank-name/)).toBeTruthy();
+  });
 });

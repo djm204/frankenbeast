@@ -44,6 +44,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
         FRANKENBEAST_DASHBOARD_API_URL: config.dashboard.apiUrl,
         FRANKENBEAST_DASHBOARD_HOST: config.dashboard.host,
         FRANKENBEAST_DASHBOARD_PORT: String(config.dashboard.port),
+        VITE_API_PROXY_TARGET: config.dashboard.apiUrl,
         ...(context.allowTrustedProviderCommandOverrides
           ? { FRANKENBEAST_TRUST_PROVIDER_COMMAND_OVERRIDES: '1' }
           : {}),
