@@ -53,6 +53,12 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ./scripts/bootstrap.sh --dry-run
   ```
 
+  To start optional local infrastructure during bootstrap after setting Grafana credentials, use `--services`:
+
+  ```bash
+  npm run bootstrap -- --services
+  ```
+
 - [ ] Review `.env` and fill in only the values you need:
 
   ```bash

@@ -139,6 +139,7 @@ describe('local setup scripts', () => {
     expect(manifest.scripts?.bootstrap).toBe('bash scripts/bootstrap.sh');
     expect(statSync(scriptPath).mode & 0o111).not.toBe(0);
     expect(script).toContain('--dry-run');
+    expect(script).toContain('--services');
     expect(script).toContain('Node.js >=22.13.0 <23 or >=24.0.0 <26');
     expect(script).toContain('cp .env.example .env');
     expect(script).toContain('default_keys');
@@ -165,6 +166,14 @@ describe('local setup scripts', () => {
     expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
     expect(dryRun.stdout).toMatch(/dry-run: would copy \.env\.example to \.env|\.env already exists; leaving it unchanged\./);
     expect(dryRun.stdout).toContain('dry-run: npm ci');
+
+    const servicesDryRun = spawnSync('bash', [scriptPath, '--dry-run', '--services'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(servicesDryRun.status, servicesDryRun.stderr || servicesDryRun.stdout).toBe(0);
+    expect(servicesDryRun.stdout).toContain('dry-run: docker compose up -d');
   });
 
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {
