@@ -35,6 +35,21 @@ export interface EpisodicTrace {
   readonly timestamp: string;
 }
 
+/** A traceable link from a learned critique lesson to the regression test expected to guard it. */
+export interface LessonTestTraceabilityEntry {
+  /** Stable identifier that PM handoffs can use to connect the lesson to its regression test. */
+  readonly lessonId: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  readonly failingIteration: number;
+  readonly resolvedIteration: number;
+  readonly sourceFindingMessages: readonly string[];
+  /** Deterministic regression-test identifier expected to cover this lesson before promotion. */
+  readonly testId: string;
+  /** Targeted command that verifies the traceability-map contract itself. */
+  readonly verificationCommand: string;
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -42,6 +57,8 @@ export interface CritiqueLesson {
   readonly correctionApplied: string;
   readonly taskId: TaskId;
   readonly timestamp: string;
+  /** Present for lessons recorded by LessonRecorder; absent legacy lessons are unverified. */
+  readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

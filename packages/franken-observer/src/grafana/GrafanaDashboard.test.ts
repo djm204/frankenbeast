@@ -171,6 +171,20 @@ describe('generateGrafanaDashboard', () => {
       expect(d.uid).toContain('custom')
     })
 
+    it('falls back to a stable non-empty uid for all-punctuation titles', () => {
+      const d = generateGrafanaDashboard({ title: '!!!' })
+      expect(d.uid).toBe('frankenbeast-observer')
+      expect(d.uid.length).toBeGreaterThan(0)
+      expect(d.uid).toMatch(/^[a-z0-9-]+$/)
+    })
+
+    it('falls back to a stable non-empty uid for non-alphanumeric titles', () => {
+      const d = generateGrafanaDashboard({ title: '你好世界' })
+      expect(d.uid).toBe('frankenbeast-observer')
+      expect(d.uid.length).toBeGreaterThan(0)
+      expect(d.uid).toMatch(/^[a-z0-9-]+$/)
+    })
+
     it('uid contains only url-safe characters', () => {
       const d = generateGrafanaDashboard({ title: 'Hello World! 123' })
       expect(d.uid).toMatch(/^[a-z0-9-]+$/)

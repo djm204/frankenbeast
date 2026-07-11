@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.2.5](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.4...franken-web-v0.2.5) (2026-07-11)
+
+
+### Bug Fixes
+
+* **beasts:** surface Create Agent auto-dispatch failures ([f41de4f](https://github.com/djm204/frankenbeast/commit/f41de4f592d201066fa1503a0508248bd4b96849)), closes [#1212](https://github.com/djm204/frankenbeast/issues/1212)
+* **orchestrator:** report corrupt chat session files ([#1643](https://github.com/djm204/frankenbeast/issues/1643)) ([d62c992](https://github.com/djm204/frankenbeast/commit/d62c9929a556741889dffa443f0aee9e5c5b20f6))
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+* **web:** avoid mutating provider order during render ([529b6c8](https://github.com/djm204/frankenbeast/commit/529b6c885b7f255b85123ab19b6e86509804ffe8))
+* **web:** clear stale analytics refresh data ([#1511](https://github.com/djm204/frankenbeast/issues/1511)) ([e3ffb09](https://github.com/djm204/frankenbeast/commit/e3ffb0973c3a2d89244f5a5a7c9a2aa83954e4b0)), closes [#1089](https://github.com/djm204/frankenbeast/issues/1089)
+* **web:** confirm destructive beast actions ([#1483](https://github.com/djm204/frankenbeast/issues/1483)) ([d127b6f](https://github.com/djm204/frankenbeast/commit/d127b6fcc15561a244275f88962a3c98128ee31d))
+* **web:** confirm tracked-agent deletes ([#1488](https://github.com/djm204/frankenbeast/issues/1488)) ([8f5f073](https://github.com/djm204/frankenbeast/commit/8f5f073b1540711892af7474d8718e82dd1fb889))
+* **web:** disable unavailable Beast create actions ([ef48bd4](https://github.com/djm204/frankenbeast/commit/ef48bd43d3fa25b25595629274c2426e7222df6d)), closes [#1097](https://github.com/djm204/frankenbeast/issues/1097)
+* **web:** expose tracked agent status filters ([#1506](https://github.com/djm204/frankenbeast/issues/1506)) ([6bf1e20](https://github.com/djm204/frankenbeast/commit/6bf1e2091ada17b0cbc24748c9b77f3aada42b9b)), closes [#1102](https://github.com/djm204/frankenbeast/issues/1102)
+* **web:** gate network service controls by status ([7d61bb3](https://github.com/djm204/frankenbeast/commit/7d61bb3cb07ae91c57a9395660914029ea9b9ba4))
+* **web:** guard dashboard SSE snapshot parsing ([e31035d](https://github.com/djm204/frankenbeast/commit/e31035d4fcfe91e88dce20faeab9f3357474b1d7))
+* **web:** guard tracked-agent lifecycle actions ([1fe2fea](https://github.com/djm204/frankenbeast/commit/1fe2feae7ee828e5eddd7fcadf3497b5179f59ce)), closes [#1090](https://github.com/djm204/frankenbeast/issues/1090)
+* **web:** hash root package version in turbo cache ([7f34ad7](https://github.com/djm204/frankenbeast/commit/7f34ad7a83b4d691662beac6294ca5b9a3cffb11)), closes [#1534](https://github.com/djm204/frankenbeast/issues/1534)
+* **web:** hide deep module config keys in review ([#1550](https://github.com/djm204/frankenbeast/issues/1550)) ([c6fa36f](https://github.com/djm204/frankenbeast/commit/c6fa36fd389b402ddef3bd087384484725860923))
+* **web:** interleave events and logs chronologically ([3e26b96](https://github.com/djm204/frankenbeast/commit/3e26b96c887cf79a9e2bc5763c18435373a4d151)), closes [#1182](https://github.com/djm204/frankenbeast/issues/1182)
+* **web:** keep ActivityPane from crashing on unserializable runtime event data ([a8132fa](https://github.com/djm204/frankenbeast/commit/a8132fa7b34a53e9609df2358be7c72ebdd498a4)), closes [#1111](https://github.com/djm204/frankenbeast/issues/1111)
+* **web:** keep analytics session options stable ([#1485](https://github.com/djm204/frankenbeast/issues/1485)) ([174e97c](https://github.com/djm204/frankenbeast/commit/174e97c107e2c8609d3c715d6c222a27a5af9a00))
+* **web:** load beast wizard model selectors from config ([c4247c4](https://github.com/djm204/frankenbeast/commit/c4247c46169aa2dc1c82f460e3a9d75aec58749e)), closes [#1174](https://github.com/djm204/frankenbeast/issues/1174)
+* **web:** preserve chat draft on fallback refresh failure ([#1552](https://github.com/djm204/frankenbeast/issues/1552)) ([d8f4439](https://github.com/djm204/frankenbeast/commit/d8f4439c2d047a6703ebd1bf958d95f8387f9000))
+* **web:** preserve chat session for martin-loop launches ([4ab631e](https://github.com/djm204/frankenbeast/commit/4ab631e281eb0a7c350bfa1b0712b7e1c772af39))
+* **web:** preserve SSE cursor on parse failure ([f9c5891](https://github.com/djm204/frankenbeast/commit/f9c58914d147a65e4336c4d59afe7f7709a38618))
+* **web:** prevent blank module numbers saving zero ([e90f0d0](https://github.com/djm204/frankenbeast/commit/e90f0d08e520e9abb6200ffd7da80d2468c84a66)), closes [#1173](https://github.com/djm204/frankenbeast/issues/1173)
+* **web:** prevent unavailable container launches ([3554dda](https://github.com/djm204/frankenbeast/commit/3554dda5b8f2b78e535573edff555796dc866940))
+* **web:** reject fake directory picker paths ([b824fe5](https://github.com/djm204/frankenbeast/commit/b824fe54baca4680935cb52e3ab42cca23cca398))
+* **web:** reject unsupported beast workflow definitions ([fe2891f](https://github.com/djm204/frankenbeast/commit/fe2891f5268de98b707456b26324ee3e045a953f))
+* **web:** render controls for approval-paused agents ([756ef29](https://github.com/djm204/frankenbeast/commit/756ef2908139115c91b19086cc98fca4d0d8c788)), closes [#1172](https://github.com/djm204/frankenbeast/issues/1172)
+* **web:** show analytics event pagination range ([b6c1018](https://github.com/djm204/frankenbeast/commit/b6c1018e5ad4eee55b6ed8d33efb1a2a2792abde))
+* **web:** show unavailable chat cost telemetry ([#1636](https://github.com/djm204/frankenbeast/issues/1636)) ([75d70ee](https://github.com/djm204/frankenbeast/commit/75d70ee17b9990baa404c920aebe376a2bede1e6))
+* **web:** summarize disabled module overrides in agent rows ([8f953b3](https://github.com/djm204/frankenbeast/commit/8f953b302e343b5a007f2ccade060158543ec1db))
+* **web:** surface analytics API structured errors ([04ada0b](https://github.com/djm204/frankenbeast/commit/04ada0bc5ced056413d70f28cf74c2a5b1a71e8c)), closes [#1194](https://github.com/djm204/frankenbeast/issues/1194)
+* **web:** surface Beasts API structured errors ([2416535](https://github.com/djm204/frankenbeast/commit/241653529e5170babdce4269c204f84734388058))
+* **web:** surface Dashboard initial load failures ([b0ff786](https://github.com/djm204/frankenbeast/commit/b0ff786b9aee758168566c2b0c805ad1d41aedd0)), closes [#1196](https://github.com/djm204/frankenbeast/issues/1196)
+* **web:** surface network service action failures ([#1553](https://github.com/djm204/frankenbeast/issues/1553)) ([2c43569](https://github.com/djm204/frankenbeast/commit/2c43569d63c3dd0f0c758f88e29bd00627ba4955))
+* **web:** validate beast module numeric config ([#1466](https://github.com/djm204/frankenbeast/issues/1466)) ([25a4359](https://github.com/djm204/frankenbeast/commit/25a43592b1d446c800b579ff3d79a12ae902eb59))
+* **web:** validate chat websocket server events ([626291e](https://github.com/djm204/frankenbeast/commit/626291e1af466d96f6f6409cf4938a18f03b22ce)), closes [#1091](https://github.com/djm204/frankenbeast/issues/1091)
+
+
+### Miscellaneous
+
+* **ci:** make workspace lint coverage explicit ([#1596](https://github.com/djm204/frankenbeast/issues/1596)) ([c1674ed](https://github.com/djm204/frankenbeast/commit/c1674ed69e460a9c7c14d8b7af2e4039edf174d8))
+* **package:** normalize workspace metadata ([#1573](https://github.com/djm204/frankenbeast/issues/1573)) ([921c557](https://github.com/djm204/frankenbeast/commit/921c557e9f8392f1202f3fa2cdcc7952ffccd255))
+
+
+### Documentation
+
+* **web:** clarify dashboard proxy env guidance ([cb20c5c](https://github.com/djm204/frankenbeast/commit/cb20c5cafb100741c10f032f4d03250e0ee05556)), closes [#993](https://github.com/djm204/frankenbeast/issues/993)
+* **web:** document Quick Start scripts ([e4261d7](https://github.com/djm204/frankenbeast/commit/e4261d754908e1b494dff417230fd079ece78868))
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* add workspace coverage task ([#1589](https://github.com/djm204/frankenbeast/issues/1589)) ([1934756](https://github.com/djm204/frankenbeast/commit/1934756851e520c033f2a43c5b440c8268662714)), closes [#948](https://github.com/djm204/frankenbeast/issues/948)
+* **web:** cover pending create-agent launch guard ([#1518](https://github.com/djm204/frankenbeast/issues/1518)) ([703404a](https://github.com/djm204/frankenbeast/commit/703404af589ea2394bed254d2056b577bbe32830))
+* **web:** guard chat recovery against patch markers ([3b90460](https://github.com/djm204/frankenbeast/commit/3b90460c614ad16d1f42d5c23f40f18f3629a220)), closes [#1051](https://github.com/djm204/frankenbeast/issues/1051)
+* **web:** guard chat send against patch markers ([9e7cf0f](https://github.com/djm204/frankenbeast/commit/9e7cf0fb68c90fd404396bdeb580b25a01993014))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
 ## [0.2.4](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.3...franken-web-v0.2.4) (2026-07-10)
 
 

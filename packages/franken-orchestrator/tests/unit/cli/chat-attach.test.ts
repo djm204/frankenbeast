@@ -1,14 +1,88 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
-import { resolveManagedChatAttachment } from '../../../src/network/chat-attach.js';
+import {
+  __chatAttachTestHooks,
+  resolveManagedChatAttachment,
+  type ManagedChatAttachment,
+} from '../../../src/network/chat-attach.js';
+
+class MockManagedChatWebSocket extends EventTarget {
+  static instances: MockManagedChatWebSocket[] = [];
+
+  readonly send = vi.fn();
+  readonly close = vi.fn();
+  readonly url: string;
+  readonly protocols?: string | string[];
+  readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+  constructor(url: string | URL, protocols?: string | string[]) {
+    super();
+    this.url = String(url);
+    this.protocols = protocols;
+    MockManagedChatWebSocket.instances.push(this);
+    queueMicrotask(() => this.dispatchEvent(new Event('open')));
+  }
+
+  override addEventListener(
+    type: string,
+    callback: EventListenerOrEventListenerObject | null,
+    options?: AddEventListenerOptions | boolean,
+  ): void {
+    if (callback) {
+      const callbacks = this.listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
+      callbacks.add(callback);
+      this.listeners.set(type, callbacks);
+    }
+    super.addEventListener(type, callback, options);
+  }
+
+  override removeEventListener(
+    type: string,
+    callback: EventListenerOrEventListenerObject | null,
+    options?: EventListenerOptions | boolean,
+  ): void {
+    if (callback) {
+      this.listeners.get(type)?.delete(callback);
+    }
+    super.removeEventListener(type, callback, options);
+  }
+
+  emitMessage(data: string): void {
+    this.dispatchEvent(new MessageEvent('message', { data }));
+  }
+
+  listenerCount(type: string): number {
+    return this.listeners.get(type)?.size ?? 0;
+  }
+}
+
+function stubRemoteSessionFetch(): void {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(Response.json({ data: { id: 'session-1' } }))
+    .mockResolvedValueOnce(Response.json({ data: { ticket: 'ticket-1' } })));
+}
+
+function stubManagedChatWebSocket(): void {
+  MockManagedChatWebSocket.instances = [];
+  vi.stubGlobal('WebSocket', MockManagedChatWebSocket);
+}
+
+function managedChatAttachment(): ManagedChatAttachment {
+  return {
+    baseUrl: 'http://127.0.0.1:4242',
+    wsUrl: 'ws://127.0.0.1:4242/v1/chat/ws',
+  };
+}
 
 describe('resolveManagedChatAttachment', () => {
   let workDir: string | undefined;
 
   afterEach(async () => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     if (workDir) {
       await rm(workDir, { recursive: true, force: true });
     }
@@ -118,5 +192,55 @@ describe('resolveManagedChatAttachment', () => {
     const directConsoleCall = ['console', 'log'].join('.');
 
     expect(source).not.toContain(directConsoleCall);
+  });
+
+  it('rejects malformed websocket frames while waiting for session readiness', async () => {
+    stubRemoteSessionFetch();
+    stubManagedChatWebSocket();
+
+    const session = __chatAttachTestHooks.createRemoteSession(managedChatAttachment(), 'project-1');
+    await vi.waitFor(() => expect(MockManagedChatWebSocket.instances).toHaveLength(1));
+    const socket = MockManagedChatWebSocket.instances[0];
+    expect(socket?.listenerCount('message')).toBe(1);
+
+    const rejection = expect(session).rejects.toThrow('Invalid managed chat websocket message during session readiness');
+    socket?.emitMessage('{not-json');
+
+    await rejection;
+    expect(socket?.listenerCount('message')).toBe(0);
+    expect(socket?.listenerCount('error')).toBe(0);
+    expect(socket?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('times out instead of waiting indefinitely for session readiness', async () => {
+    vi.useFakeTimers();
+    stubRemoteSessionFetch();
+    stubManagedChatWebSocket();
+
+    const session = __chatAttachTestHooks.createRemoteSession(managedChatAttachment(), 'project-1');
+    await vi.waitFor(() => expect(MockManagedChatWebSocket.instances).toHaveLength(1));
+    const socket = MockManagedChatWebSocket.instances[0];
+
+    const rejection = expect(session).rejects.toThrow('Timed out waiting for managed chat session readiness');
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await rejection;
+    expect(socket?.listenerCount('message')).toBe(0);
+    expect(socket?.listenerCount('error')).toBe(0);
+    expect(socket?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects malformed websocket frames while waiting for a reply', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    expect(socket.listenerCount('message')).toBe(1);
+
+    socket.emitMessage('{not-json');
+
+    await expect(reply).rejects.toThrow('Invalid managed chat websocket message during reply handling');
+    expect(socket.listenerCount('message')).toBe(0);
+    expect(socket.listenerCount('error')).toBe(0);
   });
 });

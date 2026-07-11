@@ -6,6 +6,14 @@ export class UnknownTrackedAgentError extends Error {
   }
 }
 
+export class UnknownBeastDefinitionError extends Error {
+  constructor(
+    public readonly definitionId: string,
+  ) {
+    super(`Unknown Beast definition: ${definitionId}`);
+  }
+}
+
 export class DeletedTrackedAgentError extends Error {
   constructor(
     public readonly agentId: string,

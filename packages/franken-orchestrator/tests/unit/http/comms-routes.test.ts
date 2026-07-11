@@ -164,6 +164,21 @@ describe('commsRoutes', () => {
     await expect(external.json()).resolves.toMatchObject({ error: { code: 'FORBIDDEN' } });
   });
 
+  it('rejects malformed generic comms inbound JSON before parsing', async () => {
+    const runtime = mockRuntime();
+    const app = commsRoutes({ config: minimalConfig(), runtime });
+
+    const res = await app.request('/v1/comms/inbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{',
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: { code: 'MALFORMED_JSON' } });
+    expect(runtime.processInbound).not.toHaveBeenCalled();
+  });
+
   it('rejects malformed generic comms inbound payloads before invoking the runtime', async () => {
     const runtime = mockRuntime();
     const app = commsRoutes({ config: minimalConfig(), runtime });

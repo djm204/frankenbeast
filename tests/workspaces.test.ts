@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { describe, it, expect } from "vitest";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  ROOT,
+  getWorkspacePackageManifestPaths,
+  getWorkspacePackages,
+  readJson,
+} from "./helpers/workspaces.js";
 
-const ROOT = join(import.meta.dirname, '..');
-const readJson = (rel: string) =>
-  JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
 const readPkg = readJson;
 
 const majorMinorPatch = (version: string) => {
@@ -25,63 +28,149 @@ const isAtLeast = (version: string, minimum: string) => {
   return true;
 };
 
-describe('npm workspaces configuration', () => {
-  describe('root package.json', () => {
-    const rootPkg = readPkg('package.json');
+describe("npm workspaces configuration", () => {
+  describe("root package.json", () => {
+    const rootPkg = readPkg("package.json");
 
-    it('has workspaces field set to packages/*', () => {
-      expect(rootPkg.workspaces).toEqual(['packages/*']);
+    it("has workspaces field set to packages/*", () => {
+      expect(rootPkg.workspaces).toEqual(["packages/*"]);
     });
 
-    it('remains private (required for workspaces)', () => {
+    it("derives the complete package inventory from the workspace glob", () => {
+      const packageDirs = readdirSync(join(ROOT, "packages"), {
+        withFileTypes: true,
+      })
+        .filter((entry) => entry.isDirectory())
+        .filter((entry) =>
+          existsSync(join(ROOT, "packages", entry.name, "package.json")),
+        )
+        .map((entry) => `packages/${entry.name}`)
+        .sort();
+
+      expect(
+        getWorkspacePackages().map((workspacePackage) => workspacePackage.dir),
+      ).toEqual(packageDirs);
+    });
+
+    it("remains private (required for workspaces)", () => {
       expect(rootPkg.private).toBe(true);
     });
 
-    it('pins ws to a security-fixed version for all workspace consumers', () => {
+    it("pins ws to a security-fixed version for all workspace consumers", () => {
       expect(rootPkg.overrides?.ws).toBeDefined();
-      expect(isAtLeast(rootPkg.overrides.ws, '8.21.0')).toBe(true);
+      expect(isAtLeast(rootPkg.overrides.ws, "8.21.0")).toBe(true);
     });
 
-    it('pins Vite to a security-fixed version for Vitest consumers', () => {
+    it("uses the root package-lock.json as the only package workspace lockfile", () => {
+      expect(
+        existsSync(join(ROOT, "package-lock.json")),
+        "root package-lock.json must govern workspace installs",
+      ).toBe(true);
+
+      const nestedWorkspaceLockfiles = readdirSync(join(ROOT, "packages"), {
+        withFileTypes: true,
+      })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `packages/${entry.name}/package-lock.json`)
+        .filter((path) => existsSync(join(ROOT, path)));
+
+      expect(
+        nestedWorkspaceLockfiles,
+        "npm workspaces under packages/* must not commit nested lockfiles; use the root package-lock.json instead",
+      ).toEqual([]);
+    });
+
+    it("pins Vite to a security-fixed version for Vitest consumers", () => {
       expect(rootPkg.overrides?.vite).toBeDefined();
-      expect(isAtLeast(rootPkg.overrides.vite, '8.1.3')).toBe(true);
+      expect(isAtLeast(rootPkg.overrides.vite, "8.1.3")).toBe(true);
     });
 
-    it('pins Anthropic SDK above the vulnerable memory-tool advisory ranges', () => {
-      expect(rootPkg.overrides?.['@anthropic-ai/sdk']).toBeDefined();
-      expect(isAtLeast(rootPkg.overrides['@anthropic-ai/sdk'], '0.110.0')).toBe(true);
+    it("pins Anthropic SDK above the vulnerable memory-tool advisory ranges", () => {
+      expect(rootPkg.overrides?.["@anthropic-ai/sdk"]).toBeDefined();
+      expect(isAtLeast(rootPkg.overrides["@anthropic-ai/sdk"], "0.110.0")).toBe(
+        true,
+      );
     });
 
-    it('keeps Turbo above the local execution/session advisory range', () => {
+    it("keeps Turbo above the local execution/session advisory range", () => {
       expect(rootPkg.devDependencies?.turbo).toBeDefined();
-      expect(isAtLeast(rootPkg.devDependencies.turbo, '2.10.3')).toBe(true);
+      expect(isAtLeast(rootPkg.devDependencies.turbo, "2.10.3")).toBe(true);
+    });
+
+    it("fans out coverage through workspace package scripts instead of root-only Vitest", () => {
+      expect(rootPkg.scripts?.["test:coverage"]).toContain(
+        "turbo run test:coverage",
+      );
+      expect(rootPkg.scripts?.["test:coverage"]).toContain(
+        '--filter="./packages/*"',
+      );
+      expect(rootPkg.scripts?.["test:coverage"]).not.toContain(
+        "--coverage.thresholds",
+      );
+      expect(rootPkg.scripts?.["test:coverage:root"]).toBe(
+        "vitest run --coverage",
+      );
     });
   });
 
-  describe('Vitest toolchain security floor', () => {
-    const minimumVitest = '4.1.9';
+  describe("workspace coverage scripts", () => {
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
+
+    it("registers a Turbo coverage task for package workspaces", () => {
+      const turbo = readJson("turbo.json");
+      expect(turbo.tasks?.["test:coverage"]).toBeDefined();
+      expect(turbo.tasks?.["test:coverage"]?.dependsOn).toContain("^build");
+      expect(turbo.tasks?.["test:coverage"]?.outputs).toContain("coverage/**");
+    });
+
+    it("exposes coverage consistently for every tested package workspace", () => {
+      const missingCoverage = packageJsonPaths
+        .map((path) => ({ path, pkg: readPkg(path) }))
+        .filter(
+          ({ pkg }) => pkg.scripts?.test && !pkg.scripts?.["test:coverage"],
+        )
+        .map(({ path }) => path);
+
+      expect(
+        missingCoverage,
+        "tested package workspaces must expose test:coverage or be explicitly excluded",
+      ).toEqual([]);
+    });
+  });
+
+  describe("Vitest toolchain security floor", () => {
+    const minimumVitest = "4.1.9";
     const packageJsonPaths = [
-      'package.json',
-      ...readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => `packages/${entry.name}/package.json`),
+      "package.json",
+      ...getWorkspacePackageManifestPaths(),
     ];
     const dependencySections = [
-      'dependencies',
-      'devDependencies',
-      'optionalDependencies',
-      'peerDependencies',
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
     ] as const;
-    const getDirectDependencies = (pkg: Record<string, Record<string, string> | undefined>, dependencyName: string) => dependencySections
-      .map((dependencySection) => ({
-        dependencySection,
-        version: pkg[dependencySection]?.[dependencyName],
-      }))
-      .filter((entry): entry is { dependencySection: typeof dependencySections[number]; version: string } => entry.version !== undefined);
+    const getDirectDependencies = (
+      pkg: Record<string, Record<string, string> | undefined>,
+      dependencyName: string,
+    ) =>
+      dependencySections
+        .map((dependencySection) => ({
+          dependencySection,
+          version: pkg[dependencySection]?.[dependencyName],
+        }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            dependencySection: (typeof dependencySections)[number];
+            version: string;
+          } => entry.version !== undefined,
+        );
     const majorOf = (version: string) => majorMinorPatch(version)[0];
 
-    it('keeps workspace Vitest declarations on the root Vitest major', () => {
-      const rootPkg = readPkg('package.json');
+    it("keeps workspace Vitest declarations on the root Vitest major", () => {
+      const rootPkg = readPkg("package.json");
       const rootVitest = rootPkg.devDependencies?.vitest;
 
       expect(rootVitest).toBeDefined();
@@ -89,7 +178,7 @@ describe('npm workspaces configuration', () => {
 
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
-        const vitestDeclarations = getDirectDependencies(pkg, 'vitest');
+        const vitestDeclarations = getDirectDependencies(pkg, "vitest");
 
         for (const { dependencySection, version } of vitestDeclarations) {
           expect(
@@ -100,15 +189,23 @@ describe('npm workspaces configuration', () => {
       }
     });
 
-    it('keeps workspace coverage-v8 declarations on the same major as Vitest', () => {
+    it("keeps workspace coverage-v8 declarations on the same major as Vitest", () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
-        const vitestDeclarations = getDirectDependencies(pkg, 'vitest');
-        const coverageDeclarations = getDirectDependencies(pkg, '@vitest/coverage-v8');
+        const vitestDeclarations = getDirectDependencies(pkg, "vitest");
+        const coverageDeclarations = getDirectDependencies(
+          pkg,
+          "@vitest/coverage-v8",
+        );
         if (coverageDeclarations.length === 0) continue;
 
-        expect(vitestDeclarations.length, `${path} declares @vitest/coverage-v8 without vitest`).toBeGreaterThan(0);
-        const vitestMajors = new Set(vitestDeclarations.map(({ version }) => majorOf(version)));
+        expect(
+          vitestDeclarations.length,
+          `${path} declares @vitest/coverage-v8 without vitest`,
+        ).toBeGreaterThan(0);
+        const vitestMajors = new Set(
+          vitestDeclarations.map(({ version }) => majorOf(version)),
+        );
         for (const { dependencySection, version } of coverageDeclarations) {
           expect(
             vitestMajors.has(majorOf(version)),
@@ -118,18 +215,18 @@ describe('npm workspaces configuration', () => {
       }
     });
 
-    it('keeps every Vitest and coverage dependency on the non-vulnerable floor', () => {
+    it("keeps every Vitest and coverage dependency on the non-vulnerable floor", () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
         for (const dependencySection of [
-          'dependencies',
-          'devDependencies',
-          'optionalDependencies',
-          'peerDependencies',
+          "dependencies",
+          "devDependencies",
+          "optionalDependencies",
+          "peerDependencies",
         ]) {
           const dependencies = pkg[dependencySection] ?? {};
 
-          for (const dependencyName of ['vitest', '@vitest/coverage-v8']) {
+          for (const dependencyName of ["vitest", "@vitest/coverage-v8"]) {
             const version = dependencies[dependencyName];
             if (version === undefined) continue;
 
@@ -142,97 +239,132 @@ describe('npm workspaces configuration', () => {
       }
     });
 
-    it('keeps every locked Vitest, Vite, and Turbo package on its security floor', () => {
-      const lockfile = readJson('package-lock.json');
+    it("keeps every locked Vitest, Vite, and Turbo package on its security floor", () => {
+      const lockfile = readJson("package-lock.json");
       const toolchainFloors = {
         vitest: minimumVitest,
-        '@vitest/coverage-v8': minimumVitest,
-        vite: '8.1.3',
-        turbo: '2.10.3',
-        '@turbo/darwin-64': '2.10.3',
-        '@turbo/darwin-arm64': '2.10.3',
-        '@turbo/linux-64': '2.10.3',
-        '@turbo/linux-arm64': '2.10.3',
-        '@turbo/windows-64': '2.10.3',
-        '@turbo/windows-arm64': '2.10.3',
+        "@vitest/coverage-v8": minimumVitest,
+        vite: "8.1.3",
+        turbo: "2.10.3",
+        "@turbo/darwin-64": "2.10.3",
+        "@turbo/darwin-arm64": "2.10.3",
+        "@turbo/linux-64": "2.10.3",
+        "@turbo/linux-arm64": "2.10.3",
+        "@turbo/windows-64": "2.10.3",
+        "@turbo/windows-arm64": "2.10.3",
       };
 
-      for (const [packageName, minimumVersion] of Object.entries(toolchainFloors)) {
-        const lockedEntries = Object.entries(lockfile.packages ?? {})
-          .filter(([path]) => path === `node_modules/${packageName}` || path.endsWith(`/node_modules/${packageName}`));
+      for (const [packageName, minimumVersion] of Object.entries(
+        toolchainFloors,
+      )) {
+        const lockedEntries = Object.entries(lockfile.packages ?? {}).filter(
+          ([path]) =>
+            path === `node_modules/${packageName}` ||
+            path.endsWith(`/node_modules/${packageName}`),
+        );
 
-        expect(lockedEntries.length, `${packageName} missing from package-lock.json`).toBeGreaterThan(0);
+        expect(
+          lockedEntries.length,
+          `${packageName} missing from package-lock.json`,
+        ).toBeGreaterThan(0);
 
         for (const [path, packageDetails] of lockedEntries) {
-          const lockedVersion = (packageDetails as { version?: string }).version;
+          const lockedVersion = (packageDetails as { version?: string })
+            .version;
 
-          expect(lockedVersion, `${packageName} at ${path} is missing a locked version`).toBeDefined();
           expect(
-            isAtLeast(lockedVersion ?? '0.0.0', minimumVersion),
+            lockedVersion,
+            `${packageName} at ${path} is missing a locked version`,
+          ).toBeDefined();
+          expect(
+            isAtLeast(lockedVersion ?? "0.0.0", minimumVersion),
             `${packageName} at ${path} must stay >= ${minimumVersion}`,
           ).toBe(true);
         }
       }
     });
 
-    it('keeps the issue #498 npm audit packages on non-vulnerable locked versions', () => {
-      const lockfile = readJson('package-lock.json');
+    it("keeps the issue #498 npm audit packages on non-vulnerable locked versions", () => {
+      const lockfile = readJson("package-lock.json");
       const packageFloors = {
-        '@anthropic-ai/sdk': '0.110.0',
-        '@babel/core': '7.29.1',
-        '@protobufjs/utf8': '1.1.1',
-        esbuild: '0.28.1',
-        'fast-uri': '3.1.3',
-        'form-data': '4.0.6',
-        hono: '4.12.27',
-        'ip-address': '10.2.0',
-        'js-yaml': '4.3.0',
-        postcss: '8.5.10',
-        protobufjs: '7.6.5',
-        qs: '6.15.3',
-        vite: '8.1.3',
-        'vite-node': '4.1.9',
+        "@anthropic-ai/sdk": "0.110.0",
+        "@babel/core": "7.29.1",
+        "@protobufjs/utf8": "1.1.1",
+        esbuild: "0.28.1",
+        "fast-uri": "3.1.3",
+        "form-data": "4.0.6",
+        hono: "4.12.27",
+        "ip-address": "10.2.0",
+        "js-yaml": "4.3.0",
+        postcss: "8.5.10",
+        protobufjs: "7.6.5",
+        qs: "6.15.3",
+        vite: "8.1.3",
+        "vite-node": "4.1.9",
         vitest: minimumVitest,
-        '@vitest/coverage-v8': minimumVitest,
-        '@vitest/mocker': minimumVitest,
-        ws: '8.21.0',
+        "@vitest/coverage-v8": minimumVitest,
+        "@vitest/mocker": minimumVitest,
+        ws: "8.21.0",
       };
 
-      for (const [packageName, minimumVersion] of Object.entries(packageFloors)) {
-        const lockedEntries = Object.entries(lockfile.packages ?? {})
-          .filter(([path]) => path === `node_modules/${packageName}` || path.endsWith(`/node_modules/${packageName}`));
+      for (const [packageName, minimumVersion] of Object.entries(
+        packageFloors,
+      )) {
+        const lockedEntries = Object.entries(lockfile.packages ?? {}).filter(
+          ([path]) =>
+            path === `node_modules/${packageName}` ||
+            path.endsWith(`/node_modules/${packageName}`),
+        );
 
-        if (packageName === '@anthropic-ai/sdk') {
-          expect(lockedEntries.length, `${packageName} missing from package-lock.json`).toBeGreaterThan(0);
+        if (packageName === "@anthropic-ai/sdk") {
+          expect(
+            lockedEntries.length,
+            `${packageName} missing from package-lock.json`,
+          ).toBeGreaterThan(0);
         }
 
         for (const [path, packageDetails] of lockedEntries) {
-          const lockedVersion = (packageDetails as { version?: string }).version;
+          const lockedVersion = (packageDetails as { version?: string })
+            .version;
 
-          expect(lockedVersion, `${packageName} at ${path} is missing a locked version`).toBeDefined();
           expect(
-            isAtLeast(lockedVersion ?? '0.0.0', minimumVersion),
+            lockedVersion,
+            `${packageName} at ${path} is missing a locked version`,
+          ).toBeDefined();
+          expect(
+            isAtLeast(lockedVersion ?? "0.0.0", minimumVersion),
             `${packageName} at ${path} must stay >= ${minimumVersion}`,
           ).toBe(true);
         }
       }
 
-      const braceExpansionEntries = Object.entries(lockfile.packages ?? {})
-        .filter(([path]) => path === 'node_modules/brace-expansion' || path.endsWith('/node_modules/brace-expansion'));
+      const braceExpansionEntries = Object.entries(
+        lockfile.packages ?? {},
+      ).filter(
+        ([path]) =>
+          path === "node_modules/brace-expansion" ||
+          path.endsWith("/node_modules/brace-expansion"),
+      );
       const braceExpansionFloorsByMajor: Record<number, string> = {
-        1: '1.1.15',
-        2: '2.1.1',
-        3: '3.0.2',
-        4: '4.0.1',
-        5: '5.0.7',
+        1: "1.1.15",
+        2: "2.1.1",
+        3: "3.0.2",
+        4: "4.0.1",
+        5: "5.0.7",
       };
 
-      expect(braceExpansionEntries.length, 'brace-expansion missing from package-lock.json').toBeGreaterThan(0);
+      expect(
+        braceExpansionEntries.length,
+        "brace-expansion missing from package-lock.json",
+      ).toBeGreaterThan(0);
       for (const [path, packageDetails] of braceExpansionEntries) {
         const lockedVersion = (packageDetails as { version?: string }).version;
 
-        expect(lockedVersion, `brace-expansion at ${path} is missing a locked version`).toBeDefined();
-        const [major] = majorMinorPatch(lockedVersion ?? '0.0.0');
+        expect(
+          lockedVersion,
+          `brace-expansion at ${path} is missing a locked version`,
+        ).toBeDefined();
+        const [major] = majorMinorPatch(lockedVersion ?? "0.0.0");
         const minimumVersion = braceExpansionFloorsByMajor[major];
 
         expect(
@@ -240,17 +372,15 @@ describe('npm workspaces configuration', () => {
           `brace-expansion at ${path} uses unsupported major ${major}; add its fixed floor before allowing it`,
         ).toBeDefined();
         expect(
-          isAtLeast(lockedVersion ?? '0.0.0', minimumVersion ?? '999.999.999'),
+          isAtLeast(lockedVersion ?? "0.0.0", minimumVersion ?? "999.999.999"),
           `brace-expansion at ${path} must stay on the fixed floor for major ${major}`,
         ).toBe(true);
       }
     });
   });
 
-  describe('cross-module dependencies use coherent internal versions', () => {
-    const packageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `packages/${entry.name}/package.json`);
+  describe("cross-module dependencies use coherent internal versions", () => {
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
     const packageManifests = packageJsonPaths.map((path) => ({
       path,
       pkg: readPkg(path),
@@ -259,13 +389,13 @@ describe('npm workspaces configuration', () => {
       packageManifests.map(({ pkg }) => [pkg.name, pkg.version]),
     );
 
-    it('pins every internal dependency to the matching package version instead of registry wildcards', () => {
+    it("pins every internal dependency to the matching package version instead of registry wildcards", () => {
       for (const { path, pkg } of packageManifests) {
         for (const dependencySection of [
-          'dependencies',
-          'devDependencies',
-          'optionalDependencies',
-          'peerDependencies',
+          "dependencies",
+          "devDependencies",
+          "optionalDependencies",
+          "peerDependencies",
         ]) {
           const dependencies = pkg[dependencySection] ?? {};
 
@@ -283,88 +413,218 @@ describe('npm workspaces configuration', () => {
     });
   });
 
-  describe('publishable package manifests', () => {
-    const packageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `packages/${entry.name}/package.json`);
+  describe("publishable package manifests", () => {
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
 
-    it('declares the shared MIT license on every publishable package and the top-level README', () => {
+    it("declares the shared MIT license on every publishable package and the top-level README", () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
         if (pkg.private === true) continue;
 
-        expect(pkg.license, `${path} must declare the shared product license`).toBe('MIT');
+        expect(
+          pkg.license,
+          `${path} must declare the shared product license`,
+        ).toBe("MIT");
       }
 
-      const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+      const readme = readFileSync(join(ROOT, "README.md"), "utf8");
       expect(readme).toMatch(/## License\n\nMIT\n?$/);
     });
 
-    it('builds dist artifacts before publishing publishable packages', () => {
+    it("keeps publishable package discovery metadata intentional", () => {
       for (const path of packageJsonPaths) {
         const pkg = readPkg(path);
         if (pkg.private === true) continue;
 
-        expect(pkg.scripts?.build, `${path} must define a build script`).toBeDefined();
+        expect(
+          typeof pkg.description,
+          `${path} must describe the package for npm discovery`,
+        ).toBe("string");
+        expect(
+          pkg.description.trim().length,
+          `${path} must use a non-empty package description`,
+        ).toBeGreaterThan(0);
+        expect(
+          Array.isArray(pkg.keywords),
+          `${path} must declare npm keywords`,
+        ).toBe(true);
+        expect(
+          pkg.keywords.length,
+          `${path} must include at least one npm keyword`,
+        ).toBeGreaterThan(0);
+        expect(
+          pkg.keywords,
+          `${path} must include the shared frankenbeast discovery keyword`,
+        ).toContain("frankenbeast");
+        if (pkg.author !== undefined) {
+          expect(
+            typeof pkg.author,
+            `${path} author must be a string when declared`,
+          ).toBe("string");
+          expect(
+            pkg.author.trim().length,
+            `${path} must not declare an empty author`,
+          ).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it("builds dist artifacts before publishing publishable packages", () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        if (pkg.private === true) continue;
+
+        expect(
+          pkg.scripts?.build,
+          `${path} must define a build script`,
+        ).toBeDefined();
         expect(
           pkg.scripts?.prepublishOnly,
           `${path} must build the workspace before npm publish so dist/bin entries and internal dependency types are fresh`,
-        ).toBe('npm --prefix ../.. run build');
+        ).toBe("npm --prefix ../.. run build");
       }
     });
   });
 
-  describe('no file: dependencies remain anywhere', () => {
-    const allPackages = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
+  describe("workspace lint coverage", () => {
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
 
-    for (const module of allPackages) {
-      it(`packages/${module}/package.json has no file: dependencies`, () => {
-        const pkg = readPkg(`packages/${module}/package.json`);
-        const allDeps = {
-          ...pkg.dependencies,
-          ...pkg.devDependencies,
-        };
-        for (const [name, version] of Object.entries(allDeps)) {
-          expect(version, `${name} in ${module} uses file: path`).not.toMatch(
-            /^file:/,
-          );
+    it("gives every workspace an explicit lint script and ESLint config", () => {
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const packageDir = path.replace(/\/package\.json$/, "");
+
+        expect(
+          pkg.scripts?.lint,
+          `${path} must define scripts.lint so Turbo cannot silently skip it`,
+        ).toBeDefined();
+        expect(
+          existsSync(join(ROOT, packageDir, "eslint.config.js")),
+          `${packageDir} must carry an explicit ESLint config`,
+        ).toBe(true);
+      }
+    });
+
+    it("documents the lint posture for every workspace", () => {
+      const lintCoverageDoc = readFileSync(
+        join(ROOT, "docs/lint-coverage.md"),
+        "utf8",
+      );
+
+      expect(lintCoverageDoc).toContain("npm run lint");
+      for (const path of packageJsonPaths) {
+        const pkg = readPkg(path);
+        const packageDir = path.replace(/\/package\.json$/, "");
+
+        expect(
+          lintCoverageDoc,
+          `${pkg.name} must be documented in docs/lint-coverage.md`,
+        ).toContain(`| \`${pkg.name}\` | \`${packageDir}\` |`);
+      }
+    });
+
+    it("uses filesystem-safe module URL conversion in the lint coverage audit", () => {
+      const auditScript = readFileSync(
+        join(ROOT, "scripts/check-workspace-lint-coverage.mjs"),
+        "utf8",
+      );
+
+      expect(auditScript).toContain("fileURLToPath");
+      expect(auditScript).toContain(
+        "fileURLToPath(new URL('..', import.meta.url))",
+      );
+      expect(auditScript).not.toContain(
+        "new URL('..', import.meta.url).pathname",
+      );
+    });
+  });
+
+  describe("no file: dependencies remain anywhere", () => {
+    const dependencySections = [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ] as const;
+    type DependencySection = (typeof dependencySections)[number];
+    type DependencyEntry = {
+      section: DependencySection;
+      name: string;
+      version: string;
+    };
+    const collectDependencyEntries = (
+      pkg: Partial<Record<DependencySection, Record<string, string>>>,
+    ): DependencyEntry[] =>
+      dependencySections.flatMap((section) =>
+        Object.entries(pkg[section] ?? {}).map(([name, version]) => ({
+          section,
+          name,
+          version,
+        })),
+      );
+
+    const workspacePackages = getWorkspacePackages();
+
+    it("scans every dependency bucket that can carry package specifiers", () => {
+      const entries = collectDependencyEntries({
+        dependencies: { regular: "^1.0.0" },
+        devDependencies: { dev: "^1.0.0" },
+        optionalDependencies: { optional: "file:../optional" },
+        peerDependencies: { peer: "file:../peer" },
+      });
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          {
+            section: "optionalDependencies",
+            name: "optional",
+            version: "file:../optional",
+          },
+          {
+            section: "peerDependencies",
+            name: "peer",
+            version: "file:../peer",
+          },
+        ]),
+      );
+    });
+
+    for (const workspacePackage of workspacePackages) {
+      it(`${workspacePackage.manifestPath} has no file: dependencies`, () => {
+        const pkg = readPkg(workspacePackage.manifestPath);
+        for (const { section, name, version } of collectDependencyEntries(
+          pkg,
+        )) {
+          expect(
+            version,
+            `${name} in ${workspacePackage.packageDirName} ${section} uses file: path`,
+          ).not.toMatch(/^file:/);
         }
       });
     }
   });
 
-  describe('canonical package namespace strategy', () => {
-    const expectedNames: Record<string, string> = {
-      'franken-brain': '@franken/brain',
-      'franken-critique': '@franken/critique',
-      'franken-governor': '@franken/governor',
-      'franken-mcp-suite': '@franken/mcp-suite',
-      'franken-observer': '@franken/observer',
-      'franken-orchestrator': '@franken/orchestrator',
-      'franken-planner': '@franken/planner',
-      'franken-types': '@franken/types',
-      'franken-web': '@franken/web',
-      'live-bench': '@franken/live-bench',
-    };
+  describe("canonical package namespace strategy", () => {
+    const workspacePackages = getWorkspacePackages();
+    const canonicalNameForPackageDir = (dir: string) =>
+      `@franken/${dir.replace(/^franken-/, "")}`;
 
-    for (const [dir, name] of Object.entries(expectedNames)) {
-      it(`packages/${dir}/package.json uses canonical name "${name}"`, () => {
-        const pkg = readPkg(`packages/${dir}/package.json`);
-        expect(pkg.name).toBe(name);
+    for (const workspacePackage of workspacePackages) {
+      it(`${workspacePackage.manifestPath} uses the canonical @franken package name`, () => {
+        expect(workspacePackage.name).toBe(
+          canonicalNameForPackageDir(workspacePackage.packageDirName),
+        );
       });
     }
 
-    it('keeps every publishable package under the @franken npm scope', () => {
-      const allPackageJsonPaths = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => `packages/${entry.name}/package.json`);
-
-      for (const path of allPackageJsonPaths) {
+    it("keeps every publishable package under the @franken npm scope", () => {
+      for (const path of getWorkspacePackageManifestPaths()) {
         const pkg = readPkg(path);
         if (pkg.private === true) continue;
-        expect(pkg.name, `${path} must use the canonical @franken scope`).toMatch(/^@franken\//);
+        expect(
+          pkg.name,
+          `${path} must use the canonical @franken scope`,
+        ).toMatch(/^@franken\//);
       }
     });
   });

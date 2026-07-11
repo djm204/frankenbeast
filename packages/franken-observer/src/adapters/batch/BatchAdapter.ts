@@ -18,9 +18,16 @@ export interface BatchAdapterOptions {
    */
   flushIntervalMs?: number
   /** Injectable for testing. Defaults to `globalThis.setInterval`. */
-  setInterval?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>
+  setInterval?: (fn: () => void, ms: number) => ReturnType<typeof globalThis.setInterval>
   /** Injectable for testing. Defaults to `globalThis.clearInterval`. */
-  clearInterval?: (id: ReturnType<typeof setInterval>) => void
+  clearInterval?: (id: ReturnType<typeof globalThis.setInterval>) => void
+}
+
+function validatePositiveSafeInteger(value: number, optionName: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`${optionName} must be a positive safe integer`)
+  }
+  return value
 }
 
 /**
@@ -50,18 +57,19 @@ export class BatchAdapter implements ExportAdapter {
   private readonly inner: ExportAdapter
   private readonly maxBatchSize: number
   private readonly buffer: Trace[] = []
-  private timer: ReturnType<typeof setInterval> | null = null
-  private readonly clearIntervalFn: (id: ReturnType<typeof setInterval>) => void
+  private timer: ReturnType<typeof globalThis.setInterval> | null = null
+  private readonly clearIntervalFn: (id: ReturnType<typeof globalThis.setInterval>) => void
   private drainPromise: Promise<void> | null = null
 
   constructor(options: BatchAdapterOptions) {
     this.inner = options.adapter
-    this.maxBatchSize = options.maxBatchSize ?? 10
-    this.clearIntervalFn = options.clearInterval ?? clearInterval
+    this.maxBatchSize = validatePositiveSafeInteger(options.maxBatchSize ?? 10, 'maxBatchSize')
+    this.clearIntervalFn = options.clearInterval ?? globalThis.clearInterval
 
-    if (options.flushIntervalMs && options.flushIntervalMs > 0) {
-      const si = options.setInterval ?? setInterval
-      this.timer = si(() => { void this.drain().catch(() => undefined) }, options.flushIntervalMs)
+    if (options.flushIntervalMs !== undefined) {
+      const flushIntervalMs = validatePositiveSafeInteger(options.flushIntervalMs, 'flushIntervalMs')
+      const si = options.setInterval ?? globalThis.setInterval
+      this.timer = si(() => { void this.drain().catch(() => undefined) }, flushIntervalMs)
     }
   }
 

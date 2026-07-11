@@ -60,6 +60,154 @@ describe('InMemoryAdapter', () => {
       expect(retrieved!.goal).toBe('updated goal')
     })
 
+    it('captures a flush-time snapshot and returns defensive query copies', async () => {
+      const trace = TraceContext.createTrace('snapshot goal')
+      const span = TraceContext.startSpan(trace, { name: 'original span' })
+      span.metadata = { nested: { count: 1 }, label: 'before' }
+      SpanLifecycle.addThoughtBlock(span, 'first thought')
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+
+      trace.goal = 'mutated original goal'
+      trace.status = 'error'
+      trace.spans[0]!.name = 'mutated original span'
+      trace.spans[0]!.metadata = { nested: { count: 2 }, label: 'after' }
+      trace.spans[0]!.thoughtBlocks.push('mutated original thought')
+
+      const firstQuery = await adapter.queryByTraceId(trace.id)
+      expect(firstQuery).not.toBeNull()
+      expect(firstQuery!.goal).toBe('snapshot goal')
+      expect(firstQuery!.status).toBe('completed')
+      expect(firstQuery!.spans[0]!.name).toBe('original span')
+      expect(firstQuery!.spans[0]!.metadata).toEqual({ nested: { count: 1 }, label: 'before' })
+      expect(firstQuery!.spans[0]!.thoughtBlocks).toEqual(['first thought'])
+
+      firstQuery!.goal = 'mutated queried goal'
+      firstQuery!.status = 'error'
+      firstQuery!.spans[0]!.name = 'mutated queried span'
+      firstQuery!.spans[0]!.metadata = { nested: { count: 3 }, label: 'queried' }
+      firstQuery!.spans[0]!.thoughtBlocks.push('mutated queried thought')
+
+      const secondQuery = await adapter.queryByTraceId(trace.id)
+      expect(secondQuery!.goal).toBe('snapshot goal')
+      expect(secondQuery!.status).toBe('completed')
+      expect(secondQuery!.spans[0]!.name).toBe('original span')
+      expect(secondQuery!.spans[0]!.metadata).toEqual({ nested: { count: 1 }, label: 'before' })
+      expect(secondQuery!.spans[0]!.thoughtBlocks).toEqual(['first thought'])
+    })
+
+    it('tolerates uncloneable metadata values while snapshotting traces', async () => {
+      const trace = TraceContext.createTrace('uncloneable metadata')
+      const span = TraceContext.startSpan(trace, { name: 'metadata span' })
+      const callback = () => 'value'
+      const marker = Symbol('marker')
+      SpanLifecycle.setMetadata(span, {
+        callback,
+        marker,
+        nested: { callback, marker, kept: true },
+      })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await expect(adapter.flush(trace)).resolves.toBeUndefined()
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      expect(retrieved!.spans[0]!.metadata).toEqual({
+        callback: String(callback),
+        marker: String(marker),
+        nested: { callback: String(callback), marker: String(marker), kept: true },
+      })
+    })
+
+    it('preserves repeated uncloneable metadata references without treating them as cycles', async () => {
+      const trace = TraceContext.createTrace('shared metadata')
+      const span = TraceContext.startSpan(trace, { name: 'shared metadata span' })
+      const callback = () => 'shared'
+      const shared = { callback, kept: true }
+      SpanLifecycle.setMetadata(span, { a: shared, b: shared })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      expect(retrieved!.spans[0]!.metadata).toEqual({
+        a: { callback: String(callback), kept: true },
+        b: { callback: String(callback), kept: true },
+      })
+    })
+
+    it('preserves container, Error, and __proto__ metadata during fallback cloning', async () => {
+      const trace = TraceContext.createTrace('container metadata')
+      const span = TraceContext.startSpan(trace, { name: 'container metadata span' })
+      const callback = () => 'container'
+      const error = new Error('boom') as Error & { code?: string; details?: { retryable: boolean } }
+      error.code = 'E_BOOM'
+      error.details = { retryable: true }
+      const protoValue = { polluted: true }
+      SpanLifecycle.setMetadata(span, {
+        tools: new Map<string, unknown>([['cb', callback]]),
+        values: new Set<unknown>([callback, 'kept']),
+        error,
+        callback,
+      })
+      Object.defineProperty(span.metadata, '__proto__', {
+        value: protoValue,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      const metadata = retrieved!.spans[0]!.metadata
+      expect(metadata['tools']).toEqual(new Map([['cb', String(callback)]]))
+      expect(metadata['values']).toEqual(new Set([String(callback), 'kept']))
+      expect(metadata['error']).toMatchObject({
+        name: 'Error',
+        message: 'boom',
+        code: 'E_BOOM',
+        details: { retryable: true },
+      })
+      expect(Object.prototype.hasOwnProperty.call(metadata, '__proto__')).toBe(true)
+      expect(metadata['__proto__']).toEqual(protoValue)
+      expect(Object.getPrototypeOf(metadata)).toBe(Object.prototype)
+    })
+
+    it('preserves binary, RegExp, and cyclic Error metadata snapshots', async () => {
+      const trace = TraceContext.createTrace('complex metadata')
+      const span = TraceContext.startSpan(trace, { name: 'complex metadata span' })
+      const bytes = new Uint8Array([1, 2, 3])
+      const view = new DataView(new Uint8Array([4, 5, 6, 7]).buffer, 1, 2)
+      const regex = /ab/g
+      regex.lastIndex = 2
+      const cyclicError = new Error('cyclic') as Error & { cause?: unknown }
+      cyclicError.cause = cyclicError
+      const aggregate = new AggregateError([cyclicError], 'many')
+      SpanLifecycle.setMetadata(span, { bytes, view, regex, cyclicError, aggregate })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+      bytes[0] = 9
+      regex.lastIndex = 0
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      const metadata = retrieved!.spans[0]!.metadata
+      expect(metadata['bytes']).toEqual(new Uint8Array([1, 2, 3]))
+      expect(Array.from(new Uint8Array((metadata['view'] as DataView).buffer))).toEqual([5, 6])
+      expect(metadata['regex']).toMatchObject({ source: 'ab', flags: 'g', lastIndex: 2 })
+      expect(metadata['cyclicError']).toMatchObject({ name: 'Error', message: 'cyclic' })
+      expect((metadata['cyclicError'] as { cause: unknown }).cause).toBe(metadata['cyclicError'])
+      expect(metadata['aggregate']).toMatchObject({ name: 'AggregateError', message: 'many' })
+      expect((metadata['aggregate'] as { errors: unknown[] }).errors).toHaveLength(1)
+    })
+
     it('warns when exporting a trace that still has active spans', async () => {
       const trace = TraceContext.createTrace('goal')
       TraceContext.startSpan(trace, { name: 'orphaned' })

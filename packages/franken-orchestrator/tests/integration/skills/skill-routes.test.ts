@@ -178,6 +178,22 @@ describe('Skill API routes', () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it('returns 400 for malformed JSON payload', async () => {
+      const installSpy = vi.spyOn(manager, 'install');
+      const customSpy = vi.spyOn(manager, 'installCustom');
+
+      const res = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Invalid JSON' });
+      expect(installSpy).not.toHaveBeenCalled();
+      expect(customSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('GET /api/skills/:name/health', () => {
@@ -281,6 +297,26 @@ describe('Skill API routes', () => {
       const body = await res.json();
       expect(body.error).toBeTruthy();
     });
+
+    it('returns 400 for malformed JSON payload', async () => {
+      await manager.install({
+        name: 'github', description: 'GH', provider: 'cli',
+        installConfig: { command: 'npx' }, authFields: [],
+      });
+      const disableSpy = vi.spyOn(manager, 'disable');
+      const enableSpy = vi.spyOn(manager, 'enable');
+
+      const res = await app.request('/api/skills/github', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Invalid JSON' });
+      expect(disableSpy).not.toHaveBeenCalled();
+      expect(enableSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('DELETE /api/skills/:name', () => {
@@ -322,6 +358,24 @@ describe('Skill API routes', () => {
       const body = await res.json();
       expect(body.exists).toBe(true);
       expect(body.content).toContain('Always lint first');
+    });
+
+    it('returns 400 for malformed JSON payload', async () => {
+      await manager.install({
+        name: 'github', description: 'GH', provider: 'cli',
+        installConfig: { command: 'npx' }, authFields: [],
+      });
+      const writeContextSpy = vi.spyOn(manager, 'writeContext');
+
+      const res = await app.request('/api/skills/github/context', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Invalid JSON' });
+      expect(writeContextSpy).not.toHaveBeenCalled();
     });
   });
 });

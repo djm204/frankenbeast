@@ -124,6 +124,27 @@ describe('analytics routes', () => {
     expect(service.listEvents).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['/summary?outcome=faild', 'getSummary'],
+    ['/sessions?outcome=blocked', 'listSessions'],
+    ['/events?outcome=unknown', 'listEvents'],
+  ] as const)('rejects unsupported outcome query values for %s before reading analytics data', async (path, serviceMethod) => {
+    const service = mockAnalyticsService();
+    const app = createAnalyticsRoutes({ analytics: service });
+
+    const res = await app.request(path);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        message: 'Unsupported Analytics outcome filter',
+        code: 'invalid_outcome',
+        allowedValues: ['approved', 'denied', 'review_recommended', 'failed', 'error', 'detected'],
+      },
+    });
+    expect(service[serviceMethod]).not.toHaveBeenCalled();
+  });
+
   it('returns event details or a 404', async () => {
     const service = mockAnalyticsService();
     const app = createAnalyticsRoutes({ analytics: service });
