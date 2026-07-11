@@ -73,6 +73,7 @@ export interface MartinLoopResult {
 export interface GitIsolationConfig {
   readonly baseBranch: string;
   readonly branchPrefix: string;
+  readonly directCommit?: boolean | undefined;
   readonly autoCommit: boolean;
   readonly workingDir: string;
   readonly mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;

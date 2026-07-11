@@ -181,6 +181,8 @@ function discoverWorkspacePackages(root: string): string[] {
 interface EffectiveCliConfig {
   provider: string;
   model?: string | undefined;
+  defaultProvider: string;
+  defaultModel?: string | undefined;
   llmOverrides?: Record<string, { provider?: string | undefined; model?: string | undefined }> | undefined;
   baseBranch: string;
   budget: number;
@@ -254,10 +256,14 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
       ? undefined
       : options.runConfig?.model;
   const executionProvider = executionOverride?.provider;
+  const effectiveProvider = executionProvider ?? baseProvider;
+  const effectiveModel = executionOverride?.model
+    ?? (executionProvider !== undefined && executionProvider !== baseProvider ? undefined : baseModel);
   return {
-    provider: executionProvider ?? baseProvider,
-    model: executionOverride?.model
-      ?? (executionProvider !== undefined && executionProvider !== baseProvider ? undefined : baseModel),
+    provider: effectiveProvider,
+    ...(effectiveModel !== undefined ? { model: effectiveModel } : {}),
+    defaultProvider: baseProvider,
+    ...(baseModel !== undefined ? { defaultModel: baseModel } : {}),
     llmOverrides: options.runConfig?.llmConfig?.overrides,
     baseBranch: options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch,
     budget: options.budget,
@@ -292,16 +298,64 @@ function resolveCliRegistryName(options: CliDepOptions, providerName: string): s
   return catalogEntry.cliRegistryName;
 }
 
+function resolveProviderCommandOverride(
+  options: CliDepOptions,
+  providerName: string,
+  registryProviderName = resolveCliRegistryName(options, providerName),
+): (ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }) | undefined {
+  const configuredProvider = options.orchestratorConfig?.consolidatedProviders
+    ?.find((provider) => provider.name === providerName || provider.type === providerName);
+  const consolidatedOverride = configuredProvider?.cliPath
+    ? {
+        cliPath: configuredProvider.cliPath,
+        command: configuredProvider.cliPath,
+        trustCommandOverride: configuredProvider.trustCommandOverride,
+        trustedCommandPaths: configuredProvider.trustedCommandPaths,
+        model: configuredProvider.model,
+        extraArgs: configuredProvider.extraArgs ? [...configuredProvider.extraArgs] : undefined,
+      }
+    : undefined;
+  return options.providersConfig?.[providerName]
+    ?? options.providersConfig?.[registryProviderName]
+    ?? consolidatedOverride;
+}
+
+const ROUTABLE_CLI_LLM_OPERATIONS = new Set([
+  'cli-session',
+  'plan-build',
+  'commit-message',
+  'pr-description',
+  'issue-triage',
+  'issue-graph',
+  'issues',
+  'chunk-session-compaction',
+]);
+
 function consolidatedProviderCommandOverrides(
   providers: readonly ProviderConfig[] | undefined,
-): Array<readonly [string, ProviderCommandOverridePolicyConfig]> {
+): Array<readonly [string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }]> {
   return providers
     ?.filter((provider) => provider.type.endsWith('-cli') && Boolean(provider.cliPath))
-    .map((provider) => [provider.type, {
-      cliPath: provider.cliPath,
-      trustCommandOverride: provider.trustCommandOverride,
-      trustedCommandPaths: provider.trustedCommandPaths,
-    }] as const) ?? [];
+    .flatMap((provider) => {
+      const registryName = resolveProviderCatalogEntry(provider.type).cliRegistryName;
+      return [provider.type, provider.name, registryName]
+        .filter((name, index, names): name is string => Boolean(name) && names.indexOf(name) === index)
+        .map((name) => [name, {
+          cliPath: provider.cliPath,
+          command: provider.cliPath,
+          trustCommandOverride: provider.trustCommandOverride,
+          trustedCommandPaths: provider.trustedCommandPaths,
+          model: provider.model,
+          extraArgs: provider.extraArgs ? [...provider.extraArgs] : undefined,
+        }] as const);
+    }) ?? [];
+}
+
+function providerCommandOverrides(options: CliDepOptions): Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> {
+  return {
+    ...Object.fromEntries(consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders)),
+    ...(options.providersConfig ?? {}),
+  };
 }
 
 function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
@@ -422,6 +476,7 @@ function createExecutionStack(
   const gitIso = new GitBranchIsolator({
     baseBranch: config.baseBranch,
     branchPrefix: config.branchPattern,
+    directCommit: config.prCreation === 'disabled' && config.branchPattern.length === 0,
     autoCommit: true,
     workingDir: options.paths.root,
     ...(config.mergeStrategy ? { mergeStrategy: config.mergeStrategy as 'merge' | 'squash' | 'rebase' } : {}),
@@ -462,7 +517,7 @@ function createCachedCliLlmClient(
 ): { adapter: CliLlmAdapter; client: CachedCliLlmClient } {
   const registryProviderName = resolveCliRegistryName(options, providerName);
   const resolvedProvider = stack.registry.get(registryProviderName);
-  const override = options.providersConfig?.[providerName];
+  const override = resolveProviderCommandOverride(options, providerName, registryProviderName);
   const observerDeps = (options.orchestratorConfig?.enableTracing
     ? observer.observerBridge.observerDeps
     : observer.observerBridge.disabledObserverDeps) as never;
@@ -476,7 +531,7 @@ function createCachedCliLlmClient(
     replayRecorder: (record) => observer.observerBridge.recordReplay(record),
     ...(options.providers ? { providers: options.providers } : {}),
     registry: stack.registry,
-    ...(options.providersConfig ? { providerOverrides: options.providersConfig } : {}),
+    providerOverrides: providerCommandOverrides(options),
   });
 
   new AdapterLlmClient(
@@ -509,7 +564,16 @@ function createLlmDeps(
   observer: ObserverDepsBundle,
   stack: ExecutionStackDeps,
 ): LlmDeps {
-  const defaultLlm = createCachedCliLlmClient(
+  const fallbackLlm = createCachedCliLlmClient(
+    options,
+    config.defaultProvider,
+    config.defaultModel,
+    artifacts,
+    observer,
+    stack,
+    'default',
+  );
+  const executionLlm = createCachedCliLlmClient(
     options,
     config.provider,
     config.model,
@@ -520,14 +584,11 @@ function createLlmDeps(
   );
 
   const byOperation = new Map<string, CachedLlmLike>();
-  const defaultTarget = options.runConfig?.llmConfig?.default;
-  const operationBaseProvider = defaultTarget?.provider ?? options.runConfig?.provider ?? config.provider;
-  const operationBaseModel = defaultTarget?.model !== undefined
-    ? defaultTarget.model
-    : defaultTarget?.provider !== undefined && defaultTarget.provider !== options.runConfig?.provider
-      ? undefined
-      : options.runConfig?.model ?? config.model;
+  byOperation.set('cli-session', executionLlm.client);
+  const operationBaseProvider = config.defaultProvider;
+  const operationBaseModel = config.defaultModel;
   for (const [operation, override] of Object.entries(config.llmOverrides ?? {})) {
+    if (operation === 'cli-session' || !ROUTABLE_CLI_LLM_OPERATIONS.has(operation)) continue;
     const operationProvider = override.provider ?? operationBaseProvider;
     const operationModel = override.model ?? (operationProvider === operationBaseProvider ? operationBaseModel : undefined);
     byOperation.set(operation, createCachedCliLlmClient(
@@ -542,10 +603,8 @@ function createLlmDeps(
   }
 
   return {
-    cliLlmAdapter: defaultLlm.adapter,
-    cachedLlm: byOperation.size > 0
-      ? new OperationRoutingLlmClient(defaultLlm.client, byOperation)
-      : defaultLlm.client,
+    cliLlmAdapter: executionLlm.adapter,
+    cachedLlm: new OperationRoutingLlmClient(fallbackLlm.client, byOperation),
   };
 }
 
@@ -757,9 +816,10 @@ function createCliExecutorDeps(
     ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective, observer.logger)
     : undefined;
 
-  const override = options.providersConfig?.[config.provider];
+  const executionProviderName = resolveCliRegistryName(options, config.provider);
+  const override = providerOverrideFor(options, config.provider);
   const providerCommands = Object.fromEntries(
-    Object.entries(options.providersConfig ?? {})
+    Object.entries(providerCommandOverrides(options))
       .filter(([, providerOverride]) => typeof providerOverride.command === 'string' && providerOverride.command.length > 0)
       .map(([providerName, providerOverride]) => [providerName, providerOverride.command as string]),
   );
@@ -774,7 +834,7 @@ function createCliExecutorDeps(
     commitMessageFn,
     observer.logger,
     {
-      provider: config.provider,
+      provider: executionProviderName,
       planName: artifacts.planName,
       sessionStore: stack.chunkSessionStore,
       snapshotStore: stack.chunkSessionSnapshotStore,

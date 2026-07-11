@@ -125,6 +125,10 @@ export class GitBranchIsolator {
     return `${this.config.branchPrefix}${chunkId}`;
   }
 
+  private isDirectCommitMode(): boolean {
+    return this.config.directCommit === true;
+  }
+
   /**
    * Safe checkout: try normal checkout first. On failure, parse the error
    * to identify conflicting files. If ALL are expendable (.build/ artifacts),
@@ -151,6 +155,10 @@ export class GitBranchIsolator {
 
   isolate(chunkId: string): void {
     assertSafeId(chunkId);
+    if (this.isDirectCommitMode()) {
+      this.ensureBranch(this.config.baseBranch);
+      return;
+    }
     const branch = this.branchName(chunkId);
     this.ensureBranch(this.config.baseBranch);
     const exists = this.git(['branch', '--list', branch]);
@@ -255,6 +263,10 @@ export class GitBranchIsolator {
 
   merge(chunkId: string, commitMessage?: string): MergeResult {
     assertSafeId(chunkId);
+    if (this.isDirectCommitMode()) {
+      this.safeCheckout(this.config.baseBranch);
+      return { merged: false, commits: 0 };
+    }
     const branch = this.branchName(chunkId);
     const count = parseInt(
       this.git(['rev-list', '--count', `${this.config.baseBranch}..${branch}`]),
@@ -332,6 +344,9 @@ export class GitBranchIsolator {
 
   getDiffStat(chunkId: string): string {
     assertSafeId(chunkId);
+    if (this.isDirectCommitMode()) {
+      return this.git(['diff', '--stat', 'HEAD~1..HEAD']);
+    }
     const branch = this.branchName(chunkId);
     return this.git(['diff', '--stat', `${this.config.baseBranch}..${branch}`]);
   }
