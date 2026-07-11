@@ -262,6 +262,75 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('keeps scanning comments after postfix non-null and increment divisions', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const content = [
+      `const ratio = value! / denominator; // ${pendingMarker}: normalize`,
+      `const incremented = i++ / denominator; // ${trackedMarker}: normalize`,
+      `const decremented = i-- / denominator; // ${hackMarker}: normalize`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('3 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker),
+      ),
+    ).toBe(true);
+  });
+
+  it('skips regex literals used as statement bodies after control conditions', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = [
+      `if (ok) /[/* ${pendingMarker}: regex data */]/.test(value);`,
+      `while (ok) /[/* ${pendingMarker}: regex data */]/.test(value);`,
+      `for (const value of values) /[/* ${pendingMarker}: regex data */]/.test(value);`,
+      `const ratio = total() / divisor; /* ${trackedMarker}: real block marker */`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker),
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores block-comment-shaped markers in JSX text but not JSX comments', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const content = [
+      `<p>/* ${pendingMarker}: shown to users */</p>`,
+      `<p>prefix /* ${pendingMarker}: also shown */ suffix</p>`,
+      `<p>{/* ${trackedMarker}: real JSX comment */}</p>`,
+      `/* ${hackMarker}: real block marker */`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('2 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));

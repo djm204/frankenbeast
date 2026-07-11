@@ -125,9 +125,70 @@ function previousSignificantToken(content: string, index: number): string {
   return content.slice(cursor + 1, end);
 }
 
+function isOperandEndingCharacter(character: string): boolean {
+  return /[$\w)\]]/.test(character);
+}
+
+function isPostfixOperatorBefore(content: string, index: number): boolean {
+  const previousIndex = previousSignificantIndex(content, index);
+  const previous = previousIndex >= 0 ? (content[previousIndex] ?? '') : '';
+
+  if (previous === '!') {
+    const operandIndex = previousSignificantIndex(content, previousIndex);
+    const operand = operandIndex >= 0 ? (content[operandIndex] ?? '') : '';
+    return isOperandEndingCharacter(operand);
+  }
+
+  if (
+    (previous === '+' || previous === '-') &&
+    content[previousIndex - 1] === previous
+  ) {
+    const operandIndex = previousSignificantIndex(content, previousIndex - 1);
+    const operand = operandIndex >= 0 ? (content[operandIndex] ?? '') : '';
+    return isOperandEndingCharacter(operand);
+  }
+
+  return false;
+}
+
+function findMatchingOpeningParen(content: string, closeIndex: number): number {
+  let depth = 0;
+  for (let cursor = closeIndex; cursor >= 0; cursor -= 1) {
+    const current = content[cursor];
+    if (current === ')') {
+      depth += 1;
+    } else if (current === '(') {
+      depth -= 1;
+      if (depth === 0) {
+        return cursor;
+      }
+    }
+  }
+  return -1;
+}
+
+function followsControlCondition(content: string, index: number): boolean {
+  const previousIndex = previousSignificantIndex(content, index);
+  if (content[previousIndex] !== ')') {
+    return false;
+  }
+
+  const openIndex = findMatchingOpeningParen(content, previousIndex);
+  if (openIndex === -1) {
+    return false;
+  }
+
+  return ['if', 'while', 'for', 'with'].includes(
+    previousSignificantToken(content, openIndex),
+  );
+}
+
 function canStartRegexLiteral(content: string, index: number): boolean {
   const previous = previousSignificantCharacter(content, index);
   const previousToken = previousSignificantToken(content, index);
+  if (isPostfixOperatorBefore(content, index)) {
+    return false;
+  }
   return (
     [
       'return',
@@ -143,6 +204,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
       'in',
       'default',
     ].includes(previousToken) ||
+    followsControlCondition(content, index) ||
     previous === '' ||
     '([{=,:;!&|?+-*~^>'.includes(previous)
   );
@@ -202,6 +264,41 @@ function collectBlockCommentLabels(
     .replace(/^\/\*/, '')
     .replace(/\*\/$/, '');
   return [extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment), commentEnd];
+}
+
+function isJsxTextBlockComment(content: string, start: number, end: number): boolean {
+  const lineStart = content.lastIndexOf('\n', start) + 1;
+  const nextLineBreak = content.indexOf('\n', end);
+  const lineEnd = nextLineBreak === -1 ? content.length : nextLineBreak;
+  const before = content.slice(lineStart, start);
+  const after = content.slice(end, lineEnd);
+  const previousNonWhitespace = before.trimEnd().at(-1) ?? '';
+
+  if (previousNonWhitespace === '{') {
+    return false;
+  }
+
+  const lastOpenBrace = before.lastIndexOf('{');
+  const lastCloseBrace = before.lastIndexOf('}');
+  if (lastOpenBrace > lastCloseBrace) {
+    return false;
+  }
+
+  const lastTagEnd = before.lastIndexOf('>');
+  const lastTagStart = before.lastIndexOf('<');
+  const nextTagStart = after.indexOf('<');
+
+  if (lastTagEnd === -1 || lastTagEnd <= lastTagStart || nextTagStart === -1) {
+    return false;
+  }
+
+  const openingTagStart = before.lastIndexOf('<', lastTagEnd);
+  if (openingTagStart === -1) {
+    return false;
+  }
+
+  const openingTag = before.slice(openingTagStart, lastTagEnd + 1).trim();
+  return /^<[A-Za-z][^>]*>$/.test(openingTag) && !/\/\s*>$/.test(openingTag);
 }
 
 function collectTemplateLiteralLabels(
@@ -311,7 +408,9 @@ function collectCodeLabels(
         content,
         index,
       );
-      labels.push(...commentLabels);
+      if (!isJsxTextBlockComment(content, index, commentEnd)) {
+        labels.push(...commentLabels);
+      }
       index = commentEnd;
       continue;
     }
