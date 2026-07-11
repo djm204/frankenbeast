@@ -151,6 +151,66 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('flags recovered failed-test findings as skill candidate signals', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Failed test tests/unit/handoff.test.ts: expected PR body to include verification evidence',
+            severity: 'critical',
+            location: 'tests/unit/handoff.test.ts',
+            suggestion: 'Run npm run test --workspace @franken/critique before handoff.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'failed-test-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual({
+      detector: 'failed-test-to-skill-candidate',
+      candidate: true,
+      sourceIteration: 0,
+      evaluatorName: 'reviewer',
+      matchedSignals: ['assertion failure', 'failed-test wording', 'test command', 'test file path'],
+      sourceFindingMessages: [
+        'Failed test tests/unit/handoff.test.ts: expected PR body to include verification evidence',
+      ],
+      operatorGuidance:
+        'This recovered critique failure looks like a concrete failed test. PM handoffs should consider creating or updating a skill only after the failure recurs or the regression exposes a reusable workflow gap; keep one-off product bugs in the issue/PR instead of promoting them as durable skill guidance.',
+    });
+  });
+
+  it('does not flag generic reviewer findings as failed-test skill candidates', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'PR summary omits the issue link',
+            severity: 'warning',
+            suggestion: 'Add the issue URL to the PR description.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'generic-review-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toBeUndefined();
+  });
+
   it('marks reviewer-feedback lessons with missing suggestions for PM follow-up', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);

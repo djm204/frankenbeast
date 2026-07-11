@@ -103,6 +103,17 @@ Recorded critique lessons also carry a `reviewerFeedback` object so worker retro
 
 Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create reviewer-feedback captures. This keeps broken tooling noise from being promoted as durable agent-learning guidance.
 
+## Failed-test-to-skill candidate detector
+
+When a recovered critique finding looks like a concrete failed test, `LessonRecorder` attaches `failedTestSkillCandidate` to the recorded lesson. The detector checks the finding message, location, and suggestion for deterministic signals such as failed-test wording, assertion failures, test file paths, test commands, and common test-runner failure output. The structured object includes:
+
+- `detector`: the stable value `failed-test-to-skill-candidate` for PM/liveness filters.
+- `matchedSignals`: the exact detector signals that matched.
+- `sourceFindingMessages`: original finding messages to review before creating or updating a skill.
+- `operatorGuidance`: guidance to promote the finding to a skill only when the failure recurs or exposes a reusable workflow gap.
+
+Generic reviewer findings and infrastructure-only evaluator exceptions do not receive `failedTestSkillCandidate`, so dashboards can distinguish reusable skill candidates from ordinary one-off PR fixes.
+
 ## Lesson experiment sandbox
 
 New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.

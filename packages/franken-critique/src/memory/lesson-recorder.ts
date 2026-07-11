@@ -1,4 +1,9 @@
-import type { MemoryPort, CritiqueLesson, ReviewerFeedbackLessonCapture } from '../types/contracts.js';
+import type {
+  MemoryPort,
+  CritiqueLesson,
+  ReviewerFeedbackLessonCapture,
+  FailedTestSkillCandidate,
+} from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
@@ -12,6 +17,18 @@ const LESSON_EXPERIMENT_SANDBOX_REASON =
 
 const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
   'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
+
+const FAILED_TEST_SKILL_CANDIDATE_GUIDANCE =
+  'This recovered critique failure looks like a concrete failed test. PM handoffs should consider creating or updating a skill only after the failure recurs or the regression exposes a reusable workflow gap; keep one-off product bugs in the issue/PR instead of promoting them as durable skill guidance.';
+
+const FAILED_TEST_SIGNAL_PATTERNS: readonly { readonly label: string; readonly pattern: RegExp }[] = [
+  { label: 'failed-test wording', pattern: /\b(?:failed|failing|broken)\s+tests?\b/i },
+  { label: 'test-failure wording', pattern: /\btest\s+fail(?:ure|ed|ing)?\b/i },
+  { label: 'assertion failure', pattern: /\b(?:assertionerror|expected\s+.+\s+(?:to|received|got))\b/i },
+  { label: 'test file path', pattern: /(?:^|[/\s])(?:tests?\/[^\s]+|[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?)\b/i },
+  { label: 'test command', pattern: /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b/i },
+  { label: 'test runner output', pattern: /\b(?:vitest|jest|mocha|playwright)\b.*\b(?:fail|failed|failing)\b/i },
+];
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -62,6 +79,12 @@ export class LessonRecorder {
         const lessonId = createLessonId(taskId, evalResult.evaluatorName, failingIteration.index);
         const findingMessages = critiqueFindings.map((f) => f.message);
 
+        const failedTestSkillCandidate = createFailedTestSkillCandidate(
+          failingIteration.index,
+          evalResult.evaluatorName,
+          critiqueFindings,
+        );
+
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
           failureDescription: findingMessages.join('; '),
@@ -98,12 +121,57 @@ export class LessonRecorder {
             evalResult.evaluatorName,
             critiqueFindings,
           ),
+          ...(failedTestSkillCandidate ? { failedTestSkillCandidate } : {}),
         });
       }
     }
 
     return lessons;
   }
+}
+
+function createFailedTestSkillCandidate(
+  sourceIteration: number,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): FailedTestSkillCandidate | undefined {
+  const matched = new Set<string>();
+  const sourceFindingMessages: string[] = [];
+
+  for (const finding of findings) {
+    const haystack = [finding.message, finding.location, finding.suggestion]
+      .filter((value): value is string => Boolean(value))
+      .join('\n');
+    const matchingSignals = FAILED_TEST_SIGNAL_PATTERNS
+      .filter((signal) => signal.pattern.test(haystack))
+      .map((signal) => signal.label);
+
+    if (matchingSignals.length > 0) {
+      sourceFindingMessages.push(finding.message);
+      for (const signal of matchingSignals) {
+        matched.add(signal);
+      }
+    }
+  }
+
+  if (matched.size === 0) {
+    return undefined;
+  }
+
+  return {
+    detector: 'failed-test-to-skill-candidate',
+    candidate: true,
+    sourceIteration,
+    evaluatorName,
+    matchedSignals: [...matched].sort(),
+    sourceFindingMessages,
+    operatorGuidance: FAILED_TEST_SKILL_CANDIDATE_GUIDANCE,
+  };
 }
 
 function createReviewerFeedbackCapture(

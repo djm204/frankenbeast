@@ -97,6 +97,24 @@ export interface ReviewerFeedbackLessonCapture {
   readonly missingSuggestionGuidance?: string;
 }
 
+/** Candidate signal that a recovered failed test may deserve durable skill guidance. */
+export interface FailedTestSkillCandidate {
+  /** Stable detector identifier for PM/liveness tooling. */
+  readonly detector: 'failed-test-to-skill-candidate';
+  /** Whether the failed critique finding looks like a concrete test failure. */
+  readonly candidate: true;
+  /** Iteration where the failed-test signal was observed. */
+  readonly sourceIteration: number;
+  /** Evaluator/reviewer that emitted the failed-test signal. */
+  readonly evaluatorName: string;
+  /** Matching signals that caused the lesson to be flagged. */
+  readonly matchedSignals: readonly string[];
+  /** Original finding messages that should be reviewed before creating or updating a skill. */
+  readonly sourceFindingMessages: readonly string[];
+  /** Deterministic operator guidance for PM handoffs and worker retrospectives. */
+  readonly operatorGuidance: string;
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -110,6 +128,8 @@ export interface CritiqueLesson {
   readonly experimentSandbox?: LessonExperimentSandbox;
   /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
   readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
+  /** Present when a recovered failed test is a candidate for future skill creation/update. */
+  readonly failedTestSkillCandidate?: FailedTestSkillCandidate;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */
