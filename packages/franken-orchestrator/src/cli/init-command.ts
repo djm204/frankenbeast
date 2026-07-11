@@ -96,7 +96,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     options.print(
-      `Repaired init config at ${options.paths.configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
+      `Repaired init config at ${configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
     );
     return;
   }
@@ -110,6 +110,6 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
   });
 
   options.print(
-    `Saved init config to ${options.paths.configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
+    `Saved init config to ${configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
   );
 }

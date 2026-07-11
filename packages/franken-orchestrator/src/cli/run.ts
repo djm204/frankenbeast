@@ -306,10 +306,9 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
   return loadConfig(args, defaultConfigPath);
 }
 
-function canInitHandleConfigSyntaxError(args: CliArgs, error: unknown): boolean {
+function canInitHandleConfigLoadError(args: CliArgs): boolean {
   return args.subcommand === 'init'
-    && (args.initVerify || args.initRepair || args.initNonInteractive)
-    && error instanceof SyntaxError;
+    && (args.initVerify || args.initRepair || args.initNonInteractive);
 }
 
 export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
@@ -835,7 +834,7 @@ export async function main(): Promise<void> {
   try {
     config = await resolveConfig(args, paths.configFile);
   } catch (error) {
-    if (!canInitHandleConfigSyntaxError(args, error)) {
+    if (!canInitHandleConfigLoadError(args)) {
       throw error;
     }
     config = defaultConfig();
