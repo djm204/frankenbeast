@@ -8,4 +8,7 @@
 - [x] Run targeted verification.
   - `npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts` passed (10 tests).
   - `npm run build --workspace @franken/types && npm run typecheck --workspace @franken/critique` passed after installing workspace dependencies because the isolated worktree had no node_modules.
-- [ ] Commit, push, open PR, and request Codex review.
+- [x] Commit, push, open PR, and request Codex review.
+  - Commit: `290400e7 feat(learning): add lesson test traceability`.
+  - PR: https://github.com/djm204/frankenbeast/pull/1872.
+  - Posted `@codex review` on the PR.
