@@ -49,6 +49,32 @@ function skipQuotedLiteral(content: string, start: number): number {
   return index;
 }
 
+function findLineCommentStart(
+  content: string,
+  lineStart: number,
+  lineEnd: number,
+): number {
+  let index = lineStart;
+
+  while (index < lineEnd) {
+    const current = content[index];
+    const next = content[index + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+
+    if (current === '/' && next === '/') {
+      return index;
+    }
+
+    index += 1;
+  }
+
+  return -1;
+}
+
 function previousSignificantIndex(content: string, index: number): number {
   let cursor = index - 1;
 
@@ -71,10 +97,9 @@ function previousSignificantIndex(content: string, index: number): number {
     }
 
     const lineStart = content.lastIndexOf('\n', cursor) + 1;
-    const linePrefix = content.slice(lineStart, cursor + 1);
-    const lineCommentStart = linePrefix.indexOf('//');
+    const lineCommentStart = findLineCommentStart(content, lineStart, cursor + 1);
     if (lineCommentStart !== -1) {
-      cursor = lineStart + lineCommentStart - 1;
+      cursor = lineCommentStart - 1;
       continue;
     }
 
@@ -100,20 +125,9 @@ function previousSignificantToken(content: string, index: number): string {
   return content.slice(cursor + 1, end);
 }
 
-function nextSignificantCharacter(content: string, index: number): string {
-  for (let cursor = index; cursor < content.length; cursor += 1) {
-    const current = content[cursor] ?? '';
-    if (!/\s/.test(current)) {
-      return current;
-    }
-  }
-  return '';
-}
-
 function canStartRegexLiteral(content: string, index: number): boolean {
   const previous = previousSignificantCharacter(content, index);
   const previousToken = previousSignificantToken(content, index);
-  const next = nextSignificantCharacter(content, index + 1);
   return (
     [
       'return',
@@ -130,8 +144,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
       'default',
     ].includes(previousToken) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^>'.includes(previous) ||
-    (previous === ')' && next === '[')
+    '([{=,:;!&|?+-*~^>'.includes(previous)
   );
 }
 
@@ -256,11 +269,7 @@ function collectCodeLabels(
       return [labels, index + 1];
     }
 
-    if (
-      current === "'" &&
-      /[$\w]/.test(content[index - 1] ?? '') &&
-      /[$\w]/.test(content[index + 1] ?? '')
-    ) {
+    if (current === "'" && /[$\w]/.test(content[index - 1] ?? '')) {
       index += 1;
       continue;
     }

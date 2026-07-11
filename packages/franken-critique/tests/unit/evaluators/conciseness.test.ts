@@ -220,6 +220,48 @@ const x = 1;
     ).toBe(true);
   });
 
+
+  it('keeps scanning array literals after division expressions', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const content = `const ratio = total() / [/* ${pendingMarker}: remove divisor */ divisor][0];`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not treat string slashes as line-comment trivia before regexes', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const content = `const s = "abc // def"; const re = /[/* ${pendingMarker}: regex data */]/;`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some((f) => f.message.includes('unresolved marker comment')),
+    ).toBe(false);
+  });
+
+  it('detects line-comment markers after plural possessive prose apostrophes', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const content = `Users' // ${pendingMarker}: migrate groups`;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));
