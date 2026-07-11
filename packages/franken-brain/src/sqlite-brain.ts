@@ -42,6 +42,23 @@ function cloneStoredWorkingMemoryValue(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value)) as unknown;
 }
 
+function stringifyWorkingMemoryValue(key: string, value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized !== undefined) {
+      return serialized;
+    }
+  } catch (error) {
+    throw new WorkingMemoryLimitError(
+      `Working memory value for "${key}" is not JSON-serializable and could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  throw new WorkingMemoryLimitError(
+    `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
+  );
+}
+
 class SqliteWorkingMemory implements IWorkingMemory {
   private store = new Map<string, unknown>();
   private sizes = new Map<string, number>();
@@ -219,12 +236,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     key: string,
     value: unknown,
   ): { normalized: unknown; serialized: string; size: number } {
-    const serialized = JSON.stringify(value);
-    if (serialized === undefined) {
-      throw new WorkingMemoryLimitError(
-        `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
-      );
-    }
+    const serialized = stringifyWorkingMemoryValue(key, value);
     const valueBytes = Buffer.byteLength(serialized, 'utf8');
     if (valueBytes > this.limits.maxValueBytes) {
       throw new WorkingMemoryLimitError(
