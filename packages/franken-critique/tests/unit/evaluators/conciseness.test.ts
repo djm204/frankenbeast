@@ -514,6 +514,34 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('handles JSX and TypeScript angle edge cases from Codex follow-up findings', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const xxxMarker = ['X', 'XX'].join('');
+    const content = [
+      `const widget = <Widget value={a > b ? /* ${pendingMarker}: compare */ value : fallback} />;`,
+      `const generic = make<Foo /* ${trackedMarker}: type */>();`,
+      `const arrow = <T /* ${hackMarker}: generic */>() => value;`,
+      `const first = <p></p>; /* ${xxxMarker}: statement-level */ const second = <div />;`,
+      `const comparison = a < b /* ${pendingMarker}: compare operands */ > c;`,
+      `<p>/* ${pendingMarker}: shown to users */</p>`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('5 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker) &&
+          f.message.includes(xxxMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));

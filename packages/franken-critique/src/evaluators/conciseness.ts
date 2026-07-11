@@ -386,8 +386,11 @@ function isLikelyTypeArgumentTag(
   start: number,
   end: number,
 ): boolean {
-  const tagText = content.slice(start, end).trim();
-  if (!/^<[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*>$/.test(tagText)) {
+  const tagText = content
+    .slice(start, end)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .trim();
+  if (!/^<\s*[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*\s*>$/.test(tagText)) {
     return false;
   }
 
@@ -396,7 +399,7 @@ function isLikelyTypeArgumentTag(
     cursor -= 1;
   }
   const previous = content[cursor] ?? '';
-  if (!/[$\w)]/.test(previous)) {
+  if (!/[$\w)=]/.test(previous)) {
     return false;
   }
 
@@ -406,6 +409,31 @@ function isLikelyTypeArgumentTag(
   }
 
   return ['(', '.', ';', ','].includes(content[cursor] ?? '');
+}
+
+function isLikelyJsxTagStart(content: string, index: number): boolean {
+  const next = content[index + 1];
+  if (!/[A-Za-z/>]/.test(next ?? '')) {
+    return false;
+  }
+  if (content[index - 1] === '<') {
+    return false;
+  }
+  if (next === '/' || next === '>') {
+    return true;
+  }
+
+  const previousIndex = previousSignificantIndex(content, index);
+  const previous = previousIndex === -1 ? '' : content[previousIndex] ?? '';
+  const previousToken = previousSignificantToken(content, index);
+  if (
+    /[$\w)\]]/.test(previous) &&
+    !['return', 'yield', 'case', 'else', 'do'].includes(previousToken)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function extractMarkerLabels(pattern: RegExp, comment: string): string[] {
@@ -471,6 +499,7 @@ function collectJsxTagExpressionLabels(
 function skipJsxTag(content: string, start: number, limit = content.length): number {
   let index = start + 1;
   let quote = '';
+  let braceDepth = 0;
 
   while (index < limit) {
     const current = content[index];
@@ -485,8 +514,22 @@ function skipJsxTag(content: string, start: number, limit = content.length): num
       index += 1;
       continue;
     }
+    if (braceDepth > 0) {
+      if (current === '{') {
+        braceDepth += 1;
+      } else if (current === '}') {
+        braceDepth -= 1;
+      }
+      index += 1;
+      continue;
+    }
     if (current === '"' || current === "'") {
       quote = current;
+      index += 1;
+      continue;
+    }
+    if (current === '{') {
+      braceDepth = 1;
       index += 1;
       continue;
     }
@@ -524,11 +567,7 @@ function findLastJsxTagBefore(
       index = commentEnd === -1 ? end : commentEnd + 2;
       continue;
     }
-    if (
-      current === '<' &&
-      /[A-Za-z/>]/.test(next ?? '') &&
-      content[index - 1] !== '<'
-    ) {
+    if (current === '<' && isLikelyJsxTagStart(content, index)) {
       const tagEnd = skipJsxTag(content, index, end);
       if (tagEnd !== -1) {
         if (!isLikelyTypeArgumentTag(content, index, tagEnd)) {
@@ -569,11 +608,7 @@ function findNextJsxTagAfter(content: string, start: number): string | undefined
       index = commentEnd === -1 ? content.length : commentEnd + 2;
       continue;
     }
-    if (
-      current === '<' &&
-      /[A-Za-z/>]/.test(next ?? '') &&
-      content[index - 1] !== '<'
-    ) {
+    if (current === '<' && isLikelyJsxTagStart(content, index)) {
       const tagEnd = skipJsxTag(content, index);
       if (tagEnd !== -1) {
         if (isLikelyTypeArgumentTag(content, index, tagEnd)) {
@@ -616,11 +651,7 @@ function hasOpenJsxAncestorBefore(content: string, end: number): boolean {
       index = commentEnd === -1 ? end : commentEnd + 2;
       continue;
     }
-    if (
-      current === '<' &&
-      /[A-Za-z/>]/.test(next ?? '') &&
-      content[index - 1] !== '<'
-    ) {
+    if (current === '<' && isLikelyJsxTagStart(content, index)) {
       const tagEnd = skipJsxTag(content, index, end);
       if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
         const tag = content.slice(index, tagEnd).trim();
@@ -687,7 +718,7 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
   if (isSelfClosingTag || isClosingTag) {
     return (
       nextTag.startsWith('</') ||
-      hasOpenJsxAncestorBefore(content, previousTag.start)
+      hasOpenJsxAncestorBefore(content, previousTag.end)
     );
   }
 
@@ -813,11 +844,7 @@ function collectCodeLabels(
       continue;
     }
 
-    if (
-      current === '<' &&
-      /[A-Za-z/>]/.test(next ?? '') &&
-      content[index - 1] !== '<'
-    ) {
+    if (current === '<' && isLikelyJsxTagStart(content, index)) {
       const tagEnd = skipJsxTag(content, index);
       if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
         labels.push(...collectJsxTagExpressionLabels(content, index, tagEnd));
