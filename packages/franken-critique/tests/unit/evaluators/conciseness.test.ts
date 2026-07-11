@@ -445,6 +445,35 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('handles edge cases from current Codex scanner findings', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const xxxMarker = ['X', 'XX'].join('');
+    const content = [
+      `const open = "<p>"; /* ${pendingMarker}: real block marker */ const close = "</p>";`,
+      `/**** ${trackedMarker}: banner block marker ****/`,
+      `<p>/* ${pendingMarker}: shown to users */<span /></p>`,
+      `const chars = [.../[/* ${pendingMarker}: regex data */]/.source];`,
+      `const compact = value</[/* ${pendingMarker}: regex data */]/.source;`,
+      `const ratio = /* // docs */ a / total; // ${hackMarker}: real line marker`,
+      `/* ${xxxMarker}: final real block marker */`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('4 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker) &&
+          f.message.includes(xxxMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));

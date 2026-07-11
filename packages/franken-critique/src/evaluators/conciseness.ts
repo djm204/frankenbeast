@@ -18,7 +18,7 @@ const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   'gi',
 );
 const UNRESOLVED_MARKER_PATTERN = new RegExp(
-  `^\\s*(?:\\*|//)?\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})(?:\\b|(?=\\())`,
+  `^\\s*(?:\\*+|//)?\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})(?:\\b|(?=\\())`,
   'gim',
 );
 const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
@@ -62,6 +62,12 @@ function findLineCommentStart(
 
     if (current === '"' || current === "'" || current === '`') {
       index = skipQuotedLiteral(content, index);
+      continue;
+    }
+
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', index + 2);
+      index = commentEnd === -1 ? lineEnd : commentEnd + 2;
       continue;
     }
 
@@ -132,7 +138,19 @@ function previousTokenIsPropertyName(content: string, index: number): boolean {
     cursor -= 1;
   }
 
-  return content[cursor] === '.';
+  return (
+    content[cursor] === '.' &&
+    !(content[cursor - 1] === '.' && content[cursor - 2] === '.')
+  );
+}
+
+function isSpreadOperatorBefore(content: string, index: number): boolean {
+  const previousIndex = previousSignificantIndex(content, index);
+  return (
+    content[previousIndex] === '.' &&
+    content[previousIndex - 1] === '.' &&
+    content[previousIndex - 2] === '.'
+  );
 }
 
 function isOperandEndingCharacter(character: string): boolean {
@@ -234,6 +252,9 @@ function canStartRegexLiteralWhileMatchingParens(
   if (previousTokenIsPropertyName(content, index)) {
     return false;
   }
+  if (isSpreadOperatorBefore(content, index)) {
+    return true;
+  }
   return (
     [
       'return',
@@ -264,7 +285,14 @@ function canStartRegexLiteral(content: string, index: number): boolean {
   if (previousTokenIsPropertyName(content, index)) {
     return false;
   }
-  if (previous === '<' && previousSignificantIndex(content, index) === index - 1) {
+  if (isSpreadOperatorBefore(content, index)) {
+    return true;
+  }
+  if (
+    previous === '<' &&
+    previousSignificantIndex(content, index) === index - 1 &&
+    /[A-Za-z>]/.test(content[index + 1] ?? '')
+  ) {
     return false;
   }
   return (
@@ -349,32 +377,144 @@ function collectBlockCommentLabels(
   return [extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment), commentEnd];
 }
 
+function skipJsxTag(content: string, start: number, limit = content.length): number {
+  let index = start + 1;
+  let quote = '';
+
+  while (index < limit) {
+    const current = content[index];
+    if (quote) {
+      if (current === '\\') {
+        index += 2;
+        continue;
+      }
+      if (current === quote) {
+        quote = '';
+      }
+      index += 1;
+      continue;
+    }
+    if (current === '"' || current === "'") {
+      quote = current;
+      index += 1;
+      continue;
+    }
+    if (current === '>') {
+      return index + 1;
+    }
+    index += 1;
+  }
+
+  return -1;
+}
+
+function findLastJsxTagBefore(
+  content: string,
+  end: number,
+): { start: number; end: number; text: string } | undefined {
+  let index = 0;
+  let lastTag: { start: number; end: number; text: string } | undefined;
+
+  while (index < end) {
+    const current = content[index];
+    const next = content[index + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+    if (current === '/' && next === '/') {
+      const lineEnd = content.indexOf('\n', index + 2);
+      index = lineEnd === -1 ? end : lineEnd + 1;
+      continue;
+    }
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', index + 2);
+      index = commentEnd === -1 ? end : commentEnd + 2;
+      continue;
+    }
+    if (
+      current === '<' &&
+      /[A-Za-z/>]/.test(next ?? '') &&
+      content[index - 1] !== '<'
+    ) {
+      const tagEnd = skipJsxTag(content, index, end);
+      if (tagEnd !== -1) {
+        lastTag = {
+          start: index,
+          end: tagEnd,
+          text: content.slice(index, tagEnd).trim(),
+        };
+        index = tagEnd;
+        continue;
+      }
+    }
+    index += 1;
+  }
+
+  return lastTag;
+}
+
+function findNextJsxTagAfter(content: string, start: number): string | undefined {
+  let index = start;
+
+  while (index < content.length) {
+    const current = content[index];
+    const next = content[index + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+    if (current === '/' && next === '/') {
+      const lineEnd = content.indexOf('\n', index + 2);
+      index = lineEnd === -1 ? content.length : lineEnd + 1;
+      continue;
+    }
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', index + 2);
+      index = commentEnd === -1 ? content.length : commentEnd + 2;
+      continue;
+    }
+    if (
+      current === '<' &&
+      /[A-Za-z/>]/.test(next ?? '') &&
+      content[index - 1] !== '<'
+    ) {
+      const tagEnd = skipJsxTag(content, index);
+      if (tagEnd !== -1) {
+        return content.slice(index, tagEnd).trim();
+      }
+    }
+    index += 1;
+  }
+
+  return undefined;
+}
+
 function isJsxTextBlockComment(content: string, start: number, end: number): boolean {
   const before = content.slice(0, start);
-  const after = content.slice(end);
   const previousNonWhitespace = before.trimEnd().at(-1) ?? '';
 
   if (previousNonWhitespace === '{') {
     return false;
   }
 
-  const lastTagEnd = before.lastIndexOf('>');
-  const lastTagStart = before.lastIndexOf('<', lastTagEnd);
-  const nextTagStart = after.indexOf('<');
+  const previousTag = findLastJsxTagBefore(content, start);
+  const nextTag = findNextJsxTagAfter(content, end);
 
-  if (lastTagEnd === -1 || lastTagStart === -1 || nextTagStart === -1) {
+  if (!previousTag || !nextTag) {
     return false;
   }
 
-  const textSinceLastTag = before.slice(lastTagEnd + 1);
+  const textSinceLastTag = before.slice(previousTag.end);
   const lastOpenBrace = textSinceLastTag.lastIndexOf('{');
   const lastCloseBrace = textSinceLastTag.lastIndexOf('}');
   if (lastOpenBrace > lastCloseBrace) {
     return false;
   }
 
-  const openingTag = before.slice(lastTagStart, lastTagEnd + 1).trim();
-  const nextTag = after.slice(nextTagStart).trimStart();
+  const openingTag = previousTag.text;
   if (openingTag === '<>') {
     return nextTag.startsWith('</>');
   }
@@ -382,7 +522,7 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
   return (
     new RegExp('^<[A-Za-z][^>]*>$').test(openingTag) &&
     !new RegExp('/\\s*>$').test(openingTag) &&
-    new RegExp('^</[A-Za-z]').test(nextTag)
+    new RegExp('^<[/A-Za-z]').test(nextTag)
   );
 }
 
