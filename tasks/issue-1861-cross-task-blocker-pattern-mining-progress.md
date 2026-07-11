@@ -6,9 +6,12 @@
 - [x] Add deterministic positive and edge-case tests.
 - [x] Add operator-facing guidance for interpreting structured output.
 - [x] Run targeted verification.
-- [ ] Commit, push, open PR, and request Codex review.
+- [x] Commit, push, open PR, and request Codex review.
+
+PR: https://github.com/djm204/frankenbeast/pull/1875
 
 Verification notes:
 - `npm run test --workspace @franken/critique -- tests/unit/memory/blocker-pattern-miner.test.ts` passed (4 tests).
 - `npx tsc -p .tmp/issue-1861-tsconfig.json --noEmit` passed for the new miner with a local ignored `@franken/types` stub.
+- `git diff --check` passed.
 - Package typecheck remains blocked by existing workspace package resolution: `npm run typecheck --workspace @franken/critique` cannot resolve `@franken/types` in this isolated install.
