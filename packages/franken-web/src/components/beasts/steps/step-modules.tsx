@@ -108,16 +108,47 @@ const labelClass = 'block text-xs font-medium text-beast-muted mb-1.5';
 
 function boundedIntegerChangeHandler(
   max: number,
-  update: (value: number) => void,
+  currentValue: unknown,
+  update: (value: number | undefined) => void,
 ): ChangeEventHandler<HTMLInputElement> {
   return (event) => {
     const rawValue = event.target.value;
+    if (rawValue === '') {
+      if (currentValue === undefined) update(undefined);
+      return;
+    }
+
     if (!/^\d+$/.test(rawValue)) return;
 
     const parsed = Number(rawValue);
-    if (!Number.isInteger(parsed) || parsed > max) return;
+    if (!Number.isInteger(parsed)) return;
+    if (parsed > max) {
+      if (currentValue === undefined) update(max);
+      return;
+    }
 
     update(parsed);
+  };
+}
+
+function clampedIntegerBlurHandler(
+  min: number,
+  max: number,
+  update: (value: number | undefined) => void,
+): ChangeEventHandler<HTMLInputElement> {
+  return (event) => {
+    const rawValue = event.target.value;
+    if (rawValue === '') {
+      update(undefined);
+      return;
+    }
+
+    if (!/^\d+$/.test(rawValue)) return;
+
+    const parsed = Number(rawValue);
+    if (!Number.isInteger(parsed)) return;
+
+    update(Math.min(max, Math.max(min, parsed)));
   };
 }
 
@@ -199,7 +230,8 @@ function renderModuleConfig(
               min={1}
               max={50}
               value={(config.maxDagDepth as number) ?? 10}
-              onChange={boundedIntegerChangeHandler(50, (value) => update('maxDagDepth', value))}
+              onChange={boundedIntegerChangeHandler(50, config.maxDagDepth, (value) => update('maxDagDepth', value))}
+              onBlur={clampedIntegerBlurHandler(1, 50, (value) => update('maxDagDepth', value))}
               className={inputClass}
             />
           </div>
@@ -211,7 +243,8 @@ function renderModuleConfig(
               min={1}
               max={20}
               value={(config.parallelTaskLimit as number) ?? 4}
-              onChange={boundedIntegerChangeHandler(20, (value) => update('parallelTaskLimit', value))}
+              onChange={boundedIntegerChangeHandler(20, config.parallelTaskLimit, (value) => update('parallelTaskLimit', value))}
+              onBlur={clampedIntegerBlurHandler(1, 20, (value) => update('parallelTaskLimit', value))}
               className={inputClass}
             />
           </div>
@@ -229,7 +262,8 @@ function renderModuleConfig(
               min={1}
               max={10}
               value={(config.maxIterations as number) ?? 3}
-              onChange={boundedIntegerChangeHandler(10, (value) => update('maxIterations', value))}
+              onChange={boundedIntegerChangeHandler(10, config.maxIterations, (value) => update('maxIterations', value))}
+              onBlur={clampedIntegerBlurHandler(1, 10, (value) => update('maxIterations', value))}
               className={inputClass}
             />
           </div>
@@ -290,7 +324,8 @@ function renderModuleConfig(
               min={10}
               max={600}
               value={(config.reflectionInterval as number) ?? 60}
-              onChange={boundedIntegerChangeHandler(600, (value) => update('reflectionInterval', value))}
+              onChange={boundedIntegerChangeHandler(600, config.reflectionInterval, (value) => update('reflectionInterval', value))}
+              onBlur={clampedIntegerBlurHandler(10, 600, (value) => update('reflectionInterval', value))}
               className={inputClass}
             />
           </div>
