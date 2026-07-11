@@ -14,16 +14,15 @@ export default defineConfig({
     setupFiles: [fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url))],
     // Default: unit tests only.
     // INTEGRATION=true → integration tests only.
-    // EVAL=true        → eval (LLM-judge) tests only.
+    // EVAL=true        → observer evaluation tests only.
     include: isIntegration
       ? ['src/**/*.integration.test.ts']
       : isEval
-        ? ['src/**/*.eval.test.ts']
+        ? ['src/evals/**/*.test.ts', 'src/**/*.eval.test.ts']
         : ['src/**/*.test.ts'],
     exclude: isIntegration || isEval
       ? []
       : ['src/**/*.integration.test.ts', 'src/**/*.eval.test.ts'],
     reporters: ['verbose'],
-    passWithNoTests: true,
   },
 })

@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { resolveContainedExistingPath, resolveContainedPath } from '@franken/types/path-containment';
 import { contentHashMatches } from '../utils/crypto.js';
 import { hashContent } from './replay-record.js';
@@ -18,9 +19,11 @@ export class ReplayContentStore {
   put(content: string): string {
     const ref = hashContent(content);
     const path = this.blobPath(ref);
-    if (!existsSync(path)) {
-      writeFileSync(path, content, 'utf8');
+    if (existsSync(path) && contentHashMatches(readFileSync(path, 'utf8'), ref)) {
+      return ref;
     }
+
+    this.writeBlobAtomically(ref, content, path);
     return ref;
   }
 
@@ -30,6 +33,19 @@ export class ReplayContentStore {
       throw new Error(`Replay blob hash mismatch for ${ref}`);
     }
     return content;
+  }
+
+  private writeBlobAtomically(ref: string, content: string, finalPath: string): void {
+    const tempName = `.${ref}.${process.pid}.${randomUUID()}.tmp`;
+    const tempPath = resolveContainedPath(this.dir, tempName, 'replayBlobTempPath');
+
+    try {
+      writeFileSync(tempPath, content, 'utf8');
+      renameSync(tempPath, finalPath);
+    } catch (err) {
+      rmSync(tempPath, { force: true });
+      throw err;
+    }
   }
 
   private blobPath(ref: string): string {

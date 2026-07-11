@@ -88,4 +88,103 @@ describe('Observer Server', () => {
     expect(observer.verify).toHaveBeenCalledWith('sess-1');
     expect(verifyResult.content[0]!.text).toContain('verified');
   });
+
+  it('rejects invalid observer log inputs before calling the observer adapter', async () => {
+    const observer = {
+      log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
+      logCost: vi.fn(),
+      cost: vi.fn(),
+      trail: vi.fn(),
+      verify: vi.fn(),
+    };
+    const logTool = createObserverServer({ observer }).tools.find((t) => t.name === 'fbeast_observer_log')!;
+
+    const invalidCases = [
+      { event: '', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: '   ', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '   ' },
+      { event: 'file_edit', metadata: { ok: true }, sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: ['not', 'json'], sessionId: 'sess-1' },
+    ];
+
+    for (const args of invalidCases) {
+      const result = await logTool.handler(args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('Error: fbeast_observer_log');
+      expect(result.content[0]!.text).not.toContain('Logged event');
+    }
+
+    expect(observer.log).not.toHaveBeenCalled();
+
+    const malformedJsonResult = await logTool.handler({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+
+    expect(malformedJsonResult.isError).toBeUndefined();
+    expect(observer.log).toHaveBeenCalledWith({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+  });
+
+  it('rejects invalid cost inputs before calling the observer adapter', async () => {
+    const observer = {
+      log: vi.fn(),
+      logCost: vi.fn().mockResolvedValue({ costUsd: 0, unknownModel: false }),
+      cost: vi.fn(),
+      trail: vi.fn(),
+      verify: vi.fn(),
+    };
+    const logCostTool = createObserverServer({ observer }).tools.find((t) => t.name === 'fbeast_observer_log_cost')!;
+
+    const invalidCases = [
+      { promptTokens: 'NaN', completionTokens: 0 },
+      { promptTokens: 'Infinity', completionTokens: 0 },
+      { promptTokens: -1, completionTokens: 0 },
+      { promptTokens: 1.5, completionTokens: 0 },
+      { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 },
+      { promptTokens: 0, completionTokens: Number.NaN },
+      { promptTokens: 0, completionTokens: Number.POSITIVE_INFINITY },
+      { promptTokens: 0, completionTokens: -1 },
+      { promptTokens: 0, completionTokens: 1.5 },
+      { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { promptTokens: 0, completionTokens: 0, costUsd: Number.NaN },
+      { promptTokens: 0, completionTokens: 0, costUsd: Number.POSITIVE_INFINITY },
+      { promptTokens: 0, completionTokens: 0, costUsd: -0.01 },
+    ];
+
+    for (const args of invalidCases) {
+      const result = await logCostTool.handler({
+        sessionId: 'sess-1',
+        model: 'gpt-4o',
+        ...args,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('Error: fbeast_observer_log_cost');
+    }
+
+    expect(observer.logCost).not.toHaveBeenCalled();
+
+    const zeroResult = await logCostTool.handler({
+      sessionId: 'sess-1',
+      model: 'gpt-4o',
+      promptTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+    });
+
+    expect(zeroResult.isError).toBeUndefined();
+    expect(observer.logCost).toHaveBeenCalledWith({
+      sessionId: 'sess-1',
+      model: 'gpt-4o',
+      promptTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+    });
+  });
 });

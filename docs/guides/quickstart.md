@@ -22,6 +22,8 @@ For CI-style validation without mutating files or installing dependencies, run:
 
 If Corepack is not available yet, install it first with `npm install -g corepack`; the bootstrap script then activates and verifies the root `packageManager` pin.
 
+Dependency locking is centralized at the workspace root: commit updates to the root `package-lock.json` only. Package workspaces under `packages/*` must not carry their own nested `package-lock.json` files; run installs from the repository root so npm records workspace dependency changes in the root lockfile. Standalone example projects under `examples/` may keep their own lockfiles because they are scaffolded outside the monorepo workspace.
+
 Run reproducible dependency audits through the guarded script so the live npm
 binary still matches the root `packageManager` pin before `npm audit` runs:
 
@@ -67,7 +69,7 @@ npm run typecheck
 npm test
 ```
 
-Root scripts currently include `build`, `typecheck`, `test`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts.
+Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. Use `test:ci` for the same root-plus-package test target that CI runs locally; it first builds the shared `@franken/types` workspace so fresh checkouts can resolve workspace package exports, and it intentionally excludes Docker smoke, security, dependency, lint, and live/e2e gates that remain separate CI steps. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
 ## 5. Try the orchestrator CLI
 
@@ -142,4 +144,7 @@ npm run test:root
 
 # Single package via Turbo filter
 npx turbo run test --filter=franken-brain
+
+# Explicit opt-in live benchmark suite (sets FBEAST_LIVE_BENCH_E2E=1)
+npm run test:live:bench
 ```

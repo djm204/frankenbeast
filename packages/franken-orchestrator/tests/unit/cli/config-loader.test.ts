@@ -74,6 +74,23 @@ describe('Config loader', () => {
     expect(config.chat.model).toBe('claude-sonnet-4-6');
   });
 
+  it('ignores a malformed default operator config file for init commands', async () => {
+    const filePath = join(tmpdir(), `beast-default-config-malformed-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, '{"chat": {', 'utf-8');
+
+    const config = await loadConfig(makeArgs({ subcommand: 'init' }), filePath);
+    expect(config.chat.model).toBe('claude-sonnet-4-6');
+  });
+
+  it('throws on a malformed explicit config file for init commands', async () => {
+    const filePath = join(tmpdir(), `beast-explicit-config-malformed-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, '{"chat": {', 'utf-8');
+
+    await expect(loadConfig(makeArgs({ subcommand: 'init', config: filePath }))).rejects.toThrow(SyntaxError);
+  });
+
   it('deep merges nested network config from file', async () => {
     const filePath = join(tmpdir(), `beast-network-config-${Date.now()}.json`);
     tmpFiles.push(filePath);

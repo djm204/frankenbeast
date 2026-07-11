@@ -8,6 +8,10 @@ export interface TokenTotals {
   premiumExecution: number;
 }
 
+function cloneMessage(message: TranscriptMessage): TranscriptMessage {
+  return { ...message };
+}
+
 export class Transcript {
   private _messages: TranscriptMessage[] = [];
 
@@ -17,14 +21,15 @@ export class Transcript {
     modelTier?: string;
     tokens?: number;
   }): void {
-    this._messages.push({
+    const storedMessage: TranscriptMessage = {
       ...msg,
       timestamp: isoNow(),
-    });
+    };
+    this._messages.push(storedMessage);
   }
 
   messages(): readonly TranscriptMessage[] {
-    return [...this._messages];
+    return this._messages.map(cloneMessage);
   }
 
   tokensByTier(): TokenTotals {
@@ -40,7 +45,7 @@ export class Transcript {
 
   static fromMessages(msgs: TranscriptMessage[]): Transcript {
     const t = new Transcript();
-    t._messages = [...msgs];
+    t._messages = msgs.map(cloneMessage);
     return t;
   }
 }

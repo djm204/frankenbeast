@@ -85,6 +85,18 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
   return true;
 }
 
+function validateCostInput(input: ObserverCostInput): void {
+  if (!Number.isFinite(input.promptTokens) || !Number.isSafeInteger(input.promptTokens) || input.promptTokens < 0) {
+    throw new Error('promptTokens must be a finite safe non-negative integer');
+  }
+  if (!Number.isFinite(input.completionTokens) || !Number.isSafeInteger(input.completionTokens) || input.completionTokens < 0) {
+    throw new Error('completionTokens must be a finite safe non-negative integer');
+  }
+  if (input.costUsd !== undefined && (!Number.isFinite(input.costUsd) || input.costUsd < 0)) {
+    throw new Error('costUsd must be a finite non-negative number');
+  }
+}
+
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
   const store = createSqliteStore(dbPath);
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
@@ -131,6 +143,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     },
 
     async logCost(input) {
+      validateCostInput(input);
       const unknownModel = input.costUsd === undefined && !hasDefaultPricing(input.model);
       const costUsd = input.costUsd ?? costCalculator.calculate({
         model: input.model,
@@ -382,7 +395,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number, hash: string, parentHash?: string): void {
-  store.db.prepare('UPDATE audit_trail SET hash = ?, parent_hash = ? WHERE id = ?').run(hash, parentHash ?? null, id);
+  store.setAuditTrailMutationEnabled(true);
+  try {
+    store.db.prepare('UPDATE audit_trail SET hash = ?, parent_hash = ? WHERE id = ?').run(hash, parentHash ?? null, id);
+  } finally {
+    store.setAuditTrailMutationEnabled(false);
+  }
 }
 
 function parseMetadata(metadata: string): unknown {

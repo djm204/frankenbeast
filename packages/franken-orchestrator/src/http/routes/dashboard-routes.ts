@@ -13,7 +13,7 @@ const DASHBOARD_SSE_TICKET_SCOPE = 'dashboard';
 export interface DashboardRouteDeps {
   skillManager: SkillManager;
   getSecurityConfig: () => SecurityConfig;
-  getProviders: () => Array<{ name: string; type: string; available: boolean; failoverOrder: number }>;
+  getProviders: () => Array<{ name: string; type: string; available: boolean; failoverOrder: number; model?: string }>;
   operatorToken?: string | undefined;
   ticketStore?: SseConnectionTicketStore | undefined;
 }
