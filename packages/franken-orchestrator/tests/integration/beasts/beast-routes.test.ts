@@ -198,6 +198,26 @@ describe('beast routes', () => {
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
   });
 
+  it.each([
+    ['/v1/beasts/runs/missing-run-id'],
+    ['/v1/beasts/runs/missing-run-id/events'],
+    ['/v1/beasts/runs/missing-run-id/logs'],
+  ])('returns a structured 404 when reading unknown run path %s', async (path) => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request(path, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'BEAST_RUN_NOT_FOUND',
+        message: "Beast run 'missing-run-id' was not found",
+      },
+    });
+  });
+
   it('dispatches a real container executor through the API and exposes container fields', async () => {
     const { app, operatorToken, fakeContainerSupervisor } = createBeastApp({ realContainer: true });
     const headers = {
@@ -393,6 +413,27 @@ describe('beast routes', () => {
     const answered = await answerResponse.json() as { data: { complete: boolean; session: { currentPrompt: { key: string } } } };
     expect(answered.data.complete).toBe(false);
     expect(answered.data.session.currentPrompt.key).toBe('objective');
+  });
+
+  it('returns a structured 404 when answering an unknown interview session', async () => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request('/v1/beasts/interviews/missing-session/answer', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ answer: 'claude' }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'INTERVIEW_SESSION_NOT_FOUND',
+        message: "Beast interview session 'missing-session' was not found",
+      },
+    });
   });
 
   it('returns 404 and does not persist a run when trackedAgentId is unknown', async () => {

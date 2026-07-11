@@ -59,11 +59,24 @@ function isBlank(value: unknown): boolean {
   return typeof value !== 'string' || value.trim().length === 0;
 }
 
+function hasUnsafeRepoPathSegments(value: string): boolean {
+  if (value.includes('\0')) return true;
+  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:/.test(value)) return true;
+  return value.split(/[\\/]+/).includes('..');
+}
+
+function isBrowserFakePath(value: string): boolean {
+  return /^(?:[a-zA-Z]:)?[\\/]*fakepath[\\/]/i.test(value);
+}
+
 function isRepoRelativeMarkdownDesignDocPath(value: string): boolean {
-  if (value.includes('\0')) return false;
-  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:/.test(value)) return false;
-  if (value.split(/[\\/]+/).includes('..')) return false;
+  if (hasUnsafeRepoPathSegments(value)) return false;
   return /\.(?:md|mdx|markdown)$/i.test(value);
+}
+
+function isDirectoryPathPrompt(prompt: BeastInterviewPrompt): boolean {
+  const key = prompt.key.toLowerCase();
+  return prompt.kind === 'directory' || key.includes('dir') || key.includes('directory');
 }
 
 function requiredMessage(prompt: BeastInterviewPrompt): string {
@@ -90,6 +103,11 @@ function validateCatalogPrompt(
   }
   if (prompt.key === 'designDocPath' && typeof value === 'string' && !isRepoRelativeMarkdownDesignDocPath(value)) {
     errors.designDocPath = 'Design doc path must be a repo-relative Markdown file without traversal.';
+  }
+  if (isDirectoryPathPrompt(prompt) && typeof value === 'string' && (isBrowserFakePath(value) || hasUnsafeRepoPathSegments(value))) {
+    errors[errorKey] = isBrowserFakePath(value)
+      ? 'Directory path must be a repo-relative path, not a browser fake path.'
+      : 'Directory path must be a repo-relative path without traversal.';
   }
 }
 

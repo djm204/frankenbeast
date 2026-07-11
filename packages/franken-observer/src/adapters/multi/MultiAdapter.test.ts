@@ -108,6 +108,43 @@ describe('MultiAdapter', () => {
       expect(await multi.queryByTraceId(trace.id)).toEqual(trace)
     })
 
+    it('continues to a later adapter when an earlier adapter rejects', async () => {
+      const failingQuery: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+        listTraceIds: vi.fn().mockResolvedValue([]),
+      }
+      const healthy = new InMemoryAdapter()
+      const trace = makeTrace()
+      await healthy.flush(trace)
+      const multi = new MultiAdapter({ adapters: [failingQuery, healthy] })
+
+      await expect(multi.queryByTraceId(trace.id)).resolves.toEqual(trace)
+      expect(failingQuery.queryByTraceId).toHaveBeenCalledWith(trace.id)
+    })
+
+    it('throws an aggregate error when adapters fail and no trace is found', async () => {
+      const failingQuery: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+        listTraceIds: vi.fn().mockResolvedValue([]),
+      }
+      const multi = new MultiAdapter({ adapters: [failingQuery, new InMemoryAdapter()] })
+
+      await expect(multi.queryByTraceId('missing')).rejects.toThrow('queryByTraceId')
+    })
+
+    it('returns null for query failures when throwOnError is false', async () => {
+      const failingQuery: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+        listTraceIds: vi.fn().mockResolvedValue([]),
+      }
+      const multi = new MultiAdapter({ adapters: [failingQuery], throwOnError: false })
+
+      await expect(multi.queryByTraceId('missing')).resolves.toBeNull()
+    })
+
     it('returns null when no adapter has the trace', async () => {
       const multi = new MultiAdapter({ adapters: [new InMemoryAdapter(), new InMemoryAdapter()] })
       expect(await multi.queryByTraceId('missing')).toBeNull()
@@ -140,6 +177,54 @@ describe('MultiAdapter', () => {
       const multi = new MultiAdapter({ adapters: [a, b] })
       const ids = await multi.listTraceIds()
       expect(ids).toEqual(['shared'])
+    })
+
+    it('returns ids from healthy adapters when another adapter rejects', async () => {
+      const failingList: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockResolvedValue(null),
+        listTraceIds: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+      }
+      const healthy = new InMemoryAdapter()
+      await healthy.flush(makeTrace('healthy'))
+      const multi = new MultiAdapter({ adapters: [failingList, healthy] })
+
+      await expect(multi.listTraceIds()).resolves.toEqual(['healthy'])
+      expect(failingList.listTraceIds).toHaveBeenCalledTimes(1)
+    })
+
+    it('throws an aggregate error when every list adapter rejects', async () => {
+      const failingList: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockResolvedValue(null),
+        listTraceIds: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+      }
+      const multi = new MultiAdapter({ adapters: [failingList] })
+
+      await expect(multi.listTraceIds()).rejects.toThrow('listTraceIds')
+    })
+
+    it('throws an aggregate error when failures leave only empty list results', async () => {
+      const failingList: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockResolvedValue(null),
+        listTraceIds: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+      }
+      const emptyFallback = new InMemoryAdapter()
+      const multi = new MultiAdapter({ adapters: [failingList, emptyFallback] })
+
+      await expect(multi.listTraceIds()).rejects.toThrow('listTraceIds')
+    })
+
+    it('returns an empty list when every list adapter rejects and throwOnError is false', async () => {
+      const failingList: ExportAdapter = {
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockResolvedValue(null),
+        listTraceIds: vi.fn().mockRejectedValue(new Error('remote unavailable')),
+      }
+      const multi = new MultiAdapter({ adapters: [failingList], throwOnError: false })
+
+      await expect(multi.listTraceIds()).resolves.toEqual([])
     })
 
     it('returns an empty array with empty adapters list', async () => {

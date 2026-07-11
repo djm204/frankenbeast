@@ -10,6 +10,7 @@ import type {
   BrainSnapshot,
   SkillCatalogEntry,
 } from '@franken/types';
+import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
@@ -55,6 +56,11 @@ export class ClaudeCliAdapter implements ILlmProvider {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    const spawnState: { message: string | undefined } = { message: undefined };
+    proc.once('error', (error) => {
+      spawnState.message = error.message;
+    });
+
     const userContent = request.messages
       .map((m) =>
         typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
@@ -63,7 +69,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
     proc.stdin!.write(userContent);
     proc.stdin!.end();
 
-    yield* this.parseStream(proc);
+    yield* this.parseStream(proc, spawnState);
   }
 
   formatHandoff(snapshot: BrainSnapshot): string {
@@ -139,8 +145,12 @@ export class ClaudeCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
+    spawnState: { message: string | undefined },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
+    proc.once('error', () => {
+      rl.close();
+    });
     let currentToolUse: { id: string; name: string; inputJson: string } | null =
       null;
     let totalInputTokens = 0;
@@ -280,7 +290,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
               } else if (record['type'] === 'tool_use') {
                 yield {
                   type: 'tool_use',
-                  id: (record['id'] as string) ?? crypto.randomUUID(),
+                  id: (record['id'] as string) ?? deterministicUuid('packages/franken-orchestrator/src/providers/claude-cli-adapter.ts'),
                   name: record['name'] as string,
                   input: record['input'] ?? {},
                 };
@@ -328,10 +338,19 @@ export class ClaudeCliAdapter implements ILlmProvider {
         }
       }
 
-      // If process exited without message_stop, check exit code
+      // If process exited without message_stop, check spawn/exit status
       const exitCode = await new Promise<number | null>((resolve) => {
         proc.on('close', resolve);
       });
+      if (spawnState.message) {
+        streamCompleted = true;
+        yield {
+          type: 'error',
+          error: `claude process failed to start: ${spawnState.message}`,
+          retryable: false,
+        };
+        return;
+      }
       if (exitCode !== 0) {
         yield {
           type: 'error',

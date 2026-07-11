@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 

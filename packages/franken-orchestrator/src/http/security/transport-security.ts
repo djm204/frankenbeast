@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-
+import { wallClockNow } from '@franken/types';
 export interface IssueSignedTokenOptions {
   expiresInMs?: number;
   secret: string;
@@ -52,7 +52,7 @@ export class TransportSecurityService {
   }
 
   issueSignedToken(options: IssueSignedTokenOptions): string {
-    const expiresAt = Date.now() + (options.expiresInMs ?? 5 * 60 * 1000);
+    const expiresAt = wallClockNow() + (options.expiresInMs ?? 5 * 60 * 1000);
     const nonce = randomBytes(16).toString('base64url');
     const payload = `${options.subject}.${options.scope}.${expiresAt}.${nonce}`;
     const signature = signatureFor(payload, options.secret).toString('base64url');
@@ -82,7 +82,7 @@ export class TransportSecurityService {
     }
 
     const expiresAt = Number(expiresAtRaw);
-    if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) {
+    if (!Number.isFinite(expiresAt) || expiresAt < wallClockNow()) {
       return false;
     }
 

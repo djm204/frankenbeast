@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 export interface SqliteStore {
   readonly db: Database.Database;
   close(): void;
+  setAuditTrailMutationEnabled(enabled: boolean): void;
 }
 
 const SCHEMA = `
@@ -71,7 +72,34 @@ export function createSqliteStore(dbPath: string): SqliteStore {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
+  const auditTrailMutation = { enabled: false };
+
+  db.function(
+    'fbeast_can_mutate_audit_trail',
+    {
+      deterministic: true,
+    },
+    () => (auditTrailMutation.enabled ? 1 : 0),
+  );
+
   db.exec(SCHEMA);
+
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS audit_trail_prevent_update
+    BEFORE UPDATE ON audit_trail
+    WHEN fbeast_can_mutate_audit_trail() = 0
+    BEGIN
+      SELECT RAISE(ABORT, 'audit_trail is append-only');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS audit_trail_prevent_delete
+    BEFORE DELETE ON audit_trail
+    WHEN fbeast_can_mutate_audit_trail() = 0
+    BEGIN
+      SELECT RAISE(ABORT, 'audit_trail is append-only');
+    END;
+  `);
+
   const costColumns = db.pragma('table_info(cost_ledger)') as Array<{ name: string }>;
   if (!costColumns.some((column) => column.name === 'cost_source')) {
     try {
@@ -87,6 +115,9 @@ export function createSqliteStore(dbPath: string): SqliteStore {
     db,
     close() {
       db.close();
+    },
+    setAuditTrailMutationEnabled(enabled: boolean) {
+      auditTrailMutation.enabled = enabled;
     },
   };
 }

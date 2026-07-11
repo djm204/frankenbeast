@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { deterministicUuid, now, random } from '../src/index.js';
+import { createSeededRandom, deterministicUuid, now, random } from '../src/index.js';
 import { deterministicUuid as deterministicUuidFromSubpath } from '@franken/types/utils';
-import { createSeededRandom } from '../src/utils/seededRandom.js';
 
 const originalSeed = process.env['FRANKENBEAST_SEED'];
 

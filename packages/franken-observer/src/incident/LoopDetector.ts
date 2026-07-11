@@ -86,7 +86,11 @@ export class LoopDetector {
     }
 
     for (const handler of this.handlers) {
-      handler(result)
+      try {
+        handler(result)
+      } catch {
+        // Isolate handler failures; other handlers still receive the signal.
+      }
     }
 
     return result

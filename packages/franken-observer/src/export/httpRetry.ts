@@ -1,5 +1,6 @@
 import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
 
+import { seededRandom } from '@franken/types';
 type FetchResponse = Awaited<ReturnType<FetchFn>>
 
 export interface HttpRetryOptions {
@@ -68,7 +69,7 @@ export async function fetchWithRetry(
       const base = Math.min(baseDelayMs * 2 ** (i - 1), maxDelayMs)
       // Clamp AFTER jitter so maxDelayMs is a true upper bound (callers rely on
       // it to cap shutdown-sensitive export latency).
-      const delay = jitter ? Math.min(base + Math.random() * baseDelayMs, maxDelayMs) : base
+      const delay = jitter ? Math.min(base + seededRandom.random() * baseDelayMs, maxDelayMs) : base
       await sleep(delay)
     }
     try {

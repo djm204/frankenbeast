@@ -40,7 +40,13 @@ export function StepModules() {
   function updateDeepConfig(moduleKey: string, field: string, value: unknown) {
     const deepKey = `${moduleKey}Config`;
     const current = (values[deepKey] ?? {}) as Record<string, unknown>;
-    setStepValues(3, { ...values, [deepKey]: { ...current, [field]: value } });
+    const nextConfig = { ...current };
+    if (value === undefined) {
+      delete nextConfig[field];
+    } else {
+      nextConfig[field] = value;
+    }
+    setStepValues(3, { ...values, [deepKey]: nextConfig });
   }
 
   function getDeepConfig(moduleKey: string): Record<string, unknown> {

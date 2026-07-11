@@ -18,8 +18,12 @@
     "lint": "eslint src/ tests/",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "frankenbeast",
+    "memory",
+    "agent-memory",
+    "sqlite"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import type {
   Trace,
   Span,
@@ -7,6 +6,8 @@ import type {
   TraceValidationOptions,
   TraceValidationResult,
 } from './types.js'
+import { randomUUID } from 'node:crypto';
+import { wallClockNow } from '@franken/types';
 import type { LoopDetector } from '../incident/LoopDetector.js'
 
 export const TraceContext = {
@@ -15,7 +16,7 @@ export const TraceContext = {
       id: randomUUID(),
       goal,
       status: 'active',
-      startedAt: Date.now(),
+      startedAt: wallClockNow(),
       spans: [],
     }
   },
@@ -30,7 +31,7 @@ export const TraceContext = {
       parentSpanId: options.parentSpanId,
       name: options.name,
       status: 'active',
-      startedAt: Date.now(),
+      startedAt: wallClockNow(),
       metadata: {},
       thoughtBlocks: [],
     }
@@ -42,8 +43,9 @@ export const TraceContext = {
     if (span.status !== 'active') {
       throw new Error(`Cannot end span that is already ${span.status} (id: ${span.id})`)
     }
-    span.endedAt = Date.now()
-    span.durationMs = span.endedAt - span.startedAt
+    const endedAt = wallClockNow()
+    span.endedAt = endedAt
+    span.durationMs = endedAt - span.startedAt
     span.status = options.status ?? 'completed'
     if (options.errorMessage !== undefined) {
       span.errorMessage = options.errorMessage
@@ -55,12 +57,21 @@ export const TraceContext = {
     if (trace.status !== 'active') {
       throw new Error(`Cannot end trace that is already ${trace.status} (id: ${trace.id})`)
     }
-    trace.endedAt = Date.now()
+    const activeSpans = trace.spans.filter(span => span.status === 'active')
+    if (activeSpans.length > 0) {
+      const activeSpanSummary = activeSpans
+        .map(span => `"${span.name}" (${span.id})`)
+        .join(', ')
+      throw new Error(
+        `Cannot end trace with ${activeSpans.length} active span(s): ${activeSpanSummary} (trace id: ${trace.id})`,
+      )
+    }
+    trace.endedAt = wallClockNow()
     trace.status = 'completed'
   },
 
   validateTrace(trace: Trace, options: TraceValidationOptions = {}): TraceValidationResult {
-    const now = options.now ?? Date.now()
+    const now = options.now ?? wallClockNow()
     const issues = trace.spans
       .filter(span => span.status === 'active')
       .map(span => {

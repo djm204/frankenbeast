@@ -5,7 +5,8 @@ import type {
   TrackedAgentEvent,
   TrackedAgentInitAction,
 } from '../types.js';
-import { UnknownTrackedAgentError } from '../errors.js';
+import { isoNow } from '@franken/types';
+import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../errors.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 
 export interface CreateTrackedAgentRequest {
@@ -43,7 +44,7 @@ export interface TrackedAgentDetail {
 export class AgentService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
-    private readonly now: () => string = () => new Date().toISOString(),
+    private readonly now: () => string = () => isoNow(),
   ) {}
 
   createAgent(request: CreateTrackedAgentRequest): TrackedAgent {
@@ -64,13 +65,21 @@ export class AgentService {
   }
 
   listAgents(): TrackedAgent[] {
-    return this.repository.listTrackedAgents().filter((agent) => isVisibleAgent(agent));
+    return this.repository.listTrackedAgents();
   }
 
   getAgent(agentId: string): TrackedAgent {
     const agent = this.repository.getTrackedAgent(agentId);
-    if (!agent || !isVisibleAgent(agent)) {
+    if (!agent) {
       throw new UnknownTrackedAgentError(agentId);
+    }
+    return agent;
+  }
+
+  getMutableAgent(agentId: string): TrackedAgent {
+    const agent = this.getAgent(agentId);
+    if (agent.status === 'deleted') {
+      throw new DeletedTrackedAgentError(agentId);
     }
     return agent;
   }
@@ -98,8 +107,8 @@ export class AgentService {
 
   softDeleteAgent(agentId: string): TrackedAgent {
     const agent = this.getAgent(agentId);
-    if (agent.status !== 'stopped') {
-      throw new Error(`Tracked agent '${agentId}' is not stopped`);
+    if (agent.status !== 'stopped' && agent.status !== 'failed' && agent.status !== 'completed') {
+      throw new Error(`Tracked agent '${agentId}' is not stopped, failed, or completed`);
     }
     return this.repository.updateTrackedAgent(agentId, {
       status: 'deleted',
@@ -118,8 +127,4 @@ export class AgentService {
       updatedAt: this.now(),
     });
   }
-}
-
-function isVisibleAgent(agent: TrackedAgent): boolean {
-  return agent.status !== 'deleted';
 }

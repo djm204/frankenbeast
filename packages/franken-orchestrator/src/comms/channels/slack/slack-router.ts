@@ -3,6 +3,7 @@ import { slackSignatureMiddleware } from '../../security/slack-signature.js';
 import { SlackEventBaseSchema, SlackInteractionSchema } from './slack-schemas.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
 import type { SessionMapper } from '../../core/session-mapper.js';
+import { isoNow } from '@franken/types';
 
 export interface SlackRouterOptions {
   gateway: ChatGateway;
@@ -67,7 +68,7 @@ export function slackRouter(options: SlackRouterOptions) {
           externalThreadId: event.thread_ts || event.ts, // Thread to keep conversation context
           externalMessageId: event.ts,
           text,
-          receivedAt: new Date().toISOString(),
+          receivedAt: isoNow(),
           rawEvent: body,
         });
       }

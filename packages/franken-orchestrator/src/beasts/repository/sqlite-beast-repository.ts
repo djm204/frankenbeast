@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import type {
   BeastDispatchSource,
@@ -40,13 +40,13 @@ interface CreateAttemptInput {
 interface UpdateRunPatch {
   status?: BeastRunStatus | undefined;
   configSnapshot?: Readonly<Record<string, unknown>> | undefined;
-  startedAt?: string | undefined;
-  finishedAt?: string | undefined;
-  currentAttemptId?: string | undefined;
+  startedAt?: string | null | undefined;
+  finishedAt?: string | null | undefined;
+  currentAttemptId?: string | null | undefined;
   attemptCount?: number | undefined;
   lastHeartbeatAt?: string | undefined;
-  stopReason?: string | undefined;
-  latestExitCode?: number | undefined;
+  stopReason?: string | null | undefined;
+  latestExitCode?: number | null | undefined;
 }
 
 interface UpdateAttemptPatch {
@@ -283,13 +283,33 @@ export class SQLiteBeastRepository {
       ...current,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.configSnapshot !== undefined ? { configSnapshot: patch.configSnapshot } : {}),
-      ...(patch.startedAt !== undefined ? { startedAt: patch.startedAt } : {}),
-      ...(patch.finishedAt !== undefined ? { finishedAt: patch.finishedAt } : {}),
-      ...(patch.currentAttemptId !== undefined ? { currentAttemptId: patch.currentAttemptId } : {}),
+      ...(patch.startedAt !== undefined
+        ? patch.startedAt === null
+          ? { startedAt: undefined }
+          : { startedAt: patch.startedAt }
+        : {}),
+      ...(patch.finishedAt !== undefined
+        ? patch.finishedAt === null
+          ? { finishedAt: undefined }
+          : { finishedAt: patch.finishedAt }
+        : {}),
+      ...(patch.currentAttemptId !== undefined
+        ? patch.currentAttemptId === null
+          ? { currentAttemptId: undefined }
+          : { currentAttemptId: patch.currentAttemptId }
+        : {}),
       ...(patch.attemptCount !== undefined ? { attemptCount: patch.attemptCount } : {}),
       ...(patch.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: patch.lastHeartbeatAt } : {}),
-      ...(patch.stopReason !== undefined ? { stopReason: patch.stopReason } : {}),
-      ...(patch.latestExitCode !== undefined ? { latestExitCode: patch.latestExitCode } : {}),
+      ...(patch.stopReason !== undefined
+        ? patch.stopReason === null
+          ? { stopReason: undefined }
+          : { stopReason: patch.stopReason }
+        : {}),
+      ...(patch.latestExitCode !== undefined
+        ? patch.latestExitCode === null
+          ? { latestExitCode: undefined }
+          : { latestExitCode: patch.latestExitCode }
+        : {}),
     };
 
     this.db.prepare(

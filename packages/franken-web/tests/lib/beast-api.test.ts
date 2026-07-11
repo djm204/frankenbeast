@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BeastApiClient } from '../../src/lib/beast-api';
+import { BeastApiClient, BeastApiError } from '../../src/lib/beast-api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -86,6 +86,46 @@ describe('BeastApiClient', () => {
       'http://localhost:3000/v1/beasts/agents/agent-1',
       expect.objectContaining({ method: 'GET' }),
     );
+  });
+
+  it('rejects createAgent when the API reports an auto-dispatch failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({
+        error: {
+          code: 'AGENT_DISPATCH_FAILED',
+          message: "Dispatch failed for tracked agent 'agent-1': Invalid chunk-plan config: outputDir is required",
+          details: {
+            agentId: 'agent-1',
+            dispatchError: 'Invalid chunk-plan config: outputDir is required',
+          },
+        },
+      }),
+    });
+
+    const errorPromise = client.createAgent({
+      definitionId: 'chunk-plan',
+      initAction: {
+        kind: 'chunk-plan',
+        command: '/plan --design-doc docs/plans/design.md',
+        config: { designDocPath: 'docs/plans/design.md' },
+      },
+      initConfig: { designDocPath: 'docs/plans/design.md' },
+    });
+
+    await expect(errorPromise).rejects.toThrow(
+      "Dispatch failed for tracked agent 'agent-1': Invalid chunk-plan config: outputDir is required (HTTP 409, AGENT_DISPATCH_FAILED)",
+    );
+    await expect(errorPromise).rejects.toMatchObject({
+      name: 'BeastApiError',
+      status: 409,
+      code: 'AGENT_DISPATCH_FAILED',
+      details: {
+        agentId: 'agent-1',
+        dispatchError: 'Invalid chunk-plan config: outputDir is required',
+      },
+    });
   });
 
   it('controls existing beast runs once dispatch has happened', async () => {
@@ -231,7 +271,55 @@ describe('BeastApiClient', () => {
       }),
     });
 
-    await expect(client.killAgent('agent-1')).rejects.toThrow('HTTP 409');
+    const errorPromise = client.killAgent('agent-1');
+
+    await expect(errorPromise).rejects.toThrow(
+      "Tracked agent 'agent-1' has no linked run to kill (HTTP 409, TRACKED_AGENT_NOT_KILLABLE)",
+    );
+    await expect(errorPromise).rejects.toMatchObject({
+      name: 'BeastApiError',
+      status: 409,
+      code: 'TRACKED_AGENT_NOT_KILLABLE',
+    });
+  });
+
+  it('surfaces structured errors for void Beasts API requests', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({
+        error: {
+          code: 'BEAST_DELETE_UNAVAILABLE',
+          message: 'Beast deletion is temporarily unavailable',
+          details: { retryAfterMs: 1_000 },
+        },
+      }),
+    });
+
+    const errorPromise = client.deleteAgent('agent-1');
+
+    await expect(errorPromise).rejects.toThrow(
+      'Beast deletion is temporarily unavailable (HTTP 503, BEAST_DELETE_UNAVAILABLE)',
+    );
+    await expect(errorPromise).rejects.toMatchObject({
+      name: 'BeastApiError',
+      status: 503,
+      code: 'BEAST_DELETE_UNAVAILABLE',
+      details: { retryAfterMs: 1_000 },
+    });
+  });
+
+  it('falls back to the HTTP status when Beasts API error bodies are malformed', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: () => Promise.reject(new SyntaxError('not json')),
+    });
+
+    const errorPromise = client.killAgent('agent-1');
+
+    await expect(errorPromise).rejects.toThrow('HTTP 502');
+    await expect(errorPromise).rejects.toBeInstanceOf(BeastApiError);
   });
 
   it('opens the ticket-authenticated Beast event stream', async () => {
@@ -383,7 +471,7 @@ describe('BeastApiClient', () => {
     }
   });
 
-  it('passes the last received SSE event id when reconnecting with a fresh ticket', async () => {
+  it('passes the last successfully parsed SSE event id when reconnecting with a fresh ticket', async () => {
     vi.useFakeTimers();
     const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
     const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
@@ -405,18 +493,132 @@ describe('BeastApiClient', () => {
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
 
     try {
-      const unsubscribe = await client.subscribeToEvents({ runStatus: vi.fn(), error: vi.fn() });
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ runStatus: vi.fn(), runLog: vi.fn(), error: onError });
 
       listeners[0]?.['run.status']?.({
         data: JSON.stringify({ runId: 'run-1', status: 'running' }),
         lastEventId: '42',
       });
+      listeners[0]?.['run.log']?.({
+        data: '{malformed-json',
+        lastEventId: '43',
+      });
+      listeners[0]?.['run.status']?.({
+        data: JSON.stringify({ runId: 'run-1', status: 'completed' }),
+        lastEventId: '44',
+      });
       listeners[0]?.error?.({ data: '' });
       await vi.advanceTimersByTimeAsync(1_000);
 
+      expect(onError).toHaveBeenCalledWith(expect.any(SyntaxError));
       expect(MockEventSource).toHaveBeenNthCalledWith(
         2,
         'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=42',
+      );
+
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('acknowledges unhandled SSE events without parsing their payloads', async () => {
+    vi.useFakeTimers();
+    const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      const instanceListeners: Record<string, (event: { data: string; lastEventId?: string }) => void> = {};
+      listeners.push(instanceListeners);
+      Object.assign(this, {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string; lastEventId?: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      });
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+
+    try {
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ runStatus: vi.fn(), error: onError });
+
+      listeners[0]?.['agent.status']?.({
+        data: '{malformed-json-for-unhandled-event',
+        lastEventId: '45',
+      });
+      listeners[0]?.error?.({ data: '' });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('reconnecting') }));
+      expect(MockEventSource).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=45',
+      );
+
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('retains a parsed SSE event id when its handler throws', async () => {
+    vi.useFakeTimers();
+    const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      const instanceListeners: Record<string, (event: { data: string; lastEventId?: string }) => void> = {};
+      listeners.push(instanceListeners);
+      Object.assign(this, {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string; lastEventId?: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      });
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+
+    try {
+      const handlerError = new Error('consumer failed');
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({
+        runStatus: vi.fn(() => { throw handlerError; }),
+        error: onError,
+      });
+
+      listeners[0]?.['run.status']?.({
+        data: JSON.stringify({ runId: 'run-1', status: 'running' }),
+        lastEventId: '44',
+      });
+      listeners[0]?.error?.({ data: '' });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(onError).toHaveBeenCalledWith(handlerError);
+      expect(MockEventSource).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=44',
       );
 
       unsubscribe();

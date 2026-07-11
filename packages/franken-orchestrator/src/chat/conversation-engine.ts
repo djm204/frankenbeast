@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { ILlmClient } from '@franken/types';
 import type {
   ModelTierValue,
@@ -6,6 +5,7 @@ import type {
   TurnOutcome,
   ReplyOutcome,
 } from './types.js';
+import { deterministicUuid, isoNow } from '@franken/types';
 import { IntentRouter } from './intent-router.js';
 import { EscalationPolicy } from './escalation-policy.js';
 import { PromptBuilder } from './prompt-builder.js';
@@ -55,10 +55,10 @@ export class ConversationEngine {
       const totalCost = history.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
       if (totalCost >= this.budgetPerSession) {
         const userMessage: TranscriptMessage = {
-          id: randomUUID(),
+          id: deterministicUuid('packages/franken-orchestrator/src/chat/conversation-engine.ts'),
           role: 'user',
           content: input,
-          timestamp: new Date().toISOString(),
+          timestamp: isoNow(),
         };
         const budgetReply: ReplyOutcome = {
           kind: 'reply',
@@ -77,10 +77,10 @@ export class ConversationEngine {
     const { tier, outcome } = this.policy.evaluate(intent, input);
 
     const userMessage: TranscriptMessage = {
-      id: randomUUID(),
+      id: deterministicUuid('packages/franken-orchestrator/src/chat/conversation-engine.ts'),
       role: 'user',
       content: input,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
     };
 
     if (outcome.kind === 'reply') {
@@ -99,10 +99,10 @@ export class ConversationEngine {
           modelTier: tier,
         };
         const assistantMessage: TranscriptMessage = {
-          id: randomUUID(),
+          id: deterministicUuid('packages/franken-orchestrator/src/chat/conversation-engine.ts'),
           role: 'assistant',
           content: response,
-          timestamp: new Date().toISOString(),
+          timestamp: isoNow(),
           modelTier: tier,
         };
         return {

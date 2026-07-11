@@ -760,6 +760,8 @@ EVAL=true npm run test:eval
 npm run test:watch
 ```
 
+All observer test commands fail when their selected glob discovers zero tests. This is intentional: unit, integration, and eval suites should surface renamed or drifted test files instead of reporting a successful empty run.
+
 The package ships an extensive unit test suite. All adapters and integrations are tested with injectable `fetch` functions — no network calls in CI.
 
 ---
@@ -780,7 +782,7 @@ dist/index.d.ts     # TypeScript declarations
 dist/index.d.ts.map # TypeScript declaration map
 ```
 
-The build is plain `tsc` and the output is **ESM-only** (`"type": "module"`). The `exports` map has `types` and `import` conditions but no `require` entry, so the package cannot be `require()`d from CommonJS — consumers must use `import` (or a dynamic `import()` from CJS).
+The build is plain `tsc` and the output is **ESM-only** (`"type": "module"`). The package does **not** emit CommonJS artifacts such as `dist/index.cjs` or `dist/index.d.cts`, and consumers must use `import` (or a dynamic `import()` from CJS).
 
 ---
 

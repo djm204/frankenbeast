@@ -26,6 +26,7 @@ const SEVERITY_RANK: Record<string, number> = {
 };
 const UNLABELLED_RANK = 4;
 const TITLE_MAX = 50;
+const DECIMAL_ISSUE_NUMBER = /^[1-9]\d*$/;
 
 interface ReviewEntry {
   readonly issue: GithubIssue;
@@ -171,8 +172,13 @@ export class IssueReview {
       const invalid: string[] = [];
 
       for (const part of parts) {
-        const num = parseInt(part, 10);
-        if (isNaN(num) || !validNumbers.has(num)) {
+        if (!DECIMAL_ISSUE_NUMBER.test(part)) {
+          invalid.push(part);
+          continue;
+        }
+
+        const num = Number(part);
+        if (!validNumbers.has(num)) {
           invalid.push(part);
         } else {
           parsed.push(num);

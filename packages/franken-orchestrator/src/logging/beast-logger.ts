@@ -1,3 +1,4 @@
+import { now as deterministicNow } from '@franken/types';
 /**
  * BeastLogger — Reusable color-coded logger for FRANKENBEAST CLI.
  *
@@ -310,12 +311,12 @@ export class BeastLogger implements ILogger {
   }
 
   private timestamp(): string {
-    return `${A.gray}${new Date().toTimeString().slice(0, 8)}${A.reset}`;
+    return `${A.gray}${new Date(deterministicNow()).toTimeString().slice(0, 8)}${A.reset}`;
   }
 
   private capture(level: string, msg: string): void {
     if (!this.captureForFile) return;
-    const now = new Date();
+    const now = new Date(deterministicNow());
     const date = now.toISOString().slice(0, 10);
     const time = now.toTimeString().slice(0, 8);
     const entry = `[${date} ${time}] [${level}] ${stripAnsi(msg)}`;

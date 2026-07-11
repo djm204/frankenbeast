@@ -1,4 +1,5 @@
 import { ANSI } from '../logging/beast-logger.js';
+import { wallClockNow } from '@franken/types';
 
 const FRAMES = ['|', '/', '-', '\\'];
 const SPINNER_INTERVAL_MS = 100;
@@ -21,11 +22,11 @@ export function createStreamProgressWithSpinner(
   const label = options.label ?? 'LLM working...';
 
   let frameIdx = 0;
-  const startMs = Date.now();
+  const startMs = wallClockNow();
 
   const renderSpinner = (): void => {
     const frame = FRAMES[frameIdx % FRAMES.length]!;
-    const secs = ((Date.now() - startMs) / 1000).toFixed(1);
+    const secs = ((wallClockNow() - startMs) / 1000).toFixed(1);
     write(`\r\x1b[K${frame} ${label} (${secs}s)`);
     frameIdx++;
   };

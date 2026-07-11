@@ -8,7 +8,7 @@ import {
   SpanLifecycle,
 } from '@franken/observer';
 import type { Trace, Span } from '@franken/observer';
-import { makeTokenSpend } from '@franken/types';
+import { makeTokenSpend, isoNow } from '@franken/types';
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 import type { ContextWindowUsage, ObserverDeps } from '../skills/cli-skill-executor.js';
 import type { ReplayContentStoreLike, ReplayRecord, ReplayRecordKind } from '../replay/replay-content-store.js';
@@ -160,7 +160,7 @@ export class CliObserverBridge implements IObserverModule {
       version: 1,
       kind: record.kind,
       runId: record.runId,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
       ...(record.provider ? { provider: record.provider } : {}),
       ...(record.model ? { model: record.model } : {}),
       ...(record.toolName ? { toolName: record.toolName } : {}),

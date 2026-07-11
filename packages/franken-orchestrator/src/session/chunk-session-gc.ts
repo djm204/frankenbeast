@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { FileChunkSessionStore } from './chunk-session-store.js';
+import { wallClockNow } from '@franken/types';
 
 export interface ChunkSessionGcConfig {
   sessionRoot: string;
@@ -16,7 +17,7 @@ export class ChunkSessionGc {
     this.store = new FileChunkSessionStore(config.sessionRoot);
   }
 
-  collect(now: Date = new Date()): number {
+  collect(now: Date = new Date(wallClockNow())): number {
     let removed = 0;
     removed += this.collectExpiredSessions(now);
     removed += this.collectOrphanedSnapshots();

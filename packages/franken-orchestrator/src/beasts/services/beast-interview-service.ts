@@ -3,6 +3,7 @@ import type {
   BeastInterviewPrompt,
   BeastInterviewSession,
 } from '../types.js';
+import { isoNow } from '@franken/types';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 
@@ -13,6 +14,13 @@ export interface BeastInterviewProgress {
   readonly config?: Readonly<Record<string, unknown>> | undefined;
 }
 
+export class UnknownBeastInterviewSessionError extends Error {
+  constructor(public readonly sessionId: string) {
+    super(`Unknown Beast interview session: ${sessionId}`);
+    this.name = 'UnknownBeastInterviewSessionError';
+  }
+}
+
 export class BeastInterviewService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -21,7 +29,7 @@ export class BeastInterviewService {
 
   start(definitionId: string): BeastInterviewSession & { currentPrompt?: BeastInterviewPrompt | undefined } {
     const definition = this.getDefinitionOrThrow(definitionId);
-    const now = new Date().toISOString();
+    const now = isoNow();
     const session = this.repository.createInterviewSession({
       definitionId,
       status: 'active',
@@ -36,7 +44,7 @@ export class BeastInterviewService {
   resume(sessionId: string): BeastInterviewProgress {
     const session = this.repository.getInterviewSession(sessionId);
     if (!session) {
-      throw new Error(`Unknown Beast interview session: ${sessionId}`);
+      throw new UnknownBeastInterviewSessionError(sessionId);
     }
 
     const definition = this.getDefinitionOrThrow(session.definitionId);
@@ -59,7 +67,7 @@ export class BeastInterviewService {
   answer(sessionId: string, answer: string): BeastInterviewProgress {
     const session = this.repository.getInterviewSession(sessionId);
     if (!session) {
-      throw new Error(`Unknown Beast interview session: ${sessionId}`);
+      throw new UnknownBeastInterviewSessionError(sessionId);
     }
 
     const definition = this.getDefinitionOrThrow(session.definitionId);
@@ -77,7 +85,7 @@ export class BeastInterviewService {
       ...session.answers,
       [prompt.key]: coerceAnswer(prompt, answer),
     };
-    const now = new Date().toISOString();
+    const now = isoNow();
     const nextPrompt = currentPrompt(definition, nextAnswers);
     const nextStatus = nextPrompt ? 'active' : 'completed';
     const updated = this.repository.updateInterviewSession(session.id, {

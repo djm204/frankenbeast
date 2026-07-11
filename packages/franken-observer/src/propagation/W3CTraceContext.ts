@@ -33,6 +33,8 @@ const RE_HEX_16 = /^[0-9a-f]{16}$/
 const RE_HEX_02 = /^[0-9a-f]{2}$/
 const ZEROS_32  = '0'.repeat(32)
 const ZEROS_16  = '0'.repeat(16)
+const TRACEPARENT_VERSION_00 = '00'
+const TRACEPARENT_VERSION_FORBIDDEN = 'ff'
 
 // ── parseTraceparent ──────────────────────────────────────────────────────────
 
@@ -40,12 +42,16 @@ const ZEROS_16  = '0'.repeat(16)
  * Parses a W3C `traceparent` header value.
  *
  * Returns `null` for any input that does not conform to the spec:
- * unknown version bytes are accepted (forwards compatibility), but
- * all-zeros IDs and non-hex characters are rejected.
+ * unknown version bytes other than `ff` are accepted (forwards compatibility),
+ * but version `00` must have exactly four fields and all-zeros IDs and
+ * non-hex characters are rejected.
  *
  * ```ts
  * const ctx = parseTraceparent(req.headers['traceparent'])
- * if (ctx) process.stdout.write(`${ctx.traceId} ${ctx.sampled}\n`)
+ * if (ctx) {
+ *   const { traceId, sampled } = ctx
+ *   // use `traceId`/`sampled` when wiring a child span
+ * }
  * ```
  */
 export function parseTraceparent(header: string | null | undefined): TraceparentFields | null {
@@ -55,7 +61,10 @@ export function parseTraceparent(header: string | null | undefined): Traceparent
   // Spec mandates exactly 4 fields for version 00; future versions may add more.
   if (parts.length < 4) return null
 
-  const [, traceId, parentSpanId, flags] = parts
+  const [version, traceId, parentSpanId, flags] = parts
+
+  if (!RE_HEX_02.test(version) || version === TRACEPARENT_VERSION_FORBIDDEN) return null
+  if (version === TRACEPARENT_VERSION_00 && parts.length !== 4) return null
 
   if (!RE_HEX_32.test(traceId)    || traceId    === ZEROS_32) return null
   if (!RE_HEX_16.test(parentSpanId) || parentSpanId === ZEROS_16) return null
@@ -75,16 +84,16 @@ export function parseTraceparent(header: string | null | undefined): Traceparent
  * fetch(url, { headers: { traceparent: header } })
  * ```
  *
- * @throws {Error} if `traceId` is not 32 lowercase hex chars, or
- *                 if `parentSpanId` is not 16 lowercase hex chars.
+ * @throws {Error} if `traceId` is not 32 lowercase non-zero hex chars, or
+ *                 if `parentSpanId` is not 16 lowercase non-zero hex chars.
  */
 export function formatTraceparent(fields: TraceparentFields): string {
   const { traceId, parentSpanId, sampled } = fields
-  if (!RE_HEX_32.test(traceId)) {
-    throw new Error(`traceId must be 32 lowercase hex characters, got: "${traceId}"`)
+  if (!RE_HEX_32.test(traceId) || traceId === ZEROS_32) {
+    throw new Error(`traceId must be 32 lowercase non-zero hex characters, got: "${traceId}"`)
   }
-  if (!RE_HEX_16.test(parentSpanId)) {
-    throw new Error(`parentSpanId must be 16 lowercase hex characters, got: "${parentSpanId}"`)
+  if (!RE_HEX_16.test(parentSpanId) || parentSpanId === ZEROS_16) {
+    throw new Error(`parentSpanId must be 16 lowercase non-zero hex characters, got: "${parentSpanId}"`)
   }
   return `00-${traceId}-${parentSpanId}-${sampled ? '01' : '00'}`
 }
@@ -101,7 +110,10 @@ export function formatTraceparent(fields: TraceparentFields): string {
  *
  * ```ts
  * const state = parseTracestate(req.headers['tracestate'])
- * process.stdout.write(state['vendor-name'])
+ * const vendor = state['vendor-name']
+ * if (vendor) {
+ *   // use vendor value in propagation headers
+ * }
  * ```
  */
 export function parseTracestate(header: string | null | undefined): Record<string, string> {

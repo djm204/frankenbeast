@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
+import { deterministicUuid, seededRandom, wallClockNow } from '@franken/types';
 import type { SessionToken } from '../core/types.js';
 
 const LOCK_RETRY_MS = 10;
@@ -158,8 +159,8 @@ export class SessionTokenStore {
 
     mkdirSync(dirname(this.persistenceFile), { recursive: true, mode: 0o700 });
     const lockPath = `${this.persistenceFile}.lock`;
-    const lockToken = `${process.pid}:${Date.now()}:${Math.random()}`;
-    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    const lockToken = `${deterministicUuid('session-token-lock')}:${wallClockNow()}:${seededRandom.random()}`;
+    const deadline = wallClockNow() + LOCK_TIMEOUT_MS;
     let lockFd: number | undefined;
 
     while (lockFd === undefined) {
@@ -171,7 +172,7 @@ export class SessionTokenStore {
         if (code === 'EEXIST' && this.reclaimStaleLock(lockPath)) {
           continue;
         }
-        if (code !== 'EEXIST' || Date.now() >= deadline) {
+        if (code !== 'EEXIST' || wallClockNow() >= deadline) {
           throw err;
         }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
@@ -200,7 +201,7 @@ export class SessionTokenStore {
   private reclaimStaleLock(lockPath: string): boolean {
     try {
       const observedToken = readFileSync(lockPath, 'utf8');
-      const lockAgeMs = Date.now() - statSync(lockPath).mtimeMs;
+      const lockAgeMs = wallClockNow() - statSync(lockPath).mtimeMs;
       if (lockAgeMs < LOCK_STALE_MS) return false;
       if (readFileSync(lockPath, 'utf8') !== observedToken) return false;
       unlinkSync(lockPath);
@@ -227,12 +228,13 @@ export class SessionTokenStore {
       }));
 
     mkdirSync(dirname(this.persistenceFile), { recursive: true, mode: 0o700 });
-    const tmpPath = `${this.persistenceFile}.${process.pid}.tmp`;
+    const tmpPath = `${this.persistenceFile}.${deterministicUuid('session-token-store-write')}.tmp`;
     writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
     renameSync(tmpPath, this.persistenceFile);
   }
 
   private isExpired(token: SessionToken): boolean {
-    return Date.now() >= token.expiresAt.getTime();
+    const expiresAtMs = token.expiresAt.getTime();
+    return !Number.isFinite(expiresAtMs) || wallClockNow() >= expiresAtMs;
   }
 }

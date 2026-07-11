@@ -7,6 +7,7 @@ import type {
   CritiqueLoopResult,
   CorrectionRequest,
 } from '../types/loop.js';
+import { isoNow } from '@franken/types';
 import type { EscalationRequest } from '../types/contracts.js';
 import type { CritiquePipeline } from '../pipeline/critique-pipeline.js';
 import { hasReachedMaxIterations } from './iteration-limit.js';
@@ -42,7 +43,7 @@ export class CritiqueLoop {
         index: state.iterationCount,
         input,
         result: critiqueResult,
-        completedAt: new Date().toISOString(),
+        completedAt: isoNow(),
       };
 
       state.iterations.push(iteration);

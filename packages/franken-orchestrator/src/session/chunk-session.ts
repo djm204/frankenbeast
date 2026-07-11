@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { deterministicUuid, isoNow } from '@franken/types';
 
 export type ChunkTranscriptKind =
   | 'system'
@@ -66,16 +66,16 @@ export function createChunkTranscriptEntry(kind: ChunkTranscriptKind, content: s
   return {
     kind,
     content,
-    createdAt: new Date().toISOString(),
+    createdAt: isoNow(),
   };
 }
 
 export function createChunkSession(input: CreateChunkSessionInput): ChunkSession {
-  const now = new Date().toISOString();
+  const now = isoNow();
 
   return {
     version: 1,
-    sessionId: randomUUID(),
+    sessionId: deterministicUuid('packages/franken-orchestrator/src/session/chunk-session.ts'),
     planName: input.planName,
     taskId: input.taskId,
     chunkId: input.chunkId,

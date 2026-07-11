@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Transcript } from '../../../src/chat/transcript.js';
 import { ModelTier } from '../../../src/chat/types.js';
+import type { TranscriptMessage } from '../../../src/chat/types.js';
 
 describe('Transcript', () => {
   let transcript: Transcript;
@@ -40,11 +41,61 @@ describe('Transcript', () => {
     expect(totals.premiumExecution).toBe(200);
   });
 
+  it('returns defensive message copies so callers cannot mutate internal state', () => {
+    transcript.append({ role: 'assistant', content: 'Short reply', modelTier: ModelTier.Cheap, tokens: 10 });
+
+    const returned = transcript.messages()[0]!;
+    returned.content = 'tampered';
+    returned.tokens = 999_999;
+    returned.modelTier = ModelTier.PremiumExecution;
+
+    expect(transcript.messages()[0]).toMatchObject({
+      role: 'assistant',
+      content: 'Short reply',
+      modelTier: ModelTier.Cheap,
+      tokens: 10,
+    });
+    expect(transcript.tokensByTier()).toEqual({
+      cheap: 10,
+      premiumReasoning: 0,
+      premiumExecution: 0,
+    });
+  });
+
   it('initializes from existing messages array', () => {
     const existing = [
       { role: 'user' as const, content: 'Hi', timestamp: new Date().toISOString() },
     ];
     const t = Transcript.fromMessages(existing);
     expect(t.messages()).toHaveLength(1);
+  });
+
+  it('copies source message objects when initializing from existing messages', () => {
+    const existing: TranscriptMessage[] = [
+      {
+        role: 'assistant',
+        content: 'Original',
+        timestamp: new Date().toISOString(),
+        modelTier: ModelTier.PremiumReasoning,
+        tokens: 42,
+      },
+    ];
+
+    const t = Transcript.fromMessages(existing);
+    existing[0]!.content = 'tampered';
+    existing[0]!.tokens = 999_999;
+    existing[0]!.modelTier = ModelTier.Cheap;
+
+    expect(t.messages()[0]).toMatchObject({
+      role: 'assistant',
+      content: 'Original',
+      modelTier: ModelTier.PremiumReasoning,
+      tokens: 42,
+    });
+    expect(t.tokensByTier()).toEqual({
+      cheap: 0,
+      premiumReasoning: 42,
+      premiumExecution: 0,
+    });
   });
 });

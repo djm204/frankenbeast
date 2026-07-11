@@ -1,8 +1,21 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { readVitestFlag } from '../../../../scripts/vitest-env.js';
+
+function listTestFiles(dir: string): string[] {
+  if (!existsSync(dir)) {
+    return [];
+  }
+
+  return readdirSync(dir)
+    .flatMap((entry) => {
+      const path = join(dir, entry);
+      return statSync(path).isDirectory() ? listTestFiles(path) : [path];
+    })
+    .filter((path) => path.endsWith('.test.ts'));
+}
 
 describe('Vitest environment flags', () => {
   it('treats missing and explicit false-like values as disabled', () => {
@@ -33,6 +46,23 @@ describe('Vitest environment flags', () => {
     const config = readFileSync(resolve(import.meta.dirname, '../../vitest.config.ts'), 'utf8');
 
     expect(config).not.toContain('process.env');
+    expect(config).toContain("arg.includes('tests/e2e/')");
+    expect(config).toContain("arg.includes('test/e2e/')");
+    expect(config).toContain("'tests/e2e/**/*.test.ts'");
     expect(config).toContain("'test/e2e/**/*.test.ts'");
+  });
+
+  it('keeps every package E2E test tree covered by the E2E include globs', () => {
+    const packageRoot = resolve(import.meta.dirname, '../..');
+    const config = readFileSync(resolve(packageRoot, 'vitest.config.ts'), 'utf8');
+    const e2eTestFiles = ['tests/e2e', 'test/e2e'].flatMap((dir) =>
+      listTestFiles(resolve(packageRoot, dir)).map((file) => relative(packageRoot, file)),
+    );
+
+    expect(e2eTestFiles).toContain('test/e2e/e2e-pipeline.test.ts');
+    for (const file of e2eTestFiles) {
+      const e2eRoot = file.startsWith('tests/e2e/') ? 'tests/e2e' : 'test/e2e';
+      expect(config).toContain(`'${e2eRoot}/**/*.test.ts'`);
+    }
   });
 });

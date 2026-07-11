@@ -1,4 +1,5 @@
 import { createChunkTranscriptEntry, type ChunkSession, type ChunkTranscriptEntry } from './chunk-session.js';
+import { isoNow } from '@franken/types';
 
 export interface ChunkSessionCompactorDeps {
   summarize(prompt: string): Promise<string>;
@@ -22,7 +23,7 @@ export class ChunkSessionCompactor {
 
   async compact(session: ChunkSession): Promise<ChunkSession> {
     const summary = await this.deps.summarize(this.buildCompactionPrompt(session));
-    const now = new Date().toISOString();
+    const now = isoNow();
     const retained = this.retainCriticalTranscript(session.transcript);
     const compactionEntry = createChunkTranscriptEntry('compaction_summary', summary);
 

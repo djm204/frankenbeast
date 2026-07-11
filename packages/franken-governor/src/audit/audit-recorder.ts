@@ -1,6 +1,7 @@
 import type { ApprovalRequest, ApprovalResponse, ResponseCode } from '../core/types.js';
 import type { GovernorMemoryPort, EpisodicTraceRecord } from './governor-memory-port.js';
 import type { AuditRecorder, AuditRecordOptions } from '../gateway/approval-gateway.js';
+import { now as deterministicNow } from '@franken/types';
 
 export class GovernorAuditRecorder implements AuditRecorder {
   constructor(private readonly memoryPort: GovernorMemoryPort) {}
@@ -16,7 +17,7 @@ export class GovernorAuditRecorder implements AuditRecorder {
       type: 'episodic',
       projectId: request.projectId,
       status: signatureVerificationFailed ? 'failure' : this.toStatus(response.decision),
-      createdAt: Date.now(),
+      createdAt: deterministicNow(),
       taskId: request.taskId,
       toolName: 'hitl-gateway',
       input: {

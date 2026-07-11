@@ -143,6 +143,28 @@ describe('IssueReview', () => {
       expect(result.approved[0]!.issueNumber).toBe(2);
     });
 
+    it('rejects partially numeric issue numbers and re-prompts', async () => {
+      const issues = [
+        makeIssue({ number: 1 }),
+        makeIssue({ number: 2 }),
+        makeIssue({ number: 3 }),
+      ];
+      const triage = [
+        makeTriage({ issueNumber: 1 }),
+        makeTriage({ issueNumber: 2 }),
+        makeTriage({ issueNumber: 3 }),
+      ];
+      const io = createMockIO(['edit', '1abc, 2 trailing, 03junk', '2', 'Y']);
+      const review = new IssueReview(io);
+
+      const result = await review.review(issues, triage);
+
+      const allOutput = io.output.join('\n');
+      expect(allOutput).toContain('Invalid issue number(s): 1abc, 2 trailing, 03junk');
+      expect(result.action).toBe('execute');
+      expect(result.approved.map((t) => t.issueNumber)).toEqual([1, 3]);
+    });
+
     it('can abort after editing', async () => {
       const issues = [makeIssue({ number: 1 }), makeIssue({ number: 2 })];
       const triage = [

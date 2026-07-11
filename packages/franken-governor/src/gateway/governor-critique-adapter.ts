@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { ApprovalRequest, TriggerResult } from '../core/types.js';
 import { defaultConfig, type GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
@@ -6,8 +5,10 @@ import { ApprovalGateway, type AuditRecorder } from './approval-gateway.js';
 import type { SignatureVerifier } from '../security/signature-verifier.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { BudgetTrigger, type BudgetTriggerContext } from '../triggers/budget-trigger.js';
+import { evaluateTrigger } from '../triggers/evaluate-trigger.js';
 import { SkillTrigger, type SkillTriggerContext } from '../triggers/skill-trigger.js';
 import type { RationaleBlock, VerificationResult } from '@franken/types';
+import { deterministicUuid, now as deterministicNow } from '@franken/types';
 
 /** Governance flags for a skill, looked up by the adapter per rationale. */
 export interface SkillGovernanceMetadata {
@@ -80,12 +81,12 @@ export class GovernorCritiqueAdapter {
     }
 
     const base = {
-      requestId: randomUUID(),
+      requestId: deterministicUuid('packages/franken-governor/src/gateway/governor-critique-adapter.ts'),
       taskId: rationale.taskId as string,
       projectId: this.projectId,
       trigger: triggerResult,
       summary: `${rationale.reasoning} → ${rationale.expectedOutcome}`,
-      timestamp: new Date(),
+      timestamp: new Date(deterministicNow()),
     };
 
     const request: ApprovalRequest = rationale.selectedTool !== undefined
@@ -113,7 +114,7 @@ export class GovernorCritiqueAdapter {
       // from the rationale + injected sources, so it must not be fed a
       // RationaleBlock it was never typed for (see issue #490).
       if (triggerContext.skip) continue;
-      const result = evaluator.evaluate(triggerContext.context);
+      const result = evaluateTrigger(evaluator, triggerContext.context);
       if (result.triggered) return result;
     }
     return { triggered: false, triggerId: 'none' };

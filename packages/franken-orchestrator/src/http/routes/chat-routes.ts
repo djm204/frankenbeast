@@ -14,6 +14,7 @@ import type {
   MessageResult,
   TurnOutcome,
 } from '@franken/types';
+import { isoNow } from '@franken/types';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -184,12 +185,12 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
         ? {
             description: result.pendingApprovalDescription,
-            requestedAt: result.pendingApprovalRequestedAt ?? new Date().toISOString(),
+            requestedAt: result.pendingApprovalRequestedAt ?? isoNow(),
             ...result.pendingApprovalContext,
           }
         : null;
       session.beastContext = result.beastContext ?? null;
-      session.updatedAt = new Date().toISOString();
+      session.updatedAt = isoNow();
       sessionStore.save(session);
 
       const outcome: TurnOutcome = result.outcome ?? {
@@ -252,7 +253,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         const originalState = session.state;
         session.pendingApproval = null;
         session.state = 'approved';
-        session.updatedAt = new Date().toISOString();
+        session.updatedAt = isoNow();
         sessionStore.save(session);
         try {
           result = await runtime.run(runtimeInput, {
@@ -266,7 +267,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         } catch (error) {
           session.pendingApproval = pendingApproval;
           session.state = originalState;
-          session.updatedAt = new Date().toISOString();
+          session.updatedAt = isoNow();
           sessionStore.save(session);
           throw error;
         }
@@ -278,7 +279,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         session.state = 'rejected';
         session.pendingApproval = null;
       }
-      session.updatedAt = new Date().toISOString();
+      session.updatedAt = isoNow();
       sessionStore.save(session);
 
       return c.json({

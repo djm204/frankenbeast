@@ -1,10 +1,15 @@
 import type { TranscriptMessage } from './types.js';
 import { ModelTier } from './types.js';
+import { isoNow } from '@franken/types';
 
 export interface TokenTotals {
   cheap: number;
   premiumReasoning: number;
   premiumExecution: number;
+}
+
+function cloneMessage(message: TranscriptMessage): TranscriptMessage {
+  return { ...message };
 }
 
 export class Transcript {
@@ -16,14 +21,15 @@ export class Transcript {
     modelTier?: string;
     tokens?: number;
   }): void {
-    this._messages.push({
+    const storedMessage: TranscriptMessage = {
       ...msg,
-      timestamp: new Date().toISOString(),
-    });
+      timestamp: isoNow(),
+    };
+    this._messages.push(storedMessage);
   }
 
   messages(): readonly TranscriptMessage[] {
-    return [...this._messages];
+    return this._messages.map(cloneMessage);
   }
 
   tokensByTier(): TokenTotals {
@@ -39,7 +45,7 @@ export class Transcript {
 
   static fromMessages(msgs: TranscriptMessage[]): Transcript {
     const t = new Transcript();
-    t._messages = [...msgs];
+    t._messages = msgs.map(cloneMessage);
     return t;
   }
 }

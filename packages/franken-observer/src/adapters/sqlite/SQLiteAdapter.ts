@@ -1,4 +1,6 @@
 import Database from 'better-sqlite3'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { Trace, Span } from '../../core/types.js'
 import type { ExportAdapter, TraceSummary } from '../../export/ExportAdapter.js'
 import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
@@ -102,6 +104,7 @@ export class SQLiteAdapter implements ExportAdapter {
   private flushedSpanSnapshotCount = 0
 
   constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
+    mkdirSync(dirname(filePath), { recursive: true })
     this.db = new Database(filePath)
     this.maxFlushedSpanSnapshots = Math.max(
       0,

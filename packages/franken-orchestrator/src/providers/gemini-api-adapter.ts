@@ -10,6 +10,7 @@ import type {
   ToolDefinition,
   BrainSnapshot,
 } from '@franken/types';
+import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 
 export interface GeminiApiOptions {
@@ -85,7 +86,7 @@ export class GeminiApiAdapter implements ILlmProvider {
           for (const call of chunk.functionCalls) {
             yield {
               type: 'tool_use',
-              id: (call as { id?: string }).id ?? crypto.randomUUID(),
+              id: (call as { id?: string }).id ?? deterministicUuid('packages/franken-orchestrator/src/providers/gemini-api-adapter.ts'),
               name: call.name ?? '',
               input: call.args ?? {},
             };

@@ -6,9 +6,26 @@
 
 ![Status](https://img.shields.io/badge/status-beta-blue)
 [![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)
+[![Daily security scan](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml/badge.svg)](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml)
+[![Dependabot](https://img.shields.io/badge/dependabot-configured-025E8C?logo=dependabot)](.github/dependabot.yml)
+
 **Deterministic guardrails for AI agents.**
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
+
+## 🚀 One-click onboarding
+
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation, then run the repository bootstrap script:
+
+```bash
+npm run bootstrap -- --no-docker
+```
+
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+
+```bash
+./scripts/bootstrap.sh --dry-run
+```
 
 ## Latest release announcement
 
@@ -34,6 +51,10 @@ Both modes share `.fbeast/beast.db`.
 LLM-based agents routinely lose safety constraints when context windows compress, hallucinate tool calls that violate architectural rules, and take destructive actions without human oversight. Frankenbeast solves this by placing safety enforcement in a deterministic pipeline that the LLM cannot bypass, forget, or summarise away.
 
 **The key guarantee:** Safety constraints survive context-window compression because they are enforced by the firewall pipeline, not by the LLM prompt.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations.
 
 ## Architecture
 
@@ -329,8 +350,8 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 
 ## Prerequisites
 
-- **Node.js** `>=22.13.0 <23 || >=24.0.0 <26` (see `.nvmrc` for the pinned local default; npm enforces this with `engine-strict=true`)
-- **npm** >= 10.0.0
+- **Node.js** `>=22.13.0 <23 || >=24.0.0 <26` (the local default is pinned in [.nvmrc](.nvmrc); npm enforces this with `engine-strict=true`, and CI exercises the same pinned baseline)
+- **npm** 11.5.1 via the root `packageManager` pin
 
 ### Optional
 
@@ -437,7 +458,7 @@ frankenbeast --design-doc docs/my-feature-design.md
 frankenbeast --plan-dir ./my-chunks/
 ```
 
-Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `--resume` to preserve existing checkpoint data and continue an interrupted run; when no checkpoint exists, `--resume` fails fast instead of silently behaving like a cold run.
+Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` when a previous run was interrupted and you want to continue from the saved checkpoint/chunk-session data. If the checkpoint is missing, the resume command fails fast with a missing-checkpoint error instead of silently starting a cold run.
 
 ### Subcommands
 
@@ -488,8 +509,11 @@ frankenbeast issues --label bug --repo owner/repo
 --assignee <user>       Filter by assignee
 --limit <n>             Max issues to fetch (default: 30)
 --repo <owner/repo>     Target repository (auto-inferred if omitted)
+--target-upstream       Use the checkout's upstream remote as the target repo
 --dry-run               Preview triage without executing
 ```
+
+Execution controls such as `--budget`, `--provider`, `--providers`, and `--no-pr` are global options that also affect `frankenbeast issues` runs; see [Fix GitHub Issues](docs/guides/fix-github-issues.md#all-flags) for the complete issue workflow flag table.
 
 **Chat server flags:**
 
@@ -547,16 +571,30 @@ npm test
 # Per-package tests via Turborepo
 npx turbo run test --filter=franken-brain
 
-# Orchestrator E2E tests
-cd packages/franken-orchestrator && npm run test:e2e
+# Orchestrator E2E tests (sets E2E=true and delegates to @franken/orchestrator)
+npm run test:e2e
 ```
+
+The E2E suites are opt-in and remain outside the regular `npm test` path. Before
+running them from a clean checkout, run the dependency-aware root build with
+`npm run build`, install a real `claude` CLI on `PATH`, and provide a valid
+`ANTHROPIC_API_KEY` in the environment. The root `test:e2e` script delegates to
+the workspace script, which sets `E2E=true` for the gated suites and forwards
+Vitest arguments after `--`.
 
 ## Local Dev Environment
 
+For first-time setup, use the onboarding checklist and bootstrap script:
+
 ```bash
-# Configure local services. Generate a unique Grafana password before starting
-# the full compose stack; Grafana requires GRAFANA_USER=admin with a non-default password.
-cp .env.example .env
+# Validate prerequisites and create .env without starting optional services.
+npm run bootstrap -- --no-docker
+
+# CI-style prerequisite validation without mutating files or installing packages.
+./scripts/bootstrap.sh --dry-run
+
+# Generate a unique Grafana password before starting the full compose stack;
+# Grafana requires GRAFANA_USER=admin with a non-default password.
 $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and adjust CHROMA_URL if needed
 
 # .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.
@@ -564,9 +602,10 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # TLS-terminated endpoint, then export that same endpoint before seed/verify.
 # export CHROMA_URL=https://chromadb.example.com
 
-# Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
-# image versions and mounts ./tempo.yaml so local tracing starts deterministically.
-docker compose up -d
+# Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
+# compose file pins image versions and mounts ./tempo.yaml so local tracing
+# starts deterministically.
+npm run bootstrap -- --services
 
 # Local Tempo exposes OTLP/HTTP writes on http://localhost:4318 for TempoAdapter
 # and readiness on http://localhost:3200/ready for verify-setup. The root
@@ -607,7 +646,7 @@ Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config
 ```bash
 frankenbeast init   # interactive — prompts for a passphrase, generates and stores the token
 ```
-When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`. For CI/CD, set `FRANKENBEAST_PASSPHRASE` in the environment; `frankenbeast init --non-interactive` verifies an already-complete `.fbeast/config.json` and init state rather than creating a fresh vault.
+When `network.secureBackend` is unset, init defaults to `local-encrypted`: the passphrase encrypts the local vault at `.fbeast/secrets.enc`, with key-derivation metadata in `.fbeast/secrets.meta.json`. For CI/headless runtime flows, mount or persist `.fbeast/config.json` (which selects the backend and stores logical refs), `.fbeast/secrets.enc`, and `.fbeast/secrets.meta.json` — or persist the whole `.fbeast` secret-store state — then set `FRANKENBEAST_PASSPHRASE` in the environment so runtime commands can decrypt the vault without prompting; this is used by commands like `frankenbeast run`, not as a replacement for interactive setup.
 
 **OS keychain:**
 ```json

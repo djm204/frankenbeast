@@ -1,6 +1,7 @@
 import type { TrackedAgent, TrackedAgentInitActionKind, BeastExecutionMode, BeastRun } from '../types.js';
 import type { BeastDispatchService } from './beast-dispatch-service.js';
 import { AgentService } from './agent-service.js';
+import { isoNow } from '@franken/types';
 
 export interface CreateChatInitAgentRequest {
   readonly definitionId: string;
@@ -21,7 +22,7 @@ export class AgentInitService {
   constructor(
     private readonly agents: AgentService,
     private readonly dispatch: Pick<BeastDispatchService, 'createRun'>,
-    private readonly now: () => string = () => new Date().toISOString(),
+    private readonly now: () => string = () => isoNow(),
   ) {}
 
   createChatInitAgent(request: CreateChatInitAgentRequest): TrackedAgent {

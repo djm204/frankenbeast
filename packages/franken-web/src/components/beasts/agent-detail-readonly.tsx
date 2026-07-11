@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import * as Accordion from '@radix-ui/react-accordion';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
 import type { TrackedAgentDetail } from '../../lib/beast-api';
+import { buildLogDisplayEntries } from './log-display-entry';
 
 interface AgentDetailReadonlyProps {
   detail: TrackedAgentDetail;
@@ -11,6 +12,7 @@ interface AgentDetailReadonlyProps {
 
 export function AgentDetailReadonly({ detail, logs, onExpandLogs }: AgentDetailReadonlyProps) {
   const { agent } = detail;
+  const displayEntries = buildLogDisplayEntries(detail.events, logs);
 
   return (
     <ScrollArea.Root className="flex-1 overflow-hidden">
@@ -69,15 +71,12 @@ export function AgentDetailReadonly({ detail, logs, onExpandLogs }: AgentDetailR
             </button>
           }>
             <div className="space-y-1 font-mono text-xs text-beast-muted max-h-48 overflow-y-auto">
-              {detail.events.map((e) => (
-                <div key={e.id} className={`${e.level === 'error' ? 'text-beast-danger' : ''}`}>
-                  [{new Date(e.createdAt).toLocaleTimeString()}] {e.message}
+              {displayEntries.map((entry) => (
+                <div key={entry.key} className={`${entry.level === 'error' ? 'text-beast-danger' : ''}`}>
+                  {entry.label}
                 </div>
               ))}
-              {logs.map((line, i) => (
-                <div key={i}>{line}</div>
-              ))}
-              {detail.events.length === 0 && logs.length === 0 && (
+              {displayEntries.length === 0 && (
                 <p className="text-beast-subtle italic">No events or logs yet</p>
               )}
             </div>
