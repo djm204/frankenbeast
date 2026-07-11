@@ -203,6 +203,10 @@ describe('GhostDependencyEvaluator', () => {
       const objectTypeAssertion = value as { loader: import('ghost-package').Loader };
       const tupleAssertion = value as [import('ghost-package').Tuple];
       const readonlyAssertion = value as readonly import('ghost-package').Readonly[];
+      const genericCall = createPlugin<import('ghost-package').Options>();
+      const unionAssertion = value as string | import('ghost-package').Shape;
+      const functionType = (() => {}) as () => import('ghost-package').Factory;
+      const typedFunctionValue: () => import('ghost-package').Factory = () => ({}) as never;
       interface Cfg { name: string; plugin: import('ghost-package').Plugin }
       type InlineObject = { name: string; plugin: import('ghost-package').Plugin };
       declare namespace N { type T = import('ghost-package').T }
@@ -251,6 +255,7 @@ describe('GhostDependencyEvaluator', () => {
       const genericAngleAsserted = await import(<Readonly<string>>'generic-angle-ghost');
       const literalAsserted = await import('literal-asserted-ghost' as const);
       const literalSatisfied = await import('literal-satisfied-ghost' satisfies string);
+      const nonNullAsserted = await import('non-null-asserted-ghost'!);
       const runtimeTernary = kind === 'extends' ? fallback : import('ternary-ghost');
       const lessThanRuntime = count < import('less-than-ghost');
       const compactLessThanRuntime = count<import('compact-less-than-ghost');
@@ -259,7 +264,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(26);
+    expect(result.findings).toHaveLength(27);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -283,6 +288,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('generic-angle-ghost'),
         expect.stringContaining('literal-asserted-ghost'),
         expect.stringContaining('literal-satisfied-ghost'),
+        expect.stringContaining('non-null-asserted-ghost'),
         expect.stringContaining('ternary-ghost'),
         expect.stringContaining('less-than-ghost'),
         expect.stringContaining('compact-less-than-ghost'),

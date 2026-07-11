@@ -246,7 +246,10 @@ function readDynamicImportSpecifier(
   const specifier = readDynamicImportArgumentSpecifier(content, i);
   if (!specifier) return null;
 
-  const nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  const nextTokenIndex = skipTypeScriptNonNullAssertion(
+    content,
+    skipImportTrivia(content, specifier.endIndex + 1),
+  );
   const assertedTokenIndex = skipTypeScriptImportArgumentAssertion(
     content,
     nextTokenIndex,
@@ -262,6 +265,11 @@ function readDynamicImportSpecifier(
   }
 
   return specifier;
+}
+
+function skipTypeScriptNonNullAssertion(content: string, index: number): number {
+  if (content[index] !== '!') return index;
+  return skipImportTrivia(content, index + 1);
 }
 
 function skipTypeScriptImportArgumentAssertion(
@@ -341,6 +349,8 @@ function canStartNativeDynamicImport(
 
   return !(
     isNestedTypeReference ||
+    isTypeOnlyImportReferenceUse(prefix, content, importIndex) ||
+    isInsideGenericTypeArgument(prefix, content, importIndex) ||
     isInsideTypeDeclaration(prefix) ||
     isInsideTypeAnnotation(prefix, content, importIndex, isTernaryBranch)
   );
@@ -405,6 +415,9 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
   if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
+  if (/(?:\bas\s*|\bsatisfies\s*)\(\s*\)\s*=>\s*$/.test(prefixWithoutTrailingTrivia)) {
+    return true;
+  }
   if (/(?:\bas\s*|\bsatisfies\s*)\s*(?:readonly\s*)?(?:\[\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
@@ -423,7 +436,92 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
 
   if (operator !== '|' && operator !== '&') return false;
 
-  return trimmed.at(-2) !== operator && trimmed.lastIndexOf('<') > trimmed.lastIndexOf('>');
+  return (
+    trimmed.at(-2) !== operator &&
+    (trimmed.lastIndexOf('<') > trimmed.lastIndexOf('>') ||
+      /(?:\bas\b|\bsatisfies\b|:)\s*[\s\S]*[|&]$/.test(trimmed))
+  );
+}
+
+function isInsideGenericTypeArgument(
+  prefix: string,
+  content: string,
+  importIndex: number,
+): boolean {
+  const trimmed = prefix.trimEnd();
+  if (!/[A-Za-z_$][\w$]*<$/.test(trimmed)) return false;
+  if (trimmed.lastIndexOf('<') < trimmed.lastIndexOf('>')) return false;
+
+  const dynamicImport = readDynamicImportSpecifierForTypeContext(
+    content,
+    importIndex + 'import'.length,
+  );
+  if (!dynamicImport) return false;
+
+  let i = skipImportTrivia(content, dynamicImport.endIndex + 1);
+  while (content[i] === '.' || (content[i] === '[' && content[i + 1] === ']')) {
+    if (content[i] === '.') {
+      i = skipImportTrivia(content, i + 1);
+      if (!/[A-Za-z_$]/.test(content[i] ?? '')) return false;
+      while (isIdentifierCharacter(content[i] ?? '')) i += 1;
+      i = skipImportTrivia(content, i);
+      continue;
+    }
+    i = skipImportTrivia(content, i + 2);
+  }
+
+  return content[i] === '>';
+}
+
+function isTypeOnlyImportReferenceUse(
+  prefix: string,
+  content: string,
+  importIndex: number,
+): boolean {
+  const dynamicImport = readDynamicImportSpecifierForTypeContext(
+    content,
+    importIndex + 'import'.length,
+  );
+  if (!dynamicImport) return false;
+
+  const afterImport = skipImportTrivia(content, dynamicImport.endIndex + 1);
+  if (
+    content[afterImport] !== '.' &&
+    content[afterImport] !== '>' &&
+    !(content[afterImport] === '[' && content[afterImport + 1] === ']')
+  ) {
+    return false;
+  }
+
+  const trimmed = prefix.trimEnd();
+  if (/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed)) {
+    return false;
+  }
+
+  if (/(?:\btype\b|\binterface\b|\bimplements\b|\bkeyof\b|\btypeof\b|\bas\b|\bsatisfies\b)[\s\S]*$/.test(trimmed)) {
+    return true;
+  }
+
+  const colonIndex = trimmed.lastIndexOf(':');
+  if (colonIndex === -1) return false;
+  const openBraceIndex = trimmed.lastIndexOf('{');
+  const semicolonIndex = trimmed.lastIndexOf(';');
+  return colonIndex > semicolonIndex && !/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed.slice(openBraceIndex));
+}
+
+function readDynamicImportSpecifierForTypeContext(
+  content: string,
+  index: number,
+): StringLiteralRead | null {
+  let i = skipImportTrivia(content, index);
+  if (content[i] !== '(') return null;
+  i = skipImportTrivia(content, i + 1);
+  const specifier = readDynamicImportArgumentSpecifier(content, i);
+  if (!specifier) return null;
+  const nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  return content[nextTokenIndex] === ')'
+    ? { value: specifier.value, endIndex: nextTokenIndex }
+    : null;
 }
 
 function stripTrailingTrivia(content: string): string {
@@ -436,6 +534,9 @@ function isInsideTypeDeclaration(prefix: string): boolean {
     /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
     !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
+      prefix,
+    ) &&
+    !/\}\s*(?:export\s+)?(?:const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b[\s\S]*$/.test(
       prefix,
     ) &&
     !/\}\s*(?:export\s+)?$/.test(prefix) &&
@@ -492,7 +593,11 @@ function isInsideTypeAnnotation(
 
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (/[=;]/.test(annotationSuffix)) return false;
-  if (/=>/.test(annotationSuffix)) return false;
+  if (/=>/.test(annotationSuffix)) {
+    return /^\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*(?:\[\])?)\s*=>\s*$/.test(
+      annotationSuffix,
+    );
+  }
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
   if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {
     return false;
