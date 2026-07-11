@@ -32,6 +32,7 @@ export interface PrCreatorConfig {
   readonly disabled: boolean;
   readonly remote: string;
   readonly disableBranding?: boolean;
+  readonly commitConvention?: 'conventional' | 'freeform';
 }
 
 export interface PrCreateOptions {
@@ -111,6 +112,7 @@ export class PrCreator {
       disabled: config.disabled ?? false,
       remote: config.remote ?? 'origin',
       disableBranding: config.disableBranding ?? false,
+      commitConvention: config.commitConvention ?? 'conventional',
     };
     this.exec = exec;
     this.llm = llm;
@@ -128,18 +130,28 @@ export class PrCreator {
         ? `The scope MUST be "${scope}" (derived from the affected package).`
         : 'Omit the scope — these are root-level changes.';
 
-      const prompt = [
-        'Write a semver-compatible conventional commit message for this change.',
-        'Format: type(scope): description',
-        'Types: feat, fix, chore, refactor, docs, test, ci, perf',
-        `${scopeHint}`,
-        'One line, max 72 chars. No markdown, no backticks.',
-        'The type determines semver bump: feat = minor, fix = patch, BREAKING CHANGE footer = major.',
-        '',
-        `Chunk objective: ${chunkObjective}`,
-        'Files changed:',
-        diffStat,
-      ].join('\n');
+      const prompt = this.config.commitConvention === 'freeform'
+        ? [
+          'Write a concise Git commit subject for this change.',
+          'Use natural language; do not force conventional-commit type/scope formatting.',
+          'One line, max 72 chars. No markdown, no backticks.',
+          '',
+          `Chunk objective: ${chunkObjective}`,
+          'Files changed:',
+          diffStat,
+        ].join('\n')
+        : [
+          'Write a semver-compatible conventional commit message for this change.',
+          'Format: type(scope): description',
+          'Types: feat, fix, chore, refactor, docs, test, ci, perf',
+          `${scopeHint}`,
+          'One line, max 72 chars. No markdown, no backticks.',
+          'The type determines semver bump: feat = minor, fix = patch, BREAKING CHANGE footer = major.',
+          '',
+          `Chunk objective: ${chunkObjective}`,
+          'Files changed:',
+          diffStat,
+        ].join('\n');
 
       const raw = await completeWithCacheHint(this.llm, prompt, {
         operation: 'commit-message',
@@ -149,6 +161,11 @@ export class PrCreator {
       });
       const msg = cleanCommitMessage(raw, this.config.disableBranding);
       const subject = msg.split('\n')[0] ?? '';
+      if (this.config.commitConvention === 'freeform') {
+        return subject.trim().length > 0
+          ? msg
+          : buildFreeformFallbackCommitMessage(chunkObjective, this.config.disableBranding);
+      }
       if (!CONVENTIONAL_SUBJECT_RE.test(subject)) {
         return buildFallbackCommitMessage(chunkObjective, scope, this.config.disableBranding);
       }
@@ -734,6 +751,11 @@ function buildFallbackCommitMessage(chunkObjective: string, scope?: string, disa
   const slug = chunkObjective.trim().slice(0, 50).replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').toLowerCase();
   const scopePart = scope ? `(${scope})` : '';
   const subject = `chore${scopePart}: implement ${slug || 'changes'}`;
+  return disableBranding ? subject : `${subject}\n\n${BRANDING}`;
+}
+
+function buildFreeformFallbackCommitMessage(chunkObjective: string, disableBranding = false): string {
+  const subject = chunkObjective.trim().replace(/\s+/g, ' ').slice(0, 72) || 'Implement requested changes';
   return disableBranding ? subject : `${subject}\n\n${BRANDING}`;
 }
 

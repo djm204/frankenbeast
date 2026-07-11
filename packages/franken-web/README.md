@@ -11,9 +11,19 @@ The dashboard is the primary Beast operator UI. CLI users can perform the same c
 ```bash
 npm run dev          # Start Vite dev server (default: http://localhost:5173)
 npm run dev:chat     # Start with API proxy pointing to chat-server on :3737
+npm run dev:network  # Start the network-management dashboard dev server
 npm run build        # Production build (tsc + vite build)
 npm run preview      # Preview production build locally
 npm test             # Run tests
+npm run typecheck    # Run the web package TypeScript check (tsc --noEmit)
+```
+
+Use `npm run dev:network` when working on the Network tab or local network-service flows. It serves the web dashboard in local Vite dev mode; keep API calls behind the same-origin proxy and set `VITE_API_PROXY_TARGET` when `/v1/network/*` should talk to a non-default local orchestrator/daemon. Set `VITE_BEAST_API_PROXY_TARGET` only when Beast controls under `/v1/beasts/*` should use a different target.
+
+From the repo root, run the same focused TypeScript check with:
+
+```bash
+npm --workspace @franken/web run typecheck
 ```
 
 ## Run with MCP Mode

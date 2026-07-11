@@ -44,6 +44,48 @@ describe('TOOL_REGISTRY', () => {
     expect(stubNames.size).toBe(EXPECTED_COUNT);
   });
 
+  it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {
+    const observer = {
+      log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
+      logCost: vi.fn(),
+      cost: vi.fn(),
+      trail: vi.fn(),
+      verify: vi.fn(),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_observer_log')!.makeHandler({ observer } as unknown as AdapterSet);
+
+    const invalidCases = [
+      { event: '', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: '   ', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '   ' },
+      { event: 'file_edit', metadata: { ok: true }, sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: ['not', 'json'], sessionId: 'sess-1' },
+    ];
+
+    for (const args of invalidCases) {
+      const result = await handler(args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('Error: fbeast_observer_log');
+      expect(result.content[0]!.text).not.toContain('Logged event');
+    }
+
+    expect(observer.log).not.toHaveBeenCalled();
+
+    const malformedJsonResult = await handler({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+
+    expect(malformedJsonResult.isError).toBeUndefined();
+    expect(observer.log).toHaveBeenCalledWith({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+  });
+
   it('rejects invalid observer log cost arguments before invoking the registry adapter handler', async () => {
     const observer = {
       log: vi.fn(),

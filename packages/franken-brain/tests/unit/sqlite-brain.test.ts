@@ -149,6 +149,17 @@ describe('SqliteBrain', () => {
       );
     });
 
+    it('rejects circular values with a working-memory error and keeps prior state', () => {
+      const circular: Record<string, unknown> = { label: 'loop' };
+      circular.self = circular;
+      brain.working.set('safe', { status: 'persisted' });
+
+      expect(() => brain.working.set('cycle', circular)).toThrow(WorkingMemoryLimitError);
+      expect(() => brain.working.restore({ cycle: circular })).toThrow(WorkingMemoryLimitError);
+      expect(brain.working.snapshot()).toEqual({ safe: { status: 'persisted' } });
+      expect(brain.working.has('cycle')).toBe(false);
+    });
+
     it('accounts for the serialized form, not a deceptive small JSON facade', () => {
       // A Map stringifies to '{}' but would retain its full contents if stored
       // by reference. The store normalizes to the JSON round-trip, so what is
@@ -173,6 +184,25 @@ describe('SqliteBrain', () => {
       hydrated.close();
     });
 
+    it('constructor hydration honors stricter custom working memory limits', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const roomy = new SqliteBrain(dbPath, { maxEntries: 3 });
+        roomy.working.set('a', 1);
+        roomy.working.set('b', 2);
+        roomy.flush();
+        roomy.close();
+
+        expect(() => new SqliteBrain(dbPath, { maxEntries: 1 })).toThrow(
+          WorkingMemoryLimitError,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('keeps previous state when restore() exceeds limits', () => {
       const bounded = new SqliteBrain(':memory:', { maxEntries: 2 });
       bounded.working.set('keep', 'me');
@@ -189,6 +219,47 @@ describe('SqliteBrain', () => {
       brain.working.set('complex', complex);
       expect(brain.working.get('complex')).toEqual(complex);
     });
+
+    it('returns defensive clones from get() so callers cannot mutate accounted state', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+      const persistent = new SqliteBrain(dbPath);
+      const validated = { nested: { steps: ['validated'] } };
+
+      try {
+        persistent.working.set('rules', validated);
+        const accountedBytes = persistent.working.usage().totalBytes;
+        const returned = persistent.working.get('rules') as { nested: { steps: string[] } };
+
+        returned.nested.steps.push('unvalidated'.repeat(100));
+
+        expect(persistent.working.get('rules')).toEqual(validated);
+        expect(persistent.working.usage().totalBytes).toBe(accountedBytes);
+
+        persistent.serialize();
+        persistent.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('rules')).toEqual(validated);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('returns defensive clones from snapshot() so callers cannot mutate accounted state', () => {
+      const validated = { nested: { items: [{ name: 'validated' }] } };
+      brain.working.set('rules', validated);
+      const accountedBytes = brain.working.usage().totalBytes;
+
+      const snap = brain.working.snapshot() as { rules: { nested: { items: Array<{ name: string }> } } };
+      snap.rules.nested.items[0].name = 'unvalidated';
+      snap.rules.nested.items.push({ name: 'oversized'.repeat(100) });
+
+      expect(brain.working.snapshot()).toEqual({ rules: validated });
+      expect(brain.working.get('rules')).toEqual(validated);
+      expect(brain.working.usage().totalBytes).toBe(accountedBytes);
+    });
   });
 
   describe('flush()', () => {
@@ -197,6 +268,103 @@ describe('SqliteBrain', () => {
       const snapshot = brain.serialize();
       // Working memory data is in the snapshot
       expect(snapshot.working).toEqual({ task: 'test-flush' });
+    });
+
+    it('persists only changed working-memory rows on subsequent flushes', () => {
+      const db = (brain as unknown as {
+        db: {
+          exec: (sql: string) => void;
+          prepare: (sql: string) => { all: () => Array<{ action: string; key: string }> };
+        };
+      }).db;
+
+      brain.working.set('alpha', 'one');
+      brain.working.set('beta', 'two');
+      brain.working.set('gamma', 'three');
+      brain.flush();
+
+      db.exec(`
+        CREATE TEMP TABLE working_memory_audit (action TEXT NOT NULL, key TEXT NOT NULL);
+        CREATE TEMP TRIGGER working_memory_audit_delete
+        AFTER DELETE ON working_memory
+        BEGIN
+          INSERT INTO working_memory_audit (action, key) VALUES ('delete', OLD.key);
+        END;
+        CREATE TEMP TRIGGER working_memory_audit_insert
+        AFTER INSERT ON working_memory
+        BEGIN
+          INSERT INTO working_memory_audit (action, key) VALUES ('insert', NEW.key);
+        END;
+        CREATE TEMP TRIGGER working_memory_audit_update
+        AFTER UPDATE ON working_memory
+        BEGIN
+          INSERT INTO working_memory_audit (action, key) VALUES ('update', NEW.key);
+        END;
+      `);
+
+      brain.working.set('beta', 'two-updated');
+      brain.flush();
+
+      const auditRows = db.prepare('SELECT action, key FROM working_memory_audit').all();
+      expect(new Set(auditRows.map(row => row.key))).toEqual(new Set(['beta']));
+    });
+
+    it('deletes only removed persisted working-memory rows on flush', () => {
+      const db = (brain as unknown as {
+        db: {
+          exec: (sql: string) => void;
+          prepare: (sql: string) => { all: () => Array<{ action: string; key: string }> };
+        };
+      }).db;
+
+      brain.working.restore({ keep: true, remove: false, alsoKeep: 3 });
+      brain.flush();
+
+      db.exec(`
+        CREATE TEMP TABLE working_memory_delete_audit (action TEXT NOT NULL, key TEXT NOT NULL);
+        CREATE TEMP TRIGGER working_memory_delete_audit_delete
+        AFTER DELETE ON working_memory
+        BEGIN
+          INSERT INTO working_memory_delete_audit (action, key) VALUES ('delete', OLD.key);
+        END;
+        CREATE TEMP TRIGGER working_memory_delete_audit_insert
+        AFTER INSERT ON working_memory
+        BEGIN
+          INSERT INTO working_memory_delete_audit (action, key) VALUES ('insert', NEW.key);
+        END;
+      `);
+
+      expect(brain.working.delete('remove')).toBe(true);
+      brain.flush();
+
+      const auditRows = db.prepare('SELECT action, key FROM working_memory_delete_audit').all();
+      expect(auditRows).toEqual([{ action: 'delete', key: 'remove' }]);
+    });
+
+    it('deletes externally added persisted rows when flushing a stale cleared instance', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('local', 'value');
+        stale.flush();
+
+        const concurrent = new SqliteBrain(dbPath);
+        concurrent.working.set('external', 'value');
+        concurrent.flush();
+        concurrent.close();
+
+        stale.working.clear();
+        stale.flush();
+        stale.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.keys()).toEqual([]);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -329,6 +497,12 @@ describe('SqliteBrain', () => {
 
       const row = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
       expect(row).toBeUndefined();
+
+      db.exec(`DROP TRIGGER fail_checkpoint_insert`);
+      brain.recovery.checkpoint(makeState({ step: 4 }));
+
+      const recovered = db.prepare('SELECT value FROM working_memory WHERE key = ?').get('key1');
+      expect(recovered?.value).toBe('"value1"');
     });
 
     it('lastCheckpoint() returns most recent', () => {
@@ -414,6 +588,42 @@ describe('SqliteBrain', () => {
       expect(cp!.phase).toBe('execution');
       expect(cp!.step).toBe(5);
       brain2.close();
+    });
+
+    it('hydrate() replaces existing persistent database rows without duplicating snapshot data', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        brain.working.set('task', 'snapshot');
+        brain.episodic.record({
+          type: 'success',
+          summary: 'hydrated once only',
+          createdAt: '2026-07-10T00:00:00Z',
+        });
+        brain.recovery.checkpoint({
+          runId: 'run-1',
+          phase: 'execution',
+          step: 1,
+          context: {},
+          timestamp: '2026-07-10T00:01:00Z',
+        });
+        const snapshot = brain.serialize();
+
+        const first = SqliteBrain.hydrate(snapshot, dbPath);
+        first.close();
+        const second = SqliteBrain.hydrate(snapshot, dbPath);
+
+        expect(second.working.snapshot()).toEqual({ task: 'snapshot' });
+        expect(second.episodic.count()).toBe(1);
+        expect(second.episodic.recent(10)).toEqual(snapshot.episodic);
+        expect(second.serialize().episodic).toEqual(snapshot.episodic);
+        expect(second.recovery.listCheckpoints()).toHaveLength(1);
+        expect(second.recovery.lastCheckpoint()?.runId).toBe('run-1');
+        second.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('round-trips with null checkpoint', () => {

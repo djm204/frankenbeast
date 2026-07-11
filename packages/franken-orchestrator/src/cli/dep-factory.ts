@@ -1,5 +1,6 @@
-import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
+import { AuditTrailStore, type ReplayRecord } from '@franken/observer';
 import { BeastLogger } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
@@ -185,6 +186,7 @@ interface EffectiveCliConfig {
   budget: number;
   branchPattern: string;
   prCreation?: 'auto' | 'manual' | 'disabled' | undefined;
+  commitConvention?: 'conventional' | 'freeform' | undefined;
   disableBranding: boolean;
   mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;
   skills?: string[] | undefined;
@@ -251,6 +253,7 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
     budget: options.budget,
     branchPattern: options.runConfig?.gitConfig?.branchPattern ?? 'feat/',
     prCreation: options.runConfig?.gitConfig?.prCreation,
+    commitConvention: options.runConfig?.gitConfig?.commitConvention === 'freeform' ? 'freeform' : 'conventional',
     disableBranding: options.runConfig?.gitConfig?.disableBranding ?? false,
     mergeStrategy: options.runConfig?.gitConfig?.mergeStrategy,
     skills: options.runConfig?.skills,
@@ -699,13 +702,24 @@ function createCliExecutorDeps(
   llm: LlmDeps,
 ): CliExecutorDeps {
   const prDisabled = options.noPr || config.prCreation === 'disabled';
+  const prCreatorConfig: {
+    targetBranch: string;
+    disabled: false;
+    remote: string;
+    disableBranding: boolean;
+    commitConvention?: 'conventional' | 'freeform';
+  } = {
+    targetBranch: config.baseBranch,
+    disabled: false,
+    remote: 'origin',
+    disableBranding: config.disableBranding,
+  };
+  if (config.commitConvention !== undefined) {
+    prCreatorConfig.commitConvention = config.commitConvention;
+  }
+
   const prCreator = prDisabled ? undefined : new PrCreator(
-    {
-      targetBranch: config.baseBranch,
-      disabled: false,
-      remote: 'origin',
-      disableBranding: config.disableBranding,
-    },
+    prCreatorConfig,
     undefined,
     llm.cachedLlm,
   );
@@ -887,11 +901,8 @@ function appendAuditFinalize(
         for (const [manifestRunId, records] of manifestsByRunId) {
           const replayManifestPath = join(observer.replayAuditRoot, `${manifestRunId}.replay.json`);
           const existingManifest = readExistingReplayManifest(replayManifestPath);
-          writeFileSync(
-            replayManifestPath,
-            JSON.stringify([...existingManifest, ...records], null, 2),
-            'utf8',
-          );
+          const store = new AuditTrailStore(resolve(observer.replayAuditRoot, '..', '..'));
+          store.saveReplayManifest(manifestRunId, [...existingManifest, ...records] as ReplayRecord[]);
         }
       }
     } catch { /* best-effort */ }

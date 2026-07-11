@@ -93,6 +93,7 @@ export class WebhookNotifier {
         const { baseDelayMs, maxDelayMs, jitter } = this.retry
         const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
         const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
+        // Clamp after adding jitter so maxDelayMs remains a true upper bound.
         const delay = Math.min(jittered, maxDelayMs)
         await this.sleepFn(delay)
       }

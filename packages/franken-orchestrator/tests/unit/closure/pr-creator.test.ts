@@ -165,21 +165,28 @@ describe('generateCommitMessage — fallback on garbage', () => {
     expect(result!).not.toMatch(/--/);
   });
 
-  it('returns canned message when LLM returns empty string', async () => {
-    const llm = { complete: vi.fn().mockResolvedValue('') };
+  it('passes through freeform commit messages when configured', async () => {
+    const llm = {
+      complete: vi.fn().mockResolvedValue('Describe auth session validation naturally'),
+    };
     const creator = new PrCreator(
-      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      { targetBranch: 'main', disabled: false, remote: 'origin', commitConvention: 'freeform' },
       vi.fn(),
       llm,
     );
 
     const result = await creator.generateCommitMessage(
       ' src/auth.ts | 10 ++++',
-      'fix auth bug',
+      'add session validation',
     );
 
     expect(result).toBeTruthy();
-    expect(result!).toMatch(/^chore: implement/);
+    expect(result!).toContain('Describe auth session validation naturally');
+    expect(result!).not.toMatch(/^(feat|fix|chore|refactor|docs|test|ci|perf)(\([^)]+\))?:/);
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('do not force conventional-commit'),
+      expect.objectContaining({ operation: 'commit-message' }),
+    );
   });
 });
 

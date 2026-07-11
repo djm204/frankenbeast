@@ -69,6 +69,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     let exitInfo: { code: number | null; signal: string | null } | undefined;
     let exitFired = false;
     let cleanupStarted = false;
+    let setupError: Error | undefined;
     const forceClose = {
       stdout: undefined as (() => void) | undefined,
       stderr: undefined as (() => void) | undefined,
@@ -102,6 +103,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     let maybeFireExit: () => void = () => undefined;
 
     const onError = (error: Error) => {
+      setupError ??= error;
       callbacks.onStderr(`Process spawn failed for ${spec.command}: ${error.message}`);
       if (!exitInfo) {
         exitInfo = { code: 1, signal: null };
@@ -138,7 +140,9 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     child.once('error', onError);
 
     if (!child.pid) {
-      throw new Error(
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      cleanupProcess();
+      throw setupError ?? new Error(
         `Failed to spawn Beast process for command: ${spec.command}`,
       );
     }

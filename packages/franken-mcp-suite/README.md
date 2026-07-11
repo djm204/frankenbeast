@@ -154,6 +154,21 @@ fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })
 
 `fbeast-mcp` runs all 21 tools in a single MCP server process.
 
+## Testing
+
+```bash
+# Unit tests
+npm test
+
+# Full-cycle integration tests (real SQLite/adapters; no mocked integration seams)
+npm run test:integration
+
+# Watch mode
+npm run test:watch
+```
+
+`test:integration` targets the package's `src/**/*.integration.test.ts` files, including the full-cycle MCP suite. The suite runs deterministically without a Codex CLI installation: Codex-specific prerequisite assertions are skipped when the `codex` binary is unavailable, while the remaining database and adapter integration checks still execute.
+
 ## Hooks
 
 When installed with `--hooks`, `fbeast-hook` provides governance and audit on every tool call:

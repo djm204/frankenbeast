@@ -35,9 +35,37 @@ export class WorkingMemoryLimitError extends Error {
   }
 }
 
+function cloneStoredWorkingMemoryValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
+function stringifyWorkingMemoryValue(key: string, value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized !== undefined) {
+      return serialized;
+    }
+  } catch (error) {
+    throw new WorkingMemoryLimitError(
+      `Working memory value for "${key}" is not JSON-serializable and could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  throw new WorkingMemoryLimitError(
+    `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
+  );
+}
+
 class SqliteWorkingMemory implements IWorkingMemory {
   private store = new Map<string, unknown>();
   private sizes = new Map<string, number>();
+  private serialized = new Map<string, string>();
+  private persistedSerialized = new Map<string, string>();
+  private dirtyKeys = new Set<string>();
+  private deletedKeys = new Set<string>();
   private totalBytes = 0;
 
   constructor(
@@ -45,47 +73,157 @@ class SqliteWorkingMemory implements IWorkingMemory {
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
     hydrateFromDb = true,
   ) {
+    this.loadPersistedSerializedFromDb();
     if (hydrateFromDb) {
       this.loadFromDb();
     }
   }
 
-  /** Hydrate in-memory state from persisted SQLite working_memory rows. */
-  private loadFromDb(): void {
+  private loadPersistedSerializedFromDb(): Array<{ key: string; value: string }> {
     const rows = this.db
       .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
       .all() as Array<{ key: string; value: string }>;
-    const snap: Record<string, unknown> = {};
-
-    for (const row of rows) {
-      Object.defineProperty(snap, row.key, {
-        value: parseStoredWorkingMemoryValue(row.value),
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-    }
-
-    this.restore(snap);
+    this.persistedSerialized = new Map(rows.map(row => [row.key, row.value]));
+    return rows;
   }
 
-  /** Flush in-memory Map to SQLite working_memory table (called on checkpoint). */
-  flushToDb(): void {
+  /** Hydrate in-memory state from persisted SQLite working_memory rows. */
+  private loadFromDb(): void {
+    const rows = this.loadPersistedSerializedFromDb();
+    if (rows.length > this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Persisted working memory has ${rows.length} entries, exceeding maxEntries (${this.limits.maxEntries})`,
+      );
+    }
+
+    const prepared: Array<[string, unknown, string, number]> = [];
+    let total = 0;
+    for (const row of rows) {
+      const parsed = parseStoredWorkingMemoryValue(row.value);
+      const { normalized, serialized, size } = this.prepareEntry(row.key, parsed);
+      total += size;
+      prepared.push([row.key, normalized, serialized, size]);
+    }
+    if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
+      throw new WorkingMemoryLimitError(
+        `Persisted working memory is ${total} bytes, exceeding maxTotalBytes (${this.limits.maxTotalBytes})`,
+      );
+    }
+
+    this.store.clear();
+    this.sizes.clear();
+    this.serialized.clear();
+    this.dirtyKeys.clear();
+    this.deletedKeys.clear();
+    this.totalBytes = 0;
+
+    for (const [key, normalized, serialized, size] of prepared) {
+      this.store.set(key, normalized);
+      this.sizes.set(key, size);
+      this.serialized.set(key, serialized);
+      this.totalBytes += size;
+    }
+  }
+
+  /** Flush in-memory changes to SQLite working_memory rows (called on checkpoint). */
+  flushToDb(): (() => void) | void {
+    const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
     const upsert = this.db.prepare(
-      `INSERT OR REPLACE INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)`,
+      `INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+       WHERE working_memory.value IS NOT excluded.value`,
     );
     const now = isoNow();
-    const tx = this.db.transaction(() => {
-      this.db.prepare(`DELETE FROM working_memory`).run();
-      for (const [key, value] of this.store) {
-        upsert.run(key, JSON.stringify(value), now);
+    let flushedDirtyKeys = new Set<string>();
+    let flushedDeletedKeys = new Set<string>();
+    const applyFlush = (): boolean => {
+      this.refreshPreparedStateForFlush();
+      if (this.dirtyKeys.size === 0 && this.deletedKeys.size === 0) {
+        return false;
       }
-    });
-    tx();
+
+      for (const key of this.deletedKeys) {
+        if (!this.dirtyKeys.has(key)) {
+          deleteKey.run(key);
+        }
+      }
+      for (const key of this.dirtyKeys) {
+        const serialized = this.serialized.get(key);
+        if (serialized !== undefined) {
+          upsert.run(key, serialized, now);
+        }
+      }
+      flushedDirtyKeys = new Set(this.dirtyKeys);
+      flushedDeletedKeys = new Set(this.deletedKeys);
+      return true;
+    };
+    const tx = this.db.transaction(applyFlush);
+    const hasChanges = this.db.inTransaction ? applyFlush() : tx.immediate();
+    if (!hasChanges) {
+      return;
+    }
+    const finalizeFlush = (): void => {
+      for (const key of flushedDeletedKeys) {
+        this.persistedSerialized.delete(key);
+      }
+      for (const key of flushedDirtyKeys) {
+        const serialized = this.serialized.get(key);
+        if (serialized !== undefined) {
+          this.persistedSerialized.set(key, serialized);
+        }
+      }
+      this.deletedKeys.clear();
+      this.dirtyKeys.clear();
+    };
+
+    if (!this.db.inTransaction) {
+      finalizeFlush();
+      return;
+    }
+
+    return finalizeFlush;
+  }
+
+  private refreshPreparedStateForFlush(): void {
+    // Refresh the persisted view at flush time so this instance's in-memory
+    // state remains authoritative even when another SqliteBrain wrote new rows
+    // after this instance was constructed. Without this, clear()/restore() can
+    // miss externally added keys because deletedKeys would be seeded from a
+    // stale cache.
+    this.loadPersistedSerializedFromDb();
+
+    const prepared: Array<[string, unknown, string, number]> = [];
+    let total = 0;
+    for (const [key, value] of this.store) {
+      const { normalized, serialized, size } = this.prepareEntry(key, value);
+      total += size;
+      prepared.push([key, normalized, serialized, size]);
+    }
+    if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
+      throw new WorkingMemoryLimitError(
+        `Working memory byte budget exceeded: ${total} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
+      );
+    }
+
+    this.store.clear();
+    this.sizes.clear();
+    this.serialized.clear();
+    this.dirtyKeys.clear();
+    this.deletedKeys = new Set(this.persistedSerialized.keys());
+    this.totalBytes = total;
+    for (const [key, normalized, serialized, size] of prepared) {
+      this.store.set(key, normalized);
+      this.sizes.set(key, size);
+      this.serialized.set(key, serialized);
+      this.deletedKeys.delete(key);
+      if (this.persistedSerialized.get(key) !== serialized) {
+        this.dirtyKeys.add(key);
+      }
+    }
   }
 
   get(key: string): unknown {
-    return this.store.get(key);
+    return cloneStoredWorkingMemoryValue(this.store.get(key));
   }
 
   /**
@@ -94,13 +232,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
    * exactly the accounted (and SQLite-persisted) form — a Map or class
    * instance cannot hide megabytes behind a tiny `{}` serialization.
    */
-  private prepareEntry(key: string, value: unknown): { normalized: unknown; size: number } {
-    const serialized = JSON.stringify(value);
-    if (serialized === undefined) {
-      throw new WorkingMemoryLimitError(
-        `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
-      );
-    }
+  private prepareEntry(
+    key: string,
+    value: unknown,
+  ): { normalized: unknown; serialized: string; size: number } {
+    const serialized = stringifyWorkingMemoryValue(key, value);
     const valueBytes = Buffer.byteLength(serialized, 'utf8');
     if (valueBytes > this.limits.maxValueBytes) {
       throw new WorkingMemoryLimitError(
@@ -109,11 +245,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
     // Keys are retained by the Map and the SQLite table too — count them.
     const size = Buffer.byteLength(key, 'utf8') + valueBytes;
-    return { normalized: JSON.parse(serialized) as unknown, size };
+    return { normalized: JSON.parse(serialized) as unknown, serialized, size };
   }
 
   set(key: string, value: unknown): void {
-    const { normalized, size } = this.prepareEntry(key, value);
+    const { normalized, serialized, size } = this.prepareEntry(key, value);
 
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
@@ -129,12 +265,30 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
     this.store.set(key, normalized);
     this.sizes.set(key, size);
+    this.serialized.set(key, serialized);
     this.totalBytes = newTotal;
+    if (this.persistedSerialized.get(key) === serialized) {
+      this.dirtyKeys.delete(key);
+    } else {
+      this.dirtyKeys.add(key);
+    }
+    this.deletedKeys.delete(key);
   }
 
   delete(key: string): boolean {
+    if (!this.store.has(key)) {
+      return false;
+    }
+
     this.totalBytes -= this.sizes.get(key) ?? 0;
     this.sizes.delete(key);
+    this.serialized.delete(key);
+    this.dirtyKeys.delete(key);
+    if (this.persistedSerialized.has(key)) {
+      this.deletedKeys.add(key);
+    } else {
+      this.deletedKeys.delete(key);
+    }
     return this.store.delete(key);
   }
 
@@ -155,7 +309,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const result: Record<string, unknown> = {};
     for (const [key, value] of this.store) {
       Object.defineProperty(result, key, {
-        value,
+        value: cloneStoredWorkingMemoryValue(value),
         enumerable: true,
         configurable: true,
         writable: true,
@@ -174,11 +328,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
       );
     }
     let total = 0;
-    const prepared: Array<[string, unknown, number]> = [];
+    const prepared: Array<[string, unknown, string, number]> = [];
     for (const [key, value] of entries) {
-      const { normalized, size } = this.prepareEntry(key, value);
+      const { normalized, serialized, size } = this.prepareEntry(key, value);
       total += size;
-      prepared.push([key, normalized, size]);
+      prepared.push([key, normalized, serialized, size]);
     }
     if (!Number.isSafeInteger(total) || total > this.limits.maxTotalBytes) {
       throw new WorkingMemoryLimitError(
@@ -187,9 +341,15 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
 
     this.clear();
-    for (const [key, normalized, size] of prepared) {
+    this.deletedKeys = new Set(this.persistedSerialized.keys());
+    for (const [key, normalized, serialized, size] of prepared) {
       this.store.set(key, normalized);
       this.sizes.set(key, size);
+      this.serialized.set(key, serialized);
+      this.deletedKeys.delete(key);
+      if (this.persistedSerialized.get(key) !== serialized) {
+        this.dirtyKeys.add(key);
+      }
     }
     this.totalBytes = total;
   }
@@ -197,6 +357,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
   clear(): void {
     this.store.clear();
     this.sizes.clear();
+    this.serialized.clear();
+    this.dirtyKeys.clear();
+    this.deletedKeys = new Set(this.persistedSerialized.keys());
     this.totalBytes = 0;
   }
 }
@@ -341,19 +504,22 @@ interface CheckpointRow {
 class SqliteRecoveryMemory implements IRecoveryMemory {
   constructor(
     private db: Database.Database,
-    private flushWorkingMemory?: () => void,
+    private flushWorkingMemory?: () => (() => void) | void,
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
+    const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = { current: undefined };
     const tx = this.db.transaction(() => {
-      this.flushWorkingMemory?.();
+      finalizeWorkingMemoryFlush.current = this.flushWorkingMemory?.() ?? undefined;
       const result = this.db
         .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
         .run(JSON.stringify(state), state.timestamp);
       return { id: String(result.lastInsertRowid) };
     });
 
-    return tx() as { id: string };
+    const result = tx() as { id: string };
+    finalizeWorkingMemoryFlush.current?.();
+    return result;
   }
 
   lastCheckpoint(): ExecutionState | null {
@@ -456,19 +622,24 @@ export class SqliteBrain implements IBrain {
 
     try {
       const insertEvent = brain.db.prepare(
-        `INSERT INTO episodic_events (type, step, summary, details, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO episodic_events (id, type, step, summary, details, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       );
       const insertCheckpoint = brain.db.prepare(
         `INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`,
       );
 
+      const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = { current: undefined };
       const restoreSnapshot = brain.db.transaction(() => {
         brain.working.restore(snapshot.working);
-        brain.working.flushToDb();
+        finalizeWorkingMemoryFlush.current = brain.working.flushToDb() ?? undefined;
+
+        brain.db.prepare(`DELETE FROM episodic_events`).run();
+        brain.db.prepare(`DELETE FROM checkpoints`).run();
 
         for (const event of snapshot.episodic) {
           insertEvent.run(
+            event.id ?? null,
             event.type,
             event.step ?? null,
             event.summary,
@@ -483,6 +654,7 @@ export class SqliteBrain implements IBrain {
       });
 
       restoreSnapshot();
+      finalizeWorkingMemoryFlush.current?.();
     } catch (error) {
       brain.close();
       throw error;

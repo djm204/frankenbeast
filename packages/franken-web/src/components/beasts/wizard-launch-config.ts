@@ -102,7 +102,9 @@ function buildModuleConfig(modules: Record<string, unknown> | undefined): Record
   if (!modules) return undefined;
 
   const moduleConfig = Object.fromEntries(
-    MODULE_CONFIG_KEYS.map((key: string) => [key, modules[key] === true]),
+    MODULE_CONFIG_KEYS.flatMap((key: string) => (
+      key in modules ? [[key, modules[key] === true]] : []
+    )),
   );
 
   return Object.keys(moduleConfig).length > 0 ? moduleConfig : undefined;
@@ -117,6 +119,18 @@ function normalizeWizardProvider(provider: unknown): string | undefined {
   if (typeof provider !== 'string') return undefined;
   const trimmed = provider.trim();
   return trimmed.length > 0 ? CLI_PROVIDER_BY_WIZARD_PROVIDER[trimmed] : undefined;
+}
+
+const LLM_OPERATION_ALIASES_BY_WIZARD_ACTION: Record<string, readonly string[]> = {
+  planning: ['plan-build', 'issue-triage', 'issue-graph'],
+  execution: ['issues', 'cli-session'],
+  critique: ['critique'],
+  reflection: ['chunk-session-compaction'],
+  chat: ['chat'],
+};
+
+function llmOperationAliasesForWizardAction(action: string): readonly string[] {
+  return LLM_OPERATION_ALIASES_BY_WIZARD_ACTION[action] ?? [action];
 }
 
 function buildLlmConfig(llm: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -147,7 +161,9 @@ function buildLlmConfig(llm: Record<string, unknown> | undefined): Record<string
         if (typeof override.model === 'string' && override.model.trim().length > 0) {
           actionConfig.model = override.model;
         }
-        return Object.keys(actionConfig).length > 0 ? [[action, actionConfig]] : [];
+        return Object.keys(actionConfig).length > 0
+          ? llmOperationAliasesForWizardAction(action).map((operation) => [operation, actionConfig])
+          : [];
       }),
     );
     if (Object.keys(overrides).length > 0) {

@@ -22,7 +22,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:ci": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
@@ -40,5 +42,11 @@
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "frankenbeast",
+    "planning",
+    "decomposition",
+    "agent"
+  ]
 }

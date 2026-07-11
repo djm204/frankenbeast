@@ -44,14 +44,31 @@ export class SessionTokenStore {
 
   store(token: SessionToken): void {
     if (!this.persistenceFile) {
+      this.pruneExpiredTokens();
       this.tokens.set(token.tokenId, token);
       return;
     }
 
     this.withFileLock(() => {
       this.loadPersistedTokens();
+      this.pruneExpiredTokens();
       this.tokens.set(token.tokenId, token);
       this.persist();
+    });
+  }
+
+  cleanupExpired(): number {
+    if (!this.persistenceFile) {
+      return this.pruneExpiredTokens();
+    }
+
+    return this.withFileLock(() => {
+      const expiredPersisted = this.loadPersistedTokens();
+      const pruned = this.pruneExpiredTokens();
+      if (expiredPersisted + pruned > 0) {
+        this.persist();
+      }
+      return expiredPersisted + pruned;
     });
   }
 
@@ -87,8 +104,19 @@ export class SessionTokenStore {
     return scope === undefined || token.scope === scope;
   }
 
-  private loadPersistedTokens(): void {
-    if (!this.persistenceFile) return;
+  private pruneExpiredTokens(): number {
+    let pruned = 0;
+    for (const [tokenId, token] of this.tokens) {
+      if (this.isExpired(token)) {
+        this.tokens.delete(tokenId);
+        pruned += 1;
+      }
+    }
+    return pruned;
+  }
+
+  private loadPersistedTokens(): number {
+    if (!this.persistenceFile) return 0;
 
     let raw: string;
     try {
@@ -97,7 +125,7 @@ export class SessionTokenStore {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') {
         this.tokens.clear();
-        return;
+        return 0;
       }
       throw err;
     }
@@ -114,14 +142,18 @@ export class SessionTokenStore {
     }
 
     this.tokens.clear();
+    let expiredPersisted = 0;
     for (const value of parsed) {
       const token = this.deserialize(value);
       if (token && !this.isExpired(token)) {
         this.tokens.set(token.tokenId, token);
+      } else if (token) {
+        expiredPersisted += 1;
       }
     }
 
     // Expired entries are ignored on read and pruned on the next write.
+    return expiredPersisted;
   }
 
   private deserialize(value: unknown): SessionToken | null {

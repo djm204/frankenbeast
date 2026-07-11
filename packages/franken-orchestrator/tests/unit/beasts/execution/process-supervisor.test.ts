@@ -71,7 +71,7 @@ describe('ProcessSupervisor', () => {
       const callbacks = makeCallbacks();
       const spec = makeSpec({ command: '/definitely/not-a-real-command-franken-698', args: [] });
 
-      await expect(supervisor.spawn(spec, callbacks)).rejects.toThrow(/Failed to spawn Beast process/);
+      await expect(supervisor.spawn(spec, callbacks)).rejects.toMatchObject({ code: 'ENOENT' });
 
       await vi.waitFor(() => {
         expect(callbacks.onStderr).toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));

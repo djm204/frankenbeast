@@ -309,6 +309,26 @@ export class Session {
   private async runPlan(): Promise<void> {
     const { paths, io, designDocPath } = this.config;
     const depOptions = this.buildDepOptions();
+    const planOverride = depOptions.runConfig?.llmConfig?.overrides?.['plan-build'];
+    if (planOverride) {
+      const currentLlmConfig = depOptions.runConfig?.llmConfig ?? {};
+      depOptions.runConfig = {
+        ...depOptions.runConfig!,
+        llmConfig: {
+          ...currentLlmConfig,
+          default: {
+            ...currentLlmConfig.default,
+            ...planOverride,
+          },
+        },
+      };
+    }
+    const planProvider = depOptions.runConfig?.llmConfig?.default?.provider
+      ?? depOptions.runConfig?.provider
+      ?? this.config.provider;
+    const planModel = depOptions.runConfig?.llmConfig?.default?.model
+      ?? depOptions.runConfig?.model
+      ?? planProvider;
     // Run planning CLI from tmpdir to prevent project-scoped plugins (superpowers, etc.)
     // from loading in the spawned CLI. Plugins poison the session by injecting skill
     // instructions that make the CLI explore the codebase instead of returning JSON.
@@ -356,8 +376,8 @@ export class Session {
       cacheRootDir: paths.llmCacheDir,
       cliAdapter: cliLlmAdapter,
       projectId: paths.root,
-      provider: this.config.provider,
-      model: this.config.provider,
+      provider: planProvider,
+      model: planModel,
       operation: 'plan-build',
       workId: `plan:${planName}`,
       stablePrefix: 'surface:plan',

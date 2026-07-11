@@ -30,6 +30,20 @@ describe('AgentRow', () => {
     expect(screen.getByText('design-interview')).toBeTruthy();
   });
 
+  it('summarizes disabled module overrides instead of counting them as zero modules', () => {
+    render(
+      <AgentRow
+        agent={{ ...agent, moduleConfig: { firewall: false } }}
+        density="comfortable"
+        selected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('1 disabled module')).toBeTruthy();
+    expect(screen.queryByText('0 modules')).toBeNull();
+  });
+
   it('shows execution mode from linked run', () => {
     render(<AgentRow agent={agent} run={{
       id: 'run-1',

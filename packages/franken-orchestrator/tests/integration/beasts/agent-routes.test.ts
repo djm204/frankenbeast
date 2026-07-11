@@ -136,7 +136,7 @@ function createIntegratedBeastApp(opts?: { rateLimitMax?: number }) {
     },
   });
 
-  return { app, operatorToken };
+  return { app, operatorToken, agents };
 }
 
 function createStandaloneAgentApp() {
@@ -1014,6 +1014,99 @@ describe('agent routes integration', () => {
         message: `Tracked agent '${created.data.id}' has been deleted`,
       },
     });
+  });
+
+  it.each(['failed', 'completed'] as const)(
+    'soft-deletes %s tracked agents through the dashboard route',
+    async (status) => {
+      const { app, operatorToken, agents } = createIntegratedBeastApp();
+      const headers = {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      };
+
+      const createResponse = await app.request('/v1/beasts/agents', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          definitionId: 'design-interview',
+          initAction: {
+            kind: 'design-interview',
+            command: '/interview',
+            config: { goal: `Delete ${status} from dashboard` },
+          },
+          initConfig: { goal: `Delete ${status} from dashboard` },
+          autoDispatch: false,
+        }),
+      });
+      expect(createResponse.status).toBe(201);
+      const created = await createResponse.json() as { data: { id: string } };
+      agents.updateAgent(created.data.id, { status });
+
+      const deleteResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+        method: 'DELETE',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+        },
+      });
+      expect(deleteResponse.status).toBe(204);
+
+      const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+        },
+      });
+      expect(detailResponse.status).toBe(200);
+      const detail = await detailResponse.json() as { data: { agent: { id: string; status: string } } };
+      expect(detail.data.agent).toMatchObject({ id: created.data.id, status: 'deleted' });
+    },
+  );
+
+  it('returns a typed 409 without recording delete request events for running tracked agents', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md' },
+        },
+        initConfig: { goal: 'Do not delete running agents', outputPath: 'docs/running-delete.md' },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const deleteResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(deleteResponse.status).toBe(409);
+    expect(await deleteResponse.json()).toEqual({
+      error: {
+        code: 'TRACKED_AGENT_NOT_DELETABLE',
+        message: `Tracked agent '${created.data.id}' must be stopped, failed, or completed to delete`,
+      },
+    });
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const detail = await detailResponse.json() as { data: { events: Array<{ type: string }> } };
+    expect(detail.data.events.some((event) => event.type === 'agent.delete.requested')).toBe(false);
   });
 
   it('patches tracked agent identity and module configuration', async () => {

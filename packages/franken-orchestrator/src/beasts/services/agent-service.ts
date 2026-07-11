@@ -107,8 +107,8 @@ export class AgentService {
 
   softDeleteAgent(agentId: string): TrackedAgent {
     const agent = this.getAgent(agentId);
-    if (agent.status !== 'stopped') {
-      throw new Error(`Tracked agent '${agentId}' is not stopped`);
+    if (agent.status !== 'stopped' && agent.status !== 'failed' && agent.status !== 'completed') {
+      throw new Error(`Tracked agent '${agentId}' is not stopped, failed, or completed`);
     }
     return this.repository.updateTrackedAgent(agentId, {
       status: 'deleted',

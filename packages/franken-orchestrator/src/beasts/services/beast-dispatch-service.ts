@@ -6,6 +6,7 @@ import type { BeastExecutor } from '../execution/beast-executor.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
+import { UnknownBeastDefinitionError } from '../errors.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
@@ -207,7 +208,11 @@ export class BeastDispatchService {
           throw new Error(`Beast run disappeared after start: ${run.id}`);
         }
         if (updated.trackedAgentId) {
-          const agentStatus = updated.status === 'running' ? 'running' : 'dispatching';
+          const agentStatus = updated.status === 'running'
+            ? 'running'
+            : updated.status === 'pending_approval'
+              ? 'awaiting_approval'
+              : 'dispatching';
           const updatedAt = new Date(wallClockNow()).toISOString();
           this.repository.updateTrackedAgent(updated.trackedAgentId, {
             status: agentStatus,
@@ -293,7 +298,7 @@ export class BeastDispatchService {
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {
     const definition = this.catalog.getDefinition(definitionId);
     if (!definition) {
-      throw new Error(`Unknown Beast definition: ${definitionId}`);
+      throw new UnknownBeastDefinitionError(definitionId);
     }
     return definition;
   }

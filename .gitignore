@@ -7,12 +7,26 @@ node_modules
 .turbo
 .tmp/
 dist
+coverage/
+packages/*/coverage/
 # Frankenbeast project-local state (build logs, checkpoints, plans)
 .frankenbeast/
 # fbeast MCP suite data
 .fbeast/
 # Build runner artifacts (logs, traces, checkpoint) — must be invisible to git/codex/rg
 **/.build/
+
+# npm workspaces use the root package-lock.json as the single dependency lockfile.
+/packages/*/package-lock.json
+
+# Generated audit/scan artifacts belong in issues, PR attachments, or docs/audits/ after review.
+/audit.json
+/eval_findings.json
+/npm-audit*.json
+/*audit_findings*.md
+/packages_*_audit.md
+/packages_audit_findings.md
+/security_audit_findings.md
 
 # Root-level module directories (legacy gitlinks, pending cleanup)
 /franken-brain
