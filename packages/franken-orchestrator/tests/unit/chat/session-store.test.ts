@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
 
@@ -109,6 +109,26 @@ describe('FileSessionStore', () => {
     warn.mockRestore();
   });
 
+  it('filters corrupt-session diagnostics by project id when available', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const firstId = 'chat-corrupt-first-project';
+    const secondId = 'chat-corrupt-second-project';
+    writeFileSync(join(TMP, `${firstId}.json`), JSON.stringify({ id: firstId, projectId: 'first' }), 'utf-8');
+    writeFileSync(join(TMP, `${secondId}.json`), JSON.stringify({ id: secondId, projectId: 'second' }), 'utf-8');
+
+    expect(store.get(firstId)).toBeUndefined();
+    expect(store.get(secondId)).toBeUndefined();
+
+    expect(store.listCorruptions('first')).toEqual([
+      expect.objectContaining({ id: firstId, projectId: 'first' }),
+    ]);
+    expect(store.listCorruptions('second')).toEqual([
+      expect.objectContaining({ id: secondId, projectId: 'second' }),
+    ]);
+
+    warn.mockRestore();
+  });
+
   it('does not quarantine unreadable session paths', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const unreadableId = 'chat-directory-entry';
@@ -168,6 +188,18 @@ describe('FileSessionStore', () => {
 
     expect(store.get(session.id)!.transcript).toHaveLength(1);
     expect(readdirSync(TMP).filter((entry) => entry.includes('.tmp'))).toEqual([]);
+  });
+
+  it('preserves existing session file permissions during atomic saves', () => {
+    const session = store.create('proj');
+    const sessionPath = join(TMP, `${session.id}.json`);
+    chmodSync(sessionPath, 0o600);
+
+    session.transcript.push({ role: 'user', content: 'private', timestamp: new Date().toISOString() });
+    store.save(session);
+
+    expect(statSync(sessionPath).mode & 0o777).toBe(0o600);
+    expect(store.get(session.id)!.transcript).toHaveLength(1);
   });
 
   it('uses unique quarantine paths for repeated corrupt writes with the same id', () => {

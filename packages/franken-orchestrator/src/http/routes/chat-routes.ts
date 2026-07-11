@@ -134,7 +134,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     }));
-    const corruptSessions = sessionStore.listCorruptions?.() ?? [];
+    const corruptSessions = sessionStore.listCorruptions?.(projectId) ?? [];
     return c.json({
       data: { sessions, corruptSessions },
     } satisfies ApiDataEnvelope<{ sessions: ChatSessionSummary[]; corruptSessions: CorruptChatSessionFile[] }>);
