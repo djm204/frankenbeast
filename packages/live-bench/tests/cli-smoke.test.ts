@@ -19,7 +19,7 @@ beforeAll(() => {
       stdio: 'pipe',
     });
   }
-});
+}, 60_000);
 
 function runCli(args: string[], cwd = packageRoot) {
   return spawnSync(cliBinary, args, {
