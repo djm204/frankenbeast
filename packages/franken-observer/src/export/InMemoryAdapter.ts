@@ -60,15 +60,34 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
     return value
   }
 
-  try {
-    return structuredClone(value)
-  } catch {
-    // Fall back to a JSON-like enumerable clone for metadata containing values
-    // unsupported by the structured clone algorithm, such as functions/symbols.
-  }
-
   if (seen.has(value)) {
     return seen.get(value)
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime())
+  }
+
+  if (value instanceof RegExp) {
+    return new RegExp(value.source, value.flags)
+  }
+
+  if (value instanceof Map) {
+    const cloned = new Map<unknown, unknown>()
+    seen.set(value, cloned)
+    for (const [key, nestedValue] of value.entries()) {
+      cloned.set(cloneMetadataValue(key, seen), cloneMetadataValue(nestedValue, seen))
+    }
+    return cloned
+  }
+
+  if (value instanceof Set) {
+    const cloned = new Set<unknown>()
+    seen.set(value, cloned)
+    for (const nestedValue of value.values()) {
+      cloned.add(cloneMetadataValue(nestedValue, seen))
+    }
+    return cloned
   }
 
   if (Array.isArray(value)) {
@@ -78,10 +97,37 @@ function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>(
     return cloned
   }
 
+  if (value instanceof Error) {
+    const cloned: Record<string, unknown> = {
+      name: value.name,
+      message: value.message,
+    }
+    if (value.stack !== undefined) cloned['stack'] = value.stack
+    if ('cause' in value) cloned['cause'] = cloneMetadataValue(value.cause, seen)
+    seen.set(value, cloned)
+    for (const [key, nestedValue] of Object.entries(value)) {
+      defineMetadataProperty(cloned, key, cloneMetadataValue(nestedValue, seen))
+    }
+    return cloned
+  }
+
   const cloned: Record<string, unknown> = {}
   seen.set(value, cloned)
   for (const [key, nestedValue] of Object.entries(value)) {
-    cloned[key] = cloneMetadataValue(nestedValue, seen)
+    defineMetadataProperty(cloned, key, cloneMetadataValue(nestedValue, seen))
   }
   return cloned
+}
+
+function defineMetadataProperty(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  })
 }

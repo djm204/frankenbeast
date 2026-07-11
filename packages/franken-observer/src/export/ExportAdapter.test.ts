@@ -139,6 +139,46 @@ describe('InMemoryAdapter', () => {
       })
     })
 
+    it('preserves container, Error, and __proto__ metadata during fallback cloning', async () => {
+      const trace = TraceContext.createTrace('container metadata')
+      const span = TraceContext.startSpan(trace, { name: 'container metadata span' })
+      const callback = () => 'container'
+      const error = new Error('boom') as Error & { code?: string; details?: { retryable: boolean } }
+      error.code = 'E_BOOM'
+      error.details = { retryable: true }
+      const protoValue = { polluted: true }
+      SpanLifecycle.setMetadata(span, {
+        tools: new Map<string, unknown>([['cb', callback]]),
+        values: new Set<unknown>([callback, 'kept']),
+        error,
+        callback,
+      })
+      Object.defineProperty(span.metadata, '__proto__', {
+        value: protoValue,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      const metadata = retrieved!.spans[0]!.metadata
+      expect(metadata['tools']).toEqual(new Map([['cb', String(callback)]]))
+      expect(metadata['values']).toEqual(new Set([String(callback), 'kept']))
+      expect(metadata['error']).toMatchObject({
+        name: 'Error',
+        message: 'boom',
+        code: 'E_BOOM',
+        details: { retryable: true },
+      })
+      expect(Object.prototype.hasOwnProperty.call(metadata, '__proto__')).toBe(true)
+      expect(metadata['__proto__']).toEqual(protoValue)
+      expect(Object.getPrototypeOf(metadata)).toBe(Object.prototype)
+    })
+
     it('warns when exporting a trace that still has active spans', async () => {
       const trace = TraceContext.createTrace('goal')
       TraceContext.startSpan(trace, { name: 'orphaned' })
