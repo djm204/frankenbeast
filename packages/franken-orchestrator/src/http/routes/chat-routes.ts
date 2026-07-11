@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { approvalRuntimeInput } from '../../chat/approval-input.js';
-import type { ISessionStore } from '../../chat/session-store.js';
+import type { CorruptChatSessionFile, ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
@@ -134,7 +134,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     }));
-    return c.json({ data: { sessions } } satisfies ApiDataEnvelope<{ sessions: ChatSessionSummary[] }>);
+    const corruptSessions = sessionStore.listCorruptions?.() ?? [];
+    return c.json({
+      data: { sessions, corruptSessions },
+    } satisfies ApiDataEnvelope<{ sessions: ChatSessionSummary[]; corruptSessions: CorruptChatSessionFile[] }>);
   });
 
   // Get session
