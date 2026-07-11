@@ -110,11 +110,6 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   /** Flush in-memory changes to SQLite working_memory rows (called on checkpoint). */
   flushToDb(): (() => void) | void {
-    this.refreshPreparedStateForFlush();
-    if (this.dirtyKeys.size === 0 && this.deletedKeys.size === 0) {
-      return;
-    }
-
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
     const upsert = this.db.prepare(
       `INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)
@@ -122,7 +117,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
        WHERE working_memory.value IS NOT excluded.value`,
     );
     const now = isoNow();
-    const tx = this.db.transaction(() => {
+    let flushedDirtyKeys = new Set<string>();
+    let flushedDeletedKeys = new Set<string>();
+    const applyFlush = (): boolean => {
+      this.refreshPreparedStateForFlush();
+      if (this.dirtyKeys.size === 0 && this.deletedKeys.size === 0) {
+        return false;
+      }
+
       for (const key of this.deletedKeys) {
         if (!this.dirtyKeys.has(key)) {
           deleteKey.run(key);
@@ -134,11 +136,15 @@ class SqliteWorkingMemory implements IWorkingMemory {
           upsert.run(key, serialized, now);
         }
       }
-    });
-    tx();
-
-    const flushedDirtyKeys = new Set(this.dirtyKeys);
-    const flushedDeletedKeys = new Set(this.deletedKeys);
+      flushedDirtyKeys = new Set(this.dirtyKeys);
+      flushedDeletedKeys = new Set(this.deletedKeys);
+      return true;
+    };
+    const tx = this.db.transaction(applyFlush);
+    const hasChanges = this.db.inTransaction ? applyFlush() : tx.immediate();
+    if (!hasChanges) {
+      return;
+    }
     const finalizeFlush = (): void => {
       for (const key of flushedDeletedKeys) {
         this.persistedSerialized.delete(key);
