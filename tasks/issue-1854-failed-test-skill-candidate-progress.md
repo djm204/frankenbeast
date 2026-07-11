@@ -12,4 +12,7 @@
   - `npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts` passed (16 tests).
   - Initial typecheck failed until `@franken/types` was built.
   - `npm run build --workspace @franken/types && npm run typecheck --workspace @franken/critique` passed.
-- [ ] Commit, push, open PR, and request Codex review.
+- [x] Commit, push, open PR, and request Codex review.
+  - Commit: `eea6c801 feat(learning): detect failed-test skill candidates`.
+  - PR: https://github.com/djm204/frankenbeast/pull/1888.
+  - Posted `@codex review` on the PR.
