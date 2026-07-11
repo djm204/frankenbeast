@@ -116,18 +116,28 @@ export function createAuditEvent(
 
 export { hashContent };
 
-function cloneValueFallback(value: unknown, seen: WeakMap<object, unknown>): unknown {
-  if (typeof value !== 'object' || value === null) {
+function cloneValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
     return value;
   }
 
   const existing = seen.get(value);
   if (existing !== undefined) {
-    return existing;
+    return existing as T;
+  }
+
+  if (typeof value === 'function') {
+    Object.freeze(value);
+    seen.set(value, value);
+    return value;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return Buffer.from(value) as T;
   }
 
   if (value instanceof Date) {
-    return new Date(value.getTime());
+    return new Date(value.getTime()) as T;
   }
 
   if (Array.isArray(value)) {
@@ -136,7 +146,7 @@ function cloneValueFallback(value: unknown, seen: WeakMap<object, unknown>): unk
     for (const item of value) {
       clone.push(cloneValue(item, seen));
     }
-    return clone;
+    return clone as T;
   }
 
   if (value instanceof Map) {
@@ -145,7 +155,7 @@ function cloneValueFallback(value: unknown, seen: WeakMap<object, unknown>): unk
     for (const [key, item] of value) {
       clone.set(cloneValue(key, seen), cloneValue(item, seen));
     }
-    return clone;
+    return clone as T;
   }
 
   if (value instanceof Set) {
@@ -154,7 +164,7 @@ function cloneValueFallback(value: unknown, seen: WeakMap<object, unknown>): unk
     for (const item of value) {
       clone.add(cloneValue(item, seen));
     }
-    return clone;
+    return clone as T;
   }
 
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
@@ -166,19 +176,11 @@ function cloneValueFallback(value: unknown, seen: WeakMap<object, unknown>): unk
   for (const [key, item] of Object.entries(value)) {
     clone[key] = cloneValue(item, seen);
   }
-  return clone;
-}
-
-function cloneValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
-  try {
-    return structuredClone(value);
-  } catch {
-    return cloneValueFallback(value, seen) as T;
-  }
+  return clone as T;
 }
 
 function freezeValue<T>(value: T, seen = new WeakSet<object>()): T {
-  if (typeof value !== 'object' || value === null || seen.has(value)) {
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null || seen.has(value)) {
     return value;
   }
 

@@ -183,6 +183,38 @@ describe('AuditTrail', () => {
     });
   });
 
+  it('freezes function payloads so callable objects cannot mutate stored history', () => {
+    const trail = new AuditTrail();
+    const payload = (): string => 'ok';
+    (payload as { mutable?: { count: number } }).mutable = { count: 1 };
+
+    trail.append(createAuditEvent('function.payload', payload, { phase: 'p', provider: 'pr' }));
+
+    ignoreMutation(() => {
+      (payload as { mutable?: { count: number } }).mutable = { count: 99 };
+    });
+    const returnedPayload = trail.getAll()[0]!.payload as { mutable?: { count: number } };
+    ignoreMutation(() => {
+      returnedPayload.mutable = { count: 42 };
+    });
+
+    expect((trail.getAll()[0]!.payload as { mutable?: { count: number } }).mutable).toEqual({ count: 1 });
+  });
+
+  it('preserves Buffer payloads while isolating mutable aliases', () => {
+    const trail = new AuditTrail();
+    const payload = Buffer.from('audit-bytes');
+    trail.append(createAuditEvent('buffer.payload', payload, { phase: 'p', provider: 'pr' }));
+
+    payload[0] = 0;
+    const returnedPayload = trail.getAll()[0]!.payload as Buffer;
+    expect(Buffer.isBuffer(returnedPayload)).toBe(true);
+    expect(returnedPayload.toString()).toBe('audit-bytes');
+
+    returnedPayload[0] = 0;
+    expect((trail.getAll()[0]!.payload as Buffer).toString()).toBe('audit-bytes');
+  });
+
   it('fromJSON rejects non-array input', () => {
     expect(() => AuditTrail.fromJSON({})).toThrow(/events must be an array/i);
   });
