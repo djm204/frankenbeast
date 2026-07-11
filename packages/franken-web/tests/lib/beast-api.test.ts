@@ -52,8 +52,14 @@ describe('BeastApiClient', () => {
         config: { designDocPath: 'docs/plans/design.md' },
         chatSessionId: 'sess-1',
       },
-      initConfig: { designDocPath: 'docs/plans/design.md' },
+      initConfig: {
+        designDocPath: 'docs/plans/design.md',
+        skills: ['planning'],
+        promptConfig: { text: 'Plan from this context.' },
+        gitConfig: { preset: 'feature-branch' },
+      },
       chatSessionId: 'sess-1',
+      moduleConfig: { planner: true, skills: true },
     });
     await client.listAgents();
     await client.getAgent('agent-1');
@@ -71,8 +77,14 @@ describe('BeastApiClient', () => {
             config: { designDocPath: 'docs/plans/design.md' },
             chatSessionId: 'sess-1',
           },
-          initConfig: { designDocPath: 'docs/plans/design.md' },
+          initConfig: {
+            designDocPath: 'docs/plans/design.md',
+            skills: ['planning'],
+            promptConfig: { text: 'Plan from this context.' },
+            gitConfig: { preset: 'feature-branch' },
+          },
           chatSessionId: 'sess-1',
+          moduleConfig: { planner: true, skills: true },
         }),
       }),
     );

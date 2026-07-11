@@ -85,21 +85,26 @@ describe('BeastDispatchService', () => {
         provider: 'claude',
         objective: 'Implement the dispatch panel',
         chunkDirectory: 'docs/chunks',
-        skills: { selectedSkills: [] },
+        skills: ['code-review', 'testing'],
+        promptConfig: { text: 'Launch with this context.' },
         gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: true, mergeStrategy: 'squash', commitConvention: 'conventional' },
         llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
       executionMode: 'process',
+      moduleConfig: { firewall: true, skills: true, planner: false },
     });
 
     expect(run.configSnapshot).toEqual({
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
+      skills: ['code-review', 'testing'],
+      promptConfig: { text: 'Launch with this context.' },
       gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
       llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
+      modules: { firewall: true, skills: true, planner: false },
     });
   });
 
