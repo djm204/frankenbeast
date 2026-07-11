@@ -184,10 +184,15 @@ describe('AuditTrailStore', () => {
     const replayPath = join(tempDir, '.fbeast', 'audit', 'run-1.replay.json');
     chmodSync(filePath, 0o644);
     chmodSync(replayPath, 0o644);
+    const originalUmask = process.umask(0o077);
 
-    store.save('run-1', sampleTrail(), [
-      { version: 1, kind: 'llm.request', runId: 'run-1', timestamp: 't2', contentRef: 'def456' },
-    ]);
+    try {
+      store.save('run-1', sampleTrail(), [
+        { version: 1, kind: 'llm.request', runId: 'run-1', timestamp: 't2', contentRef: 'def456' },
+      ]);
+    } finally {
+      process.umask(originalUmask);
+    }
 
     expect(statSync(filePath).mode & 0o777).toBe(0o644);
     expect(statSync(replayPath).mode & 0o777).toBe(0o644);

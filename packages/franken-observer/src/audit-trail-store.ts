@@ -127,14 +127,17 @@ function cleanupTempFile(path: string): void {
 }
 
 function writeTempFile(finalPath: string, contents: string): string {
-  const mode = fs.existsSync(finalPath) ? fs.statSync(finalPath).mode & 0o777 : 0o666;
+  const existingMode = fs.existsSync(finalPath) ? fs.statSync(finalPath).mode & 0o777 : undefined;
   const tempPath = join(
     resolve(finalPath, '..'),
     `.${basename(finalPath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
   );
   let file: number | undefined;
   try {
-    file = fs.openSync(tempPath, 'wx', mode);
+    file = fs.openSync(tempPath, 'wx', existingMode ?? 0o666);
+    if (existingMode !== undefined) {
+      fs.fchmodSync(file, existingMode);
+    }
     fs.writeFileSync(file, contents);
     fs.fsyncSync(file);
   } catch (error) {
