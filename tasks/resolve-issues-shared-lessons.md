@@ -4,6 +4,9 @@
 - For Vitest suite-flag fixes, assert false-like env values (`0`, `false`, `no`, blank) preserve the default unit-test include set in package configs, not just helper return values.
 - In Vitest tests, avoid cache-busting variable dynamic imports such as `import(`../vitest.config.ts?case=${...}`)`: Vite cannot statically analyze them. Use a static config import and reset env/argv around each assertion instead.
 
+## 2026-07-10 — Control-plane JSON parse hardening
+- In control-plane mutation routes, prefer centralized JSON parsing helpers (`parseJsonBody`) and explicit malformed-body tests; this prevents runtime 500s and keeps manager/runtime calls from running on bad input.
+
 ## 2026-07-10 — Codex usage-limit handling in issue-to-PR flow
 - If `@codex review` immediately responds with usage-limit, treat it as a hard blocker for the merge gate and stop extra polling. Resume review only after credits are restored and a fresh trigger can produce a current-head clean response.
 
@@ -38,7 +41,7 @@
 - Add a dedicated helper in tests when a fire-and-forget integration must assert non-delivery; this keeps suites stable even if internals switch from direct emits to queued microtasks.
 
 ## 2026-07-10 — Parallel planner deadlock guard
-
+- In ParallelPlanner execution, don't allow the "no tasks ready" path to continue silently as success. Keep cycle checks explicit and fail fast with a clear `CyclicDependencyError` (or similar) before running task waves, and add a unit test that proves executor is never called when readiness stalls due to a dependency cycle.
 - When `@codex review` is usage-limited, classify it as a blocker state and do not merge until a new trigger can produce a current-head clean response.
 
 ## 2026-07-10 — ProcessSupervisor runtime error cleanup
