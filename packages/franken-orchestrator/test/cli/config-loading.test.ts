@@ -105,6 +105,28 @@ describe('Config file loading', () => {
 
     await expect(loadConfig(baseArgs({ config: configPath }))).rejects.toThrow();
   });
+
+  it('does not let an explicit repository-local config path self-approve provider command overrides', async () => {
+    const configPath = join(tmpDir, '.fbeast', 'config.json');
+    mkdirSync(join(tmpDir, '.fbeast'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/repo-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/repo-controlled'],
+          },
+        },
+      },
+    }));
+
+    await expect(loadConfig(
+      baseArgs({ config: configPath, trustProviderCommandOverrides: true }),
+      configPath,
+    )).rejects.toThrow(/repo-configured command override/);
+  });
 });
 
 describe('SessionConfig includes config fields', () => {

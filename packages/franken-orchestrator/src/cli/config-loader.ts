@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import type { CliArgs } from './args.js';
@@ -68,6 +69,29 @@ function removeTrustFields(value: unknown): void {
   delete value['trustedCommandPaths'];
 }
 
+function hasCommandTrustFields(value: unknown): boolean {
+  return isRecord(value)
+    && ('trustCommandOverride' in value || 'trustedCommandPaths' in value);
+}
+
+function repositoryLocalConfigHasCommandTrust(fileConfig: Partial<OrchestratorConfig>): boolean {
+  const root = fileConfig as Record<string, unknown>;
+
+  const providers = root['providers'];
+  if (isRecord(providers) && isRecord(providers['overrides'])) {
+    if (Object.values(providers['overrides']).some(hasCommandTrustFields)) {
+      return true;
+    }
+  }
+
+  const consolidatedProviders = root['consolidatedProviders'];
+  return Array.isArray(consolidatedProviders) && consolidatedProviders.some(hasCommandTrustFields);
+}
+
+function isRepositoryLocalConfig(configPath: string, defaultConfigPath: string | undefined): boolean {
+  return defaultConfigPath !== undefined && resolve(configPath) === resolve(defaultConfigPath);
+}
+
 function isJsonSyntaxError(error: unknown): error is SyntaxError {
   return error instanceof SyntaxError;
 }
@@ -124,7 +148,15 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
   if (configPath) {
     try {
       fileConfig = await fromFile(configPath);
-      if (!args.config && !args.trustProviderCommandOverrides) {
+      const repositoryLocal = isRepositoryLocalConfig(configPath, defaultConfigPath);
+      if (repositoryLocal) {
+        if (args.trustProviderCommandOverrides && repositoryLocalConfigHasCommandTrust(fileConfig)) {
+          throw new Error(
+            'Refusing repo-configured command override trust fields; '
+              + 'repository-local config cannot define trustCommandOverride or trustedCommandPaths. '
+              + 'Use an explicit operator-owned config file for trusted provider command overrides.',
+          );
+        }
         fileConfig = stripRepositoryLocalCommandTrust(fileConfig);
       }
     } catch (error) {
