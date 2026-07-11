@@ -66,15 +66,16 @@ If you use a separate Beast daemon, start that daemon before `chat-server` so th
 
 ```bash
 # Terminal 1: start the separate Beast daemon.
-export FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token-from-frankenbeast-init>
+export FRANKENBEAST_BEAST_OPERATOR_TOKEN="<token-from-frankenbeast-init>"
 npm --workspace @franken/orchestrator run beasts-daemon -- --port 4051
 
 # Terminal 2: start chat-server after the daemon is listening.
-export FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token-from-frankenbeast-init>
+export FRANKENBEAST_BEAST_OPERATOR_TOKEN="<token-from-frankenbeast-init>"
 FRANKENBEAST_BEAST_DAEMON_URL=http://127.0.0.1:4051 \
   npm --workspace @franken/orchestrator run chat-server
 
 # Terminal 3: keep chat/API on the started chat server and Beast routes on the daemon.
+export FRANKENBEAST_BEAST_OPERATOR_TOKEN="<token-from-frankenbeast-init>"
 VITE_API_PROXY_TARGET=http://127.0.0.1:3737 \
 VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4051 \
   npm --workspace @franken/web run dev
