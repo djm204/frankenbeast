@@ -152,18 +152,42 @@ function isPostfixOperatorBefore(content: string, index: number): boolean {
 }
 
 function findMatchingOpeningParen(content: string, closeIndex: number): number {
-  let depth = 0;
-  for (let cursor = closeIndex; cursor >= 0; cursor -= 1) {
+  const openParens: number[] = [];
+  let cursor = 0;
+
+  while (cursor <= closeIndex && cursor < content.length) {
     const current = content[cursor];
-    if (current === ')') {
-      depth += 1;
-    } else if (current === '(') {
-      depth -= 1;
-      if (depth === 0) {
-        return cursor;
+    const next = content[cursor + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      cursor = skipQuotedLiteral(content, cursor);
+      continue;
+    }
+
+    if (current === '/' && next === '/') {
+      const lineEnd = content.indexOf('\n', cursor + 2);
+      cursor = lineEnd === -1 ? content.length : lineEnd + 1;
+      continue;
+    }
+
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', cursor + 2);
+      cursor = commentEnd === -1 ? content.length : commentEnd + 2;
+      continue;
+    }
+
+    if (current === '(') {
+      openParens.push(cursor);
+    } else if (current === ')') {
+      const openIndex = openParens.pop();
+      if (cursor === closeIndex) {
+        return openIndex ?? -1;
       }
     }
+
+    cursor += 1;
   }
+
   return -1;
 }
 
@@ -206,7 +230,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
     ].includes(previousToken) ||
     followsControlCondition(content, index) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^>'.includes(previous)
+    '([{=,:;!&|?+-*~^<>/'.includes(previous)
   );
 }
 
@@ -219,6 +243,9 @@ function skipRegexLiteral(content: string, start: number): number {
     if (current === '\\') {
       index += 2;
       continue;
+    }
+    if ((current === '\n' || current === '\r') && !inCharacterClass) {
+      return start + 1;
     }
     if (current === '[') {
       inCharacterClass = true;
@@ -238,6 +265,7 @@ function skipRegexLiteral(content: string, start: number): number {
 }
 
 function extractMarkerLabels(pattern: RegExp, comment: string): string[] {
+  pattern.lastIndex = 0;
   return [...comment.matchAll(pattern)].flatMap((match) =>
     match[1] ? [match[1]] : [],
   );
@@ -267,38 +295,36 @@ function collectBlockCommentLabels(
 }
 
 function isJsxTextBlockComment(content: string, start: number, end: number): boolean {
-  const lineStart = content.lastIndexOf('\n', start) + 1;
-  const nextLineBreak = content.indexOf('\n', end);
-  const lineEnd = nextLineBreak === -1 ? content.length : nextLineBreak;
-  const before = content.slice(lineStart, start);
-  const after = content.slice(end, lineEnd);
+  const before = content.slice(0, start);
+  const after = content.slice(end);
   const previousNonWhitespace = before.trimEnd().at(-1) ?? '';
 
   if (previousNonWhitespace === '{') {
     return false;
   }
 
-  const lastOpenBrace = before.lastIndexOf('{');
-  const lastCloseBrace = before.lastIndexOf('}');
+  const lastTagEnd = before.lastIndexOf('>');
+  const lastTagStart = before.lastIndexOf('<', lastTagEnd);
+  const nextTagStart = after.indexOf('<');
+
+  if (lastTagEnd === -1 || lastTagStart === -1 || nextTagStart === -1) {
+    return false;
+  }
+
+  const textSinceLastTag = before.slice(lastTagEnd + 1);
+  const lastOpenBrace = textSinceLastTag.lastIndexOf('{');
+  const lastCloseBrace = textSinceLastTag.lastIndexOf('}');
   if (lastOpenBrace > lastCloseBrace) {
     return false;
   }
 
-  const lastTagEnd = before.lastIndexOf('>');
-  const lastTagStart = before.lastIndexOf('<');
-  const nextTagStart = after.indexOf('<');
-
-  if (lastTagEnd === -1 || lastTagEnd <= lastTagStart || nextTagStart === -1) {
-    return false;
-  }
-
-  const openingTagStart = before.lastIndexOf('<', lastTagEnd);
-  if (openingTagStart === -1) {
-    return false;
-  }
-
-  const openingTag = before.slice(openingTagStart, lastTagEnd + 1).trim();
-  return /^<[A-Za-z][^>]*>$/.test(openingTag) && !/\/\s*>$/.test(openingTag);
+  const openingTag = before.slice(lastTagStart, lastTagEnd + 1).trim();
+  const nextTag = after.slice(nextTagStart).trimStart();
+  return (
+    /^<[A-Za-z][^>]*>$/.test(openingTag) &&
+    !/\/\s*>$/.test(openingTag) &&
+    /^<\/[A-Za-z]/.test(nextTag)
+  );
 }
 
 function collectTemplateLiteralLabels(

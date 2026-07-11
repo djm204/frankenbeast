@@ -331,6 +331,72 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('ignores multiline JSX text that contains block-comment-shaped markers', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = [
+      '<section>',
+      '  <p>',
+      `    /* ${pendingMarker}: shown to users */`,
+      '  </p>',
+      `  <p>{/* ${trackedMarker}: real JSX comment */}</p>`,
+      '</section>',
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker),
+      ),
+    ).toBe(true);
+  });
+
+  it('skips regex statement bodies after control conditions with string parens', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = [
+      `if (label === ")") /[/* ${pendingMarker}: regex data */]/.test(value);`,
+      `while (label !== "(") /[/* ${pendingMarker}: regex data */]/.test(value);`,
+      `/* ${trackedMarker}: real block marker */`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker),
+      ),
+    ).toBe(true);
+  });
+
+  it('skips regex literals after comparison and division operators', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const content = [
+      `const isPattern = value < /[/* ${pendingMarker}: regex data */]/.source;`,
+      `const ratio = total / /[/* ${pendingMarker}: regex data */]/.source.length;`,
+      `/* ${trackedMarker}: real block marker */`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('1 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));
