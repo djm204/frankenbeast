@@ -294,7 +294,7 @@ function canStartRegexLiteralWhileMatchingParens(
       'default',
     ].includes(previousToken) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^<>/}'.includes(previous)
+    '([{=,:;!&|?+-*~^<>/'.includes(previous)
   );
 }
 
@@ -308,6 +308,12 @@ function canStartRegexLiteral(content: string, index: number): boolean {
     return false;
   }
   if (isSpreadOperatorBefore(content, index)) {
+    return true;
+  }
+  if (
+    previous === '}' &&
+    /^\s*$/.test(content.slice(content.lastIndexOf('\n', index - 1) + 1, index))
+  ) {
     return true;
   }
   if (
@@ -341,7 +347,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
     ].includes(previousToken) ||
     followsControlCondition(content, index) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^<>/}'.includes(previous)
+    '([{=,:;!&|?+-*~^<>/'.includes(previous)
   );
 }
 
@@ -583,7 +589,7 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
     return nextTag.startsWith('</>');
   }
 
-  const isOpeningTag = new RegExp('^<[A-Za-z][^>]*>$').test(openingTag);
+  const isOpeningTag = new RegExp('^<[A-Za-z]').test(openingTag);
   const isSelfClosingTag = new RegExp('/\\s*>$').test(openingTag);
   const isClosingTag = new RegExp('^</[A-Za-z]').test(openingTag);
 
@@ -710,6 +716,18 @@ function collectCodeLabels(
       }
       index = commentEnd;
       continue;
+    }
+
+    if (
+      current === '<' &&
+      /[A-Za-z/>]/.test(next ?? '') &&
+      content[index - 1] !== '<'
+    ) {
+      const tagEnd = skipJsxTag(content, index);
+      if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
+        index = tagEnd;
+        continue;
+      }
     }
 
     if (current === '/' && canStartRegexLiteral(content, index)) {

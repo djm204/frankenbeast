@@ -482,8 +482,11 @@ const x = 1;
     const xxxMarker = ['X', 'XX'].join('');
     const content = [
       `<p><span />/* ${pendingMarker}: shown to users */</p>`,
+      `<Tooltip label="a > b">/* ${pendingMarker}: shown to users */</Tooltip>`,
       `const generic = make<Item>(); /* ${trackedMarker}: real block marker */ return <div />;`,
       `const cls = /[//]/; const ratio = a / b; // ${hackMarker}: normalize`,
+      `const x = <div>text</div>; // ${hackMarker}: real jsx-adjacent line marker`,
+      `const ratio = {} / total; // ${trackedMarker}: real brace division marker`,
       `if (ok) {}`,
       `/[/* ${pendingMarker}: regex data */]/.test(value);`,
       `const compact = value</a[/* ${pendingMarker}: regex data */]/.source;`,
@@ -498,7 +501,7 @@ const x = 1;
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('5 unresolved marker comment(s)') &&
+          f.message.includes('7 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
           f.message.includes(trackedMarker) &&
           f.message.includes(hackMarker) &&
