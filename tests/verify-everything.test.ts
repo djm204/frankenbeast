@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '..');
 const exec = (command: string, args: string[]) =>
   execFileSync(command, args, { cwd: ROOT, encoding: 'utf8' }).trim();
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const ALL_PACKAGES = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && existsSync(resolve(ROOT, 'packages', entry.name, 'package.json')))
@@ -21,12 +22,13 @@ describe('Chunk 10: full verification pass', () => {
       expect(source).not.toContain(`${pipe} wc -l`);
       expect(source).not.toContain(`${pipe} head`);
       expect(source).not.toContain(['git', 'log'].join(' '));
+      expect(source).toContain("process.platform === 'win32' ? 'npm.cmd' : 'npm'");
     });
   });
 
   describe('workspace resolution', () => {
     it('npm ls @franken/types resolves without errors', () => {
-      const result = spawnSync('npm', ['ls', '@franken/types'], {
+      const result = spawnSync(npmCommand, ['ls', '@franken/types'], {
         cwd: ROOT,
         encoding: 'utf8',
       });
