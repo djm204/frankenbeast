@@ -193,6 +193,9 @@ describe('GhostDependencyEvaluator', () => {
       class RequiredTypedField { dep: import('ghost-package').Ghost }
       const typeofCast = value as typeof import('ghost-package');
       const typeofSatisfies = value satisfies typeof import('ghost-package');
+      const keyofCast = value as keyof import('ghost-package').Shape;
+      function keyed<T extends keyof typeof import('ghost-package')>() {}
+      class Plugin implements import('ghost-package').Plugin {}
       const plugin = loader.import('unknown-lib');
       this.#import('private-loader');
     `;
@@ -217,13 +220,16 @@ describe('GhostDependencyEvaluator', () => {
       (async () => import('iife-after-type-ghost'))();
       type V = {}
       export const exported = await import('export-after-type-ghost');
+      type BareDynamic = {}
+      import('bare-after-type-ghost');
       async function awaited(): Promise<void> { await import('awaited-function-ghost'); }
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
+      const parenthesized = await import(('parenthesized-ghost'));
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(10);
+    expect(result.findings).toHaveLength(12);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -234,8 +240,10 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('void-after-type-ghost'),
         expect.stringContaining('iife-after-type-ghost'),
         expect.stringContaining('export-after-type-ghost'),
+        expect.stringContaining('bare-after-type-ghost'),
         expect.stringContaining('awaited-function-ghost'),
         expect.stringContaining('switch-case-ghost'),
+        expect.stringContaining('parenthesized-ghost'),
       ]),
     );
   });

@@ -239,12 +239,7 @@ function readDynamicImportSpecifier(
 
   i = skipImportTrivia(content, i + 1);
 
-  const specifier =
-    content[i] === '`'
-      ? readNoSubstitutionTemplateString(content, i)
-      : content[i] === "'" || content[i] === '"'
-        ? readQuotedString(content, i)
-        : null;
+  const specifier = readDynamicImportArgumentSpecifier(content, i);
   if (!specifier) return null;
 
   const nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
@@ -253,6 +248,27 @@ function readDynamicImportSpecifier(
   }
 
   return specifier;
+}
+
+function readDynamicImportArgumentSpecifier(
+  content: string,
+  index: number,
+): StringLiteralRead | null {
+  if (content[index] === '`') return readNoSubstitutionTemplateString(content, index);
+  if (content[index] === "'" || content[index] === '"') {
+    return readQuotedString(content, index);
+  }
+
+  if (content[index] !== '(') return null;
+
+  const nestedStart = skipImportTrivia(content, index + 1);
+  const nested = readDynamicImportArgumentSpecifier(content, nestedStart);
+  if (!nested) return null;
+
+  const closingIndex = skipImportTrivia(content, nested.endIndex + 1);
+  if (content[closingIndex] !== ')') return null;
+
+  return { value: nested.value, endIndex: closingIndex };
 }
 
 function canStartNativeDynamicImport(
@@ -287,7 +303,9 @@ function isSpreadOperand(content: string, dotIndex: number): boolean {
 }
 
 function endsInsideNestedTypeReference(prefix: string): boolean {
-  if (/(?:\bas\s*|\bsatisfies\s*)(?:typeof\s*)?$/.test(prefix)) return true;
+  if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)(?:(?:keyof|typeof)\s*)?$/.test(prefix)) {
+    return true;
+  }
 
   const trimmed = prefix.trimEnd();
 
@@ -312,6 +330,7 @@ function isInsideTypeDeclaration(prefix: string): boolean {
     !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
     ) &&
+    !/\}\s*\n\s*(?:export\s+)?$/.test(prefix) &&
     !/\}\s*\n\s*(?:export\s+)?(?:void\s*$|\(|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
       prefix,
     )
