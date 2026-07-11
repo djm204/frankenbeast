@@ -18,7 +18,7 @@ import {
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
 } from '../lib/beast-api';
-import { ChatApiClient, type ChatSessionSummary } from '../lib/api';
+import { ChatApiClient, type ChatSessionSummary, type CorruptChatSessionFile } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import { BeastsPage } from '../pages/beasts-page';
 import type { AgentLifecycleAction } from './beasts/agent-action-bar';
@@ -281,6 +281,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [preserveComposerDraft, setPreserveComposerDraft] = useState(!sessionId);
   const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  const [corruptChatSessions, setCorruptChatSessions] = useState<CorruptChatSessionFile[]>([]);
   const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
   const [chatSessionsError, setChatSessionsError] = useState<string | null>(null);
   const [chatSessionsRefreshNonce, setChatSessionsRefreshNonce] = useState(0);
@@ -468,15 +469,17 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     setChatSessionsLoading(true);
     setChatSessionsError(null);
 
-    void chatClient.listSessions(projectId)
-      .then((sessions) => {
+    void chatClient.listSessionsWithDiagnostics(projectId)
+      .then(({ sessions, corruptSessions }) => {
         if (!cancelled) {
           setChatSessions(sessions);
+          setCorruptChatSessions(corruptSessions);
         }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setChatSessions([]);
+          setCorruptChatSessions([]);
           setChatSessionsError(error instanceof Error ? error.message : 'Unable to load conversations.');
         }
       })
@@ -1032,6 +1035,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                         {chatSessions.length} saved {chatSessions.length === 1 ? 'conversation' : 'conversations'} available.
                       </small>
                     )}
+                    {!chatSessionsLoading && !chatSessionsError && corruptChatSessions.length > 0 ? (
+                      <small className="field-error" role="alert">
+                        {corruptChatSessions.length} corrupted saved {corruptChatSessions.length === 1 ? 'conversation was' : 'conversations were'} quarantined and omitted.
+                      </small>
+                    ) : null}
                   </label>
                   {chatSessionsError ? (
                     <button

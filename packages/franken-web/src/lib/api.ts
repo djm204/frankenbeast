@@ -23,6 +23,18 @@ export type {
 } from '@franken/types';
 export type { ChatSessionResponse as ChatSession } from '@franken/types';
 
+export interface CorruptChatSessionFile {
+  id: string;
+  path: string;
+  quarantinePath: string;
+  reason: string;
+}
+
+export interface ChatSessionListResponse {
+  sessions: ChatSessionSummary[];
+  corruptSessions: CorruptChatSessionFile[];
+}
+
 export const CHAT_SOCKET_PROTOCOL = 'franken.chat.v1';
 export const CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX = 'franken.chat.token.';
 
@@ -107,15 +119,20 @@ export class ChatApiClient {
   }
 
   async listSessions(projectId?: string): Promise<ChatSessionSummary[]> {
+    const body = await this.listSessionsWithDiagnostics(projectId);
+    return body.sessions;
+  }
+
+  async listSessionsWithDiagnostics(projectId?: string): Promise<ChatSessionListResponse> {
     const url = new URL('/v1/chat/sessions', this.requestBaseUrl);
     if (projectId) {
       url.searchParams.set('projectId', projectId);
     }
-    const body = await this.request<{ sessions: ChatSessionSummary[] }>(
+    const body = await this.request<ChatSessionListResponse>(
       `${url.pathname}${url.search}`,
       { method: 'GET' },
     );
-    return body.sessions;
+    return { sessions: body.sessions, corruptSessions: body.corruptSessions ?? [] };
   }
 
   async sendMessage(sessionId: string, content: string): Promise<MessageResult> {

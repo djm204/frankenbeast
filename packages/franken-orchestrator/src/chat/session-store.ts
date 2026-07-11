@@ -142,7 +142,7 @@ export class FileSessionStore implements ISessionStore {
   }
 
   private quarantineCorruptSession(id: string, path: string, error: unknown): void {
-    const quarantinePath = `${path}.corrupt-${deterministicNow()}`;
+    const quarantinePath = `${path}.corrupt-${deterministicNow()}-${randomBytes(3).toString('hex')}`;
     const reason = error instanceof Error ? error.message : String(error);
     const diagnostic: CorruptChatSessionFile = { id, path, quarantinePath, reason };
     this.corruptions.set(id, diagnostic);

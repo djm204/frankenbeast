@@ -125,13 +125,16 @@ describe('FileSessionStore', () => {
 
   it('rejects path-traversal session ids without moving files outside the store', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const outsidePath = join(TMP, '..', 'config.json');
+    const nestedStoreDir = join(TMP, 'nested-store');
+    const nestedStore = new FileSessionStore(nestedStoreDir);
+    mkdirSync(nestedStoreDir, { recursive: true });
+    const outsidePath = join(TMP, 'config.json');
     writeFileSync(outsidePath, JSON.stringify({ ok: true }), 'utf-8');
 
-    expect(store.get('../config')).toBeUndefined();
+    expect(nestedStore.get('../config')).toBeUndefined();
 
     expect(existsSync(outsidePath)).toBe(true);
-    expect(store.listCorruptions()).toEqual([]);
+    expect(nestedStore.listCorruptions()).toEqual([]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('ignoring invalid chat session id'));
 
     warn.mockRestore();
@@ -165,5 +168,24 @@ describe('FileSessionStore', () => {
 
     expect(store.get(session.id)!.transcript).toHaveLength(1);
     expect(readdirSync(TMP).filter((entry) => entry.includes('.tmp'))).toEqual([]);
+  });
+
+  it('uses unique quarantine paths for repeated corrupt writes with the same id', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const corruptId = 'chat-repeat-corrupt';
+    const corruptPath = join(TMP, `${corruptId}.json`);
+    writeFileSync(corruptPath, '{"id":', 'utf-8');
+    expect(store.get(corruptId)).toBeUndefined();
+    const firstQuarantine = store.listCorruptions()[0]!.quarantinePath;
+
+    writeFileSync(corruptPath, '{"id":', 'utf-8');
+    expect(store.get(corruptId)).toBeUndefined();
+
+    const quarantinedFiles = readdirSync(TMP).filter((entry) => entry.startsWith(`${corruptId}.json.corrupt-`));
+    expect(quarantinedFiles).toHaveLength(2);
+    expect(store.listCorruptions()[0]!.quarantinePath).not.toBe(firstQuarantine);
+    expect(existsSync(corruptPath)).toBe(false);
+
+    warn.mockRestore();
   });
 });

@@ -53,6 +53,7 @@ vi.mock('../hooks/use-chat-session', () => ({
 vi.mock('../lib/api', () => ({
   ChatApiClient: class {
     listSessions = vi.fn().mockResolvedValue([]);
+    listSessionsWithDiagnostics = vi.fn().mockResolvedValue({ sessions: [], corruptSessions: [] });
   },
 }));
 
