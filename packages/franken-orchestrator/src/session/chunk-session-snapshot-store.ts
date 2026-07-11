@@ -64,7 +64,9 @@ export class FileChunkSessionSnapshotStore {
         )
         .filter(({ session }) => session.chunkId === chunkId)
         .sort((a, b) => a.filePath.localeCompare(b.filePath));
-      const matchingTaskIds = new Set(matchingEntries.map(({ session, storageKey }) => session.taskId ?? storageKey));
+      const matchingTaskIds = new Set(
+        matchingEntries.map(({ session, storageKey }) => session.taskId ?? this.normalizeStorageKey(storageKey)),
+      );
 
       // Corrupt snapshots cannot prove their chunk id after quarantine, but
       // their task-scoped directory is still evidence that another task may
@@ -72,8 +74,8 @@ export class FileChunkSessionSnapshotStore {
       // so an unscoped restore fails closed instead of falling back to a
       // healthy snapshot from a different task.
       for (const { session, storageKey } of entries) {
-        if (session === undefined) {
-          matchingTaskIds.add(storageKey);
+        if (session === undefined && this.storageKeyMayContainChunk(storageKey, chunkId)) {
+          matchingTaskIds.add(this.normalizeStorageKey(storageKey));
         }
       }
 
@@ -107,12 +109,35 @@ export class FileChunkSessionSnapshotStore {
       .filter(({ dirPath }) => existsSync(dirPath) && statSync(dirPath).isDirectory())
       .flatMap(({ storageKey, dirPath }) =>
         readdirSync(dirPath)
-          .filter((file) => file.endsWith('.json'))
+          .filter((file) => file.endsWith('.json') || file.includes('.json.corrupt.'))
           .map((file) => {
             const filePath = join(dirPath, file);
-            return { filePath, storageKey, session: readJsonFileOrQuarantine<ChunkSession>(filePath) };
+            return {
+              filePath,
+              storageKey,
+              session: file.includes('.json.corrupt.') ? undefined : readJsonFileOrQuarantine<ChunkSession>(filePath),
+            };
           }),
       );
+  }
+
+  private normalizeStorageKey(storageKey: string): string {
+    try {
+      return decodeURIComponent(storageKey);
+    } catch {
+      return storageKey;
+    }
+  }
+
+  private storageKeyMayContainChunk(storageKey: string, chunkId: string): boolean {
+    const normalized = this.normalizeStorageKey(storageKey);
+    return (
+      normalized === chunkId ||
+      normalized.endsWith(`:${chunkId}`) ||
+      normalized.endsWith(`/${chunkId}`) ||
+      normalized.endsWith(`-${chunkId}`) ||
+      normalized.endsWith(`_${chunkId}`)
+    );
   }
 
   private snapshotDir(planName: string, chunkId: string, taskId?: string): string {
