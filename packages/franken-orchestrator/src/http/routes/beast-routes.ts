@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
-import { UnknownTrackedAgentError } from '../../beasts/errors.js';
+import { UnknownBeastDefinitionError, UnknownTrackedAgentError } from '../../beasts/errors.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';
@@ -178,6 +178,13 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof UnknownBeastDefinitionError) {
+        throw new HttpError(
+          404,
+          'BEAST_DEFINITION_NOT_FOUND',
+          `Beast definition '${body.definitionId}' was not found`,
+        );
+      }
       if (error instanceof UnknownTrackedAgentError && body.trackedAgentId) {
         throw new HttpError(
           404,

@@ -453,6 +453,40 @@ describe('beast routes', () => {
     expect(runsBody.data.runs).toEqual([]);
   });
 
+  it('returns 404 and does not persist a run when definitionId is unknown', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'does-not-exist',
+        config: {},
+        startNow: true,
+      }),
+    });
+
+    expect(createResponse.status).toBe(404);
+    expect(await createResponse.json()).toEqual({
+      error: {
+        code: 'BEAST_DEFINITION_NOT_FOUND',
+        message: "Beast definition 'does-not-exist' was not found",
+      },
+    });
+
+    const runsResponse = await app.request('/v1/beasts/runs', {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
+    expect(runsBody.data.runs).toEqual([]);
+  });
+
   it('persists a failed run instead of returning 500 when startNow startup fails', async () => {
     const { app, operatorToken } = createBeastApp({ failStart: true });
     const headers = {
