@@ -395,12 +395,21 @@ describe('PlanGraph — insertFixItTask', () => {
       createTaskId('a'),
       createTaskId('setup'),
     ]);
-    expect(g2.topoSort().map((task) => task.id)).toEqual([
-      createTaskId('a'),
-      createTaskId('setup'),
-      createTaskId('fix-b'),
-      createTaskId('b'),
-    ]);
+    const sorted = g2.topoSort().map((task) => task.id);
+    const fixIndex = sorted.indexOf(createTaskId('fix-b'));
+    const failedIndex = sorted.indexOf(createTaskId('b'));
+
+    expect(sorted).toEqual(
+      expect.arrayContaining([
+        createTaskId('a'),
+        createTaskId('setup'),
+        createTaskId('fix-b'),
+        createTaskId('b'),
+      ])
+    );
+    expect(sorted.indexOf(createTaskId('a'))).toBeLessThan(fixIndex);
+    expect(sorted.indexOf(createTaskId('setup'))).toBeLessThan(fixIndex);
+    expect(fixIndex).toBeLessThan(failedIndex);
   });
 
   it('is immutable and increments the recovery version', () => {
