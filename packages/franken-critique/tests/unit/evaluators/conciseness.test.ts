@@ -192,9 +192,9 @@ const x = 1;
     const hackMarker = ['HA', 'CK'].join('');
     const xxxMarker = ['X', 'XX'].join('');
     const content = [
-      "Don't skip later fenced code markers:",
+      `Don't leave // ${pendingMarker}: same-line prose marker`,
       '````ts',
-      `// ${pendingMarker}: fenced code follow-up`,
+      `/* ${trackedMarker}(owner): block marker without colon */`,
       '````',
       '/** Render the todo list for this page. */',
       'const ratio = (a + b) / c;',
@@ -202,13 +202,14 @@ const x = 1;
       'const re = // docs before regex',
       `  /[/* ${hackMarker}: regex data */]/;`,
       `if (ok) foo(); else /[/* ${xxxMarker}: regex data */]/.test(value);`,
+      `for (const m of /[/* ${xxxMarker}: regex data */]/g.exec(s) ?? []) {}`,
     ].join('\n');
     const result = await evaluator.evaluate(createInput(content));
 
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('2 unresolved marker comment(s)') &&
+          f.message.includes('3 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
           f.message.includes(trackedMarker) &&
           !f.message.includes(hackMarker) &&

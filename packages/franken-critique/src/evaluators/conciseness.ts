@@ -18,8 +18,8 @@ const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   'gi',
 );
 const UNRESOLVED_MARKER_PATTERN = new RegExp(
-  `(?:^|[\\s*])(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\s*:`,
-  'gi',
+  `(?:^|[\\s*])(${UNRESOLVED_COMMENT_MARKERS.join('|')})(?:\\b|(?=\\())`,
+  'g',
 );
 const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
@@ -125,6 +125,8 @@ function canStartRegexLiteral(content: string, index: number): boolean {
       'void',
       'delete',
       'else',
+      'of',
+      'in',
     ].includes(previousToken) ||
     previous === '' ||
     '([{=,:;!&|?+-*~^>'.includes(previous) ||
@@ -248,6 +250,15 @@ function collectCodeLabels(
 
     if (endCharacter && endCharacter !== '}' && current === endCharacter) {
       return [labels, index + 1];
+    }
+
+    if (
+      current === "'" &&
+      /[$\w]/.test(content[index - 1] ?? '') &&
+      /[$\w]/.test(content[index + 1] ?? '')
+    ) {
+      index += 1;
+      continue;
     }
 
     if (current === '"' || current === "'") {
