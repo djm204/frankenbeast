@@ -44,14 +44,31 @@ export class SessionTokenStore {
 
   store(token: SessionToken): void {
     if (!this.persistenceFile) {
+      this.pruneExpiredTokens();
       this.tokens.set(token.tokenId, token);
       return;
     }
 
     this.withFileLock(() => {
       this.loadPersistedTokens();
+      this.pruneExpiredTokens();
       this.tokens.set(token.tokenId, token);
       this.persist();
+    });
+  }
+
+  cleanupExpired(): number {
+    if (!this.persistenceFile) {
+      return this.pruneExpiredTokens();
+    }
+
+    return this.withFileLock(() => {
+      this.loadPersistedTokens();
+      const pruned = this.pruneExpiredTokens();
+      if (pruned > 0) {
+        this.persist();
+      }
+      return pruned;
     });
   }
 
@@ -85,6 +102,17 @@ export class SessionTokenStore {
     const token = this.get(tokenId);
     if (!token) return false;
     return scope === undefined || token.scope === scope;
+  }
+
+  private pruneExpiredTokens(): number {
+    let pruned = 0;
+    for (const [tokenId, token] of this.tokens) {
+      if (this.isExpired(token)) {
+        this.tokens.delete(tokenId);
+        pruned += 1;
+      }
+    }
+    return pruned;
   }
 
   private loadPersistedTokens(): void {
