@@ -531,7 +531,10 @@ const x = 1;
       `const constrained = <T extends Foo /* ${trackedMarker}: constrained generic */>() => value;`,
       `const attrComment = <Widget /* ${hackMarker}: tag trivia */ value={1} />;`,
       `<_Foo>/* ${pendingMarker}: shown to users */</_Foo>`,
-      `const contextual = of / total; // ${xxxMarker}: contextual identifier division`,
+      `const ratio = of / total; // ${xxxMarker}: contextual identifier division`,
+      `class C { m(total) { return this.#default / total; // ${pendingMarker}: private field division } }`,
+      `const expr = <>{items.map((item) => <span /> /* ${trackedMarker}: jsx expression comment */)}</>;`,
+      `${Array.from({ length: 24 }, (_, index) => `<p>text ${index}</p>`).join('')}`,
       `<p>/* ${pendingMarker}: shown to users */</p>`,
     ].join('\n');
     const result = await evaluator.evaluate(createInput(content));
@@ -539,10 +542,40 @@ const x = 1;
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('10 unresolved marker comment(s)') &&
+          f.message.includes('12 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
           f.message.includes(trackedMarker) &&
           f.message.includes(hackMarker) &&
+          f.message.includes(xxxMarker),
+      ),
+    ).toBe(true);
+  });
+
+  it('handles recursive JSX, private fields, and JSX expression comments from Codex follow-up findings', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const xxxMarker = ['X', 'XX'].join('');
+    const repeatedJsx = `<>{${Array.from({ length: 25 }, (_, index) => `<p>text ${index}</p>`).join('')}}</>`;
+    const content = [
+      repeatedJsx,
+      `class Example { #default = 1; value(total: number) { return this.#default / total; // ${pendingMarker}: private field division } }`,
+      `const fragment = <>{items.map((item) => <span key={item.id} /> /* ${trackedMarker}: expression comment */)}</>;`,
+      `<p><span />/* ${hackMarker}: shown sibling text */</p>`,
+      `/* ${xxxMarker}: final real block marker */`,
+    ].join('\n');
+    const start = Date.now();
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('3 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          !f.message.includes(hackMarker) &&
           f.message.includes(xxxMarker),
       ),
     ).toBe(true);

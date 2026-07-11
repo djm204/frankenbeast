@@ -192,6 +192,10 @@ function previousTokenIsPropertyName(content: string, index: number): boolean {
     cursor -= 1;
   }
 
+  if (content[cursor] === '#') {
+    return true;
+  }
+
   return (
     content[cursor] === '.' &&
     !(content[cursor - 1] === '.' && content[cursor - 2] === '.')
@@ -666,6 +670,15 @@ function jsxTagName(tag: string): string | undefined {
   return match?.[1];
 }
 
+function isSimpleJsxTagStart(content: string, index: number): boolean {
+  const next = content[index + 1];
+  return (
+    content[index] === '<' &&
+    /[A-Za-z_$/>]/.test(next ?? '') &&
+    content[index - 1] !== '<'
+  );
+}
+
 function hasOpenJsxAncestorBefore(content: string, end: number): boolean {
   const stack: string[] = [];
   let index = 0;
@@ -688,7 +701,7 @@ function hasOpenJsxAncestorBefore(content: string, end: number): boolean {
       index = commentEnd === -1 ? end : commentEnd + 2;
       continue;
     }
-    if (current === '<' && isLikelyJsxTagStart(content, index)) {
+    if (isSimpleJsxTagStart(content, index)) {
       const tagEnd = skipJsxTag(content, index, end);
       if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
         const tag = content.slice(index, tagEnd).trim();
@@ -710,11 +723,44 @@ function hasOpenJsxAncestorBefore(content: string, end: number): boolean {
   return stack.length > 0;
 }
 
+function hasUnclosedBraceOnCurrentLine(content: string, end: number): boolean {
+  const lineStart = content.lastIndexOf('\n', end - 1) + 1;
+  let depth = 0;
+  let index = lineStart;
+
+  while (index < end) {
+    const current = content[index];
+    const next = content[index + 1];
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+    if (current === '/' && next === '/') {
+      const lineEnd = content.indexOf('\n', index + 2);
+      index = lineEnd === -1 ? end : Math.min(lineEnd + 1, end);
+      continue;
+    }
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', index + 2);
+      index = commentEnd === -1 ? end : Math.min(commentEnd + 2, end);
+      continue;
+    }
+    if (current === '{') {
+      depth += 1;
+    } else if (current === '}' && depth > 0) {
+      depth -= 1;
+    }
+    index += 1;
+  }
+
+  return depth > 0;
+}
+
 function isJsxTextBlockComment(content: string, start: number, end: number): boolean {
   const before = content.slice(0, start);
   const previousNonWhitespace = before.trimEnd().at(-1) ?? '';
 
-  if (previousNonWhitespace === '{') {
+  if (previousNonWhitespace === '{' || hasUnclosedBraceOnCurrentLine(content, start)) {
     return false;
   }
 
