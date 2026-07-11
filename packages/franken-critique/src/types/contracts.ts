@@ -50,6 +50,25 @@ export interface LessonTestTraceabilityEntry {
   readonly verificationCommand: string;
 }
 
+/** Structured operator workflow for rolling back a learned lesson without deleting audit history. */
+export interface LessonRollbackWorkflow {
+  /** Stable identifier PM handoffs can reference when requesting a rollback. */
+  readonly rollbackId: string;
+  readonly lessonId: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  /** LessonRecorder emits active workflows; downstream stores may mark them rolled_back after execution. */
+  readonly state: 'active';
+  /** Evidence operators must provide before the lesson can be demoted or superseded. */
+  readonly requiredEvidence: readonly string[];
+  /** Deterministic, ordered actions for PM/worker handoffs. */
+  readonly rollbackSteps: readonly string[];
+  /** Command that should pass before a replacement lesson is promoted. */
+  readonly verificationCommand: string;
+  /** Human-readable guidance for dashboards or retrospective summaries. */
+  readonly operatorMessage: string;
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -59,6 +78,8 @@ export interface CritiqueLesson {
   readonly timestamp: string;
   /** Present for lessons recorded by LessonRecorder; absent legacy lessons are unverified. */
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
+  /** Structured rollback workflow for lessons that are traceable enough to safely demote. */
+  readonly rollbackWorkflow?: LessonRollbackWorkflow;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

@@ -22,6 +22,7 @@ export type {
   ADRMatch,
   EpisodicTrace,
   LessonTestTraceabilityEntry,
+  LessonRollbackWorkflow,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,
@@ -61,7 +62,7 @@ export type { CritiqueErrorOptions } from './errors/index.js';
 // Core components
 export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
-export { LessonRecorder } from './memory/lesson-recorder.js';
+export { LessonRecorder, createLessonRollbackWorkflow } from './memory/lesson-recorder.js';
 
 // Evaluators
 export { SafetyEvaluator } from './evaluators/safety.js';

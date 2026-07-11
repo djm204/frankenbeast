@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { LessonRecorder } from '../../../src/memory/lesson-recorder.js';
+import { LessonRecorder, createLessonRollbackWorkflow } from '../../../src/memory/lesson-recorder.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { MemoryPort } from '../../../src/types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../../../src/types/loop.js';
@@ -111,6 +111,86 @@ describe('LessonRecorder', () => {
           'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
       },
     ]);
+  });
+
+  it('adds an active lesson rollback workflow for traceable recorded lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'Safety Gate', [
+          { message: 'plain HTTP endpoint needs HTTPS', severity: 'critical' },
+        ]),
+        createIteration(2, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'Task 123');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.rollbackWorkflow).toEqual({
+      rollbackId: 'task-123:safety-gate:iteration-0:rollback',
+      lessonId: 'task-123:safety-gate:iteration-0',
+      taskId: 'Task 123',
+      evaluatorName: 'Safety Gate',
+      state: 'active',
+      requiredEvidence: ['rollbackReason', 'supersedingFindingOrRegression'],
+      rollbackSteps: [
+        'Attach the rollback reason and superseding evidence to the PM handoff.',
+        'Mark the lesson as rolled back or superseded in the memory store; do not delete the original audit record.',
+        'Run the lesson verification command before promoting a replacement lesson.',
+      ],
+      verificationCommand:
+        'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+      operatorMessage:
+        'Rollback task-123:safety-gate:iteration-0 only with a concrete reason and superseding evidence; preserve the original lesson for audit history.',
+    });
+  });
+
+  it('builds rollback workflow metadata from a traceability entry without recording a lesson', () => {
+    expect(
+      createLessonRollbackWorkflow({
+        lessonId: 'task-123:safety-gate:iteration-0',
+        taskId: 'Task 123',
+        evaluatorName: 'Safety Gate',
+        failingIteration: 0,
+        resolvedIteration: 2,
+        sourceFindingMessages: ['plain HTTP endpoint needs HTTPS'],
+        testId: 'task-123:safety-gate:iteration-0:regression',
+        verificationCommand: 'npm run test --workspace @franken/critique -- --run lesson-recorder',
+      }),
+    ).toMatchObject({
+      rollbackId: 'task-123:safety-gate:iteration-0:rollback',
+      lessonId: 'task-123:safety-gate:iteration-0',
+      state: 'active',
+      requiredEvidence: ['rollbackReason', 'supersedingFindingOrRegression'],
+      verificationCommand: 'npm run test --workspace @franken/critique -- --run lesson-recorder',
+    });
+  });
+
+  it('does not create rollback workflow entries for infrastructure-only evaluator exceptions', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'adr-compliance', [
+          {
+            message: 'internal evaluator error occurred',
+            severity: 'critical',
+            location: EVALUATOR_EXCEPTION_LOCATION,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-123');
+
+    expect(port.recordLesson).not.toHaveBeenCalled();
   });
 
   it('does not create traceability entries for infrastructure-only evaluator exceptions', async () => {

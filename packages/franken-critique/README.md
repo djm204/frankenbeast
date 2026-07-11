@@ -92,6 +92,18 @@ When the critique loop recovers from one or more failing iterations and ends in 
 
 Infrastructure-only evaluator exceptions are intentionally excluded from the map so operator dashboards do not promote broken tooling as product lessons. PM handoffs should treat lessons without a matching regression `testId` as unverified learning that is not ready for promotion.
 
+## Lesson rollback workflow
+
+Every traceable `LessonRecorder` lesson also includes a `rollbackWorkflow` object so PM handoffs and dashboards can demote bad learning without deleting audit history. The workflow includes:
+
+- `rollbackId`: a stable `<lessonId>:rollback` identifier.
+- `state`: `active` for newly recorded lessons; downstream memory stores can mark their retained copy as rolled back or superseded after execution.
+- `requiredEvidence`: the minimum evidence keys (`rollbackReason` and `supersedingFindingOrRegression`) operators must attach before rollback.
+- `rollbackSteps`: ordered actions for handoffs: document the reason/evidence, mark the retained memory record as rolled back or superseded instead of deleting it, then run the verification command before promoting a replacement lesson.
+- `verificationCommand`: the targeted regression command that must pass before replacement learning is promoted.
+
+Infrastructure-only evaluator exceptions do not record lessons, traceability, or rollback workflows. This prevents operators from rolling back or promoting lessons that came from broken evaluator tooling instead of product behavior.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.
