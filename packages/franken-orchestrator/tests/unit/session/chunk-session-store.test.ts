@@ -456,6 +456,29 @@ describe('FileChunkSessionSnapshotStore', () => {
     expect(snapshots.restoreLatest('demo-plan', 'issue-2')?.promiseTag).toBe('ISSUE_2_DONE');
   });
 
+  it('restoreLatest() without a taskId ignores unrelated single-token corrupt chunks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-single-token-unrelated-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:billing',
+      chunkId: 'billing',
+      promiseTag: 'BILLING_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const corruptDir = join(root, 'demo-plan', chunkSessionStorageKey('auth', 'impl:auth'));
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(corruptDir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+    writeFileSync(join(corruptDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', 'billing')?.promiseTag).toBe('BILLING_DONE');
+  });
+
   it('list() without a taskId skips a corrupt snapshot instead of throwing', () => {
     const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-list-corrupt-'));
     tmpDirs.push(root);
