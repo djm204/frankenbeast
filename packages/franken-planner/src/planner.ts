@@ -47,8 +47,28 @@ export class Planner {
   ) {}
 
   async plan(rawInput: string): Promise<PlanResult> {
+    return this.executePlan(rawInput);
+  }
+
+  private async executePlan(rawInput: string): Promise<PlanResult> {
+    let graph: PlanGraph;
     try {
-      return await this.executePlan(rawInput);
+      // 1. Sanitize via MOD-01
+      const intent = await this.guardrails.getSanitizedIntent(rawInput);
+
+      // 2. Build task graph
+      graph = await this.graphBuilder.build(intent);
+
+      // 3. HITL approval gate
+      const markdown = this.planExporter.toMarkdown(graph);
+      const approval = await this.hitlGate.requestApproval(markdown);
+
+      if (approval.decision === 'aborted') {
+        return { status: 'aborted', reason: approval.reason };
+      }
+      if (approval.decision === 'modified') {
+        graph = applyModifications(graph, approval.changes);
+      }
     } catch (err) {
       if (err instanceof RationaleRejectedError) {
         return { status: 'rationale_rejected', taskId: createTaskId(err.taskId) };
@@ -57,25 +77,6 @@ export class Planner {
         return Planner.toStrategyDomainFailure(err);
       }
       throw err;
-    }
-  }
-
-  private async executePlan(rawInput: string): Promise<PlanResult> {
-    // 1. Sanitize via MOD-01
-    const intent = await this.guardrails.getSanitizedIntent(rawInput);
-
-    // 2. Build task graph
-    let graph = await this.graphBuilder.build(intent);
-
-    // 3. HITL approval gate
-    const markdown = this.planExporter.toMarkdown(graph);
-    const approval = await this.hitlGate.requestApproval(markdown);
-
-    if (approval.decision === 'aborted') {
-      return { status: 'aborted', reason: approval.reason };
-    }
-    if (approval.decision === 'modified') {
-      graph = applyModifications(graph, approval.changes);
     }
 
     // 4. Optionally wrap executor with CoT gate (MOD-07)

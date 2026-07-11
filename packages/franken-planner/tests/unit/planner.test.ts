@@ -7,6 +7,7 @@ import { RecoveryController } from '../../src/recovery/recovery-controller';
 import { PlanGraph } from '../../src/core/dag';
 import {
   CyclicDependencyError,
+  DuplicateTaskError,
   MaxRecoveryAttemptsError,
   RecursionDepthExceededError,
   TaskNotFoundError,
@@ -355,6 +356,17 @@ describe('Planner — self-correction loop', () => {
       { failedTaskId: createTaskId('t-1'), attempt: 1 },
       { failedTaskId: createTaskId('fix-t-1-attempt-1'), attempt: 2 },
     ]);
+  });
+
+  it('does not convert recovery graph domain errors into synthetic planner failures', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new DuplicateTaskError('fix-t-1-attempt-1');
+    const executor = vi.fn().mockResolvedValue(failure('t-1', 'disk full'));
+    const recovery = { recover: vi.fn().mockRejectedValue(error) };
+
+    const { planner } = buildPlanner({ graph, executor, recovery });
+
+    await expect(planner.plan('do something')).rejects.toBe(error);
   });
 
   it('returns failed when error is unknown (no known fix)', async () => {
