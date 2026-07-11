@@ -301,6 +301,32 @@ describe('SqliteBrain', () => {
       const auditRows = db.prepare('SELECT action, key FROM working_memory_delete_audit').all();
       expect(auditRows).toEqual([{ action: 'delete', key: 'remove' }]);
     });
+
+    it('deletes externally added persisted rows when flushing a stale cleared instance', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('local', 'value');
+        stale.flush();
+
+        const concurrent = new SqliteBrain(dbPath);
+        concurrent.working.set('external', 'value');
+        concurrent.flush();
+        concurrent.close();
+
+        stale.working.clear();
+        stale.flush();
+        stale.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.keys()).toEqual([]);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('episodic memory', () => {

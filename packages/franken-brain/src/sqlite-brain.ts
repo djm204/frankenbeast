@@ -155,6 +155,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   private refreshPreparedStateForFlush(): void {
+    // Refresh the persisted view at flush time so this instance's in-memory
+    // state remains authoritative even when another SqliteBrain wrote new rows
+    // after this instance was constructed. Without this, clear()/restore() can
+    // miss externally added keys because deletedKeys would be seeded from a
+    // stale cache.
+    this.loadPersistedSerializedFromDb();
+
     const prepared: Array<[string, unknown, string, number]> = [];
     let total = 0;
     for (const [key, value] of this.store) {
