@@ -131,27 +131,41 @@ export class FileChunkSessionSnapshotStore {
   }
 
   private storageKeyClearlyNamesOtherChunk(storageKey: string, chunkId: string): boolean {
-    if (this.storageKeyMayContainChunk(storageKey, chunkId)) {
-      return false;
-    }
-    const normalized = this.normalizeStorageKey(storageKey);
-    return normalized.includes(':') || normalized.includes('/');
+    const candidate = this.storageKeyChunkCandidate(storageKey);
+    return candidate !== undefined && candidate !== chunkId;
   }
 
   private storageKeyMayContainChunk(storageKey: string, chunkId: string): boolean {
+    const candidate = this.storageKeyChunkCandidate(storageKey);
+    if (candidate !== undefined) {
+      return candidate === chunkId;
+    }
+
     const normalized = this.normalizeStorageKey(storageKey);
     let index = normalized.indexOf(chunkId);
     while (index !== -1) {
       const before = index === 0 ? '' : normalized[index - 1];
       const after = index + chunkId.length >= normalized.length ? '' : normalized[index + chunkId.length];
-      const hasValidPrefix = before === '' || before === ':' || before === '/' || before === '-' || before === '_';
-      const hasValidSuffix = after === '' || after === ':' || after === '/' || after === '-' || after === '_';
+      const hasValidPrefix = before === '' || before === ':' || before === '/';
+      const hasValidSuffix = after === '' || after === ':' || after === '/';
       if (hasValidPrefix && hasValidSuffix) {
         return true;
       }
       index = normalized.indexOf(chunkId, index + 1);
     }
     return false;
+  }
+
+  private storageKeyChunkCandidate(storageKey: string): string | undefined {
+    const normalized = this.normalizeStorageKey(storageKey);
+    for (const prefix of ['fix-harden:', 'fix-impl:', 'harden:', 'impl:', 'cli:'] as const) {
+      if (!normalized.startsWith(prefix)) {
+        continue;
+      }
+      const candidate = normalized.slice(prefix.length).replace(/-attempt-\d+$/u, '');
+      return candidate === '' ? undefined : candidate;
+    }
+    return undefined;
   }
 
   private snapshotDir(planName: string, chunkId: string, taskId?: string): string {
