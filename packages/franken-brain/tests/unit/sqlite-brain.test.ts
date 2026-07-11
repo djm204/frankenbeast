@@ -499,6 +499,9 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recall('searchable', 10).map(event => event.summary)).toEqual([
         'healthy searchable event',
       ]);
+      expect(brain.episodic.recall('searchable', 0)).toEqual([]);
+      expect(brain.episodic.recent(0)).toEqual([]);
+      expect(brain.episodic.recentFailures(0)).toEqual([]);
     });
   });
 
