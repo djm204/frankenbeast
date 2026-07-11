@@ -125,8 +125,6 @@ if [[ -n "$default_keys" && -f .env ]]; then
   fi
 fi
 
-run npm ci
-
 if [[ "$PROMPT_DOCKER" -eq 1 && "$ASSUME_YES" -eq 0 && "$DRY_RUN" -eq 0 && -t 0 ]]; then
   read -r -p "Start optional Docker compose services now? [y/N] " docker_answer
   case "$docker_answer" in
@@ -136,23 +134,28 @@ if [[ "$PROMPT_DOCKER" -eq 1 && "$ASSUME_YES" -eq 0 && "$DRY_RUN" -eq 0 && -t 0 
 fi
 
 if [[ "$START_DOCKER" -eq 1 ]]; then
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    run docker compose up -d
-  else
-    command -v docker >/dev/null 2>&1 || fail "Docker is required for --services/--with-docker. Install Docker or rerun with --no-docker."
-    env_value() {
-      local key="$1"
-      [[ -f .env ]] || return 0
-      { grep -E "^${key}=" .env || true; } | tail -n 1 | cut -d= -f2- | sed -E 's/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/'
-    }
-    grafana_user="$(env_value GRAFANA_USER)"
-    grafana_password="$(env_value GRAFANA_PASSWORD)"
-    if [[ -z "$grafana_user" || -z "$grafana_password" || "$grafana_password" == "admin" || "$grafana_password" == "change-me-random-grafana-password" ]]; then
-      fail "--services/--with-docker requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD in .env before starting Grafana."
-    fi
-    [[ "$grafana_user" == "admin" ]] || fail "docker-compose.yml requires GRAFANA_USER=admin for the local Grafana service."
-    run docker compose up -d
+  env_value() {
+    local key="$1"
+    [[ -f .env ]] || return 0
+    { grep -E "^${key}=" .env || true; } | tail -n 1 | cut -d= -f2- | sed -E 's/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/'
+  }
+  grafana_user="$(env_value GRAFANA_USER)"
+  grafana_password="$(env_value GRAFANA_PASSWORD)"
+  if [[ -f .env && ( -z "$grafana_user" || -z "$grafana_password" || "$grafana_password" == "admin" || "$grafana_password" == "change-me-random-grafana-password" ) ]]; then
+    fail "--services/--with-docker requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD in .env before starting Grafana."
   fi
+  if [[ -f .env ]]; then
+    [[ "$grafana_user" == "admin" ]] || fail "docker-compose.yml requires GRAFANA_USER=admin for the local Grafana service."
+  fi
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    command -v docker >/dev/null 2>&1 || fail "Docker is required for --services/--with-docker. Install Docker or rerun with --no-docker."
+  fi
+fi
+
+run npm ci
+
+if [[ "$START_DOCKER" -eq 1 ]]; then
+  run docker compose up -d
 else
   log "Skipping optional Docker compose services. Use --services or --with-docker to start them."
 fi

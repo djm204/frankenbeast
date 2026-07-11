@@ -174,6 +174,26 @@ describe('local setup scripts', () => {
     });
     expect(servicesDryRun.status, servicesDryRun.stderr || servicesDryRun.stdout).toBe(0);
     expect(servicesDryRun.stdout).toContain('dry-run: docker compose up -d');
+
+    const invalidEnvRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-invalid-env-'));
+    try {
+      mkdirSync(join(invalidEnvRoot, 'scripts'));
+      writeFileSync(join(invalidEnvRoot, 'scripts/bootstrap.sh'), script);
+      writeFileSync(join(invalidEnvRoot, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(invalidEnvRoot, '.env.example'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=change-me-random-grafana-password\n');
+      writeFileSync(join(invalidEnvRoot, '.env'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=admin\n');
+
+      const invalidServicesDryRun = spawnSync('bash', [join(invalidEnvRoot, 'scripts/bootstrap.sh'), '--dry-run', '--services'], {
+        cwd: invalidEnvRoot,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(invalidServicesDryRun.status).not.toBe(0);
+      expect(invalidServicesDryRun.stderr).toContain('requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD');
+      expect(invalidServicesDryRun.stdout).not.toContain('dry-run: npm ci');
+    } finally {
+      rmSync(invalidEnvRoot, { recursive: true, force: true });
+    }
   });
 
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {

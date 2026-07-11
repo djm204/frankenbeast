@@ -53,12 +53,6 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ./scripts/bootstrap.sh --dry-run
   ```
 
-  To start optional local infrastructure during bootstrap after setting Grafana credentials, use `--services`:
-
-  ```bash
-  npm run bootstrap -- --services
-  ```
-
 - [ ] Review `.env` and fill in only the values you need:
 
   ```bash
@@ -68,8 +62,15 @@ Use this checklist for a first local checkout or when rebuilding a development e
   Common local values:
 
   - Semantic memory endpoint: `CHROMA_URL=http://localhost:8000` for the local compose stack.
+  - Local Grafana: set `GRAFANA_USER=admin` and replace `GRAFANA_PASSWORD` with a unique non-default value before starting optional services.
   - Dashboard/Beast controls: `FRANKENBEAST_BEAST_OPERATOR_TOKEN`, kept server-side only.
   - Provider API keys and the local-encrypted `FRANKENBEAST_PASSPHRASE` must be present in the process environment for commands that read `process.env` directly. Export them in the shell or launch wrapper that starts `frankenbeast`, `chat-server`, or CI jobs; do not assume writing them to `.env` alone makes every runtime path load them.
+
+- [ ] Optional: start local infrastructure during bootstrap after setting Grafana credentials:
+
+  ```bash
+  npm run bootstrap -- --services
+  ```
 
 - [ ] Optional: create a standalone project from the quick-start example. The script copies `examples/quick-start`, creates `.env` from `.env.example`, and runs `npm ci` in the new directory:
 
