@@ -18,7 +18,7 @@ const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   'gi',
 );
 const UNRESOLVED_MARKER_PATTERN = new RegExp(
-  `^\\s*(?:\\*+|//)?\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})(?:\\b|(?=\\())`,
+  `^\\s*(?:\\*+|//)?\\s*@?(${UNRESOLVED_COMMENT_MARKERS.join('|')})(?:\\b|(?=\\())`,
   'gim',
 );
 const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
@@ -294,7 +294,7 @@ function canStartRegexLiteralWhileMatchingParens(
       'default',
     ].includes(previousToken) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^<>/'.includes(previous)
+    '([{=,:;!&|?+-*~^<>/}'.includes(previous)
   );
 }
 
@@ -315,7 +315,13 @@ function canStartRegexLiteral(content: string, index: number): boolean {
     previousSignificantIndex(content, index) === index - 1 &&
     /[A-Za-z>]/.test(content[index + 1] ?? '')
   ) {
-    return false;
+    let beforeLessThan = index - 2;
+    while (beforeLessThan >= 0 && /\s/.test(content[beforeLessThan] ?? '')) {
+      beforeLessThan -= 1;
+    }
+    if (!/[$\w)\]]/.test(content[beforeLessThan] ?? '')) {
+      return false;
+    }
   }
   return (
     [
@@ -335,7 +341,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
     ].includes(previousToken) ||
     followsControlCondition(content, index) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^<>/'.includes(previous)
+    '([{=,:;!&|?+-*~^<>/}'.includes(previous)
   );
 }
 
@@ -577,10 +583,19 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
     return nextTag.startsWith('</>');
   }
 
-  return (
-    new RegExp('^</?[A-Za-z][^>]*>$').test(openingTag) &&
-    new RegExp('^<[/A-Za-z]').test(nextTag)
-  );
+  const isOpeningTag = new RegExp('^<[A-Za-z][^>]*>$').test(openingTag);
+  const isSelfClosingTag = new RegExp('/\\s*>$').test(openingTag);
+  const isClosingTag = new RegExp('^</[A-Za-z]').test(openingTag);
+
+  if (!new RegExp('^<[/A-Za-z]').test(nextTag)) {
+    return false;
+  }
+
+  if (isSelfClosingTag || isClosingTag) {
+    return nextTag.startsWith('</');
+  }
+
+  return isOpeningTag;
 }
 
 function collectTemplateLiteralLabels(

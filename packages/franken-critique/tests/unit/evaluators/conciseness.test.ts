@@ -484,7 +484,13 @@ const x = 1;
       `<p><span />/* ${pendingMarker}: shown to users */</p>`,
       `const generic = make<Item>(); /* ${trackedMarker}: real block marker */ return <div />;`,
       `const cls = /[//]/; const ratio = a / b; // ${hackMarker}: normalize`,
-      `const ok = value < /a[/* ${pendingMarker}: regex data */]/.source;`,
+      `if (ok) {}`,
+      `/[/* ${pendingMarker}: regex data */]/.test(value);`,
+      `const compact = value</a[/* ${pendingMarker}: regex data */]/.source;`,
+      `const first = <div />`,
+      `/* ${pendingMarker}: ASI-separated real block marker */`,
+      `const second = <span />;`,
+      `/** @${pendingMarker.toLowerCase()} remove workaround */`,
       `/* ${xxxMarker}: final real block marker */`,
     ].join('\n');
     const result = await evaluator.evaluate(createInput(content));
@@ -492,8 +498,8 @@ const x = 1;
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('3 unresolved marker comment(s)') &&
-          !f.message.includes(pendingMarker) &&
+          f.message.includes('5 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
           f.message.includes(trackedMarker) &&
           f.message.includes(hackMarker) &&
           f.message.includes(xxxMarker),
