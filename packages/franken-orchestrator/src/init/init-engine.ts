@@ -1,5 +1,3 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { parseOrchestratorConfig, defaultConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { FileInitStateStore } from './init-state-store.js';
@@ -7,6 +5,7 @@ import { runInitWizard } from './init-wizard.js';
 import type { InitState } from './init-types.js';
 import { verifyInit } from './init-verify.js';
 import type { ISecretStore } from '../network/secret-store.js';
+import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from './init-json-file.js';
 
 export interface InitEngineResult {
   config: OrchestratorConfig;
@@ -29,17 +28,13 @@ async function loadExistingConfig(
   configFile: string,
   options: { allowTrustedProviderCommandOverrides?: boolean | undefined } = {},
 ): Promise<OrchestratorConfig> {
-  try {
-    const raw = await readFile(configFile, 'utf-8');
-    return parseOrchestratorConfig(JSON.parse(raw), {
+  const rawConfig = await readJsonFileOrDefault(configFile, defaultConfig, {
+    description: 'orchestrator config',
+    onCorrupt: warnJsonQuarantined,
+  });
+  return parseOrchestratorConfig(rawConfig, {
       allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return defaultConfig();
-    }
-    throw error;
-  }
+  });
 }
 
 async function resolveBaseConfig(options: RunInteractiveInitOptions): Promise<OrchestratorConfig> {
@@ -59,8 +54,7 @@ async function resolveBaseConfig(options: RunInteractiveInitOptions): Promise<Or
 }
 
 async function saveConfig(configFile: string, config: OrchestratorConfig): Promise<void> {
-  await mkdir(dirname(configFile), { recursive: true });
-  await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  await writeJsonFileAtomic(configFile, config);
 }
 
 export async function runInteractiveInit(options: RunInteractiveInitOptions): Promise<InitEngineResult> {

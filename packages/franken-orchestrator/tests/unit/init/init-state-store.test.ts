@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileInitStateStore } from '../../../src/init/init-state-store.js';
@@ -9,6 +9,7 @@ describe('FileInitStateStore', () => {
   let tempDir: string | undefined;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -39,5 +40,34 @@ describe('FileInitStateStore', () => {
     const loaded = await store.load('/tmp/project/.fbeast/config.json');
 
     expect(loaded).toEqual(saved);
+  });
+
+  it('quarantines malformed JSON and returns a clean initial state', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const stateFile = join(tempDir, 'init-state.json');
+    const store = new FileInitStateStore(stateFile);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await writeFile(stateFile, '{"selectedModules": [', 'utf-8');
+
+    const state = await store.load('/tmp/project/.fbeast/config.json');
+    const files = await readdir(tempDir);
+    const quarantine = files.find((file) => file.startsWith('init-state.json.corrupt-'));
+
+    expect(state).toEqual(createEmptyInitState('/tmp/project/.fbeast/config.json'));
+    expect(quarantine).toBeTruthy();
+    await expect(readFile(join(tempDir, quarantine ?? ''), 'utf-8')).resolves.toBe('{"selectedModules": [');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init state JSON'));
+  });
+
+  it('saves state through a temporary file rename without leaving temp files behind', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const stateFile = join(tempDir, 'nested', 'init-state.json');
+    const store = new FileInitStateStore(stateFile);
+
+    await store.save(createEmptyInitState('/tmp/project/.fbeast/config.json'));
+
+    const files = await readdir(join(tempDir, 'nested'));
+    expect(files).toEqual(['init-state.json']);
+    await expect(readFile(stateFile, 'utf-8')).resolves.toContain('/tmp/project/.fbeast/config.json');
   });
 });
