@@ -23,6 +23,8 @@ export type {
   EpisodicTrace,
   LessonTestTraceabilityEntry,
   LessonExperimentSandbox,
+  ReviewerFeedbackLessonEntry,
+  ReviewerFeedbackLessonCapture,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,
