@@ -378,6 +378,31 @@ describe('PlanGraph — insertFixItTask', () => {
     expect(g2.getTask(createTaskId('b'))?.dependsOn).toEqual([createTaskId('fix-b')]);
   });
 
+  it('deduplicates failed task and explicit fix task dependencies', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('setup'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+    const fix = makeTask('fix-b', { dependsOn: [createTaskId('a'), createTaskId('setup')] });
+
+    const g2 = g.insertFixItTask(createTaskId('b'), fix);
+
+    expect(g2.getDependencies(createTaskId('fix-b'))).toEqual([
+      createTaskId('a'),
+      createTaskId('setup'),
+    ]);
+    expect(g2.getTask(createTaskId('fix-b'))?.dependsOn).toEqual([
+      createTaskId('a'),
+      createTaskId('setup'),
+    ]);
+    expect(g2.topoSort().map((task) => task.id)).toEqual([
+      createTaskId('a'),
+      createTaskId('setup'),
+      createTaskId('fix-b'),
+      createTaskId('b'),
+    ]);
+  });
+
   it('is immutable and increments the recovery version', () => {
     const g = PlanGraph.empty().addTask(makeTask('a'));
 
