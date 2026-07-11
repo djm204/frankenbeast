@@ -49,9 +49,10 @@ export class InMemoryRateLimiter {
       return;
     }
 
+    const maxChecks = Math.min(cleanupBatchSize, this.counters.size);
     let checked = 0;
     for (const [key, counter] of this.counters) {
-      if (checked >= cleanupBatchSize) {
+      if (checked >= maxChecks) {
         break;
       }
       checked += 1;
