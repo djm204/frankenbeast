@@ -526,6 +526,12 @@ const x = 1;
       `const arrow = <T /* ${hackMarker}: generic */>() => value;`,
       `const first = <p></p>; /* ${xxxMarker}: statement-level */ const second = <div />;`,
       `const comparison = a < b /* ${pendingMarker}: compare operands */ > c;`,
+      `const quoted = <Widget text={"} >"} value={/* ${trackedMarker}: later prop */ x} />;`,
+      `return /[//]/.source / total; // ${hackMarker}: real line marker`,
+      `const constrained = <T extends Foo /* ${trackedMarker}: constrained generic */>() => value;`,
+      `const attrComment = <Widget /* ${hackMarker}: tag trivia */ value={1} />;`,
+      `<_Foo>/* ${pendingMarker}: shown to users */</_Foo>`,
+      `const contextual = of / total; // ${xxxMarker}: contextual identifier division`,
       `<p>/* ${pendingMarker}: shown to users */</p>`,
     ].join('\n');
     const result = await evaluator.evaluate(createInput(content));
@@ -533,7 +539,7 @@ const x = 1;
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('5 unresolved marker comment(s)') &&
+          f.message.includes('10 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
           f.message.includes(trackedMarker) &&
           f.message.includes(hackMarker) &&

@@ -100,7 +100,39 @@ function startsRegexLiteralOnLine(
     return true;
   }
 
-  return '([{=,:;!&|?+-*~^<>/'.includes(content[cursor] ?? '');
+  let tokenStart = cursor;
+  while (tokenStart >= lineStart && /[$\w]/.test(content[tokenStart] ?? '')) {
+    tokenStart -= 1;
+  }
+
+  return (
+    isRegexPrefixToken(content.slice(tokenStart + 1, cursor + 1)) ||
+    followsForIterationKeywordOnLine(content, index) ||
+    '([{=,:;!&|?+-*~^<>/'.includes(content[cursor] ?? '')
+  );
+}
+
+function isRegexPrefixToken(token: string): boolean {
+  return [
+    'return',
+    'throw',
+    'case',
+    'yield',
+    'await',
+    'typeof',
+    'void',
+    'delete',
+    'else',
+    'do',
+    'default',
+  ].includes(token);
+}
+
+function followsForIterationKeywordOnLine(content: string, index: number): boolean {
+  const lineStart = content.lastIndexOf('\n', index - 1) + 1;
+  return /\bfor\s*\([^)]*\b(?:of|in)\s*$/.test(
+    content.slice(lineStart, index),
+  );
 }
 
 function previousSignificantIndex(content: string, index: number): number {
@@ -278,21 +310,8 @@ function canStartRegexLiteralWhileMatchingParens(
     return true;
   }
   return (
-    [
-      'return',
-      'throw',
-      'case',
-      'yield',
-      'await',
-      'typeof',
-      'void',
-      'delete',
-      'else',
-      'do',
-      'of',
-      'in',
-      'default',
-    ].includes(previousToken) ||
+    isRegexPrefixToken(previousToken) ||
+    followsForIterationKeywordOnLine(content, index) ||
     previous === '' ||
     '([{=,:;!&|?+-*~^<>/'.includes(previous)
   );
@@ -330,21 +349,8 @@ function canStartRegexLiteral(content: string, index: number): boolean {
     }
   }
   return (
-    [
-      'return',
-      'throw',
-      'case',
-      'yield',
-      'await',
-      'typeof',
-      'void',
-      'delete',
-      'else',
-      'do',
-      'of',
-      'in',
-      'default',
-    ].includes(previousToken) ||
+    isRegexPrefixToken(previousToken) ||
+    followsForIterationKeywordOnLine(content, index) ||
     followsControlCondition(content, index) ||
     previous === '' ||
     '([{=,:;!&|?+-*~^<>/'.includes(previous)
@@ -390,7 +396,11 @@ function isLikelyTypeArgumentTag(
     .slice(start, end)
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .trim();
-  if (!/^<\s*[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*\s*>$/.test(tagText)) {
+  if (
+    !/^<\s*[A-Za-z_$][\w$]*(?:\s+(?:extends|=)\s*[^,>]+)?(?:\s*,\s*[A-Za-z_$][\w$]*(?:\s+(?:extends|=)\s*[^,>]+)?)*\s*>$/.test(
+      tagText,
+    )
+  ) {
     return false;
   }
 
@@ -413,14 +423,11 @@ function isLikelyTypeArgumentTag(
 
 function isLikelyJsxTagStart(content: string, index: number): boolean {
   const next = content[index + 1];
-  if (!/[A-Za-z/>]/.test(next ?? '')) {
+  if (!/[A-Za-z_$/>]/.test(next ?? '')) {
     return false;
   }
   if (content[index - 1] === '<') {
     return false;
-  }
-  if (next === '/' || next === '>') {
-    return true;
   }
 
   const previousIndex = previousSignificantIndex(content, index);
@@ -428,9 +435,14 @@ function isLikelyJsxTagStart(content: string, index: number): boolean {
   const previousToken = previousSignificantToken(content, index);
   if (
     /[$\w)\]]/.test(previous) &&
-    !['return', 'yield', 'case', 'else', 'do'].includes(previousToken)
+    !['return', 'yield', 'case', 'else', 'do'].includes(previousToken) &&
+    !(next === '/' && hasOpenJsxAncestorBefore(content, index))
   ) {
     return false;
+  }
+
+  if (next === '/' || next === '>') {
+    return true;
   }
 
   return true;
@@ -480,6 +492,15 @@ function collectJsxTagExpressionLabels(
       index = skipQuotedLiteral(content, index);
       continue;
     }
+    if (current === '/' && content[index + 1] === '*') {
+      const [commentLabels, commentEnd] = collectBlockCommentLabels(
+        content,
+        index,
+      );
+      labels.push(...commentLabels);
+      index = commentEnd;
+      continue;
+    }
     if (current === '{') {
       const [expressionLabels, expressionEnd] = collectCodeLabels(
         content,
@@ -515,6 +536,20 @@ function skipJsxTag(content: string, start: number, limit = content.length): num
       continue;
     }
     if (braceDepth > 0) {
+      if (current === '"' || current === "'" || current === '`') {
+        index = skipQuotedLiteral(content, index);
+        continue;
+      }
+      if (current === '/' && content[index + 1] === '/') {
+        const lineEnd = content.indexOf('\n', index + 2);
+        index = lineEnd === -1 ? limit : lineEnd + 1;
+        continue;
+      }
+      if (current === '/' && content[index + 1] === '*') {
+        const commentEnd = content.indexOf('*/', index + 2);
+        index = commentEnd === -1 ? limit : commentEnd + 2;
+        continue;
+      }
       if (current === '{') {
         braceDepth += 1;
       } else if (current === '}') {
@@ -625,7 +660,9 @@ function findNextJsxTagAfter(content: string, start: number): string | undefined
 }
 
 function jsxTagName(tag: string): string | undefined {
-  const match = /^<\/?\s*([A-Za-z][\w.]*)/.exec(tag);
+  const match = /^<\/?\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/.exec(
+    tag,
+  );
   return match?.[1];
 }
 
@@ -707,11 +744,11 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
     return nextTag.startsWith('</>');
   }
 
-  const isOpeningTag = new RegExp('^<[A-Za-z]').test(openingTag);
+  const isOpeningTag = new RegExp('^<[A-Za-z_$]').test(openingTag);
   const isSelfClosingTag = new RegExp('/\\s*>$').test(openingTag);
-  const isClosingTag = new RegExp('^</[A-Za-z]').test(openingTag);
+  const isClosingTag = new RegExp('^</[A-Za-z_$]').test(openingTag);
 
-  if (!new RegExp('^<[/A-Za-z]').test(nextTag)) {
+  if (!new RegExp('^<[/A-Za-z_$]').test(nextTag)) {
     return false;
   }
 
