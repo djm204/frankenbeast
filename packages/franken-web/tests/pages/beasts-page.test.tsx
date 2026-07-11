@@ -3,10 +3,14 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-libra
 import { BeastsPage } from '../../src/pages/beasts-page';
 import type { DashboardApiClient } from '../../src/lib/dashboard-api';
 import { useBeastStore } from '../../src/stores/beast-store';
+import { useDashboardStore } from '../../src/stores/dashboard-store';
+
+const snapshotSecurity = { profile: 'standard', injectionDetection: true, piiMasking: true, outputValidation: true };
 
 afterEach(() => {
   cleanup();
   useBeastStore.getState().resetWizard();
+  useDashboardStore.getState().reset();
 });
 
 const baseProps = {
@@ -33,7 +37,7 @@ const baseProps = {
   dashboardClient: ({
     fetchSnapshot: vi.fn().mockResolvedValue({
       skills: [],
-      security: { profile: 'standard', injectionDetection: true, piiMasking: true, outputValidation: true },
+      security: snapshotSecurity,
       providers: [],
     }),
   } as unknown as DashboardApiClient),
@@ -66,6 +70,31 @@ describe('BeastsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /create agent/i }));
     // Wizard opens — step indicator renders
     expect(screen.getByText('Identity')).toBeTruthy();
+  });
+
+  it('refreshes provider snapshot on wizard open even when cached providers exist', async () => {
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'stale', type: 'stale-cli', available: true, failoverOrder: 0 }],
+    });
+    const dashboardClient = {
+      fetchSnapshot: vi.fn().mockResolvedValue({
+        skills: [],
+        security: snapshotSecurity,
+        providers: [{ name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0, model: 'gpt-5-codex' }],
+      }),
+    } as unknown as DashboardApiClient;
+
+    render(<BeastsPage {...baseProps} dashboardClient={dashboardClient} />);
+    fireEvent.click(screen.getByRole('button', { name: /create agent/i }));
+
+    await waitFor(() => {
+      expect(dashboardClient.fetchSnapshot).toHaveBeenCalledTimes(1);
+      expect(useDashboardStore.getState().providers).toEqual([
+        { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0, model: 'gpt-5-codex' },
+      ]);
+    });
   });
 
   it('disables every create-agent entry point when the Beast API is unavailable', () => {

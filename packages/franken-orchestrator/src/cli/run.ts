@@ -60,7 +60,7 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
-import { resolveProviderType } from '../providers/provider-config.js';
+import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 
 /**
@@ -419,15 +419,47 @@ export function buildDashboardProviderSnapshot(
   }
 
   const registryProviders = providerRegistry?.getProviders() ?? [];
-  const registryByName = new Map(registryProviders.map((provider) => [provider.name, provider]));
+  const registryByName = new Map<string, (typeof registryProviders)[number]>();
   const configuredNames = [...new Set([
     config.providers.default,
     ...(config.providers.fallbackChain ?? []),
     ...extraProviderNames,
-    ...registryProviders.map((provider) => provider.name),
   ].filter(Boolean))];
+  const configuredTypes = new Set<string>();
+  for (const name of configuredNames) {
+    try {
+      configuredTypes.add(resolveProviderType(name));
+    } catch {
+      // Custom provider names are still represented by their configured key.
+    }
+  }
 
-  return configuredNames.map((name, index) => {
+  const registryNames = registryProviders.flatMap((provider) => {
+    let canonicalName = provider.name;
+    try {
+      canonicalName = resolveProviderCatalogEntry(provider.name).name;
+    } catch {
+      // Keep custom registry providers under their registry name.
+    }
+    registryByName.set(provider.name, provider);
+    registryByName.set(canonicalName, provider);
+
+    const providerType = provider.type || (() => {
+      try {
+        return resolveProviderType(canonicalName);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (configuredNames.includes(canonicalName) || (providerType && configuredTypes.has(providerType))) {
+      return [];
+    }
+    return [canonicalName];
+  });
+
+  const providerNames = [...new Set([...configuredNames, ...registryNames])];
+
+  return providerNames.map((name, index) => {
     const registryProvider = registryByName.get(name);
     let type: string = registryProvider?.type ?? '';
     if (!type) {
@@ -1106,7 +1138,7 @@ export async function main(): Promise<void> {
               dashboardDeps: {
                 skillManager,
                 getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
-                getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, args.providers ?? []),
+                getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
               },
             }
           : {}),

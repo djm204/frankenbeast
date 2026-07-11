@@ -246,7 +246,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -385,6 +385,44 @@ describe('provider CLI availability preflight', () => {
       claude: { command: 'definitely-missing-frankenbeast-claude' },
       codex: { command: 'definitely-missing-frankenbeast-codex' },
     })).toThrow('Install one of: claude, codex, gemini, aider');
+  });
+});
+
+describe('dashboard provider snapshots', () => {
+  it('normalizes registry implementation names already represented by configured provider keys', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'claude',
+        fallbackChain: ['codex'],
+        overrides: { claude: { model: 'claude-sonnet-4' }, codex: { model: 'gpt-5' } },
+      },
+    } as any, {
+      getProviders: () => [
+        { name: 'claude-cli', type: 'claude-cli' },
+        { name: 'codex-cli', type: 'codex-cli' },
+      ],
+    } as any);
+
+    expect(providers).toEqual([
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, model: 'claude-sonnet-4' },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5' },
+    ]);
+  });
+
+  it('includes the CLI-selected provider before fallback-only providers', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'gemini',
+        fallbackChain: [],
+        overrides: { codex: { model: 'gpt-5-codex' } },
+      },
+    } as any, { getProviders: () => [] } as any, ['codex', 'claude']);
+
+    expect(providers).toEqual([
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 0 },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5-codex' },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 2 },
+    ]);
   });
 });
 

@@ -65,12 +65,11 @@ export function BeastsPage({
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const resetWizard = useBeastStore((s) => s.resetWizard);
-  const providers = useDashboardStore((s) => s.providers);
   const setSnapshot = useDashboardStore((s) => s.setSnapshot);
   const createAgentDisabledReason = error ?? 'Beast API is not available. Configure the operator token/API client before creating agents.';
 
   useEffect(() => {
-    if (!showWizard || providers.length > 0) return undefined;
+    if (!showWizard) return undefined;
     let cancelled = false;
     dashboardClient.fetchSnapshot()
       .then((snapshot) => {
@@ -78,7 +77,7 @@ export function BeastsPage({
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [dashboardClient, providers.length, setSnapshot, showWizard]);
+  }, [dashboardClient, setSnapshot, showWizard]);
 
   function handleOpenWizard() {
     if (disabled) return;
