@@ -474,6 +474,33 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('handles follow-up Codex scanner edge cases', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const xxxMarker = ['X', 'XX'].join('');
+    const content = [
+      `<p><span />/* ${pendingMarker}: shown to users */</p>`,
+      `const generic = make<Item>(); /* ${trackedMarker}: real block marker */ return <div />;`,
+      `const cls = /[//]/; const ratio = a / b; // ${hackMarker}: normalize`,
+      `const ok = value < /a[/* ${pendingMarker}: regex data */]/.source;`,
+      `/* ${xxxMarker}: final real block marker */`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('3 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker) &&
+          f.message.includes(xxxMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));

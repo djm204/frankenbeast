@@ -71,6 +71,11 @@ function findLineCommentStart(
       continue;
     }
 
+    if (current === '/' && next !== '/' && startsRegexLiteralOnLine(content, index, lineStart)) {
+      index = skipRegexLiteral(content, index);
+      continue;
+    }
+
     if (current === '/' && next === '/') {
       return index;
     }
@@ -79,6 +84,23 @@ function findLineCommentStart(
   }
 
   return -1;
+}
+
+function startsRegexLiteralOnLine(
+  content: string,
+  index: number,
+  lineStart: number,
+): boolean {
+  let cursor = index - 1;
+  while (cursor >= lineStart && /\s/.test(content[cursor] ?? '')) {
+    cursor -= 1;
+  }
+
+  if (cursor < lineStart) {
+    return true;
+  }
+
+  return '([{=,:;!&|?+-*~^<>/'.includes(content[cursor] ?? '');
 }
 
 function previousSignificantIndex(content: string, index: number): number {
@@ -347,6 +369,33 @@ function skipRegexLiteral(content: string, start: number): number {
   return index;
 }
 
+function isLikelyTypeArgumentTag(
+  content: string,
+  start: number,
+  end: number,
+): boolean {
+  const tagText = content.slice(start, end).trim();
+  if (!/^<[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*>$/.test(tagText)) {
+    return false;
+  }
+
+  let cursor = start - 1;
+  while (cursor >= 0 && /\s/.test(content[cursor] ?? '')) {
+    cursor -= 1;
+  }
+  const previous = content[cursor] ?? '';
+  if (!/[$\w)]/.test(previous)) {
+    return false;
+  }
+
+  cursor = end;
+  while (cursor < content.length && /\s/.test(content[cursor] ?? '')) {
+    cursor += 1;
+  }
+
+  return ['(', '.', ';', ','].includes(content[cursor] ?? '');
+}
+
 function extractMarkerLabels(pattern: RegExp, comment: string): string[] {
   pattern.lastIndex = 0;
   return [...comment.matchAll(pattern)].flatMap((match) =>
@@ -440,11 +489,13 @@ function findLastJsxTagBefore(
     ) {
       const tagEnd = skipJsxTag(content, index, end);
       if (tagEnd !== -1) {
-        lastTag = {
-          start: index,
-          end: tagEnd,
-          text: content.slice(index, tagEnd).trim(),
-        };
+        if (!isLikelyTypeArgumentTag(content, index, tagEnd)) {
+          lastTag = {
+            start: index,
+            end: tagEnd,
+            text: content.slice(index, tagEnd).trim(),
+          };
+        }
         index = tagEnd;
         continue;
       }
@@ -483,6 +534,10 @@ function findNextJsxTagAfter(content: string, start: number): string | undefined
     ) {
       const tagEnd = skipJsxTag(content, index);
       if (tagEnd !== -1) {
+        if (isLikelyTypeArgumentTag(content, index, tagEnd)) {
+          index = tagEnd;
+          continue;
+        }
         return content.slice(index, tagEnd).trim();
       }
     }
@@ -508,6 +563,9 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
   }
 
   const textSinceLastTag = before.slice(previousTag.end);
+  if (/[;=]/.test(textSinceLastTag)) {
+    return false;
+  }
   const lastOpenBrace = textSinceLastTag.lastIndexOf('{');
   const lastCloseBrace = textSinceLastTag.lastIndexOf('}');
   if (lastOpenBrace > lastCloseBrace) {
@@ -520,8 +578,7 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
   }
 
   return (
-    new RegExp('^<[A-Za-z][^>]*>$').test(openingTag) &&
-    !new RegExp('/\\s*>$').test(openingTag) &&
+    new RegExp('^</?[A-Za-z][^>]*>$').test(openingTag) &&
     new RegExp('^<[/A-Za-z]').test(nextTag)
   );
 }
