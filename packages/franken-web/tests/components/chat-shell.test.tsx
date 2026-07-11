@@ -244,8 +244,15 @@ vi.mock('../../src/hooks/use-chat-session.js', () => ({
 }));
 
 vi.mock('../../src/lib/api.js', () => ({
-  ChatApiClient: vi.fn(function (this: { listSessions: typeof mockListSessions }) {
+  ChatApiClient: vi.fn(function (this: {
+    listSessions: typeof mockListSessions;
+    listSessionsWithDiagnostics: (projectId?: string) => Promise<{ sessions: Awaited<ReturnType<typeof mockListSessions>>; corruptSessions: [] }>;
+  }) {
     this.listSessions = mockListSessions;
+    this.listSessionsWithDiagnostics = async (projectId?: string) => ({
+      sessions: await mockListSessions(projectId),
+      corruptSessions: [],
+    });
   }),
 }));
 
