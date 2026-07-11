@@ -164,5 +164,26 @@ describe('SpanLifecycle', () => {
       }
       expect(handler).toHaveBeenCalledOnce()
     })
+
+    it('does not let a loop-detected handler failure make endSpan throw', () => {
+      const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 2 })
+      const throwingHandler = vi.fn(() => {
+        throw new Error('handler failed')
+      })
+      const laterHandler = vi.fn()
+      detector.on('loop-detected', throwingHandler)
+      detector.on('loop-detected', laterHandler)
+
+      const trace = TraceContext.createTrace('goal')
+      for (const name of ['a', 'b', 'a']) {
+        const span = TraceContext.startSpan(trace, { name })
+        TraceContext.endSpan(span, {}, detector)
+      }
+
+      const triggeringSpan = TraceContext.startSpan(trace, { name: 'b' })
+      expect(() => TraceContext.endSpan(triggeringSpan, {}, detector)).not.toThrow()
+      expect(throwingHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledOnce()
+    })
   })
 })
