@@ -9,4 +9,7 @@
   - Initial `npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts` failed because dependencies were absent (`Cannot find package 'vitest'`).
   - Installed repo dependencies with `npm install --ignore-scripts --no-audit --no-fund --package-lock=false` after disk preflight.
   - `npm run build --workspace @franken/types && npm run typecheck --workspace @franken/critique && npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts` passed.
-- [ ] Commit, push, open PR, and request Codex review.
+- [x] Commit, push, open PR, and request Codex review.
+  - Commit: `0f5ae756 feat(learning): capture reviewer-feedback lessons`.
+  - PR: https://github.com/djm204/frankenbeast/pull/1887.
+  - Posted `@codex review` on the PR.
