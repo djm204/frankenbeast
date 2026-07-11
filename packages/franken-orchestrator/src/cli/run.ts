@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
+import { defaultConfig, parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -304,6 +304,12 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
     throw new Error(`Config file not found: ${args.config}`);
   }
   return loadConfig(args, defaultConfigPath);
+}
+
+function canInitHandleConfigSyntaxError(args: CliArgs, error: unknown): boolean {
+  return args.subcommand === 'init'
+    && (args.initVerify || args.initRepair || args.initNonInteractive)
+    && error instanceof SyntaxError;
 }
 
 export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
@@ -825,7 +831,15 @@ export async function main(): Promise<void> {
       ? undefined
       : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
-  const config = await resolveConfig(args, paths.configFile);
+  let config: OrchestratorConfig;
+  try {
+    config = await resolveConfig(args, paths.configFile);
+  } catch (error) {
+    if (!canInitHandleConfigSyntaxError(args, error)) {
+      throw error;
+    }
+    config = defaultConfig();
+  }
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
 
