@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-11 — Vitest config env-flag regression tests
+- For Vitest suite-flag fixes, assert false-like env values (`0`, `false`, `no`, blank) preserve the default unit-test include set in package configs, not just helper return values.
+- In Vitest tests, avoid cache-busting variable dynamic imports such as `import(`../vitest.config.ts?case=${...}`)`: Vite cannot statically analyze them. Use a static config import and reset env/argv around each assertion instead.
+
 ## 2026-07-10 — Codex usage-limit handling in issue-to-PR flow
 - If `@codex review` immediately responds with usage-limit, treat it as a hard blocker for the merge gate and stop extra polling. Resume review only after credits are restored and a fresh trigger can produce a current-head clean response.
 
