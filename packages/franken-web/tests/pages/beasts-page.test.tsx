@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import { BeastsPage } from '../../src/pages/beasts-page';
+import { useBeastStore } from '../../src/stores/beast-store';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useBeastStore.getState().resetWizard();
+});
 
 const baseProps = {
   agents: [
@@ -56,6 +60,27 @@ describe('BeastsPage', () => {
     expect(screen.getByText('Identity')).toBeTruthy();
   });
 
+  it('disables every create-agent entry point when the Beast API is unavailable', () => {
+    render(
+      <BeastsPage
+        {...baseProps}
+        agents={[]}
+        disabled={true}
+        error="Beast API not available"
+      />,
+    );
+
+    const headerCreateButton = screen.getByRole('button', { name: /^\+ create agent$/i });
+    const emptyStateCreateButton = screen.getByRole('button', { name: /create your first agent/i });
+
+    expect(headerCreateButton.hasAttribute('disabled')).toBe(true);
+    expect(emptyStateCreateButton.hasAttribute('disabled')).toBe(true);
+    expect(screen.getAllByText('Beast API not available').length).toBeGreaterThan(0);
+
+    fireEvent.click(emptyStateCreateButton);
+    expect(screen.queryByText('Identity')).toBeNull();
+  });
+
   it('drives wizard workflow choices from backend catalog prop', () => {
     render(<BeastsPage {...baseProps} catalog={[{
       id: 'custom-beast',
@@ -78,5 +103,42 @@ describe('BeastsPage', () => {
   it('shows error banner when error prop is set', () => {
     render(<BeastsPage {...baseProps} error="Something went wrong" />);
     expect(screen.getByText('Something went wrong')).toBeTruthy();
+  });
+
+  it('keeps the Create Agent wizard open and shows launch errors', async () => {
+    const onLaunch = vi.fn().mockRejectedValue(new Error(
+      "Dispatch failed for tracked agent 'agent-1': Invalid chunk-plan config: outputDir is required",
+    ));
+
+    render(<BeastsPage
+      {...baseProps}
+      catalog={[{
+        id: 'martin-loop',
+        label: 'Martin Loop',
+        description: 'Implementation workflow',
+        executionModeDefault: 'process',
+        interviewPrompts: [],
+      }]}
+      onLaunch={onLaunch}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: /create agent/i }));
+    act(() => {
+      useBeastStore.getState().setStepValues(0, { name: 'Dispatch Failure Agent' });
+      useBeastStore.getState().setStepValues(1, {
+        workflowType: 'martin-loop',
+        provider: 'codex',
+        objective: 'Implement chunks',
+        chunkDirectory: 'tasks/chunks',
+      });
+      useBeastStore.setState({ wizardStep: 7, highestCompleted: 6 });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /launch agent/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Dispatch failed for tracked agent');
+    });
+    expect(screen.getByText('Create Agent')).toBeTruthy();
+    expect(onLaunch).toHaveBeenCalledTimes(1);
   });
 });

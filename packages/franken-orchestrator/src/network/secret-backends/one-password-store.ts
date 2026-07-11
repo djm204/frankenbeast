@@ -6,6 +6,19 @@ type CliRunner = (command: string, args: string[]) => Promise<CliResult>;
 const VAULT = 'frankenbeast';
 const TITLE_PREFIX = 'frankenbeast/';
 
+function titleForKey(key: string): string {
+  return `${TITLE_PREFIX}${key}`;
+}
+
+function itemIdFromJson(stdout: string): string | undefined {
+  try {
+    const item = JSON.parse(stdout) as { id?: unknown };
+    return typeof item.id === 'string' && item.id.length > 0 ? item.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class OnePasswordStore implements ISecretStore {
   readonly id = '1password';
 
@@ -25,7 +38,7 @@ export class OnePasswordStore implements ISecretStore {
   }
 
   async store(key: string, value: string): Promise<void> {
-    const title = `${TITLE_PREFIX}${key}`;
+    const title = titleForKey(key);
     const getResult = await this.runner('op', ['item', 'get', title, `--vault=${VAULT}`]);
 
     if (getResult.exitCode === 0) {
@@ -51,9 +64,25 @@ export class OnePasswordStore implements ISecretStore {
   }
 
   async resolve(key: string): Promise<string | undefined> {
-    const encodedKey = encodeURIComponent(key);
-    const ref = `op://${VAULT}/${TITLE_PREFIX}${encodedKey}/password`;
-    const result = await this.runner('op', ['read', ref]);
+    const title = titleForKey(key);
+    const itemResult = await this.runner('op', [
+      'item',
+      'get',
+      title,
+      `--vault=${VAULT}`,
+      '--format=json',
+    ]);
+
+    if (itemResult.exitCode !== 0) {
+      return undefined;
+    }
+
+    const itemId = itemIdFromJson(itemResult.stdout);
+    if (!itemId) {
+      return undefined;
+    }
+
+    const result = await this.runner('op', ['read', `op://${VAULT}/${itemId}/password`]);
     if (result.exitCode !== 0) {
       return undefined;
     }
@@ -61,7 +90,7 @@ export class OnePasswordStore implements ISecretStore {
   }
 
   async delete(key: string): Promise<void> {
-    const title = `${TITLE_PREFIX}${key}`;
+    const title = titleForKey(key);
     await this.runner('op', ['item', 'delete', title, `--vault=${VAULT}`]);
   }
 

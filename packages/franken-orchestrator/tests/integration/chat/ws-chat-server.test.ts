@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WebSocket } from 'ws';
+import { WebSocket, type RawData } from 'ws';
 import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
@@ -73,6 +73,35 @@ function onceSocket(socket: WebSocket, event: 'open' | 'close' | 'error'): Promi
   });
 }
 
+function rawSocketPayloadToString(data: RawData): string {
+  if (Array.isArray(data)) {
+    return Buffer.concat(data).toString('utf8');
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data).toString('utf8');
+  }
+  return data.toString('utf8');
+}
+
+function waitForSocketEvent(socket: WebSocket, type: string): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off('message', onMessage);
+      reject(new Error(`Timed out waiting for websocket event '${type}'`));
+    }, 2_000);
+    const onMessage = (data: RawData) => {
+      const payload = JSON.parse(rawSocketPayloadToString(data)) as Record<string, unknown>;
+      if (payload.type !== type) {
+        return;
+      }
+      clearTimeout(timeout);
+      socket.off('message', onMessage);
+      resolve(payload);
+    };
+    socket.on('message', onMessage);
+  });
+}
+
 describe('ws chat server', () => {
   it('accepts upgrade requests with socket tokens in websocket subprotocols', async () => {
     mkdirSync(TMP, { recursive: true });
@@ -98,6 +127,108 @@ describe('ws chat server', () => {
     expect(socket.url).not.toContain(token);
 
     socket.close();
+    httpServer.close();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('routes browser-sent frames through the live websocket receive handler', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const runtime = createTestRuntime();
+    const httpServer = createServer();
+    attachChatWebSocketServer({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`,
+      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`],
+    );
+
+    const ready = waitForSocketEvent(socket, 'session.ready');
+    await expect(onceSocket(socket, 'open')).resolves.toEqual([]);
+    await expect(ready).resolves.toEqual(expect.objectContaining({
+      type: 'session.ready',
+      sessionId: session.id,
+    }));
+
+    const pong = waitForSocketEvent(socket, 'pong');
+    socket.send(JSON.stringify({ type: 'ping' }));
+    await expect(pong).resolves.toEqual(expect.objectContaining({ type: 'pong' }));
+
+    const invalidEvent = waitForSocketEvent(socket, 'turn.error');
+    socket.send('{not-json');
+    await expect(invalidEvent).resolves.toEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'INVALID_EVENT',
+    }));
+
+    const accepted = waitForSocketEvent(socket, 'message.accepted');
+    const typing = waitForSocketEvent(socket, 'assistant.typing.start');
+    const delta = waitForSocketEvent(socket, 'assistant.message.delta');
+    const complete = waitForSocketEvent(socket, 'assistant.message.complete');
+    socket.send(JSON.stringify({
+      type: 'message.send',
+      clientMessageId: 'client-live-1',
+      content: 'hello from the browser websocket',
+    }));
+
+    await expect(accepted).resolves.toEqual(expect.objectContaining({
+      type: 'message.accepted',
+      clientMessageId: 'client-live-1',
+      sessionId: session.id,
+    }));
+    await expect(typing).resolves.toEqual(expect.objectContaining({
+      type: 'assistant.typing.start',
+    }));
+    await expect(delta).resolves.toEqual(expect.objectContaining({
+      type: 'assistant.message.delta',
+    }));
+    await expect(complete).resolves.toEqual(expect.objectContaining({
+      type: 'assistant.message.complete',
+      content: 'Working on it right now.',
+    }));
+
+    socket.close();
+    httpServer.close();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('removes only the real websocket peer after a successful upgrade closes', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const httpServer = createServer();
+    const chatSocketServer = attachChatWebSocketServer({
+      runtime: createTestRuntime(),
+      sessionStore: store,
+      tokenSecret: secret,
+      server: httpServer,
+    });
+    const port = await listen(httpServer);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/v1/chat/ws?sessionId=${encodeURIComponent(session.id)}`,
+      [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${token}`],
+    );
+
+    await expect(onceSocket(socket, 'open')).resolves.toEqual([]);
+    expect(chatSocketServer.controller.connections.size).toBe(1);
+
+    const closed = onceSocket(socket, 'close');
+    socket.close();
+    await closed;
+
+    expect(chatSocketServer.controller.connections.size).toBe(0);
+
+    chatSocketServer.close();
     httpServer.close();
     rmSync(TMP, { recursive: true, force: true });
   });
@@ -360,6 +491,10 @@ describe('ws chat server', () => {
       command: 'deploy staging',
       risk: 'Requires explicit approval before execution.',
       sessionId: session.id,
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: 'turn.execution.complete',
+      data: { status: 'pending_approval' },
     }));
     expect(store.get(session.id)?.pendingApproval).toEqual(expect.objectContaining({
       description: 'deploy staging',

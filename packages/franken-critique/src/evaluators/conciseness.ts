@@ -17,6 +17,10 @@ const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
   'gi',
 );
+const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
+  `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
+  'i',
+);
 const MAX_COMMENT_RATIO = 0.5;
 
 export class ConcisenessEvaluator implements Evaluator {
@@ -56,8 +60,11 @@ export class ConcisenessEvaluator implements Evaluator {
     const totalLines = lines.filter((l) => l.trim().length > 0).length;
     if (totalLines === 0) return;
 
-    // Count single-line comments
-    let commentLines = lines.filter((l) => COMMENT_LINE_PATTERN.test(l)).length;
+    // Count single-line comments and inline unresolved comment markers.
+    let commentLines = lines.filter(
+      (l) =>
+        COMMENT_LINE_PATTERN.test(l) || UNRESOLVED_COMMENT_LINE_PATTERN.test(l),
+    ).length;
 
     // Count block comment lines
     for (const match of content.matchAll(BLOCK_COMMENT_PATTERN)) {
@@ -85,7 +92,8 @@ export class ConcisenessEvaluator implements Evaluator {
       findings.push({
         message: `Found ${matches.length} unresolved marker comment(s): ${labels}. Address or track these as issues.`,
         severity: 'info',
-        suggestion: 'Resolve deferred-work items or convert them to tracked issues',
+        suggestion:
+          'Resolve deferred-work items or convert them to tracked issues',
       });
     }
   }

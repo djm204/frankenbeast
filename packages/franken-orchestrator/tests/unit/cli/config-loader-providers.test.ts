@@ -101,7 +101,7 @@ describe('Config loader providers passthrough', () => {
       },
     }));
 
-    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
+    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/requires explicit CLI approval/);
   });
 
   it('requires CLI approval before a repository-local config can trust an allowed provider binary', async () => {
@@ -119,7 +119,7 @@ describe('Config loader providers passthrough', () => {
       },
     }));
 
-    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
+    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/requires explicit CLI approval/);
 
     const approved = await loadConfig(makeArgs({ trustProviderCommandOverrides: true }), filePath);
     expect(approved.providers.overrides['claude']).toEqual({
@@ -164,7 +164,7 @@ describe('Config loader providers passthrough', () => {
       }],
     }));
 
-    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/trustCommandOverride: true/);
+    await expect(loadConfig(makeArgs(), filePath)).rejects.toThrow(/requires explicit CLI approval/);
   });
 
   it('merges providers with other config fields from file', async () => {

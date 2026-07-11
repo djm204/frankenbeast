@@ -81,6 +81,32 @@ describe('analytics routes', () => {
     expect(service.listEvents).toHaveBeenCalledWith({ page: 2, pageSize: 25 });
   });
 
+  it.each([
+    ['/events?page=2abc', 'page'],
+    ['/events?pageSize=25junk', 'pageSize'],
+    ['/events?page=1.5', 'page'],
+    ['/events?page=-1', 'page'],
+    ['/events?page=0', 'page'],
+    ['/events?page=abc', 'page'],
+    [`/events?page=${'9'.repeat(400)}`, 'page'],
+  ])('rejects malformed pagination value %s before reading analytics data', async (path, parameter) => {
+    const service = mockAnalyticsService();
+    const app = createAnalyticsRoutes({ analytics: service });
+
+    const res = await app.request(path);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        message: 'Invalid Analytics pagination parameter',
+        code: 'invalid_pagination',
+        parameter,
+        expected: 'positive integer',
+      },
+    });
+    expect(service.listEvents).not.toHaveBeenCalled();
+  });
+
   it('rejects unsupported timeWindow query values before reading analytics data', async () => {
     const service = mockAnalyticsService();
     const app = createAnalyticsRoutes({ analytics: service });
@@ -96,6 +122,27 @@ describe('analytics routes', () => {
       },
     });
     expect(service.listEvents).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['/summary?outcome=faild', 'getSummary'],
+    ['/sessions?outcome=blocked', 'listSessions'],
+    ['/events?outcome=unknown', 'listEvents'],
+  ] as const)('rejects unsupported outcome query values for %s before reading analytics data', async (path, serviceMethod) => {
+    const service = mockAnalyticsService();
+    const app = createAnalyticsRoutes({ analytics: service });
+
+    const res = await app.request(path);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        message: 'Unsupported Analytics outcome filter',
+        code: 'invalid_outcome',
+        allowedValues: ['approved', 'denied', 'review_recommended', 'failed', 'error', 'detected'],
+      },
+    });
+    expect(service[serviceMethod]).not.toHaveBeenCalled();
   });
 
   it('returns event details or a 404', async () => {

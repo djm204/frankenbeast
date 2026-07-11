@@ -53,6 +53,11 @@ export class CodexCliAdapter implements ILlmProvider {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    const spawnState: { message: string | undefined } = { message: undefined };
+    proc.once('error', (error) => {
+      spawnState.message = error.message;
+    });
+
     const userContent = request.messages
       .map((m) =>
         typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
@@ -61,7 +66,7 @@ export class CodexCliAdapter implements ILlmProvider {
     proc.stdin!.write(userContent);
     proc.stdin!.end();
 
-    yield* this.parseStream(proc);
+    yield* this.parseStream(proc, spawnState);
   }
 
   formatHandoff(snapshot: BrainSnapshot): string {
@@ -127,8 +132,12 @@ export class CodexCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
+    spawnState: { message: string | undefined },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
+    proc.once('error', () => {
+      rl.close();
+    });
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let streamCompleted = false;
@@ -185,10 +194,19 @@ export class CodexCliAdapter implements ILlmProvider {
         }
       }
 
-      // Stream ended without a done/error frame — check exit code
+      // Stream ended without a done/error frame — check spawn/exit status
       const exitCode = await new Promise<number | null>((resolve) => {
         proc.on('close', resolve);
       });
+      if (spawnState.message) {
+        streamCompleted = true;
+        yield {
+          type: 'error',
+          error: `codex process failed to start: ${spawnState.message}`,
+          retryable: false,
+        };
+        return;
+      }
       if (exitCode !== 0 && exitCode !== null) {
         yield {
           type: 'error',
