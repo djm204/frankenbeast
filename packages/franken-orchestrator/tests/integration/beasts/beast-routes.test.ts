@@ -415,6 +415,27 @@ describe('beast routes', () => {
     expect(answered.data.session.currentPrompt.key).toBe('objective');
   });
 
+  it('returns a structured 404 when answering an unknown interview session', async () => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request('/v1/beasts/interviews/missing-session/answer', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ answer: 'claude' }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'INTERVIEW_SESSION_NOT_FOUND',
+        message: "Beast interview session 'missing-session' was not found",
+      },
+    });
+  });
+
   it('returns 404 and does not persist a run when trackedAgentId is unknown', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
