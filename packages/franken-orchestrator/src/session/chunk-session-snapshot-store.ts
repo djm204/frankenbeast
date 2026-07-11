@@ -131,13 +131,18 @@ export class FileChunkSessionSnapshotStore {
 
   private storageKeyMayContainChunk(storageKey: string, chunkId: string): boolean {
     const normalized = this.normalizeStorageKey(storageKey);
-    return (
-      normalized === chunkId ||
-      normalized.endsWith(`:${chunkId}`) ||
-      normalized.endsWith(`/${chunkId}`) ||
-      normalized.endsWith(`-${chunkId}`) ||
-      normalized.endsWith(`_${chunkId}`)
-    );
+    let index = normalized.indexOf(chunkId);
+    while (index !== -1) {
+      const before = index === 0 ? '' : normalized[index - 1];
+      const after = index + chunkId.length >= normalized.length ? '' : normalized[index + chunkId.length];
+      const hasValidPrefix = before === '' || before === ':' || before === '/' || before === '-' || before === '_';
+      const hasValidSuffix = after === '' || after === ':' || after === '/' || after === '-' || after === '_';
+      if (hasValidPrefix && hasValidSuffix) {
+        return true;
+      }
+      index = normalized.indexOf(chunkId, index + 1);
+    }
+    return false;
   }
 
   private snapshotDir(planName: string, chunkId: string, taskId?: string): string {
