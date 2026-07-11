@@ -299,6 +299,48 @@ describe('NetworkPage', () => {
     expect((screen.getByLabelText('Comms enabled') as HTMLInputElement).checked).toBe(true);
   });
 
+  it('syncs refreshed config into untouched fields without clobbering unsaved edits', () => {
+    const { rerender } = render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Chat host'), { target: { value: '0.0.0.0' } });
+
+    rerender(
+      <NetworkPage
+        config={{
+          ...baseConfig,
+          chat: { ...baseConfig.chat, model: 'fresh-backend-model', host: '192.168.1.10' },
+        }}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('fresh-backend-model')).toBeDefined();
+    expect(screen.getByDisplayValue('0.0.0.0')).toBeDefined();
+    expect(screen.getByText('chat.host=0.0.0.0')).toBeDefined();
+    expect(screen.queryByText('chat.model=fresh-backend-model')).toBeNull();
+  });
+
   it('surfaces save errors from the network config API', async () => {
     const onSaveConfig = vi.fn().mockRejectedValue(new Error('HTTP 400'));
 

@@ -1278,6 +1278,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                     setNetworkError(`Unable to refresh network status: ${networkErrorMessage(error, 'Request failed.')}`);
                   }
                 });
+              void client.getConfig()
+                .then((nextConfig) => {
+                  setNetworkConfig(nextConfig);
+                })
+                .catch(() => undefined);
               if (!logServiceId) {
                 return;
               }
