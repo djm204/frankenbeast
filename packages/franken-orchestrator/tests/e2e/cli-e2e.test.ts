@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { Session } from '../../src/cli/session.js';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../src/cli/project-root.js';
 import type { InterviewIO } from '../../src/planning/interview-loop.js';
+import { readVitestFlag } from '../../../../scripts/vitest-env.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Only run in E2E mode
-const describeE2E = process.env['E2E'] === 'true' ? describe : describe.skip;
+const describeE2E = readVitestFlag(process.env, 'E2E') ? describe : describe.skip;
 
 function mockIO(answers: string[] = ['yes']): InterviewIO {
   let idx = 0;
