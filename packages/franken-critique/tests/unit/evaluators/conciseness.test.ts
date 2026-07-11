@@ -195,21 +195,23 @@ const x = 1;
       `Don't leave // ${pendingMarker}: same-line prose marker`,
       '````ts',
       `/* ${trackedMarker}(owner): block marker without colon */`,
+      `/* ${pendingMarker.toLowerCase()}: lowercase block marker */`,
       '````',
-      '/** Render the todo list for this page. */',
+      '/** Render the TODO column in this view. */',
       'const ratio = (a + b) / c;',
       `// ${trackedMarker}: division comment remains visible`,
       'const re = // docs before regex',
       `  /[/* ${hackMarker}: regex data */]/;`,
       `if (ok) foo(); else /[/* ${xxxMarker}: regex data */]/.test(value);`,
       `for (const m of /[/* ${xxxMarker}: regex data */]/g.exec(s) ?? []) {}`,
+      `export default /[/* ${hackMarker}: regex data */]/;`,
     ].join('\n');
     const result = await evaluator.evaluate(createInput(content));
 
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('3 unresolved marker comment(s)') &&
+          f.message.includes('4 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
           f.message.includes(trackedMarker) &&
           !f.message.includes(hackMarker) &&

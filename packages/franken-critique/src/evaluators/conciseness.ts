@@ -18,8 +18,8 @@ const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   'gi',
 );
 const UNRESOLVED_MARKER_PATTERN = new RegExp(
-  `(?:^|[\\s*])(${UNRESOLVED_COMMENT_MARKERS.join('|')})(?:\\b|(?=\\())`,
-  'g',
+  `^\\s*(?:\\*|//)?\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})(?:\\b|(?=\\())`,
+  'gim',
 );
 const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
   `//\\s*(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
@@ -127,6 +127,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
       'else',
       'of',
       'in',
+      'default',
     ].includes(previousToken) ||
     previous === '' ||
     '([{=,:;!&|?+-*~^>'.includes(previous) ||
@@ -183,7 +184,10 @@ function collectBlockCommentLabels(
 ): [string[], number] {
   const end = content.indexOf('*/', start + 2);
   const commentEnd = end === -1 ? content.length : end + 2;
-  const comment = content.slice(start, commentEnd);
+  const comment = content
+    .slice(start, commentEnd)
+    .replace(/^\/\*/, '')
+    .replace(/\*\/$/, '');
   return [extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment), commentEnd];
 }
 
