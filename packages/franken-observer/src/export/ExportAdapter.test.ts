@@ -60,6 +60,44 @@ describe('InMemoryAdapter', () => {
       expect(retrieved!.goal).toBe('updated goal')
     })
 
+    it('captures a flush-time snapshot and returns defensive query copies', async () => {
+      const trace = TraceContext.createTrace('snapshot goal')
+      const span = TraceContext.startSpan(trace, { name: 'original span' })
+      span.metadata = { nested: { count: 1 }, label: 'before' }
+      SpanLifecycle.addThoughtBlock(span, 'first thought')
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+
+      trace.goal = 'mutated original goal'
+      trace.status = 'error'
+      trace.spans[0]!.name = 'mutated original span'
+      trace.spans[0]!.metadata = { nested: { count: 2 }, label: 'after' }
+      trace.spans[0]!.thoughtBlocks.push('mutated original thought')
+
+      const firstQuery = await adapter.queryByTraceId(trace.id)
+      expect(firstQuery).not.toBeNull()
+      expect(firstQuery!.goal).toBe('snapshot goal')
+      expect(firstQuery!.status).toBe('completed')
+      expect(firstQuery!.spans[0]!.name).toBe('original span')
+      expect(firstQuery!.spans[0]!.metadata).toEqual({ nested: { count: 1 }, label: 'before' })
+      expect(firstQuery!.spans[0]!.thoughtBlocks).toEqual(['first thought'])
+
+      firstQuery!.goal = 'mutated queried goal'
+      firstQuery!.status = 'error'
+      firstQuery!.spans[0]!.name = 'mutated queried span'
+      firstQuery!.spans[0]!.metadata = { nested: { count: 3 }, label: 'queried' }
+      firstQuery!.spans[0]!.thoughtBlocks.push('mutated queried thought')
+
+      const secondQuery = await adapter.queryByTraceId(trace.id)
+      expect(secondQuery!.goal).toBe('snapshot goal')
+      expect(secondQuery!.status).toBe('completed')
+      expect(secondQuery!.spans[0]!.name).toBe('original span')
+      expect(secondQuery!.spans[0]!.metadata).toEqual({ nested: { count: 1 }, label: 'before' })
+      expect(secondQuery!.spans[0]!.thoughtBlocks).toEqual(['first thought'])
+    })
+
     it('warns when exporting a trace that still has active spans', async () => {
       const trace = TraceContext.createTrace('goal')
       TraceContext.startSpan(trace, { name: 'orphaned' })
