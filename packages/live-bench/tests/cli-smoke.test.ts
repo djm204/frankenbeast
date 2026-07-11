@@ -6,20 +6,23 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const cliEntrypoint = join(packageRoot, 'dist', 'cli', 'main.js');
+const repoRoot = dirname(dirname(packageRoot));
 const corpusRoot = join(packageRoot, 'corpus');
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const cliBinary = join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'fbeast-live-bench.cmd' : 'fbeast-live-bench');
 
 beforeAll(() => {
-  execFileSync(npmCommand, ['run', 'build'], {
-    cwd: packageRoot,
-    encoding: 'utf8',
-    stdio: 'pipe',
-  });
+  for (const workspace of ['@franken/types', '@franken/live-bench']) {
+    execFileSync(npmCommand, ['run', 'build', `--workspace=${workspace}`], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+  }
 });
 
 function runCli(args: string[], cwd = packageRoot) {
-  return spawnSync(process.execPath, [cliEntrypoint, ...args], {
+  return spawnSync(cliBinary, args, {
     cwd,
     encoding: 'utf8',
     timeout: 10_000,
