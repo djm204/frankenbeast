@@ -1,4 +1,4 @@
-import type { MemoryPort, CritiqueLesson } from '../types/contracts.js';
+import type { MemoryPort, CritiqueLesson, ReviewerFeedbackLessonCapture } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
@@ -9,6 +9,9 @@ const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
   'New critique lessons are experimental until their traceability map and regression evidence are independently verified.';
+
+const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
+  'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -90,12 +93,45 @@ export class LessonRecorder {
               verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
             },
           ],
+          reviewerFeedback: createReviewerFeedbackCapture(
+            failingIteration.index,
+            evalResult.evaluatorName,
+            critiqueFindings,
+          ),
         });
       }
     }
 
     return lessons;
   }
+}
+
+function createReviewerFeedbackCapture(
+  sourceIteration: number,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): ReviewerFeedbackLessonCapture {
+  const capturedFindings = findings.map((finding) => ({
+    sourceIteration,
+    evaluatorName,
+    message: finding.message,
+    severity: finding.severity,
+    ...(finding.location ? { location: finding.location } : {}),
+    ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
+  }));
+  const suggestionsComplete = capturedFindings.every((finding) => Boolean(finding.suggestion));
+
+  return {
+    summary: capturedFindings.map((finding) => finding.message).join('; '),
+    findings: capturedFindings,
+    suggestionsComplete,
+    ...(suggestionsComplete ? {} : { missingSuggestionGuidance: MISSING_REVIEWER_SUGGESTION_GUIDANCE }),
+  };
 }
 
 function createLessonId(taskId: TaskId, evaluatorName: string, iterationIndex: number): string {

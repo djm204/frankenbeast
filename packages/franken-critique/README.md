@@ -92,6 +92,17 @@ When the critique loop recovers from one or more failing iterations and ends in 
 
 Infrastructure-only evaluator exceptions are intentionally excluded from the map so operator dashboards do not promote broken tooling as product lessons. PM handoffs should treat lessons without a matching regression `testId` as unverified learning that is not ready for promotion.
 
+## Reviewer-feedback lesson capture
+
+Recorded critique lessons also carry a `reviewerFeedback` object so worker retrospectives and PM handoff summaries can reuse the reviewer feedback that created the lesson without parsing prose. The capture includes:
+
+- `summary`: a concise concatenation of the reviewer finding messages.
+- `findings`: normalized feedback entries with source iteration, evaluator name, message, severity, and any reviewer-provided source location or suggestion.
+- `suggestionsComplete`: `true` only when every captured feedback item includes a reviewer suggestion.
+- `missingSuggestionGuidance`: present when at least one feedback item lacks a suggestion; PM/liveness tooling should surface the original message and ask for remediation guidance before promotion.
+
+Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create reviewer-feedback captures. This keeps broken tooling noise from being promoted as durable agent-learning guidance.
+
 ## Lesson experiment sandbox
 
 New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.

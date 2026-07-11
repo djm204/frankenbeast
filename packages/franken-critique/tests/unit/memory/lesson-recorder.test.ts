@@ -113,6 +113,77 @@ describe('LessonRecorder', () => {
     ]);
   });
 
+  it('captures reviewer feedback messages, suggestions, severities, and source locations with the lesson', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'PR summary omits the verification command',
+            severity: 'warning',
+            location: 'pull-request-body',
+            suggestion: 'Add the exact targeted test command and result to the PR description.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'review-feedback-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.reviewerFeedback).toEqual({
+      summary: 'PR summary omits the verification command',
+      findings: [
+        {
+          sourceIteration: 0,
+          evaluatorName: 'reviewer',
+          message: 'PR summary omits the verification command',
+          severity: 'warning',
+          location: 'pull-request-body',
+          suggestion: 'Add the exact targeted test command and result to the PR description.',
+        },
+      ],
+      suggestionsComplete: true,
+    });
+  });
+
+  it('marks reviewer-feedback lessons with missing suggestions for PM follow-up', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          { message: 'Review identified a handoff gap without remediation guidance', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'missing-suggestion-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.reviewerFeedback).toEqual({
+      summary: 'Review identified a handoff gap without remediation guidance',
+      findings: [
+        {
+          sourceIteration: 0,
+          evaluatorName: 'reviewer',
+          message: 'Review identified a handoff gap without remediation guidance',
+          severity: 'critical',
+        },
+      ],
+      suggestionsComplete: false,
+      missingSuggestionGuidance:
+        'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.',
+    });
+  });
+
   it('sandboxes new lessons as experimental and blocks promotion until verified', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
