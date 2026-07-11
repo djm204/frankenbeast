@@ -116,6 +116,27 @@ export function createAuditEvent(
 
 export { hashContent };
 
+function cloneArrayBufferView<T extends ArrayBufferView>(value: T): T {
+  if (value instanceof DataView) {
+    const copy = new Uint8Array(value.byteLength);
+    copy.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    return new DataView(copy.buffer) as unknown as T;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return Buffer.from(value) as unknown as T;
+  }
+
+  const TypedArray = value.constructor as new (source: ArrayLike<number>) => T;
+  return new TypedArray(value as unknown as ArrayLike<number>);
+}
+
+function cloneArrayBuffer<T extends ArrayBuffer | SharedArrayBuffer>(value: T): ArrayBuffer {
+  const copy = new Uint8Array(value.byteLength);
+  copy.set(new Uint8Array(value));
+  return copy.buffer;
+}
+
 function cloneValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
     return value;
@@ -127,8 +148,8 @@ function cloneValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   }
 
   if (typeof value === 'function') {
-    Object.freeze(value);
     seen.set(value, value);
+    freezeValue(value);
     return value;
   }
 
@@ -167,16 +188,39 @@ function cloneValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
     return clone as T;
   }
 
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
-    return structuredClone(value);
+  if (ArrayBuffer.isView(value)) {
+    return cloneArrayBufferView(value) as T;
   }
 
-  const clone: Record<string, unknown> = {};
-  seen.set(value, clone);
-  for (const [key, item] of Object.entries(value)) {
-    clone[key] = cloneValue(item, seen);
+  if (value instanceof ArrayBuffer || value instanceof SharedArrayBuffer) {
+    return cloneArrayBuffer(value) as T;
   }
-  return clone as T;
+
+  const toJSON = (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === 'function') {
+    return cloneValue(toJSON.call(value), seen) as T;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype === Object.prototype || prototype === null) {
+    const clone: Record<string, unknown> = {};
+    seen.set(value, clone);
+    for (const [key, item] of Object.entries(value)) {
+      clone[key] = cloneValue(item, seen);
+    }
+    return clone as T;
+  }
+
+  try {
+    return structuredClone(value);
+  } catch {
+    const clone: Record<string, unknown> = {};
+    seen.set(value, clone);
+    for (const [key, item] of Object.entries(value)) {
+      clone[key] = cloneValue(item, seen);
+    }
+    return clone as T;
+  }
 }
 
 function freezeValue<T>(value: T, seen = new WeakSet<object>()): T {

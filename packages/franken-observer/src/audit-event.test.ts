@@ -193,6 +193,9 @@ describe('AuditTrail', () => {
     ignoreMutation(() => {
       (payload as { mutable?: { count: number } }).mutable = { count: 99 };
     });
+    ignoreMutation(() => {
+      (payload as { mutable?: { count: number } }).mutable!.count = 99;
+    });
     const returnedPayload = trail.getAll()[0]!.payload as { mutable?: { count: number } };
     ignoreMutation(() => {
       returnedPayload.mutable = { count: 42 };
@@ -213,6 +216,30 @@ describe('AuditTrail', () => {
 
     returnedPayload[0] = 0;
     expect((trail.getAll()[0]!.payload as Buffer).toString()).toBe('audit-bytes');
+  });
+
+  it('copies typed arrays backed by shared memory', () => {
+    const trail = new AuditTrail();
+    const shared = new SharedArrayBuffer(4);
+    const payload = new Uint8Array(shared);
+    payload.set([1, 2, 3, 4]);
+    trail.append(createAuditEvent('shared.payload', payload, { phase: 'p', provider: 'pr' }));
+
+    payload[0] = 99;
+    const returnedPayload = trail.getAll()[0]!.payload as Uint8Array;
+    expect(Array.from(returnedPayload)).toEqual([1, 2, 3, 4]);
+
+    returnedPayload[1] = 88;
+    expect(Array.from(trail.getAll()[0]!.payload as Uint8Array)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('preserves prototype-backed toJSON payload data', () => {
+    const trail = new AuditTrail();
+    const url = new URL('https://example.com/audit?event=1');
+    trail.append(createAuditEvent('url.payload', url, { phase: 'p', provider: 'pr' }));
+
+    expect(trail.getAll()[0]!.payload).toBe('https://example.com/audit?event=1');
+    expect(trail.toJSON()[0]!.payload).toBe('https://example.com/audit?event=1');
   });
 
   it('fromJSON rejects non-array input', () => {
