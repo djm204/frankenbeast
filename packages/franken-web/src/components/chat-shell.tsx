@@ -314,6 +314,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [networkLogsLoading, setNetworkLogsLoading] = useState(false);
   const [networkLogsError, setNetworkLogsError] = useState<string | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const [networkConfigError, setNetworkConfigError] = useState<string | null>(null);
   const networkStatusRequestIdRef = useRef(0);
   const networkStatusSuccessRequestIdRef = useRef(0);
   const networkStatusSettledRequestIdRef = useRef(0);
@@ -1254,7 +1255,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         ) : route === 'network' ? (
           <NetworkPage
             config={networkConfig}
-            error={networkError}
+            error={networkError ?? networkConfigError}
             logs={networkLogs}
             logsError={networkLogsError}
             logsLoading={networkLogsLoading}
@@ -1287,11 +1288,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 .then((nextConfig) => {
                   if (configRequestId === networkConfigRequestIdRef.current) {
                     setNetworkConfig(nextConfig);
+                    setNetworkConfigError(null);
                   }
                 })
                 .catch((error: unknown) => {
                   if (configRequestId === networkConfigRequestIdRef.current) {
-                    setNetworkError(`Unable to refresh network config: ${networkErrorMessage(error, 'Request failed.')}`);
+                    setNetworkConfigError(`Unable to refresh network config: ${networkErrorMessage(error, 'Request failed.')}`);
                   }
                 });
               if (!logServiceId) {
@@ -1325,8 +1327,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             }}
             onSaveConfig={(assignments) => {
               const client = new NetworkApiClient(baseUrl);
+              const configRequestId = ++networkConfigRequestIdRef.current;
               return client.updateConfig(assignments).then((nextConfig) => {
-                setNetworkConfig(nextConfig);
+                if (configRequestId === networkConfigRequestIdRef.current) {
+                  setNetworkConfig(nextConfig);
+                  setNetworkConfigError(null);
+                }
               });
             }}
             onSelectLogService={(serviceId) => {

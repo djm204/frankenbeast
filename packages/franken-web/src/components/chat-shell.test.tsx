@@ -321,6 +321,62 @@ describe('ChatShell route heading', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network config: HTTP 503');
   });
 
+  it('keeps config refresh failures visible after status refresh succeeds', async () => {
+    let resolveStatus!: (value: unknown) => void;
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({ mode: 'secure', secureBackend: 'local-encrypted', services: [] })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStatus = resolve; }));
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockRejectedValueOnce(new Error('HTTP 503'));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network config: HTTP 503');
+
+    resolveStatus({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('alert').textContent).toContain('Unable to refresh network config: HTTP 503');
+  });
+
+  it('prevents stale config refreshes from overwriting a saved config response', async () => {
+    let resolveStaleConfig!: (value: unknown) => void;
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStaleConfig = resolve; }));
+    networkApiMocks.updateConfig.mockResolvedValue({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'saved-model', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'saved-model' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
+
+    await waitFor(() => expect(screen.getByDisplayValue('saved-model')).toBeDefined());
+    resolveStaleConfig({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'stale-model', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
+
+    expect(screen.getByDisplayValue('saved-model')).toBeDefined();
+    expect(screen.queryByDisplayValue('stale-model')).toBeNull();
+  });
+
   it('ignores stale refresh failures after a newer network refresh succeeds', async () => {
     let rejectStaleRefresh!: (error: Error) => void;
     networkApiMocks.getStatus
