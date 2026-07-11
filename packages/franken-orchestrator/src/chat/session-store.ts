@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, readdirSync, unlinkSync, mkdirSync, renameSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { ChatSessionSchema, type ChatSession } from './types.js';
 import { isoNow, now as deterministicNow } from '@franken/types';
 
@@ -47,13 +47,22 @@ export class FileSessionStore implements ISessionStore {
   }
 
   get(id: string): ChatSession | undefined {
+    const path = this.safeFilePath(id);
+    if (path === undefined) {
+      return undefined;
+    }
+
+    let raw: string;
     try {
-      const raw = readFileSync(this.filePath(id), 'utf-8');
+      raw = readFileSync(path, 'utf-8');
+    } catch {
+      return undefined;
+    }
+
+    try {
       return ChatSessionSchema.parse(JSON.parse(raw));
     } catch (error) {
-      if (!isNotFoundError(error)) {
-        this.quarantineCorruptSession(id, error);
-      }
+      this.quarantineCorruptSession(id, path, error);
       return undefined;
     }
   }
@@ -81,6 +90,11 @@ export class FileSessionStore implements ISessionStore {
   }
 
   listCorruptions(): CorruptChatSessionFile[] {
+    for (const diagnostic of this.listQuarantinedFiles()) {
+      if (!this.corruptions.has(diagnostic.id)) {
+        this.corruptions.set(diagnostic.id, diagnostic);
+      }
+    }
     return Array.from(this.corruptions.values()).sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -96,9 +110,22 @@ export class FileSessionStore implements ISessionStore {
     return join(this.storeDir, `${id}.json`);
   }
 
+  private safeFilePath(id: string): string | undefined {
+    const resolvedStoreDir = resolve(this.storeDir);
+    const resolvedPath = resolve(this.storeDir, `${id}.json`);
+    if (resolvedPath === resolvedStoreDir || !resolvedPath.startsWith(`${resolvedStoreDir}${sep}`)) {
+      console.warn(`[chat-session-store] ignoring invalid chat session id ${JSON.stringify(id)}`);
+      return undefined;
+    }
+    return resolvedPath;
+  }
+
   private writeToDisk(session: ChatSession): void {
     mkdirSync(this.storeDir, { recursive: true });
-    const destination = this.filePath(session.id);
+    const destination = this.safeFilePath(session.id);
+    if (destination === undefined) {
+      throw new Error(`Invalid chat session id: ${JSON.stringify(session.id)}`);
+    }
     const tmpPath = `${destination}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
     try {
       writeFileSync(tmpPath, JSON.stringify(session, null, 2), 'utf-8');
@@ -114,8 +141,7 @@ export class FileSessionStore implements ISessionStore {
     }
   }
 
-  private quarantineCorruptSession(id: string, error: unknown): void {
-    const path = this.filePath(id);
+  private quarantineCorruptSession(id: string, path: string, error: unknown): void {
     const quarantinePath = `${path}.corrupt-${deterministicNow()}`;
     const reason = error instanceof Error ? error.message : String(error);
     const diagnostic: CorruptChatSessionFile = { id, path, quarantinePath, reason };
@@ -131,8 +157,22 @@ export class FileSessionStore implements ISessionStore {
       `[chat-session-store] corrupt chat session ${id} quarantined at ${diagnostic.quarantinePath}: ${diagnostic.reason}`,
     );
   }
-}
 
-function isNotFoundError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+  private listQuarantinedFiles(): CorruptChatSessionFile[] {
+    try {
+      return readdirSync(this.storeDir)
+        .filter((file) => file.includes('.json.corrupt-'))
+        .map((file) => {
+          const id = file.slice(0, file.indexOf('.json.corrupt-'));
+          return {
+            id,
+            path: this.filePath(id),
+            quarantinePath: join(this.storeDir, file),
+            reason: 'previously quarantined corrupt chat session file',
+          };
+        });
+    } catch {
+      return [];
+    }
+  }
 }

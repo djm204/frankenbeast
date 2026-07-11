@@ -89,6 +89,54 @@ describe('FileSessionStore', () => {
     warn.mockRestore();
   });
 
+  it('keeps corrupt-session diagnostics visible after a store restart', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const corruptId = 'chat-corrupt-before-restart';
+    const corruptPath = join(TMP, `${corruptId}.json`);
+    writeFileSync(corruptPath, '{"id":', 'utf-8');
+
+    expect(store.get(corruptId)).toBeUndefined();
+    const restartedStore = new FileSessionStore(TMP);
+
+    expect(restartedStore.listCorruptions()).toEqual([
+      expect.objectContaining({
+        id: corruptId,
+        path: corruptPath,
+        reason: 'previously quarantined corrupt chat session file',
+      }),
+    ]);
+
+    warn.mockRestore();
+  });
+
+  it('does not quarantine unreadable session paths', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unreadableId = 'chat-directory-entry';
+    const unreadablePath = join(TMP, `${unreadableId}.json`);
+    mkdirSync(unreadablePath, { recursive: true });
+
+    expect(store.get(unreadableId)).toBeUndefined();
+
+    expect(existsSync(unreadablePath)).toBe(true);
+    expect(store.listCorruptions()).toEqual([]);
+
+    warn.mockRestore();
+  });
+
+  it('rejects path-traversal session ids without moving files outside the store', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const outsidePath = join(TMP, '..', 'config.json');
+    writeFileSync(outsidePath, JSON.stringify({ ok: true }), 'utf-8');
+
+    expect(store.get('../config')).toBeUndefined();
+
+    expect(existsSync(outsidePath)).toBe(true);
+    expect(store.listCorruptions()).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('ignoring invalid chat session id'));
+
+    warn.mockRestore();
+  });
+
   it('quarantines schema-invalid session files separately from missing files', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const corruptId = 'chat-invalid-schema';
