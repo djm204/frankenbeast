@@ -35,23 +35,12 @@ export class FileChunkSessionSnapshotStore {
         .sort();
     }
 
-    const planDir = join(this.rootDir, planName);
-    if (!existsSync(planDir)) {
-      return [];
-    }
-
-    return readdirSync(planDir)
-      .map((dirName) => join(planDir, dirName))
-      .filter((dirPath) => existsSync(dirPath) && statSync(dirPath).isDirectory())
-      .flatMap((dirPath) =>
-        readdirSync(dirPath)
-          .filter((file) => file.endsWith('.json'))
-          .map((file) => join(dirPath, file)),
-      )
+    return this.listUnscopedCandidates(planName)
       // Corrupt snapshots are quarantined and skipped instead of aborting the
       // whole listing — one damaged snapshot must not hide the healthy ones.
-      .map((filePath) => ({ filePath, session: readJsonFileOrQuarantine<ChunkSession>(filePath) }))
-      .filter((entry): entry is { filePath: string; session: ChunkSession } => entry.session !== undefined)
+      .filter((entry): entry is { filePath: string; storageKey: string; session: ChunkSession } =>
+        entry.session !== undefined,
+      )
       .filter(({ session }) => session.chunkId === chunkId)
       .map(({ filePath }) => filePath)
       .sort();
@@ -67,19 +56,63 @@ export class FileChunkSessionSnapshotStore {
    * cannot tell which task owns the requested restore.
    */
   restoreLatest(planName: string, chunkId: string, taskId?: string): ChunkSession | undefined {
+    if (!taskId) {
+      const entries = this.listUnscopedCandidates(planName);
+      const matchingEntries = entries
+        .filter((entry): entry is { filePath: string; storageKey: string; session: ChunkSession } =>
+          entry.session !== undefined,
+        )
+        .filter(({ session }) => session.chunkId === chunkId)
+        .sort((a, b) => a.filePath.localeCompare(b.filePath));
+      const matchingTaskIds = new Set(matchingEntries.map(({ session, storageKey }) => session.taskId ?? storageKey));
+
+      // Corrupt snapshots cannot prove their chunk id after quarantine, but
+      // their task-scoped directory is still evidence that another task may
+      // own the requested chunk. Count those directories in the ambiguity set
+      // so an unscoped restore fails closed instead of falling back to a
+      // healthy snapshot from a different task.
+      for (const { session, storageKey } of entries) {
+        if (session === undefined) {
+          matchingTaskIds.add(storageKey);
+        }
+      }
+
+      if (matchingTaskIds.size > 1) {
+        return undefined;
+      }
+
+      return matchingEntries.at(-1)?.session;
+    }
+
     const files = this.list(planName, chunkId, taskId);
     const sessions = files
       .map((filePath) => readJsonFileOrQuarantine<ChunkSession>(filePath))
       .filter((session): session is ChunkSession => session !== undefined);
 
-    if (!taskId) {
-      const matchingTaskIds = new Set(sessions.map((session) => session.taskId ?? ''));
-      if (matchingTaskIds.size > 1) {
-        return undefined;
-      }
+    return sessions.at(-1);
+  }
+
+  private listUnscopedCandidates(planName: string): Array<{
+    filePath: string;
+    storageKey: string;
+    session: ChunkSession | undefined;
+  }> {
+    const planDir = join(this.rootDir, planName);
+    if (!existsSync(planDir)) {
+      return [];
     }
 
-    return sessions.at(-1);
+    return readdirSync(planDir)
+      .map((storageKey) => ({ storageKey, dirPath: join(planDir, storageKey) }))
+      .filter(({ dirPath }) => existsSync(dirPath) && statSync(dirPath).isDirectory())
+      .flatMap(({ storageKey, dirPath }) =>
+        readdirSync(dirPath)
+          .filter((file) => file.endsWith('.json'))
+          .map((file) => {
+            const filePath = join(dirPath, file);
+            return { filePath, storageKey, session: readJsonFileOrQuarantine<ChunkSession>(filePath) };
+          }),
+      );
   }
 
   private snapshotDir(planName: string, chunkId: string, taskId?: string): string {
