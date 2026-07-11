@@ -72,9 +72,10 @@ export class FileChunkSessionSnapshotStore {
       // their task-scoped directory is still evidence that another task may
       // own the requested chunk. Count those directories in the ambiguity set
       // so an unscoped restore fails closed instead of falling back to a
-      // healthy snapshot from a different task.
+      // healthy snapshot from a different task. Only skip a corrupt directory
+      // when its task-style storage key clearly names a different chunk.
       for (const { session, storageKey } of entries) {
-        if (session === undefined && this.storageKeyMayContainChunk(storageKey, chunkId)) {
+        if (session === undefined && !this.storageKeyClearlyNamesOtherChunk(storageKey, chunkId)) {
           matchingTaskIds.add(this.normalizeStorageKey(storageKey));
         }
       }
@@ -127,6 +128,15 @@ export class FileChunkSessionSnapshotStore {
     } catch {
       return storageKey;
     }
+  }
+
+  private storageKeyClearlyNamesOtherChunk(storageKey: string, chunkId: string): boolean {
+    if (this.storageKeyMayContainChunk(storageKey, chunkId)) {
+      return false;
+    }
+    const normalized = this.normalizeStorageKey(storageKey);
+    const lastTaskSegment = normalized.split(/[:/]/).at(-1) ?? normalized;
+    return /^\d+_[A-Za-z0-9_]+$/.test(lastTaskSegment);
   }
 
   private storageKeyMayContainChunk(storageKey: string, chunkId: string): boolean {
