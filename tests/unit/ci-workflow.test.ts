@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { load } from 'js-yaml';
@@ -8,6 +8,20 @@ const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
 const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
+const NPMRC_PATH = resolve(ROOT, '.npmrc');
+
+function packageManifestPaths(): string[] {
+  const packageDirs = readdirSync(resolve(ROOT, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => resolve(ROOT, 'packages', entry.name, 'package.json'))
+    .filter((path) => existsSync(path));
+
+  return [resolve(ROOT, 'package.json'), ...packageDirs];
+}
+
+function readJsonFile<T>(path: string): T {
+  return JSON.parse(readFileSync(path, 'utf-8')) as T;
+}
 
 function parseWorkflowYaml(source: string): Record<string, unknown> {
   let workflow: unknown;
@@ -35,6 +49,16 @@ function expectRecord(value: unknown, label: string): Record<string, unknown> {
 function expectSteps(job: Record<string, unknown>): Array<Record<string, unknown>> {
   expect(Array.isArray(job.steps)).toBe(true);
   return job.steps as Array<Record<string, unknown>>;
+}
+
+function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
+  const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+  const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+  const step = expectSteps(buildTestLint).find(
+    (candidate) => candidate.run === 'npx turbo run build typecheck',
+  );
+  expect(step, 'CI should explicitly gate build and typecheck through Turbo').toBeTruthy();
+  return step as Record<string, unknown>;
 }
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
@@ -81,13 +105,14 @@ on:
       expect(pullRequest.branches).toEqual(['main']);
     });
 
-    it('uses Node.js 22', () => {
+    it('uses the repository-pinned minimum supported Node.js version', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
       const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
-      expect(setupNodeWith['node-version']).toBe('22');
+      expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+      expect(setupNodeWith['node-version']).toBeUndefined();
     });
 
     it('runs npm ci for deterministic installs', () => {
@@ -102,37 +127,79 @@ on:
     });
 
     it('enables Corepack and verifies the packageManager-pinned npm before installing', () => {
+      expect(content).toContain('npm install -g corepack@0.34.4');
       expect(content).toContain('corepack enable npm');
       expect(content).toContain('corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate');
       expect(content).toContain('node scripts/check-package-manager.mjs');
+      expect(content.indexOf('npm install -g corepack@0.34.4')).toBeLessThan(content.indexOf('corepack enable npm'));
       expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
     });
 
-    it('builds before running package tests in CI', () => {
-      expect(content).toContain('turbo run');
-      expect(content).toMatch(/turbo run build lint[\s\S]*turbo run test/);
-      expect(content.indexOf('turbo run build lint')).toBeLessThan(content.indexOf('turbo run test'));
+    it('explicitly gates build, typecheck, and the root lint coverage check before running the shared CI test target', () => {
+      const buildTypecheckStep = expectBuildTypecheckStep(workflow);
+      expect(buildTypecheckStep.name).toBe('Run package build and typecheck');
+      expect(content).toMatch(/npx turbo run build typecheck[\s\S]*npm run lint[\s\S]*npm run test:ci/);
+      const workspaceLintStep = '\n        run: npm run lint\n';
+      expect(content.indexOf('npx turbo run build typecheck')).toBeLessThan(content.indexOf(workspaceLintStep));
+      expect(content.indexOf(workspaceLintStep)).toBeLessThan(content.indexOf('npm run test:ci'));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
+      expect(content).not.toContain('npx turbo run build typecheck lint');
     });
 
-    it('runs the deterministic root Vitest suite separately from Turbo', () => {
-      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
-      expect(content).toContain('npm run test:root');
+    it('runs the deterministic root Vitest suite through the shared CI test script', () => {
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+
+      expect(content).toMatch(/name:\s*Run CI test suite/);
+      expect(packageJson.scripts?.['test:ci']).toContain('npm run ci:test:root');
       expect(content).not.toMatch(/npm run test:root --/);
-      expect(content.indexOf('npm run test:root')).toBeLessThan(content.indexOf('npx turbo run test'));
+      expect(packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:root')).toBeLessThan(
+        packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:packages') ?? -1,
+      );
+    });
+
+    it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
+      expect(content).toMatch(/name:\s*Validate bootstrap script \(dry-run\)/);
+      expect(content).toContain('npm run bootstrap:dry-run');
+      expect(content.indexOf('npm ci')).toBeLessThan(content.indexOf('npm run bootstrap:dry-run'));
+      expect(content.indexOf('npm run bootstrap:dry-run')).toBeLessThan(content.indexOf('npm run audit:dependencies'));
+      expect(content).toContain('CI_BOOTSTRAP_DRY_RUN: "1"');
     });
 
     it('runs CI test commands with a fixed deterministic seed matrix', () => {
       expect(content).toContain('deterministic-seed');
       expect(content).toContain("deterministic-seed: ['1337']");
       expect(content).toContain('FRANKENBEAST_SEED: ${{ matrix.deterministic-seed }}');
-      expect(content.indexOf('FRANKENBEAST_SEED')).toBeLessThan(content.indexOf('npm run test:root'));
+      expect(content.indexOf('FRANKENBEAST_SEED')).toBeLessThan(content.indexOf('npm run test:ci'));
     });
 
-    it('documents the root-suite and package-Turbo CI split in step names', () => {
-      expect(content).toMatch(/name:\s*Run package build and lint/);
-      expect(content).toMatch(/name:\s*Run package tests/);
-      expect(content).toMatch(/name:\s*Run deterministic root Vitest suite/);
+    it('runs test commands through a configurable retry wrapper', () => {
+      const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+
+      expect(content).toContain("CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}");
+      expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
+      expect(packageJson.scripts?.['ci:test:packages']).toBe('node scripts/retry-ci-command.mjs -- npx turbo run test');
+      expect(packageJson.scripts?.['ci:test:planner-integration']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner',
+      );
+      expect(packageJson.scripts?.['test:ci']).toBe(
+        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration',
+      );
+      expect(content).toContain('npm run test:ci');
+      expect(content).not.toContain('run: npm run ci:test:root');
+      expect(content).not.toContain('run: npm run ci:test:packages');
+      expect(content).not.toContain('run: npm run ci:test:planner-integration');
+      expect(content).not.toContain('run: npm run test:root');
+      expect(content).not.toContain('run: npx turbo run test');
+    });
+
+    it('documents the package build, typecheck, workspace lint, and shared CI test targets in step names', () => {
+      expect(content).toMatch(/name:\s*Run package build and typecheck/);
+      expect(content).toMatch(/name:\s*Run workspace lint gate/);
+      expect(content).toMatch(/name:\s*Run CI test suite/);
     });
 
     it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {
@@ -155,6 +222,43 @@ on:
       expect(setupNodeWith.cache).toBe('npm');
     });
 
+    it('uses the pinned minimum Node.js version in every CI setup-node step', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const nvmrc = readFileSync(resolve(ROOT, '.nvmrc'), 'utf-8').trim();
+
+      for (const [jobName, jobConfig] of Object.entries(jobs)) {
+        const job = expectRecord(jobConfig, `jobs.${jobName}`);
+        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v4')) {
+          const setupNodeWith = expectRecord(step.with, `${jobName}.actions/setup-node.with`);
+          expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+          expect(setupNodeWith['node-version']).toBeUndefined();
+        }
+      }
+
+      expect(nvmrc).toBe('22.13.0');
+    });
+
+    it('does not schedule unsupported Node 20 test jobs', () => {
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const serializedJobs = JSON.stringify(jobs);
+
+      expect(serializedJobs).not.toContain('"node-version":');
+      expect(serializedJobs).not.toMatch(/\b20(?:\.\d+)?\b/);
+    });
+
+    it('keeps package engines aligned with the Node baseline exercised in CI', () => {
+      const rootPackage = readJsonFile<{ engines?: { node?: string } }>(resolve(ROOT, 'package.json'));
+      const rootNodeRange = rootPackage.engines?.node;
+      expect(rootNodeRange).toBe('>=22.13.0 <23 || >=24.0.0 <26');
+      expect(rootNodeRange).not.toContain('20');
+      expect(readFileSync(NPMRC_PATH, 'utf-8')).toContain('engine-strict=true');
+
+      for (const manifestPath of packageManifestPaths()) {
+        const manifest = readJsonFile<{ name?: string; engines?: { node?: string } }>(manifestPath);
+        expect(manifest.engines?.node, `${manifest.name ?? manifestPath} should match root Node engines`).toBe(rootNodeRange);
+      }
+    });
+
     it('uses actions/checkout with full history for root verification tests', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
@@ -173,50 +277,111 @@ on:
 });
 
 describe('release-please.yml publishes released npm packages', () => {
+  let content: string;
+  let workflow: Record<string, unknown>;
+  let jobs: Record<string, unknown>;
+  let releasePlease: Record<string, unknown>;
+  let publishNpm: Record<string, unknown>;
+  let releaseStep: Record<string, unknown>;
+
+  beforeAll(() => {
+    content = readFileSync(RELEASE_PATH, 'utf-8');
+    workflow = parseWorkflowYaml(content);
+    jobs = expectRecord(workflow.jobs, 'release workflow jobs');
+    releasePlease = expectRecord(jobs['release-please'], 'jobs.release-please');
+    publishNpm = expectRecord(jobs['publish-npm'], 'jobs.publish-npm');
+    const matchingReleaseStep = expectSteps(releasePlease).find(
+      (step) => step.uses === 'googleapis/release-please-action@v5',
+    );
+    if (!matchingReleaseStep) {
+      throw new Error('release-please action v5 step should be present');
+    }
+    releaseStep = matchingReleaseStep;
+  });
+
   it('release-please.yml exists', () => {
     expect(existsSync(RELEASE_PATH)).toBe(true);
   });
 
-  it('references correct config-file path', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('config-file: release-please-config.json');
+  it('rejects syntactically invalid release workflow YAML even when release keys are present', () => {
+    expect(() =>
+      parseWorkflowYaml(`name: Release Please
+on:
+  push:
+    branches: [main
+jobs:
+  release-please:
+    steps:
+      - uses: googleapis/release-please-action@v5
+`),
+    ).toThrow(/YAML/);
   });
 
-  it('references correct manifest-file path', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('manifest-file: .release-please-manifest.json');
+  it('is valid YAML and triggers only on push to main', () => {
+    expect(workflow.name).toBe('Release Please');
+    const triggers = expectRecord(workflow.on, 'release workflow on');
+    const push = expectRecord(triggers.push, 'release workflow on.push');
+    expect(push.branches).toEqual(['main']);
+    expect(triggers.pull_request).toBeUndefined();
+  });
+
+  it('keeps release-please permissions scoped to the release job', () => {
+    expect(expectRecord(workflow.permissions, 'release workflow root permissions')).toEqual({ contents: 'read' });
+    expect(expectRecord(releasePlease.permissions, 'release-please permissions')).toEqual({
+      contents: 'write',
+      'pull-requests': 'write',
+    });
+  });
+
+  it('anchors config-file and manifest-file under the release-please action step', () => {
+    expect(releaseStep.id).toBe('release');
+    const releaseWith = expectRecord(releaseStep.with, 'release-please action with');
+    expect(releaseWith['config-file']).toBe('release-please-config.json');
+    expect(releaseWith['manifest-file']).toBe('.release-please-manifest.json');
   });
 
   it('exposes release-please released paths to a publish job', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('paths_released: ${{ steps.release.outputs.paths_released }}');
-    expect(content).toContain('publish-npm:');
-    expect(content).toContain('PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}');
+    expect(expectRecord(releasePlease.outputs, 'release-please outputs').paths_released).toBe(
+      '${{ steps.release.outputs.paths_released }}',
+    );
+    expect(publishNpm.needs).toBe('release-please');
+    expect(expectRecord(publishNpm.env, 'publish-npm env').PATHS_RELEASED).toBe(
+      '${{ needs.release-please.outputs.paths_released }}',
+    );
   });
 
   it('authenticates npm only in the publish step with the NPM_TOKEN secret and registry auth', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('registry-url: https://registry.npmjs.org');
-    expect(content).toMatch(/- name: Publish released npm packages\n\s+env:\n\s+NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
+    const publishSteps = expectSteps(publishNpm);
+    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v4');
+    expect(setupNode).toBeTruthy();
+    expect(expectRecord(setupNode?.with, 'publish setup-node with')['registry-url']).toBe('https://registry.npmjs.org');
+
+    const publishStep = publishSteps.find((step) => step.name === 'Publish released npm packages');
+    expect(publishStep).toBeTruthy();
+    expect(expectRecord(publishStep?.env, 'publish step env').NODE_AUTH_TOKEN).toBe('${{ secrets.NPM_TOKEN }}');
   });
 
   it('keeps OIDC scoped to the publish job only', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toMatch(/permissions:\n\s+contents: read\n\njobs:/);
-    expect(content).toMatch(/publish-npm:[\s\S]*permissions:\n\s+contents: read\n\s+id-token: write/);
+    expect(expectRecord(workflow.permissions, 'release workflow root permissions')).toEqual({ contents: 'read' });
+    expect(expectRecord(publishNpm.permissions, 'publish-npm permissions')).toEqual({
+      contents: 'read',
+      'id-token': 'write',
+    });
   });
 
   it('validates build, typecheck, test, and lint before release records are created', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    expect(content).toContain('validate-release:');
-    expect(content).toContain('release-please:\n    needs: validate-release');
-    expect(content).toMatch(/Validate release before creating tags[\s\S]*turbo run build typecheck lint[\s\S]*turbo run test/);
-    expect(content.indexOf('turbo run build typecheck lint')).toBeLessThan(content.indexOf('turbo run test'));
-    expect(content).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
+    const validateRelease = expectRecord(jobs['validate-release'], 'jobs.validate-release');
+    expect(releasePlease.needs).toBe('validate-release');
+    const validationStep = expectSteps(validateRelease).find((step) => step.name === 'Validate release before creating tags');
+    expect(validationStep).toBeTruthy();
+    const validationRun = String(validationStep?.run ?? '');
+    expect(validationRun).toContain('turbo run build typecheck lint');
+    expect(validationRun).toContain('turbo run test');
+    expect(validationRun.indexOf('turbo run build typecheck lint')).toBeLessThan(validationRun.indexOf('turbo run test'));
+    expect(validationRun).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
   });
 
   it('enforces the packageManager-pinned npm before release installs and publishes', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
     expect(content.match(/corepack enable npm/g)?.length).toBe(2);
     expect(content.match(/node scripts\/check-package-manager\.mjs/g)?.length).toBe(2);
     expect(content.indexOf('node scripts/check-package-manager.mjs')).toBeLessThan(content.indexOf('npm ci'));
@@ -234,11 +399,12 @@ describe('release-please.yml publishes released npm packages', () => {
   });
 
   it('defers npm token enforcement until a public package needs publishing', () => {
-    const content = readFileSync(RELEASE_PATH, 'utf-8');
-    const tokenCheckIndex = content.indexOf('NPM_TOKEN secret is required to publish $name@$version');
-    const privateSkipIndex = content.indexOf('Skipping $package_path: package is private');
+    const publishStep = expectSteps(publishNpm).find((step) => step.name === 'Publish released npm packages');
+    const publishRun = String(publishStep?.run ?? '');
+    const tokenCheckIndex = publishRun.indexOf('NPM_TOKEN secret is required to publish $name@$version');
+    const privateSkipIndex = publishRun.indexOf('Skipping $package_path: package is private');
     expect(tokenCheckIndex).toBeGreaterThan(privateSkipIndex);
-    expect(content).toContain('npm publish "$package_path" --access public --provenance');
+    expect(publishRun).toContain('npm publish "$package_path" --access public --provenance');
   });
 });
 

@@ -1,12 +1,22 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { beforeAll, describe, expect, it } from 'vitest';
 
-const packageRoot = process.cwd();
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliEntrypoint = join(packageRoot, 'dist', 'cli', 'main.js');
 const corpusRoot = join(packageRoot, 'corpus');
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+beforeAll(() => {
+  execFileSync(npmCommand, ['run', 'build'], {
+    cwd: packageRoot,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+});
 
 function runCli(args: string[], cwd = packageRoot) {
   return spawnSync(process.execPath, [cliEntrypoint, ...args], {

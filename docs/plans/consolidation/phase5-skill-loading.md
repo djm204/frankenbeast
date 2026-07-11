@@ -69,7 +69,7 @@ This keeps dashboard toggles durable without rewriting user-authored YAML on eve
 
 ## Current implementation status
 
-The Phase 5 SkillManager work is not a TODO placeholder. The live code now has
+The Phase 5 SkillManager work is not a generic placeholder. The live code now has
 these supported surfaces:
 
 - `packages/franken-orchestrator/src/skills/skill-manager.ts` owns the

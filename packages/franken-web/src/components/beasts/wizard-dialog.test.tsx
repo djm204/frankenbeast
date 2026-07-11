@@ -2,16 +2,45 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
+import type { BeastCatalogEntry } from '../../lib/beast-api';
 import { useBeastStore } from '../../stores/beast-store';
 import { WizardDialog } from './wizard-dialog';
 
-function renderWizard() {
+type WizardDialogTestProps = Partial<ComponentProps<typeof WizardDialog>>;
+
+const CATALOG: BeastCatalogEntry[] = [
+  {
+    id: 'design-interview',
+    label: 'Design Interview',
+    description: 'Draft a design document',
+    executionModeDefault: 'process',
+    interviewPrompts: [
+      { key: 'goal', prompt: 'What should be designed?', kind: 'string', required: true },
+      { key: 'outputPath', prompt: 'Where should the design be written?', kind: 'string', required: true },
+    ],
+  },
+  {
+    id: 'chunk-plan',
+    label: 'Design Doc -> Chunk Creation',
+    description: 'Create implementation chunks from a design document',
+    executionModeDefault: 'process',
+    interviewPrompts: [
+      { key: 'designDocPath', prompt: 'Which design document should be chunked?', kind: 'file', required: true },
+      { key: 'outputDir', prompt: 'Where should the chunk plan be written?', kind: 'directory', required: true },
+    ],
+  },
+];
+
+function renderWizard(props: WizardDialogTestProps = {}) {
   return render(
     <WizardDialog
       isOpen
       onClose={vi.fn()}
       onLaunch={vi.fn()}
+      catalog={CATALOG}
       containerRuntime={{ available: true }}
+      {...props}
     />,
   );
 }
@@ -80,7 +109,11 @@ describe('WizardDialog validation', () => {
 
   it('includes the review summary in form view before the launch action', () => {
     useBeastStore.getState().setStepValues(0, { name: 'Reviewable Agent' });
-    useBeastStore.getState().setStepValues(1, { workflowType: 'design-interview' });
+    useBeastStore.getState().setStepValues(1, {
+      workflowType: 'design-interview',
+      goal: 'Draft a launch plan',
+      outputPath: 'docs/launch.md',
+    });
 
     renderWizard();
 
@@ -92,5 +125,28 @@ describe('WizardDialog validation', () => {
     expect(reviewHeading.compareDocumentPosition(launchButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Reviewable Agent')).toBeTruthy();
     expect(screen.getAllByText('Design Interview').length).toBeGreaterThan(0);
+  });
+
+  it('uses the footer launch control as the only review-step launch path while pending', () => {
+    const onLaunch = vi.fn();
+    const store = useBeastStore.getState();
+    store.setStepValues(0, { name: 'Reviewable Agent' });
+    store.setStepValues(1, {
+      workflowType: 'design-interview',
+      goal: 'Prevent duplicate launches',
+      outputPath: 'docs/duplicate-launches.md',
+    });
+    store.markStepCompleted(6);
+    store.setWizardStep(7);
+
+    renderWizard({ onLaunch, launching: true });
+
+    expect(screen.queryByRole('button', { name: 'Launch' })).toBeNull();
+    const launchButton = screen.getByRole('button', { name: 'Launching...' });
+    expect(launchButton).toHaveProperty('disabled', true);
+
+    fireEvent.click(launchButton);
+
+    expect(onLaunch).not.toHaveBeenCalled();
   });
 });

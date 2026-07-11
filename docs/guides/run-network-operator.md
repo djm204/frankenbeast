@@ -18,13 +18,24 @@ Optional surfaces activate from config:
 
 - `comms-gateway`
 
-## Start the Network
+## Link the Local CLI
 
-From the repo root:
+The network operator currently launches repo-local services and dashboard assets, so run it from a Frankenbeast checkout with the public CLI linked:
 
 ```bash
-npm --workspace @franken/orchestrator run build
-node packages/franken-orchestrator/dist/cli/run.js network up
+npm install
+npm run local:link
+npm run local:verify-cli
+```
+
+The public `frankenbeast` binary is the primary operator interface. Maintainers debugging an unlinked checkout can still use the raw built artifact after `npm --workspace @franken/orchestrator run build`, for example `node packages/franken-orchestrator/dist/cli/run.js network ...`, but user-facing examples should prefer `frankenbeast network`.
+
+## Start the Network
+
+From the Frankenbeast repo root:
+
+```bash
+frankenbeast network up
 ```
 
 Foreground mode is the default. It keeps the operator attached to the child services and shuts them down on `Ctrl+C`.
@@ -32,22 +43,22 @@ Foreground mode is the default. It keeps the operator attached to the child serv
 Detached mode:
 
 ```bash
-node packages/franken-orchestrator/dist/cli/run.js network up -d
+frankenbeast network up -d
 ```
 
 ## Check Status
 
 ```bash
-node packages/franken-orchestrator/dist/cli/run.js network status
+frankenbeast network status
 ```
 
 ## Stop or Restart Services
 
 ```bash
-node packages/franken-orchestrator/dist/cli/run.js network stop beasts-daemon
-node packages/franken-orchestrator/dist/cli/run.js network stop chat-server
-node packages/franken-orchestrator/dist/cli/run.js network restart dashboard-web
-node packages/franken-orchestrator/dist/cli/run.js network down
+frankenbeast network stop beasts-daemon
+frankenbeast network stop chat-server
+frankenbeast network restart dashboard-web
+frankenbeast network down
 ```
 
 ## Dashboard Access
@@ -91,13 +102,13 @@ When intentionally running `chat-server` with managed semantics, keep `FRANKENBE
 Inspect current operator-facing config:
 
 ```bash
-node packages/franken-orchestrator/dist/cli/run.js network config
+frankenbeast network config
 ```
 
 Apply a config update:
 
 ```bash
-node packages/franken-orchestrator/dist/cli/run.js network config --set chat.model=claude-sonnet-4-6
+frankenbeast network config --set chat.model=claude-sonnet-4-6
 ```
 
 Sensitive values should be stored as refs, not plaintext values.
@@ -125,7 +136,7 @@ Supported `network.secureBackend` values:
 For production operators, prefer a managed secret backend when available, such as `1password`, `bitwarden`, or `os-keychain`. Select one explicitly in project config instead of relying on automatic backend discovery:
 
 ```bash
-node packages/franken-orchestrator/dist/cli/run.js network config --set network.secureBackend=1password
+frankenbeast network config --set network.secureBackend=1password
 ```
 
 Choose the backend before running `frankenbeast init` when possible. Changing `network.secureBackend` later does not migrate existing secret refs or secret values; re-store or migrate referenced secrets such as `network.operatorTokenRef` into the newly selected backend before the next boot.

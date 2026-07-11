@@ -137,6 +137,106 @@ describe('DomainAllowlistMiddleware', () => {
       expect(logs[0]).toContain('evil.com');
       expect(logs[0]).toContain('fetch');
     });
+
+    it('preserves blocked domains that appear after large serializable input fields', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [
+          {
+            name: 'fetch',
+            input: { payload: 'x'.repeat(12_000), url: 'https://evil.com/data' },
+          },
+        ],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+
+      expect(() => logMw.afterResponse(resp)).not.toThrow();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain('evil.com');
+      expect(logs[0]).toContain('fetch');
+    });
+
+    it('does not throw when tool call input contains a circular reference', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const input: Record<string, unknown> = {
+        url: 'https://evil.com/data',
+      };
+      input.self = input;
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [{ name: 'fetch', input }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+
+      let result: LlmResponse | undefined;
+      expect(() => {
+        result = logMw.afterResponse(resp);
+      }).not.toThrow();
+      expect(result).toBe(resp);
+      expect(logs.some((msg) => msg.includes('fetch'))).toBe(true);
+      expect(logs.some((msg) => msg.includes('could not fully serialize'))).toBe(
+        true,
+      );
+      expect(logs.some((msg) => msg.includes('evil.com'))).toBe(true);
+    });
+
+    it('preserves sibling blocked domains when another input property throws during access', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const input: Record<string, unknown> = {
+        url: 'https://evil.com/data',
+      };
+      Object.defineProperty(input, 'bad', {
+        enumerable: true,
+        get() {
+          throw new Error('adapter getter failed');
+        },
+      });
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [{ name: 'fetch', input }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+
+      expect(() => logMw.afterResponse(resp)).not.toThrow();
+      expect(logs.some((msg) => msg.includes('could not fully serialize'))).toBe(
+        true,
+      );
+      expect(logs.some((msg) => msg.includes('evil.com'))).toBe(true);
+    });
+
+    it('scans blocked domains in object keys and toJSON-backed values', () => {
+      const logs: string[] = [];
+      const logMw = new DomainAllowlistMiddleware(['github.com'], (msg) =>
+        logs.push(msg),
+      );
+      const resp: LlmResponse = {
+        content: 'Ok',
+        toolCalls: [
+          {
+            name: 'fetch',
+            input: {
+              'https://evil.com/keyed': true,
+              url: new URL('https://phish.test/data'),
+            },
+          },
+        ],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+
+      expect(() => logMw.afterResponse(resp)).not.toThrow();
+      expect(logs.some((msg) => msg.includes('evil.com'))).toBe(true);
+      expect(logs.some((msg) => msg.includes('phish.test'))).toBe(true);
+    });
   });
 
   describe('domain matching', () => {

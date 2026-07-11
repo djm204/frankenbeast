@@ -75,10 +75,20 @@ function mapTurnEvent(event: TurnEvent): ServerSocketEvent {
     case 'start':
       return { type: 'turn.execution.start', data: event.data as Record<string, unknown> | undefined, timestamp };
     case 'complete':
+      if (isPendingApprovalComplete(event.data)) {
+        return { type: 'turn.execution.progress', data: event.data, timestamp };
+      }
       return { type: 'turn.execution.complete', data: event.data as Record<string, unknown> | undefined, timestamp };
     default:
       return { type: 'turn.execution.progress', data: event.data as Record<string, unknown> | undefined, timestamp };
   }
+}
+
+function isPendingApprovalComplete(data: unknown): data is Record<string, unknown> {
+  return typeof data === 'object'
+    && data !== null
+    && 'status' in data
+    && data.status === 'pending_approval';
 }
 
 function messageIdFromSession(session: ChatSession): string {

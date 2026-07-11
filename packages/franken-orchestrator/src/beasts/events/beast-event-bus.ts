@@ -25,6 +25,38 @@ function reportDefaultListenerError({ event, error }: BeastEventBusListenerError
   });
 }
 
+function cloneJsonCompatibleValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneJsonCompatibleValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+        key,
+        cloneJsonCompatibleValue(nestedValue),
+      ]),
+    );
+  }
+
+  return value;
+}
+
+function cloneValue(value: unknown): unknown {
+  try {
+    return structuredClone(value);
+  } catch {
+    return cloneJsonCompatibleValue(value);
+  }
+}
+
+function cloneEvent(event: BeastSseEvent): BeastSseEvent {
+  return {
+    ...event,
+    data: cloneValue(event.data) as Record<string, unknown>,
+  };
+}
+
 export class BeastEventBus {
   private sequence = 0;
   private readonly listeners = new Set<EventListener>();
@@ -43,7 +75,7 @@ export class BeastEventBus {
 
   publish(event: Omit<BeastSseEvent, 'id'>): void {
     this.sequence += 1;
-    const stamped: BeastSseEvent = { ...event, id: this.sequence };
+    const stamped: BeastSseEvent = cloneEvent({ ...event, id: this.sequence });
 
     this.buffer.push(stamped);
     if (this.buffer.length > this.maxBufferSize) {
@@ -51,13 +83,14 @@ export class BeastEventBus {
     }
 
     for (const listener of this.listeners) {
+      const listenerEvent = cloneEvent(stamped);
       try {
-        const result = listener(stamped);
+        const result = listener(listenerEvent);
         if (result && typeof result.catch === 'function') {
-          result.catch((error: unknown) => this.reportListenerError(stamped, error, listener));
+          result.catch((error: unknown) => this.reportListenerError(listenerEvent, error, listener));
         }
       } catch (error) {
-        this.reportListenerError(stamped, error, listener);
+        this.reportListenerError(listenerEvent, error, listener);
       }
     }
   }
@@ -70,7 +103,7 @@ export class BeastEventBus {
   }
 
   replaySince(lastEventId: number): BeastSseEvent[] {
-    return this.buffer.filter((e) => e.id !== undefined && e.id > lastEventId);
+    return this.buffer.filter((e) => e.id !== undefined && e.id > lastEventId).map((event) => cloneEvent(event));
   }
 
   private reportListenerError(event: BeastSseEvent, error: unknown, listener: EventListener): void {

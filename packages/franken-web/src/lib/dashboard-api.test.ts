@@ -202,6 +202,48 @@ describe('DashboardApiClient', () => {
       }
     });
 
+    it('reports malformed snapshot payloads without throwing out of the EventSource listener', async () => {
+      const listeners: Record<string, (event: { data: string }) => void> = {};
+
+      const MockEventSource = vi.fn(function (this: {
+        addEventListener?: (type: string, handler: (event: { data: string }) => void) => void;
+        close?: () => void;
+      }) {
+        this.addEventListener = vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          listeners[type] = handler;
+        });
+        this.close = vi.fn();
+      });
+
+      const originalEventSource = globalThis.EventSource;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).EventSource = MockEventSource;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ticket: 'dashboard-ticket' }),
+      });
+
+      try {
+        const client = new DashboardApiClient(BASE_URL);
+        const onSnapshot = vi.fn();
+        const onError = vi.fn();
+        const unsub = await client.subscribeToDashboard(onSnapshot, onError);
+
+        expect(() => listeners['snapshot']!({ data: '{not-json' })).not.toThrow();
+        expect(onSnapshot).not.toHaveBeenCalled();
+        expect(onError).toHaveBeenCalledWith(expect.any(Error));
+
+        unsub();
+      } finally {
+        if (originalEventSource) {
+          globalThis.EventSource = originalEventSource;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (globalThis as any).EventSource;
+        }
+      }
+    });
+
     it('mints a fresh one-shot ticket after EventSource errors', async () => {
       vi.useFakeTimers();
       const closeFns = [vi.fn(), vi.fn()];
