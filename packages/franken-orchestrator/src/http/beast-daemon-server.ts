@@ -49,6 +49,7 @@ function errorMessage(error: unknown): string {
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4050;
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
+const PID_FILE_DECIMAL_PATTERN = /^\d+$/;
 
 export function defaultBeastDaemonPidFile(root: string): string {
   return join(root, '.frankenbeast', 'beasts-daemon.pid');
@@ -149,8 +150,8 @@ async function claimPidFile(pidFile: string): Promise<void> {
 async function readExistingPidFile(pidFile: string): Promise<number | undefined> {
   try {
     const raw = await readFile(pidFile, 'utf8');
-    const pid = Number.parseInt(raw.trim(), 10);
-    if (Number.isFinite(pid) && pid > 0) {
+    const pid = parsePidFileContents(raw);
+    if (pid !== undefined) {
       return pid;
     }
     await rm(pidFile, { force: true });
@@ -166,14 +167,22 @@ async function readExistingPidFile(pidFile: string): Promise<number | undefined>
 async function readPidFile(pidFile: string): Promise<number | undefined> {
   try {
     const raw = await readFile(pidFile, 'utf8');
-    const pid = Number.parseInt(raw.trim(), 10);
-    return Number.isFinite(pid) && pid > 0 ? pid : undefined;
+    return parsePidFileContents(raw);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return undefined;
     }
     throw error;
   }
+}
+
+function parsePidFileContents(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!PID_FILE_DECIMAL_PATTERN.test(trimmed)) {
+    return undefined;
+  }
+  const pid = Number(trimmed);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
 }
 
 function isProcessAlive(pid: number): boolean {
