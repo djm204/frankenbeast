@@ -149,6 +149,17 @@ describe('SqliteBrain', () => {
       );
     });
 
+    it('rejects circular values with a working-memory error and keeps prior state', () => {
+      const circular: Record<string, unknown> = { label: 'loop' };
+      circular.self = circular;
+      brain.working.set('safe', { status: 'persisted' });
+
+      expect(() => brain.working.set('cycle', circular)).toThrow(WorkingMemoryLimitError);
+      expect(() => brain.working.restore({ cycle: circular })).toThrow(WorkingMemoryLimitError);
+      expect(brain.working.snapshot()).toEqual({ safe: { status: 'persisted' } });
+      expect(brain.working.has('cycle')).toBe(false);
+    });
+
     it('accounts for the serialized form, not a deceptive small JSON facade', () => {
       // A Map stringifies to '{}' but would retain its full contents if stored
       // by reference. The store normalizes to the JSON round-trip, so what is
