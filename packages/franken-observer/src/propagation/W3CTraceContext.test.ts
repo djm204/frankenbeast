@@ -176,8 +176,52 @@ describe('parseTracestate', () => {
     expect(parseTracestate('rojo=abc,broken,congo=xyz')).toEqual({ rojo: 'abc', congo: 'xyz' })
   })
 
-  it('handles values that contain equals signs (takes first = as delimiter)', () => {
-    expect(parseTracestate('k=v=extra')).toEqual({ k: 'v=extra' })
+  it('skips entries with spaces in the key', () => {
+    expect(parseTracestate('bad key=value,rojo=abc')).toEqual({ rojo: 'abc' })
+  })
+
+  it('skips entries with control characters in the value', () => {
+    expect(parseTracestate('rojo=abc\nline,congo=xyz')).toEqual({ congo: 'xyz' })
+  })
+
+  it('skips entries with non-ASCII values', () => {
+    expect(parseTracestate('rojo=caf\u00e9,congo=xyz,snowman=\u2603')).toEqual({ congo: 'xyz' })
+  })
+
+  it('skips duplicate keys after first occurrence', () => {
+    expect(parseTracestate('rojo=first,rojo=second,congo=xyz')).toEqual({ rojo: 'first', congo: 'xyz' })
+  })
+
+  it('keeps only the first 32 valid entries', () => {
+    const header = Array.from({ length: 33 }, (_, i) => `k${String(i).padStart(2, '0')}=v${i}`).join(',')
+    expect(Object.keys(parseTracestate(header))).toHaveLength(32)
+  })
+
+  it('skips values that contain equals signs', () => {
+    expect(parseTracestate('k=v=extra,rojo=abc')).toEqual({ rojo: 'abc' })
+  })
+
+  it('accepts W3C tracestate keys with slashes and numeric tenant ids', () => {
+    expect(parseTracestate('vendor/foo=abc,1tenant@vendor=xyz')).toEqual({
+      'vendor/foo': 'abc',
+      '1tenant@vendor': 'xyz',
+    })
+  })
+
+  it('rejects simple tracestate keys that start with digits', () => {
+    expect(parseTracestate('1vendor=bad,vendor=ok')).toEqual({ vendor: 'ok' })
+  })
+
+  it('counts malformed tracestate members toward the 32-member inbound limit', () => {
+    const header = [
+      ...Array.from({ length: 32 }, (_, i) => `bad.key.${i}=v${i}`),
+      'vendor=value',
+    ].join(',')
+    expect(parseTracestate(header)).toEqual({})
+  })
+
+  it('rejects tracestate keys with dots', () => {
+    expect(parseTracestate('vendor.foo=abc,rojo=xyz')).toEqual({ rojo: 'xyz' })
   })
 })
 
@@ -192,14 +236,56 @@ describe('formatTracestate', () => {
     expect(formatTracestate({ rojo: 'abc', congo: 'xyz' })).toBe('rojo=abc,congo=xyz')
   })
 
+  it('filters invalid entries before formatting', () => {
+    expect(formatTracestate({ 'bad key': 'abc', vendor: 'value' })).toBe('vendor=value')
+  })
+
+  it('filters values containing commas from output', () => {
+    expect(formatTracestate({ vendor: 'one,two', good: 'safe' })).toBe('good=safe')
+  })
+
+  it('filters values containing equals signs from output', () => {
+    expect(formatTracestate({ vendor: 'a=b', good: 'safe' })).toBe('good=safe')
+  })
+
+  it('filters non-ASCII and trailing-space values from output', () => {
+    expect(formatTracestate({ vendor: 'caf\u00e9', trailing: 'value ', good: 'safe' })).toBe('good=safe')
+  })
+
+  it('formats W3C-compliant keys and rejects dotted or digit-start simple keys', () => {
+    expect(formatTracestate({ 'vendor/foo': 'abc', '1tenant@vendor': 'xyz', 'vendor.foo': 'bad', '1vendor': 'bad' })).toBe(
+      'vendor/foo=abc,1tenant@vendor=xyz',
+    )
+  })
+
+  it('returns empty string when all entries are invalid', () => {
+    expect(formatTracestate({ 'bad key': 'abc', bad2: 'one,two' })).toBe('')
+  })
+
   it('returns empty string for an empty record', () => {
     expect(formatTracestate({})).toBe('')
+  })
+
+  it('truncates to the first 32 valid entries', () => {
+    const state = Object.fromEntries(
+      Array.from({ length: 33 }, (_, i) => [`k${String(i).padStart(2, '0')}`, `v${i}`]),
+    ) as Record<string, string>
+    expect(formatTracestate(state).split(',')).toHaveLength(32)
+  })
+
+  it('limits entries after filtering invalid entries', () => {
+    const state = Object.fromEntries([
+      ...Array.from({ length: 32 }, (_, i) => [`bad.key.${i}`, `v${i}`]),
+      ['vendor', 'value'],
+    ]) as Record<string, string>
+    expect(formatTracestate(state)).toBe('vendor=value')
   })
 
   it('roundtrips cleanly with parseTracestate for simple values', () => {
     const state = { rojo: 'abc123', congo: 'xyz789' }
     expect(parseTracestate(formatTracestate(state))).toEqual(state)
   })
+
 })
 
 // ── extractFromHeaders / injectIntoHeaders ───────────────────────────────────
@@ -254,6 +340,33 @@ describe('injectIntoHeaders', () => {
   it('does not include tracestate key when state is omitted', () => {
     const headers = injectIntoHeaders({ traceId: TRACE_ID, parentSpanId: SPAN_ID, sampled: true })
     expect('tracestate' in headers).toBe(false)
+  })
+
+  it('omits tracestate when provided state is invalid', () => {
+    const headers = injectIntoHeaders(
+      { traceId: TRACE_ID, parentSpanId: SPAN_ID, sampled: true },
+      { 'bad key': 'one,two' },
+    )
+    expect('tracestate' in headers).toBe(false)
+  })
+
+  it('clears existing tracestate when provided state sanitizes empty', () => {
+    const headers = injectIntoHeaders(
+      { traceId: TRACE_ID, parentSpanId: SPAN_ID, sampled: true },
+      { 'bad key': 'one,two' },
+      { tracestate: 'stale=value' },
+    )
+    expect('tracestate' in headers).toBe(false)
+  })
+
+  it('clears existing tracestate case-insensitively when provided state sanitizes empty', () => {
+    const headers = injectIntoHeaders(
+      { traceId: TRACE_ID, parentSpanId: SPAN_ID, sampled: true },
+      { 'bad key': 'one,two' },
+      { Tracestate: 'stale=value' },
+    )
+    expect('tracestate' in headers).toBe(false)
+    expect('Tracestate' in headers).toBe(false)
   })
 
   it('merges into an existing headers object', () => {

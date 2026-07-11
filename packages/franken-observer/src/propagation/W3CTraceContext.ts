@@ -31,10 +31,34 @@ export interface ExtractedTraceContext {
 const RE_HEX_32 = /^[0-9a-f]{32}$/
 const RE_HEX_16 = /^[0-9a-f]{16}$/
 const RE_HEX_02 = /^[0-9a-f]{2}$/
+const RE_TRACESTATE_KEY = /^(?:[a-z][a-z0-9_\-*\/]{0,255}|[a-z0-9][a-z0-9_\-*\/]{0,240}@[a-z][a-z0-9_\-*\/]{0,13})$/
 const ZEROS_32  = '0'.repeat(32)
 const ZEROS_16  = '0'.repeat(16)
 const TRACEPARENT_VERSION_00 = '00'
 const TRACEPARENT_VERSION_FORBIDDEN = 'ff'
+
+const MAX_TRACESTATE_ENTRIES = 32
+const MAX_TRACESTATE_KEY_LENGTH = 256
+const MAX_TRACESTATE_VALUE_LENGTH = 256
+const MAX_TRACESTATE_ENTRY_LENGTH = MAX_TRACESTATE_KEY_LENGTH + 1 + MAX_TRACESTATE_VALUE_LENGTH
+
+function isValidTracestateKey(key: string): boolean {
+  return key.length <= MAX_TRACESTATE_KEY_LENGTH && RE_TRACESTATE_KEY.test(key)
+}
+
+function isValidTracestateValue(value: string): boolean {
+  if (!value.length || value.length > MAX_TRACESTATE_VALUE_LENGTH) return false
+  if (/[=,]/.test(value)) return false
+  if (/[^\u0020-\u007E]/.test(value)) return false
+  if (value.endsWith(' ')) return false
+  return true
+}
+
+function sanitizeTracestate(state: Record<string, string>): [string, string][] {
+  return Object.entries(state)
+    .filter(([key, value]) => isValidTracestateKey(key) && isValidTracestateValue(value))
+    .slice(0, MAX_TRACESTATE_ENTRIES)
+}
 
 // ── parseTraceparent ──────────────────────────────────────────────────────────
 
@@ -103,9 +127,9 @@ export function formatTraceparent(fields: TraceparentFields): string {
 /**
  * Parses a W3C `tracestate` header value into a plain object.
  *
- * Malformed entries (no `=` delimiter) are silently skipped.
- * The first `=` in each entry is the key/value delimiter; values may contain
- * additional `=` characters.
+ * Malformed entries are silently skipped.
+ * Valid keys use W3C `tracestate` key grammar and values exclude commas and control
+ * characters. Duplicate keys are ignored after the first occurrence.
  * Returns `{}` for empty, null, or undefined input.
  *
  * ```ts
@@ -120,13 +144,27 @@ export function parseTracestate(header: string | null | undefined): Record<strin
   if (!header?.trim()) return {}
 
   const result: Record<string, string> = {}
+  let seenMembers = 0
+
   for (const entry of header.split(',')) {
-    const eqIdx = entry.indexOf('=')
+    const entryTrimmed = entry.trim()
+    if (!entryTrimmed) continue
+    if (seenMembers >= MAX_TRACESTATE_ENTRIES) break
+    seenMembers += 1
+    if (entryTrimmed.length > MAX_TRACESTATE_ENTRY_LENGTH) continue
+
+    const eqIdx = entryTrimmed.indexOf('=')
     if (eqIdx === -1) continue
-    const key   = entry.slice(0, eqIdx).trim()
-    const value = entry.slice(eqIdx + 1).trim()
-    if (key) result[key] = value
+
+    const key = entryTrimmed.slice(0, eqIdx).trim()
+    const value = entryTrimmed.slice(eqIdx + 1).trim()
+    if (!key || !value) continue
+    if (!isValidTracestateKey(key) || !isValidTracestateValue(value)) continue
+    if (Object.hasOwn(result, key)) continue
+
+    result[key] = value
   }
+
   return result
 }
 
@@ -141,7 +179,9 @@ export function parseTracestate(header: string | null | undefined): Record<strin
  * ```
  */
 export function formatTracestate(state: Record<string, string>): string {
-  return Object.entries(state).map(([k, v]) => `${k}=${v}`).join(',')
+  return sanitizeTracestate(state)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(',')
 }
 
 // ── HTTP header helpers ───────────────────────────────────────────────────────
@@ -189,6 +229,14 @@ export function injectIntoHeaders(
 ): Record<string, string> {
   const out: Record<string, string> = { ...existing }
   out['traceparent'] = formatTraceparent(fields)
-  if (state !== undefined) out['tracestate'] = formatTracestate(state)
+  if (state !== undefined) {
+    for (const key of Object.keys(out)) {
+      if (key.toLowerCase() === 'tracestate') delete out[key]
+    }
+    const tracestate = formatTracestate(state)
+    if (tracestate) {
+      out['tracestate'] = tracestate
+    }
+  }
   return out
 }

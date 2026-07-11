@@ -1,5 +1,12 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — W3C tracestate sanitization before serialization
+- `parseTracestate`/`formatTracestate` should enforce W3C key/value constraints and member limits before exposing user-controlled values in headers.
+- Treat malformed list entries (invalid key grammar, control characters, commas, duplicate keys, oversized members, and member-count overflow) as drop/ignore cases during parse and emit only sanitized key/value pairs on format/inject.
+- W3C `tracestate` simple keys must start with a lowercase letter; digit starts are valid only in the tenant portion of multi-tenant keys (`tenant@system`). Values must be printable ASCII, must not contain commas or equals signs, and must not end with a space.
+- When clearing sanitized-empty `tracestate` during header injection, delete existing header keys case-insensitively so stale mixed-case `Tracestate` does not leak through.
+- For issue-1116, adding targeted regression tests for these edge cases prevented malformed `tracestate` strings from entering outbound headers in observer propagation paths.
+
 ## 2026-07-10 — Beast panel dialog portal isolation
 - When a modal/alert is portaled from inside a slide-in panel, gate panel-level outside-click and Escape handlers against both existing and new dialog markers (for example `[data-beast-panel-portal]` plus `[data-beast-dialog-layer]`) so cross-branch/merge differences don't regress behavior.
 - Normalize pointer event targets before portal detection (handle text nodes and text-node parents) so clicks on dialog copy/titles are still treated as dialog interactions, preventing accidental panel closure.
