@@ -94,9 +94,20 @@ Infrastructure-only evaluator exceptions are intentionally excluded from the map
 
 ## Lesson experiment sandbox
 
-New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.
+New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the contradiction report is clear or reconciled, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.
 
 Failing iterations without actionable findings, and infrastructure-only evaluator exceptions, do not create sandboxed lessons. This keeps broken evaluator/tooling noise from entering the learning pipeline as experimental guidance.
+
+## Lesson contradiction detector
+
+`LessonRecorder` emits a `contradictionReport` for each recorded lesson. When the memory adapter implements optional `searchLessons(query, topK)`, the recorder queries comparable prior lessons and runs the deterministic detector before calling `recordLesson`. The report is structured for PM/liveness surfaces:
+
+- `status: "clear"` means no comparable prior lesson from the same evaluator had both shared normalized terms and reversed negated guidance.
+- `status: "contradiction_detected"` includes `contradictions[]` entries with the conflicting lesson id, evaluator, shared terms, reason, prior failure description, and prior correction. Treat this as a promotion blocker until an operator reconciles, supersedes, or retires one side.
+- `status: "not_checked"` means the memory adapter has not implemented `searchLessons`, so historical contradictions are unknown and should be treated as unresolved before promotion.
+- `verificationCommand` points at the focused unit test that covers success and negative detector cases.
+
+Adapters that want historical contradiction checks should return likely prior critique lessons for the query string without mutating memory.
 
 ## Package scripts
 

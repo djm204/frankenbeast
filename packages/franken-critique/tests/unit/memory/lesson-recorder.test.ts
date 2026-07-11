@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { LessonRecorder } from '../../../src/memory/lesson-recorder.js';
+import { LessonRecorder, detectLessonContradictions } from '../../../src/memory/lesson-recorder.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
-import type { MemoryPort } from '../../../src/types/contracts.js';
+import type { MemoryPort, CritiqueLesson } from '../../../src/types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../../../src/types/loop.js';
 import type { CritiqueResult, EvaluationFinding } from '../../../src/types/evaluation.js';
 
@@ -37,6 +37,17 @@ function createIteration(
     input: { content: `iteration ${index}`, metadata: {} },
     result,
     completedAt: new Date().toISOString(),
+  };
+}
+
+function createLesson(overrides: Partial<CritiqueLesson> = {}): CritiqueLesson {
+  return {
+    evaluatorName: 'factuality',
+    failureDescription: 'Cache guidance allowed unaudited stale responses',
+    correctionApplied: 'Require cache verification before reuse',
+    taskId: 'lesson-task',
+    timestamp: '2026-07-11T00:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -137,6 +148,7 @@ describe('LessonRecorder', () => {
         'New critique lessons are experimental until their traceability map and regression evidence are independently verified.',
       exitCriteria: [
         'Confirm at least one lesson-to-test traceability entry is present.',
+        'Check the contradiction report and resolve any conflicting prior lesson before promotion.',
         'Run the listed verification command and attach the evidence to the PM handoff.',
         'Promote or retire the lesson only after review confirms the regression covers the source finding.',
       ],
@@ -157,6 +169,120 @@ describe('LessonRecorder', () => {
     await recorder.record(result, 'sandbox-task');
 
     expect(port.recordLesson).not.toHaveBeenCalled();
+  });
+
+  it('attaches a not-checked contradiction report when lesson search is unavailable', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'factuality', [
+          { message: 'Cache guidance allowed unaudited stale responses', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'lesson-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.contradictionReport).toEqual({
+      status: 'not_checked',
+      guidance:
+        'No lesson search adapter is available, so historical lesson contradictions were not checked.',
+      verificationCommand:
+        'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+      contradictions: [],
+    });
+  });
+
+  it('attaches a clear contradiction report when comparable prior lessons do not conflict', async () => {
+    const port = createMockMemoryPort();
+    port.searchLessons = vi.fn().mockResolvedValue([
+      createLesson({
+        failureDescription: 'Cache guidance reused stale responses without checking provenance',
+        correctionApplied: 'Require cache verification and provenance review before reuse',
+      }),
+    ]);
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'factuality', [
+          { message: 'Cache guidance allowed unaudited stale responses', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'lesson-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(port.searchLessons).toHaveBeenCalledWith(
+      expect.stringContaining('Cache guidance allowed unaudited stale responses'),
+      10,
+    );
+    expect(lesson.contradictionReport).toEqual({
+      status: 'clear',
+      guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+      verificationCommand:
+        'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+      contradictions: [],
+    });
+  });
+
+  it('detects same-evaluator lesson contradictions with shared terms and negated guidance', () => {
+    const current = createLesson({
+      correctionApplied: 'Do not reuse cache responses without provenance checks',
+    });
+    const prior = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'prior-cache-lesson',
+          taskId: 'prior-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance allowed unaudited stale responses'],
+          testId: 'prior-cache-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      correctionApplied: 'Reuse cache responses when provenance checks are present',
+    });
+
+    const report = detectLessonContradictions(current, [prior]);
+
+    expect(report.status).toBe('contradiction_detected');
+    expect(report.guidance).toContain('Promotion is blocked');
+    expect(report.contradictions).toEqual([
+      expect.objectContaining({
+        conflictingLessonId: 'prior-cache-lesson',
+        evaluatorName: 'factuality',
+        sharedTerms: expect.arrayContaining(['cache', 'provenance', 'responses', 'reuse']),
+        conflictingCorrectionApplied: 'Reuse cache responses when provenance checks are present',
+      }),
+    ]);
+  });
+
+  it('does not flag unrelated evaluators or non-overlapping lessons as contradictions', () => {
+    const current = createLesson({
+      evaluatorName: 'factuality',
+      correctionApplied: 'Do not reuse cache responses without provenance checks',
+    });
+    const unrelated = createLesson({
+      evaluatorName: 'security',
+      failureDescription: 'Token logging exposed credentials',
+      correctionApplied: 'Redact tokens before logging',
+    });
+
+    expect(detectLessonContradictions(current, [unrelated])).toMatchObject({
+      status: 'clear',
+      contradictions: [],
+    });
   });
 
   it('does not create traceability entries for infrastructure-only evaluator exceptions', async () => {
