@@ -9,7 +9,6 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = dirname(dirname(packageRoot));
 const corpusRoot = join(packageRoot, 'corpus');
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const cliBinary = join(repoRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'fbeast-live-bench.cmd' : 'fbeast-live-bench');
 
 beforeAll(() => {
   for (const workspace of ['@franken/types', '@franken/live-bench']) {
@@ -22,7 +21,7 @@ beforeAll(() => {
 }, 60_000);
 
 function runCli(args: string[], cwd = packageRoot) {
-  return spawnSync(cliBinary, args, {
+  return spawnSync(npmCommand, ['exec', '--', 'fbeast-live-bench', ...args], {
     cwd,
     encoding: 'utf8',
     timeout: 10_000,
