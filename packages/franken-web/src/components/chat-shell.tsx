@@ -325,6 +325,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     clearedFailedDraft: reconciledFailedDraft,
     connectionStatus,
     costUsd,
+    costTelemetryStatus,
     dismissError,
     errorBanners,
     messages,
@@ -863,6 +864,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   }
 
   const hasPendingApproval = Boolean(pendingApproval) || sessionState === 'pending_approval';
+  const spendLabel = costTelemetryStatus === 'available' ? `$${costUsd.toFixed(2)}` : 'Unavailable';
   const composerDisabled = status === 'connecting'
     || status === 'sending'
     || status === 'streaming'
@@ -971,7 +973,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             </div>
             <div>
               <dt>Spend</dt>
-              <dd>${costUsd.toFixed(2)}</dd>
+              <dd title={costTelemetryStatus === 'available' ? undefined : 'Cost telemetry has not been reported by this session yet.'}>
+                {spendLabel}
+              </dd>
             </div>
           </dl>
         </header>
@@ -1095,7 +1099,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             </section>
 
             <aside className="chat-page__rail">
-              <CostBadge tier={tier ?? 'pending'} tokenTotals={tokenTotals} costUsd={costUsd} />
+              <CostBadge
+                tier={tier ?? 'pending'}
+                telemetryStatus={costTelemetryStatus}
+                tokenTotals={tokenTotals}
+                costUsd={costUsd}
+              />
               <ActivityPane events={activity} resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`} />
               <ApprovalCard
                 pending={hasPendingApproval}

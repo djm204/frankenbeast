@@ -1,5 +1,6 @@
 export interface CostBadgeProps {
   tier: string;
+  telemetryStatus: 'available' | 'unavailable';
   tokenTotals: {
     cheap: number;
     premiumReasoning: number;
@@ -8,7 +9,10 @@ export interface CostBadgeProps {
   costUsd: number;
 }
 
-export function CostBadge({ tier, tokenTotals, costUsd }: CostBadgeProps) {
+export function CostBadge({ tier, telemetryStatus, tokenTotals, costUsd }: CostBadgeProps) {
+  const telemetryUnavailable = telemetryStatus === 'unavailable';
+  const unavailableLabel = 'Unavailable';
+
   return (
     <section className="rail-card" aria-label="Cost summary">
       <div className="rail-card__header">
@@ -17,15 +21,17 @@ export function CostBadge({ tier, tokenTotals, costUsd }: CostBadgeProps) {
       </div>
       <dl className="cost-grid">
         <dt>Tier</dt>
-        <dd>{tier}</dd>
+        <dd>{telemetryUnavailable ? unavailableLabel : tier}</dd>
         <dt>Cheap</dt>
-        <dd>{tokenTotals.cheap}</dd>
+        <dd>{telemetryUnavailable ? unavailableLabel : tokenTotals.cheap}</dd>
         <dt>Reasoning</dt>
-        <dd>{tokenTotals.premiumReasoning}</dd>
+        <dd>{telemetryUnavailable ? unavailableLabel : tokenTotals.premiumReasoning}</dd>
         <dt>Execution</dt>
-        <dd>{tokenTotals.premiumExecution}</dd>
+        <dd>{telemetryUnavailable ? unavailableLabel : tokenTotals.premiumExecution}</dd>
         <dt>Total</dt>
-        <dd>${costUsd.toFixed(2)}</dd>
+        <dd title={telemetryUnavailable ? 'Cost telemetry has not been reported by this session yet.' : undefined}>
+          {telemetryUnavailable ? unavailableLabel : `$${costUsd.toFixed(2)}`}
+        </dd>
       </dl>
     </section>
   );
