@@ -49,8 +49,10 @@ If you use a non-default backend port in local development, keep `VITE_API_URL` 
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 
-# Separate Beast backend: chat/API traffic goes to :4242, Beast controls go to :4050.
+# Separate Beast backend: start the Beast daemon first, then point chat/API at it.
 npm --workspace @franken/orchestrator run beasts-daemon -- --base-dir /path/to/your-project --port 4050
+FRANKENBEAST_BEAST_DAEMON_URL=http://127.0.0.1:4050 \
+  npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
 VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4050 \
   npm --workspace @franken/web run dev
