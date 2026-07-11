@@ -378,6 +378,40 @@ describe('PlanGraph — insertFixItTask', () => {
     expect(g2.getTask(createTaskId('b'))?.dependsOn).toEqual([createTaskId('fix-b')]);
   });
 
+  it('deduplicates failed task and explicit fix task dependencies', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('setup'))
+      .addTask(makeTask('b'), [createTaskId('a')]);
+    const fix = makeTask('fix-b', { dependsOn: [createTaskId('a'), createTaskId('setup')] });
+
+    const g2 = g.insertFixItTask(createTaskId('b'), fix);
+
+    expect(g2.getDependencies(createTaskId('fix-b'))).toEqual([
+      createTaskId('a'),
+      createTaskId('setup'),
+    ]);
+    expect(g2.getTask(createTaskId('fix-b'))?.dependsOn).toEqual([
+      createTaskId('a'),
+      createTaskId('setup'),
+    ]);
+    const sorted = g2.topoSort().map((task) => task.id);
+    const fixIndex = sorted.indexOf(createTaskId('fix-b'));
+    const failedIndex = sorted.indexOf(createTaskId('b'));
+
+    expect(sorted).toEqual(
+      expect.arrayContaining([
+        createTaskId('a'),
+        createTaskId('setup'),
+        createTaskId('fix-b'),
+        createTaskId('b'),
+      ])
+    );
+    expect(sorted.indexOf(createTaskId('a'))).toBeLessThan(fixIndex);
+    expect(sorted.indexOf(createTaskId('setup'))).toBeLessThan(fixIndex);
+    expect(fixIndex).toBeLessThan(failedIndex);
+  });
+
   it('is immutable and increments the recovery version', () => {
     const g = PlanGraph.empty().addTask(makeTask('a'));
 
