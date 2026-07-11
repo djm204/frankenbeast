@@ -3,7 +3,21 @@
 ## Prerequisites
 
 - `gh` CLI authenticated (`gh auth status`)
-- `frankenbeast` installed globally (`npm link` from repo root)
+- `frankenbeast` available from the current checkout. From the repo root, run:
+
+  ```bash
+  npm install
+  npm run local:link
+  npm run local:verify-cli
+  ```
+
+  `local:link` builds the repo and links the workspaces that expose the `fbeast` and `frankenbeast` binaries. If you do not want global links, run issue commands through the orchestrator workspace instead:
+
+  ```bash
+  npm --workspace @franken/orchestrator exec -- frankenbeast issues --help
+  ```
+
+  See [Running the CLI Beast Harness](./run-cli-beast.md) for the full local CLI setup, including the paired `fbeast` MCP flow.
 - A GitHub repository with open issues
 
 ## How It Works
