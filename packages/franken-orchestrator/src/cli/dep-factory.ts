@@ -1,5 +1,6 @@
-import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
+import { AuditTrailStore, type ReplayRecord } from '@franken/observer';
 import { BeastLogger } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
@@ -802,11 +803,8 @@ function appendAuditFinalize(
         for (const [manifestRunId, records] of manifestsByRunId) {
           const replayManifestPath = join(observer.replayAuditRoot, `${manifestRunId}.replay.json`);
           const existingManifest = readExistingReplayManifest(replayManifestPath);
-          writeFileSync(
-            replayManifestPath,
-            JSON.stringify([...existingManifest, ...records], null, 2),
-            'utf8',
-          );
+          const store = new AuditTrailStore(resolve(observer.replayAuditRoot, '..', '..'));
+          store.saveReplayManifest(manifestRunId, [...existingManifest, ...records] as ReplayRecord[]);
         }
       }
     } catch { /* best-effort */ }
