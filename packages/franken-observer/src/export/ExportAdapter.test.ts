@@ -98,6 +98,29 @@ describe('InMemoryAdapter', () => {
       expect(secondQuery!.spans[0]!.thoughtBlocks).toEqual(['first thought'])
     })
 
+    it('tolerates uncloneable metadata values while snapshotting traces', async () => {
+      const trace = TraceContext.createTrace('uncloneable metadata')
+      const span = TraceContext.startSpan(trace, { name: 'metadata span' })
+      const callback = () => 'value'
+      const marker = Symbol('marker')
+      SpanLifecycle.setMetadata(span, {
+        callback,
+        marker,
+        nested: { callback, marker, kept: true },
+      })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await expect(adapter.flush(trace)).resolves.toBeUndefined()
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      expect(retrieved!.spans[0]!.metadata).toEqual({
+        callback: String(callback),
+        marker: String(marker),
+        nested: { callback: String(callback), marker: String(marker), kept: true },
+      })
+    })
+
     it('warns when exporting a trace that still has active spans', async () => {
       const trace = TraceContext.createTrace('goal')
       TraceContext.startSpan(trace, { name: 'orphaned' })

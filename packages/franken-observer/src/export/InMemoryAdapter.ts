@@ -25,5 +25,60 @@ export class InMemoryAdapter implements ExportAdapter {
 }
 
 function cloneTrace(trace: Trace): Trace {
-  return structuredClone(trace)
+  return {
+    id: trace.id,
+    goal: trace.goal,
+    status: trace.status,
+    startedAt: trace.startedAt,
+    ...(trace.endedAt !== undefined ? { endedAt: trace.endedAt } : {}),
+    spans: trace.spans.map(span => ({
+      id: span.id,
+      traceId: span.traceId,
+      ...(span.parentSpanId !== undefined ? { parentSpanId: span.parentSpanId } : {}),
+      name: span.name,
+      status: span.status,
+      startedAt: span.startedAt,
+      ...(span.endedAt !== undefined ? { endedAt: span.endedAt } : {}),
+      ...(span.durationMs !== undefined ? { durationMs: span.durationMs } : {}),
+      ...(span.errorMessage !== undefined ? { errorMessage: span.errorMessage } : {}),
+      metadata: cloneMetadata(span.metadata),
+      thoughtBlocks: [...span.thoughtBlocks],
+    })),
+  }
+}
+
+function cloneMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  return cloneMetadataValue(metadata) as Record<string, unknown>
+}
+
+function cloneMetadataValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === 'function' || typeof value === 'symbol') {
+    return String(value)
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return value
+  }
+
+  try {
+    return structuredClone(value)
+  } catch {
+    // Fall back to a JSON-like enumerable clone for metadata containing values
+    // unsupported by the structured clone algorithm, such as functions/symbols.
+  }
+
+  if (seen.has(value)) {
+    return '[Circular]'
+  }
+  seen.add(value)
+
+  if (Array.isArray(value)) {
+    return value.map(item => cloneMetadataValue(item, seen))
+  }
+
+  const cloned: Record<string, unknown> = {}
+  for (const [key, nestedValue] of Object.entries(value)) {
+    cloned[key] = cloneMetadataValue(nestedValue, seen)
+  }
+  return cloned
 }
