@@ -97,6 +97,30 @@ export interface ReviewerFeedbackLessonCapture {
   readonly missingSuggestionGuidance?: string;
 }
 
+/** LLM-friendly template PM/worker handoffs can use after a PR closes to extract reusable lessons. */
+export interface PostPrLessonExtractionTemplate {
+  /** Stable template identifier for downstream liveness tooling and prompt selection. */
+  readonly templateId: 'post-pr-lesson-extraction-v1';
+  /** Operator-facing moment when this template should be run. */
+  readonly trigger: 'after-pr-review-or-merge';
+  /** Prompt instructions for the LLM or worker producing the post-PR lesson. */
+  readonly instructions: readonly string[];
+  /** Evidence that must be present before a lesson can be promoted from this template. */
+  readonly requiredEvidence: readonly string[];
+  /** JSON object shape expected from the extraction step. */
+  readonly outputSchema: {
+    readonly issueNumber: 'number-or-null';
+    readonly prUrl: 'string-or-null';
+    readonly sourceFinding: 'string';
+    readonly correctionApplied: 'string';
+    readonly reusableLesson: 'string';
+    readonly regressionEvidence: 'string';
+    readonly followUpNeeded: 'boolean';
+  };
+  /** Explicit failure guidance when the PR lacks enough evidence to extract a lesson. */
+  readonly insufficientEvidenceGuidance: string;
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -110,6 +134,8 @@ export interface CritiqueLesson {
   readonly experimentSandbox?: LessonExperimentSandbox;
   /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
   readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
+  /** Structured template for extracting reusable lessons from post-PR review/merge evidence. */
+  readonly postPrLessonExtractionTemplate?: PostPrLessonExtractionTemplate;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

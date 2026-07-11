@@ -184,6 +184,79 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('attaches an LLM-friendly post-PR lesson extraction template to recorded lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'PR omitted the regression evidence from the handoff',
+            severity: 'warning',
+            suggestion: 'Add the exact verifier command and result before requesting promotion.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'post-pr-template-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.postPrLessonExtractionTemplate).toEqual({
+      templateId: 'post-pr-lesson-extraction-v1',
+      trigger: 'after-pr-review-or-merge',
+      instructions: [
+        'Inspect the linked issue, PR description, final diff, reviewer feedback, and verification evidence before extracting a durable lesson.',
+        'Extract only lessons that are reusable for future workers; do not restate one-off implementation details as policy.',
+        'If required evidence is missing, set followUpNeeded to true and use insufficientEvidenceGuidance instead of inventing a lesson.',
+      ],
+      requiredEvidence: [
+        'Linked issue or task identifier',
+        'PR URL or merge/review artifact',
+        'Reviewer finding or failure mode that motivated the correction',
+        'Correction applied in the final PR head',
+        'Regression test, verifier, or explicit reason no code-level regression applies',
+      ],
+      outputSchema: {
+        issueNumber: 'number-or-null',
+        prUrl: 'string-or-null',
+        sourceFinding: 'string',
+        correctionApplied: 'string',
+        reusableLesson: 'string',
+        regressionEvidence: 'string',
+        followUpNeeded: 'boolean',
+      },
+      insufficientEvidenceGuidance:
+        'Do not promote a post-PR lesson until the issue/PR, source finding, correction, and verification evidence are all available.',
+    });
+  });
+
+  it('does not attach a post-PR extraction template when no actionable lesson is recorded', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'internal evaluator error occurred',
+            severity: 'critical',
+            location: EVALUATOR_EXCEPTION_LOCATION,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'post-pr-template-task');
+
+    expect(port.recordLesson).not.toHaveBeenCalled();
+  });
+
   it('sandboxes new lessons as experimental and blocks promotion until verified', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
