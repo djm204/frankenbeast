@@ -269,6 +269,15 @@ export function buildInitAction(
   throw new Error(`Unsupported Beast workflow definition: ${definitionId}`);
 }
 
+export function resolveWizardDefinitionId(config: Record<string, unknown>): string {
+  const workflow = config.workflow as Record<string, unknown> | undefined;
+  const workflowType = workflow?.workflowType;
+  if (typeof workflowType !== 'string' || workflowType.trim().length === 0) {
+    throw new Error('Workflow type is required before launching a Beast agent.');
+  }
+  return workflowType.trim();
+}
+
 export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -1152,8 +1161,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               setBeastAgentDetail(null);
             }}
             onLaunch={async (config) => {
-              const workflow = config.workflow as Record<string, unknown> | undefined;
-              const definitionId = String(workflow?.workflowType ?? 'martin-loop');
+              const definitionId = resolveWizardDefinitionId(config);
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const launchChatSessionId = selectedSessionId ?? activeSessionId ?? undefined;
               const initAction = buildInitAction(definitionId, config, launchChatSessionId);

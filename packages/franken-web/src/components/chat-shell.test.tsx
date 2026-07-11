@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildInitAction, ChatShell } from './chat-shell';
+import { buildInitAction, ChatShell, resolveWizardDefinitionId } from './chat-shell';
 
 const mocks = vi.hoisted(() => ({
   createAgent: vi.fn(),
@@ -406,5 +406,11 @@ describe('ChatShell route heading', () => {
       }));
     }
 
+  });
+
+  it('rejects Create Agent wizard launch configs without an explicit workflow type', () => {
+    expect(() => resolveWizardDefinitionId({})).toThrow('Workflow type is required before launching a Beast agent.');
+    expect(() => resolveWizardDefinitionId({ workflow: { workflowType: '   ' } })).toThrow('Workflow type is required before launching a Beast agent.');
+    expect(resolveWizardDefinitionId({ workflow: { workflowType: ' martin-loop ' } })).toBe('martin-loop');
   });
 });
