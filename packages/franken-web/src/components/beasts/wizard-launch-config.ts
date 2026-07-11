@@ -149,7 +149,8 @@ function buildSelectedSkills(skills: Record<string, unknown> | undefined): strin
 function normalizeWizardProvider(provider: unknown): string | undefined {
   if (typeof provider !== 'string') return undefined;
   const trimmed = provider.trim();
-  return trimmed.length > 0 ? CLI_PROVIDER_BY_WIZARD_PROVIDER[trimmed] : undefined;
+  if (trimmed.length === 0) return undefined;
+  return CLI_PROVIDER_BY_WIZARD_PROVIDER[trimmed] ?? trimmed;
 }
 
 const LLM_OPERATION_ALIASES_BY_WIZARD_ACTION: Record<string, readonly string[]> = {

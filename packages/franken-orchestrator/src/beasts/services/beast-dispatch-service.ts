@@ -22,6 +22,7 @@ const SHARED_RUNTIME_CONFIG_KEYS = [
   'gitConfig',
   'llmConfig',
   'promptConfig',
+  'provider',
   'model',
   'maxDurationMs',
   'maxTotalTokens',
@@ -70,6 +71,7 @@ function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown
     case 'llmConfig':
     case 'promptConfig':
       return isRecord(value) ? value : undefined;
+    case 'provider':
     case 'model':
       return typeof value === 'string' ? value : undefined;
     case 'maxDurationMs':

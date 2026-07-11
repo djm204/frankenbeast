@@ -312,13 +312,17 @@ export class Session {
     const planOverride = depOptions.runConfig?.llmConfig?.overrides?.['plan-build'];
     if (planOverride) {
       const currentLlmConfig = depOptions.runConfig?.llmConfig ?? {};
+      const currentDefault = currentLlmConfig.default ?? {};
+      const providerChanged = planOverride.provider !== undefined
+        && planOverride.provider !== currentDefault.provider;
       depOptions.runConfig = {
         ...depOptions.runConfig!,
         llmConfig: {
           ...currentLlmConfig,
           default: {
-            ...currentLlmConfig.default,
+            ...currentDefault,
             ...planOverride,
+            ...(providerChanged && planOverride.model === undefined ? { model: undefined } : {}),
           },
         },
       };

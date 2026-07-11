@@ -94,7 +94,7 @@ describe('buildWizardLaunchConfig', () => {
     });
   });
 
-  it('emits compatible CLI providers for API, CLI, and Aider wizard selections', () => {
+  it('emits compatible CLI providers for API, CLI, Aider, and custom wizard selections', () => {
     expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'openai-api', defaultModel: 'gpt-5.5' } })).toMatchObject({
       provider: 'codex',
       llmConfig: { default: { provider: 'codex', model: 'gpt-5.5' } },
@@ -106,6 +106,10 @@ describe('buildWizardLaunchConfig', () => {
     expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'aider', defaultModel: 'sonnet' } })).toMatchObject({
       provider: 'aider',
       llmConfig: { default: { provider: 'aider', model: 'sonnet' } },
+    });
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'prod-claude', defaultModel: 'sonnet' } })).toMatchObject({
+      provider: 'prod-claude',
+      llmConfig: { default: { provider: 'prod-claude', model: 'sonnet' } },
     });
   });
 

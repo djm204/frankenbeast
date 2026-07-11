@@ -135,7 +135,7 @@ const stubMemory: IMemoryModule = {
   recordTrace: async () => {},
 };
 const stubSkills: ISkillsModule = {
-  hasSkill: () => false,
+  hasSkill: (skillId: string) => skillId.startsWith('cli:'),
   getAvailableSkills: () => [],
   execute: async (skillId: string) => { throw new Error(`Skills module is disabled; cannot execute ${skillId}`); },
 };
@@ -242,12 +242,18 @@ interface CliExecutorDeps {
 
 function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
   const effectiveModules = options.runConfig?.modules ?? options.enabledModules;
+  const defaultTarget = options.runConfig?.llmConfig?.default;
+  const executionOverride = options.runConfig?.llmConfig?.overrides?.['cli-session'];
+  const baseProvider = defaultTarget?.provider
+    ?? options.runConfig?.provider
+    ?? options.provider;
+  const baseModel = defaultTarget?.model
+    ?? options.runConfig?.model;
+  const executionProvider = executionOverride?.provider;
   return {
-    provider: options.runConfig?.llmConfig?.default?.provider
-      ?? options.runConfig?.provider
-      ?? options.provider,
-    model: options.runConfig?.llmConfig?.default?.model
-      ?? options.runConfig?.model,
+    provider: executionProvider ?? baseProvider,
+    model: executionOverride?.model
+      ?? (executionProvider !== undefined && executionProvider !== baseProvider ? undefined : baseModel),
     llmOverrides: options.runConfig?.llmConfig?.overrides,
     baseBranch: options.runConfig?.gitConfig?.baseBranch ?? options.baseBranch,
     budget: options.budget,

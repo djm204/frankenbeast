@@ -381,6 +381,39 @@ describe('dep-factory provider wiring', () => {
     );
   });
 
+  it('routes cli-session overrides into the Martin execution provider without carrying stale default models', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        objective: 'Use execution override',
+        provider: 'codex',
+        model: 'gpt-5.3-codex-spark',
+        llmConfig: {
+          default: { provider: 'codex', model: 'gpt-5.3-codex-spark' },
+          overrides: {
+            'cli-session': { provider: 'claude' },
+          },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.not.objectContaining({ model: 'gpt-5.3-codex-spark' }),
+    );
+  });
+
+  it('keeps built-in cli skills available when the skills module is disabled', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const result = await createCliDeps(makeOpts());
+
+    expect(result.deps.skills.hasSkill('cli:chunk-a')).toBe(true);
+    expect(result.deps.skills.hasSkill('project-skill')).toBe(false);
+  });
+
   it('rejects command overrides from providersConfig unless explicitly trusted', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
