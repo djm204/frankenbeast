@@ -30,11 +30,15 @@ describe('SQLiteAdapter', () => {
     vi.clearAllMocks()
   })
 
-  it('configures a busy timeout so concurrent writers wait for locks', () => {
+  it('configures WAL, foreign keys, and a busy timeout so concurrent writers wait for locks', () => {
     const adapter = new SQLiteAdapter('/tmp/traces.db')
 
     expect(Database).toHaveBeenCalledWith('/tmp/traces.db')
-    expect(pragmaMock).toHaveBeenCalledWith('busy_timeout = 5000')
+    expect(pragmaMock.mock.calls.map(call => call[0])).toEqual([
+      'busy_timeout = 5000',
+      'journal_mode = WAL',
+      'foreign_keys = ON',
+    ])
 
     adapter.close()
   })
