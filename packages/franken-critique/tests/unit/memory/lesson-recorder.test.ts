@@ -113,6 +113,52 @@ describe('LessonRecorder', () => {
     ]);
   });
 
+  it('sandboxes new lessons as experimental and blocks promotion until verified', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'factuality', [
+          { message: 'handoff cited an unverified file path', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'sandbox-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.experimentSandbox).toEqual({
+      state: 'experimental',
+      promotionBlocked: true,
+      reason:
+        'New critique lessons are experimental until their traceability map and regression evidence are independently verified.',
+      exitCriteria: [
+        'Confirm at least one lesson-to-test traceability entry is present.',
+        'Run the listed verification command and attach the evidence to the PM handoff.',
+        'Promote or retire the lesson only after review confirms the regression covers the source finding.',
+      ],
+      verificationCommand:
+        'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+    });
+  });
+
+  it('does not create an experimental sandbox entry for failing iterations with no actionable finding', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [createIteration(0, 'fail', 'empty-failure'), createIteration(1, 'pass')],
+    };
+
+    await recorder.record(result, 'sandbox-task');
+
+    expect(port.recordLesson).not.toHaveBeenCalled();
+  });
+
   it('does not create traceability entries for infrastructure-only evaluator exceptions', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);

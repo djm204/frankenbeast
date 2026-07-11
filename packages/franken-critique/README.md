@@ -92,6 +92,12 @@ When the critique loop recovers from one or more failing iterations and ends in 
 
 Infrastructure-only evaluator exceptions are intentionally excluded from the map so operator dashboards do not promote broken tooling as product lessons. PM handoffs should treat lessons without a matching regression `testId` as unverified learning that is not ready for promotion.
 
+## Lesson experiment sandbox
+
+New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.
+
+Failing iterations without actionable findings, and infrastructure-only evaluator exceptions, do not create sandboxed lessons. This keeps broken evaluator/tooling noise from entering the learning pipeline as experimental guidance.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.
