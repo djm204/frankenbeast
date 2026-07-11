@@ -6,4 +6,4 @@
 - [x] Add deterministic positive and negative tests.
 - [x] Update operator guidance docs.
 - [x] Run targeted verification.
-- [ ] Commit, push, open PR, and request Codex review.
+- [x] Commit, push, open PR, and request Codex review.
