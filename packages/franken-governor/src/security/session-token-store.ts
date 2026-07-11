@@ -63,12 +63,12 @@ export class SessionTokenStore {
     }
 
     return this.withFileLock(() => {
-      this.loadPersistedTokens();
+      const expiredPersisted = this.loadPersistedTokens();
       const pruned = this.pruneExpiredTokens();
-      if (pruned > 0) {
+      if (expiredPersisted + pruned > 0) {
         this.persist();
       }
-      return pruned;
+      return expiredPersisted + pruned;
     });
   }
 
@@ -115,8 +115,8 @@ export class SessionTokenStore {
     return pruned;
   }
 
-  private loadPersistedTokens(): void {
-    if (!this.persistenceFile) return;
+  private loadPersistedTokens(): number {
+    if (!this.persistenceFile) return 0;
 
     let raw: string;
     try {
@@ -125,7 +125,7 @@ export class SessionTokenStore {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') {
         this.tokens.clear();
-        return;
+        return 0;
       }
       throw err;
     }
@@ -142,14 +142,18 @@ export class SessionTokenStore {
     }
 
     this.tokens.clear();
+    let expiredPersisted = 0;
     for (const value of parsed) {
       const token = this.deserialize(value);
       if (token && !this.isExpired(token)) {
         this.tokens.set(token.tokenId, token);
+      } else if (token) {
+        expiredPersisted += 1;
       }
     }
 
     // Expired entries are ignored on read and pruned on the next write.
+    return expiredPersisted;
   }
 
   private deserialize(value: unknown): SessionToken | null {
