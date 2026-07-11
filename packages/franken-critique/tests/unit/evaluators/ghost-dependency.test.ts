@@ -196,7 +196,10 @@ describe('GhostDependencyEvaluator', () => {
       const keyofCast = value as keyof import('ghost-package').Shape;
       function keyed<T extends keyof typeof import('ghost-package')>() {}
       class Plugin implements import('ghost-package').Plugin {}
+      const commentedCast = value as /* generated */ import('ghost-package').Shape;
+      class CommentedPlugin implements /* generated */ import('ghost-package').Plugin {}
       const plugin = loader.import('unknown-lib');
+      loader./* generated */import('unknown-lib');
       this.#import('private-loader');
     `;
     const result = await evaluator.evaluate(createInput(content));
@@ -222,14 +225,23 @@ describe('GhostDependencyEvaluator', () => {
       export const exported = await import('export-after-type-ghost');
       type BareDynamic = {}
       import('bare-after-type-ghost');
+      type SimpleAlias = string
+      import('simple-type-after-ghost');
+      type VoidAlias = string
+      void import('void-simple-type-after-ghost');
       async function awaited(): Promise<void> { await import('awaited-function-ghost'); }
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
+      loadPlugin: import('label-ghost');
       const parenthesized = await import(('parenthesized-ghost'));
+      const literalAsserted = await import('literal-asserted-ghost' as const);
+      const literalSatisfied = await import('literal-satisfied-ghost' satisfies string);
+      const lessThanRuntime = count < import('less-than-ghost');
+      const bitwiseRuntime = flags | import('bitwise-or-ghost');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(12);
+    expect(result.findings).toHaveLength(19);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -241,9 +253,16 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('iife-after-type-ghost'),
         expect.stringContaining('export-after-type-ghost'),
         expect.stringContaining('bare-after-type-ghost'),
+        expect.stringContaining('simple-type-after-ghost'),
+        expect.stringContaining('void-simple-type-after-ghost'),
         expect.stringContaining('awaited-function-ghost'),
         expect.stringContaining('switch-case-ghost'),
+        expect.stringContaining('label-ghost'),
         expect.stringContaining('parenthesized-ghost'),
+        expect.stringContaining('literal-asserted-ghost'),
+        expect.stringContaining('literal-satisfied-ghost'),
+        expect.stringContaining('less-than-ghost'),
+        expect.stringContaining('bitwise-or-ghost'),
       ]),
     );
   });

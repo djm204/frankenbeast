@@ -243,11 +243,48 @@ function readDynamicImportSpecifier(
   if (!specifier) return null;
 
   const nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  const assertedTokenIndex = skipTypeScriptImportArgumentAssertion(
+    content,
+    nextTokenIndex,
+  );
+  if (assertedTokenIndex !== nextTokenIndex) {
+    return content[assertedTokenIndex] === ')' || content[assertedTokenIndex] === ','
+      ? { value: specifier.value, endIndex: assertedTokenIndex - 1 }
+      : null;
+  }
+
   if (content[nextTokenIndex] !== ')' && content[nextTokenIndex] !== ',') {
     return null;
   }
 
   return specifier;
+}
+
+function skipTypeScriptImportArgumentAssertion(
+  content: string,
+  index: number,
+): number {
+  const keyword = startsWithKeyword(content, index, 'as')
+    ? 'as'
+    : startsWithKeyword(content, index, 'satisfies')
+      ? 'satisfies'
+      : null;
+  if (!keyword) return index;
+
+  let i = skipImportTrivia(content, index + keyword.length);
+  while (i < content.length && content[i] !== ')' && content[i] !== ',') {
+    if (content[i] === '/' && content[i + 1] === '/') {
+      i = skipImportTrivia(content, skipSingleLineComment(content, i + 2));
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i = skipImportTrivia(content, skipMultiLineComment(content, i + 2) + 1);
+      continue;
+    }
+    i += 1;
+  }
+
+  return i;
 }
 
 function readDynamicImportArgumentSpecifier(
@@ -275,7 +312,7 @@ function canStartNativeDynamicImport(
   content: string,
   importIndex: number,
 ): boolean {
-  const previousIndex = previousNonWhitespaceIndex(content, importIndex - 1);
+  const previousIndex = previousNonTriviaIndex(content, importIndex - 1);
   const previous = previousIndex === null ? null : content[previousIndex]!;
   if (
     previous === '#' ||
@@ -303,7 +340,8 @@ function isSpreadOperand(content: string, dotIndex: number): boolean {
 }
 
 function endsInsideNestedTypeReference(prefix: string): boolean {
-  if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)(?:(?:keyof|typeof)\s*)?$/.test(prefix)) {
+  const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
+  if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
 
@@ -317,16 +355,22 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
   }
 
   const operator = trimmed.at(-1);
-  if (operator === '<') return true;
+  if (operator === '<') return !/\s<$/.test(trimmed);
 
   if (operator !== '|' && operator !== '&') return false;
 
-  return trimmed.at(-2) !== operator;
+  return trimmed.at(-2) !== operator && trimmed.lastIndexOf('<') > trimmed.lastIndexOf('>');
+}
+
+function stripTrailingTrivia(content: string): string {
+  const i = skipTriviaBackward(content, content.length - 1);
+  return content.slice(0, i + 1);
 }
 
 function isInsideTypeDeclaration(prefix: string): boolean {
   return (
     /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
+    !hasCompletedTypeDeclarationBeforeImport(prefix) &&
     !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
     ) &&
@@ -335,6 +379,17 @@ function isInsideTypeDeclaration(prefix: string): boolean {
       prefix,
     )
   );
+}
+
+function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
+  const newlineIndex = prefix.lastIndexOf('\n');
+  if (newlineIndex === -1) return false;
+
+  const suffix = prefix.slice(newlineIndex + 1);
+  if (!/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix)) return false;
+
+  const previousLine = prefix.slice(0, newlineIndex).trimEnd();
+  return !/[=?:,|&<{([]$/.test(previousLine) && !/\bextends\s*$/.test(previousLine);
 }
 
 function isInsideTypeAnnotation(
@@ -351,6 +406,12 @@ function isInsideTypeAnnotation(
   const beforeAnnotation = prefix.slice(0, annotationIndex);
   if (/\bcase\s+[\s\S]*$/.test(beforeAnnotation)) return false;
   if (/:\s*\{[^}]*$/.test(beforeAnnotation)) return true;
+  if (
+    /(?:^|[;{}\n])\s*[A-Za-z_$][\w$]*$/.test(beforeAnnotation) &&
+    !/\bclass\b[\s\S]*\{[^}]*$/.test(beforeAnnotation)
+  ) {
+    return false;
+  }
 
   const outerAnnotationIndex = beforeAnnotation.lastIndexOf(':');
   if (outerAnnotationIndex !== -1) {
@@ -721,6 +782,11 @@ function previousNonWhitespaceIndex(
   }
 
   return null;
+}
+
+function previousNonTriviaIndex(content: string, index: number): number | null {
+  const i = skipTriviaBackward(content, index);
+  return i < 0 ? null : i;
 }
 
 function readIdentifierStart(content: string, index: number): number {
