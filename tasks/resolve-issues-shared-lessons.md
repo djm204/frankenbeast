@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-10 — E2E API failure skip boundary checks
+- Treat provider-only flake as skippable only when the pipeline reached plan/execute phase (`[planner]` or `[martin]`), not on generic setup/auth strings.
+- Add an E2E precondition skip only for provider credentials the default E2E CLI invocation can actually use; do not let Gemini-only credentials run the default `claude,codex` path without an explicit provider.
+- Keep DNS/provider transport errors such as `ENOTFOUND` skippable after the pipeline boundary so transient provider outages do not look like product regressions.
+
 ## 2026-07-10 — W3C tracestate sanitization before serialization
 - `parseTracestate`/`formatTracestate` should enforce W3C key/value constraints and member limits before exposing user-controlled values in headers.
 - Treat malformed list entries (invalid key grammar, control characters, commas, duplicate keys, oversized members, and member-count overflow) as drop/ignore cases during parse and emit only sanitized key/value pairs on format/inject.
