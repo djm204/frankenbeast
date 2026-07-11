@@ -121,6 +121,24 @@ describe('InMemoryAdapter', () => {
       })
     })
 
+    it('preserves repeated uncloneable metadata references without treating them as cycles', async () => {
+      const trace = TraceContext.createTrace('shared metadata')
+      const span = TraceContext.startSpan(trace, { name: 'shared metadata span' })
+      const callback = () => 'shared'
+      const shared = { callback, kept: true }
+      SpanLifecycle.setMetadata(span, { a: shared, b: shared })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+
+      await adapter.flush(trace)
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      expect(retrieved!.spans[0]!.metadata).toEqual({
+        a: { callback: String(callback), kept: true },
+        b: { callback: String(callback), kept: true },
+      })
+    })
+
     it('warns when exporting a trace that still has active spans', async () => {
       const trace = TraceContext.createTrace('goal')
       TraceContext.startSpan(trace, { name: 'orphaned' })

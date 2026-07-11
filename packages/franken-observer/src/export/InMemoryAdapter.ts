@@ -51,7 +51,7 @@ function cloneMetadata(metadata: Record<string, unknown>): Record<string, unknow
   return cloneMetadataValue(metadata) as Record<string, unknown>
 }
 
-function cloneMetadataValue(value: unknown, seen = new WeakSet<object>()): unknown {
+function cloneMetadataValue(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
   if (typeof value === 'function' || typeof value === 'symbol') {
     return String(value)
   }
@@ -68,15 +68,18 @@ function cloneMetadataValue(value: unknown, seen = new WeakSet<object>()): unkno
   }
 
   if (seen.has(value)) {
-    return '[Circular]'
+    return seen.get(value)
   }
-  seen.add(value)
 
   if (Array.isArray(value)) {
-    return value.map(item => cloneMetadataValue(item, seen))
+    const cloned: unknown[] = []
+    seen.set(value, cloned)
+    cloned.push(...value.map(item => cloneMetadataValue(item, seen)))
+    return cloned
   }
 
   const cloned: Record<string, unknown> = {}
+  seen.set(value, cloned)
   for (const [key, nestedValue] of Object.entries(value)) {
     cloned[key] = cloneMetadataValue(nestedValue, seen)
   }
