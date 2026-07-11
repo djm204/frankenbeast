@@ -199,6 +199,7 @@ describe('startNetworkService', () => {
         FRANKENBEAST_DASHBOARD_API_URL: 'http://127.0.0.1:3737',
         FRANKENBEAST_DASHBOARD_HOST: '127.0.0.1',
         FRANKENBEAST_DASHBOARD_PORT: '5173',
+        VITE_API_PROXY_TARGET: 'http://127.0.0.1:3737',
         FRANKENBEAST_TRUST_PROVIDER_COMMAND_OVERRIDES: '1',
       },
     }, { id: 'dashboard-web' }), {
