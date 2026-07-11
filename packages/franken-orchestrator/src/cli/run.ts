@@ -60,6 +60,8 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
+import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
+import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -399,6 +401,75 @@ export function assertAnyProviderCliAvailable(
       + `Checked: ${attempted || 'none'}. `
       + 'Install one of: claude, codex, gemini, aider; or configure providers.overrides.<provider>.command.',
   );
+}
+
+function resolveDashboardProviderType(nameOrType: string, fallbackType?: string): string {
+  if (nameOrType === 'aider') return fallbackType ?? 'claude-cli';
+  try {
+    return resolveProviderType(nameOrType);
+  } catch {
+    return fallbackType ?? 'unknown';
+  }
+}
+
+export function buildDashboardProviderSnapshot(
+  config: OrchestratorConfig,
+  providerRegistry?: LlmProviderRegistry | undefined,
+  extraProviderNames: readonly string[] = [],
+): Array<{ name: string; type: string; available: boolean; failoverOrder: number; model?: string }> {
+  if (config.consolidatedProviders?.length) {
+    return config.consolidatedProviders.map((provider, index) => ({
+      name: provider.name,
+      type: provider.type,
+      available: true,
+      failoverOrder: index,
+      ...(provider.model ? { model: provider.model } : {}),
+    }));
+  }
+
+  const registryProviders = providerRegistry?.getProviders() ?? [];
+  const registryByName = new Map<string, (typeof registryProviders)[number]>();
+  const configuredNames = [...new Set([
+    ...extraProviderNames,
+    config.providers.default,
+    ...(config.providers.fallbackChain ?? []),
+  ].filter(Boolean))];
+  const configuredTypes = new Set<string>();
+  for (const [index, name] of configuredNames.entries()) {
+    configuredTypes.add(resolveDashboardProviderType(name, registryProviders[index]?.type));
+  }
+
+  const registryNames = registryProviders.flatMap((provider) => {
+    let canonicalName = provider.name;
+    try {
+      canonicalName = resolveProviderCatalogEntry(provider.name).name;
+    } catch {
+      // Keep custom registry providers under their registry name.
+    }
+    registryByName.set(provider.name, provider);
+    registryByName.set(canonicalName, provider);
+
+    const providerType = provider.type || resolveDashboardProviderType(canonicalName);
+    if (configuredNames.includes(canonicalName) || (providerType && configuredTypes.has(providerType))) {
+      return [];
+    }
+    return [canonicalName];
+  });
+
+  const providerNames = [...new Set([...configuredNames, ...registryNames])];
+
+  return providerNames.map((name, index) => {
+    const registryProvider = registryByName.get(name);
+    const type: string = registryProvider?.type ?? resolveDashboardProviderType(name, registryProviders[index]?.type);
+    const model = config.providers.overrides?.[name]?.model;
+    return {
+      name,
+      type,
+      available: true,
+      failoverOrder: index,
+      ...(model ? { model } : {}),
+    };
+  });
 }
 
 function isCommandAvailable(command: string): boolean {
@@ -1059,9 +1130,7 @@ export async function main(): Promise<void> {
               dashboardDeps: {
                 skillManager,
                 getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
-                getProviders: () => providerRegistry.getProviders().map((p, i) => ({
-                  name: p.name, type: p.type, available: true, failoverOrder: i,
-                })),
+                getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
               },
             }
           : {}),

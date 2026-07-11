@@ -35,3 +35,6 @@ jobs:
 
       - name: Test with coverage
         run: pnpm test:ci
+
+      - name: Integration tests
+        run: pnpm test:integration

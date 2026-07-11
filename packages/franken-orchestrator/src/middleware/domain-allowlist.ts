@@ -4,6 +4,71 @@ import type { LlmMiddleware, LlmResponse } from './llm-middleware.js';
 const URL_PATTERN =
   /https?:\/\/([a-zA-Z0-9.-]+(?:\.[a-zA-Z]{2,}))(\/[^\s)'"]*)?/g;
 
+interface SerializedToolInput {
+  readonly text: string;
+  readonly lossy: boolean;
+}
+
+function serializeToolInputForDomainScan(input: unknown): SerializedToolInput {
+  const seen = new WeakSet<object>();
+  const parts: string[] = [];
+  let lossy = false;
+
+  const collect = (value: unknown): void => {
+    if (typeof value === 'string') {
+      parts.push(value);
+      return;
+    }
+    if (
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      parts.push(String(value));
+      return;
+    }
+    if (typeof value !== 'object' || value === null) {
+      return;
+    }
+    if (seen.has(value)) {
+      lossy = true;
+      return;
+    }
+    seen.add(value);
+
+    const toJson = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJson === 'function') {
+      try {
+        const jsonValue = toJson.call(value);
+        if (jsonValue !== value) {
+          collect(jsonValue);
+        }
+      } catch {
+        lossy = true;
+      }
+    }
+
+    for (const [key, descriptor] of Object.entries(
+      Object.getOwnPropertyDescriptors(value),
+    )) {
+      parts.push(key);
+      if ('value' in descriptor) {
+        collect(descriptor.value);
+      } else {
+        lossy = true;
+      }
+    }
+  };
+
+  try {
+    collect(input);
+  } catch {
+    lossy = true;
+  }
+
+  return { text: parts.join(' '), lossy };
+}
+
 export class DomainBlockedError extends Error {
   constructor(
     public readonly domain: string,
@@ -62,8 +127,13 @@ export class DomainAllowlistMiddleware implements LlmMiddleware {
     // Scan tool call inputs for URLs
     if (response.toolCalls) {
       for (const tc of response.toolCalls) {
-        const inputStr = JSON.stringify(tc.input);
-        for (const domain of this.extractDomains(inputStr)) {
+        const input = serializeToolInputForDomainScan(tc.input);
+        if (input.lossy) {
+          this.logger?.(
+            `[security] Tool call "${tc.name}" input could not fully serialize for domain allowlist scanning`,
+          );
+        }
+        for (const domain of this.extractDomains(input.text)) {
           if (!this.isDomainAllowed(domain)) {
             this.logger?.(
               `[security] Tool call "${tc.name}" contains blocked domain: ${domain}`,

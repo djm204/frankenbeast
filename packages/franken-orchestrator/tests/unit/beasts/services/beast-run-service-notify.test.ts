@@ -73,6 +73,48 @@ describe('BeastRunService.notifyRunStatusChange', () => {
     expect(updatedAgent!.status).toBe('completed');
   });
 
+  it('syncs pending approval runs to tracked-agent awaiting approval status', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-run-svc-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const catalog = new BeastCatalogService();
+    const mockExecutors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    } as unknown as BeastExecutors;
+    const mockMetrics = {
+      recordRunStopped: vi.fn(),
+    } as unknown as BeastMetrics;
+    const service = new BeastRunService(repo, catalog, mockExecutors, mockMetrics, logs);
+    const now = new Date().toISOString();
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'cli',
+      status: 'running',
+      createdByUser: 'pfk',
+      initAction: { kind: 'dispatch', definitionId: 'martin-loop' },
+      initConfig: { provider: 'claude', objective: 'test', chunkDirectory: '/tmp' },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const run = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { provider: 'claude', objective: 'test', chunkDirectory: '/tmp' },
+      dispatchedBy: 'cli',
+      dispatchedByUser: 'pfk',
+      createdAt: now,
+      trackedAgentId: agent.id,
+    });
+
+    repo.updateRun(run.id, { status: 'pending_approval' });
+
+    service.notifyRunStatusChange(run.id);
+
+    expect(repo.getTrackedAgent(agent.id)!.status).toBe('awaiting_approval');
+  });
+
   it('skips all writes when status has not changed (full idempotency)', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-run-svc-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

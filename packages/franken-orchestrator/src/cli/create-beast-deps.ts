@@ -14,7 +14,6 @@ import { SkillConfigStore } from '../skills/skill-config-store.js';
 import { AuditTrail, AuditTrailStore, createAuditEvent } from '@franken/observer';
 import { ReplayContentStore } from '../replay/replay-content-store.js';
 import { join, basename, dirname } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
 
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
@@ -195,16 +194,8 @@ export function createBeastDeps(
     getTokenUsage: () => registry.getTokenUsage(),
     persistAuditTrail: (runId: string) => {
       const store = new AuditTrailStore(auditTrailProjectRoot);
-      const eventPath = store.save(runId, auditTrail);
       const replayManifest = observer.getReplayManifest();
-      if (replayManifest.length > 0) {
-        mkdirSync(auditRoot, { recursive: true });
-        writeFileSync(
-          join(auditRoot, `${runId}.replay.json`),
-          JSON.stringify(replayManifest, null, 2),
-          'utf8',
-        );
-      }
+      const eventPath = store.save(runId, auditTrail, replayManifest.length > 0 ? replayManifest : undefined);
       return eventPath;
     },
 

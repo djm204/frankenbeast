@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
@@ -27,6 +27,7 @@ describe('verifyInit', () => {
   let tempDir: string | undefined;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -46,6 +47,33 @@ describe('verifyInit', () => {
     expect(result.ok).toBe(false);
     expect(result.messages.join('\n')).toContain('Config file is missing');
     expect(result.messages.join('\n')).toContain('Init state is missing');
+  });
+
+  it('quarantines malformed verification JSON and reports it as missing', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const fbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(fbeastDir, 'config.json');
+    const stateFile = join(fbeastDir, 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await mkdir(fbeastDir, { recursive: true });
+    await writeFile(configFile, '{"comms": {', 'utf-8');
+    await writeFile(stateFile, '{"completedSteps": [', 'utf-8');
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+    const files = await readdir(fbeastDir);
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join('\n')).toContain('Config file is missing');
+    expect(result.messages.join('\n')).toContain('Init state is missing');
+    expect(files.some((file) => file.startsWith('config.json.corrupt-'))).toBe(true);
+    const stateQuarantine = files.find((file) => file.startsWith('init-state.json.corrupt-'));
+    expect(stateQuarantine).toBeTruthy();
+    await expect(readFile(join(fbeastDir, stateQuarantine ?? ''), 'utf-8')).resolves.toBe('{"completedSteps": [');
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it('checks only enabled comms transports', async () => {

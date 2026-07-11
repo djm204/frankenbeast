@@ -16,8 +16,10 @@
   ],
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:integration": "INTEGRATION=true vitest run --reporter=verbose",
     "test:eval": "EVAL=true vitest run --reporter=verbose",
@@ -36,5 +38,12 @@
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "frankenbeast",
+    "observability",
+    "evaluation",
+    "tracing",
+    "metrics"
+  ]
 }

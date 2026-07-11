@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { FileInitStateStore } from './init-state-store.js';
 import type { ISecretStore } from '../network/secret-store.js';
+import { readJsonFileOrDefault, warnJsonQuarantined } from './init-json-file.js';
 
 export type InitIssueCode =
   | 'missing-config'
@@ -25,15 +25,10 @@ export interface InitVerificationResult {
 }
 
 async function tryReadJson<T>(filePath: string): Promise<T | undefined> {
-  try {
-    const raw = await readFile(filePath, 'utf-8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return undefined;
-    }
-    throw error;
-  }
+  return readJsonFileOrDefault<T | undefined>(filePath, () => undefined, {
+    description: 'init verification JSON',
+    onCorrupt: warnJsonQuarantined,
+  });
 }
 
 export async function verifyInit(options: {

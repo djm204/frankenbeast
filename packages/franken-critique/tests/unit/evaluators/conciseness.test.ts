@@ -42,6 +42,26 @@ describe('ConcisenessEvaluator', () => {
     );
   });
 
+  it('counts inline unresolved comments toward the comment ratio', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const lines = [
+      `const first = 1; // ${pendingMarker}: replace placeholder`,
+      `const second = 2; // ${trackedMarker}: remove duplication`,
+      `const third = 3; // ${hackMarker}: temporary fallback`,
+      'const fourth = 4;',
+    ];
+    const result = await evaluator.evaluate(createInput(lines.join('\n')));
+
+    expect(
+      result.findings.some((f) =>
+        f.message.startsWith('Excessive comment ratio:'),
+      ),
+    ).toBe(true);
+  });
+
   it('flags unresolved marker comments', async () => {
     const evaluator = new ConcisenessEvaluator();
     const pendingMarker = ['TO', 'DO'].join('');

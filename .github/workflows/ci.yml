@@ -14,6 +14,7 @@ jobs:
         deterministic-seed: ['1337']
     env:
       FRANKENBEAST_SEED: ${{ matrix.deterministic-seed }}
+      CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,11 +22,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Enable packageManager-pinned npm
         run: |
+          npm install -g corepack@0.34.4
           corepack enable npm
           corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 
@@ -36,6 +38,11 @@ jobs:
         run: ./scripts/bootstrap.sh --dry-run
 
       - run: npm ci
+
+      - name: Validate bootstrap script (dry-run)
+        env:
+          CI_BOOTSTRAP_DRY_RUN: "1"
+        run: npm run bootstrap:dry-run
 
       - name: Dependency vulnerability audit
         run: npm run audit:dependencies
@@ -56,9 +63,6 @@ jobs:
 
       - run: npm run audit:security
 
-      - name: Run deterministic root Vitest suite
-        run: npm run test:root
-
       - name: Run Docker sandbox build smoke test
         run: npm run test:docker:sandbox
 
@@ -70,11 +74,14 @@ jobs:
       - name: Workspace dependency hygiene (no wildcard internal deps)
         run: node scripts/check-workspace-deps.mjs
 
-      - name: Run package build and lint
-        run: npx turbo run build lint
+      - name: Run package build and typecheck
+        run: npx turbo run build typecheck
 
-      - name: Run package tests
-        run: npx turbo run test
+      - name: Run workspace lint gate
+        run: npm run lint
+
+      - name: Run CI test suite
+        run: npm run test:ci
 
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs
@@ -87,11 +94,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Enable packageManager-pinned npm
         run: |
+          npm install -g corepack@0.34.4
           corepack enable npm
           corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 

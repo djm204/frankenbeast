@@ -5,6 +5,7 @@ import { codexServerName } from './codex-server-names.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 
 function tmpDir(): string {
@@ -112,6 +113,70 @@ describe('fbeast init', () => {
     const backups = jsonBackups(geminiDir);
     expect(backups).toHaveLength(1);
     expect(readFileSync(join(geminiDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
+  });
+
+  it('throws with a clear error and preserves Claude .mcp.json when mcpServers is an array', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const mcpPath = join(root, '.mcp.json');
+    const original = JSON.stringify({ mcpServers: [] });
+    writeFileSync(mcpPath, original);
+
+    expect(() => runInit({ root, claudeDir, hooks: false, client: 'claude' })).toThrow(
+      '.mcp.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(mcpPath, 'utf-8')).toBe(original);
+  });
+
+  it('throws with a clear error and preserves Claude .mcp.json when mcpServers is primitive', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const mcpPath = join(root, '.mcp.json');
+    const original = JSON.stringify({ mcpServers: 'bad' });
+    writeFileSync(mcpPath, original);
+
+    expect(() => runInit({ root, claudeDir, hooks: false, client: 'claude' })).toThrow(
+      '.mcp.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(mcpPath, 'utf-8')).toBe(original);
+  });
+
+  it('throws with a clear error and preserves Gemini settings.json when mcpServers is an array', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    const settingsPath = join(geminiDir, 'settings.json');
+    const original = JSON.stringify({ mcpServers: [] });
+    writeFileSync(settingsPath, original);
+
+    expect(() => runInit({ root, claudeDir: geminiDir, hooks: false, client: 'gemini' })).toThrow(
+      'settings.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(original);
+  });
+
+  it('throws with a clear error and preserves Gemini settings.json when mcpServers is primitive', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    const settingsPath = join(geminiDir, 'settings.json');
+    const original = JSON.stringify({ mcpServers: 'bad' });
+    writeFileSync(settingsPath, original);
+
+    expect(() => runInit({ root, claudeDir: geminiDir, hooks: false, client: 'gemini' })).toThrow(
+      'settings.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(original);
   });
 
   it('merges with existing Claude .mcp.json comments and trailing commas without overwriting', () => {
@@ -267,6 +332,33 @@ describe('fbeast init', () => {
     expect(afterCmd).toContain('cd "$p"');
     expect(afterCmd).not.toContain('do;');
     expect(afterCmd).toContain('gemini-after-tool.sh');
+  });
+
+  it('quotes Gemini hook commands so hostile project roots cannot inject shell commands', () => {
+    const parent = tmpDir();
+    dirs.push(parent);
+    const marker = join(parent, 'gemini-injection-marker');
+    const root = join(parent, `project with spaces ; $(touch ${marker}) and quote's`);
+    mkdirSync(root, { recursive: true });
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const beforeCmd = (settings.hooks.BeforeTool[0] as any).hooks[0].command as string;
+    const result = spawnSync(beforeCmd, {
+      cwd: parent,
+      env: { ...process.env, GEMINI_PROJECT_ROOT: root, FBEAST_DISABLE_HOOKS: '1' },
+      shell: true,
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+    expect(beforeCmd).toContain('script=');
+    expect(beforeCmd).toContain('.fbeast/hooks/gemini-before-tool.sh');
+    expect(beforeCmd).toContain('exec "$executable"');
+    expect(beforeCmd).not.toContain(root);
   });
 
   it('merges Gemini hooks without clobbering existing BeforeTool entries', () => {
