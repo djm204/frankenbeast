@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.7.5](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.4...@franken/brain-v0.7.5) (2026-07-11)
+
+
+### Bug Fixes
+
+* **brain:** chunk episodic recall keyword queries ([3fad876](https://github.com/djm204/frankenbeast/commit/3fad876d5b981c034c63c35c578bc388a21cccc2)), closes [#1106](https://github.com/djm204/frankenbeast/issues/1106)
+* **brain:** clone working memory reads ([#1610](https://github.com/djm204/frankenbeast/issues/1610)) ([b62eb1a](https://github.com/djm204/frankenbeast/commit/b62eb1a7c9172dbaa93d4ac0aaa60ae68ca94838))
+* **brain:** handle circular working-memory serialization ([#1655](https://github.com/djm204/frankenbeast/issues/1655)) ([7753816](https://github.com/djm204/frankenbeast/commit/7753816c321150e4e0192bd3be63f093bd38cd08)), closes [#1050](https://github.com/djm204/frankenbeast/issues/1050)
+* **brain:** reduce working memory flush writes ([#1609](https://github.com/djm204/frankenbeast/issues/1609)) ([271c159](https://github.com/djm204/frankenbeast/commit/271c159883a762659f290c9d5bf2abbe5c93bada))
+* **brain:** replace hydrated sqlite snapshot rows ([b90e4de](https://github.com/djm204/frankenbeast/commit/b90e4de27fe5701cebebbc35cbeccb29be2e3fe7)), closes [#920](https://github.com/djm204/frankenbeast/issues/920)
+* **brain:** tolerate corrupt persisted JSON rows ([#1662](https://github.com/djm204/frankenbeast/issues/1662)) ([1bee9b3](https://github.com/djm204/frankenbeast/commit/1bee9b3ce1797b8c03ccf666be87ddc357dd5668))
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **package:** normalize workspace metadata ([#1573](https://github.com/djm204/frankenbeast/issues/1573)) ([921c557](https://github.com/djm204/frankenbeast/commit/921c557e9f8392f1202f3fa2cdcc7952ffccd255))
+
+
+### Documentation
+
+* align documented node requirement ([#1585](https://github.com/djm204/frankenbeast/issues/1585)) ([c3482d3](https://github.com/djm204/frankenbeast/commit/c3482d3330ac741ac022d7bb571e1bb530b2de3b))
+* **brain:** document maintenance commands ([a3e993c](https://github.com/djm204/frankenbeast/commit/a3e993c7e3bcd5c7d513cac2591399b4b526353e))
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* wire brain critique integration suites ([#1463](https://github.com/djm204/frankenbeast/issues/1463)) ([38c92ca](https://github.com/djm204/frankenbeast/commit/38c92ca67b652229954bf25b641e2f7206e894e8)), closes [#973](https://github.com/djm204/frankenbeast/issues/973)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
 ## [0.7.4](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.3...@franken/brain-v0.7.4) (2026-07-10)
 
 
