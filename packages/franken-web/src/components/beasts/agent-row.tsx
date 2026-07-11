@@ -15,6 +15,26 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function pluralizeModule(count: number): string {
+  return count === 1 ? 'module' : 'modules';
+}
+
+function formatModuleConfigSummary(moduleConfig: NonNullable<TrackedAgentSummary['moduleConfig']>): string {
+  const values = Object.values(moduleConfig);
+  const disabledCount = values.filter((enabled) => enabled === false).length;
+  const enabledCount = values.filter((enabled) => enabled === true).length;
+
+  if (disabledCount > 0 && enabledCount > 0) {
+    return `${disabledCount} disabled, ${enabledCount} enabled ${pluralizeModule(enabledCount)}`;
+  }
+
+  if (disabledCount > 0) {
+    return `${disabledCount} disabled ${pluralizeModule(disabledCount)}`;
+  }
+
+  return `${enabledCount} enabled ${pluralizeModule(enabledCount)}`;
+}
+
 export function AgentRow({ agent, run, density, selected, onClick }: AgentRowProps) {
   const selectedClass = selected ? 'bg-beast-accent-soft border-beast-accent' : 'border-beast-border';
   const executionMode = run?.executionMode ?? agent.executionMode;
@@ -39,7 +59,7 @@ export function AgentRow({ agent, run, density, selected, onClick }: AgentRowPro
           </span>
           {agent.moduleConfig && (
             <span className="text-xs px-2.5 py-1 rounded-full bg-beast-control text-beast-muted border border-beast-border">
-              {Object.values(agent.moduleConfig).filter(Boolean).length} modules
+              {formatModuleConfigSummary(agent.moduleConfig)}
             </span>
           )}
           {executionMode && (

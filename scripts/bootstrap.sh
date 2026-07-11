@@ -8,7 +8,7 @@ ASSUME_YES=0
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/bootstrap.sh [--dry-run] [--with-docker|--no-docker] [--yes]
+Usage: scripts/bootstrap.sh [--dry-run] [--services|--with-docker|--no-docker] [--yes]
 
 Bootstraps a Frankenbeast checkout for local development:
   1. validates Node.js, npm, and Corepack prerequisites;
@@ -21,6 +21,7 @@ Bootstraps a Frankenbeast checkout for local development:
 Options:
   --dry-run       Validate prerequisites and planned actions without mutating files,
                   installing packages, or starting Docker.
+  --services      Alias for --with-docker; start docker compose services after npm ci.
   --with-docker   Start docker compose services after npm ci.
   --no-docker     Skip docker compose without prompting.
   --yes           Accept defaults for prompts; currently skips optional Docker.
@@ -41,7 +42,7 @@ run() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
-    --with-docker) START_DOCKER=1; PROMPT_DOCKER=0 ;;
+    --services|--with-docker) START_DOCKER=1; PROMPT_DOCKER=0 ;;
     --no-docker) START_DOCKER=0; PROMPT_DOCKER=0 ;;
     --yes|-y) ASSUME_YES=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -124,8 +125,6 @@ if [[ -n "$default_keys" && -f .env ]]; then
   fi
 fi
 
-run npm ci
-
 if [[ "$PROMPT_DOCKER" -eq 1 && "$ASSUME_YES" -eq 0 && "$DRY_RUN" -eq 0 && -t 0 ]]; then
   read -r -p "Start optional Docker compose services now? [y/N] " docker_answer
   case "$docker_answer" in
@@ -135,7 +134,6 @@ if [[ "$PROMPT_DOCKER" -eq 1 && "$ASSUME_YES" -eq 0 && "$DRY_RUN" -eq 0 && -t 0 
 fi
 
 if [[ "$START_DOCKER" -eq 1 ]]; then
-  command -v docker >/dev/null 2>&1 || fail "Docker is required for --with-docker. Install Docker or rerun with --no-docker."
   env_value() {
     local key="$1"
     [[ -f .env ]] || return 0
@@ -143,13 +141,23 @@ if [[ "$START_DOCKER" -eq 1 ]]; then
   }
   grafana_user="$(env_value GRAFANA_USER)"
   grafana_password="$(env_value GRAFANA_PASSWORD)"
-  if [[ -z "$grafana_user" || -z "$grafana_password" || "$grafana_password" == "admin" || "$grafana_password" == "change-me-random-grafana-password" ]]; then
-    fail "--with-docker requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD in .env before starting Grafana."
+  if [[ -f .env && ( -z "$grafana_user" || -z "$grafana_password" || "$grafana_password" == "admin" || "$grafana_password" == "change-me-random-grafana-password" ) ]]; then
+    fail "--services/--with-docker requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD in .env before starting Grafana."
   fi
-  [[ "$grafana_user" == "admin" ]] || fail "docker-compose.yml requires GRAFANA_USER=admin for the local Grafana service."
+  if [[ -f .env ]]; then
+    [[ "$grafana_user" == "admin" ]] || fail "docker-compose.yml requires GRAFANA_USER=admin for the local Grafana service."
+  fi
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    command -v docker >/dev/null 2>&1 || fail "Docker is required for --services/--with-docker. Install Docker or rerun with --no-docker."
+  fi
+fi
+
+run npm ci
+
+if [[ "$START_DOCKER" -eq 1 ]]; then
   run docker compose up -d
 else
-  log "Skipping optional Docker compose services. Use --with-docker to start them."
+  log "Skipping optional Docker compose services. Use --services or --with-docker to start them."
 fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then

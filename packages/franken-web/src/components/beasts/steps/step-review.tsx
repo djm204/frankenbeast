@@ -18,13 +18,24 @@ type WorkflowReviewValues = {
   chunkDir?: string;
 };
 
+const CANONICAL_MODULE_KEYS = [
+  'firewall',
+  'skills',
+  'memory',
+  'planner',
+  'critique',
+  'governor',
+  'heartbeat',
+] as const;
+
 export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[] }) {
   const { stepValues, setWizardStep } = useBeastStore();
 
   const identity = stepValues[0] as { name?: string; description?: string } | undefined;
   const workflow = stepValues[1] as WorkflowReviewValues | undefined;
   const llm = stepValues[2] as { defaultProvider?: string; defaultModel?: string } | undefined;
-  const modules = stepValues[3] as Record<string, boolean> | undefined;
+  const modules = stepValues[3] as Record<string, unknown> | undefined;
+  const selectedModuleKeys = getSelectedModuleKeys(modules);
   const skills = stepValues[4] as { selectedSkills?: string[] } | undefined;
   const prompts = stepValues[5] as { promptText?: string; files?: Array<{ name: string }> } | undefined;
   const git = stepValues[6] as { preset?: string; baseBranch?: string } | undefined;
@@ -51,10 +62,10 @@ export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[]
       <ReviewSection title="Modules" stepIndex={3} onEdit={setWizardStep}>
         {modules ? (
           <div className="flex flex-wrap gap-1">
-            {Object.entries(modules).filter(([, v]) => v).map(([k]) => (
+            {selectedModuleKeys.map((k) => (
               <span key={k} className="text-xs px-2 py-0.5 rounded-full bg-beast-accent-soft text-beast-accent border border-beast-accent/30">{k}</span>
             ))}
-            {Object.values(modules).filter(Boolean).length === 0 && <p className="text-xs text-beast-subtle">None selected</p>}
+            {selectedModuleKeys.length === 0 && <p className="text-xs text-beast-subtle">None selected</p>}
           </div>
         ) : (
           <p className="text-xs text-beast-subtle">Default configuration</p>
@@ -89,6 +100,11 @@ export function StepReview({ catalog }: { catalog?: readonly BeastCatalogEntry[]
 
     </div>
   );
+}
+
+function getSelectedModuleKeys(modules: Record<string, unknown> | undefined): string[] {
+  if (!modules) return [];
+  return CANONICAL_MODULE_KEYS.filter((key) => modules[key] === true);
 }
 
 function WorkflowReview({ workflow, stepValues, catalog }: {

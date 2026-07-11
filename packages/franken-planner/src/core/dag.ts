@@ -16,13 +16,134 @@ export interface PlanGraphFromTasksOptions {
   reason?: string;
 }
 
+function cloneUnknown<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if (typeof value === 'function') {
+    throw new TypeError('Task metadata cannot contain functions because they cannot be cloned safely');
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+
+  const existing = seen.get(value);
+  if (existing !== undefined) {
+    return existing as T;
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return value.slice(0) as T;
+  }
+
+  if (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer) {
+    throw new TypeError('Task metadata cannot contain SharedArrayBuffer values');
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    const copiedBuffer = bytes.slice().buffer;
+    if (value instanceof DataView) {
+      return new DataView(copiedBuffer) as T;
+    }
+    const TypedArray = value.constructor as new (buffer: ArrayBuffer) => ArrayBufferView;
+    return new TypedArray(copiedBuffer) as T;
+  }
+
+  if (Array.isArray(value)) {
+    const clone: unknown[] = [];
+    seen.set(value, clone);
+    for (const item of value) {
+      clone.push(cloneUnknown(item, seen));
+    }
+    return clone as T;
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime()) as T;
+  }
+
+  if (value instanceof RegExp) {
+    const clone = new RegExp(value.source, value.flags);
+    clone.lastIndex = value.lastIndex;
+    return clone as T;
+  }
+
+  if (value instanceof Set) {
+    const clone = new Set<unknown>();
+    seen.set(value, clone);
+    for (const item of value) {
+      clone.add(cloneUnknown(item, seen));
+    }
+    return clone as T;
+  }
+
+  if (value instanceof Map) {
+    const clone = new Map<unknown, unknown>();
+    seen.set(value, clone);
+    for (const [key, mapValue] of value) {
+      clone.set(cloneUnknown(key, seen), cloneUnknown(mapValue, seen));
+    }
+    return clone as T;
+  }
+
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError('Task metadata contains an unsupported mutable object');
+  }
+
+  const clone: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  seen.set(value, clone);
+  for (const [key, objectValue] of Object.entries(value as Record<string, unknown>)) {
+    Object.defineProperty(clone, key, {
+      value: cloneUnknown(objectValue, seen),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return clone as T;
+}
+
+function cloneTask(task: Task): Task {
+  const cloned: Task = {
+    ...task,
+    requiredSkills: [...task.requiredSkills],
+    dependsOn: [...task.dependsOn],
+  };
+  if (task.metadata !== undefined) {
+    cloned.metadata = cloneUnknown(task.metadata);
+  }
+  return cloned;
+}
+
+function cloneTaskMap(nodes: ReadonlyMap<TaskId, Task>): Map<TaskId, Task> {
+  const cloned = new Map<TaskId, Task>();
+  for (const [id, task] of nodes) {
+    cloned.set(id, cloneTask(task));
+  }
+  return cloned;
+}
+
+function cloneEdgeMap(edges: ReadonlyMap<TaskId, ReadonlySet<TaskId>>): Map<TaskId, Set<TaskId>> {
+  const cloned = new Map<TaskId, Set<TaskId>>();
+  for (const [id, deps] of edges) {
+    cloned.set(id, new Set(deps));
+  }
+  return cloned;
+}
+
 export class PlanGraph {
+  private readonly _nodes: ReadonlyMap<TaskId, Task>;
+  private readonly _edges: ReadonlyMap<TaskId, ReadonlySet<TaskId>>;
+
   private constructor(
-    private readonly _nodes: ReadonlyMap<TaskId, Task>,
-    private readonly _edges: ReadonlyMap<TaskId, ReadonlySet<TaskId>>,
+    nodes: ReadonlyMap<TaskId, Task>,
+    edges: ReadonlyMap<TaskId, ReadonlySet<TaskId>>,
     readonly version: number,
     readonly reason: string
-  ) {}
+  ) {
+    this._nodes = cloneTaskMap(nodes);
+    this._edges = cloneEdgeMap(edges);
+  }
 
   // ─── Factories ─────────────────────────────────────────────────────────────
 
@@ -96,11 +217,12 @@ export class PlanGraph {
   // ─── Queries ───────────────────────────────────────────────────────────────
 
   getTask(taskId: TaskId): Task | undefined {
-    return this._nodes.get(taskId);
+    const task = this._nodes.get(taskId);
+    return task === undefined ? undefined : cloneTask(task);
   }
 
   getTasks(): Task[] {
-    return Array.from(this._nodes.values());
+    return Array.from(this._nodes.values(), cloneTask);
   }
 
   getDependencies(taskId: TaskId): TaskId[] {
@@ -130,7 +252,7 @@ export class PlanGraph {
         `Graph contains a cycle — ${this._nodes.size - sorted.length} task(s) unresolvable`
       );
     }
-    return sorted.map((id) => this._nodes.get(id) as Task);
+    return sorted.map((id) => cloneTask(this._nodes.get(id) as Task));
   }
 
   // ─── Mutations (all return new PlanGraph — immutable) ──────────────────────
@@ -145,7 +267,7 @@ export class PlanGraph {
       }
     }
     const newNodes = new Map(this._nodes);
-    newNodes.set(task.id, task);
+    newNodes.set(task.id, { ...task, dependsOn: [...dependsOn] });
     const newEdges = new Map(this._edges);
     newEdges.set(task.id, new Set(dependsOn));
     return new PlanGraph(newNodes, newEdges, this.version, this.reason);
@@ -163,6 +285,10 @@ export class PlanGraph {
       const cleaned = new Set(deps);
       cleaned.delete(taskId);
       newEdges.set(id, cleaned);
+      const task = newNodes.get(id);
+      if (task) {
+        newNodes.set(id, { ...task, dependsOn: [...cleaned] });
+      }
     }
     return new PlanGraph(newNodes, newEdges, this.version, this.reason);
   }
@@ -186,8 +312,12 @@ export class PlanGraph {
       return { ...task, dependsOn: this.getDependencies(task.id) };
     });
 
+    const fixTaskDependencies = [
+      ...new Set([...this.getDependencies(failedTaskId), ...fixTask.dependsOn]),
+    ];
+
     return PlanGraph.fromTasks(
-      [...tasks, { ...fixTask, dependsOn: this.getDependencies(failedTaskId) }],
+      [...tasks, { ...fixTask, dependsOn: fixTaskDependencies }],
       {
         version: this.version + 1,
         reason: `recovery: fix-it injected before '${failedTaskId}'`,

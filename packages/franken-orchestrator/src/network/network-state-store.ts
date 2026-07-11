@@ -1,5 +1,6 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { atomicWriteFileSync, readJsonFileOrQuarantine } from '../session/atomic-file.js';
 
 export interface ManagedNetworkServiceState {
   id: string;
@@ -29,20 +30,12 @@ export class NetworkStateStore {
   constructor(private readonly filePath: string) {}
 
   async load(): Promise<NetworkOperatorState | undefined> {
-    try {
-      const raw = await readFile(this.filePath, 'utf-8');
-      return JSON.parse(raw) as NetworkOperatorState;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return undefined;
-      }
-      throw error;
-    }
+    return readJsonFileOrQuarantine<NetworkOperatorState>(this.filePath);
   }
 
   async save(state: NetworkOperatorState): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(state, null, 2), 'utf-8');
+    atomicWriteFileSync(this.filePath, JSON.stringify(state, null, 2));
   }
 
   async clear(): Promise<void> {

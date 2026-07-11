@@ -7,11 +7,19 @@ import {
   type TokenTotals,
   type TranscriptMessage,
 } from '../lib/api';
-import { deterministicUuid, isoNow, seededRandom } from '@franken/types';
+import {
+  ServerSocketEventSchema,
+  type ServerSocketEvent,
+  deterministicUuid,
+  isoNow,
+  seededRandom,
+} from '@franken/types';
 
 export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'offline' | 'error';
 export type MessageReceipt = 'sending' | 'accepted' | 'delivered' | 'read' | 'failed';
+export type CostTelemetryStatus = 'available' | 'unavailable';
+export type TokenTelemetryStatus = 'available' | 'unavailable';
 
 export type ChatErrorAction = 'retry-session' | 'reconnect' | 'retry-message' | 'dismiss';
 
@@ -56,6 +64,8 @@ export interface UseChatSessionResult {
   approvalResolving: boolean;
   connectionStatus: ConnectionStatus;
   costUsd: number;
+  costTelemetryStatus: CostTelemetryStatus;
+  tokenTelemetryStatus: TokenTelemetryStatus;
   clearedFailedDraft?: { content: string; nonce: number };
   dismissError: (id: string) => void;
   errorBanners: ChatErrorBanner[];
@@ -74,68 +84,6 @@ export interface UseChatSessionResult {
   tokenTotals: TokenTotals;
 }
 
-type ServerSocketEvent =
-  | {
-    type: 'session.ready';
-    sessionId: string;
-    projectId: string;
-    transcript: TranscriptMessage[];
-    state: string;
-    pendingApproval?: PendingApproval | null;
-  }
-  | {
-    type: 'message.accepted' | 'message.delivered';
-    clientMessageId: string;
-    timestamp: string;
-  }
-  | {
-    type: 'message.read';
-    clientMessageId?: string;
-    messageId?: string;
-    timestamp: string;
-  }
-  | { type: 'assistant.typing.start'; timestamp: string }
-  | {
-    type: 'assistant.message.delta';
-    messageId: string;
-    chunk: string;
-    modelTier?: string;
-  }
-  | {
-    type: 'assistant.message.complete';
-    messageId: string;
-    content: string;
-    modelTier?: string;
-    timestamp: string;
-  }
-  | {
-    type: 'turn.execution.start' | 'turn.execution.progress' | 'turn.execution.complete';
-    data?: Record<string, unknown>;
-    timestamp: string;
-  }
-  | {
-    type: 'turn.approval.requested';
-    description: string;
-    timestamp: string;
-    tool?: string;
-    command?: string;
-    risk?: string;
-    affectedFiles?: string[];
-    sessionId?: string;
-  }
-  | {
-    type: 'turn.approval.resolved';
-    approved: boolean;
-    timestamp: string;
-  }
-  | {
-    type: 'turn.error';
-    code: string;
-    message: string;
-    timestamp: string;
-  }
-  | { type: 'pong'; timestamp: string };
-
 const EMPTY_TOKEN_TOTALS: TokenTotals = {
   cheap: 0,
   premiumReasoning: 0,
@@ -148,6 +96,10 @@ interface PendingSend {
   timeoutId: ReturnType<typeof setTimeout>;
   resolve: () => void;
   reject: (error: Error) => void;
+}
+
+class NonRetryableSendError extends Error {
+  readonly retryableSend = false;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -278,6 +230,24 @@ function applySessionSnapshot(session: ChatSession): ChatMessage[] {
   return normalizeTranscript(session.transcript);
 }
 
+function sessionHasTokenTelemetry(session: ChatSession): boolean {
+  if (session.tokenTotals.cheap > 0
+    || session.tokenTotals.premiumReasoning > 0
+    || session.tokenTotals.premiumExecution > 0) {
+    return true;
+  }
+
+  return session.transcript.some((message) => message.tokens !== undefined);
+}
+
+function sessionHasCostTelemetry(session: ChatSession): boolean {
+  if (session.costUsd > 0) {
+    return true;
+  }
+
+  return session.transcript.some((message) => message.costUsd !== undefined);
+}
+
 function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): ChatMessage[] {
   const snapshot = applySessionSnapshot(session);
   const snapshotById = new Map(snapshot.map((message) => [message.id, message]));
@@ -346,10 +316,14 @@ function preserveLocalRecoveryMessages(
     }
 
     if (consumeSnapshotMatch(message)) {
-      if (message.role === 'user' && message.receipt === 'failed') {
+      if (message.role === 'user' && (message.receipt === 'failed' || (message.receipt === 'accepted' && message.canRetry === false))) {
         clearedFailedDrafts.push(message.content);
       }
       return [];
+    }
+
+    if (message.role === 'user' && message.receipt === 'accepted' && message.canRetry === false) {
+      return [message];
     }
 
     if (message.role !== 'user' || !message.receipt || message.canRetry === false) {
@@ -381,6 +355,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [approvalResolving, setApprovalResolving] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [costUsd, setCostUsd] = useState(0);
+  const [costTelemetryStatus, setCostTelemetryStatus] = useState<CostTelemetryStatus>('unavailable');
+  const [tokenTelemetryStatus, setTokenTelemetryStatus] = useState<TokenTelemetryStatus>('unavailable');
   const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
@@ -481,6 +457,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setSessionState(refreshed.state);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
+        setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+        setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
         setStatus('idle');
         setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
@@ -535,6 +513,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setTier(null);
     setTokenTotals(EMPTY_TOKEN_TOTALS);
     setCostUsd(0);
+    setCostTelemetryStatus('unavailable');
+    setTokenTelemetryStatus('unavailable');
     setErrorBanners([]);
     errorActionRef.current.clear();
     setStatus('connecting');
@@ -560,6 +540,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setPendingApproval(session.pendingApproval ?? null);
         setTokenTotals(session.tokenTotals);
         setCostUsd(session.costUsd);
+        setCostTelemetryStatus(sessionHasCostTelemetry(session) ? 'available' : 'unavailable');
+        setTokenTelemetryStatus(sessionHasTokenTelemetry(session) ? 'available' : 'unavailable');
         setStatus('idle');
       } catch (error) {
         if (!cancelled) {
@@ -610,6 +592,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     let shouldReconnect = true;
     let reconnectRefreshInFlight = false;
+    let protocolErrored = false;
     setConnectionStatus('connecting');
     readyRef.current = false;
 
@@ -619,6 +602,33 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       }
       reconnectRefreshInFlight = true;
       refreshSession();
+    }
+
+    function handleProtocolError(message: string) {
+      protocolErrored = true;
+      shouldReconnect = false;
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
+      try {
+        socket.close();
+      } catch {
+        // Ignore close failures; the protocol-error banner already tells the user how to recover.
+      }
+      setStatus('error');
+      setConnectionStatus('error');
+      failAllPendingSends(new Error(message));
+      if (approvalResolvingRef.current) {
+        updateApprovalResolving(false);
+        setApprovalError('The chat server sent an invalid response while resolving approval. Try again if approval is still pending.');
+      }
+      addErrorBanner(makeBanner(
+        'Chat protocol error',
+        message,
+        'reconnect',
+        'Reconnect chat',
+        'invalid_socket_event',
+      ));
     }
 
     const socket = new WebSocket(
@@ -633,13 +643,27 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     };
 
     socket.onmessage = (event) => {
-      let payload: ServerSocketEvent;
-
-      try {
-        payload = JSON.parse(event.data as string) as ServerSocketEvent;
-      } catch {
+      if (protocolErrored) {
         return;
       }
+
+      let decoded: unknown;
+
+      try {
+        decoded = JSON.parse(event.data as string);
+      } catch {
+        handleProtocolError('The chat server sent invalid JSON over the WebSocket. Reconnect to refresh the session state.');
+        return;
+      }
+
+      const parsed = ServerSocketEventSchema.safeParse(decoded);
+      if (!parsed.success) {
+        const detail = parsed.error.issues[0]?.message ?? 'The event did not match the expected schema.';
+        handleProtocolError(`The chat server sent an invalid event: ${detail}`);
+        return;
+      }
+
+      const payload = parsed.data;
 
       switch (payload.type) {
         case 'session.ready':
@@ -875,6 +899,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setStatus('sending');
 
     if (!optimisticAdd) {
+      let fallbackRefreshError: Error | null = null;
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
         if (!sessionStillCurrent(sessionId)) {
@@ -895,23 +920,30 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setSessionState(refreshed.state);
           setTokenTotals(refreshed.tokenTotals);
           setCostUsd(refreshed.costUsd);
+          setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+          setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
           setStatus('idle');
         } catch (error) {
           if (!sessionStillCurrent(sessionId)) {
             return;
           }
+          const refreshMessage = errorMessage(
+            error,
+            'The fallback chat request completed, but the updated transcript could not be loaded.',
+          );
           setMessages((current) => [
             ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
-            { ...optimisticMessage, receipt: 'accepted' },
+            { ...optimisticMessage, receipt: 'accepted', canRetry: false },
           ]);
           addErrorBanner(makeBanner(
             'Message sent; refresh failed',
-            errorMessage(error, 'The message was accepted, but the updated transcript could not be loaded.'),
+            refreshMessage,
             'retry-session',
             'Refresh chat',
             'session_refresh_failed',
           ));
           setStatus('idle');
+          fallbackRefreshError = new NonRetryableSendError(refreshMessage);
         }
       } catch (error) {
         if (!sessionStillCurrent(sessionId)) {
@@ -926,6 +958,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             setSessionState(refreshed.state);
             setTokenTotals(refreshed.tokenTotals);
             setCostUsd(refreshed.costUsd);
+            setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+            setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
           }
         } catch {
           // Preserve the original send failure while keeping the draft retryable.
@@ -946,6 +980,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         ));
         setStatus('error');
         throw sendError;
+      }
+      if (fallbackRefreshError) {
+        throw fallbackRefreshError;
       }
       return;
     }
@@ -1021,6 +1058,8 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         ]);
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
+        setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+        setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
         updateApprovalResolving(false);
         setApprovalError(null);
         setStatus('idle');
@@ -1053,6 +1092,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     clearedFailedDraft,
     connectionStatus,
     costUsd,
+    costTelemetryStatus,
     dismissError,
     errorBanners,
     messages,
@@ -1067,6 +1107,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     showTypingIndicator,
     status,
     tier,
+    tokenTelemetryStatus,
     tokenTotals,
   };
 }

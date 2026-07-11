@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { SessionToken } from '../../../src/core/types.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
 
@@ -73,6 +74,19 @@ describe('SessionTokenStore', () => {
     store.store(token);
     vi.advanceTimersByTime(2000);
 
+    expect(store.isValid(token.tokenId)).toBe(false);
+  });
+
+  it('treats invalid expiresAt dates as expired', () => {
+    const store = new SessionTokenStore();
+    const token: SessionToken = {
+      ...makeToken(10_000),
+      expiresAt: new Date(Number.NaN),
+    };
+
+    store.store(token);
+
+    expect(store.get(token.tokenId)).toBeUndefined();
     expect(store.isValid(token.tokenId)).toBe(false);
   });
 

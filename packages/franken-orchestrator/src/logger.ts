@@ -37,7 +37,9 @@ export class ConsoleLogger implements ILogger {
   }
 
   warn(msg: string, _data?: unknown): void {
-    console.warn(formatLine('[beast:warn]', msg));
+    // Keep generic orchestrator warnings on the shared info stream so routine
+    // status messages stay visible without triggering noisy stderr/console.warn alerts.
+    printLine(formatLine('[beast:warn]', msg));
   }
 
   error(msg: string, _data?: unknown): void {

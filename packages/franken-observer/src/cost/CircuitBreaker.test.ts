@@ -102,6 +102,32 @@ describe('CircuitBreaker', () => {
       expect(() => breaker.check(999)).not.toThrow()
     })
 
+    it('isolates handler failures and still returns the trip result', () => {
+      breaker.on('limit-reached', () => {
+        throw new Error('webhook failed')
+      })
+
+      expect(() => breaker.check(0.51)).not.toThrow()
+      expect(breaker.check(0.60)).toEqual({ tripped: true, limitUsd: 0.50, spendUsd: 0.60 })
+    })
+
+    it('attempts later handlers after an earlier limit-reached handler throws', () => {
+      const throwingHandler = vi.fn(() => {
+        throw new Error('webhook failed')
+      })
+      const laterHandler = vi.fn()
+
+      breaker.on('limit-reached', throwingHandler)
+      breaker.on('limit-reached', laterHandler)
+
+      expect(() => breaker.check(0.51)).not.toThrow()
+      expect(throwingHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ tripped: true, limitUsd: 0.50, spendUsd: 0.51 }),
+      )
+    })
+
     it('continues returning results after trip', () => {
       breaker.check(1.00)
       const result = breaker.check(2.00)

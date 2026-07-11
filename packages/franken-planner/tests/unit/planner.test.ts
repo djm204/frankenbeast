@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Planner } from '../../src/planner';
 import { LinearPlanner } from '../../src/planners/linear';
+import { RecursivePlanner } from '../../src/planners/recursive';
 import { StubHITLGate } from '../../src/hitl/stub-hitl-gate';
 import { RecoveryController } from '../../src/recovery/recovery-controller';
 import { PlanGraph } from '../../src/core/dag';
@@ -365,6 +366,64 @@ describe('Planner — self-correction loop', () => {
     const result = await planner.plan('do something');
 
     expect(result.status).toBe('failed');
+  });
+
+  it('recovers failed dynamic sub-tasks within their recursive sub-graph', async () => {
+    const setup = makeTask('setup');
+    const parent = makeTask('parent');
+    const child = makeTask('child');
+    const sibling = makeTask('sibling');
+    const graph = PlanGraph.empty().addTask(setup).addTask(parent).addTask(sibling);
+    const executedTaskIds: TaskId[] = [];
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      executedTaskIds.push(task.id);
+      if (task.id === createTaskId('parent')) {
+        return Promise.resolve(expand('parent', [child]));
+      }
+      if (task.id === createTaskId('child') && !executedTaskIds.includes(createTaskId('fix-child-attempt-1'))) {
+        return Promise.resolve(failure('child', 'disk full'));
+      }
+      return Promise.resolve(success(task.id));
+    });
+    const recovery = {
+      recover: vi.fn(async (failedTaskId: TaskId, _err: Error, recoveryGraph: PlanGraph, attempt: number) => {
+        const fixTask: Task = {
+          id: createTaskId(`fix-${failedTaskId}-attempt-${attempt}`),
+          objective: `Fix ${failedTaskId}`,
+          requiredSkills: [],
+          dependsOn: [],
+          status: 'pending',
+        };
+        return recoveryGraph.insertFixItTask(failedTaskId, fixTask);
+      }),
+    };
+
+    const { planner } = buildPlanner({ graph, executor, recovery, strategy: new RecursivePlanner() });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('completed');
+    expect(recovery.recover).toHaveBeenCalledWith(
+      createTaskId('child'),
+      expect.any(Error),
+      expect.objectContaining({ reason: 'recursive expansion' }),
+      1
+    );
+    expect(executedTaskIds).toEqual([
+      createTaskId('setup'),
+      createTaskId('parent'),
+      createTaskId('child'),
+      createTaskId('fix-child-attempt-1'),
+      createTaskId('child'),
+      createTaskId('sibling'),
+    ]);
+    if (result.status !== 'completed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('setup'),
+      createTaskId('parent'),
+      createTaskId('fix-child-attempt-1'),
+      createTaskId('child'),
+      createTaskId('sibling'),
+    ]);
   });
 });
 

@@ -18,8 +18,10 @@
   },
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:live": "npm run build && FBEAST_LIVE_BENCH_E2E=1 vitest run tests/live",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
@@ -38,5 +40,12 @@
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "frankenbeast",
+    "benchmark",
+    "codex",
+    "gemini",
+    "mcp"
+  ]
 }
