@@ -398,6 +398,28 @@ describe('provider CLI availability preflight', () => {
       },
     })).toBe('gemini');
   });
+
+  it('preflights the plan-build provider override for planning runs', () => {
+    expect(resolveEffectivePreflightProvider('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+          'plan-build': { provider: 'prod-claude' },
+        },
+      },
+    }, 'plan')).toBe('prod-claude');
+  });
+
+  it('normalizes custom consolidated providers before CLI availability preflight', () => {
+    const report = checkProviderCliAvailability('prod-claude', [], {}, [
+      { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+    ] as never);
+
+    expect(report[0]?.provider).toBe('prod-claude');
+    expect(report[0]?.command).toBe('claude');
+  });
 });
 
 describe('dashboard provider snapshots', () => {

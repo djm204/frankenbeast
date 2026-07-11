@@ -244,12 +244,15 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
   const effectiveModules = options.runConfig?.modules ?? options.enabledModules;
   const defaultTarget = options.runConfig?.llmConfig?.default;
   const executionOverride = options.runConfig?.llmConfig?.overrides?.['cli-session'];
+  const topLevelProvider = options.runConfig?.provider;
   const baseProvider = defaultTarget?.provider
-    ?? options.runConfig?.provider
+    ?? topLevelProvider
     ?? options.provider;
-  const baseModel = defaultTarget !== undefined
+  const baseModel = defaultTarget?.model !== undefined
     ? defaultTarget.model
-    : options.runConfig?.model;
+    : defaultTarget?.provider !== undefined && defaultTarget.provider !== topLevelProvider
+      ? undefined
+      : options.runConfig?.model;
   const executionProvider = executionOverride?.provider;
   return {
     provider: executionProvider ?? baseProvider,
@@ -517,9 +520,16 @@ function createLlmDeps(
   );
 
   const byOperation = new Map<string, CachedLlmLike>();
+  const defaultTarget = options.runConfig?.llmConfig?.default;
+  const operationBaseProvider = defaultTarget?.provider ?? options.runConfig?.provider ?? config.provider;
+  const operationBaseModel = defaultTarget?.model !== undefined
+    ? defaultTarget.model
+    : defaultTarget?.provider !== undefined && defaultTarget.provider !== options.runConfig?.provider
+      ? undefined
+      : options.runConfig?.model ?? config.model;
   for (const [operation, override] of Object.entries(config.llmOverrides ?? {})) {
-    const operationProvider = override.provider ?? config.provider;
-    const operationModel = override.model ?? (operationProvider === config.provider ? config.model : undefined);
+    const operationProvider = override.provider ?? operationBaseProvider;
+    const operationModel = override.model ?? (operationProvider === operationBaseProvider ? operationBaseModel : undefined);
     byOperation.set(operation, createCachedCliLlmClient(
       options,
       operationProvider,

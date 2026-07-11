@@ -381,6 +381,28 @@ describe('dep-factory provider wiring', () => {
     );
   });
 
+  it('preserves top-level model fallback when llmConfig.default only restates the same provider', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        provider: 'codex',
+        objective: 'Fallback model compatibility',
+        model: 'gpt-5',
+        llmConfig: {
+          default: { provider: 'codex' },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'codex' }),
+      expect.objectContaining({ model: 'gpt-5' }),
+    );
+  });
+
   it('routes cli-session overrides into the Martin execution provider without carrying stale default models', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
@@ -404,6 +426,33 @@ describe('dep-factory provider wiring', () => {
       expect.objectContaining({ name: 'claude' }),
       expect.not.objectContaining({ model: 'gpt-5.3-codex-spark' }),
     );
+  });
+
+  it('providerless operation overrides inherit the default target instead of the execution provider', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        objective: 'Operation override inherits default provider',
+        provider: 'codex',
+        model: 'gpt-5.3-codex-spark',
+        llmConfig: {
+          default: { provider: 'codex' },
+          overrides: {
+            'cli-session': { provider: 'claude' },
+            'plan-build': { model: 'gpt-5' },
+          },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCachedCliLlmClient).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'plan-build',
+      provider: 'codex',
+      model: 'gpt-5',
+    }));
   });
 
   it('keeps built-in cli skills available when the skills module is disabled', async () => {
