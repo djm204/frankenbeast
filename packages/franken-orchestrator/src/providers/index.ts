@@ -2,7 +2,20 @@ export { ProviderRegistry } from './provider-registry.js';
 export type { ProviderRegistryOptions } from './provider-registry.js';
 export { TokenAggregator } from './token-aggregator.js';
 export type { AggregatedTokenUsage } from './token-aggregator.js';
-export { formatHandoff, truncateSnapshot } from './format-handoff.js';
+export {
+  PM_HANDOFF_QUALITY_RUBRIC,
+  formatHandoff,
+  formatPmHandoffQualityRubric,
+  scorePmHandoffQuality,
+  truncateSnapshot,
+} from './format-handoff.js';
+export type {
+  PmHandoffQualityCriterionResult,
+  PmHandoffQualityReport,
+  PmHandoffRubricCriterion,
+  PmHandoffRubricCriterionId,
+  PmHandoffSummary,
+} from './format-handoff.js';
 export { ClaudeCliAdapter } from './claude-cli-adapter.js';
 export type { ClaudeCliOptions } from './claude-cli-adapter.js';
 export { CodexCliAdapter } from './codex-cli-adapter.js';

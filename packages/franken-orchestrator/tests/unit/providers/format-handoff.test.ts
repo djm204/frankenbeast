@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import type { BrainSnapshot } from '@franken/types';
-import { formatHandoff, truncateSnapshot } from '../../../src/providers/format-handoff.js';
+import {
+  PM_HANDOFF_QUALITY_RUBRIC,
+  formatHandoff,
+  formatPmHandoffQualityRubric,
+  scorePmHandoffQuality,
+  truncateSnapshot,
+} from '../../../src/providers/format-handoff.js';
 
 function makeSnapshot(overrides: Partial<BrainSnapshot> = {}): BrainSnapshot {
   return {
@@ -70,6 +76,54 @@ describe('formatHandoff', () => {
     const text = formatHandoff(makeSnapshot());
     expect(text).toMatch(/^--- BRAIN STATE HANDOFF ---/);
     expect(text).toMatch(/--- END HANDOFF ---$/);
+  });
+
+  it('includes the PM handoff quality rubric for worker continuity', () => {
+    const text = formatHandoff(makeSnapshot());
+    expect(text).toContain('PM handoff quality rubric:');
+    expect(text).toContain('issue-and-outcome: Name the issue number');
+    expect(text).toContain('verification-evidence: Include exact commands');
+    expect(text).toContain('blocker-disclosure: State blockers explicitly');
+  });
+});
+
+describe('PM handoff quality rubric', () => {
+  it('formats deterministic rubric guidance for operator-facing handoffs', () => {
+    const text = formatPmHandoffQualityRubric();
+    for (const criterion of PM_HANDOFF_QUALITY_RUBRIC) {
+      expect(text).toContain(criterion.id);
+      expect(text).toContain(criterion.guidance);
+    }
+  });
+
+  it('scores a complete handoff as passing', () => {
+    const report = scorePmHandoffQuality({
+      issueNumber: 1862,
+      branch: 'pfkborg/issue-1862-feat-learning-add-pm-handoff-quality',
+      prUrl: 'https://github.com/djm204/frankenbeast/pull/1',
+      changedFiles: ['packages/franken-orchestrator/src/providers/format-handoff.ts'],
+      verificationCommands: ['npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts'],
+      blockers: [],
+      scopeNotes: ['Added PM handoff quality rubric and scorer.'],
+      diskFree: '24G',
+    });
+
+    expect(report.passed).toBe(true);
+    expect(report.score).toBe(1);
+    expect(report.failedCriteria).toEqual([]);
+  });
+
+  it('reports explicit failures for incomplete handoffs', () => {
+    const report = scorePmHandoffQuality({
+      issueNumber: 1862,
+      branch: 'pfkborg/issue-1862-feat-learning-add-pm-handoff-quality',
+      scopeNotes: ['Missing verification and blocker disclosure.'],
+    });
+
+    expect(report.passed).toBe(false);
+    expect(report.failedCriteria).toContain('verification-evidence');
+    expect(report.failedCriteria).toContain('blocker-disclosure');
+    expect(report.failedCriteria).toContain('operator-continuity');
   });
 });
 
