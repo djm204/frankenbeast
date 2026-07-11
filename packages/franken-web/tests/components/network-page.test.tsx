@@ -400,6 +400,13 @@ describe('NetworkPage', () => {
     expect(onSelectLogService).toHaveBeenCalledWith('chat-server');
     expect(screen.queryByRole('option', { name: 'orphan-in-process (running)' })).toBeNull();
     expect(screen.getByRole('option', { name: 'comms-gateway (running)' })).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'View logs for dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View logs for comms-gateway' }));
+
+    expect(onSelectLogService).toHaveBeenCalledWith('dashboard');
+    expect(onSelectLogService).toHaveBeenCalledWith('comms-gateway');
+    expect(screen.queryByRole('button', { name: 'View logs for orphan-in-process' })).toBeNull();
   });
 
   it('upgrades network logs into a searchable operational viewer', () => {

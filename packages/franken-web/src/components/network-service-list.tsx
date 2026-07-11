@@ -6,11 +6,13 @@ interface NetworkServiceItem {
   explanation?: string;
   url?: string;
   inProcess?: boolean;
+  hostServiceId?: string;
   channels?: Record<string, boolean>;
 }
 
 interface NetworkServiceListProps {
   services: NetworkServiceItem[];
+  onSelectLogs(serviceId: string): void;
   onStart(serviceId: string): Promise<void> | void;
   onStop(serviceId: string): Promise<void> | void;
   onRestart(serviceId: string): Promise<void> | void;
@@ -43,8 +45,13 @@ function canStopOrRestartService(service: NetworkServiceItem): boolean {
   return !service.inProcess && (status === 'running' || status === 'stale');
 }
 
+function canViewServiceLogs(service: NetworkServiceItem): boolean {
+  return !service.inProcess || Boolean(service.hostServiceId);
+}
+
 export function NetworkServiceList({
   services,
+  onSelectLogs,
   onStart,
   onStop,
   onRestart,
@@ -123,6 +130,16 @@ export function NetworkServiceList({
               )}
             </div>
             <div className="network-services__actions">
+              {canViewServiceLogs(service) ? (
+                <button
+                  aria-label={`View logs for ${service.id}`}
+                  className="button button--secondary button--small"
+                  onClick={() => onSelectLogs(service.id)}
+                  type="button"
+                >
+                  View logs
+                </button>
+              ) : null}
               <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'start', onStart)} aria-label={`Start ${service.id}`} disabled={startDisabled}>Start</button>
               <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'stop', onStop)} aria-label={`Stop ${service.id}`} disabled={stopOrRestartDisabled}>Stop</button>
               <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'restart', onRestart)} aria-label={`Restart ${service.id}`} disabled={stopOrRestartDisabled}>Restart</button>

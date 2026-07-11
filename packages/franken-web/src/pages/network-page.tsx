@@ -54,6 +54,7 @@ export function NetworkPage({
           <NetworkStatusGrid mode={status.mode} secureBackend={status.secureBackend} />
           <NetworkServiceList
             services={services}
+            onSelectLogs={onSelectLogService}
             onRestart={onRestart}
             onStart={onStart}
             onStop={onStop}
