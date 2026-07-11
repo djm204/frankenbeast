@@ -14,6 +14,13 @@ export interface BeastInterviewProgress {
   readonly config?: Readonly<Record<string, unknown>> | undefined;
 }
 
+export class UnknownBeastInterviewSessionError extends Error {
+  constructor(public readonly sessionId: string) {
+    super(`Unknown Beast interview session: ${sessionId}`);
+    this.name = 'UnknownBeastInterviewSessionError';
+  }
+}
+
 export class BeastInterviewService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -37,7 +44,7 @@ export class BeastInterviewService {
   resume(sessionId: string): BeastInterviewProgress {
     const session = this.repository.getInterviewSession(sessionId);
     if (!session) {
-      throw new Error(`Unknown Beast interview session: ${sessionId}`);
+      throw new UnknownBeastInterviewSessionError(sessionId);
     }
 
     const definition = this.getDefinitionOrThrow(session.definitionId);
@@ -60,7 +67,7 @@ export class BeastInterviewService {
   answer(sessionId: string, answer: string): BeastInterviewProgress {
     const session = this.repository.getInterviewSession(sessionId);
     if (!session) {
-      throw new Error(`Unknown Beast interview session: ${sessionId}`);
+      throw new UnknownBeastInterviewSessionError(sessionId);
     }
 
     const definition = this.getDefinitionOrThrow(session.definitionId);

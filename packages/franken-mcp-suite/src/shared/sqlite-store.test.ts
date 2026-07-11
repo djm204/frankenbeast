@@ -101,4 +101,32 @@ describe('SqliteStore', () => {
 
     store.close();
   });
+
+  it('blocks audit_trail mutation unless explicitly unlocked for migration', () => {
+    const dbPath = tracked(tmpDbPath());
+    const store = createSqliteStore(dbPath);
+
+    store.db
+      .prepare('INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash) VALUES (?, ?, ?, ?, ?)')
+      .run('session-immutable', 'tool_call', 'payload', 'sha256:0', null);
+
+    expect(() => {
+      store.db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run('tampered', 'session-immutable');
+    }).toThrowError(/append-only/i);
+
+    expect(() => {
+      store.db.prepare('DELETE FROM audit_trail WHERE session_id = ?').run('session-immutable');
+    }).toThrowError(/append-only/i);
+
+    store.setAuditTrailMutationEnabled(true);
+    expect(() => {
+      store.db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run('tampered', 'session-immutable');
+    }).not.toThrow();
+
+    expect(store.db.prepare('SELECT payload FROM audit_trail WHERE session_id = ?').get('session-immutable')).toMatchObject({
+      payload: 'tampered',
+    });
+
+    store.close();
+  });
 });

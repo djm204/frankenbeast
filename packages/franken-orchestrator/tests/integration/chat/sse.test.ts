@@ -136,6 +136,25 @@ describe('SSE Streaming', () => {
     expect(eventLines[eventLines.length - 1]).toContain('complete');
   });
 
+  it('closes approval-request streams after the terminal event without leaking TurnRunner listeners', async () => {
+    const sessionId = await createSession();
+    emitAfterDelay([
+      { type: 'approval_request', sessionId, data: { taskDescription: 'needs approval' } },
+      { type: 'complete', sessionId, data: { status: 'pending_approval' } },
+    ]);
+
+    const res = await app.request(`/v1/chat/sessions/${sessionId}/stream`);
+    const textPromise = res.text();
+
+    await expect(Promise.race([
+      textPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('SSE stream did not close')), 500)),
+    ])).resolves.toContain('event: complete');
+
+    expect(await textPromise).toContain('event: approval_request');
+    expect(turnRunner.listenerCount('event')).toBe(0);
+  });
+
   it('only forwards events for the requested session when two streams are open', async () => {
     const firstSessionId = await createSession();
     const secondSessionId = await createSession();

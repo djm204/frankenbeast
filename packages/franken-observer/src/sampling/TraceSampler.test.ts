@@ -63,6 +63,12 @@ describe('ProbabilisticSampler', () => {
   it('throws RangeError for probability > 1', () => {
     expect(() => new ProbabilisticSampler(1.1)).toThrow(RangeError)
   })
+
+  it('throws RangeError for non-finite probability values', () => {
+    expect(() => new ProbabilisticSampler(Number.NaN)).toThrow(RangeError)
+    expect(() => new ProbabilisticSampler(Number.POSITIVE_INFINITY)).toThrow(RangeError)
+    expect(() => new ProbabilisticSampler(Number.NEGATIVE_INFINITY)).toThrow(RangeError)
+  })
 })
 
 // ── RateLimitedSampler ───────────────────────────────────────────────────────
@@ -96,6 +102,43 @@ describe('RateLimitedSampler', () => {
     const results = Array.from({ length: 6 }, (_, i) => s.shouldSample(`t${i}`))
     expect(results.slice(0, 5).every(Boolean)).toBe(true)
     expect(results[5]).toBe(false)
+  })
+
+  it('throws RangeError when windowMs is zero', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: 0 })).toThrow(RangeError)
+  })
+
+  it('throws RangeError when windowMs is negative', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: -1 })).toThrow(RangeError)
+  })
+
+  it('throws RangeError when windowMs is not finite', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: Number.NaN })).toThrow(RangeError)
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1, windowMs: Number.POSITIVE_INFINITY })).toThrow(RangeError)
+  })
+
+  it('throws RangeError when maxPerWindow is not greater than zero', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 0, windowMs: 1000 })).toThrow(RangeError)
+    expect(() => new RateLimitedSampler({ maxPerWindow: -1, windowMs: 1000 })).toThrow(RangeError)
+  })
+
+  it('throws RangeError when maxPerWindow is not finite', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: Number.NaN, windowMs: 1000 })).toThrow(
+      RangeError,
+    )
+    expect(() =>
+      new RateLimitedSampler({ maxPerWindow: Number.POSITIVE_INFINITY, windowMs: 1000 }),
+    ).toThrow(RangeError)
+    expect(() =>
+      new RateLimitedSampler({ maxPerWindow: Number.NEGATIVE_INFINITY, windowMs: 1000 }),
+    ).toThrow(RangeError)
+  })
+
+  it('throws RangeError when maxPerWindow is not a safe integer', () => {
+    expect(() => new RateLimitedSampler({ maxPerWindow: 1.5, windowMs: 1000 })).toThrow(RangeError)
+    expect(() =>
+      new RateLimitedSampler({ maxPerWindow: Number.MAX_SAFE_INTEGER + 1, windowMs: 1000 }),
+    ).toThrow(RangeError)
   })
 })
 

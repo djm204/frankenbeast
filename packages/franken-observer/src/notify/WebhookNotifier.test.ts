@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { seededRandom } from '@franken/types'
 import { WebhookNotifier } from './WebhookNotifier.js'
 import { CircuitBreaker } from '../cost/CircuitBreaker.js'
 import { LoopDetector } from '../incident/LoopDetector.js'
@@ -182,7 +183,7 @@ describe('WebhookNotifier', () => {
         sleep: sleepFn,
       })
       await expect(notifier.send({ type: 'test' })).rejects.toThrow()
-      const delays = sleepFn.mock.calls.map(args => args[0] as number)
+      const delays = sleepFn.mock.calls.map((args: unknown[]) => args[0] as number)
       expect(delays[0]).toBe(100)  // 100 * 2^0
       expect(delays[1]).toBe(200)  // 100 * 2^1
       expect(delays[2]).toBe(400)  // 100 * 2^2
@@ -198,7 +199,7 @@ describe('WebhookNotifier', () => {
         sleep: sleepFn,
       })
       await expect(notifier.send({ type: 'test' })).rejects.toThrow()
-      const delays = sleepFn.mock.calls.map(args => args[0] as number)
+      const delays = sleepFn.mock.calls.map((args: unknown[]) => args[0] as number)
       expect(delays[0]).toBe(100)
       expect(delays[1]).toBe(200)
       expect(delays[2]).toBe(250) // capped
@@ -208,18 +209,18 @@ describe('WebhookNotifier', () => {
     it('clamps jittered delay at maxDelayMs', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
-      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.9)
+      const randomSpy = vi.spyOn(seededRandom, 'random').mockReturnValue(0.99)
       const notifier = new WebhookNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
-        retry: { maxRetries: 1, baseDelayMs: 100, maxDelayMs: 100, jitter: true },
+        retry: { maxRetries: 1, baseDelayMs: 200, maxDelayMs: 200, jitter: true },
         sleep: sleepFn,
       })
 
       try {
         await expect(notifier.send({ type: 'test' })).rejects.toThrow()
 
-        expect(sleepFn).toHaveBeenCalledWith(100)
+        expect(sleepFn).toHaveBeenCalledWith(200)
       } finally {
         randomSpy.mockRestore()
       }
@@ -301,7 +302,7 @@ describe('WebhookNotifier', () => {
         sleep: sleepFn,
       })
       await expect(notifier.send({ type: 'test' })).rejects.toThrow()
-      const delays = sleepFn.mock.calls.map(args => args[0] as number)
+      const delays = sleepFn.mock.calls.map((args: unknown[]) => args[0] as number)
       // With jitter each delay is base*2^i + random(0..base), so >= base*2^i and < 2*base*2^i
       expect(delays[0]).toBeGreaterThanOrEqual(100)
       expect(delays[0]).toBeLessThan(200)

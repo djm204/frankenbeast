@@ -36,6 +36,62 @@ function deferred<T = void>(): {
   return { promise, resolve, reject }
 }
 
+// ── options ───────────────────────────────────────────────────────────────────
+
+describe('BatchAdapter — options', () => {
+  it.each([
+    Number.NaN,
+    Infinity,
+    0,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])('rejects invalid maxBatchSize: %s', maxBatchSize => {
+    expect(() => new BatchAdapter({
+      adapter: new InMemoryAdapter(),
+      maxBatchSize,
+    })).toThrow(RangeError)
+  })
+
+  it.each([
+    Number.NaN,
+    Infinity,
+    0,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])('rejects invalid flushIntervalMs: %s', flushIntervalMs => {
+    const setIntervalFn = vi.fn()
+
+    expect(() => new BatchAdapter({
+      adapter: new InMemoryAdapter(),
+      flushIntervalMs,
+      setInterval: setIntervalFn,
+    })).toThrow(RangeError)
+    expect(setIntervalFn).not.toHaveBeenCalled()
+  })
+
+  it('accepts valid integer boundaries for batch size and timer options', async () => {
+    const inner = new InMemoryAdapter()
+    const setIntervalFn = vi.fn().mockReturnValue(42 as unknown as ReturnType<typeof globalThis.setInterval>)
+    const clearIntervalFn = vi.fn()
+    const batch = new BatchAdapter({
+      adapter: inner,
+      maxBatchSize: 1,
+      flushIntervalMs: 1,
+      setInterval: setIntervalFn,
+      clearInterval: clearIntervalFn,
+    })
+
+    await batch.flush(makeTrace('valid-boundary'))
+    expect(await inner.listTraceIds()).toEqual(['valid-boundary'])
+    expect(setIntervalFn).toHaveBeenCalledWith(expect.any(Function), 1)
+
+    await batch.stop()
+    expect(clearIntervalFn).toHaveBeenCalledWith(42)
+  })
+})
+
 // ── buffering ─────────────────────────────────────────────────────────────────
 
 describe('BatchAdapter — buffering', () => {
@@ -171,6 +227,36 @@ describe('BatchAdapter — drain()', () => {
 
     await expect(batch.drain()).rejects.toThrow('fast failure')
     expect(calls).toEqual(['fast-fail', 'slow-success', 'fast-fail'])
+  })
+
+  it('retains failed traces for retry without duplicating successful traces after partial drain failure', async () => {
+    const inner = new InMemoryAdapter()
+    const failedOnce = new Set<string>()
+    const calls: string[] = []
+    vi.spyOn(inner, 'flush').mockImplementation(async trace => {
+      calls.push(trace.id)
+      if (trace.id === 'retry-later' && !failedOnce.has(trace.id)) {
+        failedOnce.add(trace.id)
+        throw new Error('transient exporter failure')
+      }
+      await InMemoryAdapter.prototype.flush.call(inner, trace)
+    })
+    const batch = new BatchAdapter({ adapter: inner, maxBatchSize: 100 })
+
+    const alreadyPersisted = makeTrace('already-persisted')
+    const retryLater = makeTrace('retry-later')
+
+    await batch.flush(alreadyPersisted)
+    await batch.flush(retryLater)
+    await expect(batch.drain()).rejects.toThrow('transient exporter failure')
+
+    expect(await inner.listTraceIds()).toEqual(['already-persisted'])
+    expect(await batch.queryByTraceId('retry-later')).toEqual(retryLater)
+    expect((await batch.listTraceIds()).sort()).toEqual(['already-persisted', 'retry-later'])
+
+    await expect(batch.drain()).resolves.toBeUndefined()
+    expect((await inner.listTraceIds()).sort()).toEqual(['already-persisted', 'retry-later'])
+    expect(calls).toEqual(['already-persisted', 'retry-later', 'retry-later'])
   })
 
   it('does not fail a newly queued trace because an older drain rejects', async () => {
@@ -355,6 +441,17 @@ describe('BatchAdapter — stop()', () => {
     await expect(stopPromise).rejects.toThrow('old drain failed')
     expect(received).toEqual(['old', 'old', 'appended'])
     expect(await batch.listTraceIds()).toEqual(['old'])
+  })
+
+  it('retains shutdown traces when stop fails to flush them', async () => {
+    const batch = new BatchAdapter({ adapter: new FailingFlushAdapter(), maxBatchSize: 100 })
+    const trace = makeTrace('shutdown-retry')
+
+    await batch.flush(trace)
+    await expect(batch.stop()).rejects.toThrow('database temporarily locked')
+
+    expect(await batch.queryByTraceId('shutdown-retry')).toEqual(trace)
+    expect(await batch.listTraceIds()).toEqual(['shutdown-retry'])
   })
 
   it('does not call clearInterval when no timer was started', async () => {

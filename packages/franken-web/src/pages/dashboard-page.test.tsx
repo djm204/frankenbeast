@@ -56,6 +56,7 @@ describe('DashboardPage', () => {
     render(<DashboardPage client={client} />);
 
     expect((await screen.findByRole('alert')).textContent).toContain('Unable to load dashboard. HTTP 503');
+    expect(useDashboardStore.getState().loading).toBe(false);
     expect(screen.getByRole('button', { name: 'Retry loading dashboard' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry loading dashboard' }));

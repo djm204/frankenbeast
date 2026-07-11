@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { createAuditEvent, hashContent } from '@franken/observer';
 import { createObserverAdapter } from './observer-adapter.js';
+import { createSqliteStore } from '../shared/sqlite-store.js';
 
 function tmpDbPath(): string {
   const dir = join(tmpdir(), `fbeast-observer-${randomUUID()}`);
@@ -20,6 +21,17 @@ function legacy16(content: string): string {
 function legacy16AuditHash(metadata: string, parentHash?: string): string {
   const inputHash = `sha256:${createHash('sha256').update(metadata).digest('hex')}`;
   return parentHash ? legacy16(`${parentHash}:${inputHash}`) : inputHash.slice(0, 16);
+}
+
+function mutateAuditTrailDirectly(dbPath: string, mutation: (db: ReturnType<typeof createSqliteStore>['db']) => void): void {
+  const store = createSqliteStore(dbPath);
+  store.setAuditTrailMutationEnabled(true);
+  try {
+    mutation(store.db);
+  } finally {
+    store.setAuditTrailMutationEnabled(false);
+    store.close();
+  }
 }
 
 function fullAuditHash(sessionId: string, eventType: string, metadata: string, parentHash?: string): string {
@@ -125,9 +137,9 @@ describe('ObserverAdapter', () => {
     const observer = createObserverAdapter(dbPath);
 
     await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId: 'session-a' });
-    const db = new Database(dbPath);
-    db.prepare('UPDATE audit_trail SET session_id = ? WHERE session_id = ?').run('session-b', 'session-a');
-    db.close();
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare('UPDATE audit_trail SET session_id = ? WHERE session_id = ?').run('session-b', 'session-a');
+    });
 
     const verification = await observer.verify('session-b');
 
@@ -394,9 +406,9 @@ describe('ObserverAdapter', () => {
     const sessionId = randomUUID();
 
     await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId });
-    const db = new Database(dbPath);
-    db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run(JSON.stringify({ tool: 'memory', tampered: true }), sessionId);
-    db.close();
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run(JSON.stringify({ tool: 'memory', tampered: true }), sessionId);
+    });
 
     const verification = await observer.verify(sessionId);
 
@@ -410,9 +422,9 @@ describe('ObserverAdapter', () => {
     const sessionId = randomUUID();
 
     await observer.log({ event: 'tool_call', metadata: JSON.stringify({ tool: 'memory' }), sessionId });
-    const db = new Database(dbPath);
-    db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run('{ "tool": "memory" }', sessionId);
-    db.close();
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run('{ "tool": "memory" }', sessionId);
+    });
 
     const verification = await observer.verify(sessionId);
 
@@ -470,5 +482,40 @@ describe('ObserverAdapter', () => {
         costUsd: 0,
       },
     ]);
+  });
+
+  it('rejects non-finite and negative cost rows before persistence', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const invalidInputs = [
+      { promptTokens: Number.NaN, completionTokens: 0 },
+      { promptTokens: Number.POSITIVE_INFINITY, completionTokens: 0 },
+      { promptTokens: -1, completionTokens: 0 },
+      { promptTokens: 1.5, completionTokens: 0 },
+      { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 },
+      { promptTokens: 0, completionTokens: Number.NaN },
+      { promptTokens: 0, completionTokens: Number.POSITIVE_INFINITY },
+      { promptTokens: 0, completionTokens: -1 },
+      { promptTokens: 0, completionTokens: 1.5 },
+      { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { promptTokens: 0, completionTokens: 0, costUsd: Number.NaN },
+      { promptTokens: 0, completionTokens: 0, costUsd: Number.POSITIVE_INFINITY },
+      { promptTokens: 0, completionTokens: 0, costUsd: -0.01 },
+    ];
+
+    for (const input of invalidInputs) {
+      await expect(observer.logCost({
+        sessionId: 'sess-invalid-cost',
+        model: 'gpt-4o',
+        ...input,
+      })).rejects.toThrow(/finite (safe )?non-negative/);
+    }
+
+    await expect(observer.cost({ sessionId: 'sess-invalid-cost' })).resolves.toMatchObject({
+      totalPromptTokens: 0,
+      totalCompletionTokens: 0,
+      totalCostUsd: 0,
+      byModel: [],
+    });
   });
 });

@@ -234,6 +234,7 @@ export class SessionTokenStore {
   }
 
   private isExpired(token: SessionToken): boolean {
-    return wallClockNow() >= token.expiresAt.getTime();
+    const expiresAtMs = token.expiresAt.getTime();
+    return !Number.isFinite(expiresAtMs) || wallClockNow() >= expiresAtMs;
   }
 }
