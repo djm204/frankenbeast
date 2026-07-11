@@ -187,6 +187,16 @@ const mockDashboardToggleSkill = vi.fn().mockResolvedValue(undefined);
 const mockDashboardUpdateSecurityProfile = vi.fn().mockResolvedValue(undefined);
 const mockDashboardSubscribe = vi.fn().mockResolvedValue(vi.fn());
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 vi.mock('../../src/hooks/use-chat-session.js', () => ({
   useChatSession: () => ({
     messages: [
@@ -645,6 +655,26 @@ describe('ChatShell', () => {
     });
   });
 
+  it('surfaces initial network status load failures before config settles', async () => {
+    window.location.hash = '#/network';
+    const slowConfig = deferred<{ network: { mode: 'secure'; secureBackend: 'local-encrypted' }; chat: { model: string; enabled: boolean; host: string; port: number } }>();
+    mockNetworkGetStatus.mockRejectedValueOnce(new Error('status endpoint unavailable'));
+    mockNetworkGetConfig.mockReturnValueOnce(slowConfig.promise);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Unable to load network status: status endpoint unavailable');
+    });
+
+    act(() => {
+      slowConfig.resolve({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'claude-sonnet-4-6', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+    });
+  });
+
   it('fetches network logs when a service is selected on the Network page', async () => {
     window.location.hash = '#/network';
     render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
@@ -784,7 +814,7 @@ describe('ChatShell', () => {
     });
   });
 
-  it('keeps service action success feedback when the follow-up status refresh fails', async () => {
+  it('shows service action error feedback when the follow-up status refresh fails', async () => {
     window.location.hash = '#/network';
     mockNetworkGetStatus
       .mockResolvedValueOnce({
@@ -800,10 +830,124 @@ describe('ChatShell', () => {
 
     await waitFor(() => {
       expect(mockNetworkRestart).toHaveBeenCalledWith('chat-server');
+      expect(screen.getByRole('alert').textContent).toContain('Unable to restart chat-server: status endpoint unavailable');
+    });
+    await waitFor(() => expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2));
+  });
+
+  it('waits for a superseding manual refresh before resolving stale service actions', async () => {
+    window.location.hash = '#/network';
+    const actionStatus = deferred<{ mode: 'secure'; secureBackend: 'local-encrypted'; services: Array<{ id: string; status: string }> }>();
+    const manualStatus = deferred<{ mode: 'secure'; secureBackend: 'local-encrypted'; services: Array<{ id: string; status: string }> }>();
+    mockNetworkGetStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      })
+      .mockReturnValueOnce(actionStatus.promise)
+      .mockReturnValueOnce(manualStatus.promise);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Restarting chat-server…')).toBeDefined();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    act(() => {
+      manualStatus.resolve({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      });
+    });
+
+    await waitFor(() => {
       expect(screen.getByText('Restarted chat-server.')).toBeDefined();
       expect(screen.queryByRole('alert')).toBeNull();
     });
-    await waitFor(() => expect(mockNetworkGetStatus).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      actionStatus.resolve({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      });
+    });
+  });
+
+  it('resolves stale service actions as soon as a superseding manual refresh succeeds', async () => {
+    window.location.hash = '#/network';
+    const actionStatus = deferred<{ mode: 'secure'; secureBackend: 'local-encrypted'; services: Array<{ id: string; status: string }> }>();
+    const manualStatus = deferred<{ mode: 'secure'; secureBackend: 'local-encrypted'; services: Array<{ id: string; status: string }> }>();
+    mockNetworkGetStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      })
+      .mockReturnValueOnce(actionStatus.promise)
+      .mockReturnValueOnce(manualStatus.promise);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart chat-server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    act(() => {
+      manualStatus.resolve({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Restarted chat-server.')).toBeDefined();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    expect(screen.queryByText('Restarting chat-server…')).toBeNull();
+  });
+
+  it('surfaces network status refresh failures before selected service logs settle', async () => {
+    window.location.hash = '#/network';
+    const slowLogs = deferred<{ logs: string[] }>();
+    mockNetworkGetStatus
+      .mockResolvedValueOnce({
+        mode: 'secure',
+        secureBackend: 'local-encrypted',
+        services: [{ id: 'chat-server', status: 'running' }],
+      })
+      .mockRejectedValueOnce(new Error('status endpoint unavailable'));
+    mockNetworkGetLogs
+      .mockResolvedValueOnce({ logs: ['current log line'] })
+      .mockReturnValueOnce(slowLogs.promise);
+
+    render(<ChatShell baseUrl="http://localhost:3000" projectId="test-project" version="0.9.0" />);
+
+    await screen.findByLabelText('Service logs');
+    fireEvent.change(screen.getByLabelText('Service logs'), { target: { value: 'chat-server' } });
+    await screen.findByText('current log line');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('Unable to refresh network status: status endpoint unavailable');
+    });
+    expect(screen.getByText('Loading logs for the selected service...')).toBeDefined();
+
+    act(() => {
+      slowLogs.resolve({ logs: ['slow refreshed log line'] });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('slow refreshed log line')).toBeDefined();
+    });
   });
 
   it('shows connection and session status in the top bar', () => {
