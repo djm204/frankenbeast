@@ -105,6 +105,53 @@ describe('SpanRedactor — metadata rules', () => {
     expect(meta['model']).toBe('x')
   })
 
+  it('matches global RegExp rules statelessly across consecutive keys and flushes', async () => {
+    const inner = new InMemoryAdapter()
+    const keyPattern = /^(api|auth)_/g
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: keyPattern, action: 'remove' }],
+    })
+
+    await redactor.flush(
+      makeTrace([makeSpan({ metadata: { api_key: 'k', auth_token: 't', model: 'x' } })]),
+    )
+    await redactor.flush(
+      makeTrace(
+        [makeSpan({ id: 'span-2', metadata: { api_secret: 's', auth_cookie: 'c', safe: true } })],
+        'trace-2',
+      ),
+    )
+
+    const firstMeta = (await inner.queryByTraceId('trace-1'))!.spans[0].metadata
+    expect(firstMeta).not.toHaveProperty('api_key')
+    expect(firstMeta).not.toHaveProperty('auth_token')
+    expect(firstMeta['model']).toBe('x')
+
+    const secondMeta = (await inner.queryByTraceId('trace-2'))!.spans[0].metadata
+    expect(secondMeta).not.toHaveProperty('api_secret')
+    expect(secondMeta).not.toHaveProperty('auth_cookie')
+    expect(secondMeta['safe']).toBe(true)
+    expect(keyPattern.lastIndex).toBe(0)
+  })
+
+  it('matches sticky RegExp rules statelessly', async () => {
+    const inner = new InMemoryAdapter()
+    const redactor = new SpanRedactor({
+      adapter: inner,
+      rules: [{ key: /^(api|auth)_/y, action: 'mask' }],
+    })
+
+    await redactor.flush(
+      makeTrace([makeSpan({ metadata: { api_key: 'k', auth_token: 't', model: 'x' } })]),
+    )
+
+    const meta = (await inner.queryByTraceId('trace-1'))!.spans[0].metadata
+    expect(meta['api_key']).toBe('[REDACTED]')
+    expect(meta['auth_token']).toBe('[REDACTED]')
+    expect(meta['model']).toBe('x')
+  })
+
   it('applies rules to all spans in the trace', async () => {
     const inner = new InMemoryAdapter()
     const redactor = new SpanRedactor({
