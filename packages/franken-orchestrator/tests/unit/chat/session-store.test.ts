@@ -109,6 +109,36 @@ describe('FileSessionStore', () => {
     warn.mockRestore();
   });
 
+  it('does not report archived corruptions after the same session id is repaired', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const repairedId = 'chat-repaired-after-corruption';
+    const repairedPath = join(TMP, `${repairedId}.json`);
+    writeFileSync(repairedPath, '{"id":', 'utf-8');
+
+    expect(store.get(repairedId)).toBeUndefined();
+    expect(store.listCorruptions()).toEqual([
+      expect.objectContaining({ id: repairedId, path: repairedPath }),
+    ]);
+
+    store.save({
+      id: repairedId,
+      projectId: 'proj',
+      transcript: [],
+      state: 'active',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-10T00:00:00.000Z',
+      updatedAt: '2026-03-10T00:00:01.000Z',
+    });
+
+    expect(readdirSync(TMP).some((entry) => entry.startsWith(`${repairedId}.json.corrupt-`))).toBe(true);
+    expect(store.get(repairedId)).toMatchObject({ id: repairedId, projectId: 'proj' });
+    expect(store.listCorruptions()).toEqual([]);
+    expect(new FileSessionStore(TMP).listCorruptions()).toEqual([]);
+
+    warn.mockRestore();
+  });
+
   it('filters corrupt-session diagnostics by project id when available', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const firstId = 'chat-corrupt-first-project';

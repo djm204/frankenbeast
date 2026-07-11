@@ -92,6 +92,10 @@ export class FileSessionStore implements ISessionStore {
 
   listCorruptions(projectId?: string): CorruptChatSessionFile[] {
     for (const diagnostic of this.listQuarantinedFiles()) {
+      if (this.hasValidCurrentSessionFile(diagnostic.id)) {
+        this.corruptions.delete(diagnostic.id);
+        continue;
+      }
       if (!this.corruptions.has(diagnostic.id)) {
         this.corruptions.set(diagnostic.id, diagnostic);
       }
@@ -153,6 +157,20 @@ export class FileSessionStore implements ISessionStore {
       return statSync(path).mode & 0o777;
     } catch {
       return undefined;
+    }
+  }
+
+  private hasValidCurrentSessionFile(id: string): boolean {
+    const path = this.safeFilePath(id);
+    if (path === undefined) {
+      return false;
+    }
+
+    try {
+      ChatSessionSchema.parse(JSON.parse(readFileSync(path, 'utf-8')));
+      return true;
+    } catch {
+      return false;
     }
   }
 
