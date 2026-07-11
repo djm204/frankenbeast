@@ -173,11 +173,20 @@ describe('parseTracestate', () => {
     expect(Object.keys(parseTracestate(header))).toHaveLength(32)
   })
 
-  it('handles values that contain equals signs as expected', () => {
-    expect(parseTracestate('k=v=extra')).toEqual({ k: 'v=extra' })
+  it('skips values that contain equals signs', () => {
+    expect(parseTracestate('k=v=extra,rojo=abc')).toEqual({ rojo: 'abc' })
   })
 
+  it('accepts W3C tracestate keys with slashes and numeric tenant ids', () => {
+    expect(parseTracestate('vendor/foo=abc,1tenant@vendor=xyz')).toEqual({
+      'vendor/foo': 'abc',
+      '1tenant@vendor': 'xyz',
+    })
+  })
 
+  it('rejects tracestate keys with dots', () => {
+    expect(parseTracestate('vendor.foo=abc,rojo=xyz')).toEqual({ rojo: 'xyz' })
+  })
 })
 
 // ── formatTracestate ─────────────────────────────────────────────────────────
@@ -199,6 +208,16 @@ describe('formatTracestate', () => {
     expect(formatTracestate({ vendor: 'one,two', good: 'safe' })).toBe('good=safe')
   })
 
+  it('filters values containing equals signs from output', () => {
+    expect(formatTracestate({ vendor: 'a=b', good: 'safe' })).toBe('good=safe')
+  })
+
+  it('formats W3C-compliant keys and rejects dotted keys', () => {
+    expect(formatTracestate({ 'vendor/foo': 'abc', '1tenant@vendor': 'xyz', 'vendor.foo': 'bad' })).toBe(
+      'vendor/foo=abc,1tenant@vendor=xyz',
+    )
+  })
+
   it('returns empty string when all entries are invalid', () => {
     expect(formatTracestate({ 'bad key': 'abc', bad2: 'one,two' })).toBe('')
   })
@@ -212,6 +231,14 @@ describe('formatTracestate', () => {
       Array.from({ length: 33 }, (_, i) => [`k${String(i).padStart(2, '0')}`, `v${i}`]),
     ) as Record<string, string>
     expect(formatTracestate(state).split(',')).toHaveLength(32)
+  })
+
+  it('limits entries after filtering invalid entries', () => {
+    const state = Object.fromEntries([
+      ...Array.from({ length: 32 }, (_, i) => [`bad.key.${i}`, `v${i}`]),
+      ['vendor', 'value'],
+    ]) as Record<string, string>
+    expect(formatTracestate(state)).toBe('vendor=value')
   })
 
   it('roundtrips cleanly with parseTracestate for simple values', () => {
@@ -279,6 +306,15 @@ describe('injectIntoHeaders', () => {
     const headers = injectIntoHeaders(
       { traceId: TRACE_ID, parentSpanId: SPAN_ID, sampled: true },
       { 'bad key': 'one,two' },
+    )
+    expect('tracestate' in headers).toBe(false)
+  })
+
+  it('clears existing tracestate when provided state sanitizes empty', () => {
+    const headers = injectIntoHeaders(
+      { traceId: TRACE_ID, parentSpanId: SPAN_ID, sampled: true },
+      { 'bad key': 'one,two' },
+      { tracestate: 'stale=value' },
     )
     expect('tracestate' in headers).toBe(false)
   })

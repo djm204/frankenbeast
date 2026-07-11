@@ -32,7 +32,7 @@ const RE_HEX_32 = /^[0-9a-f]{32}$/
 const RE_HEX_16 = /^[0-9a-f]{16}$/
 const RE_HEX_02 = /^[0-9a-f]{2}$/
 
-const RE_TRACESTATE_KEY = /^[a-z][a-z0-9_\-\*.]{0,255}(?:@[a-z][a-z0-9_\-\*.]{0,255})?$/
+const RE_TRACESTATE_KEY = /^(?:[a-z0-9][a-z0-9_\-*\/]{0,255}|[a-z0-9][a-z0-9_\-*\/]{0,240}@[a-z][a-z0-9_\-*\/]{0,13})$/
 const ZEROS_32 = '0'.repeat(32)
 const ZEROS_16 = '0'.repeat(16)
 
@@ -47,15 +47,15 @@ function isValidTracestateKey(key: string): boolean {
 
 function isValidTracestateValue(value: string): boolean {
   if (!value.length || value.length > MAX_TRACESTATE_VALUE_LENGTH) return false
-  if (value.includes(',')) return false
+  if (/[=,]/.test(value)) return false
   if (/[\u0000-\u001f\u007F]/.test(value)) return false
   return true
 }
 
 function sanitizeTracestate(state: Record<string, string>): [string, string][] {
   return Object.entries(state)
-    .filter(([key, value], index) => index < MAX_TRACESTATE_ENTRIES)
     .filter(([key, value]) => isValidTracestateKey(key) && isValidTracestateValue(value))
+    .slice(0, MAX_TRACESTATE_ENTRIES)
 }
 
 // ── parseTraceparent ──────────────────────────────────────────────────────────
@@ -219,7 +219,11 @@ export function injectIntoHeaders(
   out['traceparent'] = formatTraceparent(fields)
   if (state !== undefined) {
     const tracestate = formatTracestate(state)
-    if (tracestate) out['tracestate'] = tracestate
+    if (tracestate) {
+      out['tracestate'] = tracestate
+    } else {
+      delete out['tracestate']
+    }
   }
   return out
 }
