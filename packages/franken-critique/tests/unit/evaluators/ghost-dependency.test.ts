@@ -198,6 +198,9 @@ describe('GhostDependencyEvaluator', () => {
       class Plugin implements import('ghost-package').Plugin {}
       const commentedCast = value as /* generated */ import('ghost-package').Shape;
       class CommentedPlugin implements /* generated */ import('ghost-package').Plugin {}
+      const parenthesizedCast = value as (import('ghost-package').Plugin);
+      const parenthesizedSatisfies = value satisfies (import('ghost-package').Plugin);
+      interface Cfg { name: string; plugin: import('ghost-package').Plugin }
       const plugin = loader.import('unknown-lib');
       loader./* generated */import('unknown-lib');
       this.#import('private-loader');
@@ -229,19 +232,24 @@ describe('GhostDependencyEvaluator', () => {
       import('simple-type-after-ghost');
       type VoidAlias = string
       void import('void-simple-type-after-ghost');
+      interface NewAfterType {}
+      new Loader(import('new-after-type-ghost'));
       async function awaited(): Promise<void> { await import('awaited-function-ghost'); }
+      const arrow = (opts: Options) => import('arrow-body-ghost');
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
       loadPlugin: import('label-ghost');
       const parenthesized = await import(('parenthesized-ghost'));
+      const angleAsserted = await import(<const>'angle-asserted-ghost');
       const literalAsserted = await import('literal-asserted-ghost' as const);
       const literalSatisfied = await import('literal-satisfied-ghost' satisfies string);
+      const runtimeTernary = kind === 'extends' ? fallback : import('ternary-ghost');
       const lessThanRuntime = count < import('less-than-ghost');
       const bitwiseRuntime = flags | import('bitwise-or-ghost');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(19);
+    expect(result.findings).toHaveLength(23);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -255,12 +263,16 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('bare-after-type-ghost'),
         expect.stringContaining('simple-type-after-ghost'),
         expect.stringContaining('void-simple-type-after-ghost'),
+        expect.stringContaining('new-after-type-ghost'),
         expect.stringContaining('awaited-function-ghost'),
+        expect.stringContaining('arrow-body-ghost'),
         expect.stringContaining('switch-case-ghost'),
         expect.stringContaining('label-ghost'),
         expect.stringContaining('parenthesized-ghost'),
+        expect.stringContaining('angle-asserted-ghost'),
         expect.stringContaining('literal-asserted-ghost'),
         expect.stringContaining('literal-satisfied-ghost'),
+        expect.stringContaining('ternary-ghost'),
         expect.stringContaining('less-than-ghost'),
         expect.stringContaining('bitwise-or-ghost'),
       ]),

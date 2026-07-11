@@ -296,6 +296,13 @@ function readDynamicImportArgumentSpecifier(
     return readQuotedString(content, index);
   }
 
+  if (content[index] === '<') {
+    const assertionEnd = content.indexOf('>', index + 1);
+    if (assertionEnd === -1) return null;
+    const assertedStart = skipImportTrivia(content, assertionEnd + 1);
+    return readDynamicImportArgumentSpecifier(content, assertedStart);
+  }
+
   if (content[index] !== '(') return null;
 
   const nestedStart = skipImportTrivia(content, index + 1);
@@ -323,7 +330,7 @@ function canStartNativeDynamicImport(
     return false;
   }
 
-  const statementStart = content.lastIndexOf(';', importIndex - 1);
+  const statementStart = findDynamicImportStatementStart(content, importIndex);
   const prefix = content.slice(statementStart + 1, importIndex);
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
   const isNestedTypeReference = endsInsideNestedTypeReference(prefix);
@@ -339,9 +346,28 @@ function isSpreadOperand(content: string, dotIndex: number): boolean {
   return content.slice(dotIndex - 2, dotIndex + 1) === '...';
 }
 
+function findDynamicImportStatementStart(content: string, importIndex: number): number {
+  let statementStart = content.lastIndexOf(';', importIndex - 1);
+  while (statementStart !== -1 && isSemicolonInsideTypeBody(content, statementStart)) {
+    statementStart = content.lastIndexOf(';', statementStart - 1);
+  }
+
+  return statementStart;
+}
+
+function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boolean {
+  const openBraceIndex = content.lastIndexOf('{', semicolonIndex);
+  if (openBraceIndex === -1) return false;
+  const closeBraceIndex = content.lastIndexOf('}', semicolonIndex);
+  if (closeBraceIndex > openBraceIndex) return false;
+
+  const beforeBrace = content.slice(0, openBraceIndex);
+  return /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace);
+}
+
 function endsInsideNestedTypeReference(prefix: string): boolean {
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
-  if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
+  if (/(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
 
@@ -371,7 +397,7 @@ function isInsideTypeDeclaration(prefix: string): boolean {
   return (
     /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
-    !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|if|for|while|switch|try|function|async\s+function|class)\b/.test(
+    !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
     ) &&
     !/\}\s*\n\s*(?:export\s+)?$/.test(prefix) &&
@@ -427,6 +453,7 @@ function isInsideTypeAnnotation(
 
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (/[=;]/.test(annotationSuffix)) return false;
+  if (/=>/.test(annotationSuffix)) return false;
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
   if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {
     return false;
@@ -442,7 +469,8 @@ function isInsideConditionalType(prefix: string): boolean {
   const questionIndex = prefix.lastIndexOf('?');
   if (questionIndex === -1) return false;
 
-  return /\bextends\b/.test(prefix.slice(0, questionIndex));
+  const condition = prefix.slice(0, questionIndex);
+  return /\bextends\b/.test(condition) && !/(?:={2,3}|!==?|[<>]=?)/.test(condition);
 }
 
 function hasTernaryBranchMarker(prefix: string): boolean {
