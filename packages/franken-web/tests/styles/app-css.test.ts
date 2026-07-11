@@ -11,3 +11,9 @@ describe('app.css sidebar controls', () => {
     expect(appCss).toMatch(/@media\s*\(min-width:\s*921px\)\s*\{[\s\S]*?\.sidebar__close\s*\{\s*display:\s*none;\s*\}/m);
   });
 });
+
+describe('app.css transcript message formatting', () => {
+  it('preserves transcript newlines and wraps long unbroken output', () => {
+    expect(appCss).toMatch(/\.message-card__content\s*\{[\s\S]*?white-space:\s*pre-wrap;[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?\}/m);
+  });
+});
