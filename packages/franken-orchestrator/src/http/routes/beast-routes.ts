@@ -7,7 +7,10 @@ import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions 
 import { UnknownTrackedAgentError } from '../../beasts/errors.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
-import { BeastInterviewService } from '../../beasts/services/beast-interview-service.js';
+import {
+  BeastInterviewService,
+  UnknownBeastInterviewSessionError,
+} from '../../beasts/services/beast-interview-service.js';
 import { BeastRunService, UnknownBeastRunError } from '../../beasts/services/beast-run-service.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
@@ -74,6 +77,12 @@ function runResponse(run: BeastRun | undefined, deps: BeastRoutesDeps): BeastRun
 
 function beastRunNotFound(runId: string): HttpError {
   return new HttpError(404, 'BEAST_RUN_NOT_FOUND', `Beast run '${runId}' was not found`);
+}
+
+class InterviewSessionNotFoundHttpError extends HttpError {
+  constructor(sessionId: string) {
+    super(404, 'INTERVIEW_SESSION_NOT_FOUND', `Beast interview session '${sessionId}' was not found`);
+  }
 }
 
 function throwKnownRunError(runId: string, error: unknown): never {
@@ -271,7 +280,16 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
 
   app.post('/v1/beasts/interviews/:sessionId/answer', async (c) => {
     const body = validateBody(InterviewAnswerBody, await parseJsonBody(c));
-    const progress = deps.interviews.answer(c.req.param('sessionId'), body.answer);
+    const sessionId = c.req.param('sessionId');
+    let progress;
+    try {
+      progress = deps.interviews.answer(sessionId, body.answer);
+    } catch (error) {
+      if (error instanceof UnknownBeastInterviewSessionError) {
+        throw new InterviewSessionNotFoundHttpError(sessionId);
+      }
+      throw error;
+    }
     return c.json({ data: progress });
   });
 
