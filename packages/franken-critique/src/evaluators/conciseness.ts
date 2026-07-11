@@ -438,6 +438,36 @@ function collectBlockCommentLabels(
   return [extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment), commentEnd];
 }
 
+function collectJsxTagExpressionLabels(
+  content: string,
+  start: number,
+  end: number,
+): string[] {
+  const labels: string[] = [];
+  let index = start + 1;
+
+  while (index < end - 1) {
+    const current = content[index];
+    if (current === '"' || current === "'") {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+    if (current === '{') {
+      const [expressionLabels, expressionEnd] = collectCodeLabels(
+        content,
+        index + 1,
+        '}',
+      );
+      labels.push(...expressionLabels);
+      index = expressionEnd;
+      continue;
+    }
+    index += 1;
+  }
+
+  return labels;
+}
+
 function skipJsxTag(content: string, start: number, limit = content.length): number {
   let index = start + 1;
   let quote = '';
@@ -559,6 +589,59 @@ function findNextJsxTagAfter(content: string, start: number): string | undefined
   return undefined;
 }
 
+function jsxTagName(tag: string): string | undefined {
+  const match = /^<\/?\s*([A-Za-z][\w.]*)/.exec(tag);
+  return match?.[1];
+}
+
+function hasOpenJsxAncestorBefore(content: string, end: number): boolean {
+  const stack: string[] = [];
+  let index = 0;
+
+  while (index < end) {
+    const current = content[index];
+    const next = content[index + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+    if (current === '/' && next === '/') {
+      const lineEnd = content.indexOf('\n', index + 2);
+      index = lineEnd === -1 ? end : lineEnd + 1;
+      continue;
+    }
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', index + 2);
+      index = commentEnd === -1 ? end : commentEnd + 2;
+      continue;
+    }
+    if (
+      current === '<' &&
+      /[A-Za-z/>]/.test(next ?? '') &&
+      content[index - 1] !== '<'
+    ) {
+      const tagEnd = skipJsxTag(content, index, end);
+      if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
+        const tag = content.slice(index, tagEnd).trim();
+        if (tag === '<>') {
+          stack.push('');
+        } else if (tag.startsWith('</')) {
+          stack.pop();
+        } else if (!/\/\s*>$/.test(tag)) {
+          const name = jsxTagName(tag);
+          if (name) stack.push(name);
+        }
+        index = tagEnd;
+        continue;
+      }
+    }
+    index += 1;
+  }
+
+  return stack.length > 0;
+}
+
 function isJsxTextBlockComment(content: string, start: number, end: number): boolean {
   const before = content.slice(0, start);
   const previousNonWhitespace = before.trimEnd().at(-1) ?? '';
@@ -575,7 +658,11 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
   }
 
   const textSinceLastTag = before.slice(previousTag.end);
-  if (/[;=]/.test(textSinceLastTag)) {
+  if (
+    /(?:^|\s)(?:const|let|var|return|function|class)\b/.test(
+      textSinceLastTag,
+    )
+  ) {
     return false;
   }
   const lastOpenBrace = textSinceLastTag.lastIndexOf('{');
@@ -598,7 +685,10 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
   }
 
   if (isSelfClosingTag || isClosingTag) {
-    return nextTag.startsWith('</');
+    return (
+      nextTag.startsWith('</') ||
+      hasOpenJsxAncestorBefore(content, previousTag.start)
+    );
   }
 
   return isOpeningTag;
@@ -679,7 +769,12 @@ function collectCodeLabels(
       continue;
     }
 
-    if (current === '`' && next === '`' && content[index + 2] === '`') {
+    if (
+      current === '`' &&
+      next === '`' &&
+      content[index + 2] === '`' &&
+      /^\s*$/.test(content.slice(content.lastIndexOf('\n', index - 1) + 1, index))
+    ) {
       while (content[index] === '`') {
         index += 1;
       }
@@ -725,6 +820,7 @@ function collectCodeLabels(
     ) {
       const tagEnd = skipJsxTag(content, index);
       if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
+        labels.push(...collectJsxTagExpressionLabels(content, index, tagEnd));
         index = tagEnd;
         continue;
       }

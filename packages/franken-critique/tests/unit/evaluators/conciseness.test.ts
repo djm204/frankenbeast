@@ -483,6 +483,10 @@ const x = 1;
     const content = [
       `<p><span />/* ${pendingMarker}: shown to users */</p>`,
       `<Tooltip label="a > b">/* ${pendingMarker}: shown to users */</Tooltip>`,
+      `<div><span />/* ${pendingMarker}: shown sibling text */<strong /></div>`,
+      `<p>a=b; c /* ${pendingMarker}: shown punctuation */</p>`,
+      `const md = \`\`\`ts\n/* ${pendingMarker}: fenced template text */\n\`\`\`;`,
+      `const widget = <Widget value={/* ${trackedMarker}: prop expression */ value} />;`,
       `const generic = make<Item>(); /* ${trackedMarker}: real block marker */ return <div />;`,
       `const cls = /[//]/; const ratio = a / b; // ${hackMarker}: normalize`,
       `const x = <div>text</div>; // ${hackMarker}: real jsx-adjacent line marker`,
@@ -501,7 +505,7 @@ const x = 1;
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('7 unresolved marker comment(s)') &&
+          f.message.includes('8 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
           f.message.includes(trackedMarker) &&
           f.message.includes(hackMarker) &&
