@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chmod, lstat, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileInitStateStore } from '../../../src/init/init-state-store.js';
@@ -103,18 +103,43 @@ describe('FileInitStateStore', () => {
     const targetFile = join(tempDir, 'shared-init-state.json');
     const stateFile = join(tempDir, 'init-state.json');
     await writeFile(targetFile, '{"selectedModules": [', 'utf-8');
+    await chmod(targetFile, 0o600);
     await symlink(targetFile, stateFile);
     const store = new FileInitStateStore(stateFile);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     await store.load('/tmp/project/.fbeast/config.json');
+    await store.save(createEmptyInitState('/tmp/project/.fbeast/config.json'));
 
     const linkInfo = await lstat(stateFile);
+    const targetInfo = await stat(targetFile);
     const files = await readdir(tempDir);
     const quarantine = files.find((file) => file.startsWith('shared-init-state.json.corrupt-'));
     expect(linkInfo.isSymbolicLink()).toBe(true);
+    expect(targetInfo.mode & 0o777).toBe(0o600);
     expect(quarantine).toBeTruthy();
     await expect(readFile(join(tempDir, quarantine ?? ''), 'utf-8')).resolves.toBe('{"selectedModules": [');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init state JSON'));
+  });
+
+  it('quarantines unsafe external symlinks without moving their targets', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const projectDir = join(tempDir, 'project');
+    await mkdir(projectDir);
+    const externalTarget = join(tempDir, 'outside-init-state.json');
+    const stateFile = join(projectDir, 'init-state.json');
+    await writeFile(externalTarget, '{"selectedModules": [', 'utf-8');
+    await symlink(externalTarget, stateFile);
+    const store = new FileInitStateStore(stateFile);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await store.load('/tmp/project/.fbeast/config.json');
+
+    const files = await readdir(projectDir);
+    const quarantine = files.find((file) => file.startsWith('init-state.json.corrupt-'));
+    expect(quarantine).toBeTruthy();
+    await expect(readFile(externalTarget, 'utf-8')).resolves.toBe('{"selectedModules": [');
+    await expect(readFile(join(projectDir, quarantine ?? ''), 'utf-8')).resolves.toBe('{"selectedModules": [');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init state JSON'));
   });
 });

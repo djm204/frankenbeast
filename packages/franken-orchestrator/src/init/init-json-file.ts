@@ -1,5 +1,5 @@
 import { chmod, lstat, mkdir, readFile, readlink, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, basename, isAbsolute, resolve as resolvePath } from 'node:path';
+import { dirname, join, basename, isAbsolute, resolve as resolvePath, relative, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export interface JsonCorruptionRecovery {
@@ -17,18 +17,26 @@ function quarantinePathFor(filePath: string): string {
   return `${filePath}.corrupt-${Date.now()}-${process.pid}-${randomUUID()}`;
 }
 
-async function resolveSymlinkTargetPath(filePath: string): Promise<string> {
+const recoveredFileModes = new Map<string, number>();
+
+function isInsideDirectory(filePath: string, directory: string): boolean {
+  const rel = relative(resolvePath(directory), resolvePath(filePath));
+  return rel.length === 0 || (!rel.startsWith('..') && !rel.includes(`..${sep}`) && !isAbsolute(rel));
+}
+
+async function resolveSafeSymlinkTargetPath(filePath: string): Promise<string> {
   const info = await lstat(filePath);
   if (!info.isSymbolicLink()) {
     return filePath;
   }
   const linkTarget = await readlink(filePath);
-  return isAbsolute(linkTarget) ? linkTarget : resolvePath(dirname(filePath), linkTarget);
+  const targetPath = isAbsolute(linkTarget) ? linkTarget : resolvePath(dirname(filePath), linkTarget);
+  return isInsideDirectory(targetPath, dirname(filePath)) ? targetPath : filePath;
 }
 
 async function resolveExistingOrSymlinkTarget(filePath: string): Promise<string> {
   try {
-    return await resolveSymlinkTargetPath(filePath);
+    return await resolveSafeSymlinkTargetPath(filePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return filePath;
@@ -63,7 +71,12 @@ export async function readJsonFileOrDefault<T>(
     }
     const targetPath = await resolveExistingOrSymlinkTarget(filePath);
     const quarantinePath = quarantinePathFor(targetPath);
+    const targetMode = await stat(targetPath).then((info) => info.mode & 0o777).catch(() => undefined);
     await rename(targetPath, quarantinePath);
+    if (targetMode !== undefined) {
+      recoveredFileModes.set(filePath, targetMode);
+      recoveredFileModes.set(targetPath, targetMode);
+    }
     options.onCorrupt?.({ description: options.description, filePath, quarantinePath, error });
     return fallback();
   }
@@ -76,7 +89,7 @@ async function resolveAtomicWriteTarget(filePath: string): Promise<{ targetPath:
     return { targetPath, mode: targetInfo.mode & 0o777 };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { targetPath };
+      return { targetPath, mode: recoveredFileModes.get(targetPath) ?? recoveredFileModes.get(filePath) };
     }
     throw error;
   }
