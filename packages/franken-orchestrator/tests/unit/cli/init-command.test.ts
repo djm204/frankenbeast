@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { handleInitCommand } from '../../../src/cli/init-command.js';
@@ -14,6 +14,69 @@ describe('handleInitCommand', () => {
       tempDir = undefined;
     }
   });
+
+  function makeArgs(overrides: Record<string, unknown> = {}) {
+    return {
+      subcommand: 'init',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: tempDir,
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      help: false,
+      issueLabel: undefined,
+      issueMilestone: undefined,
+      issueSearch: undefined,
+      issueAssignee: undefined,
+      issueLimit: undefined,
+      issueRepo: undefined,
+      dryRun: undefined,
+      initVerify: false,
+      initRepair: false,
+      initNonInteractive: false,
+      ...overrides,
+    } as any;
+  }
+
+  function makePaths(root: string, configFile: string) {
+    const frankenbeastDir = join(root, '.fbeast');
+    return {
+      root,
+      frankenbeastDir,
+      llmCacheDir: join(frankenbeastDir, '.cache', 'llm'),
+      plansDir: join(frankenbeastDir, 'plans'),
+      buildDir: join(frankenbeastDir, '.build'),
+      beastsDir: join(frankenbeastDir, '.build', 'beasts'),
+      beastLogsDir: join(frankenbeastDir, '.build', 'beasts', 'logs'),
+      beastsDb: join(frankenbeastDir, 'beast.db'),
+      chunkSessionsDir: join(frankenbeastDir, '.build', 'chunk-sessions'),
+      chunkSessionSnapshotsDir: join(frankenbeastDir, '.build', 'chunk-session-snapshots'),
+      checkpointFile: join(frankenbeastDir, '.build', '.checkpoint'),
+      tracesDb: join(frankenbeastDir, '.build', 'build-traces.db'),
+      logFile: join(frankenbeastDir, '.build', 'build.log'),
+      designDocFile: join(frankenbeastDir, 'plans', 'design.md'),
+      configFile,
+      activePlanFile: join(frankenbeastDir, 'active-plan'),
+      stateDir: join(frankenbeastDir, 'state'),
+      llmResponseFile: join(frankenbeastDir, 'plans', 'llm-response.json'),
+    };
+  }
 
   it('writes canonical config and init state using the project paths', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
@@ -275,6 +338,49 @@ describe('handleInitCommand', () => {
       },
       print: () => undefined,
     })).rejects.toThrow(/Cannot run init non-interactively[\s\S]*Config file is missing[\s\S]*Init state is missing/);
+
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('verifies an explicit --config path instead of the project-local config', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
+    const frankenbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(frankenbeastDir, 'config.json');
+    const explicitConfigFile = join(tempDir, 'explicit-bad-config.json');
+    await mkdir(frankenbeastDir, { recursive: true });
+    await writeFile(configFile, JSON.stringify(defaultConfig()), 'utf-8');
+    await writeFile(explicitConfigFile, '{ invalid json', 'utf-8');
+    const print = vi.fn();
+
+    await handleInitCommand({
+      args: makeArgs({ config: explicitConfigFile, initVerify: true }),
+      config: defaultConfig(),
+      io: { ask: async () => '', display: () => undefined },
+      paths: makePaths(tempDir, configFile),
+      print,
+    });
+
+    expect(print).toHaveBeenCalledWith(expect.stringContaining(explicitConfigFile));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('could not be parsed'));
+  });
+
+  it('reports malformed repair config before prompting for secret-store input', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-command-'));
+    const frankenbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(frankenbeastDir, 'config.json');
+    await mkdir(frankenbeastDir, { recursive: true });
+    await writeFile(configFile, '{ invalid json', 'utf-8');
+    const ask = vi.fn(async () => {
+      throw new Error('unexpected prompt');
+    });
+
+    await expect(handleInitCommand({
+      args: makeArgs({ initRepair: true }),
+      config: defaultConfig(),
+      io: { ask, display: () => undefined },
+      paths: makePaths(tempDir, configFile),
+      print: () => undefined,
+    })).rejects.toThrow(/Cannot repair init[\s\S]*invalid JSON/i);
 
     expect(ask).not.toHaveBeenCalled();
   });

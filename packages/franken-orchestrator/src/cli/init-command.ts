@@ -18,18 +18,19 @@ export interface InitCommandOptions {
 }
 
 export async function handleInitCommand(options: InitCommandOptions): Promise<void> {
+  const configFile = options.args.config ?? options.paths.configFile;
   const stateStore = new FileInitStateStore(join(options.paths.frankenbeastDir, 'init-state.json'));
 
   // Verify path: no secret store needed — pure file validation
   if (options.args.initVerify) {
     const verification = await verifyInit({
-      configFile: options.paths.configFile,
+      configFile,
       stateStore,
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     options.print(
       verification.ok
-        ? `Init verify passed for ${options.paths.configFile}.`
+        ? `Init verify passed for ${configFile}.`
         : verification.messages.join('\n'),
     );
     return;
@@ -37,7 +38,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
 
   if (options.args.initNonInteractive) {
     const verification = await verifyInit({
-      configFile: options.paths.configFile,
+      configFile,
       stateStore,
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
@@ -50,8 +51,26 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
         ].join('\n'),
       );
     }
-    options.print(`Init config is already complete at ${options.paths.configFile}.`);
+    options.print(`Init config is already complete at ${configFile}.`);
     return;
+  }
+
+  if (options.args.initRepair) {
+    const verification = await verifyInit({
+      configFile,
+      stateStore,
+      allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
+    });
+    const invalidJsonIssues = verification.issues.filter((issue) =>
+      issue.code === 'invalid-config-json' || issue.code === 'invalid-init-state-json');
+    if (invalidJsonIssues.length > 0) {
+      throw new Error(
+        [
+          'Cannot repair init because required init JSON is malformed:',
+          ...invalidJsonIssues.map((issue) => `- ${issue.message}`),
+        ].join('\n'),
+      );
+    }
   }
 
   // Interactive and repair paths need the secret store
@@ -69,7 +88,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
 
   if (options.args.initRepair) {
     const result = await runRepairInit({
-      configFile: options.paths.configFile,
+      configFile,
       stateStore,
       io: options.io,
       initBackend,
@@ -82,7 +101,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     return;
   }
   const result = await runInteractiveInit({
-    configFile: options.paths.configFile,
+    configFile,
     stateStore,
     io: options.io,
     initBackend,
