@@ -1,3 +1,4 @@
+import type { ChangeEventHandler } from 'react';
 import * as Accordion from '@radix-ui/react-accordion';
 import { useBeastStore } from '../../../stores/beast-store';
 import { ProviderModelSelect, type ProviderOption } from '../shared/provider-model-select';
@@ -105,17 +106,50 @@ export function StepModules() {
 const inputClass = 'w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent';
 const labelClass = 'block text-xs font-medium text-beast-muted mb-1.5';
 
-function parseNumberInput(value: string): number | undefined {
-  if (value.trim() === '') return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return undefined;
-  return parsed;
+function boundedIntegerChangeHandler(
+  max: number,
+  currentValue: unknown,
+  update: (value: number | undefined) => void,
+): ChangeEventHandler<HTMLInputElement> {
+  return (event) => {
+    const rawValue = event.target.value;
+    if (rawValue === '') {
+      if (currentValue === undefined) update(undefined);
+      return;
+    }
+
+    if (!/^\d+$/.test(rawValue)) return;
+
+    const parsed = Number(rawValue);
+    if (!Number.isInteger(parsed)) return;
+    if (parsed > max) {
+      if (currentValue === undefined) update(max);
+      return;
+    }
+
+    update(parsed);
+  };
 }
 
-function clampNumberInput(value: string, min: number, max: number): number | undefined {
-  const parsed = parseNumberInput(value);
-  if (parsed === undefined) return undefined;
-  return Math.min(max, Math.max(min, parsed));
+function clampedIntegerBlurHandler(
+  min: number,
+  max: number,
+  update: (value: number | undefined) => void,
+): ChangeEventHandler<HTMLInputElement> {
+  return (event) => {
+    const rawValue = event.target.value;
+    if (rawValue === '') {
+      update(undefined);
+      return;
+    }
+
+    if (!/^\d+$/.test(rawValue)) return;
+
+    const parsed = Number(rawValue);
+    if (!Number.isInteger(parsed)) return;
+
+    update(Math.min(max, Math.max(min, parsed)));
+  };
 }
 
 function renderModuleConfig(
@@ -196,8 +230,8 @@ function renderModuleConfig(
               min={1}
               max={50}
               value={(config.maxDagDepth as number) ?? 10}
-              onChange={(e) => update('maxDagDepth', parseNumberInput(e.target.value))}
-              onBlur={(e) => update('maxDagDepth', clampNumberInput(e.target.value, 1, 50))}
+              onChange={boundedIntegerChangeHandler(50, config.maxDagDepth, (value) => update('maxDagDepth', value))}
+              onBlur={clampedIntegerBlurHandler(1, 50, (value) => update('maxDagDepth', value))}
               className={inputClass}
             />
           </div>
@@ -209,8 +243,8 @@ function renderModuleConfig(
               min={1}
               max={20}
               value={(config.parallelTaskLimit as number) ?? 4}
-              onChange={(e) => update('parallelTaskLimit', parseNumberInput(e.target.value))}
-              onBlur={(e) => update('parallelTaskLimit', clampNumberInput(e.target.value, 1, 20))}
+              onChange={boundedIntegerChangeHandler(20, config.parallelTaskLimit, (value) => update('parallelTaskLimit', value))}
+              onBlur={clampedIntegerBlurHandler(1, 20, (value) => update('parallelTaskLimit', value))}
               className={inputClass}
             />
           </div>
@@ -228,8 +262,8 @@ function renderModuleConfig(
               min={1}
               max={10}
               value={(config.maxIterations as number) ?? 3}
-              onChange={(e) => update('maxIterations', parseNumberInput(e.target.value))}
-              onBlur={(e) => update('maxIterations', clampNumberInput(e.target.value, 1, 10))}
+              onChange={boundedIntegerChangeHandler(10, config.maxIterations, (value) => update('maxIterations', value))}
+              onBlur={clampedIntegerBlurHandler(1, 10, (value) => update('maxIterations', value))}
               className={inputClass}
             />
           </div>
@@ -290,8 +324,8 @@ function renderModuleConfig(
               min={10}
               max={600}
               value={(config.reflectionInterval as number) ?? 60}
-              onChange={(e) => update('reflectionInterval', parseNumberInput(e.target.value))}
-              onBlur={(e) => update('reflectionInterval', clampNumberInput(e.target.value, 10, 600))}
+              onChange={boundedIntegerChangeHandler(600, config.reflectionInterval, (value) => update('reflectionInterval', value))}
+              onBlur={clampedIntegerBlurHandler(10, 600, (value) => update('reflectionInterval', value))}
               className={inputClass}
             />
           </div>
