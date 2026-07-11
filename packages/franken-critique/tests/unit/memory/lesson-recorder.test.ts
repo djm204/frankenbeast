@@ -18,6 +18,7 @@ function createIteration(
   verdict: 'pass' | 'warn' | 'fail',
   evaluatorName = 'mock',
   findings: EvaluationFinding[] = [],
+  metadata: Readonly<Record<string, unknown>> = {},
 ): CritiqueIteration {
   const result: CritiqueResult = {
     verdict,
@@ -34,7 +35,7 @@ function createIteration(
   };
   return {
     index,
-    input: { content: `iteration ${index}`, metadata: {} },
+    input: { content: `iteration ${index}`, metadata },
     result,
     completedAt: new Date().toISOString(),
   };
@@ -113,7 +114,68 @@ describe('LessonRecorder', () => {
     ]);
   });
 
-  it('does not create traceability entries for infrastructure-only evaluator exceptions', async () => {
+  it('adds a per-agent improvement scorecard to recorded lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(
+          0,
+          'fail',
+          'complexity',
+          [{ message: 'too many params', severity: 'warning' }],
+          { agentId: 'worker-alpha' },
+        ),
+        createIteration(2, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-1858');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.improvementScorecard).toEqual({
+      agentId: 'worker-alpha',
+      taskId: 'task-1858',
+      evaluatorName: 'complexity',
+      failedIteration: 0,
+      resolvedIteration: 2,
+      baselineScore: 0.3,
+      resolvedScore: 1,
+      improvementDelta: 0.7,
+      retryCount: 2,
+      agentIdSource: 'metadata',
+      summary: 'worker-alpha improved complexity from 0.3 to 1 after 2 retries.',
+    });
+  });
+
+  it('uses an explicit fallback agent id when scorecard metadata is missing', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'safety', [{ message: 'plain HTTP endpoint', severity: 'critical' }]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-1858');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(lesson.improvementScorecard).toEqual(
+      expect.objectContaining({
+        agentId: 'unknown-agent',
+        agentIdSource: 'fallback',
+        improvementDelta: 0.7,
+        summary: 'unknown-agent improved safety from 0.3 to 1 after 1 retry.',
+      }),
+    );
+  });
+
+  it('does not create scorecards for infrastructure-only evaluator exceptions', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
 

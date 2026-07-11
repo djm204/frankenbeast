@@ -22,6 +22,7 @@ export type {
   ADRMatch,
   EpisodicTrace,
   LessonTestTraceabilityEntry,
+  AgentImprovementScorecard,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,

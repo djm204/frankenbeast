@@ -50,6 +50,28 @@ export interface LessonTestTraceabilityEntry {
   readonly verificationCommand: string;
 }
 
+/** Deterministic scorecard that lets PM/liveness tooling compare learning recovery by agent. */
+export interface AgentImprovementScorecard {
+  /** Agent identity from evaluation metadata; falls back to `unknown-agent` when callers omit it. */
+  readonly agentId: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  readonly failedIteration: number;
+  readonly resolvedIteration: number;
+  /** Score before correction, rounded to four decimal places for stable structured output. */
+  readonly baselineScore: number;
+  /** Score after correction, rounded to four decimal places for stable structured output. */
+  readonly resolvedScore: number;
+  /** Positive, zero, or negative score delta after correction. */
+  readonly improvementDelta: number;
+  /** How many critique retries were needed before the lesson was resolved. */
+  readonly retryCount: number;
+  /** Whether the source provided an explicit agent id or the scorecard used the fallback. */
+  readonly agentIdSource: 'metadata' | 'fallback';
+  /** Operator-facing interpretation for handoffs and dashboards. */
+  readonly summary: string;
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -59,6 +81,8 @@ export interface CritiqueLesson {
   readonly timestamp: string;
   /** Present for lessons recorded by LessonRecorder; absent legacy lessons are unverified. */
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
+  /** Present for per-agent learning telemetry produced by LessonRecorder. */
+  readonly improvementScorecard?: AgentImprovementScorecard;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

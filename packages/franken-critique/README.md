@@ -92,6 +92,17 @@ When the critique loop recovers from one or more failing iterations and ends in 
 
 Infrastructure-only evaluator exceptions are intentionally excluded from the map so operator dashboards do not promote broken tooling as product lessons. PM handoffs should treat lessons without a matching regression `testId` as unverified learning that is not ready for promotion.
 
+## Per-agent improvement scorecard
+
+Every recorded critique lesson also includes an `improvementScorecard` object so PM handoff summaries, liveness views, and learning telemetry can compare recovery behavior per agent without parsing prose. The scorecard records:
+
+- `agentId`: read from `EvaluationInput.metadata.agentId` when available; otherwise `unknown-agent` with `agentIdSource: "fallback"` so missing attribution is explicit.
+- `baselineScore`, `resolvedScore`, and `improvementDelta`: deterministic rounded score values for the failed evaluator and resolved critique outcome.
+- `failedIteration`, `resolvedIteration`, and `retryCount`: the retry path that produced the improvement.
+- `summary`: a compact operator-facing sentence suitable for PM handoffs.
+
+Scorecards are only emitted for product critique findings that become lessons. Infrastructure-only evaluator exceptions are excluded, matching the traceability-map behavior, so dashboards do not reward agents for recovering from broken evaluation tooling.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.

@@ -1,4 +1,4 @@
-import type { MemoryPort, CritiqueLesson } from '../types/contracts.js';
+import type { MemoryPort, CritiqueLesson, AgentImprovementScorecard } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
@@ -64,6 +64,14 @@ export class LessonRecorder {
             : 'Unknown correction',
           taskId,
           timestamp: isoNow(),
+          improvementScorecard: createImprovementScorecard({
+            taskId,
+            evaluatorName: evalResult.evaluatorName,
+            failingIteration,
+            resolvedIteration,
+            baselineScore: evalResult.score,
+            resolvedScore: passingIteration?.result.overallScore ?? failingIteration.result.overallScore,
+          }),
           testTraceability: [
             {
               lessonId,
@@ -82,6 +90,51 @@ export class LessonRecorder {
 
     return lessons;
   }
+}
+
+function createImprovementScorecard(input: {
+  taskId: TaskId;
+  evaluatorName: string;
+  failingIteration: CritiqueIteration;
+  resolvedIteration: number;
+  baselineScore: number;
+  resolvedScore: number;
+}): AgentImprovementScorecard {
+  const agentId = getAgentId(input.failingIteration);
+  const baselineScore = stableScore(input.baselineScore);
+  const resolvedScore = stableScore(input.resolvedScore);
+  const improvementDelta = stableScore(resolvedScore - baselineScore);
+  const retryCount = Math.max(0, input.resolvedIteration - input.failingIteration.index);
+
+  return {
+    agentId: agentId.value,
+    taskId: input.taskId,
+    evaluatorName: input.evaluatorName,
+    failedIteration: input.failingIteration.index,
+    resolvedIteration: input.resolvedIteration,
+    baselineScore,
+    resolvedScore,
+    improvementDelta,
+    retryCount,
+    agentIdSource: agentId.source,
+    summary: `${agentId.value} improved ${input.evaluatorName} from ${baselineScore} to ${resolvedScore} after ${retryCount} ${retryCount === 1 ? 'retry' : 'retries'}.`,
+  };
+}
+
+function getAgentId(iteration: CritiqueIteration): {
+  value: string;
+  source: AgentImprovementScorecard['agentIdSource'];
+} {
+  const rawAgentId = iteration.input.metadata['agentId'];
+  if (typeof rawAgentId === 'string' && rawAgentId.trim().length > 0) {
+    return { value: rawAgentId.trim(), source: 'metadata' };
+  }
+
+  return { value: 'unknown-agent', source: 'fallback' };
+}
+
+function stableScore(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
 }
 
 function createLessonId(taskId: TaskId, evaluatorName: string, iterationIndex: number): string {
