@@ -122,13 +122,14 @@ function cleanupTempFile(path: string): void {
 }
 
 function writeTempFile(finalPath: string, contents: string): string {
+  const mode = fs.existsSync(finalPath) ? fs.statSync(finalPath).mode & 0o777 : 0o666;
   const tempPath = join(
     resolve(finalPath, '..'),
     `.${basename(finalPath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
   );
   let file: number | undefined;
   try {
-    file = fs.openSync(tempPath, 'wx', 0o600);
+    file = fs.openSync(tempPath, 'wx', mode);
     fs.writeFileSync(file, contents);
     fs.fsyncSync(file);
   } catch (error) {
@@ -150,6 +151,11 @@ function commitTempFile(tempPath: string, finalPath: string): void {
     cleanupTempFile(tempPath);
     throw error;
   }
+}
+
+function writeJsonFileAtomically(finalPath: string, value: unknown): void {
+  const tempPath = writeTempFile(finalPath, JSON.stringify(value, null, 2));
+  commitTempFile(tempPath, finalPath);
 }
 
 /**
@@ -194,6 +200,13 @@ export class AuditTrailStore {
       throw error;
     }
     return filePath;
+  }
+
+  saveReplayManifest(runId: string, manifest: readonly ReplayRecord[]): string {
+    const replayPath = safeAuditPath(this.auditDir, runId, '.replay.json');
+    fs.mkdirSync(this.auditDir, { recursive: true });
+    writeJsonFileAtomically(replayPath, manifest);
+    return replayPath;
   }
 
   load(runId: string): AuditTrail {

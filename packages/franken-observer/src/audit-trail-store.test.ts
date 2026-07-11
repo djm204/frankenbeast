@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AuditTrail, createAuditEvent } from './audit-event.js';
@@ -174,6 +174,32 @@ describe('AuditTrailStore', () => {
     const raw = JSON.parse(readFileSync(join(tempDir, '.fbeast', 'audit', 'run-1.replay.json'), 'utf-8'));
     expect(raw).toEqual([
       { version: 1, kind: 'llm.response', runId: 'run-1', timestamp: 't', contentRef: 'abc123' },
+    ]);
+  });
+
+  it('preserves existing audit and replay file modes when atomically replacing them', () => {
+    const filePath = store.save('run-1', sampleTrail(), [
+      { version: 1, kind: 'llm.response', runId: 'run-1', timestamp: 't', contentRef: 'abc123' },
+    ]);
+    const replayPath = join(tempDir, '.fbeast', 'audit', 'run-1.replay.json');
+    chmodSync(filePath, 0o644);
+    chmodSync(replayPath, 0o644);
+
+    store.save('run-1', sampleTrail(), [
+      { version: 1, kind: 'llm.request', runId: 'run-1', timestamp: 't2', contentRef: 'def456' },
+    ]);
+
+    expect(statSync(filePath).mode & 0o777).toBe(0o644);
+    expect(statSync(replayPath).mode & 0o777).toBe(0o644);
+  });
+
+  it('writes replay-only manifests atomically for bridge records', () => {
+    const replayPath = store.saveReplayManifest('run-1', [
+      { version: 1, kind: 'tool.result', runId: 'run-1', timestamp: 't', contentRef: 'abc123' },
+    ]);
+
+    expect(JSON.parse(readFileSync(replayPath, 'utf-8'))).toEqual([
+      { version: 1, kind: 'tool.result', runId: 'run-1', timestamp: 't', contentRef: 'abc123' },
     ]);
   });
 
