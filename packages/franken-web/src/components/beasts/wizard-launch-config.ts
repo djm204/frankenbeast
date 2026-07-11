@@ -20,16 +20,47 @@ const MODULE_NUMBER_BOUNDS = {
 
 const CLI_PROVIDER_BY_WIZARD_PROVIDER: Record<string, string> = {
   anthropic: 'claude',
+  'anthropic-api': 'claude',
+  'claude-cli': 'claude',
   openai: 'codex',
+  'openai-api': 'codex',
+  'codex-cli': 'codex',
   gemini: 'gemini',
   'gemini-api': 'gemini',
+  'gemini-cli': 'gemini',
+  aider: 'aider',
   claude: 'claude',
   codex: 'codex',
+};
+
+const GIT_PRESET_DEFAULTS: Record<string, Record<string, unknown>> = {
+  'one-shot': { baseBranch: 'main', branchPattern: '', prCreation: false, commitConvention: 'conventional', mergeStrategy: 'merge' },
+  'feature-branch': { baseBranch: 'main', branchPattern: 'feat/{agent-name}/{id}', prCreation: true, commitConvention: 'conventional', mergeStrategy: 'squash' },
+  'feature-branch-worktree': { baseBranch: 'main', branchPattern: 'feat/{agent-name}/{id}', prCreation: true, commitConvention: 'conventional', mergeStrategy: 'squash' },
+  'yolo-main': { baseBranch: 'main', branchPattern: '', prCreation: false, commitConvention: 'freeform', mergeStrategy: 'merge' },
 };
 
 interface PromptFile {
   name?: unknown;
   content?: unknown;
+}
+
+function stringRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function llmProviderModel(
+  llmConfig: Record<string, unknown> | undefined,
+  operation?: string,
+): { provider?: string; model?: string } {
+  const section = operation
+    ? stringRecord(stringRecord(llmConfig?.overrides)?.[operation])
+    : stringRecord(llmConfig?.default);
+  const provider = typeof section?.provider === 'string' ? section.provider : undefined;
+  const model = typeof section?.model === 'string' ? section.model : undefined;
+  return { provider, model };
 }
 
 function resolveLaunchExecutionMode(
@@ -182,17 +213,19 @@ function normalizeBranchPattern(value: string): string {
 function buildGitConfig(git: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!git) return undefined;
 
+  const presetDefaults = typeof git.preset === 'string' ? GIT_PRESET_DEFAULTS[git.preset] : undefined;
+  const effectiveGit = { ...(presetDefaults ?? {}), ...git };
   const gitConfig: Record<string, unknown> = {};
   for (const key of ['preset', 'baseBranch', 'mergeStrategy', 'commitConvention'] as const) {
-    if (typeof git[key] === 'string' && git[key].trim().length > 0) {
-      gitConfig[key] = git[key];
+    if (typeof effectiveGit[key] === 'string' && effectiveGit[key].trim().length > 0) {
+      gitConfig[key] = effectiveGit[key];
     }
   }
-  if (typeof git.branchPattern === 'string') {
-    gitConfig.branchPattern = normalizeBranchPattern(git.branchPattern.trim());
+  if (typeof effectiveGit.branchPattern === 'string') {
+    gitConfig.branchPattern = normalizeBranchPattern(effectiveGit.branchPattern.trim());
   }
-  if (typeof git.prCreation === 'boolean') {
-    gitConfig.prCreation = git.prCreation ? 'auto' : 'disabled';
+  if (typeof effectiveGit.prCreation === 'boolean') {
+    gitConfig.prCreation = effectiveGit.prCreation ? 'auto' : 'disabled';
   }
 
   return Object.keys(gitConfig).length > 0 ? gitConfig : undefined;
@@ -274,12 +307,29 @@ export function buildWizardLaunchConfig(
     if (typeof workflow.provider === 'string') {
       config.provider = workflow.provider;
     }
+    const executionTarget = llmProviderModel(llmConfig, 'cli-session');
+    if (executionTarget.provider) {
+      config.provider = executionTarget.provider;
+    }
+    if (executionTarget.model) {
+      config.model = executionTarget.model;
+    }
     if (typeof workflow.objective === 'string') {
       config.objective = workflow.objective;
     }
     const chunkDirectory = typeof workflow.chunkDirectory === 'string' ? workflow.chunkDirectory : workflow.chunkDir;
     if (typeof chunkDirectory === 'string') {
       config.chunkDirectory = chunkDirectory;
+    }
+  }
+
+  if (typeof config.provider !== 'string') {
+    const defaultTarget = llmProviderModel(llmConfig);
+    if (defaultTarget.provider) {
+      config.provider = defaultTarget.provider;
+    }
+    if (defaultTarget.model && typeof config.model !== 'string') {
+      config.model = defaultTarget.model;
     }
   }
 

@@ -80,6 +80,8 @@ describe('buildWizardLaunchConfig', () => {
           'issue-graph': { provider: 'claude', model: 'claude-sonnet-4-6' },
         },
       },
+      provider: 'codex',
+      model: 'gpt-5.3-codex-spark',
       skills: ['code-review', 'testing'],
       gitConfig: {
         preset: 'feature-branch-worktree',
@@ -88,6 +90,59 @@ describe('buildWizardLaunchConfig', () => {
         prCreation: 'auto',
         commitConvention: 'conventional',
         mergeStrategy: 'squash',
+      },
+    });
+  });
+
+  it('emits compatible CLI providers for API, CLI, and Aider wizard selections', () => {
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'openai-api', defaultModel: 'gpt-5.5' } })).toMatchObject({
+      provider: 'codex',
+      llmConfig: { default: { provider: 'codex', model: 'gpt-5.5' } },
+    });
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'anthropic-api', defaultModel: 'claude-sonnet-4-6' } })).toMatchObject({
+      provider: 'claude',
+      llmConfig: { default: { provider: 'claude', model: 'claude-sonnet-4-6' } },
+    });
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'aider', defaultModel: 'sonnet' } })).toMatchObject({
+      provider: 'aider',
+      llmConfig: { default: { provider: 'aider', model: 'sonnet' } },
+    });
+  });
+
+  it('uses the execution override as the MartinLoop runtime provider', () => {
+    expect(buildWizardLaunchConfig({
+      1: { workflowType: 'martin-loop', provider: 'codex', objective: 'Implement chunks', chunkDirectory: 'tasks/chunks' },
+      2: {
+        defaultProvider: 'openai',
+        defaultModel: 'gpt-5.3-codex-spark',
+        overrides: {
+          execution: { provider: 'anthropic', model: 'claude-sonnet-4-6', useDefault: false },
+        },
+      },
+    })).toMatchObject({
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      llmConfig: {
+        default: { provider: 'codex', model: 'gpt-5.3-codex-spark' },
+        overrides: {
+          issues: { provider: 'claude', model: 'claude-sonnet-4-6' },
+          'cli-session': { provider: 'claude', model: 'claude-sonnet-4-6' },
+        },
+      },
+    });
+  });
+
+  it('expands selected git presets even when only the preset id is stored', () => {
+    expect(buildWizardLaunchConfig({
+      6: { preset: 'yolo-main' },
+    })).toMatchObject({
+      gitConfig: {
+        preset: 'yolo-main',
+        baseBranch: 'main',
+        branchPattern: '',
+        prCreation: 'disabled',
+        commitConvention: 'freeform',
+        mergeStrategy: 'merge',
       },
     });
   });
