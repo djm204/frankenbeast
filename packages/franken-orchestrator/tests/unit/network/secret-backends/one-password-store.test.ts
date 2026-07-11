@@ -66,7 +66,12 @@ describe('OnePasswordStore', () => {
     });
 
     it('resolves a stored secret via op item get', async () => {
-      mock.responses.set('--fields=password', {
+      mock.responses.set('--format=json', {
+        stdout: JSON.stringify({ id: 'item-id-123' }),
+        stderr: '',
+        exitCode: 0,
+      });
+      mock.responses.set('read', {
         stdout: RESOLVED_SLACK_BOT_TOKEN,
         stderr: '',
         exitCode: 0,
@@ -78,7 +83,12 @@ describe('OnePasswordStore', () => {
     it('uses the same raw item title for URL-unsafe keys across store and resolve', async () => {
       const key = 'comms/slack@workspace.botTokenRef';
       const title = 'frankenbeast/comms/slack@workspace.botTokenRef';
-      mock.responses.set('--fields=password', {
+      mock.responses.set('--format=json', {
+        stdout: JSON.stringify({ id: 'unsafe-item-id' }),
+        stderr: '',
+        exitCode: 0,
+      });
+      mock.responses.set('read', {
         stdout: RESOLVED_SLACK_BOT_TOKEN,
         stderr: '',
         exitCode: 0,
@@ -112,15 +122,24 @@ describe('OnePasswordStore', () => {
           'get',
           title,
           '--vault=frankenbeast',
-          '--fields=password',
-          '--reveal',
+          '--format=json',
         ],
+      });
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: ['read', 'op://frankenbeast/unsafe-item-id/password'],
       });
     });
 
     it('returns undefined when secret not found', async () => {
-      mock.responses.set('--fields=password', { stdout: '', stderr: 'not found', exitCode: 1 });
+      mock.responses.set('--format=json', { stdout: '', stderr: 'not found', exitCode: 1 });
       const value = await store.resolve('nonexistent');
+      expect(value).toBeUndefined();
+    });
+
+    it('returns undefined when op item metadata is malformed', async () => {
+      mock.responses.set('--format=json', { stdout: 'not json', stderr: '', exitCode: 0 });
+      const value = await store.resolve('comms.slack.botTokenRef');
       expect(value).toBeUndefined();
     });
   });
