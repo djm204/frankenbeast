@@ -86,3 +86,7 @@
 ## 2026-07-10 — Network page stale refresh races
 - Network action/status refresh fixes need promise-order regressions: cover a superseded action refresh settling before the newer manual refresh, and a hung superseded action refresh where the newer manual refresh settles first.
 - Surface Network status refresh failures independently from selected-service log refreshes and initial config loads; slow/hung independent requests must not delay operator-facing status alerts.
+
+## 2026-07-11 — Session-store corruption diagnostics
+- Atomic session writes for private transcripts should create temp files with the final restrictive mode up front, not chmod only after writing; preserve existing destination mode and default new session files to restrictive permissions.
+- Corrupt-session API diagnostics should expose only operator-useful summaries, not local server paths. When project-filtering diagnostics, keep unknown-project corruptions visible so malformed JSON does not disappear silently after quarantine.
