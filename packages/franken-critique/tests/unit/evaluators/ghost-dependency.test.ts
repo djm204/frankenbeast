@@ -190,6 +190,9 @@ describe('GhostDependencyEvaluator', () => {
       const cast = value as import('ghost-package').Ghost;
       function typedParam(dep?: import('ghost-package').Ghost) {}
       class TypedField { dep?: import('ghost-package').Ghost }
+      class RequiredTypedField { dep: import('ghost-package').Ghost }
+      const typeofCast = value as typeof import('ghost-package');
+      const typeofSatisfies = value satisfies typeof import('ghost-package');
       const plugin = loader.import('unknown-lib');
       this.#import('private-loader');
     `;
@@ -204,26 +207,33 @@ describe('GhostDependencyEvaluator', () => {
     const content = `
       const cfg: { plugin: import('object-type-ghost').Plugin } = {};
       async function load(): Promise<unknown> { return import('typed-function-ghost'); }
+      async function bare(): Promise<void> { import('bare-function-ghost'); }
+      function* yielded(): Generator { yield import('yielded-function-ghost'); }
       const logicalAnd = ready && import('logical-and-ghost');
       const logicalOr = fallback || import('logical-or-ghost');
       type T = {}
       void import('void-after-type-ghost');
       type U = {}
       (async () => import('iife-after-type-ghost'))();
+      type V = {}
+      export const exported = await import('export-after-type-ghost');
       async function awaited(): Promise<void> { await import('awaited-function-ghost'); }
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(7);
+    expect(result.findings).toHaveLength(10);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
+        expect.stringContaining('bare-function-ghost'),
+        expect.stringContaining('yielded-function-ghost'),
         expect.stringContaining('logical-and-ghost'),
         expect.stringContaining('logical-or-ghost'),
         expect.stringContaining('void-after-type-ghost'),
         expect.stringContaining('iife-after-type-ghost'),
+        expect.stringContaining('export-after-type-ghost'),
         expect.stringContaining('awaited-function-ghost'),
         expect.stringContaining('switch-case-ghost'),
       ]),
@@ -249,11 +259,13 @@ describe('GhostDependencyEvaluator', () => {
       const quoted = { 'plugin': import('quoted-key-ghost') };
       const numeric = { 1: import('numeric-key-ghost') };
       const computed = { [pluginName]: import('computed-key-ghost') };
+      const commented = { /* generated */ plugin: import('commented-key-ghost') };
+      const invalidNode = await import('node:not-a-real-builtin');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(12);
+    expect(result.findings).toHaveLength(14);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('ghost-package'),
@@ -268,6 +280,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('quoted-key-ghost'),
         expect.stringContaining('numeric-key-ghost'),
         expect.stringContaining('computed-key-ghost'),
+        expect.stringContaining('commented-key-ghost'),
+        expect.stringContaining('node:not-a-real-builtin'),
       ]),
     );
   });

@@ -79,7 +79,7 @@ function isLocalImportSpecifier(specifier: string): boolean {
     specifier.startsWith('/') ||
     specifier.startsWith('#') ||
     specifier.startsWith('file:') ||
-    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(specifier) ||
+    (!specifier.startsWith('node:') && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(specifier)) ||
     /^[A-Za-z]:/.test(specifier)
   );
 }
@@ -287,9 +287,10 @@ function isSpreadOperand(content: string, dotIndex: number): boolean {
 }
 
 function endsInsideNestedTypeReference(prefix: string): boolean {
-  if (/(?:\bas\s*|\bsatisfies\s*)$/.test(prefix)) return true;
+  if (/(?:\bas\s*|\bsatisfies\s*)(?:typeof\s*)?$/.test(prefix)) return true;
 
   const trimmed = prefix.trimEnd();
+
   if (
     /(?:,|\bextends\b|=)$/.test(trimmed) &&
     trimmed.lastIndexOf('<') > trimmed.lastIndexOf('>')
@@ -308,10 +309,10 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
 function isInsideTypeDeclaration(prefix: string): boolean {
   return (
     /^\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
-    !/\n\s*(?:const|let|var|await|return|throw|if|for|while|switch|try|function|class)\b/.test(
+    !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
     ) &&
-    !/\}\s*\n\s*(?:void\s*$|\(|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
+    !/\}\s*\n\s*(?:export\s+)?(?:void\s*$|\(|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
       prefix,
     )
   );
@@ -329,6 +330,7 @@ function isInsideTypeAnnotation(
   if (annotationIndex === -1) return false;
 
   const beforeAnnotation = prefix.slice(0, annotationIndex);
+  if (/\bcase\s+[\s\S]*$/.test(beforeAnnotation)) return false;
   if (/:\s*\{[^}]*$/.test(beforeAnnotation)) return true;
 
   const outerAnnotationIndex = beforeAnnotation.lastIndexOf(':');
@@ -346,7 +348,10 @@ function isInsideTypeAnnotation(
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (/[=;]/.test(annotationSuffix)) return false;
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
-  if (/\{[\s\S]*\b(?:return|throw|void|await|case|default)\b/.test(annotationSuffix)) {
+  if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {
+    return false;
+  }
+  if (/\{[\s\S]*$/.test(annotationSuffix)) {
     return false;
   }
 
@@ -385,9 +390,46 @@ function isLikelyObjectLiteralValue(content: string, importIndex: number): boole
     while (i >= 0 && isIdentifierCharacter(content[i]!)) i -= 1;
   }
 
-  while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
+  i = skipTriviaBackward(content, i);
+
+  if (content[i] === '{') {
+    const beforeBrace = content.slice(0, i).trimEnd();
+    if (/\bclass\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?$/.test(beforeBrace)) {
+      return false;
+    }
+  }
 
   return content[i] === '{' || content[i] === ',';
+}
+
+function skipTriviaBackward(content: string, index: number): number {
+  let i = index;
+
+  while (i >= 0) {
+    while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
+
+    if (content[i] === '/' && content[i - 1] === '*') {
+      i -= 2;
+      while (i >= 1 && !(content[i - 1] === '/' && content[i] === '*')) i -= 1;
+      i -= 2;
+      continue;
+    }
+
+    if (isInsideLineCommentBackward(content, i)) {
+      while (i >= 0 && content[i] !== '\n') i -= 1;
+      continue;
+    }
+
+    return i;
+  }
+
+  return i;
+}
+
+function isInsideLineCommentBackward(content: string, index: number): boolean {
+  const lineStart = content.lastIndexOf('\n', index) + 1;
+  const commentStart = content.lastIndexOf('//', index);
+  return commentStart >= lineStart;
 }
 
 function skipQuotedKeyBackward(content: string, quoteIndex: number): number {
