@@ -16,6 +16,7 @@ import { handleBeastCommand } from './beast-cli.js';
 import { handleInitCommand } from './init-command.js';
 import { handleSkillCommand } from './skill-cli.js';
 import { handleSecurityCommand } from './security-cli.js';
+import { handleMemoryCommand } from './memory-snapshot-diff.js';
 import { loadConfig } from './config-loader.js';
 import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -1027,6 +1028,21 @@ export async function main(): Promise<void> {
 
   if (args.subcommand === 'network') {
     await runNetworkCommand(args, config, root, paths);
+    return;
+  }
+
+  if (args.subcommand === 'memory') {
+    try {
+      await handleMemoryCommand({
+        action: args.memoryAction,
+        beforePath: args.memorySnapshotBefore,
+        afterPath: args.memorySnapshotAfter,
+        print: printLine,
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
     return;
   }
 
