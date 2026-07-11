@@ -6,4 +6,4 @@
 - [x] Implement structured JSON BrainSnapshot diff output with validation errors.
 - [x] Add focused unit coverage for parsing, success output, and invalid snapshot failure.
 - [x] Run targeted test and orchestrator typecheck verification.
-- [ ] Commit, push branch, open PR, and request `@codex review`.
+- [x] Commit, push branch, open PR, and request `@codex review`.
