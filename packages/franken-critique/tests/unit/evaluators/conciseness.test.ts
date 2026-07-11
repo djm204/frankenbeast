@@ -190,24 +190,29 @@ const x = 1;
     const pendingMarker = ['TO', 'DO'].join('');
     const trackedMarker = ['FIX', 'ME'].join('');
     const hackMarker = ['HA', 'CK'].join('');
+    const xxxMarker = ['X', 'XX'].join('');
     const content = [
       "Don't skip later fenced code markers:",
       '````ts',
       `// ${pendingMarker}: fenced code follow-up`,
       '````',
+      '/** Render the todo list for this page. */',
+      'const ratio = (a + b) / c;',
+      `// ${trackedMarker}: division comment remains visible`,
       'const re = // docs before regex',
-      `  /[/* ${trackedMarker}: regex data */]/;`,
-      `if (ok) /[/* ${hackMarker}: regex data */]/.test(value);`,
+      `  /[/* ${hackMarker}: regex data */]/;`,
+      `if (ok) foo(); else /[/* ${xxxMarker}: regex data */]/.test(value);`,
     ].join('\n');
     const result = await evaluator.evaluate(createInput(content));
 
     expect(
       result.findings.some(
         (f) =>
-          f.message.includes('1 unresolved marker comment(s)') &&
+          f.message.includes('2 unresolved marker comment(s)') &&
           f.message.includes(pendingMarker) &&
-          !f.message.includes(trackedMarker) &&
-          !f.message.includes(hackMarker),
+          f.message.includes(trackedMarker) &&
+          !f.message.includes(hackMarker) &&
+          !f.message.includes(xxxMarker),
       ),
     ).toBe(true);
   });

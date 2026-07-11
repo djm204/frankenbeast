@@ -18,7 +18,7 @@ const UNRESOLVED_COMMENT_PATTERN = new RegExp(
   'gi',
 );
 const UNRESOLVED_MARKER_PATTERN = new RegExp(
-  `\\b(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\b`,
+  `(?:^|[\\s*])(${UNRESOLVED_COMMENT_MARKERS.join('|')})\\s*:`,
   'gi',
 );
 const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
@@ -100,9 +100,20 @@ function previousSignificantToken(content: string, index: number): string {
   return content.slice(cursor + 1, end);
 }
 
+function nextSignificantCharacter(content: string, index: number): string {
+  for (let cursor = index; cursor < content.length; cursor += 1) {
+    const current = content[cursor] ?? '';
+    if (!/\s/.test(current)) {
+      return current;
+    }
+  }
+  return '';
+}
+
 function canStartRegexLiteral(content: string, index: number): boolean {
   const previous = previousSignificantCharacter(content, index);
   const previousToken = previousSignificantToken(content, index);
+  const next = nextSignificantCharacter(content, index + 1);
   return (
     [
       'return',
@@ -113,9 +124,11 @@ function canStartRegexLiteral(content: string, index: number): boolean {
       'typeof',
       'void',
       'delete',
+      'else',
     ].includes(previousToken) ||
     previous === '' ||
-    '([{=,:;!&|?+-*~^>)'.includes(previous)
+    '([{=,:;!&|?+-*~^>'.includes(previous) ||
+    (previous === ')' && next === '[')
   );
 }
 
