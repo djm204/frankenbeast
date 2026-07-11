@@ -434,18 +434,21 @@ function isLikelyJsxTagStart(content: string, index: number): boolean {
     return false;
   }
 
+  if (next === '>') {
+    return true;
+  }
+
   const previousIndex = previousSignificantIndex(content, index);
   const previous = previousIndex === -1 ? '' : content[previousIndex] ?? '';
   const previousToken = previousSignificantToken(content, index);
   if (
     /[$\w)\]]/.test(previous) &&
-    !['return', 'yield', 'case', 'else', 'do'].includes(previousToken) &&
-    !(next === '/' && hasOpenJsxAncestorBefore(content, index))
+    !['return', 'yield', 'case', 'else', 'do'].includes(previousToken)
   ) {
-    return false;
+    return next === '/' && hasOpenJsxAncestorBefore(content, index);
   }
 
-  if (next === '/' || next === '>') {
+  if (next === '/') {
     return true;
   }
 
