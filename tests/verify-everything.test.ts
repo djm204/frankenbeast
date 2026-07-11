@@ -20,8 +20,8 @@ describe("Chunk 10: full verification pass", () => {
       expect(source).not.toContain(`${pipe} wc -l`);
       expect(source).not.toContain(`${pipe} head`);
       expect(source).not.toContain(["git", "log"].join(" "));
-      expect(source).toContain(
-        "process.platform === 'win32' ? 'npm.cmd' : 'npm'",
+      expect(source).toMatch(
+        /process\.platform\s*===\s*['"]win32['"]\s*\?\s*['"]npm\.cmd['"]\s*:\s*['"]npm['"]/,
       );
     });
   });
