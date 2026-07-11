@@ -6,4 +6,4 @@
 - [x] Cover scorecard success and edge cases with targeted tests.
 - [x] Update operator-facing documentation for interpreting the scorecard.
 - [x] Run targeted verification.
-- [ ] Commit, push branch, open PR, and request Codex review.
+- [x] Commit, push branch, open PR, and request Codex review.
