@@ -2138,6 +2138,48 @@ describe('main() execution', () => {
     expect(MockSession).not.toHaveBeenCalled();
   });
 
+  it('preserves --backend on fallback config when init repair handles config load errors', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'init',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: '/mock/project/missing-config.json',
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: true,
+      initNonInteractive: false,
+      initBackend: '1password',
+    });
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({
+        network: expect.objectContaining({ secureBackend: '1password' }),
+      }),
+    }));
+    expect(MockSession).not.toHaveBeenCalled();
+  });
+
   it('preserves provider command override approval when saving network config updates', async () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-trusted-network-save`);
     const configFile = join(root, '.fbeast', 'config.json');

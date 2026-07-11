@@ -311,6 +311,14 @@ function canInitHandleConfigLoadError(args: CliArgs): boolean {
     && (args.initVerify || args.initRepair || args.initNonInteractive);
 }
 
+function initFallbackConfig(args: CliArgs): OrchestratorConfig {
+  const config = defaultConfig();
+  if (args.initBackend) {
+    config.network.secureBackend = args.initBackend as OrchestratorConfig['network']['secureBackend'];
+  }
+  return config;
+}
+
 export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
   if (!config.dashboard?.enabled) {
     return [];
@@ -837,7 +845,7 @@ export async function main(): Promise<void> {
     if (!canInitHandleConfigLoadError(args)) {
       throw error;
     }
-    config = defaultConfig();
+    config = initFallbackConfig(args);
   }
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
