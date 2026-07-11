@@ -26,8 +26,6 @@ export type { ChatSessionResponse as ChatSession } from '@franken/types';
 export interface CorruptChatSessionFile {
   id: string;
   projectId?: string;
-  path: string;
-  quarantinePath: string;
   reason: string;
 }
 

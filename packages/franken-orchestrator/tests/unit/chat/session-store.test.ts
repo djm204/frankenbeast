@@ -113,17 +113,22 @@ describe('FileSessionStore', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const firstId = 'chat-corrupt-first-project';
     const secondId = 'chat-corrupt-second-project';
+    const unknownId = 'chat-corrupt-unknown-project';
     writeFileSync(join(TMP, `${firstId}.json`), JSON.stringify({ id: firstId, projectId: 'first' }), 'utf-8');
     writeFileSync(join(TMP, `${secondId}.json`), JSON.stringify({ id: secondId, projectId: 'second' }), 'utf-8');
+    writeFileSync(join(TMP, `${unknownId}.json`), '{"id":', 'utf-8');
 
     expect(store.get(firstId)).toBeUndefined();
     expect(store.get(secondId)).toBeUndefined();
+    expect(store.get(unknownId)).toBeUndefined();
 
     expect(store.listCorruptions('first')).toEqual([
       expect.objectContaining({ id: firstId, projectId: 'first' }),
+      expect.objectContaining({ id: unknownId }),
     ]);
     expect(store.listCorruptions('second')).toEqual([
       expect.objectContaining({ id: secondId, projectId: 'second' }),
+      expect.objectContaining({ id: unknownId }),
     ]);
 
     warn.mockRestore();

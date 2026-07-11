@@ -134,10 +134,17 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     }));
-    const corruptSessions = sessionStore.listCorruptions?.(projectId) ?? [];
+    const corruptSessions = (sessionStore.listCorruptions?.(projectId) ?? []).map(({ id, projectId, reason }) => ({
+      id,
+      ...(projectId === undefined ? {} : { projectId }),
+      reason,
+    }));
     return c.json({
       data: { sessions, corruptSessions },
-    } satisfies ApiDataEnvelope<{ sessions: ChatSessionSummary[]; corruptSessions: CorruptChatSessionFile[] }>);
+    } satisfies ApiDataEnvelope<{
+      sessions: ChatSessionSummary[];
+      corruptSessions: Pick<CorruptChatSessionFile, 'id' | 'projectId' | 'reason'>[];
+    }>);
   });
 
   // Get session

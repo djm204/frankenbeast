@@ -97,7 +97,7 @@ export class FileSessionStore implements ISessionStore {
       }
     }
     return Array.from(this.corruptions.values())
-      .filter((diagnostic) => projectId === undefined || diagnostic.projectId === projectId)
+      .filter((diagnostic) => projectId === undefined || diagnostic.projectId === undefined || diagnostic.projectId === projectId)
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -132,7 +132,7 @@ export class FileSessionStore implements ISessionStore {
     const tmpPath = `${destination}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
     try {
       const existingMode = this.existingFileMode(destination);
-      writeFileSync(tmpPath, JSON.stringify(session, null, 2), 'utf-8');
+      writeFileSync(tmpPath, JSON.stringify(session, null, 2), { encoding: 'utf-8', mode: existingMode ?? 0o600 });
       if (existingMode !== undefined) {
         chmodSync(tmpPath, existingMode);
       }
