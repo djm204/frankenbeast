@@ -125,6 +125,16 @@ function previousSignificantToken(content: string, index: number): string {
   return content.slice(cursor + 1, end);
 }
 
+function previousTokenIsPropertyName(content: string, index: number): boolean {
+  const tokenEnd = previousSignificantIndex(content, index) + 1;
+  let cursor = tokenEnd - 1;
+  while (cursor >= 0 && /[$\w]/.test(content[cursor] ?? '')) {
+    cursor -= 1;
+  }
+
+  return content[cursor] === '.';
+}
+
 function isOperandEndingCharacter(character: string): boolean {
   return /[$\w)\]]/.test(character);
 }
@@ -176,6 +186,11 @@ function findMatchingOpeningParen(content: string, closeIndex: number): number {
       continue;
     }
 
+    if (current === '/' && canStartRegexLiteralWhileMatchingParens(content, cursor)) {
+      cursor = skipRegexLiteral(content, cursor);
+      continue;
+    }
+
     if (current === '(') {
       openParens.push(cursor);
     } else if (current === ')') {
@@ -207,10 +222,16 @@ function followsControlCondition(content: string, index: number): boolean {
   );
 }
 
-function canStartRegexLiteral(content: string, index: number): boolean {
+function canStartRegexLiteralWhileMatchingParens(
+  content: string,
+  index: number,
+): boolean {
   const previous = previousSignificantCharacter(content, index);
   const previousToken = previousSignificantToken(content, index);
   if (isPostfixOperatorBefore(content, index)) {
+    return false;
+  }
+  if (previousTokenIsPropertyName(content, index)) {
     return false;
   }
   return (
@@ -224,6 +245,40 @@ function canStartRegexLiteral(content: string, index: number): boolean {
       'void',
       'delete',
       'else',
+      'do',
+      'of',
+      'in',
+      'default',
+    ].includes(previousToken) ||
+    previous === '' ||
+    '([{=,:;!&|?+-*~^<>/'.includes(previous)
+  );
+}
+
+function canStartRegexLiteral(content: string, index: number): boolean {
+  const previous = previousSignificantCharacter(content, index);
+  const previousToken = previousSignificantToken(content, index);
+  if (isPostfixOperatorBefore(content, index)) {
+    return false;
+  }
+  if (previousTokenIsPropertyName(content, index)) {
+    return false;
+  }
+  if (previous === '<' && previousSignificantIndex(content, index) === index - 1) {
+    return false;
+  }
+  return (
+    [
+      'return',
+      'throw',
+      'case',
+      'yield',
+      'await',
+      'typeof',
+      'void',
+      'delete',
+      'else',
+      'do',
       'of',
       'in',
       'default',
@@ -320,10 +375,14 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
 
   const openingTag = before.slice(lastTagStart, lastTagEnd + 1).trim();
   const nextTag = after.slice(nextTagStart).trimStart();
+  if (openingTag === '<>') {
+    return nextTag.startsWith('</>');
+  }
+
   return (
-    /^<[A-Za-z][^>]*>$/.test(openingTag) &&
-    !/\/\s*>$/.test(openingTag) &&
-    /^<\/[A-Za-z]/.test(nextTag)
+    new RegExp('^<[A-Za-z][^>]*>$').test(openingTag) &&
+    !new RegExp('/\\s*>$').test(openingTag) &&
+    new RegExp('^</[A-Za-z]').test(nextTag)
   );
 }
 

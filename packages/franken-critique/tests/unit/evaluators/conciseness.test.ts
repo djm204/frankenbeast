@@ -397,6 +397,54 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('continues scanning markers after keyword property divisions and JSX closing tags', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const content = [
+      `const ratio = config.default / total; // ${pendingMarker}: normalize`,
+      `const grouped = source.in / total; /* ${trackedMarker}: normalize */`,
+      `const node = <div></div>; // ${hackMarker}: remove`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('3 unresolved marker comment(s)') &&
+          f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker),
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores fragment text and regex bodies after do/control conditions', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const content = [
+      `const fragment = <>/* ${pendingMarker}: shown to users */</>;`,
+      `if (/[)]/.test(value)) /[/* ${pendingMarker}: regex data */]/.test(value);`,
+      `do /[/* ${pendingMarker}: regex data */]/.test(value); while (ok);`,
+      `/* ${trackedMarker}: real block marker */`,
+      `// ${hackMarker}: real line marker`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('2 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));
