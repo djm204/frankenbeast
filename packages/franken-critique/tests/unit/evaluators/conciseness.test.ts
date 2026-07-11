@@ -157,6 +157,34 @@ const x = 1;
     ).toBe(true);
   });
 
+  it('handles return regexes, nested template braces, and JSX-adjacent comments', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const pendingMarker = ['TO', 'DO'].join('');
+    const trackedMarker = ['FIX', 'ME'].join('');
+    const hackMarker = ['HA', 'CK'].join('');
+    const xxxMarker = ['X', 'XX'].join('');
+    const content = [
+      `function pattern() { return /[/* ${pendingMarker}: regex data */]/; }`,
+      `const value = \`${'${'}condition ? { nested: true } : /* ${trackedMarker}: real nested expression comment */ fallback}\`;`,
+      '<div />',
+      `// ${hackMarker}: adjacent jsx line comment`,
+      '</div>',
+      `/* ${xxxMarker}: adjacent jsx block comment */`,
+    ].join('\n');
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(
+      result.findings.some(
+        (f) =>
+          f.message.includes('3 unresolved marker comment(s)') &&
+          !f.message.includes(pendingMarker) &&
+          f.message.includes(trackedMarker) &&
+          f.message.includes(hackMarker) &&
+          f.message.includes(xxxMarker),
+      ),
+    ).toBe(true);
+  });
+
   it('passes empty content', async () => {
     const evaluator = new ConcisenessEvaluator();
     const result = await evaluator.evaluate(createInput(''));

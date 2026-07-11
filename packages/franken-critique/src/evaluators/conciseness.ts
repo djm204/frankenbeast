@@ -56,9 +56,37 @@ function previousSignificantCharacter(content: string, index: number): string {
   return '';
 }
 
+function previousSignificantToken(content: string, index: number): string {
+  let cursor = index - 1;
+  while (cursor >= 0 && /\s/.test(content[cursor] ?? '')) {
+    cursor -= 1;
+  }
+
+  const end = cursor + 1;
+  while (cursor >= 0 && /[$\w]/.test(content[cursor] ?? '')) {
+    cursor -= 1;
+  }
+
+  return content.slice(cursor + 1, end);
+}
+
 function canStartRegexLiteral(content: string, index: number): boolean {
   const previous = previousSignificantCharacter(content, index);
-  return previous === '' || '([{=,:;!&|?+-*~^<>'.includes(previous);
+  const previousToken = previousSignificantToken(content, index);
+  return (
+    [
+      'return',
+      'throw',
+      'case',
+      'yield',
+      'await',
+      'typeof',
+      'void',
+      'delete',
+    ].includes(previousToken) ||
+    previous === '' ||
+    '([{=,:;!&|?+-*~^>'.includes(previous)
+  );
 }
 
 function skipRegexLiteral(content: string, start: number): number {
@@ -154,12 +182,28 @@ function collectCodeLabels(
 ): [string[], number] {
   const labels: string[] = [];
   let index = start;
+  let braceDepth = endCharacter === '}' ? 1 : 0;
 
   while (index < content.length) {
     const current = content[index];
     const next = content[index + 1];
 
-    if (endCharacter && current === endCharacter) {
+    if (endCharacter === '}' && current === '{') {
+      braceDepth += 1;
+      index += 1;
+      continue;
+    }
+
+    if (endCharacter === '}' && current === '}') {
+      braceDepth -= 1;
+      index += 1;
+      if (braceDepth === 0) {
+        return [labels, index];
+      }
+      continue;
+    }
+
+    if (endCharacter && endCharacter !== '}' && current === endCharacter) {
       return [labels, index + 1];
     }
 
