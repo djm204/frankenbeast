@@ -6,12 +6,24 @@ interface SlideInPanelProps {
   children: ReactNode;
 }
 
+function isPortalClick(target: Node | null): boolean {
+  if (!(target instanceof Node)) return false;
+
+  const targetElement = target instanceof Element
+    ? target
+    : target.parentElement;
+
+  return Boolean(targetElement?.closest('[data-beast-panel-portal="true"], [data-beast-dialog-layer]'));
+}
+
 export function SlideInPanel({ isOpen, onClose, children }: SlideInPanelProps) {
   const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === 'Escape' && isOpen && !document.querySelector('[data-beast-panel-portal="true"], [data-beast-dialog-layer]')) {
+        onClose();
+      }
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -19,7 +31,11 @@ export function SlideInPanel({ isOpen, onClose, children }: SlideInPanelProps) {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (isOpen && panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (isPortalClick(target)) return;
+
+      if (isOpen && panelRef.current && !panelRef.current.contains(target)) {
         onClose();
       }
     }

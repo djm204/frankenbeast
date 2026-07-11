@@ -23,8 +23,10 @@
   ],
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
     "test": "mkdir -p ../../.tmp/franken-types && TMPDIR=\"$PWD/../../.tmp/franken-types\" vitest run --maxWorkers=1",
+    "test:coverage": "mkdir -p ../../.tmp/franken-types && TMPDIR=\"$PWD/../../.tmp/franken-types\" vitest run --coverage --maxWorkers=1",
     "test:watch": "vitest",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
@@ -39,5 +41,12 @@
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "description": "Shared TypeScript contracts, schemas, and utility types for Frankenbeast packages",
+  "keywords": [
+    "frankenbeast",
+    "types",
+    "schemas",
+    "utilities"
+  ]
 }

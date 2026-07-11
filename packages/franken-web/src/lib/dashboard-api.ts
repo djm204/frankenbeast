@@ -58,7 +58,10 @@ export class DashboardApiClient {
   // NOTE: EventSource cannot attach an Authorization header. Browser clients
   // first mint a short-lived, one-shot stream ticket with normal authenticated
   // fetch, then put only that ticket in the EventSource URL.
-  async subscribeToDashboard(onSnapshot: (snapshot: DashboardSnapshot) => void): Promise<() => void> {
+  async subscribeToDashboard(
+    onSnapshot: (snapshot: DashboardSnapshot) => void,
+    onError?: (error: Error) => void,
+  ): Promise<() => void> {
     let eventSource: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
@@ -100,8 +103,12 @@ export class DashboardApiClient {
       }
       eventSource = nextEventSource;
       nextEventSource.addEventListener('snapshot', (event: any) => {
-        const snapshot = JSON.parse(event.data) as DashboardSnapshot;
-        onSnapshot(snapshot);
+        try {
+          const snapshot = JSON.parse(event.data) as DashboardSnapshot;
+          onSnapshot(snapshot);
+        } catch (error) {
+          onError?.(toError(error));
+        }
       });
       nextEventSource.addEventListener('error', () => {
         closeActiveSource();
@@ -117,4 +124,8 @@ export class DashboardApiClient {
     };
   }
 
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }

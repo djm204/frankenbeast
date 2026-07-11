@@ -1,12 +1,12 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { parseOrchestratorConfig, defaultConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { FileInitStateStore } from './init-state-store.js';
 import { runInitWizard } from './init-wizard.js';
-import type { InitState } from './init-types.js';
+import type { InitState, InitModuleId, SupportedCommsTransportId } from './init-types.js';
+import { createEmptyInitState } from './init-types.js';
 import { verifyInit } from './init-verify.js';
 import type { ISecretStore } from '../network/secret-store.js';
+import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from './init-json-file.js';
 
 export interface InitEngineResult {
   config: OrchestratorConfig;
@@ -29,17 +29,13 @@ async function loadExistingConfig(
   configFile: string,
   options: { allowTrustedProviderCommandOverrides?: boolean | undefined } = {},
 ): Promise<OrchestratorConfig> {
-  try {
-    const raw = await readFile(configFile, 'utf-8');
-    return parseOrchestratorConfig(JSON.parse(raw), {
+  const rawConfig = await readJsonFileOrDefault(configFile, defaultConfig, {
+    description: 'orchestrator config',
+    onCorrupt: warnJsonQuarantined,
+  });
+  return parseOrchestratorConfig(rawConfig, {
       allowTrustedProviderCommandOverrides: options.allowTrustedProviderCommandOverrides,
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return defaultConfig();
-    }
-    throw error;
-  }
+  });
 }
 
 async function resolveBaseConfig(options: RunInteractiveInitOptions): Promise<OrchestratorConfig> {
@@ -59,13 +55,48 @@ async function resolveBaseConfig(options: RunInteractiveInitOptions): Promise<Or
 }
 
 async function saveConfig(configFile: string, config: OrchestratorConfig): Promise<void> {
-  await mkdir(dirname(configFile), { recursive: true });
-  await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  await writeJsonFileAtomic(configFile, config);
+}
+
+function initStateFromConfig(configPath: string, config: OrchestratorConfig): InitState {
+  const selectedModules: InitModuleId[] = [];
+  if (config.chat.enabled) selectedModules.push('chat');
+  if (config.dashboard.enabled) selectedModules.push('dashboard');
+
+  const selectedCommsTransports: SupportedCommsTransportId[] = [];
+  if (config.comms.slack.enabled) selectedCommsTransports.push('slack');
+  if (config.comms.discord.enabled) selectedCommsTransports.push('discord');
+  if (config.comms.telegram.enabled) selectedCommsTransports.push('telegram');
+  if (config.comms.whatsapp.enabled) selectedCommsTransports.push('whatsapp');
+  if (config.comms.enabled || selectedCommsTransports.length > 0) selectedModules.push('comms');
+
+  return {
+    ...createEmptyInitState(configPath),
+    selectedModules,
+    selectedCommsTransports,
+    securityMode: config.network.mode,
+    answers: {
+      'providers.default': config.providers.default,
+      'network.operatorTokenRef': config.network.operatorTokenRef,
+      'comms.slack.appId': config.comms.slack.appId,
+      'comms.slack.botTokenRef': config.comms.slack.botTokenRef,
+      'comms.slack.signingSecretRef': config.comms.slack.signingSecretRef,
+      'comms.discord.applicationId': config.comms.discord.applicationId,
+      'comms.discord.botTokenRef': config.comms.discord.botTokenRef,
+      'comms.discord.publicKeyRef': config.comms.discord.publicKeyRef,
+      'comms.telegram.botTokenRef': config.comms.telegram.botTokenRef,
+      'comms.telegram.webhookSecretTokenRef': config.comms.telegram.webhookSecretTokenRef,
+      'comms.whatsapp.accessTokenRef': config.comms.whatsapp.accessTokenRef,
+      'comms.whatsapp.phoneNumberIdRef': config.comms.whatsapp.phoneNumberIdRef,
+      'comms.whatsapp.appSecretRef': config.comms.whatsapp.appSecretRef,
+      'comms.whatsapp.verifyTokenRef': config.comms.whatsapp.verifyTokenRef,
+    },
+  };
 }
 
 export async function runInteractiveInit(options: RunInteractiveInitOptions): Promise<InitEngineResult> {
-  const initialState = await options.stateStore.load(options.configFile);
   const baseConfig = await resolveBaseConfig(options);
+  const initialState = await options.stateStore.load(options.configFile, () => initStateFromConfig(options.configFile, baseConfig));
   const result = await runInitWizard({
     io: options.io,
     initialState,

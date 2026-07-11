@@ -30,8 +30,19 @@ export function StepModules() {
   function updateDeepConfig(moduleKey: string, field: string | Record<string, unknown>, value?: unknown) {
     const deepKey = `${moduleKey}Config`;
     const current = (values[deepKey] ?? {}) as Record<string, unknown>;
-    const updates = typeof field === 'string' ? { [field]: value } : field;
-    setStepValues(3, { ...values, [deepKey]: { ...current, ...updates } });
+
+    if (typeof field !== 'string') {
+      setStepValues(3, { ...values, [deepKey]: { ...current, ...field } });
+      return;
+    }
+
+    const nextConfig = { ...current };
+    if (value === undefined) {
+      delete nextConfig[field];
+    } else {
+      nextConfig[field] = value;
+    }
+    setStepValues(3, { ...values, [deepKey]: nextConfig });
   }
 
   function getDeepConfig(moduleKey: string): Record<string, unknown> {
@@ -90,6 +101,19 @@ export function StepModules() {
 
 const inputClass = 'w-full bg-beast-control border border-beast-border rounded-lg px-4 py-2.5 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent';
 const labelClass = 'block text-xs font-medium text-beast-muted mb-1.5';
+
+function parseNumberInput(value: string): number | undefined {
+  if (value.trim() === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed;
+}
+
+function clampNumberInput(value: string, min: number, max: number): number | undefined {
+  const parsed = parseNumberInput(value);
+  if (parsed === undefined) return undefined;
+  return Math.min(max, Math.max(min, parsed));
+}
 
 function renderModuleConfig(
   moduleKey: string,
@@ -170,7 +194,8 @@ function renderModuleConfig(
               min={1}
               max={50}
               value={(config.maxDagDepth as number) ?? 10}
-              onChange={(e) => update('maxDagDepth', Number(e.target.value))}
+              onChange={(e) => update('maxDagDepth', parseNumberInput(e.target.value))}
+              onBlur={(e) => update('maxDagDepth', clampNumberInput(e.target.value, 1, 50))}
               className={inputClass}
             />
           </div>
@@ -182,7 +207,8 @@ function renderModuleConfig(
               min={1}
               max={20}
               value={(config.parallelTaskLimit as number) ?? 4}
-              onChange={(e) => update('parallelTaskLimit', Number(e.target.value))}
+              onChange={(e) => update('parallelTaskLimit', parseNumberInput(e.target.value))}
+              onBlur={(e) => update('parallelTaskLimit', clampNumberInput(e.target.value, 1, 20))}
               className={inputClass}
             />
           </div>
@@ -200,7 +226,8 @@ function renderModuleConfig(
               min={1}
               max={10}
               value={(config.maxIterations as number) ?? 3}
-              onChange={(e) => update('maxIterations', Number(e.target.value))}
+              onChange={(e) => update('maxIterations', parseNumberInput(e.target.value))}
+              onBlur={(e) => update('maxIterations', clampNumberInput(e.target.value, 1, 10))}
               className={inputClass}
             />
           </div>
@@ -261,7 +288,8 @@ function renderModuleConfig(
               min={10}
               max={600}
               value={(config.reflectionInterval as number) ?? 60}
-              onChange={(e) => update('reflectionInterval', Number(e.target.value))}
+              onChange={(e) => update('reflectionInterval', parseNumberInput(e.target.value))}
+              onBlur={(e) => update('reflectionInterval', clampNumberInput(e.target.value, 10, 600))}
               className={inputClass}
             />
           </div>

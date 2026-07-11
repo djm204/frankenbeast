@@ -223,6 +223,28 @@ describe('LoopDetector', () => {
       for (const n of ['a', 'b', 'a', 'b']) detector.check(n)
       expect(handler).not.toHaveBeenCalled()
     })
+
+    it('isolates throwing handlers and continues notifying later listeners', () => {
+      const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 2 })
+      const throwingHandler = vi.fn(() => {
+        throw new Error('webhook failed')
+      })
+      const laterHandler = vi.fn()
+
+      detector.on('loop-detected', throwingHandler)
+      detector.on('loop-detected', laterHandler)
+
+      detector.check('a')
+      detector.check('b')
+      detector.check('a')
+
+      expect(() => detector.check('b')).not.toThrow()
+      expect(throwingHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ detected: true, detectedPattern: ['a', 'b'], repetitions: 2 }),
+      )
+    })
   })
 
   describe('reset()', () => {

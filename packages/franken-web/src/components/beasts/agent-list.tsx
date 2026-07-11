@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
-import type { BeastRunSummary, TrackedAgentSummary } from '../../lib/beast-api';
+import { TRACKED_AGENT_STATUSES, type BeastRunSummary, type TrackedAgentSummary } from '../../lib/beast-api';
 import { AgentRow, type Density } from './agent-row';
 
 interface AgentListProps {
@@ -10,9 +10,19 @@ interface AgentListProps {
   selectedAgentId: string | null;
   onSelectAgent: (agentId: string) => void;
   onCreateAgent: () => void;
+  createAgentDisabled?: boolean;
+  createAgentDisabledReason?: string | null;
 }
 
-export function AgentList({ agents, runs, selectedAgentId, onSelectAgent, onCreateAgent }: AgentListProps) {
+export function AgentList({
+  agents,
+  runs,
+  selectedAgentId,
+  onSelectAgent,
+  onCreateAgent,
+  createAgentDisabled = false,
+  createAgentDisabledReason,
+}: AgentListProps) {
   const [density, setDensity] = useState<Density>('comfortable');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -52,7 +62,7 @@ export function AgentList({ agents, runs, selectedAgentId, onSelectAgent, onCrea
             text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
         >
           <option value="">All statuses</option>
-          {['running', 'initializing', 'dispatching', 'stopped', 'completed', 'failed'].map((s) => (
+          {TRACKED_AGENT_STATUSES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
@@ -83,14 +93,23 @@ export function AgentList({ agents, runs, selectedAgentId, onSelectAgent, onCrea
         <div className="flex-1 flex flex-col items-center justify-center gap-6 text-beast-muted p-8">
           <p className="text-sm">{agents.length === 0 ? 'No agents yet' : 'No matching agents'}</p>
           {agents.length === 0 && (
-            <button
-              type="button"
-              onClick={onCreateAgent}
-              className="px-5 py-2.5 rounded-lg border border-beast-border text-beast-muted text-sm
-                hover:text-beast-text hover:bg-beast-elevated transition-colors"
-            >
-              Create your first agent
-            </button>
+            <div className="flex flex-col items-center gap-3 text-center">
+              {createAgentDisabled && createAgentDisabledReason && (
+                <p className="max-w-md text-xs text-beast-subtle">
+                  {createAgentDisabledReason}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={onCreateAgent}
+                disabled={createAgentDisabled}
+                className="px-5 py-2.5 rounded-lg border border-beast-border text-beast-muted text-sm
+                  hover:text-beast-text hover:bg-beast-elevated transition-colors disabled:cursor-not-allowed
+                  disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-beast-muted"
+              >
+                Create your first agent
+              </button>
+            </div>
           )}
         </div>
       ) : (

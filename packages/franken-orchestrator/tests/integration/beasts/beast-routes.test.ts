@@ -198,6 +198,26 @@ describe('beast routes', () => {
     expect(logsBody.data.logs.some((line) => line.includes('started'))).toBe(true);
   });
 
+  it.each([
+    ['/v1/beasts/runs/missing-run-id'],
+    ['/v1/beasts/runs/missing-run-id/events'],
+    ['/v1/beasts/runs/missing-run-id/logs'],
+  ])('returns a structured 404 when reading unknown run path %s', async (path) => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request(path, {
+      headers: { authorization: `Bearer ${operatorToken}` },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'BEAST_RUN_NOT_FOUND',
+        message: "Beast run 'missing-run-id' was not found",
+      },
+    });
+  });
+
   it('dispatches a real container executor through the API and exposes container fields', async () => {
     const { app, operatorToken, fakeContainerSupervisor } = createBeastApp({ realContainer: true });
     const headers = {
@@ -395,6 +415,27 @@ describe('beast routes', () => {
     expect(answered.data.session.currentPrompt.key).toBe('objective');
   });
 
+  it('returns a structured 404 when answering an unknown interview session', async () => {
+    const { app, operatorToken } = createBeastApp();
+
+    const response = await app.request('/v1/beasts/interviews/missing-session/answer', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ answer: 'claude' }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'INTERVIEW_SESSION_NOT_FOUND',
+        message: "Beast interview session 'missing-session' was not found",
+      },
+    });
+  });
+
   it('returns 404 and does not persist a run when trackedAgentId is unknown', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {
@@ -421,6 +462,40 @@ describe('beast routes', () => {
       error: {
         code: 'TRACKED_AGENT_NOT_FOUND',
         message: "Tracked agent 'agent-missing' was not found",
+      },
+    });
+
+    const runsResponse = await app.request('/v1/beasts/runs', {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const runsBody = await runsResponse.json() as { data: { runs: Array<unknown> } };
+    expect(runsBody.data.runs).toEqual([]);
+  });
+
+  it('returns 404 and does not persist a run when definitionId is unknown', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'does-not-exist',
+        config: {},
+        startNow: true,
+      }),
+    });
+
+    expect(createResponse.status).toBe(404);
+    expect(await createResponse.json()).toEqual({
+      error: {
+        code: 'BEAST_DEFINITION_NOT_FOUND',
+        message: "Beast definition 'does-not-exist' was not found",
       },
     });
 

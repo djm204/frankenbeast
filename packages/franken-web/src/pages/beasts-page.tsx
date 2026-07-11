@@ -8,6 +8,7 @@ import type {
 } from '../lib/beast-api';
 import { AgentList } from '../components/beasts/agent-list';
 import { AgentDetailPanel } from '../components/beasts/agent-detail-panel';
+import type { AgentLifecycleAction } from '../components/beasts/agent-action-bar';
 import { WizardDialog } from '../components/beasts/wizard-dialog';
 import { useBeastStore } from '../stores/beast-store';
 import { useDashboardStore } from '../stores/dashboard-store';
@@ -22,6 +23,7 @@ interface BeastsPageProps {
   disabled: boolean;
   error: string | null;
   logs: string[];
+  pendingAgentActions?: Record<string, AgentLifecycleAction | undefined>;
   selectedAgentId: string | null;
   dashboardClient: DashboardApiClient;
   onClose: () => void;
@@ -45,6 +47,7 @@ export function BeastsPage({
   disabled,
   error,
   logs,
+  pendingAgentActions = {},
   selectedAgentId,
   dashboardClient,
   onClose,
@@ -64,6 +67,7 @@ export function BeastsPage({
   const resetWizard = useBeastStore((s) => s.resetWizard);
   const providers = useDashboardStore((s) => s.providers);
   const setSnapshot = useDashboardStore((s) => s.setSnapshot);
+  const createAgentDisabledReason = error ?? 'Beast API is not available. Configure the operator token/API client before creating agents.';
 
   useEffect(() => {
     if (!showWizard || providers.length > 0) return undefined;
@@ -77,6 +81,7 @@ export function BeastsPage({
   }, [dashboardClient, providers.length, setSnapshot, showWizard]);
 
   function handleOpenWizard() {
+    if (disabled) return;
     resetWizard();
     setLaunchError(null);
     setShowWizard(true);
@@ -122,6 +127,8 @@ export function BeastsPage({
         selectedAgentId={selectedAgentId}
         onSelectAgent={onSelectAgent}
         onCreateAgent={handleOpenWizard}
+        createAgentDisabled={disabled}
+        createAgentDisabledReason={disabled ? createAgentDisabledReason : null}
       />
 
       {agentDetail && (
@@ -130,6 +137,7 @@ export function BeastsPage({
           detail={agentDetail}
           logs={logs}
           onClose={onClose}
+          pendingAction={pendingAgentActions[agentDetail.agent.id] ?? null}
           onStart={() => onStart(agentDetail.agent.id)}
           onStop={() => onStop(agentDetail.agent.id)}
           onRestart={() => onRestart(agentDetail.agent.id)}
