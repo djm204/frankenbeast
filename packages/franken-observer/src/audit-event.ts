@@ -116,6 +116,110 @@ export function createAuditEvent(
 
 export { hashContent };
 
+function cloneValueFallback(value: unknown, seen: WeakMap<object, unknown>): unknown {
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+
+  const existing = seen.get(value);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime());
+  }
+
+  if (Array.isArray(value)) {
+    const clone: unknown[] = [];
+    seen.set(value, clone);
+    for (const item of value) {
+      clone.push(cloneValue(item, seen));
+    }
+    return clone;
+  }
+
+  if (value instanceof Map) {
+    const clone = new Map<unknown, unknown>();
+    seen.set(value, clone);
+    for (const [key, item] of value) {
+      clone.set(cloneValue(key, seen), cloneValue(item, seen));
+    }
+    return clone;
+  }
+
+  if (value instanceof Set) {
+    const clone = new Set<unknown>();
+    seen.set(value, clone);
+    for (const item of value) {
+      clone.add(cloneValue(item, seen));
+    }
+    return clone;
+  }
+
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+    return structuredClone(value);
+  }
+
+  const clone: Record<string, unknown> = {};
+  seen.set(value, clone);
+  for (const [key, item] of Object.entries(value)) {
+    clone[key] = cloneValue(item, seen);
+  }
+  return clone;
+}
+
+function cloneValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return cloneValueFallback(value, seen) as T;
+  }
+}
+
+function freezeValue<T>(value: T, seen = new WeakSet<object>()): T {
+  if (typeof value !== 'object' || value === null || seen.has(value)) {
+    return value;
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      freezeValue(item, seen);
+    }
+  } else if (value instanceof Map) {
+    for (const [key, item] of value) {
+      freezeValue(key, seen);
+      freezeValue(item, seen);
+    }
+  } else if (value instanceof Set) {
+    for (const item of value) {
+      freezeValue(item, seen);
+    }
+  } else {
+    for (const item of Object.values(value)) {
+      freezeValue(item, seen);
+    }
+  }
+
+  if (!ArrayBuffer.isView(value)) {
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function immutableAuditEvent(event: AuditEvent): AuditEvent {
+  return freezeValue(cloneValue(event));
+}
+
+function auditEventForJson(event: AuditEvent): AuditEvent {
+  return freezeValue({
+    ...cloneValue(event),
+    payload: event.payload === undefined ? null : cloneValue(event.payload),
+  });
+}
+
 /**
  * Append-only, immutable audit trail.
  * Records every execution decision for compliance auditing.
@@ -124,30 +228,27 @@ export class AuditTrail {
   private events: AuditEvent[] = [];
 
   append(event: AuditEvent): void {
-    this.events.push(event);
+    this.events.push(immutableAuditEvent(event));
   }
 
   getAll(): readonly AuditEvent[] {
-    return this.events;
+    return this.events.map((event) => immutableAuditEvent(event));
   }
 
   getByType(type: string): AuditEvent[] {
-    return this.events.filter((e) => e.type === type);
+    return this.events.filter((e) => e.type === type).map((event) => immutableAuditEvent(event));
   }
 
   getByPhase(phase: string): AuditEvent[] {
-    return this.events.filter((e) => e.phase === phase);
+    return this.events.filter((e) => e.phase === phase).map((event) => immutableAuditEvent(event));
   }
 
   getChildren(parentEventId: string): AuditEvent[] {
-    return this.events.filter((e) => e.parentEventId === parentEventId);
+    return this.events.filter((e) => e.parentEventId === parentEventId).map((event) => immutableAuditEvent(event));
   }
 
   toJSON(): AuditEvent[] {
-    return this.events.map((event) => ({
-      ...event,
-      payload: event.payload === undefined ? null : event.payload,
-    }));
+    return this.events.map((event) => auditEventForJson(event));
   }
 
   static fromJSON(events: unknown): AuditTrail {

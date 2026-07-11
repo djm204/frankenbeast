@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { createAuditEvent, AuditTrail, hashContent } from './audit-event.js';
+import { createAuditEvent, AuditTrail, hashContent, type AuditEvent } from './audit-event.js';
+
+function ignoreMutation(mutate: () => void): void {
+  try {
+    mutate();
+  } catch {
+    // Frozen runtime values may throw in strict mode; the invariant under test is
+    // that mutation attempts never alter the trail's stored history.
+  }
+}
 
 describe('createAuditEvent', () => {
   it('generates unique eventId', () => {
@@ -102,6 +111,76 @@ describe('AuditTrail', () => {
 
     expect(trail.toJSON()[0]!.payload).toBeNull();
     expect(AuditTrail.fromJSON(trail.toJSON()).getAll()[0]!.payload).toBeNull();
+  });
+
+  it('does not retain mutable aliases to appended events', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('append.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' });
+    trail.append(event);
+
+    event.type = 'tampered';
+    (event.payload as { nested: { count: number } }).nested.count = 99;
+
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'append.alias',
+      payload: { nested: { count: 1 } },
+    });
+  });
+
+  it('returns defensive copies from getAll()', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('get.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' });
+    trail.append(event);
+
+    const returned = trail.getAll() as AuditEvent[];
+    ignoreMutation(() => returned.push(createAuditEvent('extra', {}, { phase: 'p', provider: 'pr' })));
+    ignoreMutation(() => {
+      returned[0]!.type = 'tampered';
+    });
+    ignoreMutation(() => {
+      (returned[0]!.payload as { nested: { count: number } }).nested.count = 99;
+    });
+
+    expect(trail.getAll()).toHaveLength(1);
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'get.alias',
+      payload: { nested: { count: 1 } },
+    });
+  });
+
+  it('returns defensive copies from toJSON()', () => {
+    const trail = new AuditTrail();
+    trail.append(createAuditEvent('json.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' }));
+
+    const json = trail.toJSON();
+    ignoreMutation(() => json.push(createAuditEvent('extra', {}, { phase: 'p', provider: 'pr' })));
+    ignoreMutation(() => {
+      json[0]!.type = 'tampered';
+    });
+    ignoreMutation(() => {
+      (json[0]!.payload as { nested: { count: number } }).nested.count = 99;
+    });
+
+    expect(trail.getAll()).toHaveLength(1);
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'json.alias',
+      payload: { nested: { count: 1 } },
+    });
+  });
+
+  it('fromJSON does not retain aliases to caller-owned JSON data', () => {
+    const json = [createAuditEvent('restore.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' })];
+    const trail = AuditTrail.fromJSON(json);
+
+    json[0]!.type = 'tampered';
+    (json[0]!.payload as { nested: { count: number } }).nested.count = 99;
+    json.push(createAuditEvent('extra', {}, { phase: 'p', provider: 'pr' }));
+
+    expect(trail.getAll()).toHaveLength(1);
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'restore.alias',
+      payload: { nested: { count: 1 } },
+    });
   });
 
   it('fromJSON rejects non-array input', () => {
