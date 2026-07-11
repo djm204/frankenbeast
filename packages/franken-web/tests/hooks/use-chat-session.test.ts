@@ -170,6 +170,7 @@ describe('useChatSession', () => {
     expect(result.current.costUsd).toBe(0);
     expect(result.current.tokenTotals).toEqual({ cheap: 0, premiumReasoning: 0, premiumExecution: 0 });
     expect(result.current.costTelemetryStatus).toBe('unavailable');
+    expect(result.current.tokenTelemetryStatus).toBe('unavailable');
   });
 
   it('distinguishes reported zero-cost telemetry from unavailable telemetry', async () => {
@@ -194,6 +195,33 @@ describe('useChatSession', () => {
 
     expect(result.current.costUsd).toBe(0);
     expect(result.current.costTelemetryStatus).toBe('available');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
+  });
+
+  it('keeps spend unavailable when only token telemetry is reported', async () => {
+    mockCreateSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{ role: 'assistant', content: 'Token-only reply', timestamp: '2026-03-09T00:00:01Z', tokens: 12 }],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 12, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    });
+
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.tokenTotals.cheap).toBe(12);
+    expect(result.current.costUsd).toBe(0);
+    expect(result.current.costTelemetryStatus).toBe('unavailable');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
   });
 
   it('marks sessions with non-zero usage as available telemetry', async () => {
@@ -219,6 +247,7 @@ describe('useChatSession', () => {
     expect(result.current.tokenTotals.cheap).toBe(12);
     expect(result.current.costUsd).toBe(0.05);
     expect(result.current.costTelemetryStatus).toBe('available');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
   });
 
   it('streams assistant messages and updates receipts', async () => {

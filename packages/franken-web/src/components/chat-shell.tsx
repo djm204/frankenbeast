@@ -340,6 +340,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     showTypingIndicator,
     status,
     tier,
+    tokenTelemetryStatus,
     tokenTotals,
   } = useChatSession({
     baseUrl,
@@ -1101,7 +1102,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             <aside className="chat-page__rail">
               <CostBadge
                 tier={tier ?? 'pending'}
-                telemetryStatus={costTelemetryStatus}
+                costTelemetryStatus={costTelemetryStatus}
+                tokenTelemetryStatus={tokenTelemetryStatus}
                 tokenTotals={tokenTotals}
                 costUsd={costUsd}
               />

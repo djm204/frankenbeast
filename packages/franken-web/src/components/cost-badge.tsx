@@ -1,6 +1,7 @@
 export interface CostBadgeProps {
   tier: string;
-  telemetryStatus: 'available' | 'unavailable';
+  costTelemetryStatus: 'available' | 'unavailable';
+  tokenTelemetryStatus: 'available' | 'unavailable';
   tokenTotals: {
     cheap: number;
     premiumReasoning: number;
@@ -9,8 +10,9 @@ export interface CostBadgeProps {
   costUsd: number;
 }
 
-export function CostBadge({ tier, telemetryStatus, tokenTotals, costUsd }: CostBadgeProps) {
-  const telemetryUnavailable = telemetryStatus === 'unavailable';
+export function CostBadge({ tier, costTelemetryStatus, tokenTelemetryStatus, tokenTotals, costUsd }: CostBadgeProps) {
+  const costTelemetryUnavailable = costTelemetryStatus === 'unavailable';
+  const tokenTelemetryUnavailable = tokenTelemetryStatus === 'unavailable';
   const unavailableLabel = 'Unavailable';
 
   return (
@@ -21,16 +23,16 @@ export function CostBadge({ tier, telemetryStatus, tokenTotals, costUsd }: CostB
       </div>
       <dl className="cost-grid">
         <dt>Tier</dt>
-        <dd>{telemetryUnavailable ? unavailableLabel : tier}</dd>
+        <dd>{tier}</dd>
         <dt>Cheap</dt>
-        <dd>{telemetryUnavailable ? unavailableLabel : tokenTotals.cheap}</dd>
+        <dd>{tokenTelemetryUnavailable ? unavailableLabel : tokenTotals.cheap}</dd>
         <dt>Reasoning</dt>
-        <dd>{telemetryUnavailable ? unavailableLabel : tokenTotals.premiumReasoning}</dd>
+        <dd>{tokenTelemetryUnavailable ? unavailableLabel : tokenTotals.premiumReasoning}</dd>
         <dt>Execution</dt>
-        <dd>{telemetryUnavailable ? unavailableLabel : tokenTotals.premiumExecution}</dd>
+        <dd>{tokenTelemetryUnavailable ? unavailableLabel : tokenTotals.premiumExecution}</dd>
         <dt>Total</dt>
-        <dd title={telemetryUnavailable ? 'Cost telemetry has not been reported by this session yet.' : undefined}>
-          {telemetryUnavailable ? unavailableLabel : `$${costUsd.toFixed(2)}`}
+        <dd title={costTelemetryUnavailable ? 'Cost telemetry has not been reported by this session yet.' : undefined}>
+          {costTelemetryUnavailable ? unavailableLabel : `$${costUsd.toFixed(2)}`}
         </dd>
       </dl>
     </section>

@@ -19,6 +19,7 @@ export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'e
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'offline' | 'error';
 export type MessageReceipt = 'sending' | 'accepted' | 'delivered' | 'read' | 'failed';
 export type CostTelemetryStatus = 'available' | 'unavailable';
+export type TokenTelemetryStatus = 'available' | 'unavailable';
 
 export type ChatErrorAction = 'retry-session' | 'reconnect' | 'retry-message' | 'dismiss';
 
@@ -64,6 +65,7 @@ export interface UseChatSessionResult {
   connectionStatus: ConnectionStatus;
   costUsd: number;
   costTelemetryStatus: CostTelemetryStatus;
+  tokenTelemetryStatus: TokenTelemetryStatus;
   clearedFailedDraft?: { content: string; nonce: number };
   dismissError: (id: string) => void;
   errorBanners: ChatErrorBanner[];
@@ -228,15 +230,22 @@ function applySessionSnapshot(session: ChatSession): ChatMessage[] {
   return normalizeTranscript(session.transcript);
 }
 
-function sessionHasCostTelemetry(session: ChatSession): boolean {
-  if (session.costUsd > 0
-    || session.tokenTotals.cheap > 0
+function sessionHasTokenTelemetry(session: ChatSession): boolean {
+  if (session.tokenTotals.cheap > 0
     || session.tokenTotals.premiumReasoning > 0
     || session.tokenTotals.premiumExecution > 0) {
     return true;
   }
 
-  return session.transcript.some((message) => message.tokens !== undefined || message.costUsd !== undefined);
+  return session.transcript.some((message) => message.tokens !== undefined);
+}
+
+function sessionHasCostTelemetry(session: ChatSession): boolean {
+  if (session.costUsd > 0) {
+    return true;
+  }
+
+  return session.transcript.some((message) => message.costUsd !== undefined);
 }
 
 function mergeSessionSnapshot(current: ChatMessage[], session: ChatSession): ChatMessage[] {
@@ -347,6 +356,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [costUsd, setCostUsd] = useState(0);
   const [costTelemetryStatus, setCostTelemetryStatus] = useState<CostTelemetryStatus>('unavailable');
+  const [tokenTelemetryStatus, setTokenTelemetryStatus] = useState<TokenTelemetryStatus>('unavailable');
   const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
@@ -448,6 +458,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
         setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+        setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
         setStatus('idle');
         setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
@@ -503,6 +514,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setTokenTotals(EMPTY_TOKEN_TOTALS);
     setCostUsd(0);
     setCostTelemetryStatus('unavailable');
+    setTokenTelemetryStatus('unavailable');
     setErrorBanners([]);
     errorActionRef.current.clear();
     setStatus('connecting');
@@ -529,6 +541,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setTokenTotals(session.tokenTotals);
         setCostUsd(session.costUsd);
         setCostTelemetryStatus(sessionHasCostTelemetry(session) ? 'available' : 'unavailable');
+        setTokenTelemetryStatus(sessionHasTokenTelemetry(session) ? 'available' : 'unavailable');
         setStatus('idle');
       } catch (error) {
         if (!cancelled) {
@@ -908,6 +921,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setTokenTotals(refreshed.tokenTotals);
           setCostUsd(refreshed.costUsd);
           setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+          setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
           setStatus('idle');
         } catch (error) {
           if (!sessionStillCurrent(sessionId)) {
@@ -945,6 +959,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             setTokenTotals(refreshed.tokenTotals);
             setCostUsd(refreshed.costUsd);
             setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+            setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
           }
         } catch {
           // Preserve the original send failure while keeping the draft retryable.
@@ -1044,6 +1059,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
         setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+        setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
         updateApprovalResolving(false);
         setApprovalError(null);
         setStatus('idle');
@@ -1091,6 +1107,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     showTypingIndicator,
     status,
     tier,
+    tokenTelemetryStatus,
     tokenTotals,
   };
 }

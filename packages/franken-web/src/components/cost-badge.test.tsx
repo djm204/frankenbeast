@@ -11,14 +11,35 @@ describe('CostBadge', () => {
     render(
       <CostBadge
         tier="pending"
-        telemetryStatus="unavailable"
+        costTelemetryStatus="unavailable"
+        tokenTelemetryStatus="unavailable"
         tokenTotals={{ cheap: 0, premiumReasoning: 0, premiumExecution: 0 }}
         costUsd={0}
       />,
     );
 
     const summary = within(screen.getByRole('region', { name: 'Cost summary' }));
-    expect(summary.getAllByText('Unavailable')).toHaveLength(5);
+    expect(summary.getAllByText('Unavailable')).toHaveLength(4);
+    expect(summary.getByText('pending')).toBeTruthy();
+    expect(screen.queryByText('$0.00')).toBeNull();
+  });
+
+  it('keeps token totals visible when only spend telemetry is unavailable', () => {
+    render(
+      <CostBadge
+        tier="cheap"
+        costTelemetryStatus="unavailable"
+        tokenTelemetryStatus="available"
+        tokenTotals={{ cheap: 4, premiumReasoning: 0, premiumExecution: 0 }}
+        costUsd={0}
+      />,
+    );
+
+    const summary = within(screen.getByRole('region', { name: 'Cost summary' }));
+    expect(summary.getByText('cheap')).toBeTruthy();
+    expect(summary.getByText('4')).toBeTruthy();
+    expect(summary.getAllByText('0')).toHaveLength(2);
+    expect(summary.getByText('Unavailable')).toBeTruthy();
     expect(screen.queryByText('$0.00')).toBeNull();
   });
 
@@ -26,7 +47,8 @@ describe('CostBadge', () => {
     render(
       <CostBadge
         tier="cheap"
-        telemetryStatus="available"
+        costTelemetryStatus="available"
+        tokenTelemetryStatus="available"
         tokenTotals={{ cheap: 0, premiumReasoning: 0, premiumExecution: 0 }}
         costUsd={0}
       />,
@@ -42,7 +64,8 @@ describe('CostBadge', () => {
     render(
       <CostBadge
         tier="premium_execution"
-        telemetryStatus="available"
+        costTelemetryStatus="available"
+        tokenTelemetryStatus="available"
         tokenTotals={{ cheap: 3, premiumReasoning: 5, premiumExecution: 8 }}
         costUsd={0.42}
       />,
