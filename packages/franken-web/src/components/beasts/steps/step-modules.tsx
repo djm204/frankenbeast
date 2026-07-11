@@ -1,19 +1,9 @@
 import type { ChangeEventHandler } from 'react';
 import * as Accordion from '@radix-ui/react-accordion';
 import { useBeastStore } from '../../../stores/beast-store';
-import { ProviderModelSelect, type ProviderOption } from '../shared/provider-model-select';
-
-const FALLBACK_PROVIDERS: ProviderOption[] = [
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    models: [
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
-    ],
-  },
-];
+import { useDashboardStore } from '../../../stores/dashboard-store';
+import { ProviderModelSelect } from '../shared/provider-model-select';
+import { dashboardProvidersToModelOptions } from '../shared/provider-catalog';
 
 const MODULES = [
   { key: 'firewall', name: 'Firewall', description: 'LLM proxy with rule enforcement' },
@@ -31,15 +21,22 @@ interface ModuleStepValues {
 
 export function StepModules() {
   const { stepValues, setStepValues } = useBeastStore();
+  const providers = dashboardProvidersToModelOptions(useDashboardStore((state) => state.providers));
   const values = (stepValues[3] ?? {}) as ModuleStepValues;
 
   function toggleModule(key: string) {
     setStepValues(3, { ...values, [key]: !values[key] });
   }
 
-  function updateDeepConfig(moduleKey: string, field: string, value: unknown) {
+  function updateDeepConfig(moduleKey: string, field: string | Record<string, unknown>, value?: unknown) {
     const deepKey = `${moduleKey}Config`;
     const current = (values[deepKey] ?? {}) as Record<string, unknown>;
+
+    if (typeof field !== 'string') {
+      setStepValues(3, { ...values, [deepKey]: { ...current, ...field } });
+      return;
+    }
+
     const nextConfig = { ...current };
     if (value === undefined) {
       delete nextConfig[field];
@@ -93,7 +90,7 @@ export function StepModules() {
                 </Accordion.Trigger>
               </Accordion.Header>
               <Accordion.Content className="px-5 pb-5 space-y-4">
-                {renderModuleConfig(mod.key, getDeepConfig(mod.key), (f, v) => updateDeepConfig(mod.key, f, v))}
+                {renderModuleConfig(mod.key, getDeepConfig(mod.key), (f, v) => updateDeepConfig(mod.key, f, v), providers)}
               </Accordion.Content>
             </Accordion.Item>
           ))}
@@ -155,7 +152,8 @@ function clampedIntegerBlurHandler(
 function renderModuleConfig(
   moduleKey: string,
   config: Record<string, unknown>,
-  update: (field: string, value: unknown) => void,
+  update: (field: string | Record<string, unknown>, value?: unknown) => void,
+  providers: ReturnType<typeof dashboardProvidersToModelOptions>,
 ) {
   switch (moduleKey) {
     case 'firewall':
@@ -332,14 +330,13 @@ function renderModuleConfig(
           <div>
             <label className={labelClass}>LLM Override</label>
             <ProviderModelSelect
-              providers={FALLBACK_PROVIDERS}
+              providers={providers}
               value={{
                 provider: (config.llmProvider as string) ?? '',
                 model: (config.llmModel as string) ?? '',
               }}
               onChange={(val) => {
-                update('llmProvider', val.provider);
-                update('llmModel', val.model);
+                update({ llmProvider: val.provider, llmModel: val.model });
               }}
             />
             <p className="text-xs text-beast-subtle mt-1">Leave blank to use agent default</p>

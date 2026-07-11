@@ -1136,6 +1136,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             logs={beastAgentDetail?.run?.logs ?? []}
             pendingAgentActions={pendingBeastAgentActions}
             selectedAgentId={selectedBeastAgentId}
+            dashboardClient={dashboardClient}
             onClose={() => {
               shouldAutoSelectBeastAgentRef.current = false;
               selectedBeastAgentIdRef.current = null;
