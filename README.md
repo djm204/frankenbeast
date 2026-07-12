@@ -391,6 +391,8 @@ npm test
 npm run test:root
 ```
 
+The root Vitest suite also checks local Markdown links in README/docs/package READMEs. Local link targets are treated as untrusted input: keep them simple repository-relative paths and do not add shell metacharacters such as backticks, `$`, `;`, `&`, `|`, `<`, or `>`. External `http(s)` links and same-page anchors are ignored by that local filesystem check.
+
 See [ONBOARDING.md](ONBOARDING.md) for the complete first-time setup checklist, including prerequisites, bootstrap, UI startup, troubleshooting, and secret backends. See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the shorter setup guide including Docker services.
 
 ## Run the Dashboard with MCP Mode
