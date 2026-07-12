@@ -104,6 +104,7 @@ export class LessonRecorder {
   private readonly pendingAdmissions: Map<string, Promise<boolean>>;
   private readonly blockerPatternThreshold: number;
   private readonly blockerPatterns: Map<string, BlockerPatternState>;
+  private readonly pendingBlockerAdmissions = new Map<string, Promise<void>>();
   private readonly pendingBlockerObservations = new WeakMap<
     CritiqueLesson,
     PendingBlockerPatternObservation[]
@@ -164,88 +165,93 @@ export class LessonRecorder {
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const extractedLesson of lessons) {
-        let lesson = this.withCurrentBlockerPatterns(extractedLesson);
-        const cooldownKey =
-          this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
-        let admissionSettled: ((admitted: boolean) => void) | undefined;
-        let admissionPromise: Promise<boolean> | undefined;
-        if (cooldownKey) {
-          let admittedByAnotherCall = false;
-          while (!admittedByAnotherCall) {
-            const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
-            if (pendingAdmission) {
-              await pendingAdmission;
-              continue;
-            }
-
-            if (this.cooldownMs > 0) {
-              admissionPromise = new Promise<boolean>((resolve) => {
-                admissionSettled = resolve;
-              });
-              this.pendingAdmissions.set(cooldownKey, admissionPromise);
-            }
-
-            lesson = this.withCurrentBlockerPatterns(lesson);
-            const hasMinedBlockerPatterns =
-              (lesson.blockerPatterns?.length ?? 0) > 0;
-            const suppression = this.getCooldownSuppression(
-              lesson,
-              cooldownKey,
-            );
-            if (suppression && !hasMinedBlockerPatterns) {
-              this.commitBlockerPatternObservations(lesson);
-              recordingResult.suppressedByCooldown.push(suppression);
-              admissionSettled?.(false);
-              if (
-                admissionPromise &&
-                this.pendingAdmissions.get(cooldownKey) === admissionPromise
-              ) {
-                this.pendingAdmissions.delete(cooldownKey);
-              }
-              admittedByAnotherCall = true;
-              break;
-            }
-
-            break;
-          }
-
-          if (admittedByAnotherCall) {
-            continue;
-          }
-        }
-
-        try {
-          const admittedLesson = this.withAdmissionTimestamp(lesson);
-          await this.memory.recordLesson(admittedLesson);
-          recordingResult.recorded += 1;
-          this.commitBlockerPatternObservations(lesson);
-          addUniqueBlockerPatterns(
-            recordingResult.minedBlockerPatterns,
-            lesson.blockerPatterns,
-          );
-          if (cooldownKey && this.cooldownMs > 0) {
-            this.cooldowns.set(
-              cooldownKey,
-              Date.parse(admittedLesson.cooldown!.suppressUntil),
-            );
-          }
-          admissionSettled?.(true);
-        } catch {
-          admissionSettled?.(false);
-          // Non-fatal: log failure but don't disrupt the critique flow
-        } finally {
-          if (
-            cooldownKey &&
-            admissionPromise &&
-            this.pendingAdmissions.get(cooldownKey) === admissionPromise
-          ) {
-            this.pendingAdmissions.delete(cooldownKey);
-          }
-        }
+        await this.recordExtractedLesson(extractedLesson, recordingResult);
       }
     }
 
     return recordingResult;
+  }
+
+  private async recordExtractedLesson(
+    extractedLesson: CritiqueLesson,
+    recordingResult: MutableLessonRecordingResult,
+  ): Promise<void> {
+    await this.withBlockerPatternAdmissionLock(extractedLesson, async () => {
+      let lesson = this.withCurrentBlockerPatterns(extractedLesson);
+      const cooldownKey = this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
+      let admissionSettled: ((admitted: boolean) => void) | undefined;
+      let admissionPromise: Promise<boolean> | undefined;
+      if (cooldownKey) {
+        let admittedByAnotherCall = false;
+        while (!admittedByAnotherCall) {
+          const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
+          if (pendingAdmission) {
+            await pendingAdmission;
+            continue;
+          }
+
+          if (this.cooldownMs > 0) {
+            admissionPromise = new Promise<boolean>((resolve) => {
+              admissionSettled = resolve;
+            });
+            this.pendingAdmissions.set(cooldownKey, admissionPromise);
+          }
+
+          lesson = this.withCurrentBlockerPatterns(lesson);
+          const hasMinedBlockerPatterns =
+            (lesson.blockerPatterns?.length ?? 0) > 0;
+          const suppression = this.getCooldownSuppression(lesson, cooldownKey);
+          if (suppression && !hasMinedBlockerPatterns) {
+            this.commitBlockerPatternObservations(lesson);
+            recordingResult.suppressedByCooldown.push(suppression);
+            admissionSettled?.(false);
+            if (
+              admissionPromise &&
+              this.pendingAdmissions.get(cooldownKey) === admissionPromise
+            ) {
+              this.pendingAdmissions.delete(cooldownKey);
+            }
+            admittedByAnotherCall = true;
+            break;
+          }
+
+          break;
+        }
+
+        if (admittedByAnotherCall) {
+          return;
+        }
+      }
+
+      try {
+        const admittedLesson = this.withAdmissionTimestamp(lesson);
+        await this.memory.recordLesson(admittedLesson);
+        recordingResult.recorded += 1;
+        this.commitBlockerPatternObservations(lesson);
+        addUniqueBlockerPatterns(
+          recordingResult.minedBlockerPatterns,
+          lesson.blockerPatterns,
+        );
+        if (cooldownKey && this.cooldownMs > 0) {
+          this.cooldowns.set(
+            cooldownKey,
+            Date.parse(admittedLesson.cooldown!.suppressUntil),
+          );
+        }
+        admissionSettled?.(true);
+      } catch {
+        admissionSettled?.(false);
+        // Non-fatal: log failure but don't disrupt the critique flow
+      } finally {
+        if (
+          cooldownKey &&
+          admissionPromise &&
+          this.pendingAdmissions.get(cooldownKey) === admissionPromise
+        ) {
+          this.pendingAdmissions.delete(cooldownKey);
+        }
+      }
+    });
   }
 
   private extractLessons(
@@ -441,6 +447,55 @@ export class LessonRecorder {
       }
     }
     this.pendingBlockerObservations.delete(lesson);
+  }
+
+  private async withBlockerPatternAdmissionLock<T>(
+    lesson: CritiqueLesson,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const keys = this.getPendingBlockerPatternKeys(lesson);
+    if (keys.length === 0) {
+      return operation();
+    }
+
+    while (true) {
+      const pendingLocks = keys
+        .map((key) => this.pendingBlockerAdmissions.get(key))
+        .filter((lock): lock is Promise<void> => lock !== undefined);
+      if (pendingLocks.length === 0) {
+        break;
+      }
+      await Promise.allSettled(pendingLocks);
+    }
+
+    let releaseLock!: () => void;
+    const lock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    for (const key of keys) {
+      this.pendingBlockerAdmissions.set(key, lock);
+    }
+
+    try {
+      return await operation();
+    } finally {
+      for (const key of keys) {
+        if (this.pendingBlockerAdmissions.get(key) === lock) {
+          this.pendingBlockerAdmissions.delete(key);
+        }
+      }
+      releaseLock();
+    }
+  }
+
+  private getPendingBlockerPatternKeys(lesson: CritiqueLesson): string[] {
+    return Array.from(
+      new Set(
+        (this.pendingBlockerObservations.get(lesson) ?? []).map(
+          (observation) => observation.key,
+        ),
+      ),
+    ).sort();
   }
 
   private withCurrentBlockerPatterns(lesson: CritiqueLesson): CritiqueLesson {

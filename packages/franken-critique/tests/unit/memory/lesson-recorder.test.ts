@@ -957,6 +957,65 @@ describe('LessonRecorder', () => {
     );
   });
 
+  it('serializes blocker mining by pattern key before committing observations', async () => {
+    const port = createMockMemoryPort();
+    const releaseRecordLesson: (() => void)[] = [];
+    (port.recordLesson as ReturnType<typeof vi.fn>).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseRecordLesson.push(resolve);
+        }),
+    );
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Concurrent blockers must not cross threshold without reporting',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstRecord = recorder.record(result, 'task-a');
+    await Promise.resolve();
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+
+    const secondRecord = recorder.record(result, 'task-b');
+    await Promise.resolve();
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+
+    releaseRecordLesson[0]!();
+    const firstSummary = await firstRecord;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(firstSummary.minedBlockerPatterns).toEqual([]);
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    const secondLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[1]![0];
+
+    releaseRecordLesson[1]!();
+    const secondSummary = await secondRecord;
+
+    expect(secondSummary.minedBlockerPatterns).toEqual([
+      expect.objectContaining({
+        occurrences: 2,
+        taskIds: ['task-a', 'task-b'],
+      }),
+    ]);
+    expect(secondLesson.blockerPatterns).toEqual(
+      secondSummary.minedBlockerPatterns,
+    );
+  });
+
   it('deduplicates repeated critical blocker findings within one lesson', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port, {
