@@ -15,6 +15,7 @@ const SLASH_COMMANDS = new Set([
   '/status',
   '/diff',
   '/approve',
+  '/reject',
   '/session',
 ]);
 
@@ -117,7 +118,7 @@ export class ChatRuntime {
     const trimmed = input.trim();
     const command = trimmed.startsWith('/') ? trimmed.split(/\s+/)[0]?.toLowerCase() : undefined;
 
-    if (state.pendingApproval && !state.approvalResolved && command !== '/approve') {
+    if (state.pendingApproval && !state.approvalResolved && command !== '/approve' && command !== '/reject') {
       if (trimmed.toLowerCase().startsWith('action rejected by user:')) {
         return this.result({ ...state, pendingApproval: false }, [
           { kind: 'approval', content: 'Rejected.' },
@@ -222,6 +223,18 @@ export class ChatRuntime {
           },
         ], {
           state: state.pendingApproval ? 'approved' : 'active',
+        });
+      case '/reject':
+        return this.result({
+          ...state,
+          pendingApproval: false,
+        }, [
+          {
+            kind: state.pendingApproval ? 'approval' : 'status',
+            content: state.pendingApproval ? 'Rejected.' : 'Nothing pending.',
+          },
+        ], {
+          state: state.pendingApproval ? 'rejected' : 'active',
         });
       default:
         return this.result(state, []);
