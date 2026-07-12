@@ -72,6 +72,13 @@ describe('safe JSON Pointer helpers', () => {
     expect(target).toEqual({});
   });
 
+  it('validates nested array indexes before mutating missing branches', () => {
+    const target: Record<string, unknown> = {};
+
+    expect(() => setJsonPointerValue(target, '/agents/0/4294967294/name', 'agent')).toThrow(/maximum allowed array index/i);
+    expect(target).toEqual({});
+  });
+
   it('allows large numeric object keys when they are not array indexes', () => {
     const target = { agentsById: { '4294967294': { name: 'agent' } } };
 
@@ -84,7 +91,7 @@ describe('safe JSON Pointer helpers', () => {
   it('rejects writes that target built-in prototype objects', () => {
     expect(() => setJsonPointerValue(Object.prototype as Record<string, unknown>, '/polluted', true)).toThrow(/prototype object/i);
     expect(() => setJsonPointerValue({ branch: Object.prototype }, '/branch/polluted', true)).toThrow(/prototype object/i);
-    expect(() => setJsonPointerValue({ dateProto: Date.prototype as Record<string, unknown> }, '/dateProto/polluted', true)).toThrow(/prototype object/i);
+    expect(() => setJsonPointerValue({ dateProto: Date.prototype as unknown as Record<string, unknown> }, '/dateProto/polluted', true)).toThrow(/prototype object/i);
     expect(Object.prototype).not.toHaveProperty('polluted');
     expect(Date.prototype).not.toHaveProperty('polluted');
   });
@@ -133,6 +140,25 @@ describe('safe JSON Pointer helpers', () => {
     expect(Object.prototype.hasOwnProperty.call(target, '__proto__')).toBe(true);
     expect(getJsonPointerValue(target, '/__proto__/polluted', { allowUnsafePrototypeSegments: true })).toBe('data-only');
     expect(() => assertSafeJsonPointer('/__proto__/polluted')).toThrow(/blocked/i);
+  });
+
+  it('ignores inherited option overrides for security defaults', () => {
+    Object.defineProperty(Object.prototype, 'allowUnsafePrototypeSegments', {
+      configurable: true,
+      value: true,
+    });
+    Object.defineProperty(Object.prototype, 'maxArrayIndex', {
+      configurable: true,
+      value: Number.MAX_SAFE_INTEGER,
+    });
+
+    try {
+      expect(() => assertSafeJsonPointer('/__proto__/polluted')).toThrow(/blocked/i);
+      expect(() => setJsonPointerValue({}, '/agents/4294967294/name', 'agent')).toThrow(/maximum allowed array index/i);
+    } finally {
+      delete (Object.prototype as unknown as Record<string, unknown>).allowUnsafePrototypeSegments;
+      delete (Object.prototype as unknown as Record<string, unknown>).maxArrayIndex;
+    }
   });
 
   it('fails closed on invalid pointer syntax and unsafe oversized paths', () => {

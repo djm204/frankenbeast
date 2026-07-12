@@ -39,7 +39,7 @@ export function parseJsonPointer(pointer: string, options: JsonPointerOptions = 
     throw new UnsafeJsonPointerError('JSON Pointer must be empty or start with `/`.');
   }
 
-  const maxSegments = options.maxSegments ?? DEFAULT_MAX_SEGMENTS;
+  const maxSegments = getOwnNumberOption(options, 'maxSegments', DEFAULT_MAX_SEGMENTS);
   if (!Number.isSafeInteger(maxSegments) || maxSegments < 0) {
     throw new UnsafeJsonPointerError('JSON Pointer maxSegments must be a non-negative safe integer.');
   }
@@ -97,6 +97,8 @@ export function setJsonPointerValue<T extends JsonContainer>(
     throw new UnsafeJsonPointerError('Refusing to replace the JSON Pointer root object in-place.');
   }
 
+  validateSetJsonPointerTraversal(target, segments, options);
+
   let current: JsonContainer = target;
   assertWritableJsonContainer(current);
   for (let index = 0; index < segments.length - 1; index += 1) {
@@ -112,7 +114,7 @@ export function setJsonPointerValue<T extends JsonContainer>(
       continue;
     }
 
-    if (options.createMissing === false) {
+    if (getOwnBooleanOption(options, 'createMissing') === false) {
       throw new UnsafeJsonPointerError(`JSON Pointer segment '${segment}' does not exist.`);
     }
 
@@ -144,20 +146,63 @@ function decodeJsonPointerSegment(segment: string): string {
 }
 
 function assertSafeJsonPointerSegment(segment: string, options: JsonPointerOptions): void {
-  const maxSegmentLength = options.maxSegmentLength ?? DEFAULT_MAX_SEGMENT_LENGTH;
+  const maxSegmentLength = getOwnNumberOption(options, 'maxSegmentLength', DEFAULT_MAX_SEGMENT_LENGTH);
   if (!Number.isSafeInteger(maxSegmentLength) || maxSegmentLength < 0) {
     throw new UnsafeJsonPointerError('JSON Pointer maxSegmentLength must be a non-negative safe integer.');
   }
   if (segment.length > maxSegmentLength) {
     throw new UnsafeJsonPointerError(`JSON Pointer segment exceeds ${maxSegmentLength} characters.`);
   }
-  if (!options.allowUnsafePrototypeSegments && UNSAFE_JSON_POINTER_SEGMENTS.has(segment)) {
+  if (getOwnBooleanOption(options, 'allowUnsafePrototypeSegments') !== true && UNSAFE_JSON_POINTER_SEGMENTS.has(segment)) {
     throw new UnsafeJsonPointerError(`JSON Pointer segment '${segment}' is blocked because it can mutate object prototypes.`);
   }
 }
 
 function isObjectLike(value: unknown): value is object {
   return typeof value === 'object' && value !== null;
+}
+
+function validateSetJsonPointerTraversal(target: JsonContainer, segments: readonly string[], options: SetJsonPointerOptions): void {
+  let current: JsonContainer = target;
+  assertWritableJsonContainer(current);
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    const nextSegment = segments[index + 1];
+    if (hasOwnContainerValue(current, segment, options)) {
+      const existing = readOwnContainerValue(current, segment, options);
+      if (!isJsonContainer(existing)) {
+        throw new UnsafeJsonPointerError(`JSON Pointer segment '${segment}' does not resolve to an object or array.`);
+      }
+      assertWritableJsonContainer(existing);
+      current = existing;
+      continue;
+    }
+
+    if (getOwnBooleanOption(options, 'createMissing') === false) {
+      throw new UnsafeJsonPointerError(`JSON Pointer segment '${segment}' does not exist.`);
+    }
+    current = shouldCreateArrayForSegment(nextSegment, options) ? [] : Object.create(null) as Record<string, unknown>;
+  }
+
+  if (Array.isArray(current)) {
+    parseArrayIndex(segments.at(-1) as string, options);
+  }
+}
+
+function getOwnNumberOption<K extends 'maxSegments' | 'maxSegmentLength' | 'maxArrayIndex'>(
+  options: JsonPointerOptions,
+  key: K,
+  defaultValue: number,
+): number {
+  return Object.prototype.hasOwnProperty.call(options, key) ? options[key] as number : defaultValue;
+}
+
+function getOwnBooleanOption(
+  options: JsonPointerOptions | SetJsonPointerOptions,
+  key: 'allowUnsafePrototypeSegments' | 'createMissing',
+): boolean | undefined {
+  const optionRecord = options as Record<string, boolean | undefined>;
+  return Object.prototype.hasOwnProperty.call(optionRecord, key) ? optionRecord[key] : undefined;
 }
 
 function isJsonContainer(value: unknown): value is JsonContainer {
@@ -184,7 +229,7 @@ function parseArrayIndex(segment: string, options: JsonPointerOptions): number |
   if (!/^(0|[1-9]\d*)$/u.test(segment)) {
     return undefined;
   }
-  const maxArrayIndex = options.maxArrayIndex ?? DEFAULT_MAX_ARRAY_INDEX;
+  const maxArrayIndex = getOwnNumberOption(options, 'maxArrayIndex', DEFAULT_MAX_ARRAY_INDEX);
   if (!Number.isSafeInteger(maxArrayIndex) || maxArrayIndex < 0) {
     throw new UnsafeJsonPointerError('JSON Pointer maxArrayIndex must be a non-negative safe integer.');
   }
