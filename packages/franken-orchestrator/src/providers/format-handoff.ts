@@ -2,6 +2,7 @@ import type { BrainSnapshot, EpisodicEvent } from '@franken/types';
 
 /** Rough char-to-token ratio (1 token ≈ 4 chars) */
 const CHARS_PER_TOKEN = 4;
+const MAX_RUBRIC_EVIDENCE_CHARS = 240;
 
 export type PmHandoffRubricStatus = 'pass' | 'needs-attention';
 
@@ -26,6 +27,11 @@ export interface PmHandoffQualityAssessment {
   readonly total: number;
   readonly results: readonly PmHandoffRubricResult[];
   readonly operatorGuidance: string;
+}
+
+interface HandoffEvidenceEntry {
+  readonly searchable: string;
+  readonly display: string;
 }
 
 export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
@@ -130,7 +136,10 @@ export function assessPmHandoffQuality(
   const evidenceCorpus = buildHandoffEvidenceCorpus(snapshot);
   const results = PM_HANDOFF_QUALITY_RUBRIC.map((criterion) => {
     const evidence = evidenceCorpus
-      .filter((entry) => criterion.evidencePatterns.some((pattern) => pattern.test(entry)))
+      .filter((entry) =>
+        criterion.evidencePatterns.some((pattern) => pattern.test(entry.searchable)),
+      )
+      .map((entry) => entry.display)
       .slice(0, 3);
     return {
       id: criterion.id,
@@ -203,32 +212,63 @@ function formatPmHandoffQualityRubric(
   ].join('\n');
 }
 
-function buildHandoffEvidenceCorpus(snapshot: BrainSnapshot): string[] {
+function buildHandoffEvidenceCorpus(
+  snapshot: BrainSnapshot,
+): HandoffEvidenceEntry[] {
   const entries = [
-    ...Object.entries(snapshot.working).map(
-      ([key, value]) => `working.${key}: ${summarizeUnknown(value)}`,
-    ),
+    ...Object.entries(snapshot.working)
+      .map(([key, value]) => formatWorkingEvidence(key, value))
+      .filter((entry): entry is HandoffEvidenceEntry => entry !== null),
     ...snapshot.episodic.map(formatEpisodicEvidence),
   ];
 
   if (snapshot.checkpoint) {
-    entries.push(
-      `checkpoint: phase=${snapshot.checkpoint.phase} step=${snapshot.checkpoint.step} context=${summarizeUnknown(snapshot.checkpoint.context)}`,
+    const searchable = normalizeEvidence(
+      [
+        snapshot.checkpoint.phase,
+        String(snapshot.checkpoint.step),
+        summarizeUnknown(snapshot.checkpoint.context),
+      ].join(' '),
     );
+    if (searchable.length > 0) {
+      entries.push({
+        searchable,
+        display: `checkpoint: phase=${snapshot.checkpoint.phase} step=${snapshot.checkpoint.step} context=${truncateEvidence(searchable)}`,
+      });
+    }
   }
 
-  return entries
-    .map((entry) => entry.replace(/\s+/g, ' ').trim())
-    .filter((entry) => entry.length > 0);
+  return entries;
 }
 
-function formatEpisodicEvidence(event: EpisodicEvent): string {
+function formatWorkingEvidence(
+  key: string,
+  value: unknown,
+): HandoffEvidenceEntry | null {
+  const searchable = normalizeEvidence(summarizeUnknown(value));
+  if (searchable.length === 0) {
+    return null;
+  }
+  return {
+    searchable,
+    display: `working.${key}: ${truncateEvidence(searchable)}`,
+  };
+}
+
+function formatEpisodicEvidence(event: EpisodicEvent): HandoffEvidenceEntry {
   const details = event.details ? ` details=${summarizeUnknown(event.details)}` : '';
   const step = event.step ? ` step=${event.step}` : '';
-  return `event.${event.type}:${step} ${event.summary}${details}`;
+  const searchable = normalizeEvidence(`${step} ${event.summary}${details}`);
+  return {
+    searchable,
+    display: `event.${event.type}:${step} ${truncateEvidence(searchable)}`,
+  };
 }
 
 function summarizeUnknown(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
   if (typeof value === 'string') {
     return value;
   }
@@ -237,4 +277,16 @@ function summarizeUnknown(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function normalizeEvidence(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function truncateEvidence(value: string): string {
+  const normalized = normalizeEvidence(value);
+  if (normalized.length <= MAX_RUBRIC_EVIDENCE_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, MAX_RUBRIC_EVIDENCE_CHARS - 1)}…`;
 }

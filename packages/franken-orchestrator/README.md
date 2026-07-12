@@ -85,7 +85,7 @@ The rubric checks six criteria:
 - Artifacts and links: branch, PR, worktree, diff, docs, URLs, or telemetry records.
 - Learning and reuse: reusable lessons, retrospectives, Codex/CI feedback, and promotion/retirement rationale.
 
-Each criterion reports `pass` only when matching evidence is present in working memory, recent events, or checkpoint context; sparse handoffs report `needs-attention` with guidance instead of inventing missing evidence.
+Each criterion reports `pass` only when matching evidence is present in working memory, recent events, or checkpoint context; sparse handoffs report `needs-attention` with guidance instead of inventing missing evidence. Structured tooling can import `assessPmHandoffQuality` from `@franken/orchestrator` when it needs the rubric score without parsing handoff prose.
 
 ## Package areas
 

@@ -137,6 +137,46 @@ describe('assessPmHandoffQuality', () => {
     );
     expect(assessment.operatorGuidance).toContain('missing one or more rubric criteria');
   });
+
+  it('ignores empty placeholder fields when scoring evidence', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {
+          verification: '',
+          blocker: null,
+          pr: undefined,
+          issue: '   ',
+        },
+        episodic: [],
+      }),
+    );
+
+    expect(assessment.score).toBe(0);
+    expect(assessment.results.every((result) => result.evidence.length === 0)).toBe(true);
+  });
+
+  it('bounds large checkpoint context evidence in the formatted rubric', () => {
+    const text = formatHandoff(
+      makeSnapshot({
+        working: {},
+        episodic: [],
+        checkpoint: {
+          runId: 'run-1',
+          phase: 'decision',
+          step: 2,
+          context: { huge: 'verified '.repeat(200) },
+          timestamp: '2026-03-22T00:00:00.000Z',
+        },
+      }),
+    );
+
+    const checkpointEvidence = text
+      .split('\n')
+      .find((line) => line.includes('checkpoint: phase=decision'));
+    expect(checkpointEvidence).toBeTruthy();
+    expect(checkpointEvidence!.length).toBeLessThan(360);
+    expect(checkpointEvidence).toContain('…');
+  });
 });
 
 describe('truncateSnapshot', () => {
