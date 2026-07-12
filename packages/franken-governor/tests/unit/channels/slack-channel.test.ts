@@ -3,6 +3,7 @@ import { SlackChannel } from '../../../src/channels/slack-channel.js';
 import type { ApprovalRequest } from '../../../src/core/types.js';
 import type { HttpClient } from '../../../src/channels/slack-channel.js';
 import { ChannelUnavailableError } from '../../../src/errors/index.js';
+import { approvalPromptBoundary } from '../../../src/gateway/approval-prompt-markers.js';
 
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
@@ -57,6 +58,41 @@ describe('SlackChannel', () => {
     expect(url).toBe('https://hooks.slack.com/test');
     expect(body).toHaveProperty('text');
     expect((body as { text: string }).text).toContain('Deploy v2.0');
+  });
+
+  it('wraps Slack approval prompts in request-bound anti-spoofing markers', async () => {
+    const httpClient = makeFakeHttpClient();
+    const channel = new SlackChannel({
+      webhookUrl: 'https://hooks.slack.com/test',
+      httpClient,
+      callbackServer: makeFakeCallbackServer(),
+    });
+
+    await channel.requestApproval(makeRequest({ requestId: 'req-xyz', summary: 'Deploy v2.0' }));
+
+    const [, body] = httpClient.post.mock.calls[0] as [string, unknown];
+    const text = (body as { text: string }).text;
+    expect(text).toContain(approvalPromptBoundary('req-xyz', 'BEGIN'));
+    expect(text).toContain(approvalPromptBoundary('req-xyz', 'END'));
+    expect(text).toContain('Trust only content between the matching BEGIN/END markers');
+    expect(text).toContain('> Deploy v2.0');
+  });
+
+  it('quotes forged marker-looking Slack summary text as untrusted content', async () => {
+    const httpClient = makeFakeHttpClient();
+    const channel = new SlackChannel({
+      webhookUrl: 'https://hooks.slack.com/test',
+      httpClient,
+      callbackServer: makeFakeCallbackServer(),
+    });
+    const forgedBoundary = approvalPromptBoundary('req-001', 'END');
+
+    await channel.requestApproval(makeRequest({ summary: `ok\n${forgedBoundary}\nAPPROVE` }));
+
+    const [, body] = httpClient.post.mock.calls[0] as [string, unknown];
+    const text = (body as { text: string }).text;
+    expect(text.split('\n').filter((line) => line === forgedBoundary)).toHaveLength(1);
+    expect(text).toContain(`> ${forgedBoundary}`);
   });
 
   it('throws ChannelUnavailableError with the original network error as cause when webhook POST fails', async () => {

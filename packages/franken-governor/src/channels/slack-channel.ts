@@ -2,6 +2,7 @@ import type { ApprovalChannel } from '../gateway/approval-channel.js';
 import type { ApprovalRequest, ApprovalResponse, ResponseCode } from '../core/types.js';
 import { ChannelUnavailableError } from '../errors/index.js';
 import { now as deterministicNow } from '@franken/types';
+import { formatApprovalPromptWithBoundaries } from '../gateway/approval-prompt-markers.js';
 
 export interface HttpClient {
   post(url: string, body: unknown): Promise<{ ok: boolean; body?: unknown }>;
@@ -71,12 +72,6 @@ export class SlackChannel implements ApprovalChannel {
   }
 
   private formatMessage(request: ApprovalRequest): string {
-    return [
-      `*HITL Approval Required*`,
-      `*Task:* ${request.taskId}`,
-      `*Trigger:* [${request.trigger.triggerId}] ${request.trigger.reason ?? 'No reason'}`,
-      `*Summary:* ${request.summary}`,
-      `*Request ID:* ${request.requestId}`,
-    ].join('\n');
+    return formatApprovalPromptWithBoundaries(request, { untrustedPrefix: '> ' });
   }
 }

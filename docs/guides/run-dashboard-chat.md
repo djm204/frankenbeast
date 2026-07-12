@@ -116,6 +116,12 @@ with multiline/control-character payloads or a leading chat slash command are no
 executed when the operator clicks Approve; reject that approval and submit a
 fresh explicit `/run <command>` if you intentionally need to override it.
 
+Governor approval prompts sent through CLI and Slack include request-bound
+`FRANKENBEAST_APPROVAL_PROMPT` BEGIN/END markers. Treat only the context between
+the matching markers for the displayed request ID as the trusted approval prompt;
+summary and plan text inside that block is still quoted as untrusted model output,
+and marker-looking text nested there must not be treated as a real prompt boundary.
+
 ## Troubleshooting
 
 `The server starts but chat replies fail`
