@@ -9,7 +9,6 @@ import type {
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
-import { isoNow } from '@franken/types';
 import { createHash } from 'node:crypto';
 
 const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
@@ -26,6 +25,8 @@ export interface LessonRecorderOptions {
   readonly cooldownMs?: number;
   /** Clock injection for deterministic tests and replay tooling. */
   readonly now?: () => Date | string;
+  /** Shared cooldown state for reviewer rebuilds that happen in the same process. */
+  readonly cooldownStore?: Map<string, number>;
 }
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
@@ -66,8 +67,7 @@ export class LessonRecorder {
   private readonly memory: MemoryPort;
   private readonly cooldownMs: number;
   private readonly now: () => string;
-  private readonly cooldownNowMs: () => number;
-  private readonly cooldowns = new Map<string, number>();
+  private readonly cooldowns: Map<string, number>;
   private readonly pendingAdmissions = new Map<string, Promise<boolean>>();
 
   constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
@@ -84,11 +84,9 @@ export class LessonRecorder {
 
     this.memory = memory;
     this.cooldownMs = cooldownMs;
-    const now = options.now ?? isoNow;
-    this.cooldownNowMs = options.now
-      ? (): number => Date.parse(normalizeTimestamp(options.now!()))
-      : (): number => Date.now();
+    const now = options.now ?? ((): Date => new Date());
     this.now = (): string => normalizeTimestamp(now());
+    this.cooldowns = options.cooldownStore ?? new Map<string, number>();
   }
 
   async record(
@@ -155,10 +153,7 @@ export class LessonRecorder {
           await this.memory.recordLesson(lesson);
           recordingResult.recorded += 1;
           if (cooldownKey && this.cooldownMs > 0) {
-            this.cooldowns.set(
-              cooldownKey,
-              Date.parse(lesson.cooldown!.suppressUntil),
-            );
+            this.cooldowns.set(cooldownKey, this.createSuppressUntilMs());
           }
           admissionSettled?.(true);
         } catch {
@@ -204,16 +199,15 @@ export class LessonRecorder {
         );
         const findingMessages = critiqueFindings.map((f) => f.message);
         const recordedAt = this.now();
-        const cooldownBaseMs = this.cooldownNowMs();
+        const cooldownBaseMs = Date.parse(recordedAt);
         this.pruneExpiredCooldowns(cooldownBaseMs);
         const cooldownKey = createCooldownKey(
           evalResult.evaluatorName,
           findingMessages,
         );
-        const suppressUntil = addCooldownWindow(
-          cooldownBaseMs,
-          this.cooldownMs,
-        );
+        const suppressUntil = new Date(
+          addCooldownWindowMs(cooldownBaseMs, this.cooldownMs),
+        ).toISOString();
 
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
@@ -276,8 +270,8 @@ export class LessonRecorder {
       return null;
     }
 
-    const suppressedAtMs = this.cooldownNowMs();
-    const suppressedAt = new Date(suppressedAtMs).toISOString();
+    const suppressedAt = this.now();
+    const suppressedAtMs = Date.parse(suppressedAt);
     const remainingMs = suppressUntilMs - suppressedAtMs;
     if (remainingMs <= 0) {
       this.cooldowns.delete(cooldownKey);
@@ -302,6 +296,10 @@ export class LessonRecorder {
         this.cooldowns.delete(key);
       }
     }
+  }
+
+  private createSuppressUntilMs(): number {
+    return addCooldownWindowMs(Date.parse(this.now()), this.cooldownMs);
   }
 }
 
@@ -385,14 +383,14 @@ function normalizeTimestamp(value: Date | string): string {
   return new Date(parsed).toISOString();
 }
 
-function addCooldownWindow(baseMs: number, cooldownMs: number): string {
+function addCooldownWindowMs(baseMs: number, cooldownMs: number): number {
   const suppressUntilMs = baseMs + cooldownMs;
   if (!Number.isFinite(suppressUntilMs)) {
     throw new RangeError(
       'LessonRecorder cooldownMs produced an invalid suppressUntil timestamp.',
     );
   }
-  return new Date(suppressUntilMs).toISOString();
+  return suppressUntilMs;
 }
 
 function stableHash(value: string): string {

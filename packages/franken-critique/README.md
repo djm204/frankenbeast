@@ -129,7 +129,7 @@ Failing iterations without actionable findings, and infrastructure-only evaluato
 
 Recorded lessons include a `cooldown` object with the key, window, `recordedAt`, `suppressUntil`, and operator guidance. The `record()` call returns a `LessonRecordingResult` containing `recorded` and `suppressedByCooldown`; suppressed entries include the task id, evaluator name, suppression timestamp, remaining milliseconds, and reason so PM/liveness tooling can report the skipped duplicate instead of silently drifting.
 
-Callers that need a different window can construct `new LessonRecorder(memory, { cooldownMs })`; pass `cooldownMs: 0` to disable suppression. Invalid negative or non-finite cooldown windows throw a `RangeError` during construction.
+Callers that need a different window can construct `new LessonRecorder(memory, { cooldownMs })`; pass `cooldownMs: 0` to disable suppression. The recorder uses an advancing wall-clock by default and only uses the injected `now` callback for tests/replay callers that explicitly pass one. Cooldown state is instance-local unless callers pass a reused `cooldownStore` map in `LessonRecorderOptions`, which lets reviewer rebuilds in the same worker suppress duplicate lessons without leaking state into unrelated tests or pipelines. Invalid negative or non-finite cooldown windows throw a `RangeError` during construction.
 
 ## Package scripts
 

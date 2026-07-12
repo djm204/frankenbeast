@@ -422,6 +422,97 @@ describe('LessonRecorder', () => {
     expect(admitted).toEqual({ recorded: 1, suppressedByCooldown: [] });
   });
 
+  it('honors shared cooldown state across recorder instances', async () => {
+    const port = createMockMemoryPort();
+    const cooldownStore = new Map<string, number>();
+    const firstRecorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+      cooldownStore,
+    });
+    const secondRecorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:30.000Z'),
+      cooldownStore,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Reviewer rebuild should keep cooldown state',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await firstRecorder.record(result, 'first-task');
+    const suppressed = await secondRecorder.record(result, 'second-task');
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(suppressed).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [
+        expect.objectContaining({
+          taskId: 'second-task',
+          remainingMs: 30_000,
+        }),
+      ],
+    });
+  });
+
+  it('starts the local cooldown window after persistence succeeds', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    let releasePersistence!: () => void;
+    const persistenceStarted = new Promise<void>((resolve) => {
+      (port.recordLesson as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        () =>
+          new Promise<void>((release) => {
+            releasePersistence = release;
+            resolve();
+          }),
+      );
+    });
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 1_000,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Slow memory writes should not consume cooldown budget',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstRecord = recorder.record(result, 'first-task');
+    await persistenceStarted;
+    now = new Date('2026-07-12T10:00:02.000Z');
+    releasePersistence();
+    await firstRecord;
+    const suppressed = await recorder.record(result, 'second-task');
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(suppressed).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [
+        expect.objectContaining({
+          taskId: 'second-task',
+          suppressUntil: '2026-07-12T10:00:03.000Z',
+          remainingMs: 1_000,
+        }),
+      ],
+    });
+  });
+
   it('reserves cooldown admission before async persistence completes', async () => {
     const port = createMockMemoryPort();
     let releasePersistence!: () => void;
@@ -561,6 +652,38 @@ describe('LessonRecorder', () => {
       separateFindings,
       'second-task',
     );
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+  });
+
+  it('keeps evaluator names distinct even when their display slugs collide', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const policySpace: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'policy A', [
+          { message: 'same finding', severity: 'warning' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+    const policyDash: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'policy-A', [
+          { message: 'same finding', severity: 'warning' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(policySpace, 'first-task');
+    const secondSummary = await recorder.record(policyDash, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
     expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
