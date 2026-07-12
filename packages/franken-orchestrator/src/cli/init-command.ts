@@ -62,7 +62,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     const invalidJsonIssues = verification.issues.filter((issue) =>
-      issue.code === 'invalid-config-json' || issue.code === 'invalid-init-state-json');
+      issue.code === 'invalid-config-json');
     if (invalidJsonIssues.length > 0) {
       throw new Error(
         [

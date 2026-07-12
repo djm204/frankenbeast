@@ -140,6 +140,58 @@ describe('runInteractiveInit', () => {
     );
   });
 
+  it('repairs malformed init state by rebuilding it from valid config defaults', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateFile = join(tempDir, '.fbeast', 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
+    const config = defaultConfig();
+    config.chat.enabled = true;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateFile, '{"answers": {', 'utf-8');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { io } = scriptedIo(
+      '', // keep chat enabled from config
+      '', // keep dashboard from config
+      '', // keep comms from config
+      '', // keep provider from config
+      '', // keep security mode from config
+    );
+
+    const result = await runRepairInit({ configFile, stateStore, io });
+
+    expect(result.config.chat.enabled).toBe(true);
+    expect(result.state.configPath).toBe(configFile);
+    expect(result.state.selectedModules).toEqual(['chat', 'dashboard']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
+  });
+
+  it('repairs non-object init state by rebuilding it from valid config defaults', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateFile = join(tempDir, '.fbeast', 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
+    const config = defaultConfig();
+    config.chat.enabled = true;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateFile, 'null\n', 'utf-8');
+    const { io } = scriptedIo(
+      '', // keep chat enabled from config
+      '', // keep dashboard from config
+      '', // keep comms from config
+      '', // keep provider from config
+      '', // keep security mode from config
+    );
+
+    const result = await runRepairInit({ configFile, stateStore, io });
+
+    expect(result.config.chat.enabled).toBe(true);
+    expect(result.state.configPath).toBe(configFile);
+    expect(result.state.selectedModules).toEqual(['chat', 'dashboard']);
+  });
+
   it('resumes from saved init state defaults instead of starting from scratch', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
     const configFile = join(tempDir, '.fbeast', 'config.json');

@@ -130,7 +130,7 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
   }
 
   const invalidJsonIssues = verification.issues.filter((issue) =>
-    issue.code === 'invalid-config-json' || issue.code === 'invalid-init-state-json');
+    issue.code === 'invalid-config-json');
   if (invalidJsonIssues.length > 0) {
     throw new Error(
       [

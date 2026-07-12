@@ -311,6 +311,22 @@ function canInitHandleConfigLoadError(args: CliArgs): boolean {
     && (args.initVerify || args.initRepair || args.initNonInteractive);
 }
 
+async function isInitConfigFileError(configFile: string, error: unknown): Promise<boolean> {
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  if (error instanceof TypeError && /config file must contain a json object/i.test(error.message)) {
+    return true;
+  }
+  try {
+    const raw = await readFile(configFile, 'utf-8');
+    const value = JSON.parse(raw) as unknown;
+    return value === null || typeof value !== 'object' || Array.isArray(value);
+  } catch (error) {
+    return error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
 function initFallbackConfig(args: CliArgs): OrchestratorConfig {
   const config = defaultConfig();
   if (args.initBackend) {
@@ -842,7 +858,7 @@ export async function main(): Promise<void> {
   try {
     config = await resolveConfig(args, paths.configFile);
   } catch (error) {
-    if (!canInitHandleConfigLoadError(args)) {
+    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(args.config ?? paths.configFile, error)) {
       throw error;
     }
     config = initFallbackConfig(args);

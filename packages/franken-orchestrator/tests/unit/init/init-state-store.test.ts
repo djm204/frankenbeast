@@ -42,6 +42,31 @@ describe('FileInitStateStore', () => {
     expect(loaded).toEqual(saved);
   });
 
+  it('falls back when persisted state belongs to another config path', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const store = new FileInitStateStore(join(tempDir, 'init-state.json'));
+    await store.save({
+      ...createEmptyInitState('/tmp/project/.fbeast/default-config.json'),
+      selectedModules: ['chat'],
+      answers: { 'providers.default': 'codex' },
+    });
+
+    const loaded = await store.load('/tmp/project/alternate-config.json');
+
+    expect(loaded).toEqual(createEmptyInitState('/tmp/project/alternate-config.json'));
+  });
+
+  it('falls back when persisted state is not a JSON object', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
+    const stateFile = join(tempDir, 'init-state.json');
+    const store = new FileInitStateStore(stateFile);
+    await writeFile(stateFile, 'null\n', 'utf-8');
+
+    const loaded = await store.load('/tmp/project/.fbeast/config.json');
+
+    expect(loaded).toEqual(createEmptyInitState('/tmp/project/.fbeast/config.json'));
+  });
+
   it('quarantines malformed JSON and returns a clean initial state', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-state-'));
     const stateFile = join(tempDir, 'init-state.json');
