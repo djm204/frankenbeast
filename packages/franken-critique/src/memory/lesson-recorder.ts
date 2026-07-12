@@ -158,10 +158,14 @@ export class LessonRecorder {
         }
 
         try {
-          await this.memory.recordLesson(lesson);
+          const admittedLesson = this.withAdmissionTimestamp(lesson);
+          await this.memory.recordLesson(admittedLesson);
           recordingResult.recorded += 1;
           if (cooldownKey && this.cooldownMs > 0) {
-            this.cooldowns.set(cooldownKey, this.createSuppressUntilMs());
+            this.cooldowns.set(
+              cooldownKey,
+              Date.parse(admittedLesson.cooldown!.suppressUntil),
+            );
           }
           admissionSettled?.(true);
         } catch {
@@ -306,9 +310,27 @@ export class LessonRecorder {
     }
   }
 
-  private createSuppressUntilMs(): number {
-    return addCooldownWindowMs(Date.parse(this.now()), this.cooldownMs);
+  private withAdmissionTimestamp(lesson: CritiqueLesson): CritiqueLesson {
+    if (!lesson.cooldown) {
+      return lesson;
+    }
+
+    const recordedAt = this.now();
+    const suppressUntil = new Date(
+      addCooldownWindowMs(Date.parse(recordedAt), lesson.cooldown.windowMs),
+    ).toISOString();
+
+    return {
+      ...lesson,
+      timestamp: recordedAt,
+      cooldown: {
+        ...lesson.cooldown,
+        recordedAt,
+        suppressUntil,
+      },
+    };
   }
+
 }
 
 function getPendingAdmissions(

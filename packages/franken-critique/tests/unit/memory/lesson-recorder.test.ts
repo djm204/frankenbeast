@@ -555,7 +555,7 @@ describe('LessonRecorder', () => {
     expect(disabledSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
   });
 
-  it('starts the local cooldown window after persistence succeeds', async () => {
+  it('aligns local suppression with the recorded cooldown metadata', async () => {
     const port = createMockMemoryPort();
     let now = new Date('2026-07-12T10:00:00.000Z');
     let releasePersistence!: () => void;
@@ -577,7 +577,7 @@ describe('LessonRecorder', () => {
       iterations: [
         createIteration(0, 'fail', 'learning-reviewer', [
           {
-            message: 'Slow memory writes should not consume cooldown budget',
+            message: 'Slow memory writes should keep recorded and live cooldowns aligned',
             severity: 'warning',
           },
         ]),
@@ -590,19 +590,14 @@ describe('LessonRecorder', () => {
     now = new Date('2026-07-12T10:00:02.000Z');
     releasePersistence();
     await firstRecord;
-    const suppressed = await recorder.record(result, 'second-task');
+    const secondSummary = await recorder.record(result, 'second-task');
+    const firstLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { cooldown: { recordedAt: string; suppressUntil: string } };
 
-    expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(suppressed).toEqual({
-      recorded: 0,
-      suppressedByCooldown: [
-        expect.objectContaining({
-          taskId: 'second-task',
-          suppressUntil: '2026-07-12T10:00:03.000Z',
-          remainingMs: 1_000,
-        }),
-      ],
-    });
+    expect(firstLesson.cooldown.recordedAt).toBe('2026-07-12T10:00:00.000Z');
+    expect(firstLesson.cooldown.suppressUntil).toBe('2026-07-12T10:00:01.000Z');
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
   });
 
   it('reserves cooldown admission before async persistence completes', async () => {
