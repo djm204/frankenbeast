@@ -91,7 +91,7 @@ describe('Memory Server', () => {
   });
 
   it('rejects invalid query limits before calling the brain adapter', async () => {
-    for (const invalidLimit of ['abc', 'NaN', 'Infinity', '0', '-1']) {
+    for (const invalidLimit of ['abc', 'NaN', 'Infinity', '0', '-1', '1.5', '1001', '9007199254740993']) {
       const brain = {
         query: vi.fn().mockResolvedValue([]),
         store: vi.fn(),
