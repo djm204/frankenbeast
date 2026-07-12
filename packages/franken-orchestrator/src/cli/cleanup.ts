@@ -19,13 +19,15 @@ function lstatOptional(target: string): ReturnType<typeof lstatSync> | undefined
   }
 }
 
-function assertNoSymlinkedPathComponents(target: string): void {
+function assertNoSymlinkedCleanupComponents(target: string): void {
   const absoluteTarget = resolve(target);
   const root = parse(absoluteTarget).root;
-  let current = root;
+  const parts = absoluteTarget.slice(root.length).split(sep).filter(Boolean);
+  const paths = parts.map((_, index) => join(root, ...parts.slice(0, index + 1)));
+  const fbeastIndex = parts.lastIndexOf('.fbeast');
+  const firstCleanupComponentIndex = fbeastIndex >= 0 ? fbeastIndex : parts.length - 1;
 
-  for (const part of absoluteTarget.slice(root.length).split(sep).filter(Boolean)) {
-    current = join(current, part);
+  for (const current of paths.slice(Math.max(firstCleanupComponentIndex, 0))) {
     const stat = lstatOptional(current);
     if (!stat) return;
     if (stat.isSymbolicLink()) {
@@ -43,7 +45,7 @@ function assertNoSymlinkedPathComponents(target: string): void {
  */
 export function cleanupBuild(buildDir: string, options: CleanupBuildOptions = {}): number {
   if (!options.allowSymlinkedBuildDir) {
-    assertNoSymlinkedPathComponents(buildDir);
+    assertNoSymlinkedCleanupComponents(buildDir);
   }
 
   const rootStat = lstatOptional(buildDir);

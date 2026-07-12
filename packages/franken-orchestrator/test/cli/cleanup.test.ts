@@ -105,4 +105,18 @@ describe('cleanupBuild', () => {
     expect(() => cleanupBuild(buildDir)).toThrow(/Refusing to clean build directory with symlinked path component/i);
     expect(readFileSync(outsideFile, 'utf8')).toBe('do not delete');
   });
+
+  it('allows cleanup when only the workspace parent is symlinked', () => {
+    const realWorkspace = join(tmpDir, 'real-workspace');
+    const linkedWorkspace = join(tmpDir, 'linked-workspace');
+    const linkedBuildDir = join(linkedWorkspace, '.fbeast', '.build');
+    mkdirSync(join(realWorkspace, '.fbeast', '.build'), { recursive: true });
+    writeFileSync(join(realWorkspace, '.fbeast', '.build', 'build.log'), 'delete me');
+    symlinkSync(realWorkspace, linkedWorkspace, 'dir');
+
+    const removed = cleanupBuild(linkedBuildDir);
+
+    expect(removed).toBe(1);
+    expect(readdirSync(join(realWorkspace, '.fbeast', '.build'))).toEqual([]);
+  });
 });

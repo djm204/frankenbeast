@@ -74,4 +74,25 @@ describe('cleanupBuild', () => {
       rmSync(outside, { recursive: true, force: true });
     }
   });
+
+  it('allows cleanup when only the workspace parent is symlinked', () => {
+    const linkParent = mkdtempSync(join(tmpdir(), 'cleanup-link-parent-'));
+    const realWorkspace = mkdtempSync(join(tmpdir(), 'cleanup-real-workspace-'));
+    const linkedWorkspace = join(linkParent, 'workspace');
+    const realBuild = join(realWorkspace, '.fbeast', '.build');
+    const linkRoot = join(linkedWorkspace, '.fbeast', '.build');
+    mkdirSync(realBuild, { recursive: true });
+    writeFileSync(join(realBuild, 'build.log'), 'delete me');
+    symlinkSync(realWorkspace, linkedWorkspace, 'dir');
+
+    try {
+      const removed = cleanupBuild(linkRoot);
+
+      expect(removed).toBe(1);
+      expect(existsSync(join(realBuild, 'build.log'))).toBe(false);
+    } finally {
+      rmSync(linkParent, { recursive: true, force: true });
+      rmSync(realWorkspace, { recursive: true, force: true });
+    }
+  });
 });
