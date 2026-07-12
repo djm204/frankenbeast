@@ -381,7 +381,9 @@ jobs:
     const validationRun = String(validationStep?.run ?? '');
     expect(validationRun).toContain('turbo run build typecheck lint');
     expect(validationRun).toContain('turbo run test');
+    expect(validationRun).toContain('npm run ci:test:observer-eval');
     expect(validationRun.indexOf('turbo run build typecheck lint')).toBeLessThan(validationRun.indexOf('turbo run test'));
+    expect(validationRun.indexOf('turbo run test')).toBeLessThan(validationRun.indexOf('npm run ci:test:observer-eval'));
     expect(validationRun).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
   });
 

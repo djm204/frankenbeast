@@ -32,19 +32,6 @@ function runObserverVitestWithNoMatches(env: NodeJS.ProcessEnv = {}) {
   );
 }
 
-function runObserverPackageScript(script: string) {
-  return spawnSync('npm', ['run', script], {
-    cwd: packageRoot,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      CI: '1',
-      INTEGRATION: undefined,
-      EVAL: undefined,
-    },
-  });
-}
-
 describe('observer Vitest discovery', () => {
   it('does not mask empty default unit test discovery', () => {
     const config = readFileSync(resolve(packageRoot, 'vitest.config.ts'), 'utf8');
@@ -135,12 +122,32 @@ describe('observer Vitest discovery', () => {
     }
   });
 
-  it('runs the advertised observer eval suite instead of a zero-test placeholder', () => {
-    const result = runObserverPackageScript('test:eval');
-    const output = `${result.stdout}\n${result.stderr}`;
+  it('points eval mode at the committed observer eval suite', async () => {
+    const originalEval = process.env['EVAL'];
+    const originalIntegration = process.env['INTEGRATION'];
 
-    expect(result.status, output).toBe(0);
-    expect(output).toMatch(/src\/evals\/.+\.test\.ts/u);
-    expect(output).toMatch(/Test Files[\s\S]*[1-9]\d*\s+passed/u);
-  }, discoverySmokeTimeoutMs);
+    try {
+      process.env['EVAL'] = 'true';
+      delete process.env['INTEGRATION'];
+      vi.resetModules();
+
+      const module = await import('../vitest.config.ts');
+      const config = module.default as VitestConfig;
+
+      expect(config.test?.include).toEqual(['src/evals/**/*.test.ts', 'src/**/*.eval.test.ts']);
+      expect(config.test?.exclude).toEqual([]);
+    } finally {
+      if (originalEval === undefined) {
+        delete process.env['EVAL'];
+      } else {
+        process.env['EVAL'] = originalEval;
+      }
+      if (originalIntegration === undefined) {
+        delete process.env['INTEGRATION'];
+      } else {
+        process.env['INTEGRATION'] = originalIntegration;
+      }
+      vi.resetModules();
+    }
+  });
 });
