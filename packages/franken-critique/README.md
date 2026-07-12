@@ -131,6 +131,12 @@ Recorded lessons include a `cooldown` object with the key, window, `recordedAt`,
 
 Callers that need a different window can construct `new LessonRecorder(memory, { cooldownMs })`; pass `cooldownMs: 0` to disable suppression. The recorder uses an advancing wall-clock by default and only uses the injected `now` callback for tests/replay callers that explicitly pass one. Cooldown state is instance-local unless callers pass a reused `cooldownStore` map in `LessonRecorderOptions`, which lets reviewer rebuilds in the same worker suppress duplicate lessons without leaking state into unrelated tests or pipelines. Recorders that reuse the same store also share in-flight admission reservations, so concurrent rebuilds do not double-persist the same equivalent lesson. Invalid negative or non-finite cooldown windows throw a `RangeError` during construction.
 
+## Cross-task blocker pattern mining
+
+`LessonRecorder` also mines repeated blocker patterns while it records critique lessons. Critical findings are normalized by evaluator name and finding text, then counted across distinct task ids. Once the same blocker reaches the configured distinct-task threshold, `record()` surfaces it in `minedBlockerPatterns` and the associated recorded lesson includes `blockerPatterns` for PM/liveness consumers.
+
+Each mined pattern includes a stable `key`, evaluator name, normalized finding, threshold, occurrence count, ordered distinct task ids, first/last seen timestamps, and operator guidance. Repeated observations from the same task do not increment the pattern, and warning-only findings are ignored so the signal stays focused on true blockers. The default threshold is 3 distinct tasks; tests or replay callers can pass `blockerPatternThreshold` and a shared `blockerPatternStore` in `LessonRecorderOptions` when multiple recorder instances should mine against the same in-process history.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.

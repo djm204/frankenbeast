@@ -5,6 +5,7 @@ import type {
   LessonRecordingResult,
   ReviewerFeedbackLessonCapture,
   PostPrLessonExtractionTemplate,
+  CrossTaskBlockerPattern,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -23,6 +24,22 @@ const PENDING_ADMISSIONS_BY_COOLDOWN_STORE = new WeakMap<
 
 const LEARNING_COOLDOWN_GUIDANCE =
   'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.';
+const DEFAULT_BLOCKER_PATTERN_THRESHOLD = 3;
+const MIN_BLOCKER_PATTERN_THRESHOLD = 2;
+const BLOCKER_PATTERN_GUIDANCE =
+  'Equivalent blocker findings have recurred across distinct tasks; PM/liveness handoffs should treat this as a cross-task pattern and route a durable mitigation instead of rediscovering it per task.';
+
+export interface BlockerPatternObservation {
+  readonly taskId: TaskId;
+  readonly observedAt: string;
+}
+
+export interface BlockerPatternState {
+  readonly key: string;
+  readonly evaluatorName: string;
+  readonly normalizedFinding: string;
+  readonly observations: BlockerPatternObservation[];
+}
 
 export interface LessonRecorderOptions {
   /** Milliseconds to suppress equivalent lessons after one is admitted. Defaults to 24 hours. */
@@ -31,6 +48,10 @@ export interface LessonRecorderOptions {
   readonly now?: () => Date | string;
   /** Shared cooldown state for reviewer rebuilds that happen in the same process. */
   readonly cooldownStore?: Map<string, number>;
+  /** Distinct task count required before a repeated critical finding is surfaced as a blocker pattern. Defaults to 3. */
+  readonly blockerPatternThreshold?: number;
+  /** Shared blocker-pattern state for mining recurrent blockers across recorder instances. */
+  readonly blockerPatternStore?: Map<string, BlockerPatternState>;
 }
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
@@ -73,6 +94,8 @@ export class LessonRecorder {
   private readonly now: () => string;
   private readonly cooldowns: Map<string, number>;
   private readonly pendingAdmissions: Map<string, Promise<boolean>>;
+  private readonly blockerPatternThreshold: number;
+  private readonly blockerPatterns: Map<string, BlockerPatternState>;
 
   constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
     const cooldownMs = options.cooldownMs ?? DEFAULT_LESSON_COOLDOWN_MS;
@@ -88,6 +111,18 @@ export class LessonRecorder {
 
     this.memory = memory;
     this.cooldownMs = cooldownMs;
+    const blockerPatternThreshold =
+      options.blockerPatternThreshold ?? DEFAULT_BLOCKER_PATTERN_THRESHOLD;
+    if (
+      !Number.isInteger(blockerPatternThreshold) ||
+      blockerPatternThreshold < MIN_BLOCKER_PATTERN_THRESHOLD
+    ) {
+      throw new RangeError(
+        'LessonRecorder blockerPatternThreshold must be an integer greater than or equal to 2.',
+      );
+    }
+    this.blockerPatternThreshold = blockerPatternThreshold;
+    this.blockerPatterns = options.blockerPatternStore ?? new Map();
     const now = options.now ?? ((): Date => new Date());
     this.now = (): string => normalizeTimestamp(now());
     this.cooldowns = options.cooldownStore ?? new Map<string, number>();
@@ -100,10 +135,7 @@ export class LessonRecorder {
     result: CritiqueLoopResult,
     taskId: TaskId,
   ): Promise<LessonRecordingResult> {
-    const recordingResult: MutableLessonRecordingResult = {
-      recorded: 0,
-      suppressedByCooldown: [],
-    };
+    const recordingResult = createMutableLessonRecordingResult();
 
     // Only record lessons from multi-iteration pass/warn successes.
     if (
@@ -120,6 +152,13 @@ export class LessonRecorder {
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const lesson of lessons) {
+        addUniqueBlockerPatterns(
+          recordingResult.minedBlockerPatterns,
+          lesson.blockerPatterns,
+        );
+        if (recordingResult.minedBlockerPatterns.length > 0) {
+          exposeMinedBlockerPatterns(recordingResult);
+        }
         const cooldownKey =
           this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
         let admissionSettled: ((admitted: boolean) => void) | undefined;
@@ -220,6 +259,12 @@ export class LessonRecorder {
         const suppressUntil = new Date(
           addCooldownWindowMs(cooldownBaseMs, this.cooldownMs),
         ).toISOString();
+        const blockerPatterns = this.mineBlockerPatterns(
+          taskId,
+          evalResult.evaluatorName,
+          critiqueFindings,
+          recordedAt,
+        );
 
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
@@ -266,11 +311,63 @@ export class LessonRecorder {
             suppressUntil,
             guidance: LEARNING_COOLDOWN_GUIDANCE,
           },
+          ...(blockerPatterns.length > 0 ? { blockerPatterns } : {}),
         });
       }
     }
 
     return lessons;
+  }
+
+  private mineBlockerPatterns(
+    taskId: TaskId,
+    evaluatorName: string,
+    findings: readonly {
+      readonly message: string;
+      readonly severity: string;
+    }[],
+    observedAt: string,
+  ): CrossTaskBlockerPattern[] {
+    const minedPatterns: CrossTaskBlockerPattern[] = [];
+    for (const finding of findings) {
+      if (finding.severity !== 'critical') {
+        continue;
+      }
+
+      const normalizedFinding = normalizeBlockerFinding(finding.message);
+      if (!normalizedFinding) {
+        continue;
+      }
+
+      const key = createBlockerPatternKey(evaluatorName, normalizedFinding);
+      let pattern = this.blockerPatterns.get(key);
+      if (!pattern) {
+        pattern = {
+          key,
+          evaluatorName,
+          normalizedFinding,
+          observations: [],
+        };
+        this.blockerPatterns.set(key, pattern);
+      }
+
+      if (
+        pattern.observations.some(
+          (observation) => observation.taskId === taskId,
+        )
+      ) {
+        continue;
+      }
+
+      pattern.observations.push({ taskId, observedAt });
+      if (pattern.observations.length >= this.blockerPatternThreshold) {
+        minedPatterns.push(
+          createCrossTaskBlockerPattern(pattern, this.blockerPatternThreshold),
+        );
+      }
+    }
+
+    return minedPatterns;
   }
 
   private getCooldownSuppression(
@@ -330,7 +427,6 @@ export class LessonRecorder {
       },
     };
   }
-
 }
 
 function getPendingAdmissions(
@@ -347,6 +443,79 @@ function getPendingAdmissions(
 interface MutableLessonRecordingResult {
   recorded: number;
   suppressedByCooldown: LessonCooldownSuppression[];
+  minedBlockerPatterns: CrossTaskBlockerPattern[];
+}
+
+function createMutableLessonRecordingResult(): MutableLessonRecordingResult {
+  const result = {
+    recorded: 0,
+    suppressedByCooldown: [],
+  } as unknown as MutableLessonRecordingResult;
+  Object.defineProperty(result, 'minedBlockerPatterns', {
+    value: [],
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  return result;
+}
+
+function addUniqueBlockerPatterns(
+  target: CrossTaskBlockerPattern[],
+  patterns: readonly CrossTaskBlockerPattern[] | undefined,
+): void {
+  for (const pattern of patterns ?? []) {
+    if (!target.some((existing) => existing.key === pattern.key)) {
+      target.push(pattern);
+    }
+  }
+}
+
+function exposeMinedBlockerPatterns(
+  result: MutableLessonRecordingResult,
+): void {
+  Object.defineProperty(result, 'minedBlockerPatterns', {
+    value: result.minedBlockerPatterns,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
+function createCrossTaskBlockerPattern(
+  state: BlockerPatternState,
+  threshold: number,
+): CrossTaskBlockerPattern {
+  return {
+    key: state.key,
+    evaluatorName: state.evaluatorName,
+    normalizedFinding: state.normalizedFinding,
+    threshold,
+    occurrences: state.observations.length,
+    taskIds: state.observations.map((observation) => observation.taskId),
+    firstSeenAt: state.observations[0]!.observedAt,
+    lastSeenAt: state.observations[state.observations.length - 1]!.observedAt,
+    guidance: BLOCKER_PATTERN_GUIDANCE,
+  };
+}
+
+function createBlockerPatternKey(
+  evaluatorName: string,
+  normalizedFinding: string,
+): string {
+  const normalizedPattern = JSON.stringify({
+    evaluatorName,
+    normalizedFinding,
+  });
+  return [
+    'blocker-pattern',
+    sanitizeLessonIdPart(evaluatorName),
+    stableHash(normalizedPattern),
+  ].join(':');
+}
+
+function normalizeBlockerFinding(message: string): string {
+  return message.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {
