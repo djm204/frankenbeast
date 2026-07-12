@@ -25,16 +25,25 @@ export interface ConversationEngineOptions {
   sessionContinuation?: boolean;
 }
 
+interface ConversationEngineTurnOptions {
+  sessionId?: string;
+}
+
+type ContinuationAwareLlmClient = ILlmClient & {
+  complete(prompt: string, options?: { sessionContinue?: boolean; sessionId?: string }): Promise<string>;
+};
+
 export class ConversationEngine {
-  private readonly llm: ILlmClient;
+  private readonly llm: ContinuationAwareLlmClient;
   private readonly router: IntentRouter;
   private readonly policy: EscalationPolicy;
   private readonly promptBuilder: PromptBuilder;
   private readonly budgetPerSession: number | undefined;
   private readonly sessionContinuation: boolean;
+  private readonly primedSessions = new Set<string>();
 
   constructor({ llm, projectName, maxTranscriptLength, budgetPerSession, sessionContinuation }: ConversationEngineOptions) {
-    this.llm = llm;
+    this.llm = llm as ContinuationAwareLlmClient;
     this.router = new IntentRouter();
     this.policy = new EscalationPolicy();
     this.promptBuilder = new PromptBuilder({
@@ -48,6 +57,7 @@ export class ConversationEngine {
   async processTurn(
     input: string,
     history: TranscriptMessage[],
+    options: ConversationEngineTurnOptions = {},
   ): Promise<TurnResult> {
     // Budget check: reject if cumulative cost exceeds session budget
     if (this.budgetPerSession !== undefined) {
@@ -84,15 +94,25 @@ export class ConversationEngine {
 
     if (outcome.kind === 'reply') {
       try {
-        // First turn for each transcript: full prompt with system context + history.
+        // First reply turn for each live session: full prompt with system context + history.
         // Subsequent turns with session continuation: raw input only
         // (CLI session already has context from --continue). Scope the decision to
-        // the passed transcript so a shared HTTP runtime cannot leak continuation
-        // state across independent chat sessions.
-        const prompt = (this.sessionContinuation && history.length > 0)
+        // sessions that this engine has actually primed with a prior LLM reply so
+        // a shared HTTP runtime cannot leak continuation state across independent
+        // or resumed chat sessions.
+        const sessionId = options.sessionId;
+        const shouldContinue = this.sessionContinuation
+          && (sessionId ? this.primedSessions.has(sessionId) : history.length > 0);
+        const prompt = shouldContinue
           ? input
           : this.promptBuilder.build([...history, userMessage]);
-        const response = await this.llm.complete(prompt);
+        const response = await this.llm.complete(prompt, {
+          sessionContinue: shouldContinue,
+          ...(sessionId ? { sessionId } : {}),
+        });
+        if (sessionId) {
+          this.primedSessions.add(sessionId);
+        }
         const replyOutcome: ReplyOutcome = {
           kind: 'reply',
           content: response,

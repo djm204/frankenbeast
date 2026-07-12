@@ -130,13 +130,14 @@ export class CliLlmAdapter implements IAdapter {
       id?: string;
       messages: Array<{ role: string; content: string }>;
       cacheSession?: CliCacheSessionHint;
+      sessionContinue?: boolean;
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
     const cacheSession = req.cacheSession;
     const cacheCapabilities = resolveProviderCacheCapabilities(this.provider);
     const sessionContinue = this.opts.chatMode
-      ? this.chatCallCount > 0
+      ? req.sessionContinue ?? this.chatCallCount > 0
       : Boolean(cacheSession?.key && cacheCapabilities.nativeWorkSessions);
     const transformed: CliTransformed = {
       prompt: last?.content ?? '',

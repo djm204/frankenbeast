@@ -486,7 +486,10 @@ describe('Chat HTTP Routes', () => {
       body: JSON.stringify({ content: 'second' }),
     });
 
-    expect(llmComplete).toHaveBeenNthCalledWith(2, 'second');
+    expect(llmComplete).toHaveBeenNthCalledWith(2, 'second', expect.objectContaining({
+      sessionContinue: true,
+      sessionId: created.id,
+    }));
   });
 
   it('builds a full first-turn prompt for each HTTP chat session when continuation is enabled', async () => {
@@ -524,10 +527,18 @@ describe('Chat HTTP Routes', () => {
     expect(llmComplete).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('You are Frankenbeast for project test-project.'),
+      expect.objectContaining({
+        sessionContinue: false,
+        sessionId: second.id,
+      }),
     );
     expect(llmComplete).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('user: hello from second session'),
+      expect.objectContaining({
+        sessionContinue: false,
+        sessionId: second.id,
+      }),
     );
     expect(llmComplete).not.toHaveBeenNthCalledWith(2, 'hello from second session');
   });

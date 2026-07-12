@@ -26,7 +26,10 @@ describe('chat runtime parity', () => {
       transcript: first.transcript,
     });
 
-    expect(llm.complete).toHaveBeenNthCalledWith(2, 'second');
+    expect(llm.complete).toHaveBeenNthCalledWith(2, 'second', expect.objectContaining({
+      sessionContinue: true,
+      sessionId: 'session-1',
+    }));
     expect(second.displayMessages[0]?.kind).toBe('reply');
   });
 

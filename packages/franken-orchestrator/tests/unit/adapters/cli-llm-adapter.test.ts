@@ -190,6 +190,30 @@ describe('CliLlmAdapter', () => {
         requestId: 'req-2',
       });
     });
+    it('honors explicit chat continuation overrides in chat mode', async () => {
+      const { spawnFn } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+      const adapter = new CliLlmAdapter(claudeProvider, { ...baseOpts, chatMode: true }, spawnFn);
+
+      const first = adapter.transformRequest({
+        id: 'req-chat-1',
+        provider: 'adapter',
+        model: 'adapter',
+        messages: [{ role: 'user', content: 'first session full prompt' }],
+        sessionContinue: false,
+      });
+      expect(first.sessionContinue).toBe(false);
+
+      await adapter.execute({ ...first, prompt: 'first session full prompt' });
+
+      const second = adapter.transformRequest({
+        id: 'req-chat-2',
+        provider: 'adapter',
+        model: 'adapter',
+        messages: [{ role: 'user', content: 'second session full prompt' }],
+        sessionContinue: false,
+      });
+      expect(second.sessionContinue).toBe(false);
+    });
   });
 
   describe('execute', () => {

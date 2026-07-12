@@ -274,7 +274,7 @@ export class ChatRuntime {
       }
     }
 
-    const result = await this.engine.processTurn(input, state.transcript);
+    const result = await this.engine.processTurn(input, state.transcript, { sessionId: state.sessionId });
     const transcript = [...state.transcript, ...result.newMessages];
 
     switch (result.outcome.kind) {
