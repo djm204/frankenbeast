@@ -68,12 +68,11 @@ export class ChatGateway extends EventEmitter {
     routeMetadata?: Record<string, unknown>,
   ): Promise<void> {
     // Map action IDs to the appropriate slash command.
-    // /approve approves the pending action; rejection is a plain-text
-    // message that the runtime can interpret as declining.
+    // /approve approves the pending action; /reject denies it.
     const text =
       actionId === 'approve'
         ? '/approve'
-        : `Action rejected by user: ${actionId}`;
+        : '/reject';
 
     const cachedRouteMetadata = routeMetadata ?? this.getRememberedRouteMetadata(sessionId);
 

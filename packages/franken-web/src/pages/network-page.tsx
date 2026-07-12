@@ -7,6 +7,7 @@ import type { NetworkConfigResponse, NetworkStatusResponse } from '../lib/networ
 interface NetworkPageProps {
   status: Pick<NetworkStatusResponse, 'mode' | 'secureBackend'>;
   services: NetworkStatusResponse['services'];
+  error?: string | null;
   logs: string[];
   selectedLogServiceId?: string;
   logsLoading?: boolean;
@@ -23,6 +24,7 @@ interface NetworkPageProps {
 export function NetworkPage({
   status,
   services,
+  error = null,
   logs,
   selectedLogServiceId,
   logsLoading,
@@ -45,11 +47,14 @@ export function NetworkPage({
         <button className="button button--secondary" type="button" onClick={onRefresh}>Refresh</button>
       </section>
 
+      {error && <p className="network-page__alert" role="alert">{error}</p>}
+
       <div className="network-page__grid">
         <div className="network-page__main">
           <NetworkStatusGrid mode={status.mode} secureBackend={status.secureBackend} />
           <NetworkServiceList
             services={services}
+            onSelectLogs={onSelectLogService}
             onRestart={onRestart}
             onStart={onStart}
             onStop={onStop}

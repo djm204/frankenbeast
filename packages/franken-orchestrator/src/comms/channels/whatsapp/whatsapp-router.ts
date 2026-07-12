@@ -3,6 +3,7 @@ import { whatsappSignatureMiddleware } from '../../security/whatsapp-signature.j
 import { WhatsAppWebhookSchema } from './whatsapp-schemas.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
 import type { SessionMapper } from '../../core/session-mapper.js';
+import { constantTimeTokenEqual } from '../../../http/security/constant-time.js';
 
 export interface WhatsAppRouterOptions {
   gateway: ChatGateway;
@@ -22,7 +23,7 @@ export function whatsappRouter(options: WhatsAppRouterOptions) {
     const token = c.req.query('hub.verify_token');
     const challenge = c.req.query('hub.challenge');
 
-    if (mode === 'subscribe' && token === verifyToken) {
+    if (mode === 'subscribe' && token && constantTimeTokenEqual(token, verifyToken)) {
       return c.text(challenge || '');
     }
     return c.json({ error: 'Forbidden' }, 403);

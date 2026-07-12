@@ -197,6 +197,52 @@ describe('BeastDispatchService', () => {
     });
   });
 
+  it('preserves awaiting approval status after startNow dispatch pauses for approval', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const eventBus = new BeastEventBus();
+    const publishSpy = vi.spyOn(eventBus, 'publish');
+    const agents = new AgentService(repo, () => '2026-03-17T00:00:00.000Z');
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => {
+          repo.updateRun(run.id, { status: 'pending_approval' });
+        }),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, { eventBus });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' } },
+      initConfig: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' },
+    });
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: { provider: 'claude', objective: 'Approval test', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: true,
+    });
+
+    expect(run.status).toBe('pending_approval');
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({ status: 'awaiting_approval' });
+    const agentStatusEvents = publishSpy.mock.calls.filter(([e]) => e.type === 'agent.status');
+    expect(agentStatusEvents.at(-1)?.[0].data).toMatchObject({
+      agentId: agent.id,
+      status: 'awaiting_approval',
+    });
+  });
+
   it('publishes agent.status SSE event on startNow failure with tracked agent', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

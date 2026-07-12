@@ -37,6 +37,14 @@ export function resolveProjectRoot(baseDir: string): string {
   return findWorkspaceRoot(start) ?? start;
 }
 
+function normalizeWorkspacePattern(workspace: string): string {
+  return workspace.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+}
+
+function hasPackagesWorkspace(workspaces: string[] | undefined): boolean {
+  return workspaces?.some((workspace) => normalizeWorkspacePattern(workspace) === 'packages/*') ?? false;
+}
+
 function findWorkspaceRoot(start: string): string | undefined {
   let current = start;
 
@@ -52,7 +60,7 @@ function findWorkspaceRoot(start: string): string | undefined {
           : packageJson.workspaces?.packages;
         const rel = relative(current, start);
         const isInsidePackagesDir = rel === 'packages' || rel.startsWith(`packages/`);
-        if (workspaces?.includes('packages/*') && (start === current || isInsidePackagesDir)) {
+        if (hasPackagesWorkspace(workspaces) && (start === current || isInsidePackagesDir)) {
           return current;
         }
       } catch {

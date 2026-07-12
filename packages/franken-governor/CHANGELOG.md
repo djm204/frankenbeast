@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.5.14](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.13...franken-governor-v0.5.14) (2026-07-11)
+
+
+### Bug Fixes
+
+* **governor:** handle trigger evaluator exceptions ([#1530](https://github.com/djm204/frankenbeast/issues/1530)) ([ec95839](https://github.com/djm204/frankenbeast/commit/ec95839d6a9ad18e39ab70437bf9a6847f1a8cec)), closes [#1184](https://github.com/djm204/frankenbeast/issues/1184)
+* **governor:** prune expired session tokens on write ([7d20cdb](https://github.com/djm204/frankenbeast/commit/7d20cdb93ceea33b9f528d43956ac08ffc9c8622)), closes [#1109](https://github.com/djm204/frankenbeast/issues/1109)
+* **governor:** reject invalid session token TTLs ([2c28524](https://github.com/djm204/frankenbeast/commit/2c285243010b99b32f4c018693e02712c50730b8)), closes [#1171](https://github.com/djm204/frankenbeast/issues/1171)
+* **governor:** verify Slack webhooks from raw bytes ([ce02e1a](https://github.com/djm204/frankenbeast/commit/ce02e1a43322b2f5ab6e7ee8efe46637c3462975))
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **ci:** make workspace lint coverage explicit ([#1596](https://github.com/djm204/frankenbeast/issues/1596)) ([c1674ed](https://github.com/djm204/frankenbeast/commit/c1674ed69e460a9c7c14d8b7af2e4039edf174d8))
+
+
+### Documentation
+
+* **ramp-up:** refresh package safety status ([ee13582](https://github.com/djm204/frankenbeast/commit/ee135822f14bbc89212e2c5cca246cb0ef71206b)), closes [#949](https://github.com/djm204/frankenbeast/issues/949)
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
 ## [0.5.13](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.12...franken-governor-v0.5.13) (2026-07-10)
 
 

@@ -1,5 +1,6 @@
 import type { ILogger } from './deps.js';
 import { wallClockNow } from '@franken/types';
+import { redactLogData, redactSensitiveText } from './logging/redaction.js';
 
 
 function printLine(...args: unknown[]): void {
@@ -7,7 +8,7 @@ function printLine(...args: unknown[]): void {
 }
 function formatLine(prefix: string, msg: string): string {
   const timestamp = new Date(wallClockNow()).toISOString();
-  return `${timestamp} ${prefix} ${msg}`;
+  return `${timestamp} ${prefix} ${redactSensitiveText(msg)}`;
 }
 
 function formatDebug(prefix: string, msg: string, data?: unknown): string {
@@ -15,7 +16,7 @@ function formatDebug(prefix: string, msg: string, data?: unknown): string {
   if (data === undefined) {
     return base;
   }
-  return `${base} ${JSON.stringify(data)}`;
+  return `${base} ${JSON.stringify(redactLogData(data))}`;
 }
 
 export class ConsoleLogger implements ILogger {
@@ -37,6 +38,8 @@ export class ConsoleLogger implements ILogger {
   }
 
   warn(msg: string, _data?: unknown): void {
+    // Keep generic orchestrator warnings on the shared info stream so routine
+    // status messages stay visible without triggering noisy stderr/console.warn alerts.
     printLine(formatLine('[beast:warn]', msg));
   }
 

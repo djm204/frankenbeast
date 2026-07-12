@@ -363,6 +363,46 @@ describe('beast daemon', () => {
     expect(existsSync(corrupt.pidFile)).toBe(false);
   });
 
+  it('rejects partially numeric and otherwise malformed pid files before claiming', async () => {
+    const malformedPidFileContents = [
+      `${process.pid}abc\n`,
+      `${process.pid}\n456`,
+      '   \n',
+      `-${process.pid}\n`,
+      `${process.pid}.5\n`,
+    ];
+
+    for (const contents of malformedPidFileContents) {
+      const paths = await makePaths();
+      await mkdir(join(paths.root, '.frankenbeast'), { recursive: true });
+      await writeFile(paths.pidFile, contents, { flag: 'wx' });
+
+      const daemon = await startBeastDaemon({
+        ...paths,
+        operatorToken,
+        port: 0,
+      });
+
+      expect(await readFile(paths.pidFile, 'utf8')).toBe(`${process.pid}\n`);
+      await daemon.close();
+      expect(existsSync(paths.pidFile)).toBe(false);
+    }
+  });
+
+  it('removes malformed pid files during release checks', async () => {
+    const paths = await makePaths();
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+    });
+
+    await writeFile(paths.pidFile, `${process.pid}abc\n`);
+    await daemon.close();
+
+    expect(existsSync(paths.pidFile)).toBe(false);
+  });
+
   it('releases the pid file when service construction fails', async () => {
     const paths = await makePaths();
     const badDbParent = join(paths.root, 'not-a-directory');

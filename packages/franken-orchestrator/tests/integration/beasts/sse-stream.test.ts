@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
@@ -82,6 +82,26 @@ describe('Beast SSE routes', () => {
       headers: {
         cookie: `frankenbeast_operator_token=${OPERATOR_TOKEN}`,
         origin: 'http://localhost',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticket).toBeDefined();
+  });
+
+  it('POST /v1/beasts/events/ticket accepts proxied HTTPS same-origin operator cookies', async () => {
+    const ctx = createSseApp();
+    ticketStore = ctx.ticketStore;
+
+    const res = await ctx.app.request('http://internal.local/v1/beasts/events/ticket', {
+      method: 'POST',
+      headers: {
+        cookie: `frankenbeast_operator_token=${OPERATOR_TOKEN}`,
+        origin: 'https://dashboard.example.com',
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'dashboard.example.com',
       },
     });
 
@@ -237,6 +257,49 @@ describe('Beast SSE routes', () => {
 
     expect(events.find((e) => e.id === '1')).toBeUndefined();
     expect(events.find((e) => e.id === '2')).toBeDefined();
+  });
+
+  it.each([
+    ['partial numeric Last-Event-ID header', { headers: { 'Last-Event-ID': '10abc' } }],
+    ['non-numeric lastEventId query', { query: 'lastEventId=abc' }],
+    ['negative lastEventId query', { query: 'lastEventId=-1' }],
+    ['unsafe integer Last-Event-ID header', { headers: { 'Last-Event-ID': '9007199254740992' } }],
+  ])('rejects malformed reconnect cursor: %s', async (_label, options) => {
+    const getSnapshot = vi.fn(() => ({ agents: [{ id: 'a1', status: 'idle' }] }));
+    const ctx = createSseApp({ getSnapshot });
+    ticketStore = ctx.ticketStore;
+
+    ctx.bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running' } });
+
+    const ticket = await issueTicket(ctx.app);
+    const query = options.query ? `&${options.query}` : '';
+    const req = new Request(`http://localhost/v1/beasts/events/stream?ticket=${ticket}${query}`, {
+      headers: options.headers,
+    });
+    const res = await ctx.app.request(req);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        code: 'INVALID_LAST_EVENT_ID',
+        message: 'Last-Event-ID must be a non-negative safe integer',
+      },
+    });
+    expect(getSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid Last-Event-ID header even when lastEventId query is valid', async () => {
+    const ctx = createSseApp();
+    ticketStore = ctx.ticketStore;
+
+    const ticket = await issueTicket(ctx.app);
+    const req = new Request(`http://localhost/v1/beasts/events/stream?ticket=${ticket}&lastEventId=1`, {
+      headers: { 'Last-Event-ID': '1abc' },
+    });
+    const res = await ctx.app.request(req);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: { code: 'INVALID_LAST_EVENT_ID' } });
   });
 
   it('does not send snapshot on reconnect with Last-Event-ID', async () => {

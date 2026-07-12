@@ -31,6 +31,13 @@ binary still matches the root `packageManager` pin before `npm audit` runs:
 npm run audit:security
 ```
 
+Dependency-update automation is fail-closed for first-party packages: Dependabot
+may update external npm and GitHub Actions dependencies, but it must ignore the
+internal `@franken/*` workspace scope for all update types and exclude it from
+every npm update group. Run `npm run check:dependabot-supply-chain` after
+editing `.github/dependabot.yml` to verify that registry-driven update PRs
+cannot confuse internal workspace packages with public packages.
+
 ## 2. Configure environment
 
 ```bash
@@ -69,25 +76,34 @@ npm run typecheck
 npm test
 ```
 
-Root scripts currently include `build`, `typecheck`, `test`, `test:integration`, `test:eval`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. `test:integration` runs deterministic workspace integration suites through Turborepo, while `test:eval` and `test:live:bench` are explicit opt-ins outside default `npm test`; `test:live:bench` delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
+Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:integration`, `test:eval`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. Use `test:ci` for the same root-plus-package test target that CI runs locally; it first builds the shared `@franken/types` workspace so fresh checkouts can resolve workspace package exports, and it intentionally excludes Docker smoke, security, dependency, lint, and live/e2e gates that remain separate CI steps. `test:integration` runs deterministic workspace integration suites through Turborepo, while `test:eval` and `test:live:bench` are explicit opt-ins outside default `npm test`; `test:live:bench` delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
 ## 5. Try the orchestrator CLI
 
+The repository root is private and does not publish a root `frankenbeast` binary
+for `npx` to resolve. Link the local workspace CLIs first; the `local:link`
+script builds the packages and links both `@franken/orchestrator` and
+`@franken/mcp-suite` so `frankenbeast`, `franken`, `frkn`, and `fbeast` are on
+your PATH.
+
 ```bash
+# Build and link the local workspace binaries once from the repo root
+npm run local:link
+
 # Show supported commands and flags
-npx frankenbeast --help
+frankenbeast --help
 
 # Interview only — generates a design doc under .fbeast/plans/
-npx frankenbeast interview
+frankenbeast interview
 
 # Plan from an existing design doc
-npx frankenbeast plan --design-doc docs/my-feature-design.md
+frankenbeast plan --design-doc docs/my-feature-design.md
 
 # Execute chunks from .fbeast/plans/ or a supplied plan directory
-npx frankenbeast run --plan-dir .fbeast/plans/my-plan/
+frankenbeast run --plan-dir .fbeast/plans/my-plan/
 
 # Preview GitHub issue triage without executing fixes
-npx frankenbeast issues --repo owner/repo --dry-run
+frankenbeast issues --repo owner/repo --dry-run
 ```
 
 `--dry-run` is an issue-workflow flag; it is not a global CLI dry-run flag.

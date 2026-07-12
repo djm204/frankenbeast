@@ -13,6 +13,20 @@
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
 
+## 🚀 One-click onboarding
+
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation, then run the repository bootstrap script:
+
+```bash
+npm run bootstrap -- --no-docker
+```
+
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+
+```bash
+./scripts/bootstrap.sh --dry-run
+```
+
 ## Latest release announcement
 
 [Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0) is the latest Frankenbeast release line. It packages the recent one-click onboarding cleanup, security hardening across MCP, observer, orchestrator, governor, and web surfaces, plus deterministic mode improvements for repeatable validation, recovery, and release gates.
@@ -336,8 +350,8 @@ The shipped Hono HTTP surface is integrated in `@franken/orchestrator`'s chat se
 
 ## Prerequisites
 
-- **Node.js** `>=22.13.0 <23 || >=24.0.0 <26` (see `.nvmrc` for the pinned local default; npm enforces this with `engine-strict=true`)
-- **npm** >= 10.0.0
+- **Node.js** `>=22.13.0 <23 || >=24.0.0 <26` (the local default is pinned in [.nvmrc](.nvmrc); npm enforces this with `engine-strict=true`, and CI exercises the same pinned baseline)
+- **npm** 11.5.1 via the root `packageManager` pin
 
 ### Optional
 
@@ -444,7 +458,7 @@ frankenbeast --design-doc docs/my-feature-design.md
 frankenbeast --plan-dir ./my-chunks/
 ```
 
-Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `--resume` to preserve existing checkpoint data and continue an interrupted run; when no checkpoint exists, `--resume` fails fast instead of silently behaving like a cold run.
+Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` when a previous run was interrupted and you want to continue from saved checkpoint/chunk-session data. `--resume` requires an existing checkpoint for the selected plan; if that checkpoint is missing, the command fails fast with a missing-checkpoint error instead of silently starting a cold run.
 
 ### Subcommands
 
@@ -482,6 +496,7 @@ frankenbeast issues --label bug --repo owner/repo
 --no-pr                 Skip PR creation after execution
 --verbose               Debug logs + trace viewer on :4040
 --reset                 Clear checkpoint and traces
+--resume                Resume from an existing checkpoint for the selected plan
 --cleanup               Remove all build artifacts from .fbeast/.build/
 --help                  Show help
 ```
@@ -557,9 +572,16 @@ npm test
 # Per-package tests via Turborepo
 npx turbo run test --filter=franken-brain
 
-# Orchestrator E2E tests
-cd packages/franken-orchestrator && npm run test:e2e
+# Orchestrator E2E tests (sets E2E=true and delegates to @franken/orchestrator)
+npm run test:e2e
 ```
+
+The E2E suites are opt-in and remain outside the regular `npm test` path. Before
+running them from a clean checkout, run the dependency-aware root build with
+`npm run build`, install a real `claude` CLI on `PATH`, and provide a valid
+`ANTHROPIC_API_KEY` in the environment. The root `test:e2e` script delegates to
+the workspace script, which sets `E2E=true` for the gated suites and forwards
+Vitest arguments after `--`.
 
 ## Local Dev Environment
 
@@ -581,9 +603,10 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # TLS-terminated endpoint, then export that same endpoint before seed/verify.
 # export CHROMA_URL=https://chromadb.example.com
 
-# Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
-# image versions and mounts ./tempo.yaml so local tracing starts deterministically.
-docker compose up -d
+# Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
+# compose file pins image versions and mounts ./tempo.yaml so local tracing
+# starts deterministically.
+npm run bootstrap -- --services
 
 # Local Tempo exposes OTLP/HTTP writes on http://localhost:4318 for TempoAdapter
 # and readiness on http://localhost:3200/ready for verify-setup. The root
@@ -611,12 +634,12 @@ Frankenbeast stores secrets outside the config file. The config references secre
 
 | Backend | Key | Best for |
 |---------|-----|----------|
-| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Local dev on macOS, Linux, Windows |
+| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Explicit opt-in for local dev that should use native credential storage |
 | 1Password | `1password` | Teams using 1Password vaults |
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
-| Local encrypted file | `local-encrypted` | CI/CD or offline environments |
+| Local encrypted file | `local-encrypted` | Default backend; CI/CD, offline, or minimal environments |
 
-Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config.json`, then set `network.secureBackend` there. `frankenbeast init` reads and updates `.fbeast/config.json`.
+Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config.json`, then set `network.secureBackend` there. If you omit `network.secureBackend`, the config schema and init flow use `local-encrypted`; `os-keychain` is never selected automatically. `frankenbeast init` reads and updates `.fbeast/config.json`.
 
 ### Setup per backend
 
@@ -630,7 +653,7 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 ```json
 { "network": { "secureBackend": "os-keychain" } }
 ```
-Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
+Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in the native macOS Keychain, GNOME Secret Service, or Windows Credential Manager instead of the default encrypted file. The token is generated and stored in the OS keychain automatically (no passphrase prompt).
 
 **1Password / Bitwarden:**
 ```json
@@ -906,7 +929,7 @@ frankenbeast/
 │   ├── RAMP_UP.md               # Concise agent onboarding doc
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
-│   ├── adr/                     # Architecture Decision Records
+│   ├── adr/                     # Architecture Decision Records (see docs/adr/*.md)
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests

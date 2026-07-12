@@ -12,6 +12,15 @@ function safeTokenCompare(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+function parseLastEventId(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) return undefined;
+
+  const id = Number(value);
+  if (!Number.isSafeInteger(id)) return undefined;
+  return id;
+}
+
 export interface BeastSseRouteDeps {
   bus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
@@ -36,6 +45,8 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
       origin: c.req.header('origin'),
       requestUrl: c.req.url,
       secFetchSite: c.req.header('sec-fetch-site'),
+      forwardedProto: c.req.header('x-forwarded-proto'),
+      forwardedHost: c.req.header('x-forwarded-host'),
     })) {
       return c.json({ error: { code: 'FORBIDDEN', message: 'Cookie operator authentication requires a same-origin request' } }, 403);
     }
@@ -61,11 +72,20 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
 
-    const lastEventId = c.req.header('Last-Event-ID') ?? c.req.query('lastEventId');
+    const lastEventIdValue = c.req.header('Last-Event-ID') ?? c.req.query('lastEventId');
+    const lastEventId = parseLastEventId(lastEventIdValue);
+    if (lastEventIdValue !== undefined && lastEventId === undefined) {
+      return c.json({
+        error: {
+          code: 'INVALID_LAST_EVENT_ID',
+          message: 'Last-Event-ID must be a non-negative safe integer',
+        },
+      }, 400);
+    }
 
     return streamSSE(c, async (stream) => {
       // Send initial snapshot if no Last-Event-ID (fresh connect, not reconnect)
-      if (!lastEventId && deps.getSnapshot) {
+      if (lastEventId === undefined && deps.getSnapshot) {
         await stream.writeSSE({
           id: '0',
           event: 'snapshot',
@@ -73,17 +93,14 @@ export function createBeastSseRoutes(deps: BeastSseRouteDeps): Hono {
         });
       }
 
-      if (lastEventId) {
-        const id = parseInt(lastEventId, 10);
-        if (!isNaN(id)) {
-          const missed = bus.replaySince(id);
-          for (const event of missed) {
-            await stream.writeSSE({
-              id: String(event.id),
-              event: event.type,
-              data: JSON.stringify(event.data),
-            });
-          }
+      if (lastEventId !== undefined) {
+        const missed = bus.replaySince(lastEventId);
+        for (const event of missed) {
+          await stream.writeSSE({
+            id: String(event.id),
+            event: event.type,
+            data: JSON.stringify(event.data),
+          });
         }
       }
 

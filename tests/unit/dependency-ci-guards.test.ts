@@ -5,7 +5,8 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
-const SCRIPT = resolve(ROOT, 'scripts/check-major-outdated.mjs');
+const OUTDATED_SCRIPT = resolve(ROOT, 'scripts/check-major-outdated.mjs');
+const DEPENDABOT_SUPPLY_CHAIN_SCRIPT = resolve(ROOT, 'scripts/check-dependabot-supply-chain.mjs');
 
 function writeJson(value: unknown, filename = 'outdated.json') {
   const dir = mkdtempSync(join(tmpdir(), 'franken-outdated-'));
@@ -14,8 +15,22 @@ function writeJson(value: unknown, filename = 'outdated.json') {
   return file;
 }
 
+function writeText(content: string, filename: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'franken-dependabot-'));
+  const file = join(dir, filename);
+  writeFileSync(file, content, 'utf8');
+  return file;
+}
+
 function runOutdatedGuard(report: unknown, baseline: unknown = []) {
-  return spawnSync(process.execPath, [SCRIPT, '--input', writeJson(report), '--baseline', writeJson(baseline, 'baseline.json')], {
+  return spawnSync(process.execPath, [OUTDATED_SCRIPT, '--input', writeJson(report), '--baseline', writeJson(baseline, 'baseline.json')], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
+}
+
+function runDependabotSupplyChainGuard(config: string) {
+  return spawnSync(process.execPath, [DEPENDABOT_SUPPLY_CHAIN_SCRIPT, '--config', writeText(config, 'dependabot.yml')], {
     cwd: ROOT,
     encoding: 'utf8',
   });
@@ -134,7 +149,126 @@ describe('dependency CI guards for issue #1414', () => {
     expect(result.stdout).toContain('no unapproved direct dependencies are behind the latest major release');
   });
 
-  it('wires dependency audit, major outdated check, and SBOM artifact generation into CI', () => {
+  it('fails dependabot configs that allow registry-driven internal workspace updates', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      all-npm:
+        patterns:
+          - "*"
+`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('@franken/*');
+    expect(result.stderr).toContain('exclude-patterns');
+    expect(result.stderr).toContain('must ignore');
+  });
+
+  it('fails internal-scope ignores that only cover filtered update PRs', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      external-npm:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+    ignore:
+      - dependency-name: "@franken/*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('without update-types filters');
+
+    const versionFiltered = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      external-npm:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+    ignore:
+      - dependency-name: "@franken/*"
+        versions: ["<1.0.0"]
+`);
+
+    expect(versionFiltered.status).toBe(1);
+    expect(versionFiltered.stderr).toContain('without update-types filters');
+  });
+
+  it('fails npm entries that target release branches instead of default-branch security coverage', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: release/0.45
+    groups:
+      external-npm:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+    ignore:
+      - dependency-name: "@franken/*"
+`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('target-branch');
+    expect(result.stderr).toContain('default branch');
+  });
+
+  it('fails every npm group that lacks an internal-scope exclusion', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      safe-inline:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+      unsafe-production:
+        dependency-type: production
+    ignore:
+      - dependency-name: "@franken/*"
+`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('unsafe-production');
+    expect(result.stderr).toContain('exclude-patterns');
+  });
+
+  it('accepts dependabot configs that exclude internal packages from all npm updates', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      external-npm:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+      production-only:
+        dependency-type: production
+        exclude-patterns: ["@franken/*"]
+    ignore:
+      - dependency-name: "@franken/*"
+`);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Dependabot supply-chain guard OK');
+  });
+
+  it('wires dependency audit, major outdated check, dependabot guard, and SBOM artifact generation into CI', () => {
     const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
@@ -142,8 +276,10 @@ describe('dependency CI guards for issue #1414', () => {
 
     expect(packageJson.scripts?.['audit:dependencies']).toBe('node scripts/check-package-manager.mjs && npm audit');
     expect(packageJson.scripts?.['deps:outdated:major']).toBe('node scripts/check-major-outdated.mjs');
+    expect(packageJson.scripts?.['check:dependabot-supply-chain']).toBe('node scripts/check-dependabot-supply-chain.mjs');
     expect(workflow).toContain('npm run audit:dependencies');
     expect(workflow).toContain('npm run deps:outdated:major');
+    expect(workflow).toContain('npm run check:dependabot-supply-chain');
     expect(workflow).toContain('npm sbom --sbom-format cyclonedx');
     expect(workflow).toContain('actions/upload-artifact@v4');
     expect(workflow).toContain('dependency-sbom-cyclonedx');

@@ -35,18 +35,33 @@ function isUnsafeMethod(method: string): boolean {
   return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method.toUpperCase());
 }
 
+function originFromRequestUrl(requestUrl: string, forwardedProto?: string | undefined, forwardedHost?: string | undefined): string {
+  const url = new URL(requestUrl);
+  const proto = forwardedProto?.split(',')[0]?.trim().toLowerCase();
+  const host = forwardedHost?.split(',')[0]?.trim();
+  if (proto === 'http' || proto === 'https') {
+    url.protocol = `${proto}:`;
+  }
+  if (host) {
+    url.host = host;
+  }
+  return url.origin;
+}
+
 export function isCookieOperatorAuthAllowed(options: {
   method: string;
   origin?: string | undefined;
   requestUrl: string;
   secFetchSite?: string | undefined;
+  forwardedProto?: string | undefined;
+  forwardedHost?: string | undefined;
 }): boolean {
   if (!isUnsafeMethod(options.method)) {
     return true;
   }
 
-  if (options.secFetchSite) {
-    return options.secFetchSite === 'same-origin' || options.secFetchSite === 'none';
+  if (options.secFetchSite && options.secFetchSite !== 'same-origin') {
+    return false;
   }
 
   if (!options.origin) {
@@ -54,7 +69,11 @@ export function isCookieOperatorAuthAllowed(options: {
   }
 
   try {
-    return new URL(options.origin).origin === new URL(options.requestUrl).origin;
+    return new URL(options.origin).origin === originFromRequestUrl(
+      options.requestUrl,
+      options.forwardedProto,
+      options.forwardedHost,
+    );
   } catch {
     return false;
   }
@@ -73,6 +92,8 @@ export function requireOperatorAuth(options: OperatorAuthOptions) {
       origin: c.req.header('origin'),
       requestUrl: c.req.url,
       secFetchSite: c.req.header('sec-fetch-site'),
+      forwardedProto: c.req.header('x-forwarded-proto'),
+      forwardedHost: c.req.header('x-forwarded-host'),
     })) {
       throw new HttpError(403, 'FORBIDDEN', 'Cookie operator authentication requires a same-origin request');
     }

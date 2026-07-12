@@ -14,8 +14,15 @@
       ],
       "env": ["INTEGRATION", "E2E", "EVAL", "DOCKER_BUILD"]
     },
-    "test:ci": {
-      "dependsOn": ["build"]
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/vitest-*.ts",
+        "$TURBO_ROOT$/packages/*/src/**"
+      ],
+      "outputs": ["coverage/**"],
+      "env": ["INTEGRATION", "E2E", "EVAL", "DOCKER_BUILD"]
     },
     "test:live": {
       "dependsOn": ["build"],
@@ -37,6 +44,8 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
-    "lint": {}
+    "lint": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/eslint.workspace.config.js"]
+    }
   }
 }

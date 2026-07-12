@@ -81,6 +81,9 @@ function startsWithDeclarationKeyword(content: string, index: number): boolean {
 
   return declarationKeywords.some((keyword) => {
     if (!content.startsWith(keyword, index)) return false;
+    if (/[A-Za-z0-9_$]/.test(content[index - 1] ?? '')) {
+      return false;
+    }
     if (/[A-Za-z0-9_$]/.test(content[index + keyword.length] ?? '')) {
       return false;
     }
@@ -146,13 +149,17 @@ function findBodyOpenAfterSignature(content: string, startIndex: number): number
     }
 
     if (char === '{' && typeDepth === 0) {
+      const returnTypeObjectLikely =
+        expectTypeOperand ||
+        ['keyof', 'is', 'asserts', 'extends', 'infer'].includes(
+          previousIdentifier(content, i - 1),
+        );
       const closeIndex = findMatchingDelimiter(content, i, '{', '}');
-      if (closeIndex === -1) return -1;
+      if (closeIndex === -1) return returnTypeObjectLikely ? -1 : i;
       let nextIndex = closeIndex + 1;
       nextIndex = skipWhitespace(content, nextIndex);
       if (
-        expectTypeOperand ||
-        ['keyof', 'is', 'asserts'].includes(previousIdentifier(content, i - 1)) ||
+        returnTypeObjectLikely ||
         content[nextIndex] === '{' ||
         content[nextIndex] === '|' ||
         content[nextIndex] === '&' ||

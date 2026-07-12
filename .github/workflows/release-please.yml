@@ -36,6 +36,7 @@ jobs:
           npm run lint:security
           npx turbo run build typecheck lint
           npx turbo run test
+          npm run ci:test:observer-eval
 
   release-please:
     needs: validate-release
@@ -49,7 +50,7 @@ jobs:
     steps:
       - name: Release Please
         id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

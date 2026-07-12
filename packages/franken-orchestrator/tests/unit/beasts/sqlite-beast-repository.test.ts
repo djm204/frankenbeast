@@ -4,8 +4,122 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import { UnknownTrackedAgentError } from '../../../src/beasts/errors.js';
-import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
+import {
+  BeastRepositoryJsonCorruptionError,
+  SQLiteBeastRepository,
+} from '../../../src/beasts/repository/sqlite-beast-repository.js';
 
+type CorruptJsonTable =
+  | 'beast_runs'
+  | 'beast_run_attempts'
+  | 'beast_run_events'
+  | 'beast_interview_sessions'
+  | 'tracked_agents'
+  | 'tracked_agent_events';
+
+interface CorruptJsonFixtureIds {
+  readonly runId: string;
+  readonly healthyRunId: string;
+  readonly attemptId: string;
+  readonly eventId: string;
+  readonly interviewId: string;
+  readonly agentId: string;
+  readonly agentEventId: string;
+  rowIdFor(table: string): string;
+}
+
+function seedCorruptJsonFixture(repo: SQLiteBeastRepository): CorruptJsonFixtureIds {
+  const run = repo.createRun({
+    definitionId: 'martin-loop',
+    definitionVersion: 1,
+    executionMode: 'process',
+    configSnapshot: { provider: 'claude' },
+    dispatchedBy: 'dashboard',
+    dispatchedByUser: 'pfk',
+    createdAt: '2026-03-10T00:00:00.000Z',
+  });
+  const healthyRun = repo.createRun({
+    definitionId: 'martin-loop',
+    definitionVersion: 1,
+    executionMode: 'process',
+    configSnapshot: { healthy: true },
+    dispatchedBy: 'dashboard',
+    dispatchedByUser: 'pfk',
+    createdAt: '2026-03-10T00:00:01.000Z',
+  });
+  const attempt = repo.createAttempt(run.id, {
+    status: 'running',
+    executorMetadata: { backend: 'process' },
+    startedAt: '2026-03-10T00:01:00.000Z',
+  });
+  const event = repo.appendEvent(run.id, {
+    attemptId: attempt.id,
+    type: 'attempt.started',
+    payload: { pid: 101 },
+    createdAt: '2026-03-10T00:01:01.000Z',
+  });
+  const interview = repo.createInterviewSession({
+    definitionId: 'martin-loop',
+    status: 'active',
+    answers: { goal: 'hydrate safely' },
+    createdAt: '2026-03-10T00:02:00.000Z',
+    updatedAt: '2026-03-10T00:02:00.000Z',
+  });
+  const agent = repo.createTrackedAgent({
+    definitionId: 'martin-loop',
+    source: 'dashboard',
+    status: 'initializing',
+    createdByUser: 'operator',
+    initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+    initConfig: { identity: { name: 'Corruption test agent' } },
+    moduleConfig: { firewall: true },
+    createdAt: '2026-03-10T00:03:00.000Z',
+    updatedAt: '2026-03-10T00:03:00.000Z',
+  });
+  const agentEvent = repo.appendTrackedAgentEvent(agent.id, {
+    level: 'info',
+    type: 'agent.command.sent',
+    message: 'Sent martin-loop command',
+    payload: { command: 'martin-loop' },
+    createdAt: '2026-03-10T00:03:01.000Z',
+  });
+
+  return {
+    runId: run.id,
+    healthyRunId: healthyRun.id,
+    attemptId: attempt.id,
+    eventId: event.id,
+    interviewId: interview.id,
+    agentId: agent.id,
+    agentEventId: agentEvent.id,
+    rowIdFor(table: string): string {
+      switch (table as CorruptJsonTable) {
+        case 'beast_runs':
+          return run.id;
+        case 'beast_run_attempts':
+          return attempt.id;
+        case 'beast_run_events':
+          return event.id;
+        case 'beast_interview_sessions':
+          return interview.id;
+        case 'tracked_agents':
+          return agent.id;
+        case 'tracked_agent_events':
+          return agentEvent.id;
+      }
+    },
+  };
+}
+
+function corruptJsonColumn(dbPath: string, table: string, column: string, rowId: string): void {
+  const db = new Database(dbPath);
+  try {
+    db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run('{malformed json', rowId);
+  } finally {
+    db.close();
+  }
+}
+ 
 describe('SQLiteBeastRepository', () => {
   let workDir: string | undefined;
 
@@ -280,6 +394,83 @@ describe('SQLiteBeastRepository', () => {
     })).toThrow('Unknown tracked agent: agent-missing');
 
     expect(repo.listRuns()).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'beast_runs.config_snapshot',
+      table: 'beast_runs',
+      column: 'config_snapshot',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.getRun(ids.runId),
+    },
+    {
+      name: 'beast_run_attempts.executor_metadata',
+      table: 'beast_run_attempts',
+      column: 'executor_metadata',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listAttempts(ids.runId),
+    },
+    {
+      name: 'beast_run_events.payload',
+      table: 'beast_run_events',
+      column: 'payload',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listEvents(ids.runId),
+    },
+    {
+      name: 'beast_interview_sessions.answers',
+      table: 'beast_interview_sessions',
+      column: 'answers',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.getInterviewSession(ids.interviewId),
+    },
+    {
+      name: 'tracked_agents.init_action',
+      table: 'tracked_agents',
+      column: 'init_action',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.getTrackedAgent(ids.agentId),
+    },
+    {
+      name: 'tracked_agents.init_config',
+      table: 'tracked_agents',
+      column: 'init_config',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.getTrackedAgent(ids.agentId),
+    },
+    {
+      name: 'tracked_agents.module_config',
+      table: 'tracked_agents',
+      column: 'module_config',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.getTrackedAgent(ids.agentId),
+    },
+    {
+      name: 'tracked_agent_events.payload',
+      table: 'tracked_agent_events',
+      column: 'payload',
+      exercise: (repo: SQLiteBeastRepository, ids: CorruptJsonFixtureIds) => () => repo.listTrackedAgentEvents(ids.agentId),
+    },
+  ])('reports structured data-corruption details for corrupt $name JSON', async ({ table, column, exercise }) => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(dbPath);
+    const ids = seedCorruptJsonFixture(repo);
+    corruptJsonColumn(dbPath, table, column, ids.rowIdFor(table));
+
+    expect(exercise(repo, ids)).toThrow(BeastRepositoryJsonCorruptionError);
+
+    try {
+      exercise(repo, ids)();
+      throw new Error('expected corrupt JSON read to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(BeastRepositoryJsonCorruptionError);
+      const corruption = error as BeastRepositoryJsonCorruptionError;
+      expect(corruption.context).toMatchObject({
+        table,
+        column,
+        rowId: ids.rowIdFor(table),
+        valueSnippet: '{malformed json',
+      });
+      expect(corruption.message).toContain(`${table}.${column}`);
+      expect(corruption.message).toContain(ids.rowIdFor(table));
+    }
+
+    expect(repo.getRun(ids.healthyRunId)?.configSnapshot).toEqual({ healthy: true });
   });
 
   it('migrates legacy beast_runs tables that predate tracked_agent_id', async () => {

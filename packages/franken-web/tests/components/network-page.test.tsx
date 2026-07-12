@@ -299,6 +299,93 @@ describe('NetworkPage', () => {
     expect((screen.getByLabelText('Comms enabled') as HTMLInputElement).checked).toBe(true);
   });
 
+  it('syncs refreshed config into untouched fields without clobbering unsaved edits', () => {
+    const { rerender } = render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Chat host'), { target: { value: '0.0.0.0' } });
+
+    rerender(
+      <NetworkPage
+        config={{
+          ...baseConfig,
+          chat: { ...baseConfig.chat, model: 'fresh-backend-model', host: '192.168.1.10' },
+        }}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('fresh-backend-model')).toBeDefined();
+    expect(screen.getByDisplayValue('0.0.0.0')).toBeDefined();
+    expect(screen.getByText('chat.host=0.0.0.0')).toBeDefined();
+    expect(screen.queryByText('chat.model=fresh-backend-model')).toBeNull();
+  });
+
+  it('accepts normalized config returned after a successful save', async () => {
+    const onSaveConfig = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(
+      <NetworkPage
+        config={baseConfig}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Chat port'), { target: { value: '03737' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
+
+    await waitFor(() => expect(onSaveConfig).toHaveBeenCalledWith(['chat.port=03737']));
+
+    rerender(
+      <NetworkPage
+        config={{
+          ...baseConfig,
+          chat: { ...baseConfig.chat, port: 3737 },
+        }}
+        logs={[]}
+        onSelectLogService={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestart={vi.fn()}
+        onSaveConfig={onSaveConfig}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        services={[]}
+        status={{ mode: 'secure', secureBackend: 'local-encrypted' }}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('3737')).toBeDefined();
+    expect(screen.getByText('No pending config changes.')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Save config' })).toHaveProperty('disabled', true);
+  });
+
   it('surfaces save errors from the network config API', async () => {
     const onSaveConfig = vi.fn().mockRejectedValue(new Error('HTTP 400'));
 
@@ -400,6 +487,13 @@ describe('NetworkPage', () => {
     expect(onSelectLogService).toHaveBeenCalledWith('chat-server');
     expect(screen.queryByRole('option', { name: 'orphan-in-process (running)' })).toBeNull();
     expect(screen.getByRole('option', { name: 'comms-gateway (running)' })).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'View logs for dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View logs for comms-gateway' }));
+
+    expect(onSelectLogService).toHaveBeenCalledWith('dashboard');
+    expect(onSelectLogService).toHaveBeenCalledWith('comms-gateway');
+    expect(screen.queryByRole('button', { name: 'View logs for orphan-in-process' })).toBeNull();
   });
 
   it('upgrades network logs into a searchable operational viewer', () => {

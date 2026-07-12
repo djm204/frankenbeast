@@ -997,10 +997,12 @@ Frankenbeast stores secrets outside the config file. Config references secrets b
 
 | Backend | `secureBackend` value | Best for |
 |---------|----------------------|----------|
-| OS keychain (Keychain / GNOME / DPAPI) | `os-keychain` | Local development |
+| OS keychain (Keychain / GNOME / DPAPI) | `os-keychain` | Explicit opt-in for local development that should use native credential storage |
 | 1Password | `1password` | Teams using 1Password vaults |
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
-| Local encrypted file | `local-encrypted` | CI/CD and offline environments |
+| Local encrypted file | `local-encrypted` | Default backend; CI/CD and offline environments |
+
+When `network.secureBackend` is unset, the `NetworkOperatorConfigSchema` field default applies `local-encrypted`; the OS keychain backend is available only when selected explicitly.
 
 ### Architecture
 

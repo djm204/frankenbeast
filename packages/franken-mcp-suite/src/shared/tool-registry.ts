@@ -51,7 +51,7 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
   }
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > MAX_MEMORY_QUERY_LIMIT) {
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_MEMORY_QUERY_LIMIT) {
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
   }
   return { ok: true, value: parsed };
@@ -88,6 +88,20 @@ function parseOptionalNonNegativeNumberArg(name: string, value: unknown): { ok: 
     return { ok: false, message: `${name} must be a finite non-negative number` };
   }
   return { ok: true, value: parsed };
+}
+
+function parseNonEmptyStringArg(name: string, value: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: `${name} must be a non-empty string` };
+  }
+  return { ok: true, value };
+}
+
+function parseStringArg(name: string, value: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof value !== 'string') {
+    return { ok: false, message: `${name} must be a string` };
+  }
+  return { ok: true, value };
 }
 
 export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
@@ -386,11 +400,20 @@ const TOOLS: ToolFull[] = [
       required: ['event', 'metadata', 'sessionId'],
     },
     makeHandler: ({ observer }) => async (args) => {
-      const event = String(args['event']);
-      const metadata = String(args['metadata']);
-      const sessionId = String(args['sessionId']);
-      const result = await observer.log({ event, metadata, sessionId });
-      return { content: [{ type: 'text', text: `Logged event: ${event} (id: ${result.id}, hash: ${result.hash})` }] };
+      const eventArg = parseNonEmptyStringArg('event', args['event']);
+      if (!eventArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${eventArg.message}` }], isError: true };
+      }
+      const metadataArg = parseStringArg('metadata', args['metadata']);
+      if (!metadataArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${metadataArg.message}` }], isError: true };
+      }
+      const sessionIdArg = parseNonEmptyStringArg('sessionId', args['sessionId']);
+      if (!sessionIdArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${sessionIdArg.message}` }], isError: true };
+      }
+      const result = await observer.log({ event: eventArg.value, metadata: metadataArg.value, sessionId: sessionIdArg.value });
+      return { content: [{ type: 'text', text: `Logged event: ${eventArg.value} (id: ${result.id}, hash: ${result.hash})` }] };
     },
   },
   {

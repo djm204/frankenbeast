@@ -14,7 +14,7 @@ export default defineConfig({
     setupFiles: [fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url))],
     // Default: unit tests only.
     // INTEGRATION=true → integration tests only.
-    // EVAL=true        → eval (deterministic + LLM-judge) tests only.
+    // EVAL=true        → observer evaluation tests only.
     include: isIntegration
       ? ['src/**/*.integration.test.ts']
       : isEval

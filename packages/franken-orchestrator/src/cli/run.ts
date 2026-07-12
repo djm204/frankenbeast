@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
+import { defaultConfig, parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -60,6 +60,9 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
+import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
+import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
+import { redactLogData } from '../logging/redaction.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -306,6 +309,47 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
   return loadConfig(args, defaultConfigPath);
 }
 
+function canInitHandleConfigLoadError(args: CliArgs): boolean {
+  return args.subcommand === 'init';
+}
+
+async function initConfigFileContainsNonObjectJson(configFile: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(configFile, 'utf-8')) as unknown;
+    return parsed === null || Array.isArray(parsed) || typeof parsed !== 'object';
+  } catch {
+    return false;
+  }
+}
+
+async function isInitConfigFileError(error: unknown, configFile: string): Promise<boolean> {
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  if (error instanceof Error && error.message.startsWith('Config file not found:')) {
+    return true;
+  }
+  if (error instanceof Error && /config(?: file)? (?:must contain|must be).*object/i.test(error.message)) {
+    return true;
+  }
+  if (
+    error instanceof Error
+    && /cannot read properties of null \(reading 'providers'\)|cannot convert undefined or null to object/i.test(error.message)
+    && await initConfigFileContainsNonObjectJson(configFile)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function initFallbackConfig(args: CliArgs): OrchestratorConfig {
+  const config = defaultConfig();
+  if (args.initBackend) {
+    config.network.secureBackend = args.initBackend as OrchestratorConfig['network']['secureBackend'];
+  }
+  return config;
+}
+
 export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
   if (!config.dashboard?.enabled) {
     return [];
@@ -399,6 +443,75 @@ export function assertAnyProviderCliAvailable(
       + `Checked: ${attempted || 'none'}. `
       + 'Install one of: claude, codex, gemini, aider; or configure providers.overrides.<provider>.command.',
   );
+}
+
+function resolveDashboardProviderType(nameOrType: string, fallbackType?: string): string {
+  if (nameOrType === 'aider') return fallbackType ?? 'claude-cli';
+  try {
+    return resolveProviderType(nameOrType);
+  } catch {
+    return fallbackType ?? 'unknown';
+  }
+}
+
+export function buildDashboardProviderSnapshot(
+  config: OrchestratorConfig,
+  providerRegistry?: LlmProviderRegistry | undefined,
+  extraProviderNames: readonly string[] = [],
+): Array<{ name: string; type: string; available: boolean; failoverOrder: number; model?: string }> {
+  if (config.consolidatedProviders?.length) {
+    return config.consolidatedProviders.map((provider, index) => ({
+      name: provider.name,
+      type: provider.type,
+      available: true,
+      failoverOrder: index,
+      ...(provider.model ? { model: provider.model } : {}),
+    }));
+  }
+
+  const registryProviders = providerRegistry?.getProviders() ?? [];
+  const registryByName = new Map<string, (typeof registryProviders)[number]>();
+  const configuredNames = [...new Set([
+    ...extraProviderNames,
+    config.providers.default,
+    ...(config.providers.fallbackChain ?? []),
+  ].filter(Boolean))];
+  const configuredTypes = new Set<string>();
+  for (const [index, name] of configuredNames.entries()) {
+    configuredTypes.add(resolveDashboardProviderType(name, registryProviders[index]?.type));
+  }
+
+  const registryNames = registryProviders.flatMap((provider) => {
+    let canonicalName = provider.name;
+    try {
+      canonicalName = resolveProviderCatalogEntry(provider.name).name;
+    } catch {
+      // Keep custom registry providers under their registry name.
+    }
+    registryByName.set(provider.name, provider);
+    registryByName.set(canonicalName, provider);
+
+    const providerType = provider.type || resolveDashboardProviderType(canonicalName);
+    if (configuredNames.includes(canonicalName) || (providerType && configuredTypes.has(providerType))) {
+      return [];
+    }
+    return [canonicalName];
+  });
+
+  const providerNames = [...new Set([...configuredNames, ...registryNames])];
+
+  return providerNames.map((name, index) => {
+    const registryProvider = registryByName.get(name);
+    const type: string = registryProvider?.type ?? resolveDashboardProviderType(name, registryProviders[index]?.type);
+    const model = config.providers.overrides?.[name]?.model;
+    return {
+      name,
+      type,
+      available: true,
+      failoverOrder: index,
+      ...(model ? { model } : {}),
+    };
+  });
 }
 
 function isCommandAvailable(command: string): boolean {
@@ -825,7 +938,26 @@ export async function main(): Promise<void> {
       ? undefined
       : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
-  const config = await resolveConfig(args, paths.configFile);
+  let config: OrchestratorConfig;
+  let configLoadFallback = false;
+  try {
+    config = await resolveConfig(args, paths.configFile);
+  } catch (error) {
+    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(error, args.config ?? paths.configFile)) {
+      throw error;
+    }
+    config = initFallbackConfig(args);
+    configLoadFallback = true;
+  }
+  if (
+    !configLoadFallback
+    && args.subcommand === 'init'
+    && !args.initNonInteractive
+    && await initConfigFileContainsNonObjectJson(args.config ?? paths.configFile)
+  ) {
+    config = initFallbackConfig(args);
+    configLoadFallback = true;
+  }
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
 
@@ -837,7 +969,7 @@ export async function main(): Promise<void> {
   }
 
   if (args.verbose) {
-    printLine('Config:', JSON.stringify(config, null, 2));
+    printLine('Config:', JSON.stringify(redactLogData(config), null, 2));
   }
 
   if (resumeTarget) {
@@ -882,6 +1014,7 @@ export async function main(): Promise<void> {
       await handleInitCommand({
         args,
         config,
+        configLoadFallback,
         io,
         paths,
         print: printLine,
@@ -1059,9 +1192,7 @@ export async function main(): Promise<void> {
               dashboardDeps: {
                 skillManager,
                 getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
-                getProviders: () => providerRegistry.getProviders().map((p, i) => ({
-                  name: p.name, type: p.type, available: true, failoverOrder: i,
-                })),
+                getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
               },
             }
           : {}),

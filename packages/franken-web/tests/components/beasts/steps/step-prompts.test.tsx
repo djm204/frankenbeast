@@ -47,4 +47,27 @@ describe('StepPrompts', () => {
     });
     expect(useBeastStore.getState().stepValues[5]?.promptText).toBe('Typed while loading');
   });
+
+  it('stores selected prompt files and removes them from Zustand state', async () => {
+    render(<StepPrompts />);
+
+    fireEvent.change(screen.getByLabelText('Attach files'), {
+      target: { files: [new File(['agent context'], 'context.md', { type: 'text/markdown' })] },
+    });
+
+    await waitFor(() => {
+      expect(useBeastStore.getState().stepValues[5]?.files).toEqual([
+        {
+          name: 'context.md',
+          content: 'agent context',
+          tokens: 4,
+          health: 'good',
+        },
+      ]);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove context.md' }));
+
+    expect(useBeastStore.getState().stepValues[5]?.files).toEqual([]);
+  });
 });

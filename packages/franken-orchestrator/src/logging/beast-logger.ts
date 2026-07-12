@@ -11,6 +11,7 @@ import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, tr
 import { resolve } from 'node:path';
 import type { ILogger } from '../deps.js';
 import { isCommandFailure } from '../errors/command-failure.js';
+import { redactLogData, redactSensitiveText } from './redaction.js';
 
 
 function printLine(...args: unknown[]): void {
@@ -232,6 +233,11 @@ function highlightServices(msg: string): string {
 export interface BeastLoggerOptions {
   readonly verbose: boolean;
   readonly captureForFile?: boolean;
+  /**
+   * Redact secret-looking environment/config keys from terminal and file logs.
+   * Defaults to true; set false only for an explicit local diagnostic override.
+   */
+  readonly redactSecrets?: boolean | undefined;
   /** When set, log entries are appended to this file immediately (crash-safe). */
   readonly logFile?: string | undefined;
   /** Maximum active log file size before rotating to .1, .2, etc. Defaults to 10 MiB. */
@@ -243,6 +249,7 @@ export interface BeastLoggerOptions {
 export class BeastLogger implements ILogger {
   private readonly verbose: boolean;
   private readonly captureForFile: boolean;
+  private readonly redactSecrets: boolean;
   private readonly logFile: string | undefined;
   private readonly maxLogFileBytes: number;
   private readonly maxRotatedLogFiles: number;
@@ -253,6 +260,7 @@ export class BeastLogger implements ILogger {
   constructor(options: BeastLoggerOptions) {
     this.verbose = options.verbose;
     this.captureForFile = options.captureForFile ?? false;
+    this.redactSecrets = options.redactSecrets ?? true;
     this.logFile = options.logFile;
     this.maxLogFileBytes = options.maxLogFileBytes ?? DEFAULT_MAX_LOG_FILE_BYTES;
     this.maxRotatedLogFiles = options.maxRotatedLogFiles ?? DEFAULT_ROTATED_LOG_FILES;
@@ -262,7 +270,8 @@ export class BeastLogger implements ILogger {
     const { data, source: src } = resolveArgs(dataOrSource, source);
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
-    const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
+    const safeMsg = this.redactMessage(msg);
+    const display = data !== undefined ? `${safeMsg}  ${formatCompact(data, this.redactSecrets)}` : safeMsg;
     printLine(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${badge}${display}`);
     this.capture('INFO', this.withBadgeAndData(msg, data, src));
   }
@@ -284,7 +293,8 @@ export class BeastLogger implements ILogger {
     const { data, source: src } = resolveArgs(dataOrSource, source);
     const ts = this.timestamp();
     const badge = src ? formatBadge(src) : '';
-    const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
+    const safeMsg = this.redactMessage(msg);
+    const display = data !== undefined ? `${safeMsg}  ${formatCompact(data, this.redactSecrets)}` : safeMsg;
     printLine(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${badge}${A.yellow}${display}${A.reset}`);
     this.capture('WARN', this.withBadgeAndData(msg, data, src));
   }
@@ -399,17 +409,23 @@ export class BeastLogger implements ILogger {
   }
 
   private withData(msg: string, data: unknown): string {
-    if (data === undefined) return msg;
+    const safeMsg = this.redactMessage(msg);
+    if (data === undefined) return safeMsg;
     if (isCommandFailure(data)) {
-      return `${msg} | ${data.summary}`;
+      return `${safeMsg} | ${this.redactMessage(data.summary)}`;
     }
-    return `${msg} | ${safeStringify(data)}`;
+    return `${safeMsg} | ${safeStringify(data, this.redactSecrets)}`;
   }
 
   private withBadgeAndData(msg: string, data: unknown, source: string | undefined): string {
     const badge = source ? `[${source}] ` : '';
-    const body = data !== undefined ? `${msg} | ${safePrettyStringify(data)}` : msg;
+    const safeMsg = this.redactMessage(msg);
+    const body = data !== undefined ? `${safeMsg} | ${safePrettyStringify(data, this.redactSecrets)}` : safeMsg;
     return `${badge}${body}`;
+  }
+
+  private redactMessage(msg: string): string {
+    return this.redactSecrets ? redactSensitiveText(msg) : msg;
   }
 }
 
@@ -442,19 +458,21 @@ function centerAnsi(text: string, width: number): string {
   return `${' '.repeat(leftPad)}${text}`;
 }
 
-function safeStringify(value: unknown): string {
+function safeStringify(value: unknown, redactSecrets = true): string {
   try {
-    return JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? v.toString() : v);
+    const safeValue = redactSecrets ? redactLogData(value) : value;
+    return JSON.stringify(safeValue, (_key, v) => typeof v === 'bigint' ? v.toString() : v);
   } catch {
-    return String(value);
+    return redactSecrets ? redactSensitiveText(String(value)) : String(value);
   }
 }
 
 /** Pretty-print for build.log — truncates long string values to keep logs readable. */
-function safePrettyStringify(value: unknown): string {
+function safePrettyStringify(value: unknown, redactSecrets = true): string {
   const MAX_STRING_LEN = 200;
   try {
-    const pretty = JSON.stringify(value, (_key, v) => {
+    const safeValue = redactSecrets ? redactLogData(value) : value;
+    const pretty = JSON.stringify(safeValue, (_key, v) => {
       if (typeof v === 'bigint') return v.toString();
       if (typeof v === 'string' && v.length > MAX_STRING_LEN) {
         return v.slice(0, MAX_STRING_LEN) + `... (${v.length} chars)`;
@@ -463,15 +481,16 @@ function safePrettyStringify(value: unknown): string {
     }, 2);
     return pretty;
   } catch {
-    return String(value);
+    return redactSecrets ? redactSensitiveText(String(value)) : String(value);
   }
 }
 
-function formatCompact(data: unknown): string {
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-    return safeStringify(data);
+function formatCompact(data: unknown, redactSecrets = true): string {
+  const safeData = redactSecrets ? redactLogData(data) : data;
+  if (typeof safeData !== 'object' || safeData === null || Array.isArray(safeData)) {
+    return safeStringify(safeData, redactSecrets);
   }
-  const entries = Object.entries(data as Record<string, unknown>);
+  const entries = Object.entries(safeData as Record<string, unknown>);
   if (entries.length === 0) return '';
-  return entries.map(([k, v]) => `${k}=${typeof v === 'string' ? v : safeStringify(v)}`).join(' ');
+  return entries.map(([k, v]) => `${k}=${typeof v === 'string' ? v : safeStringify(v, redactSecrets)}`).join(' ');
 }

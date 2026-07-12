@@ -1,11 +1,13 @@
-import { readFile } from 'node:fs/promises';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
-import type { FileInitStateStore } from './init-state-store.js';
+import { isInitStateForConfig, type FileInitStateStore } from './init-state-store.js';
 import type { ISecretStore } from '../network/secret-store.js';
+import { readJsonFileOrDefault, warnJsonQuarantined } from './init-json-file.js';
 
 export type InitIssueCode =
   | 'missing-config'
   | 'missing-init-state'
+  | 'invalid-config-json'
+  | 'invalid-init-state-json'
   | 'slack-incomplete'
   | 'discord-incomplete'
   | 'telegram-incomplete'
@@ -24,16 +26,40 @@ export interface InitVerificationResult {
   config?: OrchestratorConfig;
 }
 
-async function tryReadJson<T>(filePath: string): Promise<T | undefined> {
-  try {
-    const raw = await readFile(filePath, 'utf-8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return undefined;
-    }
-    throw error;
+type JsonReadResult<T> =
+  | { status: 'ok'; value: T }
+  | { status: 'missing' }
+  | { status: 'invalid'; message: string };
+
+const missingJson = Symbol('missing-json');
+
+function describeJsonParseError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return `Invalid JSON: ${error.message}`;
   }
+  return 'Invalid JSON syntax.';
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function tryReadJson<T>(filePath: string): Promise<JsonReadResult<T>> {
+  let corruptMessage: string | undefined;
+  const value = await readJsonFileOrDefault<T | typeof missingJson>(filePath, () => missingJson, {
+    description: 'init verification JSON',
+    onCorrupt: (recovery) => {
+      corruptMessage = describeJsonParseError(recovery.error);
+      warnJsonQuarantined(recovery);
+    },
+  });
+  if (corruptMessage) {
+    return { status: 'invalid', message: corruptMessage };
+  }
+  if (value === missingJson) {
+    return { status: 'missing' };
+  }
+  return { status: 'ok', value };
 }
 
 export async function verifyInit(options: {
@@ -43,20 +69,46 @@ export async function verifyInit(options: {
   allowTrustedProviderCommandOverrides?: boolean | undefined;
 }): Promise<InitVerificationResult> {
   const issues: InitVerificationIssue[] = [];
-  const rawConfig = await tryReadJson<unknown>(options.configFile);
-  const rawState = await tryReadJson<unknown>(options.stateStore.filePath);
+  const configRead = await tryReadJson<unknown>(options.configFile);
+  const stateRead = await tryReadJson<unknown>(options.stateStore.filePath);
+  const rawConfig = configRead.status === 'ok' && isJsonObject(configRead.value) ? configRead.value : undefined;
 
-  if (!rawConfig) {
+  if (configRead.status === 'missing') {
     issues.push({
       code: 'missing-config',
       message: `Config file is missing at ${options.configFile}. Run frankenbeast init.`,
     });
+  } else if (configRead.status === 'invalid') {
+    issues.push({
+      code: 'invalid-config-json',
+      message: `Config file at ${options.configFile} could not be parsed. ${configRead.message}`,
+    });
+  } else if (!isJsonObject(configRead.value)) {
+    issues.push({
+      code: 'invalid-config-json',
+      message: `Config file at ${options.configFile} must contain a JSON object.`,
+    });
   }
 
-  if (!rawState) {
+  if (stateRead.status === 'missing') {
     issues.push({
       code: 'missing-init-state',
       message: `Init state is missing at ${options.stateStore.filePath}. Run frankenbeast init.`,
+    });
+  } else if (stateRead.status === 'invalid') {
+    issues.push({
+      code: 'invalid-init-state-json',
+      message: `Init state at ${options.stateStore.filePath} could not be parsed. ${stateRead.message}`,
+    });
+  } else if (!isJsonObject(stateRead.value)) {
+    issues.push({
+      code: 'invalid-init-state-json',
+      message: `Init state at ${options.stateStore.filePath} must contain a JSON object.`,
+    });
+  } else if (!isInitStateForConfig(stateRead.value, options.configFile, options.stateStore.filePath)) {
+    issues.push({
+      code: 'invalid-init-state-json',
+      message: `Init state at ${options.stateStore.filePath} must contain a complete init state for ${options.configFile}.`,
     });
   }
 

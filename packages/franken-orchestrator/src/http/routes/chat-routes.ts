@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { approvalRuntimeInput } from '../../chat/approval-input.js';
-import type { ISessionStore } from '../../chat/session-store.js';
+import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../../chat/approval-input.js';
+import type { CorruptChatSessionFile, ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
@@ -134,7 +134,17 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     }));
-    return c.json({ data: { sessions } } satisfies ApiDataEnvelope<{ sessions: ChatSessionSummary[] }>);
+    const corruptSessions = (sessionStore.listCorruptions?.(projectId) ?? []).map(({ id, projectId, reason }) => ({
+      id,
+      ...(projectId === undefined ? {} : { projectId }),
+      reason,
+    }));
+    return c.json({
+      data: { sessions, corruptSessions },
+    } satisfies ApiDataEnvelope<{
+      sessions: ChatSessionSummary[];
+      corruptSessions: Pick<CorruptChatSessionFile, 'id' | 'projectId' | 'reason'>[];
+    }>);
   });
 
   // Get session
@@ -242,14 +252,27 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
     return withChatMutationAdmission(c, session.id, async () => {
       if (!session.pendingApproval && session.state !== 'pending_approval') {
-        return c.json({ data: { id: session.id, approved, state: session.state } });
+        return c.json({ data: { id: session.id, approved, state: session.state, pendingApproval: null } });
       }
 
       let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
       if (approved) {
         const pendingApproval = session.pendingApproval ?? null;
         const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
-        const runtimeInput = approvalRuntimeInput(pendingApproval);
+        let runtimeInput: string;
+        try {
+          runtimeInput = approvalRuntimeInput(pendingApproval);
+        } catch (error) {
+          if (error instanceof UnsafeApprovalCommandError) {
+            return c.json({
+              error: {
+                code: 'UNSAFE_APPROVAL_COMMAND',
+                message: error.message,
+              },
+            }, 400);
+          }
+          throw error;
+        }
         const originalState = session.state;
         session.pendingApproval = null;
         session.state = 'approved';
@@ -287,6 +310,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           id: session.id,
           approved,
           state: session.state,
+          pendingApproval: session.pendingApproval,
           ...(result?.outcome ? { outcome: result.outcome } : {}),
           ...(result?.tier ? { tier: result.tier } : {}),
           ...(result ? { displayMessages: result.displayMessages, events: result.events } : {}),

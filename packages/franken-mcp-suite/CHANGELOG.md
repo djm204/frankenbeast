@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.2.7](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.6...franken-mcp-suite-v0.2.7) (2026-07-11)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.6.16 to 0.7.0
+    * @franken/orchestrator bumped from 0.42.2 to 0.42.3
+
+## [0.2.6](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.5...franken-mcp-suite-v0.2.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* enforce immutable audit_trail writes ([#1459](https://github.com/djm204/frankenbeast/issues/1459)) ([0121ae4](https://github.com/djm204/frankenbeast/commit/0121ae4c081d5bba99396bda1702aa7783507a94))
+* **mcp-suite:** recover invalid JSON settings ([#1470](https://github.com/djm204/frankenbeast/issues/1470)) ([15d448e](https://github.com/djm204/frankenbeast/commit/15d448e535b8ce32caef58cec0c070b8d2a8d5ab))
+* **mcp-suite:** reject invalid observer cost inputs ([#1535](https://github.com/djm204/frankenbeast/issues/1535)) ([2ce5c4f](https://github.com/djm204/frankenbeast/commit/2ce5c4f3024113d36b46094bcad7a7b03468c988)), closes [#980](https://github.com/djm204/frankenbeast/issues/980)
+* **mcp-suite:** validate init mcpServers shape ([#1547](https://github.com/djm204/frankenbeast/issues/1547)) ([47aad6e](https://github.com/djm204/frankenbeast/commit/47aad6ed7609c9c1b0543bd16490ef5810502b1d))
+* **mcp-suite:** validate memory query limits ([#1465](https://github.com/djm204/frankenbeast/issues/1465)) ([ac2d053](https://github.com/djm204/frankenbeast/commit/ac2d053c0d7cdd6e61cb829566e0d187bf744e58)), closes [#972](https://github.com/djm204/frankenbeast/issues/972)
+* **mcp:** point planner guidance at status tool ([#1489](https://github.com/djm204/frankenbeast/issues/1489)) ([9455922](https://github.com/djm204/frankenbeast/commit/945592246e578a6c2ec1c06eae6f2aebb1ad7aef))
+* **mcp:** quote Gemini hook script paths ([0e70cff](https://github.com/djm204/frankenbeast/commit/0e70cff9873a8355a5c9e44c6375f73707a3e284)), closes [#1040](https://github.com/djm204/frankenbeast/issues/1040)
+* **mcp:** tolerate skills adapter filesystem races ([2eabf30](https://github.com/djm204/frankenbeast/commit/2eabf305f5caac540ef58cff68ae147ca6d38dc5)), closes [#935](https://github.com/djm204/frankenbeast/issues/935)
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **ci:** make workspace lint coverage explicit ([#1596](https://github.com/djm204/frankenbeast/issues/1596)) ([c1674ed](https://github.com/djm204/frankenbeast/commit/c1674ed69e460a9c7c14d8b7af2e4039edf174d8))
+* **package:** normalize workspace metadata ([#1573](https://github.com/djm204/frankenbeast/issues/1573)) ([921c557](https://github.com/djm204/frankenbeast/commit/921c557e9f8392f1202f3fa2cdcc7952ffccd255))
+
+
+### Documentation
+
+* **web:** clarify dashboard proxy env guidance ([cb20c5c](https://github.com/djm204/frankenbeast/commit/cb20c5cafb100741c10f032f4d03250e0ee05556)), closes [#993](https://github.com/djm204/frankenbeast/issues/993)
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* **mcp-suite:** add integration test script ([5a98605](https://github.com/djm204/frankenbeast/commit/5a986057f976a6b83a60e8dbcc0f5ebe4576a96d)), closes [#947](https://github.com/djm204/frankenbeast/issues/947)
+* **mcp-suite:** assert Windows fbeast shim passthrough ([#1474](https://github.com/djm204/frankenbeast/issues/1474)) ([760b146](https://github.com/djm204/frankenbeast/commit/760b146b3a87ce1f6fe8eaf91526d6d86a5b332d))
+* **mcp-suite:** cover observer log edge cases ([#1645](https://github.com/djm204/frankenbeast/issues/1645)) ([600e870](https://github.com/djm204/frankenbeast/commit/600e870914e0f1b1b67da5ab8c9dd32bba77220c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+    * @franken/brain bumped from 0.7.4 to 0.7.5
+    * @franken/critique bumped from 0.6.15 to 0.6.16
+    * @franken/governor bumped from 0.5.13 to 0.5.14
+    * @franken/observer bumped from 0.7.15 to 0.7.16
+    * @franken/orchestrator bumped from 0.42.1 to 0.42.2
+    * @franken/planner bumped from 0.4.13 to 0.4.14
+
 ## [0.2.5](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.4...franken-mcp-suite-v0.2.5) (2026-07-10)
 
 

@@ -19,6 +19,10 @@ describe('local setup scripts', () => {
 
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
+    expect(read('README.md')).toContain('Node.js** `>=22.13.0 <23 || >=24.0.0 <26`');
+    expect(read('README.md')).toContain('local default is pinned in [.nvmrc](.nvmrc)');
+    expect(read('README.md')).toContain('**npm** 11.5.1 via the root `packageManager` pin');
+    expect(read('packages/franken-brain/README.md')).toContain('npm 11.5.1 via the repository `packageManager` setting');
     expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
     expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
     expect(read('scripts/bootstrap.sh')).toContain('command -v corepack');
@@ -135,13 +139,19 @@ describe('local setup scripts', () => {
     expect(manifest.scripts?.bootstrap).toBe('bash scripts/bootstrap.sh');
     expect(statSync(scriptPath).mode & 0o111).not.toBe(0);
     expect(script).toContain('--dry-run');
+    expect(script).toContain('--services');
     expect(script).toContain('Node.js >=22.13.0 <23 or >=24.0.0 <26');
     expect(script).toContain('cp .env.example .env');
     expect(script).toContain('default_keys');
     expect(script).toContain('GRAFANA_USER=admin');
     expect(script).toContain('npm ci');
     expect(script).toContain('docker compose up -d');
+    expect(readme).toContain('## 🚀 One-click onboarding');
+    expect(readme).toContain('[Frankenbeast onboarding checklist](ONBOARDING.md)');
+    expect(readme).toContain('[`scripts/bootstrap.sh`](scripts/bootstrap.sh)');
     expect(readme).toContain('npm run bootstrap -- --no-docker');
+    expect(readme).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(onboarding).toMatch(/^---\ntitle: Frankenbeast Onboarding Checklist\ndescription: /);
     expect(onboarding).toContain('./scripts/bootstrap.sh --dry-run');
     expect(quickstart).toContain('./scripts/bootstrap.sh --dry-run');
     expect(ci).toContain('Validate bootstrap dry-run');
@@ -156,6 +166,34 @@ describe('local setup scripts', () => {
     expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
     expect(dryRun.stdout).toMatch(/dry-run: would copy \.env\.example to \.env|\.env already exists; leaving it unchanged\./);
     expect(dryRun.stdout).toContain('dry-run: npm ci');
+
+    const servicesDryRun = spawnSync('bash', [scriptPath, '--dry-run', '--services'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(servicesDryRun.status, servicesDryRun.stderr || servicesDryRun.stdout).toBe(0);
+    expect(servicesDryRun.stdout).toContain('dry-run: docker compose up -d');
+
+    const invalidEnvRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-invalid-env-'));
+    try {
+      mkdirSync(join(invalidEnvRoot, 'scripts'));
+      writeFileSync(join(invalidEnvRoot, 'scripts/bootstrap.sh'), script);
+      writeFileSync(join(invalidEnvRoot, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(invalidEnvRoot, '.env.example'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=change-me-random-grafana-password\n');
+      writeFileSync(join(invalidEnvRoot, '.env'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=admin\n');
+
+      const invalidServicesDryRun = spawnSync('bash', [join(invalidEnvRoot, 'scripts/bootstrap.sh'), '--dry-run', '--services'], {
+        cwd: invalidEnvRoot,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(invalidServicesDryRun.status).not.toBe(0);
+      expect(invalidServicesDryRun.stderr).toContain('requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD');
+      expect(invalidServicesDryRun.stdout).not.toContain('dry-run: npm ci');
+    } finally {
+      rmSync(invalidEnvRoot, { recursive: true, force: true });
+    }
   });
 
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {
@@ -275,8 +313,11 @@ describe('local setup scripts', () => {
     expect(readme).toContain('frankenbeast init --verify');
     expect(readme).toContain('review token prompts carefully');
     expect(readme).toContain('frankenbeast init --non-interactive');
+    expect(readme).toContain('If you omit `network.secureBackend`, the config schema and init flow use `local-encrypted`');
+    expect(readme).toContain('`os-keychain` is never selected automatically');
     expect(readme).toContain('Choose the secret backend before the first init run');
     expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
+    expect(readme).toContain('instead of the default encrypted file');
     expect(readme).toContain('{ "network": { "secureBackend": "1password" } }');
     expect(readme).toContain('{ "network": { "secureBackend": "bitwarden" } }');
     expect(readme).toContain('it applies the same `network.secureBackend` choice');
@@ -378,15 +419,36 @@ describe('local setup scripts', () => {
   it('keeps the CLI Beast guide aligned with supported Beast activation providers', () => {
     const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
     const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
+    const providerConfigSource = read('packages/franken-orchestrator/src/providers/provider-config.ts');
 
     expect(runCliBeastGuide).toContain('`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable');
     expect(runCliBeastGuide).toContain('Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build');
     expect(runCliBeastGuide).toContain('http://localhost:11434');
     expect(runCliBeastGuide).toContain('intentionally leaves `OLLAMA_BASE_URL` out');
     expect(runCliBeastGuide).toContain('current provider schema');
+    expect(runCliBeastGuide).toContain('GOOGLE_API_KEY` / `GEMINI_API_KEY` for `gemini-api`');
+    expect(runCliBeastGuide).toContain('anthropic-api');
+    expect(runCliBeastGuide).toContain('openai-api');
+    expect(runCliBeastGuide).toContain('gemini-api');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
+
+    const providerTypesMatch = providerConfigSource.match(/PROVIDER_TYPES = \[([\s\S]*?)\] as const/);
+    expect(providerTypesMatch).not.toBeNull();
+    const providerTypes = providerTypesMatch?.[1] ?? '';
+    for (const providerType of [
+      'claude-cli',
+      'codex-cli',
+      'gemini-cli',
+      'anthropic-api',
+      'openai-api',
+      'gemini-api',
+    ]) {
+      expect(providerTypes).toContain(providerType);
+      expect(runCliBeastGuide).toContain(providerType);
+    }
+    expect(providerTypes).not.toMatch(/ollama/i);
 
     const providersMatch = beastModeSource.match(/SUPPORTED_BEAST_PROVIDERS = new Set\(\[([^\]]+)\]\)/);
     expect(providersMatch).not.toBeNull();

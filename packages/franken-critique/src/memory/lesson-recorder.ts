@@ -1,20 +1,116 @@
-import type { MemoryPort, CritiqueLesson } from '../types/contracts.js';
+import type {
+  MemoryPort,
+  CritiqueLesson,
+  LessonCooldownSuppression,
+  LessonRecordingResult,
+  ReviewerFeedbackLessonCapture,
+  PostPrLessonExtractionTemplate,
+} from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
-import { isoNow } from '@franken/types';
+import { createHash } from 'node:crypto';
+
+const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
+  'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
+
+const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const MAX_LESSON_COOLDOWN_MS = 100 * 365 * 24 * 60 * 60 * 1000;
+const PENDING_ADMISSIONS_BY_COOLDOWN_STORE = new WeakMap<
+  Map<string, number>,
+  Map<string, Promise<boolean>>
+>();
+
+const LEARNING_COOLDOWN_GUIDANCE =
+  'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.';
+
+export interface LessonRecorderOptions {
+  /** Milliseconds to suppress equivalent lessons after one is admitted. Defaults to 24 hours. */
+  readonly cooldownMs?: number;
+  /** Clock injection for deterministic tests and replay tooling. */
+  readonly now?: () => Date | string;
+  /** Shared cooldown state for reviewer rebuilds that happen in the same process. */
+  readonly cooldownStore?: Map<string, number>;
+}
+
+const LESSON_EXPERIMENT_SANDBOX_REASON =
+  'New critique lessons are experimental until their traceability map and regression evidence are independently verified.';
+
+const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
+  'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
+
+const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
+  templateId: 'post-pr-lesson-extraction-v1',
+  trigger: 'after-pr-review-or-merge',
+  instructions: [
+    'Inspect the linked issue, PR description, final diff, reviewer feedback, and verification evidence before extracting a durable lesson.',
+    'Extract only lessons that are reusable for future workers; do not restate one-off implementation details as policy.',
+    'If required evidence is missing, set followUpNeeded to true and use insufficientEvidenceGuidance instead of inventing a lesson.',
+  ],
+  requiredEvidence: [
+    'Linked issue or task identifier',
+    'PR URL or merge/review artifact',
+    'Reviewer finding or failure mode that motivated the correction',
+    'Correction applied in the final PR head',
+    'Regression test, verifier, or explicit reason no code-level regression applies',
+  ],
+  outputSchema: {
+    issueNumber: 'number-or-null',
+    prUrl: 'string-or-null',
+    sourceFinding: 'string',
+    correctionApplied: 'string',
+    reusableLesson: 'string',
+    regressionEvidence: 'string',
+    followUpNeeded: 'boolean',
+  },
+  insufficientEvidenceGuidance:
+    'Do not promote a post-PR lesson until the issue/PR, source finding, correction, and verification evidence are all available.',
+};
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
+  private readonly cooldownMs: number;
+  private readonly now: () => string;
+  private readonly cooldowns: Map<string, number>;
+  private readonly pendingAdmissions: Map<string, Promise<boolean>>;
 
-  constructor(memory: MemoryPort) {
+  constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
+    const cooldownMs = options.cooldownMs ?? DEFAULT_LESSON_COOLDOWN_MS;
+    if (
+      !Number.isFinite(cooldownMs) ||
+      cooldownMs < 0 ||
+      cooldownMs > MAX_LESSON_COOLDOWN_MS
+    ) {
+      throw new RangeError(
+        'LessonRecorder cooldownMs must be a finite, non-negative number within the supported Date range.',
+      );
+    }
+
     this.memory = memory;
+    this.cooldownMs = cooldownMs;
+    const now = options.now ?? ((): Date => new Date());
+    this.now = (): string => normalizeTimestamp(now());
+    this.cooldowns = options.cooldownStore ?? new Map<string, number>();
+    this.pendingAdmissions = options.cooldownStore
+      ? getPendingAdmissions(options.cooldownStore)
+      : new Map<string, Promise<boolean>>();
   }
 
-  async record(result: CritiqueLoopResult, taskId: TaskId): Promise<void> {
+  async record(
+    result: CritiqueLoopResult,
+    taskId: TaskId,
+  ): Promise<LessonRecordingResult> {
+    const recordingResult: MutableLessonRecordingResult = {
+      recorded: 0,
+      suppressedByCooldown: [],
+    };
+
     // Only record lessons from multi-iteration pass/warn successes.
-    if ((result.verdict !== 'pass' && result.verdict !== 'warn') || result.iterations.length <= 1) {
-      return;
+    if (
+      (result.verdict !== 'pass' && result.verdict !== 'warn') ||
+      result.iterations.length <= 1
+    ) {
+      return recordingResult;
     }
 
     const failingIterations = result.iterations.filter(
@@ -24,13 +120,70 @@ export class LessonRecorder {
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const lesson of lessons) {
+        const cooldownKey =
+          this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
+        let admissionSettled: ((admitted: boolean) => void) | undefined;
+        let admissionPromise: Promise<boolean> | undefined;
+        if (cooldownKey) {
+          let admittedByAnotherCall = false;
+          while (!admittedByAnotherCall) {
+            const suppression = this.getCooldownSuppression(
+              lesson,
+              cooldownKey,
+            );
+            if (suppression) {
+              recordingResult.suppressedByCooldown.push(suppression);
+              admittedByAnotherCall = true;
+              break;
+            }
+
+            const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
+            if (pendingAdmission) {
+              await pendingAdmission;
+              continue;
+            }
+
+            if (this.cooldownMs > 0) {
+              admissionPromise = new Promise<boolean>((resolve) => {
+                admissionSettled = resolve;
+              });
+              this.pendingAdmissions.set(cooldownKey, admissionPromise);
+            }
+            break;
+          }
+
+          if (admittedByAnotherCall) {
+            continue;
+          }
+        }
+
         try {
-          await this.memory.recordLesson(lesson);
+          const admittedLesson = this.withAdmissionTimestamp(lesson);
+          await this.memory.recordLesson(admittedLesson);
+          recordingResult.recorded += 1;
+          if (cooldownKey && this.cooldownMs > 0) {
+            this.cooldowns.set(
+              cooldownKey,
+              Date.parse(admittedLesson.cooldown!.suppressUntil),
+            );
+          }
+          admissionSettled?.(true);
         } catch {
+          admissionSettled?.(false);
           // Non-fatal: log failure but don't disrupt the critique flow
+        } finally {
+          if (
+            cooldownKey &&
+            admissionPromise &&
+            this.pendingAdmissions.get(cooldownKey) === admissionPromise
+          ) {
+            this.pendingAdmissions.delete(cooldownKey);
+          }
         }
       }
     }
+
+    return recordingResult;
   }
 
   private extractLessons(
@@ -49,18 +202,246 @@ export class LessonRecorder {
       );
 
       if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
+        const resolvedIteration =
+          passingIteration?.index ?? failingIteration.index;
+        const lessonId = createLessonId(
+          taskId,
+          evalResult.evaluatorName,
+          failingIteration.index,
+        );
+        const findingMessages = critiqueFindings.map((f) => f.message);
+        const recordedAt = this.now();
+        const cooldownBaseMs = Date.parse(recordedAt);
+        this.pruneExpiredCooldowns(cooldownBaseMs);
+        const cooldownKey = createCooldownKey(
+          evalResult.evaluatorName,
+          findingMessages,
+        );
+        const suppressUntil = new Date(
+          addCooldownWindowMs(cooldownBaseMs, this.cooldownMs),
+        ).toISOString();
+
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
-          failureDescription: critiqueFindings.map((f) => f.message).join('; '),
+          failureDescription: findingMessages.join('; '),
           correctionApplied: passingIteration
             ? `Corrected in iteration ${passingIteration.index}`
             : 'Unknown correction',
           taskId,
-          timestamp: isoNow(),
+          timestamp: recordedAt,
+          experimentSandbox: {
+            state: 'experimental',
+            promotionBlocked: true,
+            reason: LESSON_EXPERIMENT_SANDBOX_REASON,
+            exitCriteria: [
+              'Confirm at least one lesson-to-test traceability entry is present.',
+              'Run the listed verification command and attach the evidence to the PM handoff.',
+              'Promote or retire the lesson only after review confirms the regression covers the source finding.',
+            ],
+            verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
+          },
+          testTraceability: [
+            {
+              lessonId,
+              taskId,
+              evaluatorName: evalResult.evaluatorName,
+              failingIteration: failingIteration.index,
+              resolvedIteration,
+              sourceFindingMessages: findingMessages,
+              testId: `${lessonId}:regression`,
+              verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
+            },
+          ],
+          reviewerFeedback: createReviewerFeedbackCapture(
+            failingIteration.index,
+            evalResult.evaluatorName,
+            critiqueFindings,
+          ),
+          postPrLessonExtractionTemplate:
+            createPostPrLessonExtractionTemplate(),
+          cooldown: {
+            key: cooldownKey,
+            windowMs: this.cooldownMs,
+            recordedAt,
+            suppressUntil,
+            guidance: LEARNING_COOLDOWN_GUIDANCE,
+          },
         });
       }
     }
 
     return lessons;
   }
+
+  private getCooldownSuppression(
+    lesson: CritiqueLesson,
+    cooldownKey: string,
+  ): LessonCooldownSuppression | null {
+    const suppressUntilMs = this.cooldowns.get(cooldownKey);
+    if (!suppressUntilMs) {
+      return null;
+    }
+
+    const suppressedAt = this.now();
+    const suppressedAtMs = Date.parse(suppressedAt);
+    const remainingMs = suppressUntilMs - suppressedAtMs;
+    if (remainingMs <= 0) {
+      this.cooldowns.delete(cooldownKey);
+      return null;
+    }
+
+    return {
+      key: cooldownKey,
+      taskId: lesson.taskId,
+      evaluatorName: lesson.evaluatorName,
+      suppressedAt,
+      suppressUntil: new Date(suppressUntilMs).toISOString(),
+      remainingMs,
+      reason:
+        'Equivalent critique lesson is still inside the learning cooldown window; reuse the existing lesson metadata instead of recording another copy.',
+    };
+  }
+
+  private pruneExpiredCooldowns(nowMs: number): void {
+    for (const [key, suppressUntilMs] of this.cooldowns) {
+      if (suppressUntilMs <= nowMs) {
+        this.cooldowns.delete(key);
+      }
+    }
+  }
+
+  private withAdmissionTimestamp(lesson: CritiqueLesson): CritiqueLesson {
+    if (!lesson.cooldown) {
+      return lesson;
+    }
+
+    const recordedAt = this.now();
+    const suppressUntil = new Date(
+      addCooldownWindowMs(Date.parse(recordedAt), lesson.cooldown.windowMs),
+    ).toISOString();
+
+    return {
+      ...lesson,
+      timestamp: recordedAt,
+      cooldown: {
+        ...lesson.cooldown,
+        recordedAt,
+        suppressUntil,
+      },
+    };
+  }
+
+}
+
+function getPendingAdmissions(
+  cooldownStore: Map<string, number>,
+): Map<string, Promise<boolean>> {
+  let pending = PENDING_ADMISSIONS_BY_COOLDOWN_STORE.get(cooldownStore);
+  if (!pending) {
+    pending = new Map<string, Promise<boolean>>();
+    PENDING_ADMISSIONS_BY_COOLDOWN_STORE.set(cooldownStore, pending);
+  }
+  return pending;
+}
+
+interface MutableLessonRecordingResult {
+  recorded: number;
+  suppressedByCooldown: LessonCooldownSuppression[];
+}
+
+function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {
+  return {
+    ...POST_PR_LESSON_EXTRACTION_TEMPLATE,
+    instructions: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.instructions],
+    requiredEvidence: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.requiredEvidence],
+    outputSchema: { ...POST_PR_LESSON_EXTRACTION_TEMPLATE.outputSchema },
+  };
+}
+
+function createReviewerFeedbackCapture(
+  sourceIteration: number,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): ReviewerFeedbackLessonCapture {
+  const capturedFindings = findings.map((finding) => ({
+    sourceIteration,
+    evaluatorName,
+    message: finding.message,
+    severity: finding.severity,
+    ...(finding.location ? { location: finding.location } : {}),
+    ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
+  }));
+  const suggestionsComplete = capturedFindings.every((finding) =>
+    Boolean(finding.suggestion),
+  );
+
+  return {
+    summary: capturedFindings.map((finding) => finding.message).join('; '),
+    findings: capturedFindings,
+    suggestionsComplete,
+    ...(suggestionsComplete
+      ? {}
+      : { missingSuggestionGuidance: MISSING_REVIEWER_SUGGESTION_GUIDANCE }),
+  };
+}
+
+function createLessonId(
+  taskId: TaskId,
+  evaluatorName: string,
+  iterationIndex: number,
+): string {
+  return [taskId, evaluatorName, `iteration-${iterationIndex}`]
+    .map((part) => sanitizeLessonIdPart(part))
+    .join(':');
+}
+
+function createCooldownKey(
+  evaluatorName: string,
+  findingMessages: readonly string[],
+): string {
+  const normalizedFindings = JSON.stringify({
+    evaluatorName,
+    findings: findingMessages.map((message) => message.trim()).sort(),
+  });
+  return [
+    'critique-lesson',
+    sanitizeLessonIdPart(evaluatorName),
+    stableHash(normalizedFindings),
+  ].join(':');
+}
+
+function normalizeTimestamp(value: Date | string): string {
+  const timestamp = value instanceof Date ? value.toISOString() : value;
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    throw new RangeError('LessonRecorder clock returned an invalid timestamp.');
+  }
+  return new Date(parsed).toISOString();
+}
+
+function addCooldownWindowMs(baseMs: number, cooldownMs: number): number {
+  const suppressUntilMs = baseMs + cooldownMs;
+  if (!Number.isFinite(suppressUntilMs)) {
+    throw new RangeError(
+      'LessonRecorder cooldownMs produced an invalid suppressUntil timestamp.',
+    );
+  }
+  return suppressUntilMs;
+}
+
+function stableHash(value: string): string {
+  return createHash('sha256').update(value).digest('base64url');
+}
+
+function sanitizeLessonIdPart(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-');
+  return normalized.replace(/^-+|-+$/g, '') || 'unknown';
 }

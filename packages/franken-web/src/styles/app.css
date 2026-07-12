@@ -587,6 +587,7 @@ button {
 
 .message-card__content {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message-card__error {
@@ -838,6 +839,7 @@ button {
   color: var(--accent-strong);
 }
 
+.network-page__alert,
 .network-config-editor__alert,
 .network-config-editor__success {
   margin: 0;
@@ -845,6 +847,7 @@ button {
   border-radius: 0.9rem;
 }
 
+.network-page__alert,
 .network-config-editor__alert {
   border: 1px solid rgba(255, 126, 126, 0.32);
   background: rgba(255, 126, 126, 0.1);
