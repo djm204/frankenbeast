@@ -56,4 +56,20 @@ describe('beast-store agentEditSlice', () => {
     setEditValues({ name: 'Agent1-modified' });
     expect(useBeastStore.getState().isEditDirty).toBe(true);
   });
+
+  it('seeds edit values from each new snapshot and starts clean', () => {
+    const { setEditSnapshot, setEditField } = useBeastStore.getState();
+
+    setEditSnapshot({ name: 'Agent1', moduleConfig: { planner: false } });
+    setEditField('name', 'Unsaved Agent');
+    expect(useBeastStore.getState().isEditDirty).toBe(true);
+
+    setEditSnapshot({ name: 'Agent2', moduleConfig: { planner: true } });
+
+    expect(useBeastStore.getState().editValues).toEqual({
+      name: 'Agent2',
+      moduleConfig: { planner: true },
+    });
+    expect(useBeastStore.getState().isEditDirty).toBe(false);
+  });
 });

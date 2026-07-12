@@ -1,5 +1,27 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-11 — Vitest config env-flag regression tests
+- For Vitest suite-flag fixes, assert false-like env values (`0`, `false`, `no`, blank) preserve the default unit-test include set in package configs, not just helper return values.
+- In Vitest tests, avoid cache-busting variable dynamic imports such as `import(`../vitest.config.ts?case=${...}`)`: Vite cannot statically analyze them. Use a static config import and reset env/argv around each assertion instead.
+
+## 2026-07-10 — Control-plane JSON parse hardening
+- In control-plane mutation routes, prefer centralized JSON parsing helpers (`parseJsonBody`) and explicit malformed-body tests; this prevents runtime 500s and keeps manager/runtime calls from running on bad input.
+
+## 2026-07-10 — Codex usage-limit handling in issue-to-PR flow
+- If `@codex review` immediately responds with usage-limit, treat it as a hard blocker for the merge gate and stop extra polling. Resume review only after credits are restored and a fresh trigger can produce a current-head clean response.
+
+## 2026-07-10 — E2E API failure skip boundary checks
+- Treat provider-only flake as skippable only when the pipeline reached plan/execute phase (`[planner]` or `[martin]`), not on generic setup/auth strings.
+- Add an E2E precondition skip only for provider credentials the default E2E CLI invocation can actually use; do not let Gemini-only credentials run the default `claude,codex` path without an explicit provider.
+- Keep DNS/provider transport errors such as `ENOTFOUND` skippable after the pipeline boundary so transient provider outages do not look like product regressions.
+
+## 2026-07-10 — W3C tracestate sanitization before serialization
+- `parseTracestate`/`formatTracestate` should enforce W3C key/value constraints and member limits before exposing user-controlled values in headers.
+- Treat malformed list entries (invalid key grammar, control characters, commas, duplicate keys, oversized members, and member-count overflow) as drop/ignore cases during parse and emit only sanitized key/value pairs on format/inject.
+- W3C `tracestate` simple keys must start with a lowercase letter; digit starts are valid only in the tenant portion of multi-tenant keys (`tenant@system`). Values must be printable ASCII, must not contain commas or equals signs, and must not end with a space.
+- When clearing sanitized-empty `tracestate` during header injection, delete existing header keys case-insensitively so stale mixed-case `Tracestate` does not leak through.
+- For issue-1116, adding targeted regression tests for these edge cases prevented malformed `tracestate` strings from entering outbound headers in observer propagation paths.
+
 ## 2026-07-10 — Beast panel dialog portal isolation
 - When a modal/alert is portaled from inside a slide-in panel, gate panel-level outside-click and Escape handlers against both existing and new dialog markers (for example `[data-beast-panel-portal]` plus `[data-beast-dialog-layer]`) so cross-branch/merge differences don't regress behavior.
 - Normalize pointer event targets before portal detection (handle text nodes and text-node parents) so clicks on dialog copy/titles are still treated as dialog interactions, preventing accidental panel closure.
@@ -8,11 +30,18 @@
 ## 2026-07-10 — Codex usage limits in review loop
 - If `@codex review` immediately returns usage-limit comments, classify the review state as blocked/review unavailable for this round and avoid further triggers. Re-run only after credits/enablement is restored, and prefer a short-lived monitor rather than repeated immediate retries.
 
+## 2026-07-10 — Activity pane runtime event serialization safety
+- Render failures from runtime events should never take down the Activity pane. When an event payload is shown in UI, pass it through a tiny safe formatter before `JSON.stringify` so `BigInt`/circular/toJSON-throwing values render deterministically (or a clear fallback) instead of crashing the chat shell.
+
 ## 2026-07-10 — Observer replay timestamp validation
 - Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant guards (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
-## 2026-07-10 — Parallel planner deadlock guard
+## 2026-07-10 — Deterministic observer negative-path async assertions
+- In observer event-driven tests, avoid `setTimeout(0)` or any wall-clock wait when asserting "no side effect" (e.g., webhook not fired below limit). Use a microtask drain helper (`Promise.resolve()` or a shared async-drain utility) so timing is explicit, deterministic, and aligned with whether handlers run synchronously.
+- Add a dedicated helper in tests when a fire-and-forget integration must assert non-delivery; this keeps suites stable even if internals switch from direct emits to queued microtasks.
 
+## 2026-07-10 — Parallel planner deadlock guard
+- In ParallelPlanner execution, don't allow the "no tasks ready" path to continue silently as success. Keep cycle checks explicit and fail fast with a clear `CyclicDependencyError` (or similar) before running task waves, and add a unit test that proves executor is never called when readiness stalls due to a dependency cycle.
 - When `@codex review` is usage-limited, classify it as a blocker state and do not merge until a new trigger can produce a current-head clean response.
 
 ## 2026-07-10 — ProcessSupervisor runtime error cleanup
@@ -72,6 +101,10 @@
 ## 2026-07-10 — Example scaffolding script review edges
 - For Bash scaffolding helpers, reject `.`/`..` names even when dots are otherwise allowed, avoid GNU-only `find -printf` in user-facing paths, check symlinked target directories via `target/.` before copying, and assert generated npm scripts actually load the scaffolded `.env`.
 
+## 2026-07-10 — Franken-web module numeric config
+- Number-input handlers that enforce a minimum greater than one should allow digit-prefix intermediates while typing (for example `3` before `30`) and let final wizard validation reject too-low values before launch.
+- Wizard validation for optional module config should validate only when the owning module is enabled, and should guard non-object stale/imported config before checking nested fields so hidden disabled config neither throws nor blocks progression.
+
 ## 2026-07-10 — Network stop/restart target validation
 - Validate stop and restart target IDs through `filterNetworkServices` before invoking supervisor operations, so unknown names fail fast with 400 instead of becoming no-op successes. Keep this as a shared pattern for all service-targeted control-plane endpoints where missing resources must be surfaced as client errors.
 
@@ -82,3 +115,17 @@
 ## 2026-07-10 — MCP stdio health probes
 - MCP stdio probes need stream-level `stdin` error handlers that defer EPIPE to the process close/timeout path, and Content-Length parsing must buffer bytes rather than UTF-16 strings. Add regressions for clean-exit EPIPE races, explicit initialize error responses before close(0), non-ASCII framed JSON bodies, and split `Content-Length` headers before retriggering Codex.
 - For SDK-backed stdio MCP servers, send newline-delimited JSON initialize requests while still accepting framed responses; on explicit initialize error responses, kill the still-running probe child instead of treating generic error status as a reason to skip cleanup.
+
+## 2026-07-10 — Network page stale refresh races
+- Network action/status refresh fixes need promise-order regressions: cover a superseded action refresh settling before the newer manual refresh, and a hung superseded action refresh where the newer manual refresh settles first.
+- Surface Network status refresh failures independently from selected-service log refreshes and initial config loads; slow/hung independent requests must not delay operator-facing status alerts.
+
+## 2026-07-11 — Session-store corruption diagnostics
+- Atomic session writes for private transcripts should create temp files with the final restrictive mode up front, not chmod only after writing; preserve existing destination mode and default new session files to restrictive permissions.
+- Corrupt-session API diagnostics should expose only operator-useful summaries, not local server paths. When project-filtering diagnostics, keep unknown-project corruptions visible so malformed JSON does not disappear silently after quarantine.
+
+## 2026-07-11 — Chunk snapshot restore corrupt-task ambiguity
+- Unscoped chunk-session snapshot restore must fail closed when corrupt task-scoped snapshots could belong to another task for the requested chunk. Normalize encoded task storage keys, keep already-quarantined `*.json.corrupt.*` entries in ambiguity scans, cover generated recovery task IDs (`fix-harden:<chunk>-attempt-*`), and treat opaque task IDs conservatively unless the task key clearly names a different chunk. Parse known generated prefixes (`impl:`, `harden:`, `fix-*`, `cli:`) and compare the extracted chunk exactly; include hyphenated/slash and single-token chunk IDs such as `impl:issue-1`, `impl:define-types`, `impl:issue-10/chunk-1`, and `impl:auth`, but keep opaque namespaced IDs like `task:2` ambiguous and do not let `auth` match `auth-api`.
+
+## 2026-07-11 — Vite Beast proxy documentation examples
+- For docs with copyable foreground service recipes, split long-running services into clearly labeled terminals, quote placeholder env values so Bash does not parse `<...>` as redirection, and repeat server-side token exports in every process that needs to inject Beast proxy auth (daemon, chat-server, and Vite dev server).

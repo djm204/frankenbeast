@@ -1,6 +1,6 @@
 {
   "name": "@franken/observer",
-  "version": "0.7.15",
+  "version": "0.7.16",
   "description": "MOD-05 – Observability and Evaluation for the Frankenbeast system",
   "type": "module",
   "main": "dist/index.js",
@@ -16,8 +16,10 @@
   ],
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:integration": "INTEGRATION=true vitest run --reporter=verbose",
     "test:eval": "EVAL=true vitest run --reporter=verbose",
@@ -30,7 +32,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.8.2",
+    "@franken/types": "0.9.0",
     "better-sqlite3": "^12.6.2"
   },
   "engines": {

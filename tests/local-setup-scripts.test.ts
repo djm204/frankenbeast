@@ -139,13 +139,19 @@ describe('local setup scripts', () => {
     expect(manifest.scripts?.bootstrap).toBe('bash scripts/bootstrap.sh');
     expect(statSync(scriptPath).mode & 0o111).not.toBe(0);
     expect(script).toContain('--dry-run');
+    expect(script).toContain('--services');
     expect(script).toContain('Node.js >=22.13.0 <23 or >=24.0.0 <26');
     expect(script).toContain('cp .env.example .env');
     expect(script).toContain('default_keys');
     expect(script).toContain('GRAFANA_USER=admin');
     expect(script).toContain('npm ci');
     expect(script).toContain('docker compose up -d');
+    expect(readme).toContain('## 🚀 One-click onboarding');
+    expect(readme).toContain('[Frankenbeast onboarding checklist](ONBOARDING.md)');
+    expect(readme).toContain('[`scripts/bootstrap.sh`](scripts/bootstrap.sh)');
     expect(readme).toContain('npm run bootstrap -- --no-docker');
+    expect(readme).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(onboarding).toMatch(/^---\ntitle: Frankenbeast Onboarding Checklist\ndescription: /);
     expect(onboarding).toContain('./scripts/bootstrap.sh --dry-run');
     expect(quickstart).toContain('./scripts/bootstrap.sh --dry-run');
     expect(ci).toContain('Validate bootstrap dry-run');
@@ -160,6 +166,34 @@ describe('local setup scripts', () => {
     expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
     expect(dryRun.stdout).toMatch(/dry-run: would copy \.env\.example to \.env|\.env already exists; leaving it unchanged\./);
     expect(dryRun.stdout).toContain('dry-run: npm ci');
+
+    const servicesDryRun = spawnSync('bash', [scriptPath, '--dry-run', '--services'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(servicesDryRun.status, servicesDryRun.stderr || servicesDryRun.stdout).toBe(0);
+    expect(servicesDryRun.stdout).toContain('dry-run: docker compose up -d');
+
+    const invalidEnvRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-invalid-env-'));
+    try {
+      mkdirSync(join(invalidEnvRoot, 'scripts'));
+      writeFileSync(join(invalidEnvRoot, 'scripts/bootstrap.sh'), script);
+      writeFileSync(join(invalidEnvRoot, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(invalidEnvRoot, '.env.example'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=change-me-random-grafana-password\n');
+      writeFileSync(join(invalidEnvRoot, '.env'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=admin\n');
+
+      const invalidServicesDryRun = spawnSync('bash', [join(invalidEnvRoot, 'scripts/bootstrap.sh'), '--dry-run', '--services'], {
+        cwd: invalidEnvRoot,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(invalidServicesDryRun.status).not.toBe(0);
+      expect(invalidServicesDryRun.stderr).toContain('requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD');
+      expect(invalidServicesDryRun.stdout).not.toContain('dry-run: npm ci');
+    } finally {
+      rmSync(invalidEnvRoot, { recursive: true, force: true });
+    }
   });
 
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {

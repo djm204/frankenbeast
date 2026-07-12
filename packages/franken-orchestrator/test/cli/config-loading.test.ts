@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadConfig } from '../../src/cli/config-loader.js';
@@ -104,6 +104,146 @@ describe('Config file loading', () => {
     writeFileSync(configPath, '{ not valid json }');
 
     await expect(loadConfig(baseArgs({ config: configPath }))).rejects.toThrow();
+  });
+
+  it('does not let an explicit repository-local config path self-approve provider command overrides', async () => {
+    const configPath = join(tmpDir, '.fbeast', 'config.json');
+    mkdirSync(join(tmpDir, '.fbeast'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/repo-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/repo-controlled'],
+          },
+        },
+      },
+    }));
+
+    await expect(loadConfig(
+      baseArgs({ config: configPath, trustProviderCommandOverrides: true }),
+      configPath,
+    )).rejects.toThrow(/repo-configured command override/);
+  });
+
+  it('treats alternate config files inside the repository as repo-local for provider command trust', async () => {
+    const defaultConfigPath = join(tmpDir, '.fbeast', 'config.json');
+    const configPath = join(tmpDir, '.fbeast', 'ci.json');
+    mkdirSync(join(tmpDir, '.fbeast'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/repo-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/repo-controlled'],
+          },
+        },
+      },
+    }));
+
+    await expect(loadConfig(
+      baseArgs({ config: configPath, trustProviderCommandOverrides: true }),
+      defaultConfigPath,
+    )).rejects.toThrow(/repo-configured command override/);
+  });
+
+  it('treats symlink aliases to repository config as repo-local for provider command trust', async () => {
+    const defaultConfigPath = join(tmpDir, '.fbeast', 'config.json');
+    const aliasedConfigPath = join(tmpDir, '.fbeast', 'trusted.json');
+    mkdirSync(join(tmpDir, '.fbeast'), { recursive: true });
+    writeFileSync(defaultConfigPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/repo-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/repo-controlled'],
+          },
+        },
+      },
+    }));
+    symlinkSync(defaultConfigPath, aliasedConfigPath);
+
+    await expect(loadConfig(
+      baseArgs({ config: aliasedConfigPath, trustProviderCommandOverrides: true }),
+      defaultConfigPath,
+    )).rejects.toThrow(/repo-configured command override/);
+  });
+
+  it('allows explicit operator-owned configs outside the repository to approve provider command overrides', async () => {
+    const defaultConfigPath = join(tmpDir, 'repo', '.fbeast', 'config.json');
+    const configPath = join(tmpDir, 'operator-config.json');
+    writeFileSync(configPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/operator-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/operator-controlled'],
+          },
+        },
+      },
+    }));
+
+    const config = await loadConfig(
+      baseArgs({ config: configPath, trustProviderCommandOverrides: true }),
+      defaultConfigPath,
+    );
+
+    expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
+  });
+
+  it('does not derive a repository boundary from non-standard default config paths', async () => {
+    const defaultConfigPath = join(tmpDir, 'default.json');
+    const configPath = join(tmpDir, 'operator-config.json');
+    writeFileSync(configPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/operator-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/operator-controlled'],
+          },
+        },
+      },
+    }));
+
+    const config = await loadConfig(
+      baseArgs({ config: configPath, trustProviderCommandOverrides: true }),
+      defaultConfigPath,
+    );
+
+    expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
+  });
+
+  it('preserves trusted command overrides from non-standard operator-owned default configs', async () => {
+    const defaultConfigPath = join(tmpDir, 'operator-default.json');
+    writeFileSync(defaultConfigPath, JSON.stringify({
+      maxDurationMs: 60000,
+      providers: {
+        overrides: {
+          claude: {
+            command: '/tmp/operator-controlled/claude-wrapper',
+            trustCommandOverride: true,
+            trustedCommandPaths: ['/tmp/operator-controlled'],
+          },
+        },
+      },
+    }));
+
+    const config = await loadConfig(
+      baseArgs({ trustProviderCommandOverrides: true }),
+      defaultConfigPath,
+    );
+
+    expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
   });
 });
 

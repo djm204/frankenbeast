@@ -13,6 +13,20 @@
 
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
 
+## 🚀 One-click onboarding
+
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation, then run the repository bootstrap script:
+
+```bash
+npm run bootstrap -- --no-docker
+```
+
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+
+```bash
+./scripts/bootstrap.sh --dry-run
+```
+
 ## Latest release announcement
 
 [Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0) is the latest Frankenbeast release line. It packages the recent one-click onboarding cleanup, security hardening across MCP, observer, orchestrator, governor, and web surfaces, plus deterministic mode improvements for repeatable validation, recovery, and release gates.
@@ -444,7 +458,7 @@ frankenbeast --design-doc docs/my-feature-design.md
 frankenbeast --plan-dir ./my-chunks/
 ```
 
-Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `--resume` to preserve existing checkpoint data and continue an interrupted run; when no checkpoint exists, `--resume` fails fast instead of silently behaving like a cold run.
+Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` when a previous run was interrupted and you want to continue from the saved checkpoint/chunk-session data. If the checkpoint is missing, the resume command fails fast with a missing-checkpoint error instead of silently starting a cold run.
 
 ### Subcommands
 
@@ -557,9 +571,16 @@ npm test
 # Per-package tests via Turborepo
 npx turbo run test --filter=franken-brain
 
-# Orchestrator E2E tests
-cd packages/franken-orchestrator && npm run test:e2e
+# Orchestrator E2E tests (sets E2E=true and delegates to @franken/orchestrator)
+npm run test:e2e
 ```
+
+The E2E suites are opt-in and remain outside the regular `npm test` path. Before
+running them from a clean checkout, run the dependency-aware root build with
+`npm run build`, install a real `claude` CLI on `PATH`, and provide a valid
+`ANTHROPIC_API_KEY` in the environment. The root `test:e2e` script delegates to
+the workspace script, which sets `E2E=true` for the gated suites and forwards
+Vitest arguments after `--`.
 
 ## Local Dev Environment
 
@@ -581,9 +602,10 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # TLS-terminated endpoint, then export that same endpoint before seed/verify.
 # export CHROMA_URL=https://chromadb.example.com
 
-# Start supporting services (ChromaDB, Grafana, Tempo). The compose file pins
-# image versions and mounts ./tempo.yaml so local tracing starts deterministically.
-docker compose up -d
+# Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
+# compose file pins image versions and mounts ./tempo.yaml so local tracing
+# starts deterministically.
+npm run bootstrap -- --services
 
 # Local Tempo exposes OTLP/HTTP writes on http://localhost:4318 for TempoAdapter
 # and readiness on http://localhost:3200/ready for verify-setup. The root

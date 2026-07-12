@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.4.14](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.13...@franken/planner-v0.4.14) (2026-07-11)
+
+
+### Bug Fixes
+
+* detect parallel plan cycles before execution ([#1436](https://github.com/djm204/frankenbeast/issues/1436)) ([97ab6fe](https://github.com/djm204/frankenbeast/commit/97ab6fe8c77a1fa40eb4f912f300be9860d880a0))
+* **planner:** dedupe recursive expansion tasks ([dd54eff](https://github.com/djm204/frankenbeast/commit/dd54eff77ef5dcc57b0a4aa8bd0ef0b61e52577c))
+* **planner:** handle domain errors before execution ([57ab4d3](https://github.com/djm204/frankenbeast/commit/57ab4d3d986dc228d24b22c44ec4f2311cf13ee8)), closes [#1041](https://github.com/djm204/frankenbeast/issues/1041)
+* **planner:** preserve fix task dependencies ([7ac5832](https://github.com/djm204/frankenbeast/commit/7ac58329162eed89584b1cb21594e43e933b5ec5))
+* **planner:** protect graph task immutability ([ec2f517](https://github.com/djm204/frankenbeast/commit/ec2f517dbebfdaa4730660112fe48ede991ab38c))
+* **planner:** recover recursive subgraph failures ([#1505](https://github.com/djm204/frankenbeast/issues/1505)) ([89b0751](https://github.com/djm204/frankenbeast/commit/89b0751af763de621467894e1a43fa41b216ad88))
+* **planner:** sync task dependsOn during graph mutations ([73bca39](https://github.com/djm204/frankenbeast/commit/73bca39ce9982666938a884f9a2f33be04dfbb88))
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **package:** normalize workspace metadata ([#1573](https://github.com/djm204/frankenbeast/issues/1573)) ([921c557](https://github.com/djm204/frankenbeast/commit/921c557e9f8392f1202f3fa2cdcc7952ffccd255))
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* add workspace coverage task ([#1589](https://github.com/djm204/frankenbeast/issues/1589)) ([1934756](https://github.com/djm204/frankenbeast/commit/1934756851e520c033f2a43c5b440c8268662714)), closes [#948](https://github.com/djm204/frankenbeast/issues/948)
+* **planner:** cover fix-it dependency ordering ([#1656](https://github.com/djm204/frankenbeast/issues/1656)) ([4e97a81](https://github.com/djm204/frankenbeast/commit/4e97a810b3f6793a29779468486e8ca9bcbf3fcf)), closes [#1042](https://github.com/djm204/frankenbeast/issues/1042)
+* **planner:** isolate integration vitest suites ([#1602](https://github.com/djm204/frankenbeast/issues/1602)) ([a4bdca4](https://github.com/djm204/frankenbeast/commit/a4bdca46cec160e4432cb9597973d76f5f59a6eb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
 ## [0.4.13](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.12...@franken/planner-v0.4.13) (2026-07-10)
 
 

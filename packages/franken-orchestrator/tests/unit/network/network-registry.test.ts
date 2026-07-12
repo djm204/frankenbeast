@@ -224,9 +224,11 @@ describe('network-registry', () => {
           FRANKENBEAST_DASHBOARD_API_URL: 'http://127.0.0.1:4242',
           FRANKENBEAST_DASHBOARD_HOST: '127.0.0.1',
           FRANKENBEAST_DASHBOARD_PORT: '5173',
+          VITE_API_PROXY_TARGET: 'http://127.0.0.1:4242',
         },
       },
     });
+    expect(dashboard?.runtimeConfig.process?.env).not.toHaveProperty('VITE_API_URL');
   });
 
   it('refuses to project managed services on non-loopback hosts', () => {

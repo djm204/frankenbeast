@@ -1,8 +1,50 @@
-import type { MemoryPort, CritiqueLesson } from '../types/contracts.js';
+import type {
+  MemoryPort,
+  CritiqueLesson,
+  ReviewerFeedbackLessonCapture,
+  PostPrLessonExtractionTemplate,
+} from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
 import { isoNow } from '@franken/types';
+
+const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
+  'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
+
+const LESSON_EXPERIMENT_SANDBOX_REASON =
+  'New critique lessons are experimental until their traceability map and regression evidence are independently verified.';
+
+const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
+  'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
+
+const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
+  templateId: 'post-pr-lesson-extraction-v1',
+  trigger: 'after-pr-review-or-merge',
+  instructions: [
+    'Inspect the linked issue, PR description, final diff, reviewer feedback, and verification evidence before extracting a durable lesson.',
+    'Extract only lessons that are reusable for future workers; do not restate one-off implementation details as policy.',
+    'If required evidence is missing, set followUpNeeded to true and use insufficientEvidenceGuidance instead of inventing a lesson.',
+  ],
+  requiredEvidence: [
+    'Linked issue or task identifier',
+    'PR URL or merge/review artifact',
+    'Reviewer finding or failure mode that motivated the correction',
+    'Correction applied in the final PR head',
+    'Regression test, verifier, or explicit reason no code-level regression applies',
+  ],
+  outputSchema: {
+    issueNumber: 'number-or-null',
+    prUrl: 'string-or-null',
+    sourceFinding: 'string',
+    correctionApplied: 'string',
+    reusableLesson: 'string',
+    regressionEvidence: 'string',
+    followUpNeeded: 'boolean',
+  },
+  insufficientEvidenceGuidance:
+    'Do not promote a post-PR lesson until the issue/PR, source finding, correction, and verification evidence are all available.',
+};
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -49,18 +91,99 @@ export class LessonRecorder {
       );
 
       if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
+        const resolvedIteration = passingIteration?.index ?? failingIteration.index;
+        const lessonId = createLessonId(taskId, evalResult.evaluatorName, failingIteration.index);
+        const findingMessages = critiqueFindings.map((f) => f.message);
+
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
-          failureDescription: critiqueFindings.map((f) => f.message).join('; '),
+          failureDescription: findingMessages.join('; '),
           correctionApplied: passingIteration
             ? `Corrected in iteration ${passingIteration.index}`
             : 'Unknown correction',
           taskId,
           timestamp: isoNow(),
+          experimentSandbox: {
+            state: 'experimental',
+            promotionBlocked: true,
+            reason: LESSON_EXPERIMENT_SANDBOX_REASON,
+            exitCriteria: [
+              'Confirm at least one lesson-to-test traceability entry is present.',
+              'Run the listed verification command and attach the evidence to the PM handoff.',
+              'Promote or retire the lesson only after review confirms the regression covers the source finding.',
+            ],
+            verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
+          },
+          testTraceability: [
+            {
+              lessonId,
+              taskId,
+              evaluatorName: evalResult.evaluatorName,
+              failingIteration: failingIteration.index,
+              resolvedIteration,
+              sourceFindingMessages: findingMessages,
+              testId: `${lessonId}:regression`,
+              verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
+            },
+          ],
+          reviewerFeedback: createReviewerFeedbackCapture(
+            failingIteration.index,
+            evalResult.evaluatorName,
+            critiqueFindings,
+          ),
+          postPrLessonExtractionTemplate: createPostPrLessonExtractionTemplate(),
         });
       }
     }
 
     return lessons;
   }
+}
+
+function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {
+  return {
+    ...POST_PR_LESSON_EXTRACTION_TEMPLATE,
+    instructions: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.instructions],
+    requiredEvidence: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.requiredEvidence],
+    outputSchema: { ...POST_PR_LESSON_EXTRACTION_TEMPLATE.outputSchema },
+  };
+}
+
+function createReviewerFeedbackCapture(
+  sourceIteration: number,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): ReviewerFeedbackLessonCapture {
+  const capturedFindings = findings.map((finding) => ({
+    sourceIteration,
+    evaluatorName,
+    message: finding.message,
+    severity: finding.severity,
+    ...(finding.location ? { location: finding.location } : {}),
+    ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
+  }));
+  const suggestionsComplete = capturedFindings.every((finding) => Boolean(finding.suggestion));
+
+  return {
+    summary: capturedFindings.map((finding) => finding.message).join('; '),
+    findings: capturedFindings,
+    suggestionsComplete,
+    ...(suggestionsComplete ? {} : { missingSuggestionGuidance: MISSING_REVIEWER_SUGGESTION_GUIDANCE }),
+  };
+}
+
+function createLessonId(taskId: TaskId, evaluatorName: string, iterationIndex: number): string {
+  return [taskId, evaluatorName, `iteration-${iterationIndex}`]
+    .map((part) => sanitizeLessonIdPart(part))
+    .join(':');
+}
+
+function sanitizeLessonIdPart(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+  return normalized.replace(/^-+|-+$/g, '') || 'unknown';
 }

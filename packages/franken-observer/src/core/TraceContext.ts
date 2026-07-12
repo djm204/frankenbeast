@@ -43,8 +43,9 @@ export const TraceContext = {
     if (span.status !== 'active') {
       throw new Error(`Cannot end span that is already ${span.status} (id: ${span.id})`)
     }
-    span.endedAt = wallClockNow()
-    span.durationMs = span.endedAt - span.startedAt
+    const endedAt = wallClockNow()
+    span.endedAt = endedAt
+    span.durationMs = endedAt - span.startedAt
     span.status = options.status ?? 'completed'
     if (options.errorMessage !== undefined) {
       span.errorMessage = options.errorMessage
@@ -55,6 +56,15 @@ export const TraceContext = {
   endTrace(trace: Trace): void {
     if (trace.status !== 'active') {
       throw new Error(`Cannot end trace that is already ${trace.status} (id: ${trace.id})`)
+    }
+    const activeSpans = trace.spans.filter(span => span.status === 'active')
+    if (activeSpans.length > 0) {
+      const activeSpanSummary = activeSpans
+        .map(span => `"${span.name}" (${span.id})`)
+        .join(', ')
+      throw new Error(
+        `Cannot end trace with ${activeSpans.length} active span(s): ${activeSpanSummary} (trace id: ${trace.id})`,
+      )
     }
     trace.endedAt = wallClockNow()
     trace.status = 'completed'
