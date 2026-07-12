@@ -524,9 +524,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     throw new TypeError('--mode is only supported for beasts commands');
   }
 
+  if (beastExecutionMode !== undefined && beastAction === undefined) {
+    throw new TypeError('--mode requires a beasts action: create, spawn, status, or logs');
+  }
+
   if (
     beastExecutionMode !== undefined
-    && beastAction !== undefined
     && beastAction !== 'create'
     && beastAction !== 'spawn'
     && beastAction !== 'status'
