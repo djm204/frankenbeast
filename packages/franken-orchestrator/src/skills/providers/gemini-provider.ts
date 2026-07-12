@@ -19,6 +19,9 @@ export class GeminiProvider implements ICliProvider {
 
   buildArgs(opts: ProviderOpts): string[] {
     const args: string[] = ['-p', '', '--yolo', '--output-format', 'stream-json'];
+    if (opts.model) {
+      args.push('--model', opts.model);
+    }
     if (opts.extraArgs) {
       args.push(...opts.extraArgs);
     }

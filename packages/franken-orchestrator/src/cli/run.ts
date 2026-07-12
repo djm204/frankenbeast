@@ -359,13 +359,32 @@ export function resolveEffectivePreflightProvider(
   runConfig: RunConfig | undefined,
   entryPhase: SessionPhase = 'execute',
 ): string {
-  const phaseOverride = entryPhase === 'plan' || entryPhase === 'interview'
+  const phaseOverride = entryPhase === 'plan'
     ? runConfig?.llmConfig?.overrides?.['plan-build']?.provider
     : runConfig?.llmConfig?.overrides?.['cli-session']?.provider;
   return phaseOverride
     ?? runConfig?.llmConfig?.default?.provider
     ?? runConfig?.provider
     ?? selectedProvider;
+}
+
+export function resolveEffectivePreflightProviders(
+  selectedProvider: string,
+  runConfig: RunConfig | undefined,
+  entryPhase: SessionPhase = 'execute',
+): string[] {
+  const fallback = runConfig?.llmConfig?.default?.provider
+    ?? runConfig?.provider
+    ?? selectedProvider;
+  const providers = entryPhase === 'plan'
+    ? [runConfig?.llmConfig?.overrides?.['plan-build']?.provider ?? fallback]
+    : entryPhase === 'interview'
+      ? [
+          runConfig?.llmConfig?.overrides?.['cli-session']?.provider ?? fallback,
+          runConfig?.llmConfig?.overrides?.['plan-build']?.provider,
+        ]
+      : [runConfig?.llmConfig?.overrides?.['cli-session']?.provider ?? fallback];
+  return [...new Set(providers.filter((provider): provider is string => Boolean(provider)))];
 }
 
 export interface ProviderCliAvailability {
@@ -1209,13 +1228,15 @@ export async function main(): Promise<void> {
   const { entryPhase, exitAfter } = resolvePhases(args);
   const provider = resolveSelectedProvider(args, config);
   const runConfig = loadRunConfigFromEnv();
-  const preflightProvider = resolveEffectivePreflightProvider(provider, runConfig, entryPhase);
-  assertAnyProviderCliAvailable(
-    preflightProvider,
-    args.providers ?? config.providers.fallbackChain,
-    config.providers.overrides,
-    config.consolidatedProviders,
-  );
+  const preflightProviders = resolveEffectivePreflightProviders(provider, runConfig, entryPhase);
+  for (const preflightProvider of preflightProviders) {
+    assertAnyProviderCliAvailable(
+      preflightProvider,
+      args.providers ?? config.providers.fallbackChain,
+      config.providers.overrides,
+      config.consolidatedProviders,
+    );
+  }
 
   // Create and run session
   // Precedence: CLI args > config file > defaults

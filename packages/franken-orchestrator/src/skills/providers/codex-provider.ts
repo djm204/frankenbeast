@@ -17,6 +17,9 @@ export class CodexProvider implements ICliProvider {
 
   buildArgs(opts: ProviderOpts): string[] {
     const args: string[] = ['exec', '--full-auto', '--json', '--color', 'never'];
+    if (opts.model) {
+      args.push('--model', opts.model);
+    }
     if (opts.extraArgs) {
       args.push(...opts.extraArgs);
     }

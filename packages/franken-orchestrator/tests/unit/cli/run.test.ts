@@ -246,7 +246,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -412,7 +412,7 @@ describe('provider CLI availability preflight', () => {
     }, 'plan')).toBe('prod-claude');
   });
 
-  it('preflights the plan-build provider override for full interview-to-plan runs', () => {
+  it('preflights the interview execution provider during interview runs', () => {
     expect(resolveEffectivePreflightProvider('claude', {
       provider: 'claude',
       llmConfig: {
@@ -422,7 +422,20 @@ describe('provider CLI availability preflight', () => {
           'plan-build': { provider: 'prod-claude' },
         },
       },
-    }, 'interview')).toBe('prod-claude');
+    }, 'interview')).toBe('gemini');
+  });
+
+  it('preflights both interview execution and plan-build providers for full interview-to-plan runs', () => {
+    expect(resolveEffectivePreflightProviders('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+          'plan-build': { provider: 'prod-claude' },
+        },
+      },
+    }, 'interview')).toEqual(['gemini', 'prod-claude']);
   });
 
   it('normalizes custom consolidated providers before CLI availability preflight', () => {
