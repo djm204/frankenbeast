@@ -40,6 +40,30 @@ describe('project-root', () => {
 
       expect(resolveProjectRoot(packageDir)).toBe(repoRoot);
     });
+
+    it('normalizes dot-prefixed packages workspace entries before resolving the repo root', () => {
+      const repoRoot = resolve(testDir, 'repo-dot-workspace');
+      const packageDir = resolve(repoRoot, 'packages/franken-orchestrator');
+      mkdirSync(packageDir, { recursive: true });
+      writeFileSync(
+        resolve(repoRoot, 'package.json'),
+        JSON.stringify({ private: true, workspaces: ['./packages/*'] }),
+      );
+
+      expect(resolveProjectRoot(packageDir)).toBe(repoRoot);
+    });
+
+    it('normalizes dot-prefixed packages entries in object workspaces before resolving the repo root', () => {
+      const repoRoot = resolve(testDir, 'repo-object-workspace');
+      const packageDir = resolve(repoRoot, 'packages/franken-orchestrator');
+      mkdirSync(packageDir, { recursive: true });
+      writeFileSync(
+        resolve(repoRoot, 'package.json'),
+        JSON.stringify({ private: true, workspaces: { packages: ['./packages/*'] } }),
+      );
+
+      expect(resolveProjectRoot(packageDir)).toBe(repoRoot);
+    });
   });
 
   describe('getProjectPaths', () => {
