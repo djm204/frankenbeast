@@ -55,7 +55,6 @@ export function parseJsonPointer(pointer: string, options: JsonPointerOptions = 
   const segments = rawSegments.map((segment) => decodeJsonPointerSegment(segment));
   for (const segment of segments) {
     assertSafeJsonPointerSegment(segment, options);
-    parseArrayIndex(segment, options);
   }
   return Object.freeze(segments);
 }
@@ -99,6 +98,7 @@ export function setJsonPointerValue<T extends JsonContainer>(
   }
 
   let current: JsonContainer = target;
+  assertWritableJsonContainer(current);
   for (let index = 0; index < segments.length - 1; index += 1) {
     const segment = segments[index];
     const nextSegment = segments[index + 1];
@@ -107,6 +107,7 @@ export function setJsonPointerValue<T extends JsonContainer>(
       if (!isJsonContainer(existing)) {
         throw new UnsafeJsonPointerError(`JSON Pointer segment '${segment}' does not resolve to an object or array.`);
       }
+      assertWritableJsonContainer(existing);
       current = existing;
       continue;
     }
@@ -163,6 +164,12 @@ function isJsonContainer(value: unknown): value is JsonContainer {
   return isObjectLike(value) && (Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 }
 
+function assertWritableJsonContainer(value: JsonContainer): void {
+  if (value === Object.prototype || value === Array.prototype) {
+    throw new UnsafeJsonPointerError('Refusing to mutate a built-in prototype object through a JSON Pointer.');
+  }
+}
+
 function parseArrayIndex(segment: string, options: JsonPointerOptions): number | undefined {
   if (!/^(0|[1-9]\d*)$/u.test(segment)) {
     return undefined;
@@ -196,7 +203,12 @@ function writeOwnContainerValue(container: JsonContainer, segment: string, value
     if (index === undefined) {
       throw new UnsafeJsonPointerError(`JSON Pointer segment '${segment}' is not a valid array index.`);
     }
-    container[index] = value;
+    Object.defineProperty(container, index, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value,
+    });
     return;
   }
 

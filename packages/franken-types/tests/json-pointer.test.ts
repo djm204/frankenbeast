@@ -72,6 +72,42 @@ describe('safe JSON Pointer helpers', () => {
     expect(target).toEqual({});
   });
 
+  it('allows large numeric object keys when they are not array indexes', () => {
+    const target = { agentsById: { '4294967294': { name: 'agent' } } };
+
+    expect(getJsonPointerValue(target, '/agentsById/4294967294/name')).toBe('agent');
+    setJsonPointerValue(target, '/agentsById/4294967294/enabled', true);
+
+    expect(target.agentsById['4294967294']).toEqual({ name: 'agent', enabled: true });
+  });
+
+  it('rejects writes that target built-in prototype objects', () => {
+    expect(() => setJsonPointerValue(Object.prototype as Record<string, unknown>, '/polluted', true)).toThrow(/prototype object/i);
+    expect(() => setJsonPointerValue({ branch: Object.prototype }, '/branch/polluted', true)).toThrow(/prototype object/i);
+    expect(Object.prototype).not.toHaveProperty('polluted');
+  });
+
+  it('defines array entries as own properties instead of invoking inherited setters', () => {
+    const target = new Array(1) as unknown[];
+    let setterCalled = false;
+    Object.defineProperty(Array.prototype, '0', {
+      configurable: true,
+      set() {
+        setterCalled = true;
+      },
+    });
+
+    try {
+      setJsonPointerValue(target, '/0', 'safe');
+
+      expect(setterCalled).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(target, 0)).toBe(true);
+      expect(target[0]).toBe('safe');
+    } finally {
+      delete (Array.prototype as unknown as Record<string, unknown>)['0'];
+    }
+  });
+
   it('checks segment count before materializing oversized pointer arrays', () => {
     const oversized = `/${'x/'.repeat(129)}`;
 
