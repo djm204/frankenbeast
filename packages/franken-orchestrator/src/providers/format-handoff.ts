@@ -245,20 +245,21 @@ function formatWorkingEvidence(
   key: string,
   value: unknown,
 ): HandoffEvidenceEntry | null {
-  const searchable = normalizeEvidence(summarizeUnknown(value));
-  if (searchable.length === 0) {
+  const valueEvidence = normalizeEvidence(summarizeUnknown(value));
+  if (valueEvidence.length === 0) {
     return null;
   }
+  const searchable = normalizeEvidence(`${splitEvidenceKey(key)} ${valueEvidence}`);
   return {
     searchable,
-    display: `working.${key}: ${truncateEvidence(searchable)}`,
+    display: `working.${key}: ${truncateEvidence(valueEvidence)}`,
   };
 }
 
 function formatEpisodicEvidence(event: EpisodicEvent): HandoffEvidenceEntry {
   const details = event.details ? ` details=${summarizeUnknown(event.details)}` : '';
   const step = event.step ? ` step=${event.step}` : '';
-  const searchable = normalizeEvidence(`${step} ${event.summary}${details}`);
+  const searchable = normalizeEvidence(`${event.type} ${step} ${event.summary}${details}`);
   return {
     searchable,
     display: `event.${event.type}:${step} ${truncateEvidence(searchable)}`,
@@ -272,11 +273,44 @@ function summarizeUnknown(value: unknown): string {
   if (typeof value === 'string') {
     return value;
   }
+  const pruned = pruneEmptyEvidence(value);
+  if (pruned === undefined) {
+    return '';
+  }
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(pruned);
   } catch {
     return String(value);
   }
+}
+
+function pruneEmptyEvidence(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    const normalized = normalizeEvidence(value);
+    return normalized.length === 0 ? undefined : normalized;
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => pruneEmptyEvidence(item))
+      .filter((item) => item !== undefined);
+    return items.length === 0 ? undefined : items;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .map(([key, entryValue]) => [key, pruneEmptyEvidence(entryValue)] as const)
+      .filter(([, entryValue]) => entryValue !== undefined);
+    return entries.length === 0 ? undefined : Object.fromEntries(entries);
+  }
+  return value;
+}
+
+function splitEvidenceKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ');
 }
 
 function normalizeEvidence(value: string): string {

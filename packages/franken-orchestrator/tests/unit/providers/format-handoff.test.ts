@@ -146,8 +146,23 @@ describe('assessPmHandoffQuality', () => {
           blocker: null,
           pr: undefined,
           issue: '   ',
+          handoff: { verification: '', blocker: null, nested: { pr: ' ' } },
         },
-        episodic: [],
+        episodic: [
+          {
+            type: 'observation',
+            summary: 'Agent said hello',
+            details: { blocker: null, verification: '' },
+            createdAt: '2026-03-22T00:00:00.000Z',
+          },
+        ],
+        checkpoint: {
+          runId: 'run-1',
+          phase: '2',
+          step: 0,
+          context: { pr: '', verification: null },
+          timestamp: '2026-03-22T00:00:00.000Z',
+        },
       }),
     );
 
