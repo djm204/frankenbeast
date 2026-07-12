@@ -315,7 +315,19 @@ describe('InterviewLoop', () => {
       expect(graphBuilder.build).toHaveBeenCalledOnce();
     });
 
-    it('treats anything other than yes/y as rejection', async () => {
+    it.each(['yeah', 'yea', 'true', '1'])('treats "%s" as approval', async (approval) => {
+      const llm = mockLlm(questionsResponse, designDocResponse);
+      const io = mockIO('JWT', 'Yes', 'PostgreSQL', approval);
+      const graphBuilder = mockGraphBuilder();
+      const loop = new InterviewLoop(llm, io, graphBuilder);
+
+      const graph = await loop.build(intent);
+
+      expect(graph).toBeDefined();
+      expect(graphBuilder.build).toHaveBeenCalledOnce();
+    });
+
+    it('treats negative responses as rejection', async () => {
       const llm = mockLlm(questionsResponse, designDocResponse, revisedDesignDocResponse);
       const io = mockIO('JWT', 'Yes', 'PostgreSQL', 'nah', 'fix it', 'yes');
       const graphBuilder = mockGraphBuilder();
