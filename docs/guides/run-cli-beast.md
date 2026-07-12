@@ -207,10 +207,10 @@ A franken-governor pre-deploy hook should be integrated at the dispatch/API laye
 --verbose                      # Debug logs + trace viewer
 --reset                        # Clear checkpoint and start fresh
 --resume                       # Preserve checkpoint/chunk-session state and resume from the last run
---cleanup                      # Remove all build logs, checkpoints, traces
+--cleanup                      # Remove build logs, checkpoints, traces without following symlinked entries
 ```
 
-Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts.
+Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts. `--cleanup` refuses to clean a symlinked `.build/` root by default and unlinks symlinks found inside `.build/` instead of traversing them, so cleanup cannot delete files outside the project through a symlink. There is no CLI override for symlinked cleanup roots; replace the symlink with a real disposable `.build/` directory before cleaning.
 
 Verbose and build-log output redacts secret-like environment/config keys such as `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, and `*_API_KEY` by default. The logger exposes an explicit local diagnostic override (`redactSecrets: false`) for trusted development-only callers, but normal CLI/runtime paths keep redaction enabled so environment dumps do not leak provider tokens or credentials.
 

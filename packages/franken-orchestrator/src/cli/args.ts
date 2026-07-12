@@ -151,7 +151,7 @@ Options:
   --verbose               Debug logs + trace viewer
   --reset                 Clear checkpoint and traces
   --resume                Resume from checkpoint
-  --cleanup               Remove all build logs, checkpoints, and traces
+  --cleanup               Remove build artifacts without following symlinked entries
   --verify                Verify init config and readiness
   --repair                Re-run only missing or failed init steps
   --non-interactive       Disable interactive prompts for init
