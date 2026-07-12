@@ -458,7 +458,7 @@ frankenbeast --design-doc docs/my-feature-design.md
 frankenbeast --plan-dir ./my-chunks/
 ```
 
-Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` when a previous run was interrupted and you want to continue from the saved checkpoint/chunk-session data. If the checkpoint is missing, the resume command fails fast with a missing-checkpoint error instead of silently starting a cold run.
+Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` when a previous run was interrupted and you want to continue from saved checkpoint/chunk-session data. `--resume` requires an existing checkpoint for the selected plan; if that checkpoint is missing, the command fails fast with a missing-checkpoint error instead of silently starting a cold run.
 
 ### Subcommands
 
@@ -496,6 +496,7 @@ frankenbeast issues --label bug --repo owner/repo
 --no-pr                 Skip PR creation after execution
 --verbose               Debug logs + trace viewer on :4040
 --reset                 Clear checkpoint and traces
+--resume                Resume from an existing checkpoint for the selected plan
 --cleanup               Remove all build artifacts from .fbeast/.build/
 --help                  Show help
 ```
