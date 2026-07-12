@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createCritiqueApp } from '../../../src/server/app.js';
+import { timingSafeBearerTokenMatches } from '../../../src/server/token-auth.js';
 import { CritiquePipeline } from '../../../src/pipeline/critique-pipeline.js';
 import type { Evaluator, EvaluationInput, EvaluationResult } from '../../../src/types/evaluation.js';
 
@@ -101,6 +102,12 @@ describe('Critique Hono Server', () => {
   });
 
   describe('auth', () => {
+    it('compares bearer tokens through a timing-safe helper', () => {
+      expect(timingSafeBearerTokenMatches('Bearer secret-token', 'secret-token')).toBe(true);
+      expect(timingSafeBearerTokenMatches('Bearer secret-token', 'secret-token-extra')).toBe(false);
+      expect(timingSafeBearerTokenMatches('Basic secret-token', 'secret-token')).toBe(false);
+    });
+
     it('returns 401 without bearer token', async () => {
       const app = createCritiqueApp({ bearerToken: 'secret-token', pipeline: makePipeline() });
       const res = await app.request('/v1/review', {

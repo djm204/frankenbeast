@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { CritiquePipeline } from '../pipeline/critique-pipeline.js';
 import { wallClockNow } from '@franken/types';
+import { timingSafeBearerTokenMatches } from './token-auth.js';
 
 const ReviewRequestSchema = z.object({
   code: z.string(),
@@ -20,10 +21,11 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
   const requestCounts = new Map<string, { count: number; resetAt: number }>();
 
   // Bearer auth middleware
-  if (options.bearerToken) {
+  const bearerToken = options.bearerToken;
+  if (bearerToken) {
     app.use('/v1/*', async (c, next) => {
       const auth = c.req.header('Authorization');
-      if (!auth || auth !== `Bearer ${options.bearerToken}`) {
+      if (!timingSafeBearerTokenMatches(auth, bearerToken)) {
         return c.json({ error: { message: 'Unauthorized', type: 'auth_error' } }, 401);
       }
       return next();
