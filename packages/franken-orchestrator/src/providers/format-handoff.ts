@@ -3,6 +3,70 @@ import type { BrainSnapshot, EpisodicEvent } from '@franken/types';
 /** Rough char-to-token ratio (1 token ≈ 4 chars) */
 const CHARS_PER_TOKEN = 4;
 
+export type PmHandoffRubricStatus = 'pass' | 'needs-attention';
+
+export interface PmHandoffRubricCriterion {
+  readonly id: string;
+  readonly label: string;
+  readonly guidance: string;
+  readonly evidencePatterns: readonly RegExp[];
+}
+
+export interface PmHandoffRubricResult {
+  readonly id: string;
+  readonly label: string;
+  readonly status: PmHandoffRubricStatus;
+  readonly evidence: readonly string[];
+  readonly guidance: string;
+}
+
+export interface PmHandoffQualityAssessment {
+  readonly score: number;
+  readonly passed: number;
+  readonly total: number;
+  readonly results: readonly PmHandoffRubricResult[];
+  readonly operatorGuidance: string;
+}
+
+export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
+  {
+    id: 'scope',
+    label: 'Scope and objective',
+    guidance: 'Name the issue/task, business goal, and out-of-scope boundaries so the next PM does not re-discover intent.',
+    evidencePatterns: [/\b(issue|task|goal|objective|scope|out[- ]of[- ]scope)\b/i],
+  },
+  {
+    id: 'state',
+    label: 'Current state and decisions',
+    guidance: 'Preserve completed work, current phase, and key decisions with enough context for a fresh worker to resume safely.',
+    evidencePatterns: [/\b(decision|phase|status|completed|remaining|checkpoint|current state)\b/i],
+  },
+  {
+    id: 'verification',
+    label: 'Verification evidence',
+    guidance: 'Include deterministic test, lint, build, or verifier commands and their outcome before promotion or retirement.',
+    evidencePatterns: [/\b(test|lint|typecheck|build|verified|verification|pass(?:ed)?|fail(?:ed)?|fixture)\b/i],
+  },
+  {
+    id: 'blockers',
+    label: 'Blockers and next action',
+    guidance: 'Make blockers, owner, and next action explicit instead of leaving the receiving PM to infer what to do.',
+    evidencePatterns: [/\b(blocker|blocked|risk|next action|next step|owner|assignee|needs review|follow[- ]?up)\b/i],
+  },
+  {
+    id: 'artifacts',
+    label: 'Artifacts and links',
+    guidance: 'Point to concrete artifacts such as branch, PR, worktree, diff, docs, or telemetry records that the next PM can inspect.',
+    evidencePatterns: [/\b(branch|pr|pull request|worktree|diff|artifact|doc|url|https?:\/\/|telemetry)\b/i],
+  },
+  {
+    id: 'learning',
+    label: 'Learning and reuse',
+    guidance: 'Capture reusable lessons, retrospective notes, Codex/CI feedback, or promotion/retirement rationale without one-off noise.',
+    evidencePatterns: [/\b(lesson|learning|retrospective|retro|rubric|codex|ci feedback|reuse|promot(?:e|ion)|retir(?:e|ement))\b/i],
+  },
+];
+
 /**
  * Truncate a BrainSnapshot to fit within a token budget.
  * Removes episodic events (oldest first) and working memory entries
@@ -56,6 +120,43 @@ function estimateChars(snapshot: BrainSnapshot): number {
 }
 
 /**
+ * Evaluate the snapshot with a deterministic PM handoff quality rubric.
+ * The result is intentionally evidence-based and LLM-readable so PM/liveness
+ * tooling can flag missing handoff sections without inventing context.
+ */
+export function assessPmHandoffQuality(
+  snapshot: BrainSnapshot,
+): PmHandoffQualityAssessment {
+  const evidenceCorpus = buildHandoffEvidenceCorpus(snapshot);
+  const results = PM_HANDOFF_QUALITY_RUBRIC.map((criterion) => {
+    const evidence = evidenceCorpus
+      .filter((entry) => criterion.evidencePatterns.some((pattern) => pattern.test(entry)))
+      .slice(0, 3);
+    return {
+      id: criterion.id,
+      label: criterion.label,
+      status: evidence.length > 0 ? 'pass' : 'needs-attention',
+      evidence,
+      guidance: criterion.guidance,
+    } satisfies PmHandoffRubricResult;
+  });
+  const passed = results.filter((result) => result.status === 'pass').length;
+  const total = results.length;
+  const score = total === 0 ? 0 : Number((passed / total).toFixed(2));
+
+  return {
+    score,
+    passed,
+    total,
+    results,
+    operatorGuidance:
+      passed === total
+        ? 'PM handoff includes evidence for every rubric criterion.'
+        : 'PM handoff is missing one or more rubric criteria; add the missing evidence before promotion or retirement.',
+  };
+}
+
+/**
  * Format a BrainSnapshot as human-readable text for provider handoff.
  * Shared across all adapters — each injects this via their own mechanism
  * (CLI flag, system prompt, GEMINI.md, etc.).
@@ -74,6 +175,8 @@ export function formatHandoff(snapshot: BrainSnapshot): string {
     ...snapshot.episodic.slice(-10).map(
       (e) => `  [${e.type}] ${e.summary}`,
     ),
+    '',
+    formatPmHandoffQualityRubric(assessPmHandoffQuality(snapshot)),
   ];
 
   if (snapshot.checkpoint) {
@@ -85,4 +188,53 @@ export function formatHandoff(snapshot: BrainSnapshot): string {
 
   lines.push('--- END HANDOFF ---');
   return lines.join('\n');
+}
+
+function formatPmHandoffQualityRubric(
+  assessment: PmHandoffQualityAssessment,
+): string {
+  return [
+    `PM handoff quality rubric: ${assessment.passed}/${assessment.total} (${assessment.score})`,
+    ...assessment.results.map((result) => {
+      const evidence = result.evidence.length > 0 ? result.evidence.join('; ') : result.guidance;
+      return `  - ${result.label}: ${result.status} — ${evidence}`;
+    }),
+    `PM guidance: ${assessment.operatorGuidance}`,
+  ].join('\n');
+}
+
+function buildHandoffEvidenceCorpus(snapshot: BrainSnapshot): string[] {
+  const entries = [
+    ...Object.entries(snapshot.working).map(
+      ([key, value]) => `working.${key}: ${summarizeUnknown(value)}`,
+    ),
+    ...snapshot.episodic.map(formatEpisodicEvidence),
+  ];
+
+  if (snapshot.checkpoint) {
+    entries.push(
+      `checkpoint: phase=${snapshot.checkpoint.phase} step=${snapshot.checkpoint.step} context=${summarizeUnknown(snapshot.checkpoint.context)}`,
+    );
+  }
+
+  return entries
+    .map((entry) => entry.replace(/\s+/g, ' ').trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function formatEpisodicEvidence(event: EpisodicEvent): string {
+  const details = event.details ? ` details=${summarizeUnknown(event.details)}` : '';
+  const step = event.step ? ` step=${event.step}` : '';
+  return `event.${event.type}:${step} ${event.summary}${details}`;
+}
+
+function summarizeUnknown(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

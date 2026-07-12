@@ -72,6 +72,21 @@ Integration and E2E scripts enable broader runtime paths with `INTEGRATION=true`
 
 Context snapshot imports are size-limited before JSON parsing to reduce resource-exhaustion risk from untrusted or corrupted resume/import files. `loadContext(filePath)` defaults to a 1 MiB cap, opens snapshots in nonblocking mode, rejects non-regular paths from the opened file descriptor, and enforces the same byte cap while reading so oversized content is rejected even if the file changes after metadata inspection. Trusted tooling that intentionally owns a larger snapshot must opt in per import with `loadContext(filePath, { maxBytes })`; invalid overrides such as `0`, negative, non-finite, or unsafe integer values fail closed.
 
+## PM handoff quality rubric
+
+Provider handoffs include a deterministic PM handoff quality rubric generated from the current brain snapshot. The rubric gives receiving PMs and liveness tooling a structured signal for whether a handoff is ready to promote, retire, or hand to a fresh worker.
+
+The rubric checks six criteria:
+
+- Scope and objective: issue/task, business goal, and out-of-scope boundaries.
+- Current state and decisions: completed work, current phase, and key decisions.
+- Verification evidence: test, lint, build, fixture, or deterministic verifier commands and outcomes.
+- Blockers and next action: blockers, owner, and explicit next step.
+- Artifacts and links: branch, PR, worktree, diff, docs, URLs, or telemetry records.
+- Learning and reuse: reusable lessons, retrospectives, Codex/CI feedback, and promotion/retirement rationale.
+
+Each criterion reports `pass` only when matching evidence is present in working memory, recent events, or checkpoint context; sparse handoffs report `needs-attention` with guidance instead of inventing missing evidence.
+
 ## Package areas
 
 | Area | Paths | Responsibility |
