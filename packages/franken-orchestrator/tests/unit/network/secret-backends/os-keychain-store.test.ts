@@ -154,6 +154,19 @@ describe('OsKeychainStore', () => {
       const addCall = mock.calls.find(c => c.args.some(a => a.includes('/generic:')));
       expect(addCall).toBeDefined();
     });
+
+    it('escapes apostrophes in PowerShell credential targets when resolving', async () => {
+      mock.responses.set('Get-StoredCredential', { stdout: 'resolved-value\r\n', stderr: '', exitCode: 0 });
+
+      const value = await store.resolve("team's/token");
+
+      expect(value).toBe('resolved-value');
+      const resolveCall = mock.calls.find(c => c.command === 'powershell');
+      expect(resolveCall).toBeDefined();
+      expect(resolveCall!.args).toContain(
+        "$cred = Get-StoredCredential -Target 'frankenbeast/team''s/token'; if ($cred) { $cred.GetNetworkCredential().Password }",
+      );
+    });
   });
 
   describe('unsupported platform', () => {

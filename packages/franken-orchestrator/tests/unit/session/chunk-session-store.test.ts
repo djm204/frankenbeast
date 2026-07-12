@@ -253,6 +253,279 @@ describe('FileChunkSessionSnapshotStore', () => {
     expect(existsSync(corruptPath)).toBe(false);
   });
 
+  it('restoreLatest() without a taskId returns undefined when the chunk has snapshots for multiple tasks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-ambiguous-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const implSession = makeSession(root);
+    const hardenSession = {
+      ...implSession,
+      taskId: 'harden:01_demo',
+      promiseTag: 'HARDEN_01_demo_DONE',
+      compactionGeneration: 1,
+    };
+    const implDir = join(root, 'demo-plan', chunkSessionStorageKey(implSession.chunkId, implSession.taskId));
+    const hardenDir = join(root, 'demo-plan', chunkSessionStorageKey(hardenSession.chunkId, hardenSession.taskId));
+    mkdirSync(implDir, { recursive: true });
+    mkdirSync(hardenDir, { recursive: true });
+    writeFileSync(
+      join(implDir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'),
+      JSON.stringify(implSession),
+    );
+    writeFileSync(
+      join(hardenDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'),
+      JSON.stringify(hardenSession),
+    );
+
+    expect(snapshots.restoreLatest('demo-plan', '01_demo')).toBeUndefined();
+    expect(snapshots.restoreLatest('demo-plan', '01_demo', implSession.taskId)?.promiseTag).toBe('IMPL_01_demo_DONE');
+    expect(snapshots.restoreLatest('demo-plan', '01_demo', hardenSession.taskId)?.promiseTag).toBe('HARDEN_01_demo_DONE');
+  });
+
+  it('restoreLatest() without a taskId treats corrupt task-scoped snapshots as ambiguous', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-ambiguous-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const implSession = makeSession(root);
+    const hardenSession = {
+      ...implSession,
+      taskId: 'harden:01_demo',
+      promiseTag: 'HARDEN_01_demo_DONE',
+      compactionGeneration: 1,
+    };
+    const implDir = join(root, 'demo-plan', chunkSessionStorageKey(implSession.chunkId, implSession.taskId));
+    const hardenDir = join(root, 'demo-plan', chunkSessionStorageKey(hardenSession.chunkId, hardenSession.taskId));
+    mkdirSync(implDir, { recursive: true });
+    mkdirSync(hardenDir, { recursive: true });
+    writeFileSync(
+      join(implDir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'),
+      JSON.stringify(implSession),
+    );
+    const corruptPath = join(hardenDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json');
+    writeFileSync(corruptPath, '{"chunkId": "01_demo", "trunc');
+
+    expect(snapshots.restoreLatest('demo-plan', '01_demo')).toBeUndefined();
+    expect(snapshots.restoreLatest('demo-plan', '01_demo', implSession.taskId)?.promiseTag).toBe('IMPL_01_demo_DONE');
+    expect(snapshots.restoreLatest('demo-plan', '01_demo', hardenSession.taskId)).toBeUndefined();
+    expect(existsSync(corruptPath)).toBe(false);
+    expect(readdirSync(hardenDir).some((f) => f.includes('.corrupt.'))).toBe(true);
+  });
+
+  it('restoreLatest() without a taskId stays ambiguous after corrupt snapshots are quarantined', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-ambiguous-quarantined-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const implSession = makeSession(root);
+    const hardenSession = {
+      ...implSession,
+      taskId: 'harden:01_demo',
+      promiseTag: 'HARDEN_01_demo_DONE',
+      compactionGeneration: 1,
+    };
+    const implDir = join(root, 'demo-plan', chunkSessionStorageKey(implSession.chunkId, implSession.taskId));
+    const hardenDir = join(root, 'demo-plan', chunkSessionStorageKey(hardenSession.chunkId, hardenSession.taskId));
+    mkdirSync(implDir, { recursive: true });
+    mkdirSync(hardenDir, { recursive: true });
+    writeFileSync(
+      join(implDir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'),
+      JSON.stringify(implSession),
+    );
+    writeFileSync(join(hardenDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', '01_demo')).toBeUndefined();
+    expect(snapshots.restoreLatest('demo-plan', '01_demo')).toBeUndefined();
+    expect(readdirSync(hardenDir).some((f) => f.includes('.json.corrupt.'))).toBe(true);
+  });
+
+  it('restoreLatest() without a taskId ignores corrupt snapshots for unrelated chunks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-unrelated-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+    const otherSession = {
+      ...session,
+      taskId: 'impl:02_demo',
+      chunkId: '02_demo',
+      promiseTag: 'IMPL_02_demo_DONE',
+    };
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const otherDir = join(root, 'demo-plan', chunkSessionStorageKey(otherSession.chunkId, otherSession.taskId));
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(otherDir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+    writeFileSync(join(otherDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', '01_demo')?.promiseTag).toBe('IMPL_01_demo_DONE');
+  });
+
+  it('restoreLatest() without a taskId falls back within one task when the latest snapshot is corrupt', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-unscoped-same-task-corrupt-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = makeSession(root);
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'),
+      JSON.stringify({ ...session, compactionGeneration: 0 }),
+    );
+    writeFileSync(join(dir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', '01_demo')?.compactionGeneration).toBe(0);
+  });
+
+  it('restoreLatest() without a taskId counts recovery-task corrupt snapshots as ambiguous', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-recovery-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:01_types',
+      chunkId: '01_types',
+      promiseTag: 'IMPL_01_types_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const recoverySession = {
+      ...session,
+      taskId: 'fix-harden:01_types-attempt-1',
+      promiseTag: 'FIX_HARDEN_01_types_DONE',
+    };
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const recoveryDir = join(root, 'demo-plan', chunkSessionStorageKey(recoverySession.chunkId, recoverySession.taskId));
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(recoveryDir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+    writeFileSync(join(recoveryDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', '01_types')).toBeUndefined();
+  });
+
+  it('restoreLatest() without a taskId counts opaque corrupt task snapshots as ambiguous', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-opaque-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'task-1',
+      chunkId: 'cli:01_demo',
+      promiseTag: 'TASK_1_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const otherTask = { ...session, taskId: 'task-2', promiseTag: 'TASK_2_DONE' };
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const otherDir = join(root, 'demo-plan', chunkSessionStorageKey(otherTask.chunkId, otherTask.taskId));
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(otherDir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+    writeFileSync(join(otherDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', 'cli:01_demo')).toBeUndefined();
+  });
+
+  it('restoreLatest() without a taskId ignores unrelated generated hyphenated corrupt chunks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-hyphenated-unrelated-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:issue-2',
+      chunkId: 'issue-2',
+      promiseTag: 'ISSUE_2_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+
+    for (const [chunkId, taskId] of [
+      ['issue-1', 'impl:issue-1'],
+      ['define-types', 'impl:define-types'],
+      ['issue-10/chunk-1', 'impl:issue-10/chunk-1'],
+    ] as const) {
+      const corruptDir = join(root, 'demo-plan', chunkSessionStorageKey(chunkId, taskId));
+      mkdirSync(corruptDir, { recursive: true });
+      writeFileSync(join(corruptDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+    }
+
+    expect(snapshots.restoreLatest('demo-plan', 'issue-2')?.promiseTag).toBe('ISSUE_2_DONE');
+  });
+
+  it('restoreLatest() without a taskId ignores unrelated single-token corrupt chunks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-single-token-unrelated-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:billing',
+      chunkId: 'billing',
+      promiseTag: 'BILLING_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const corruptDir = join(root, 'demo-plan', chunkSessionStorageKey('auth', 'impl:auth'));
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(corruptDir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+    writeFileSync(join(corruptDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', 'billing')?.promiseTag).toBe('BILLING_DONE');
+  });
+
+  it('restoreLatest() without a taskId ignores prefix-matching generated corrupt chunks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-prefix-unrelated-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'impl:auth',
+      chunkId: 'auth',
+      promiseTag: 'AUTH_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const corruptDir = join(root, 'demo-plan', chunkSessionStorageKey('auth-api', 'impl:auth-api'));
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(corruptDir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+    writeFileSync(join(corruptDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', 'auth')?.promiseTag).toBe('AUTH_DONE');
+  });
+
+  it('restoreLatest() without a taskId counts namespaced opaque corrupt task snapshots as ambiguous', () => {
+    const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-namespaced-opaque-corrupt-task-'));
+    tmpDirs.push(root);
+    const snapshots = new FileChunkSessionSnapshotStore(root);
+    const session = createChunkSession({
+      planName: 'demo-plan',
+      taskId: 'task:1',
+      chunkId: 'cli:01_demo',
+      promiseTag: 'TASK_1_DONE',
+      workingDir: root,
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const otherTask = { ...session, taskId: 'task:2', promiseTag: 'TASK_2_DONE' };
+    const dir = join(root, 'demo-plan', chunkSessionStorageKey(session.chunkId, session.taskId));
+    const otherDir = join(root, 'demo-plan', chunkSessionStorageKey(otherTask.chunkId, otherTask.taskId));
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(otherDir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01T00-00-00-000Z-gen-0-pre-compaction.json'), JSON.stringify(session));
+    writeFileSync(join(otherDir, '2026-01-02T00-00-00-000Z-gen-1-pre-compaction.json'), 'not valid json{{{');
+
+    expect(snapshots.restoreLatest('demo-plan', 'cli:01_demo')).toBeUndefined();
+  });
+
   it('list() without a taskId skips a corrupt snapshot instead of throwing', () => {
     const root = mkdtempSync(join(tmpdir(), 'chunk-snapshot-list-corrupt-'));
     tmpDirs.push(root);

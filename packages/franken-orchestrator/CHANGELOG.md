@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.42.3](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.42.2...@franken/orchestrator-v0.42.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **orchestrator:** evict expired beast rate-limit counters ([e7cf20c](https://github.com/djm204/frankenbeast/commit/e7cf20c96a95301fa04a69a3ac0ce6b6c140e368)), closes [#1009](https://github.com/djm204/frankenbeast/issues/1009)
+* **orchestrator:** harden unscoped snapshot restores ([#1565](https://github.com/djm204/frankenbeast/issues/1565)) ([a88f53e](https://github.com/djm204/frankenbeast/commit/a88f53e649e1f7cb803d5a7609b711269eb7a8a6))
+* **orchestrator:** report corrupt Beast JSON hydration ([32a9096](https://github.com/djm204/frankenbeast/commit/32a90967a23fc2b83a69bb6cc20e56a5b071d4bb)), closes [#1008](https://github.com/djm204/frankenbeast/issues/1008)
+* **orchestrator:** return 400 for malformed JSON in control-plane routes ([#1493](https://github.com/djm204/frankenbeast/issues/1493)) ([e049a7c](https://github.com/djm204/frankenbeast/commit/e049a7ce846c5506a1a9a92925ab1b9047b5c972))
+
+
+### Tests
+
+* **orchestrator:** assert CLI provider boundary failure ([#1865](https://github.com/djm204/frankenbeast/issues/1865)) ([fd92c4b](https://github.com/djm204/frankenbeast/commit/fd92c4b91fefcf4780c464857f93d7965e8e2d64))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.6.16 to 0.7.0
+
 ## [0.42.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.42.1...@franken/orchestrator-v0.42.2) (2026-07-11)
 
 

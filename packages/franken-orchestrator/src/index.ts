@@ -76,6 +76,17 @@ export { checkCritiqueSpiral } from './breakers/critique-spiral-breaker.js';
 
 // LLM helpers
 export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
+export {
+  PM_HANDOFF_QUALITY_RUBRIC,
+  assessPmHandoffQuality,
+  formatHandoff,
+} from './providers/format-handoff.js';
+export type {
+  PmHandoffQualityAssessment,
+  PmHandoffRubricCriterion,
+  PmHandoffRubricResult,
+  PmHandoffRubricStatus,
+} from './providers/format-handoff.js';
 export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
 
@@ -153,8 +164,11 @@ export {
   deserializeContext,
   saveContext,
   loadContext,
+  ContextSnapshotSizeError,
+  ContextSnapshotFileTypeError,
+  DEFAULT_CONTEXT_SNAPSHOT_MAX_BYTES,
 } from './resilience/context-serializer.js';
-export type { ContextSnapshot } from './resilience/context-serializer.js';
+export type { ContextSnapshot, LoadContextOptions } from './resilience/context-serializer.js';
 export { GracefulShutdown } from './resilience/graceful-shutdown.js';
 export type { ShutdownHandler } from './resilience/graceful-shutdown.js';
 export { checkModuleHealth, allHealthy } from './resilience/module-initializer.js';

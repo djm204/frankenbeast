@@ -39,7 +39,11 @@ function fromEnv(): Partial<OrchestratorConfig> {
 /** Load config from a JSON file. */
 async function fromFile(filePath: string): Promise<Partial<OrchestratorConfig>> {
   const raw = await readFile(filePath, 'utf-8');
-  return JSON.parse(raw) as Partial<OrchestratorConfig>;
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRecord(parsed)) {
+    throw new TypeError('Config file must contain a JSON object');
+  }
+  return parsed as Partial<OrchestratorConfig>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

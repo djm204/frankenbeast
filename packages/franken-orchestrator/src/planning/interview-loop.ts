@@ -134,6 +134,6 @@ export class InterviewLoop implements GraphBuilder {
 
   private isApproved(response: string): boolean {
     const normalized = response.trim().toLowerCase();
-    return normalized === 'yes' || normalized === 'y';
+    return ['yes', 'y', 'yeah', 'yea', 'true', '1'].includes(normalized);
   }
 }

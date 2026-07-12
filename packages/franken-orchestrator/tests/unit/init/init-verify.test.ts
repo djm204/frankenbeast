@@ -49,16 +49,15 @@ describe('verifyInit', () => {
     expect(result.messages.join('\n')).toContain('Init state is missing');
   });
 
-  it('quarantines malformed verification JSON and reports it as missing', async () => {
+  it('reports malformed config JSON without throwing and quarantines the file', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
     const fbeastDir = join(tempDir, '.fbeast');
     const configFile = join(fbeastDir, 'config.json');
-    const stateFile = join(fbeastDir, 'init-state.json');
-    const stateStore = new FileInitStateStore(stateFile);
+    const stateStore = new FileInitStateStore(join(fbeastDir, 'init-state.json'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await mkdir(fbeastDir, { recursive: true });
-    await writeFile(configFile, '{"comms": {', 'utf-8');
-    await writeFile(stateFile, '{"completedSteps": [', 'utf-8');
+    await writeFile(configFile, '{"comms": ', 'utf-8');
+    await stateStore.save(createEmptyInitState(configFile));
 
     const result = await verifyInit({
       configFile,
@@ -67,13 +66,134 @@ describe('verifyInit', () => {
     const files = await readdir(fbeastDir);
 
     expect(result.ok).toBe(false);
-    expect(result.messages.join('\n')).toContain('Config file is missing');
-    expect(result.messages.join('\n')).toContain('Init state is missing');
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid-config-json',
+      }),
+    );
+    expect(result.messages.join('\n')).toContain('Config file');
+    expect(result.messages.join('\n')).toContain('could not be parsed');
     expect(files.some((file) => file.startsWith('config.json.corrupt-'))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
+  });
+
+  it('reports malformed init state JSON without throwing and quarantines the file', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const fbeastDir = join(tempDir, '.fbeast');
+    const configFile = join(fbeastDir, 'config.json');
+    const stateFile = join(fbeastDir, 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
+    const config = defaultConfig();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await mkdir(fbeastDir, { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateFile, '{"version": ', 'utf-8');
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+    const files = await readdir(fbeastDir);
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid-init-state-json',
+      }),
+    );
+    expect(result.messages.join('\n')).toContain('Init state');
+    expect(result.messages.join('\n')).toContain('could not be parsed');
     const stateQuarantine = files.find((file) => file.startsWith('init-state.json.corrupt-'));
     expect(stateQuarantine).toBeTruthy();
-    await expect(readFile(join(fbeastDir, stateQuarantine ?? ''), 'utf-8')).resolves.toBe('{"completedSteps": [');
-    expect(warn).toHaveBeenCalledTimes(2);
+    await expect(readFile(join(fbeastDir, stateQuarantine ?? ''), 'utf-8')).resolves.toBe('{"version": ');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
+  });
+
+  it('reports non-object config JSON with an actionable message', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, 'null\n', 'utf-8');
+    await stateStore.save(createEmptyInitState(configFile));
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid-config-json',
+        message: expect.stringContaining('must contain a JSON object'),
+      }),
+    );
+    expect(result.messages.join('\n')).toContain('must contain a JSON object');
+  });
+
+  it('reports non-object init state JSON without passing verification', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateStore.filePath, 'null\n', 'utf-8');
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid-init-state-json',
+        message: expect.stringContaining('must contain a JSON object'),
+      }),
+    );
+  });
+
+  it('accepts init state saved with an equivalent config path spelling', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const equivalentConfigFile = `${tempDir}/.fbeast/../.fbeast/config.json`;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await stateStore.save({
+      ...createEmptyInitState(equivalentConfigFile),
+      selectedModules: ['chat'],
+      completedSteps: ['module-selection'],
+    });
+
+    const state = await stateStore.load(configFile);
+
+    expect(state.selectedModules).toEqual(['chat']);
+    expect(state.completedSteps).toEqual(['module-selection']);
+  });
+
+  it('reports structurally incomplete init state JSON without passing verification', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateStore.filePath, '{}\n', 'utf-8');
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid-init-state-json',
+        message: expect.stringContaining('complete init state'),
+      }),
+    );
   });
 
   it('checks only enabled comms transports', async () => {

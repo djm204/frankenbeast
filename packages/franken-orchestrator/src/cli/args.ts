@@ -115,6 +115,43 @@ const BOOLEAN_SHORT_OPTIONS = new Set(['d']);
 const DECIMAL_PATTERN = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
 const INTEGER_PATTERN = /^[+-]?\d+$/;
 
+function extractSubcommand(argv: string[]): { subcommand: Subcommand; flagArgs: string[] } {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === undefined) break;
+
+    if (arg === '--') {
+      break;
+    }
+
+    if (arg.startsWith('--')) {
+      const optionName = arg.slice(2).split('=', 1)[0] ?? '';
+      if (STRING_OPTIONS.has(optionName) && !arg.includes('=')) {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (arg.startsWith('-')) {
+      const shortName = arg.slice(1, 2);
+      if (BOOLEAN_SHORT_OPTIONS.has(shortName)) {
+        continue;
+      }
+    }
+
+    if (VALID_SUBCOMMANDS.has(arg)) {
+      return {
+        subcommand: arg as Exclude<Subcommand, undefined>,
+        flagArgs: [...argv.slice(0, i), ...argv.slice(i + 1)],
+      };
+    }
+
+    break;
+  }
+
+  return { subcommand: undefined, flagArgs: argv };
+}
+
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
 
@@ -151,7 +188,7 @@ Options:
   --verbose               Debug logs + trace viewer
   --reset                 Clear checkpoint and traces
   --resume                Resume from checkpoint
-  --cleanup               Remove all build logs, checkpoints, and traces
+  --cleanup               Remove build artifacts without following symlinked entries
   --verify                Verify init config and readiness
   --repair                Re-run only missing or failed init steps
   --non-interactive       Disable interactive prompts for init
@@ -347,14 +384,8 @@ function parseIntegerOption(name: string, value: string, options: { min?: number
 }
 
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
-  // Extract subcommand if first positional arg matches
-  let subcommand: Subcommand;
-  let flagArgs = argv;
-  const first = argv[0];
-  if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'init' | 'interview' | 'plan' | 'run' | 'beasts' | 'issues' | 'chat' | 'chat-server' | 'beasts-daemon' | 'network' | 'skill' | 'security';
-    flagArgs = argv.slice(1);
-  }
+  // Extract the first subcommand positional, even when global flags precede it.
+  const { subcommand, flagArgs } = extractSubcommand(argv);
 
   let rawSkillAddCommandArgs: string[] | undefined;
   let parsedFlagArgs = flagArgs;
@@ -493,9 +524,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     throw new TypeError('--mode is only supported for beasts commands');
   }
 
+  if (beastExecutionMode !== undefined && beastAction === undefined) {
+    throw new TypeError('--mode requires a beasts action: create, spawn, status, or logs');
+  }
+
   if (
     beastExecutionMode !== undefined
-    && beastAction !== undefined
     && beastAction !== 'create'
     && beastAction !== 'spawn'
     && beastAction !== 'status'

@@ -28,6 +28,13 @@ export type {
   ADRMatch,
   EpisodicTrace,
   LessonTestTraceabilityEntry,
+  LessonExperimentSandbox,
+  LessonCooldownMetadata,
+  LessonCooldownSuppression,
+  LessonRecordingResult,
+  ReviewerFeedbackLessonEntry,
+  ReviewerFeedbackLessonCapture,
+  PostPrLessonExtractionTemplate,
   CritiqueLesson,
   TokenSpend,
   EscalationRequest,
@@ -69,6 +76,7 @@ export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
 export { LessonRecorder } from './memory/lesson-recorder.js';
 export { createLearningBacklogPrioritizationReport } from './memory/learning-backlog-report.js';
+export type { LessonRecorderOptions } from './memory/lesson-recorder.js';
 export type {
   LearningBacklogInputItem,
   LearningBacklogPriority,

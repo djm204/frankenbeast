@@ -1,6 +1,6 @@
 {
   "name": "@franken/web",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Browser dashboard for Frankenbeast operator workflows",
   "type": "module",
   "files": [

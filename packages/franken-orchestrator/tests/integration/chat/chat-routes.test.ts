@@ -486,7 +486,61 @@ describe('Chat HTTP Routes', () => {
       body: JSON.stringify({ content: 'second' }),
     });
 
-    expect(llmComplete).toHaveBeenNthCalledWith(2, 'second');
+    expect(llmComplete).toHaveBeenNthCalledWith(2, 'second', expect.objectContaining({
+      sessionContinue: true,
+      sessionId: created.id,
+    }));
+  });
+
+  it('builds a full first-turn prompt for each HTTP chat session when continuation is enabled', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete },
+      projectName: 'test-project',
+      sessionContinuation: true,
+    });
+
+    const firstCreate = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const secondCreate = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: first } = await firstCreate.json();
+    const { data: second } = await secondCreate.json();
+
+    await app.request(`/v1/chat/sessions/${first.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'hello from first session' }),
+    });
+    await app.request(`/v1/chat/sessions/${second.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'hello from second session' }),
+    });
+
+    expect(llmComplete).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('You are Frankenbeast for project test-project.'),
+      expect.objectContaining({
+        sessionContinue: false,
+        sessionId: second.id,
+      }),
+    );
+    expect(llmComplete).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('user: hello from second session'),
+      expect.objectContaining({
+        sessionContinue: false,
+        sessionId: second.id,
+      }),
+    );
+    expect(llmComplete).not.toHaveBeenNthCalledWith(2, 'hello from second session');
   });
 
   it('rate limits repeated message submissions before invoking the runtime', async () => {

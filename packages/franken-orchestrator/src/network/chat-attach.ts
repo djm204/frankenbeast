@@ -266,10 +266,24 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
   });
 }
 
+function sendManagedChatInput(socket: WebSocket, input: string): void {
+  if (input === '/approve' || input === '/reject') {
+    socket.send(JSON.stringify({ type: 'approval.respond', approved: input === '/approve' }));
+    return;
+  }
+
+  socket.send(JSON.stringify({
+    type: 'message.send',
+    clientMessageId: deterministicUuid('packages/franken-orchestrator/src/network/chat-attach.ts'),
+    content: input,
+  }));
+}
+
 export const __chatAttachTestHooks = {
   awaitRemoteReply,
   createRemoteSession,
   parseManagedChatMessage,
+  sendManagedChatInput,
 };
 
 export async function runManagedChatRepl(options: {
@@ -293,17 +307,7 @@ export async function runManagedChatRepl(options: {
         break;
       }
 
-      if (input === '/approve') {
-        session.socket.send(JSON.stringify({ type: 'approval.respond', approved: true }));
-        await awaitRemoteReply(session.socket, verbose);
-        continue;
-      }
-
-      session.socket.send(JSON.stringify({
-        type: 'message.send',
-        clientMessageId: deterministicUuid('packages/franken-orchestrator/src/network/chat-attach.ts'),
-        content: input,
-      }));
+      sendManagedChatInput(session.socket, input);
       await awaitRemoteReply(session.socket, verbose);
     }
   } finally {
