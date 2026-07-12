@@ -968,6 +968,48 @@ describe('main() execution', () => {
     }));
   });
 
+  it.each([
+    'Cannot read properties of null (reading \'providers\')',
+    'Cannot convert undefined or null to object',
+  ])('lets init verification handle literal null config loader errors: %s', async (message) => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), 'null\n');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new TypeError(message));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initVerify: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ network: expect.any(Object) }),
+    }));
+  });
+
+  it('does not hide generic null loader errors when init config is malformed JSON', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '{not json', 'utf-8');
+    const error = new TypeError('Cannot read properties of null (reading \'providers\')');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initVerify: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
   it('lets interactive init handle invalid explicit config JSON with fallback defaults', async () => {
     const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
     tempDirs.push(tempDir);
