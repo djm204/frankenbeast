@@ -390,6 +390,43 @@ function assertNoExtraPositionals(commandName: string, positionals: string[], ma
   }
 }
 
+function maxNetworkPositionals(action: NetworkAction): number {
+  if (action === 'start' || action === 'stop' || action === 'restart' || action === 'logs') return 2;
+  if (action === undefined) return 0;
+  return 1;
+}
+
+function maxBeastPositionals(action: BeastAction): number {
+  if (
+    action === 'create'
+    || action === 'spawn'
+    || action === 'status'
+    || action === 'logs'
+    || action === 'stop'
+    || action === 'kill'
+    || action === 'restart'
+    || action === 'resume'
+    || action === 'delete'
+  ) {
+    return 2;
+  }
+  if (action === undefined) return 0;
+  return 1;
+}
+
+function maxSkillPositionals(action: SkillAction): number {
+  if (action === 'add') return 3;
+  if (action === 'scaffold' || action === 'remove' || action === 'enable' || action === 'disable' || action === 'info') return 2;
+  if (action === undefined) return 0;
+  return 1;
+}
+
+function maxSecurityPositionals(action: SecurityAction): number {
+  if (action === 'set') return 2;
+  if (action === undefined) return 0;
+  return 1;
+}
+
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   // Extract the first subcommand positional, even when global flags precede it.
   const { subcommand, flagArgs } = extractSubcommand(argv);
@@ -467,7 +504,6 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let securityTarget: string | undefined;
 
   if (subcommand === 'network') {
-    assertNoExtraPositionals('network', positionals, 2);
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
       if (!VALID_NETWORK_ACTIONS.has(actionCandidate)) {
@@ -475,9 +511,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       networkAction = actionCandidate as NetworkAction;
     }
+    assertNoExtraPositionals('network', positionals, maxNetworkPositionals(networkAction));
     networkTarget = positionals[1];
   } else if (subcommand === 'beasts') {
-    assertNoExtraPositionals('beasts', positionals, 2);
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
       if (!VALID_BEAST_ACTIONS.has(actionCandidate)) {
@@ -485,6 +521,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       beastAction = actionCandidate as BeastAction;
     }
+    assertNoExtraPositionals('beasts', positionals, maxBeastPositionals(beastAction));
     beastTarget = positionals[1];
   } else if (subcommand === 'skill') {
     const actionCandidate = positionals[0];
@@ -494,14 +531,13 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       skillAction = actionCandidate as SkillAction;
     }
-    assertNoExtraPositionals('skill', positionals, skillAction === 'add' ? 3 : 2);
+    assertNoExtraPositionals('skill', positionals, maxSkillPositionals(skillAction));
     skillTarget = positionals[1];
     skillCommand = positionals[2];
     skillCommandArgs = rawSkillAddCommandArgs !== undefined
       ? rawSkillAddCommandArgs
       : positionals.length > 3 ? positionals.slice(3) : undefined;
   } else if (subcommand === 'security') {
-    assertNoExtraPositionals('security', positionals, 2);
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
       if (!VALID_SECURITY_ACTIONS.has(actionCandidate)) {
@@ -509,6 +545,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       securityAction = actionCandidate as SecurityAction;
     }
+    assertNoExtraPositionals('security', positionals, maxSecurityPositionals(securityAction));
     securityTarget = positionals[1];
     if (securityAction === 'set' && securityTarget !== undefined) {
       const validProfiles = new Set(['strict', 'standard', 'permissive']);

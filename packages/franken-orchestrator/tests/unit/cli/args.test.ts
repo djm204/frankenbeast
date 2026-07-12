@@ -245,13 +245,25 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['network', 'start', 'chat-server', 'unexpected'])).toThrow(
       "Unexpected argument 'unexpected' for network command",
     );
+    expect(() => parseArgs(['network', 'down', 'staging'])).toThrow(
+      "Unexpected argument 'staging' for network command",
+    );
     expect(() => parseArgs(['beasts', 'logs', 'run-1', 'unexpected'])).toThrow(
+      "Unexpected argument 'unexpected' for beasts command",
+    );
+    expect(() => parseArgs(['beasts', 'list', 'unexpected'])).toThrow(
       "Unexpected argument 'unexpected' for beasts command",
     );
     expect(() => parseArgs(['skill', 'enable', 'my-skill', 'unexpected'])).toThrow(
       "Unexpected argument 'unexpected' for skill command",
     );
+    expect(() => parseArgs(['skill', 'list', 'unexpected'])).toThrow(
+      "Unexpected argument 'unexpected' for skill command",
+    );
     expect(() => parseArgs(['security', 'set', 'standard', 'unexpected'])).toThrow(
+      "Unexpected argument 'unexpected' for security command",
+    );
+    expect(() => parseArgs(['security', 'status', 'unexpected'])).toThrow(
       "Unexpected argument 'unexpected' for security command",
     );
   });
