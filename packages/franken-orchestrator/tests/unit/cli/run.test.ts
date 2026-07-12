@@ -948,6 +948,44 @@ describe('main() execution', () => {
     }));
   });
 
+  it('falls back for interactive init when config JSON is syntactically valid but not an object', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '[]\n', 'utf-8');
+    vi.mocked(loadConfig).mockResolvedValueOnce(defaultConfig());
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      configLoadFallback: true,
+      config: expect.objectContaining({ providers: expect.any(Object) }),
+    }));
+  });
+
+  it('does not fallback for nested object-shape config validation errors', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '{"providers":[]}\n', 'utf-8');
+    const error = new Error('Expected object, received array');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
   it('lets init verification handle non-object config JSON with fallback defaults', async () => {
     const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
     tempDirs.push(tempDir);

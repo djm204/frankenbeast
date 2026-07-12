@@ -326,12 +326,12 @@ async function isInitConfigFileError(error: unknown, configFile: string): Promis
   if (error instanceof Error && error.message.startsWith('Config file not found:')) {
     return true;
   }
-  if (error instanceof Error && /config(?: file)? (?:must contain|must be).*object|expected object|received (?:null|array)/i.test(error.message)) {
+  if (error instanceof Error && /config(?: file)? (?:must contain|must be).*object/i.test(error.message)) {
     return true;
   }
   if (
     error instanceof Error
-    && /Cannot read properties of null|Cannot convert undefined or null to object/i.test(error.message)
+    && /cannot read properties of null \(reading 'providers'\)|cannot convert undefined or null to object/i.test(error.message)
     && await initConfigFileContainsNonObjectJson(configFile)
   ) {
     return true;
@@ -874,6 +874,15 @@ export async function main(): Promise<void> {
     if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(error, args.config ?? paths.configFile)) {
       throw error;
     }
+    config = initFallbackConfig(args);
+    configLoadFallback = true;
+  }
+  if (
+    !configLoadFallback
+    && args.subcommand === 'init'
+    && !args.initNonInteractive
+    && await initConfigFileContainsNonObjectJson(args.config ?? paths.configFile)
+  ) {
     config = initFallbackConfig(args);
     configLoadFallback = true;
   }
