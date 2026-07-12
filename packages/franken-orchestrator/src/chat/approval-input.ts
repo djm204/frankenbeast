@@ -1,6 +1,6 @@
 import type { PendingApproval } from '@franken/types';
 
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
 
 export class UnsafeApprovalCommandError extends Error {
   constructor() {
