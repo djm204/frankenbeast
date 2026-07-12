@@ -904,6 +904,50 @@ describe('main() execution', () => {
     expect(mockHandleInitCommand).not.toHaveBeenCalled();
   });
 
+  it('lets init verification handle real loader null-config errors with fallback defaults', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), 'null\n', 'utf-8');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new TypeError("Cannot read properties of null (reading 'providers')"));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initVerify: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      configLoadFallback: true,
+      config: expect.objectContaining({ providers: expect.any(Object) }),
+    }));
+  });
+
+  it('lets explicit init config null deep-merge errors fall through to init handling', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    const configFile = join(tempDir, 'explicit-null.json');
+    writeFileSync(configFile, 'null\n', 'utf-8');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new TypeError('Cannot convert undefined or null to object'));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      config: configFile,
+      initRepair: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      configLoadFallback: true,
+      config: expect.objectContaining({ providers: expect.any(Object) }),
+    }));
+  });
+
   it('lets init verification handle non-object config JSON with fallback defaults', async () => {
     const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
     tempDirs.push(tempDir);

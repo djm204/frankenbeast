@@ -310,7 +310,16 @@ function canInitHandleConfigLoadError(args: CliArgs): boolean {
   return args.subcommand === 'init';
 }
 
-async function isInitConfigFileError(error: unknown): Promise<boolean> {
+async function initConfigFileContainsNonObjectJson(configFile: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(configFile, 'utf-8')) as unknown;
+    return parsed === null || Array.isArray(parsed) || typeof parsed !== 'object';
+  } catch {
+    return false;
+  }
+}
+
+async function isInitConfigFileError(error: unknown, configFile: string): Promise<boolean> {
   if (error instanceof SyntaxError) {
     return true;
   }
@@ -318,6 +327,13 @@ async function isInitConfigFileError(error: unknown): Promise<boolean> {
     return true;
   }
   if (error instanceof Error && /config(?: file)? (?:must contain|must be).*object|expected object|received (?:null|array)/i.test(error.message)) {
+    return true;
+  }
+  if (
+    error instanceof Error
+    && /Cannot read properties of null|Cannot convert undefined or null to object/i.test(error.message)
+    && await initConfigFileContainsNonObjectJson(configFile)
+  ) {
     return true;
   }
   return false;
@@ -855,7 +871,7 @@ export async function main(): Promise<void> {
   try {
     config = await resolveConfig(args, paths.configFile);
   } catch (error) {
-    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(error)) {
+    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(error, args.config ?? paths.configFile)) {
       throw error;
     }
     config = initFallbackConfig(args);
