@@ -926,7 +926,7 @@ frankenbeast/
 │   ├── RAMP_UP.md               # Concise agent onboarding doc
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
-│   ├── adr/                     # Architecture Decision Records
+│   ├── adr/                     # Architecture Decision Records (see docs/adr/*.md)
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests
