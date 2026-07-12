@@ -112,6 +112,18 @@ function normalizeRepoRelativeLaunchPath(fieldName: string, value: string): stri
   return normalized.normalized;
 }
 
+function isCatalogPathPrompt(prompt: { key: string; kind?: string }): boolean {
+  const key = prompt.key.toLowerCase();
+  return (
+    PATH_CONFIG_KEYS.has(prompt.key) ||
+    prompt.kind === 'file' ||
+    prompt.kind === 'directory' ||
+    key.includes('path') ||
+    key.includes('dir') ||
+    key.includes('directory')
+  );
+}
+
 function setNormalizedLaunchPath(
   config: Record<string, unknown>,
   workflow: Record<string, unknown> | undefined,
@@ -162,7 +174,7 @@ export function buildWizardLaunchConfig(
     for (const prompt of selectedWorkflow.interviewPrompts) {
       const value = getPromptValue(workflow, prompt);
       if (!isBlankCatalogValue(value)) {
-        config[prompt.key] = typeof value === 'string' && PATH_CONFIG_KEYS.has(prompt.key)
+        config[prompt.key] = typeof value === 'string' && isCatalogPathPrompt(prompt)
           ? normalizeRepoRelativeLaunchPath(prompt.key, value)
           : value;
       }

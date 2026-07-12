@@ -92,8 +92,8 @@ Path-style fields entered in the dashboard are normalized client-side before sub
 
 - duplicate separators and `.` segments are collapsed for deterministic display/submission
 - NUL bytes and `..` parent-traversal segments are rejected by default
-- WSL Windows drive paths such as `C:\Users\me\plan.md` are converted to `/mnt/c/Users/me/plan.md`
-- the only traversal override is the explicit `allowParentTraversal` option in `normalizePath`, reserved for already-trusted operator-supplied paths; untrusted UI/API text should keep the default deny-by-default behavior
+- launch submissions use repo-relative paths; absolute paths, drive-letter paths, and UNC paths are rejected at the wizard boundary
+- the only traversal override is the explicit `allowParentTraversal` option in `normalizePath`, reserved for already-trusted operator-supplied paths outside untrusted launch submissions; untrusted UI/API text should keep the default deny-by-default behavior
 
 Execution controls (`start`, `stop`, `restart`, `kill`) still target Beast runs after a tracked agent has dispatched.
 

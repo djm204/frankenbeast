@@ -31,6 +31,24 @@ describe('buildWizardLaunchConfig', () => {
     });
   });
 
+  it('normalizes custom catalog path prompts by prompt kind', () => {
+    const catalog: BeastCatalogEntry[] = [{
+      id: 'custom-path-beast',
+      label: 'Custom Path Beast',
+      description: 'Served by backend catalog',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'artifactFile', prompt: 'Artifact file?', kind: 'file', required: true },
+      ],
+    }];
+
+    expect(buildWizardLaunchConfig({
+      1: { workflowType: 'custom-path-beast', artifactFile: 'docs//./artifact.md' },
+    }, catalog)).toMatchObject({
+      artifactFile: 'docs/artifact.md',
+    });
+  });
+
   it('rejects unsafe path-style fields before launch submission', () => {
     expect(() => buildWizardLaunchConfig({
       1: { workflowType: 'design-interview', goal: 'Draft a billing design', outputPath: '../secret.md' },
