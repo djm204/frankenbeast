@@ -13,10 +13,6 @@ updates:
           - "@franken/*"
     ignore:
       - dependency-name: "@franken/*"
-        update-types:
-          - "version-update:semver-major"
-          - "version-update:semver-minor"
-          - "version-update:semver-patch"
 
   - package-ecosystem: github-actions
     directory: /

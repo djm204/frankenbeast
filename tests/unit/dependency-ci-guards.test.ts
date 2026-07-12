@@ -167,7 +167,7 @@ updates:
     expect(result.stderr).toContain('must ignore');
   });
 
-  it('accepts dependabot configs that exclude internal packages from broad npm updates', () => {
+  it('fails internal-scope ignores that only cover version-update PRs', () => {
     const result = runDependabotSupplyChainGuard(`
 version: 2
 updates:
@@ -175,16 +175,56 @@ updates:
     directory: /
     groups:
       external-npm:
-        patterns:
-          - "*"
-        exclude-patterns:
-          - "@franken/*"
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
     ignore:
       - dependency-name: "@franken/*"
         update-types:
           - "version-update:semver-major"
           - "version-update:semver-minor"
           - "version-update:semver-patch"
+`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('without update-types filters');
+  });
+
+  it('fails every npm group that lacks an internal-scope exclusion', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      safe-inline:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+      unsafe-production:
+        dependency-type: production
+    ignore:
+      - dependency-name: "@franken/*"
+`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('unsafe-production');
+    expect(result.stderr).toContain('exclude-patterns');
+  });
+
+  it('accepts dependabot configs that exclude internal packages from all npm updates', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      external-npm:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+      production-only:
+        dependency-type: production
+        exclude-patterns: ["@franken/*"]
+    ignore:
+      - dependency-name: "@franken/*"
 `);
 
     expect(result.status).toBe(0);
