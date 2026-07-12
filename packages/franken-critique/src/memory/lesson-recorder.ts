@@ -44,6 +44,10 @@ export interface BlockerPatternState {
 interface PendingBlockerPatternObservation {
   readonly key: string;
   readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  readonly normalizedFinding: string;
+  readonly observedAt: string;
+  readonly shouldBypassCooldown: boolean;
 }
 
 export interface LessonRecorderOptions {
@@ -163,6 +167,12 @@ export class LessonRecorder {
       for (const lesson of lessons) {
         const hasMinedBlockerPatterns =
           (lesson.blockerPatterns?.length ?? 0) > 0;
+        const shouldBypassCooldownForBlockerPattern =
+          hasMinedBlockerPatterns ||
+          (this.pendingBlockerObservations
+            .get(lesson)
+            ?.some((observation) => observation.shouldBypassCooldown) ??
+            false);
         const cooldownKey =
           this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
         let admissionSettled: ((admitted: boolean) => void) | undefined;
@@ -174,7 +184,7 @@ export class LessonRecorder {
               lesson,
               cooldownKey,
             );
-            if (suppression && !hasMinedBlockerPatterns) {
+            if (suppression && !shouldBypassCooldownForBlockerPattern) {
               recordingResult.suppressedByCooldown.push(suppression);
               admittedByAnotherCall = true;
               break;
@@ -204,6 +214,7 @@ export class LessonRecorder {
           const admittedLesson = this.withAdmissionTimestamp(lesson);
           await this.memory.recordLesson(admittedLesson);
           recordingResult.recorded += 1;
+          this.commitBlockerPatternObservations(lesson);
           addUniqueBlockerPatterns(
             recordingResult.minedBlockerPatterns,
             lesson.blockerPatterns,
@@ -217,7 +228,6 @@ export class LessonRecorder {
           admissionSettled?.(true);
         } catch {
           admissionSettled?.(false);
-          this.rollbackBlockerPatternObservations(lesson);
           // Non-fatal: log failure but don't disrupt the critique flow
         } finally {
           if (
@@ -268,7 +278,7 @@ export class LessonRecorder {
         const suppressUntil = new Date(
           addCooldownWindowMs(cooldownBaseMs, this.cooldownMs),
         ).toISOString();
-        const blockerPatternUpdate = this.mineBlockerPatterns(
+        const blockerPatternUpdate = this.previewBlockerPatterns(
           taskId,
           evalResult.evaluatorName,
           critiqueFindings,
@@ -335,7 +345,7 @@ export class LessonRecorder {
     return lessons;
   }
 
-  private mineBlockerPatterns(
+  private previewBlockerPatterns(
     taskId: TaskId,
     evaluatorName: string,
     findings: readonly {
@@ -360,34 +370,38 @@ export class LessonRecorder {
       }
 
       const key = createBlockerPatternKey(evaluatorName, normalizedFinding);
-      let pattern = this.blockerPatterns.get(key);
-      if (!pattern) {
-        pattern = {
-          key,
-          evaluatorName,
-          normalizedFinding,
-          observations: [],
-        };
-        this.blockerPatterns.set(key, pattern);
-      }
+      const pattern = this.blockerPatterns.get(key);
+      const observations = pattern?.observations ?? [];
 
-      if (
-        pattern.observations.some(
-          (observation) => observation.taskId === taskId,
-        )
-      ) {
+      if (observations.some((observation) => observation.taskId === taskId)) {
         continue;
       }
 
-      const previousObservationCount = pattern.observations.length;
-      pattern.observations.push({ taskId, observedAt });
-      pendingObservations.push({ key, taskId });
+      const previousObservationCount = observations.length;
+      const previewState: BlockerPatternState = {
+        key,
+        evaluatorName,
+        normalizedFinding,
+        observations: [...observations, { taskId, observedAt }],
+      };
+      pendingObservations.push({
+        key,
+        taskId,
+        evaluatorName,
+        normalizedFinding,
+        observedAt,
+        shouldBypassCooldown:
+          previousObservationCount < this.blockerPatternThreshold,
+      });
       if (
         previousObservationCount < this.blockerPatternThreshold &&
-        pattern.observations.length >= this.blockerPatternThreshold
+        previewState.observations.length >= this.blockerPatternThreshold
       ) {
         minedPatterns.push(
-          createCrossTaskBlockerPattern(pattern, this.blockerPatternThreshold),
+          createCrossTaskBlockerPattern(
+            previewState,
+            this.blockerPatternThreshold,
+          ),
         );
       }
     }
@@ -395,22 +409,29 @@ export class LessonRecorder {
     return { patterns: minedPatterns, observations: pendingObservations };
   }
 
-  private rollbackBlockerPatternObservations(lesson: CritiqueLesson): void {
+  private commitBlockerPatternObservations(lesson: CritiqueLesson): void {
     const pendingObservations =
       this.pendingBlockerObservations.get(lesson) ?? [];
     for (const observation of pendingObservations) {
-      const pattern = this.blockerPatterns.get(observation.key);
+      let pattern = this.blockerPatterns.get(observation.key);
       if (!pattern) {
-        continue;
+        pattern = {
+          key: observation.key,
+          evaluatorName: observation.evaluatorName,
+          normalizedFinding: observation.normalizedFinding,
+          observations: [],
+        };
+        this.blockerPatterns.set(observation.key, pattern);
       }
-      const observationIndex = pattern.observations.findIndex(
-        (entry) => entry.taskId === observation.taskId,
-      );
-      if (observationIndex >= 0) {
-        pattern.observations.splice(observationIndex, 1);
-      }
-      if (pattern.observations.length === 0) {
-        this.blockerPatterns.delete(observation.key);
+      if (
+        !pattern.observations.some(
+          (entry) => entry.taskId === observation.taskId,
+        )
+      ) {
+        pattern.observations.push({
+          taskId: observation.taskId,
+          observedAt: observation.observedAt,
+        });
       }
     }
     this.pendingBlockerObservations.delete(lesson);
