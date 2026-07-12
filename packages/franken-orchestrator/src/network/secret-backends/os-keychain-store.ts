@@ -7,6 +7,10 @@ type StdinRunner = (command: string, args: string[], stdin: string) => Promise<C
 const SERVICE = 'frankenbeast';
 const KEYS_META_KEY = '__frankenbeast_keys__';
 
+function quotePowerShellSingleQuotedString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 export interface OsKeychainStoreOptions {
   runner: CliRunner;
   stdinRunner?: StdinRunner | undefined;
@@ -289,10 +293,11 @@ export class OsKeychainStore implements ISecretStore {
   private async resolveWin32(key: string): Promise<string | undefined> {
     // cmdkey /list does not display passwords; use PowerShell to retrieve
     const target = `${SERVICE}/${key}`;
+    const quotedTarget = quotePowerShellSingleQuotedString(target);
     const result = await this.runner('powershell', [
       '-NoProfile',
       '-Command',
-      `$cred = Get-StoredCredential -Target '${target}'; if ($cred) { $cred.GetNetworkCredential().Password }`,
+      `$cred = Get-StoredCredential -Target ${quotedTarget}; if ($cred) { $cred.GetNetworkCredential().Password }`,
     ]);
     if (result.exitCode !== 0 || !result.stdout.trim()) {
       return undefined;

@@ -2,7 +2,13 @@
 // Public API barrel export
 
 // Types — common
-export type { Severity, Verdict, Score, SessionId, TaskId } from './types/common.js';
+export type {
+  Severity,
+  Verdict,
+  Score,
+  SessionId,
+  TaskId,
+} from './types/common.js';
 
 // Types — evaluation
 export { EVALUATOR_EXCEPTION_LOCATION } from './types/evaluation.js';
@@ -23,6 +29,9 @@ export type {
   EpisodicTrace,
   LessonTestTraceabilityEntry,
   LessonExperimentSandbox,
+  LessonCooldownMetadata,
+  LessonCooldownSuppression,
+  LessonRecordingResult,
   ReviewerFeedbackLessonEntry,
   ReviewerFeedbackLessonCapture,
   PostPrLessonExtractionTemplate,
@@ -70,6 +79,7 @@ export {
   mineCrossTaskBlockerPatterns,
   normalizeBlockerDescription,
 } from './memory/blocker-pattern-miner.js';
+export type { LessonRecorderOptions } from './memory/lesson-recorder.js';
 export type {
   BlockerPatternExample,
   BlockerPatternMiningOptions,

@@ -115,6 +115,57 @@ describe('control-plane operator auth', () => {
     }
   });
 
+  describe('rejects browser cookie mutations without same-origin proof', () => {
+    it('denies network mutations when cookie auth lacks an Origin header', async () => {
+      const app = buildApp();
+      const res = await app.request('http://localhost/v1/network/start', {
+        method: 'POST',
+        headers: {
+          cookie: `frankenbeast_operator_token=${encodeURIComponent(OPERATOR_TOKEN)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ target: 'dashboard-web' }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    });
+
+    it('denies cookie-authenticated mutations with Sec-Fetch-Site: none', async () => {
+      const app = buildApp();
+      const res = await app.request('http://localhost/v1/network/start', {
+        method: 'POST',
+        headers: {
+          cookie: `frankenbeast_operator_token=${encodeURIComponent(OPERATOR_TOKEN)}`,
+          origin: 'http://localhost',
+          'sec-fetch-site': 'none',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ target: 'dashboard-web' }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    });
+    it('accepts proxied HTTPS same-origin cookie mutations with forwarded proto and host', async () => {
+      const app = buildApp();
+      const res = await app.request('http://internal.local/v1/network/start', {
+        method: 'POST',
+        headers: {
+          cookie: `frankenbeast_operator_token=${encodeURIComponent(OPERATOR_TOKEN)}`,
+          origin: 'https://dashboard.example.com',
+          'sec-fetch-site': 'same-origin',
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'dashboard.example.com',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ target: 'dashboard-web' }),
+      });
+
+      expect(res.status).toBe(200);
+    });
+  });
+
   describe('authenticated requests pass the auth gate', () => {
     it('network status -> 200 with operator token', async () => {
       const app = buildApp();

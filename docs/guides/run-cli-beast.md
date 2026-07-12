@@ -12,7 +12,7 @@ The beast harness is split across two CLIs. This guide covers both.
 ## Prerequisites
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26`
-- For API-backed `frankenbeast` provider registry runs, an API key for at least one supported provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`
+- For API-backed `frankenbeast` provider registry runs, an API key for at least one supported provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or either `GOOGLE_API_KEY` / `GEMINI_API_KEY` for `gemini-api`
 - For `fbeast mcp beast` preset activation, one of the supported Beast provider paths: `anthropic-api` with `ANTHROPIC_API_KEY`, or an installed/logged-in `claude` / `codex` CLI for `claude-cli` / `codex-cli`
 
 ```bash
@@ -157,7 +157,13 @@ frankenbeast beasts logs <run-id>
 frankenbeast beasts stop <run-id>
 frankenbeast beasts kill <run-id>
 frankenbeast beasts restart <run-id>
+
+# Manage tracked dashboard agents
+frankenbeast beasts resume <agent-id>
+frankenbeast beasts delete <agent-id>
 ```
+
+`resume` and `delete` operate on tracked agent IDs, not run IDs. Use `resume` to continue the agent's linked run and `delete` to soft-delete the tracked agent.
 
 Available catalog entries: `design-interview`, `chunk-plan`, `martin-loop`.
 
@@ -201,10 +207,12 @@ A franken-governor pre-deploy hook should be integrated at the dispatch/API laye
 --verbose                      # Debug logs + trace viewer
 --reset                        # Clear checkpoint and start fresh
 --resume                       # Preserve checkpoint/chunk-session state and resume from the last run
---cleanup                      # Remove all build logs, checkpoints, traces
+--cleanup                      # Remove build logs, checkpoints, traces without following symlinked entries
 ```
 
-Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts.
+Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts. `--cleanup` refuses to clean a symlinked `.build/` root or symlinked `.fbeast` cleanup component by default and unlinks symlinks found inside `.build/` instead of traversing them, so cleanup cannot delete files outside the project through a symlink. Symlinked workspace parents are allowed; replace symlinked `.fbeast`/`.build` cleanup path components with real disposable directories before cleaning.
+
+Verbose and build-log output redacts secret-like environment/config keys such as `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, and `*_API_KEY` by default. The logger exposes an explicit local diagnostic override (`redactSecrets: false`) for trusted development-only callers, but normal CLI/runtime paths keep redaction enabled so environment dumps do not leak provider tokens or credentials.
 
 ---
 
@@ -261,11 +269,17 @@ frankenbeast issues --dry-run              # preview without executing
 
 ## 10. Network services
 
+Use `up` and `down` for the whole configured network lifecycle. Use `start`, `stop`, and `restart` when you want to control one managed service, or pass `all` to apply the action to every service without changing the operator config.
+
 ```bash
 frankenbeast network up                    # start configured services
 frankenbeast network up -d                 # detached (daemon mode)
 frankenbeast network status                # show service health and URLs
-frankenbeast network down                  # tear down
+frankenbeast network start chat-server     # start one managed service
+frankenbeast network stop dashboard-web    # stop one managed service
+frankenbeast network restart beasts-daemon # restart one managed service
+frankenbeast network restart all           # restart every managed service
+frankenbeast network down                  # tear down the managed network
 frankenbeast network logs <service|all>    # show service logs
 frankenbeast network config                # inspect operator config
 ```

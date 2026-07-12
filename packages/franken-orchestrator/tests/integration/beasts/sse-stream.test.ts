@@ -90,6 +90,26 @@ describe('Beast SSE routes', () => {
     expect(body.ticket).toBeDefined();
   });
 
+  it('POST /v1/beasts/events/ticket accepts proxied HTTPS same-origin operator cookies', async () => {
+    const ctx = createSseApp();
+    ticketStore = ctx.ticketStore;
+
+    const res = await ctx.app.request('http://internal.local/v1/beasts/events/ticket', {
+      method: 'POST',
+      headers: {
+        cookie: `frankenbeast_operator_token=${OPERATOR_TOKEN}`,
+        origin: 'https://dashboard.example.com',
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'dashboard.example.com',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticket).toBeDefined();
+  });
+
   it('POST /v1/beasts/events/ticket rejects cross-origin operator cookies', async () => {
     const ctx = createSseApp();
     ticketStore = ctx.ticketStore;

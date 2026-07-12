@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
+import { defaultConfig, parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -62,6 +62,7 @@ import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } f
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
+import { redactLogData } from '../logging/redaction.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -306,6 +307,47 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
     throw new Error(`Config file not found: ${args.config}`);
   }
   return loadConfig(args, defaultConfigPath);
+}
+
+function canInitHandleConfigLoadError(args: CliArgs): boolean {
+  return args.subcommand === 'init';
+}
+
+async function initConfigFileContainsNonObjectJson(configFile: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(configFile, 'utf-8')) as unknown;
+    return parsed === null || Array.isArray(parsed) || typeof parsed !== 'object';
+  } catch {
+    return false;
+  }
+}
+
+async function isInitConfigFileError(error: unknown, configFile: string): Promise<boolean> {
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  if (error instanceof Error && error.message.startsWith('Config file not found:')) {
+    return true;
+  }
+  if (error instanceof Error && /config(?: file)? (?:must contain|must be).*object/i.test(error.message)) {
+    return true;
+  }
+  if (
+    error instanceof Error
+    && /cannot read properties of null \(reading 'providers'\)|cannot convert undefined or null to object/i.test(error.message)
+    && await initConfigFileContainsNonObjectJson(configFile)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function initFallbackConfig(args: CliArgs): OrchestratorConfig {
+  const config = defaultConfig();
+  if (args.initBackend) {
+    config.network.secureBackend = args.initBackend as OrchestratorConfig['network']['secureBackend'];
+  }
+  return config;
 }
 
 export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
@@ -896,7 +938,26 @@ export async function main(): Promise<void> {
       ? undefined
       : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
-  const config = await resolveConfig(args, paths.configFile);
+  let config: OrchestratorConfig;
+  let configLoadFallback = false;
+  try {
+    config = await resolveConfig(args, paths.configFile);
+  } catch (error) {
+    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(error, args.config ?? paths.configFile)) {
+      throw error;
+    }
+    config = initFallbackConfig(args);
+    configLoadFallback = true;
+  }
+  if (
+    !configLoadFallback
+    && args.subcommand === 'init'
+    && !args.initNonInteractive
+    && await initConfigFileContainsNonObjectJson(args.config ?? paths.configFile)
+  ) {
+    config = initFallbackConfig(args);
+    configLoadFallback = true;
+  }
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
 
@@ -908,7 +969,7 @@ export async function main(): Promise<void> {
   }
 
   if (args.verbose) {
-    printLine('Config:', JSON.stringify(config, null, 2));
+    printLine('Config:', JSON.stringify(redactLogData(config), null, 2));
   }
 
   if (resumeTarget) {
@@ -953,6 +1014,7 @@ export async function main(): Promise<void> {
       await handleInitCommand({
         args,
         config,
+        configLoadFallback,
         io,
         paths,
         print: printLine,

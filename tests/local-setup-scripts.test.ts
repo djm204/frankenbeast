@@ -313,8 +313,11 @@ describe('local setup scripts', () => {
     expect(readme).toContain('frankenbeast init --verify');
     expect(readme).toContain('review token prompts carefully');
     expect(readme).toContain('frankenbeast init --non-interactive');
+    expect(readme).toContain('If you omit `network.secureBackend`, the config schema and init flow use `local-encrypted`');
+    expect(readme).toContain('`os-keychain` is never selected automatically');
     expect(readme).toContain('Choose the secret backend before the first init run');
     expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
+    expect(readme).toContain('instead of the default encrypted file');
     expect(readme).toContain('{ "network": { "secureBackend": "1password" } }');
     expect(readme).toContain('{ "network": { "secureBackend": "bitwarden" } }');
     expect(readme).toContain('it applies the same `network.secureBackend` choice');
@@ -416,15 +419,36 @@ describe('local setup scripts', () => {
   it('keeps the CLI Beast guide aligned with supported Beast activation providers', () => {
     const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
     const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
+    const providerConfigSource = read('packages/franken-orchestrator/src/providers/provider-config.ts');
 
     expect(runCliBeastGuide).toContain('`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable');
     expect(runCliBeastGuide).toContain('Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build');
     expect(runCliBeastGuide).toContain('http://localhost:11434');
     expect(runCliBeastGuide).toContain('intentionally leaves `OLLAMA_BASE_URL` out');
     expect(runCliBeastGuide).toContain('current provider schema');
+    expect(runCliBeastGuide).toContain('GOOGLE_API_KEY` / `GEMINI_API_KEY` for `gemini-api`');
+    expect(runCliBeastGuide).toContain('anthropic-api');
+    expect(runCliBeastGuide).toContain('openai-api');
+    expect(runCliBeastGuide).toContain('gemini-api');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
+
+    const providerTypesMatch = providerConfigSource.match(/PROVIDER_TYPES = \[([\s\S]*?)\] as const/);
+    expect(providerTypesMatch).not.toBeNull();
+    const providerTypes = providerTypesMatch?.[1] ?? '';
+    for (const providerType of [
+      'claude-cli',
+      'codex-cli',
+      'gemini-cli',
+      'anthropic-api',
+      'openai-api',
+      'gemini-api',
+    ]) {
+      expect(providerTypes).toContain(providerType);
+      expect(runCliBeastGuide).toContain(providerType);
+    }
+    expect(providerTypes).not.toMatch(/ollama/i);
 
     const providersMatch = beastModeSource.match(/SUPPORTED_BEAST_PROVIDERS = new Set\(\[([^\]]+)\]\)/);
     expect(providersMatch).not.toBeNull();

@@ -74,6 +74,9 @@ jobs:
       - name: Workspace dependency hygiene (no wildcard internal deps)
         run: node scripts/check-workspace-deps.mjs
 
+      - name: Dependabot supply-chain guard
+        run: npm run check:dependabot-supply-chain
+
       - name: Run package build and typecheck
         run: npx turbo run build typecheck
 
