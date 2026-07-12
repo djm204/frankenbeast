@@ -206,7 +206,7 @@ on:
       expect(existsSync(WORKFLOW_LINT_PATH)).toBe(true);
       const workflowLint = readFileSync(WORKFLOW_LINT_PATH, 'utf-8');
       expect(workflowLint).toContain('Lint GitHub Actions workflows');
-      expect(workflowLint).toContain('raven-actions/actionlint@v2.1.2');
+      expect(workflowLint).toContain('raven-actions/actionlint@v2.2.0');
       expect(workflowLint).toContain('version: 1.7.12');
       expect(workflowLint).toContain("'.github/workflows/**'");
       expect(content).not.toContain('actions/bin/check-yaml');
