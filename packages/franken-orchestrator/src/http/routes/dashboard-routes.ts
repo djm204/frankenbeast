@@ -53,6 +53,8 @@ function authenticateTicketRequest(c: Context, operatorToken: string): Response 
     origin: c.req.header('origin'),
     requestUrl: c.req.url,
     secFetchSite: c.req.header('sec-fetch-site'),
+    forwardedProto: c.req.header('x-forwarded-proto'),
+    forwardedHost: c.req.header('x-forwarded-host'),
   })) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Cookie operator authentication requires a same-origin request' } }, 403);
   }
