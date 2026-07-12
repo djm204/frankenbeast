@@ -23,6 +23,11 @@
       "env": ["FBEAST_LIVE_BENCH_E2E"]
     },
     "test:integration": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/vitest-*.ts",
+        "$TURBO_ROOT$/packages/*/src/**"
+      ],
       "env": ["INTEGRATION"]
     },
     "test:eval": {

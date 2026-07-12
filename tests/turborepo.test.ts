@@ -69,6 +69,7 @@ describe('Turborepo configuration', () => {
       const turbo = readJson('turbo.json');
       const integrationTask = turbo.tasks?.['test:integration'];
       expect(integrationTask).toBeDefined();
+      expect(integrationTask.inputs).toEqual(turbo.tasks?.test?.inputs);
       expect(integrationTask.env).toContain('INTEGRATION');
     });
 
@@ -160,9 +161,9 @@ describe('Turborepo configuration', () => {
           '--filter=@franken/critique',
           '--filter=@franken/governor',
           '--filter=@franken/observer',
-          '--filter=@franken/orchestrator',
         ]),
       );
+      expect(integrationScript).not.toContain('--filter=@franken/orchestrator');
     });
 
     it('exposes eval suites through an explicit opt-in root script', () => {
