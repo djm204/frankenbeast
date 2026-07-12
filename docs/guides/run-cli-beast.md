@@ -12,7 +12,7 @@ The beast harness is split across two CLIs. This guide covers both.
 ## Prerequisites
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26`
-- For API-backed `frankenbeast` provider registry runs, an API key for at least one supported provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY`
+- For API-backed `frankenbeast` provider registry runs, an API key for at least one supported provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or either `GOOGLE_API_KEY` / `GEMINI_API_KEY` for `gemini-api`
 - For `fbeast mcp beast` preset activation, one of the supported Beast provider paths: `anthropic-api` with `ANTHROPIC_API_KEY`, or an installed/logged-in `claude` / `codex` CLI for `claude-cli` / `codex-cli`
 
 ```bash
