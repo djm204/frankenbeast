@@ -88,7 +88,11 @@ describe('observer Vitest discovery', () => {
         const config = module.default as VitestConfig;
 
         expect(config.test?.include).toEqual(['src/**/*.test.ts']);
-        expect(config.test?.exclude).toEqual(['src/**/*.integration.test.ts', 'src/**/*.eval.test.ts']);
+        expect(config.test?.exclude).toEqual([
+          'src/**/*.integration.test.ts',
+          'src/**/*.eval.test.ts',
+          'src/evals/**/*.test.ts',
+        ]);
       }
     } finally {
       for (const [name, value] of Object.entries(originalEnv)) {
@@ -97,6 +101,35 @@ describe('observer Vitest discovery', () => {
         } else {
           process.env[name] = value;
         }
+      }
+      vi.resetModules();
+    }
+  });
+
+  it('excludes eval-only tests from the default unit suite', async () => {
+    const originalEval = process.env['EVAL'];
+    const originalIntegration = process.env['INTEGRATION'];
+
+    try {
+      delete process.env['EVAL'];
+      delete process.env['INTEGRATION'];
+      vi.resetModules();
+
+      const module = await import('../vitest.config.ts');
+      const config = module.default as VitestConfig;
+
+      expect(config.test?.include).toEqual(['src/**/*.test.ts']);
+      expect(config.test?.exclude).toContain('src/evals/**/*.test.ts');
+    } finally {
+      if (originalEval === undefined) {
+        delete process.env['EVAL'];
+      } else {
+        process.env['EVAL'] = originalEval;
+      }
+      if (originalIntegration === undefined) {
+        delete process.env['INTEGRATION'];
+      } else {
+        process.env['INTEGRATION'] = originalIntegration;
       }
       vi.resetModules();
     }
