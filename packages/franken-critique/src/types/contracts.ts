@@ -153,10 +153,34 @@ export interface LessonCooldownSuppression {
   readonly reason: string;
 }
 
+/** A recurring critical finding observed across more than one task. */
+export interface CrossTaskBlockerPattern {
+  /** Stable key that identifies equivalent blocker findings across tasks. */
+  readonly key: string;
+  /** Evaluator that emitted the repeated blocker finding. */
+  readonly evaluatorName: string;
+  /** Normalized blocker finding text used for cross-task equivalence. */
+  readonly normalizedFinding: string;
+  /** Distinct-task threshold required before the pattern is surfaced. */
+  readonly threshold: number;
+  /** Number of distinct tasks observed for this blocker pattern. */
+  readonly occurrences: number;
+  /** Distinct tasks that have observed this blocker, ordered by first observation. */
+  readonly taskIds: readonly TaskId[];
+  /** First time this blocker pattern was observed. */
+  readonly firstSeenAt: string;
+  /** Most recent time this blocker pattern was observed. */
+  readonly lastSeenAt: string;
+  /** Operator-facing guidance for PM/liveness handoffs. */
+  readonly guidance: string;
+}
+
 /** Summary returned by LessonRecorder.record for PM/liveness consumers. */
 export interface LessonRecordingResult {
   readonly recorded: number;
   readonly suppressedByCooldown: readonly LessonCooldownSuppression[];
+  /** Cross-task blocker patterns discovered while recording this critique result. */
+  readonly minedBlockerPatterns: readonly CrossTaskBlockerPattern[];
 }
 
 /** A lesson learned from a successful critique cycle. */
@@ -176,6 +200,8 @@ export interface CritiqueLesson {
   readonly postPrLessonExtractionTemplate?: PostPrLessonExtractionTemplate;
   /** Cooldown guard that prevents equivalent lessons from being re-recorded until suppressUntil. */
   readonly cooldown?: LessonCooldownMetadata;
+  /** Cross-task blocker patterns associated with this lesson, if any crossed the threshold. */
+  readonly blockerPatterns?: readonly CrossTaskBlockerPattern[];
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

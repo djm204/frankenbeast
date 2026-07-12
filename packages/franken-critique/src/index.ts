@@ -31,6 +31,7 @@ export type {
   LessonExperimentSandbox,
   LessonCooldownMetadata,
   LessonCooldownSuppression,
+  CrossTaskBlockerPattern,
   LessonRecordingResult,
   ReviewerFeedbackLessonEntry,
   ReviewerFeedbackLessonCapture,
@@ -75,7 +76,11 @@ export type { CritiqueErrorOptions } from './errors/index.js';
 export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
 export { LessonRecorder } from './memory/lesson-recorder.js';
-export type { LessonRecorderOptions } from './memory/lesson-recorder.js';
+export type {
+  BlockerPatternObservation,
+  BlockerPatternState,
+  LessonRecorderOptions,
+} from './memory/lesson-recorder.js';
 
 // Evaluators
 export { SafetyEvaluator } from './evaluators/safety.js';

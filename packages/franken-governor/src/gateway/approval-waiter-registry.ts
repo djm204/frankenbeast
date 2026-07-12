@@ -3,6 +3,7 @@ import type { ApprovalResponse } from '../core/types.js';
 interface PendingApproval {
   readonly taskId: string;
   readonly summary: string;
+  readonly hasRealWaiter: boolean;
   resolve: (response: ApprovalResponse) => void;
 }
 
@@ -51,6 +52,7 @@ export class ApprovalWaiterRegistry {
     this.pending.set(requestId, {
       taskId,
       summary,
+      hasRealWaiter: existing?.hasRealWaiter ?? false,
       resolve: existing?.resolve ?? (() => {}),
     });
   }
@@ -60,8 +62,13 @@ export class ApprovalWaiterRegistry {
    * `resolve(requestId, response)` is called for this `requestId`.
    */
   waitFor(requestId: string, taskId: string, summary: string): Promise<ApprovalResponse> {
+    const existing = this.pending.get(requestId);
+    if (existing?.hasRealWaiter) {
+      return Promise.reject(new Error(`Approval waiter already registered for requestId ${requestId}`));
+    }
+
     return new Promise<ApprovalResponse>((resolvePromise) => {
-      this.pending.set(requestId, { taskId, summary, resolve: resolvePromise });
+      this.pending.set(requestId, { taskId, summary, hasRealWaiter: true, resolve: resolvePromise });
     });
   }
 
