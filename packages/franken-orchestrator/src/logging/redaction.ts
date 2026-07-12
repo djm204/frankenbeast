@@ -1,8 +1,8 @@
 const REDACTED = '<redacted>';
 
-const SENSITIVE_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu;
-const ENV_ASSIGNMENT_RE = /\b([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|API_KEY|PRIVATE_KEY|ACCESS_KEY|CLAUDE_SESSION)[A-Z0-9_]*)\s*=\s*([^\s,;]+)/giu;
-const JSON_FIELD_RE = /("[^"]*(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|API_KEY|PRIVATE_KEY|ACCESS_KEY|CLAUDE_SESSION)[^"]*"\s*:\s*")([^"\\]*(?:\\.[^"\\]*)*)"/giu;
+const SENSITIVE_KEY_RE = /(?:^|[_-])(?:SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|COOKIE|BEARER|AUTH|AUTHORIZATION|PROXY[_-]?AUTHORIZATION|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLAUDE[_-]?SESSION)(?:$|[_-])/iu;
+const ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu;
+const JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu;
 
 export function isSensitiveLogKey(key: string): boolean {
   const normalized = key
@@ -14,8 +14,8 @@ export function isSensitiveLogKey(key: string): boolean {
 
 export function redactSensitiveText(text: string): string {
   return text
-    .replace(ENV_ASSIGNMENT_RE, (_match, key: string) => `${key}=${REDACTED}`)
-    .replace(JSON_FIELD_RE, (_match, key: string) => `${key}${REDACTED}"`);
+    .replace(ASSIGNMENT_RE, (match, key: string) => isSensitiveLogKey(key) ? `${key}=${REDACTED}` : match)
+    .replace(JSON_FIELD_RE, (match, prefix: string, key: string) => isSensitiveLogKey(key) ? `${prefix}"${REDACTED}"` : match);
 }
 
 export function redactLogData(value: unknown): unknown {
