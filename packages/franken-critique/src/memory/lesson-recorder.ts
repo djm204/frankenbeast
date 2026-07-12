@@ -66,6 +66,7 @@ export class LessonRecorder {
   private readonly memory: MemoryPort;
   private readonly cooldownMs: number;
   private readonly now: () => string;
+  private readonly cooldownNowMs: () => number;
   private readonly cooldowns = new Map<string, number>();
   private readonly pendingAdmissions = new Map<string, Promise<boolean>>();
 
@@ -84,6 +85,9 @@ export class LessonRecorder {
     this.memory = memory;
     this.cooldownMs = cooldownMs;
     const now = options.now ?? isoNow;
+    this.cooldownNowMs = options.now
+      ? (): number => Date.parse(normalizeTimestamp(options.now!()))
+      : (): number => Date.now();
     this.now = (): string => normalizeTimestamp(now());
   }
 
@@ -115,34 +119,35 @@ export class LessonRecorder {
         let admissionSettled: ((admitted: boolean) => void) | undefined;
         let admissionPromise: Promise<boolean> | undefined;
         if (cooldownKey) {
-          const suppression = this.getCooldownSuppression(lesson, cooldownKey);
-          if (suppression) {
-            recordingResult.suppressedByCooldown.push(suppression);
-            continue;
-          }
-
-          const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
-          if (pendingAdmission) {
-            const admitted = await pendingAdmission;
-            if (admitted) {
-              const postAdmissionSuppression = this.getCooldownSuppression(
-                lesson,
-                cooldownKey,
-              );
-              if (postAdmissionSuppression) {
-                recordingResult.suppressedByCooldown.push(
-                  postAdmissionSuppression,
-                );
-                continue;
-              }
+          let admittedByAnotherCall = false;
+          while (!admittedByAnotherCall) {
+            const suppression = this.getCooldownSuppression(
+              lesson,
+              cooldownKey,
+            );
+            if (suppression) {
+              recordingResult.suppressedByCooldown.push(suppression);
+              admittedByAnotherCall = true;
+              break;
             }
+
+            const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
+            if (pendingAdmission) {
+              await pendingAdmission;
+              continue;
+            }
+
+            if (this.cooldownMs > 0) {
+              admissionPromise = new Promise<boolean>((resolve) => {
+                admissionSettled = resolve;
+              });
+              this.pendingAdmissions.set(cooldownKey, admissionPromise);
+            }
+            break;
           }
 
-          if (this.cooldownMs > 0) {
-            admissionPromise = new Promise<boolean>((resolve) => {
-              admissionSettled = resolve;
-            });
-            this.pendingAdmissions.set(cooldownKey, admissionPromise);
+          if (admittedByAnotherCall) {
+            continue;
           }
         }
 
@@ -199,12 +204,16 @@ export class LessonRecorder {
         );
         const findingMessages = critiqueFindings.map((f) => f.message);
         const recordedAt = this.now();
-        this.pruneExpiredCooldowns(Date.parse(recordedAt));
+        const cooldownBaseMs = this.cooldownNowMs();
+        this.pruneExpiredCooldowns(cooldownBaseMs);
         const cooldownKey = createCooldownKey(
           evalResult.evaluatorName,
           findingMessages,
         );
-        const suppressUntil = addCooldownWindow(recordedAt, this.cooldownMs);
+        const suppressUntil = addCooldownWindow(
+          cooldownBaseMs,
+          this.cooldownMs,
+        );
 
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
@@ -267,8 +276,8 @@ export class LessonRecorder {
       return null;
     }
 
-    const suppressedAt = this.now();
-    const suppressedAtMs = Date.parse(suppressedAt);
+    const suppressedAtMs = this.cooldownNowMs();
+    const suppressedAt = new Date(suppressedAtMs).toISOString();
     const remainingMs = suppressUntilMs - suppressedAtMs;
     if (remainingMs <= 0) {
       this.cooldowns.delete(cooldownKey);
@@ -356,9 +365,10 @@ function createCooldownKey(
   evaluatorName: string,
   findingMessages: readonly string[],
 ): string {
-  const normalizedFindings = JSON.stringify(
-    findingMessages.map((message) => message.trim()).sort(),
-  );
+  const normalizedFindings = JSON.stringify({
+    evaluatorName,
+    findings: findingMessages.map((message) => message.trim()).sort(),
+  });
   return [
     'critique-lesson',
     sanitizeLessonIdPart(evaluatorName),
@@ -375,8 +385,8 @@ function normalizeTimestamp(value: Date | string): string {
   return new Date(parsed).toISOString();
 }
 
-function addCooldownWindow(recordedAt: string, cooldownMs: number): string {
-  const suppressUntilMs = Date.parse(recordedAt) + cooldownMs;
+function addCooldownWindow(baseMs: number, cooldownMs: number): string {
+  const suppressUntilMs = baseMs + cooldownMs;
   if (!Number.isFinite(suppressUntilMs)) {
     throw new RangeError(
       'LessonRecorder cooldownMs produced an invalid suppressUntil timestamp.',

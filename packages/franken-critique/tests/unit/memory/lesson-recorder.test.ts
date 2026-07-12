@@ -508,15 +508,26 @@ describe('LessonRecorder', () => {
     const firstRecord = recorder.record(result, 'first-task');
     await firstPersistenceStarted;
     const secondRecord = recorder.record(result, 'second-task');
+    const thirdRecord = recorder.record(result, 'third-task');
     rejectFirstPersistence(new Error('transient store failure'));
-    const [firstSummary, secondSummary] = await Promise.all([
+    const [firstSummary, secondSummary, thirdSummary] = await Promise.all([
       firstRecord,
       secondRecord,
+      thirdRecord,
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
     expect(firstSummary).toEqual({ recorded: 0, suppressedByCooldown: [] });
     expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(thirdSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [
+        expect.objectContaining({
+          taskId: 'third-task',
+          evaluatorName: 'learning-reviewer',
+        }),
+      ],
+    });
   });
 
   it('keeps multiline finding boundaries distinct in cooldown keys', async () => {
