@@ -137,4 +137,15 @@ describe('Vitest environment flags', () => {
       expect(config).toContain(`'${e2eRoot}/**/*.test.ts'`);
     }
   });
+
+  it('lints every package test tree that Vitest can execute', () => {
+    const packageRoot = resolve(import.meta.dirname, '../..');
+    const packageJson = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const lintScript = packageJson.scripts?.['lint'] ?? '';
+
+    expect(lintScript).toContain('tests/');
+    expect(lintScript).toContain('test/');
+  });
 });
