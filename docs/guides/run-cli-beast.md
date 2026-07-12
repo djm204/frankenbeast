@@ -265,10 +265,17 @@ frankenbeast issues --dry-run              # preview without executing
 frankenbeast network up                    # start configured services
 frankenbeast network up -d                 # detached (daemon mode)
 frankenbeast network status                # show service health and URLs
-frankenbeast network down                  # tear down
+frankenbeast network start chat-server     # start one managed service
+frankenbeast network start all             # start all managed services without changing config
+frankenbeast network stop chat-server      # stop one managed service
+frankenbeast network restart chat-server   # restart one managed service
+frankenbeast network restart all           # restart all managed services
+frankenbeast network down                  # tear down all managed services
 frankenbeast network logs <service|all>    # show service logs
 frankenbeast network config                # inspect operator config
 ```
+
+Use `network up` for the normal bring-up flow that applies the configured network, and `network down` to tear down the managed network. Use `network start`, `network stop`, and `network restart` when you need lifecycle control for a specific managed service such as `chat-server`, or pass `all` to apply the action across managed services.
 
 ---
 
