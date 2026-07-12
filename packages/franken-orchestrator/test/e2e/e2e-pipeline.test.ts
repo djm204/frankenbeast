@@ -32,6 +32,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readVitestFlag } from '../../../../scripts/vitest-env.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -39,7 +40,7 @@ const hasE2eProviderCredentials = (): boolean => Boolean(
   process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY'],
 );
 
-describe.skipIf(!process.env['E2E'] || !hasE2eProviderCredentials())('E2E Pipeline', () => {
+describe.skipIf(!readVitestFlag(process.env, 'E2E') || !hasE2eProviderCredentials())('E2E Pipeline', () => {
   let tmpDir: string;
   const designDoc = resolve(__dirname, 'test-design-doc.md');
   const cliBin = resolve(__dirname, '../../dist/cli/run.js');

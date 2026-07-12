@@ -270,6 +270,15 @@ export function buildInitAction(
   throw new Error(`Unsupported Beast workflow definition: ${definitionId}`);
 }
 
+export function resolveWizardDefinitionId(config: Record<string, unknown>): string {
+  const workflow = config.workflow as Record<string, unknown> | undefined;
+  const workflowType = workflow?.workflowType;
+  if (typeof workflowType !== 'string' || workflowType.trim().length === 0) {
+    throw new Error('Workflow type is required before launching a Beast agent.');
+  }
+  return workflowType.trim();
+}
+
 export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
   const [route, setRoute] = useState<RouteId>(() => routeFromHash(window.location.hash));
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -315,9 +324,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [networkLogsLoading, setNetworkLogsLoading] = useState(false);
   const [networkLogsError, setNetworkLogsError] = useState<string | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const [networkConfigError, setNetworkConfigError] = useState<string | null>(null);
   const networkStatusRequestIdRef = useRef(0);
   const networkStatusSuccessRequestIdRef = useRef(0);
   const networkStatusSettledRequestIdRef = useRef(0);
+  const networkConfigRequestIdRef = useRef(0);
   const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
@@ -395,9 +406,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
           setNetworkError(`Unable to load network status: ${networkErrorMessage(error, 'Request failed.')}`);
         }
       });
+    const configRequestId = ++networkConfigRequestIdRef.current;
     void client.getConfig()
       .then((nextConfig) => {
-        setNetworkConfig(nextConfig);
+        if (configRequestId === networkConfigRequestIdRef.current) {
+          setNetworkConfig(nextConfig);
+        }
       })
       .catch(() => undefined);
   }, [baseUrl]);
@@ -1153,8 +1167,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               setBeastAgentDetail(null);
             }}
             onLaunch={async (config) => {
-              const workflow = config.workflow as Record<string, unknown> | undefined;
-              const definitionId = String(workflow?.workflowType ?? 'martin-loop');
+              const definitionId = resolveWizardDefinitionId(config);
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const launchChatSessionId = selectedSessionId ?? activeSessionId ?? undefined;
               const initAction = buildInitAction(definitionId, config, launchChatSessionId);
@@ -1255,7 +1268,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         ) : route === 'network' ? (
           <NetworkPage
             config={networkConfig}
-            error={networkError}
+            error={networkError ?? networkConfigError}
             logs={networkLogs}
             logsError={networkLogsError}
             logsLoading={networkLogsLoading}
@@ -1281,6 +1294,19 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                   if (statusRequestId === networkStatusRequestIdRef.current) {
                     networkStatusSettledRequestIdRef.current = statusRequestId;
                     setNetworkError(`Unable to refresh network status: ${networkErrorMessage(error, 'Request failed.')}`);
+                  }
+                });
+              const configRequestId = ++networkConfigRequestIdRef.current;
+              void client.getConfig()
+                .then((nextConfig) => {
+                  if (configRequestId === networkConfigRequestIdRef.current) {
+                    setNetworkConfig(nextConfig);
+                    setNetworkConfigError(null);
+                  }
+                })
+                .catch((error: unknown) => {
+                  if (configRequestId === networkConfigRequestIdRef.current) {
+                    setNetworkConfigError(`Unable to refresh network config: ${networkErrorMessage(error, 'Request failed.')}`);
                   }
                 });
               if (!logServiceId) {
@@ -1315,7 +1341,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onSaveConfig={(assignments) => {
               const client = new NetworkApiClient(baseUrl);
               return client.updateConfig(assignments).then((nextConfig) => {
+                networkConfigRequestIdRef.current += 1;
                 setNetworkConfig(nextConfig);
+                setNetworkConfigError(null);
               });
             }}
             onSelectLogService={(serviceId) => {

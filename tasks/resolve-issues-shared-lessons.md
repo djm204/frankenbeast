@@ -1,5 +1,12 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-11 — Vitest config env-flag regression tests
+- For Vitest suite-flag fixes, assert false-like env values (`0`, `false`, `no`, blank) preserve the default unit-test include set in package configs, not just helper return values.
+- In Vitest tests, avoid cache-busting variable dynamic imports such as `import(`../vitest.config.ts?case=${...}`)`: Vite cannot statically analyze them. Use a static config import and reset env/argv around each assertion instead.
+
+## 2026-07-10 — Control-plane JSON parse hardening
+- In control-plane mutation routes, prefer centralized JSON parsing helpers (`parseJsonBody`) and explicit malformed-body tests; this prevents runtime 500s and keeps manager/runtime calls from running on bad input.
+
 ## 2026-07-10 — Codex usage-limit handling in issue-to-PR flow
 - If `@codex review` immediately responds with usage-limit, treat it as a hard blocker for the merge gate and stop extra polling. Resume review only after credits are restored and a fresh trigger can produce a current-head clean response.
 
@@ -23,6 +30,9 @@
 ## 2026-07-10 — Codex usage limits in review loop
 - If `@codex review` immediately returns usage-limit comments, classify the review state as blocked/review unavailable for this round and avoid further triggers. Re-run only after credits/enablement is restored, and prefer a short-lived monitor rather than repeated immediate retries.
 
+## 2026-07-10 — Activity pane runtime event serialization safety
+- Render failures from runtime events should never take down the Activity pane. When an event payload is shown in UI, pass it through a tiny safe formatter before `JSON.stringify` so `BigInt`/circular/toJSON-throwing values render deterministically (or a clear fallback) instead of crashing the chat shell.
+
 ## 2026-07-10 — Observer replay timestamp validation
 - Replay-time timestamp guards should mirror persisted audit-event validation, not just check finite `Date` values. JavaScript accepts parseable malformed values such as impossible dates and date-only strings, so add round-trip ISO instant guards (`new Date(Date.parse(ts)).toISOString() === ts`) before relying on replay durations.
 
@@ -31,7 +41,7 @@
 - Add a dedicated helper in tests when a fire-and-forget integration must assert non-delivery; this keeps suites stable even if internals switch from direct emits to queued microtasks.
 
 ## 2026-07-10 — Parallel planner deadlock guard
-
+- In ParallelPlanner execution, don't allow the "no tasks ready" path to continue silently as success. Keep cycle checks explicit and fail fast with a clear `CyclicDependencyError` (or similar) before running task waves, and add a unit test that proves executor is never called when readiness stalls due to a dependency cycle.
 - When `@codex review` is usage-limited, classify it as a blocker state and do not merge until a new trigger can produce a current-head clean response.
 
 ## 2026-07-10 — ProcessSupervisor runtime error cleanup
@@ -116,3 +126,9 @@
 ## 2026-07-11 — Session-store corruption diagnostics
 - Atomic session writes for private transcripts should create temp files with the final restrictive mode up front, not chmod only after writing; preserve existing destination mode and default new session files to restrictive permissions.
 - Corrupt-session API diagnostics should expose only operator-useful summaries, not local server paths. When project-filtering diagnostics, keep unknown-project corruptions visible so malformed JSON does not disappear silently after quarantine.
+
+## 2026-07-11 — Chunk snapshot restore corrupt-task ambiguity
+- Unscoped chunk-session snapshot restore must fail closed when corrupt task-scoped snapshots could belong to another task for the requested chunk. Normalize encoded task storage keys, keep already-quarantined `*.json.corrupt.*` entries in ambiguity scans, cover generated recovery task IDs (`fix-harden:<chunk>-attempt-*`), and treat opaque task IDs conservatively unless the task key clearly names a different chunk. Parse known generated prefixes (`impl:`, `harden:`, `fix-*`, `cli:`) and compare the extracted chunk exactly; include hyphenated/slash and single-token chunk IDs such as `impl:issue-1`, `impl:define-types`, `impl:issue-10/chunk-1`, and `impl:auth`, but keep opaque namespaced IDs like `task:2` ambiguous and do not let `auth` match `auth-api`.
+
+## 2026-07-11 — Vite Beast proxy documentation examples
+- For docs with copyable foreground service recipes, split long-running services into clearly labeled terminals, quote placeholder env values so Bash does not parse `<...>` as redirection, and repeat server-side token exports in every process that needs to inject Beast proxy auth (daemon, chat-server, and Vite dev server).

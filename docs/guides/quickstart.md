@@ -73,21 +73,30 @@ Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:li
 
 ## 5. Try the orchestrator CLI
 
+The repository root is private and does not publish a root `frankenbeast` binary
+for `npx` to resolve. Link the local workspace CLIs first; the `local:link`
+script builds the packages and links both `@franken/orchestrator` and
+`@franken/mcp-suite` so `frankenbeast`, `franken`, `frkn`, and `fbeast` are on
+your PATH.
+
 ```bash
+# Build and link the local workspace binaries once from the repo root
+npm run local:link
+
 # Show supported commands and flags
-npx frankenbeast --help
+frankenbeast --help
 
 # Interview only — generates a design doc under .fbeast/plans/
-npx frankenbeast interview
+frankenbeast interview
 
 # Plan from an existing design doc
-npx frankenbeast plan --design-doc docs/my-feature-design.md
+frankenbeast plan --design-doc docs/my-feature-design.md
 
 # Execute chunks from .fbeast/plans/ or a supplied plan directory
-npx frankenbeast run --plan-dir .fbeast/plans/my-plan/
+frankenbeast run --plan-dir .fbeast/plans/my-plan/
 
 # Preview GitHub issue triage without executing fixes
-npx frankenbeast issues --repo owner/repo --dry-run
+frankenbeast issues --repo owner/repo --dry-run
 ```
 
 `--dry-run` is an issue-workflow flag; it is not a global CLI dry-run flag.

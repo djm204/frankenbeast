@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import type { SkillManager } from '../../skills/skill-manager.js';
 import { SkillHealthChecker } from '../../skills/skill-health-checker.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
+import { HttpError, parseJsonBody } from '../middleware.js';
 
 function isSkillInstallValidationError(err: unknown): boolean {
   return err instanceof ZodError
@@ -72,7 +73,15 @@ export function createSkillRoutes(deps: {
   });
 
   app.post('/', async (c) => {
-    const body = (await c.req.json()) as Record<string, unknown>;
+    let body: Record<string, unknown>;
+    try {
+      body = (await parseJsonBody(c)) as Record<string, unknown>;
+    } catch (err) {
+      if (err instanceof HttpError && err.statusCode === 400) {
+        return c.json({ error: 'Invalid JSON' }, 400);
+      }
+      throw err;
+    }
 
     try {
       if (body['catalogEntry']) {
@@ -100,7 +109,15 @@ export function createSkillRoutes(deps: {
 
   app.patch('/:name', async (c) => {
     const name = c.req.param('name');
-    const body = (await c.req.json()) as { enabled?: boolean };
+    let body: { enabled?: boolean };
+    try {
+      body = (await parseJsonBody(c)) as { enabled?: boolean };
+    } catch (err) {
+      if (err instanceof HttpError && err.statusCode === 400) {
+        return c.json({ error: 'Invalid JSON' }, 400);
+      }
+      throw err;
+    }
 
     try {
       if (body.enabled === true) {
@@ -139,7 +156,15 @@ export function createSkillRoutes(deps: {
 
   app.put('/:name/context', async (c) => {
     const name = c.req.param('name');
-    const body = (await c.req.json()) as { content: string };
+    let body: { content: string };
+    try {
+      body = (await parseJsonBody(c)) as { content: string };
+    } catch (err) {
+      if (err instanceof HttpError && err.statusCode === 400) {
+        return c.json({ error: 'Invalid JSON' }, 400);
+      }
+      throw err;
+    }
     try {
       deps.skillManager.writeContext(name, body.content);
       return c.json({ updated: true });

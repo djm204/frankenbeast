@@ -56,6 +56,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [pendingFocusEventId, setPendingFocusEventId] = useState<string | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
   const detailTriggerEventIdRef = useRef<string | null>(null);
+  const activeDetailEventIdRef = useRef<string | null>(null);
   const detailRequestSeqRef = useRef(0);
   const deferDetailFocusUntilEventsLoadRef = useRef(false);
   const sawDeferredEventsLoadRef = useRef(false);
@@ -173,27 +174,33 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   async function openDetail(event: AnalyticsEvent, trigger?: HTMLElement) {
     detailTriggerRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     detailTriggerEventIdRef.current = event.id;
+    activeDetailEventIdRef.current = event.id;
     setSelectedEvent(event);
     setHasFullDetail(false);
     await loadEventDetail(event.id);
   }
 
+  function isCurrentDetailRequest(requestSeq: number, eventId: string) {
+    return detailRequestSeqRef.current === requestSeq && activeDetailEventIdRef.current === eventId;
+  }
+
   async function loadEventDetail(eventId: string) {
     const requestSeq = detailRequestSeqRef.current + 1;
     detailRequestSeqRef.current = requestSeq;
+    activeDetailEventIdRef.current = eventId;
     setIsDetailLoading(true);
     setDetailError(null);
     try {
       const detail = await client.fetchEventDetail(eventId);
-      if (detailRequestSeqRef.current !== requestSeq) return;
+      if (!isCurrentDetailRequest(requestSeq, eventId)) return;
       setSelectedEvent(detail);
       setHasFullDetail(true);
     } catch (error) {
-      if (detailRequestSeqRef.current !== requestSeq) return;
+      if (!isCurrentDetailRequest(requestSeq, eventId)) return;
       setHasFullDetail(false);
       setDetailError(error instanceof Error ? error.message : 'Unable to load event detail.');
     } finally {
-      if (detailRequestSeqRef.current === requestSeq) {
+      if (isCurrentDetailRequest(requestSeq, eventId)) {
         setIsDetailLoading(false);
       }
     }
@@ -215,6 +222,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   function closeDetail() {
     const triggerEventId = detailTriggerEventIdRef.current;
     detailRequestSeqRef.current += 1;
+    activeDetailEventIdRef.current = null;
     setSelectedEvent(null);
     setIsDetailLoading(false);
     setHasFullDetail(false);

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildInitAction, ChatShell } from './chat-shell';
+import { buildInitAction, ChatShell, resolveWizardDefinitionId } from './chat-shell';
 
 const mocks = vi.hoisted(() => ({
   createAgent: vi.fn(),
@@ -249,6 +249,174 @@ describe('ChatShell route heading', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network status: HTTP 503');
   });
 
+  it('refreshes both network status and config from the Network page', async () => {
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'refreshed-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+    expect(screen.getByDisplayValue('initial-model')).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(2));
+    expect(screen.getByDisplayValue('refreshed-model')).toBeDefined();
+  });
+
+  it('ignores stale config refresh responses after a newer refresh succeeds', async () => {
+    let resolveStaleConfig!: (value: unknown) => void;
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStaleConfig = resolve; }))
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'newer-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(screen.getByDisplayValue('newer-model')).toBeDefined());
+    resolveStaleConfig({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'stale-model', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
+
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(3));
+    expect(screen.getByDisplayValue('newer-model')).toBeDefined();
+    expect(screen.queryByDisplayValue('stale-model')).toBeNull();
+  });
+
+  it('surfaces failed config refreshes from the Network page', async () => {
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockRejectedValueOnce(new Error('HTTP 503'));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network config: HTTP 503');
+  });
+
+  it('keeps config refresh failures visible after status refresh succeeds', async () => {
+    let resolveStatus!: (value: unknown) => void;
+    networkApiMocks.getStatus
+      .mockResolvedValueOnce({ mode: 'secure', secureBackend: 'local-encrypted', services: [] })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStatus = resolve; }));
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockRejectedValueOnce(new Error('HTTP 503'));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to refresh network config: HTTP 503');
+
+    resolveStatus({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+
+    await waitFor(() => expect(networkApiMocks.getStatus).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('alert').textContent).toContain('Unable to refresh network config: HTTP 503');
+  });
+
+  it('prevents stale config refreshes from overwriting a saved config response', async () => {
+    let resolveStaleConfig!: (value: unknown) => void;
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStaleConfig = resolve; }));
+    networkApiMocks.updateConfig.mockResolvedValue({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'saved-model', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'saved-model' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
+
+    await waitFor(() => expect(screen.getByDisplayValue('saved-model')).toBeDefined());
+    resolveStaleConfig({
+      network: { mode: 'secure', secureBackend: 'local-encrypted' },
+      chat: { model: 'stale-model', enabled: true, host: '127.0.0.1', port: 3737 },
+    });
+
+    expect(screen.getByDisplayValue('saved-model')).toBeDefined();
+    expect(screen.queryByDisplayValue('stale-model')).toBeNull();
+  });
+
+  it('applies save responses even when a newer manual refresh resolves first', async () => {
+    let resolveSave!: (value: unknown) => void;
+    let resolveRefresh!: (value: unknown) => void;
+    networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
+    networkApiMocks.getConfig
+      .mockResolvedValueOnce({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
+    networkApiMocks.updateConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+
+    render(<ChatShell baseUrl="http://localhost:3737" projectId="default" version="0.2.1" />);
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Chat model'), { target: { value: 'saved-model' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save config' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(networkApiMocks.getConfig).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolveRefresh({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'initial-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+    });
+
+    await act(async () => {
+      resolveSave({
+        network: { mode: 'secure', secureBackend: 'local-encrypted' },
+        chat: { model: 'saved-model', enabled: true, host: '127.0.0.1', port: 3737 },
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('Saved network config changes.')).toBeTruthy());
+    expect(screen.getByDisplayValue('saved-model')).toBeDefined();
+    expect(screen.queryByDisplayValue('initial-model')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Save config' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('ignores stale refresh failures after a newer network refresh succeeds', async () => {
     let rejectStaleRefresh!: (error: Error) => void;
     networkApiMocks.getStatus
@@ -406,5 +574,11 @@ describe('ChatShell route heading', () => {
       }));
     }
 
+  });
+
+  it('rejects Create Agent wizard launch configs without an explicit workflow type', () => {
+    expect(() => resolveWizardDefinitionId({})).toThrow('Workflow type is required before launching a Beast agent.');
+    expect(() => resolveWizardDefinitionId({ workflow: { workflowType: '   ' } })).toThrow('Workflow type is required before launching a Beast agent.');
+    expect(resolveWizardDefinitionId({ workflow: { workflowType: ' martin-loop ' } })).toBe('martin-loop');
   });
 });

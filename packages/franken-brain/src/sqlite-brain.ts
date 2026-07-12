@@ -368,6 +368,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
 const SQLITE_VARIABLE_LIMIT = 999;
 const RECALL_VARIABLES_PER_KEYWORD = 4;
+const CORRUPT_JSON_SCAN_BATCH_SIZE = 100;
 const RECALL_LIMIT_VARIABLES = 1;
 const MAX_RECALL_KEYWORDS_PER_QUERY = Math.floor(
   (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) / RECALL_VARIABLES_PER_KEYWORD,
@@ -412,7 +413,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
 
     if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
-      return this.recallKeywordChunk(keywords, limit).map(row => rowToEvent(row));
+      return collectRowsToEvents(
+        (batchLimit, offset) => this.recallKeywordChunk(keywords, batchLimit, offset),
+        limit,
+      );
     }
 
     const rowsById = new Map<number, EpisodicRow & { relevance_score: number }>();
@@ -433,12 +437,13 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       || b.id - a.id,
     );
 
-    return (limit < 0 ? sortedRows : sortedRows.slice(0, limit)).map(rowToEvent);
+    return rowsToEvents(sortedRows, limit);
   }
 
   private recallKeywordChunk(
     keywords: string[],
     limit?: number,
+    offset = 0,
   ): Array<EpisodicRow & { relevance_score: number }> {
     // Build scoring SQL: count keyword matches across summary + details
     const scoringCases = keywords.map(() =>
@@ -454,7 +459,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       FROM episodic_events
       WHERE ${whereClauses}
       ORDER BY relevance_score DESC, created_at DESC
-      ${limit === undefined ? '' : 'LIMIT ?'}
+      ${limit === undefined ? '' : 'LIMIT ? OFFSET ?'}
     `;
 
     const likeParams = keywords.flatMap(k => {
@@ -463,26 +468,30 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     });
     const allParams = limit === undefined
       ? [...likeParams, ...likeParams]
-      : [...likeParams, ...likeParams, limit];
+      : [...likeParams, ...likeParams, limit, offset];
 
     return this.db.prepare(sql).all(...allParams) as Array<EpisodicRow & { relevance_score: number }>;
   }
 
   recentFailures(n = 10): EpisodicEvent[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM episodic_events WHERE type = 'failure'
-         ORDER BY created_at DESC LIMIT ?`,
-      )
-      .all(n) as EpisodicRow[];
-    return rows.map(rowToEvent);
+    const stmt = this.db.prepare(
+      `SELECT * FROM episodic_events WHERE type = 'failure'
+       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    );
+    return collectRowsToEvents(
+      (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
+      n,
+    );
   }
 
   recent(n = 10): EpisodicEvent[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ?`)
-      .all(n) as EpisodicRow[];
-    return rows.map(rowToEvent);
+    const stmt = this.db.prepare(
+      `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    );
+    return collectRowsToEvents(
+      (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
+      n,
+    );
   }
 
   count(): number {
@@ -523,11 +532,19 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 
   lastCheckpoint(): ExecutionState | null {
-    const row = this.db
-      .prepare(`SELECT * FROM checkpoints ORDER BY id DESC LIMIT 1`)
-      .get() as CheckpointRow | undefined;
-    if (!row) return null;
-    return JSON.parse(row.state) as ExecutionState;
+    const stmt = this.db.prepare(`SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`);
+    for (let offset = 0; ; offset += CORRUPT_JSON_SCAN_BATCH_SIZE) {
+      const rows = stmt.all(CORRUPT_JSON_SCAN_BATCH_SIZE, offset) as CheckpointRow[];
+      for (const row of rows) {
+        const state = parseCheckpointState(row);
+        if (state !== null) {
+          return state;
+        }
+      }
+      if (rows.length < CORRUPT_JSON_SCAN_BATCH_SIZE) {
+        return null;
+      }
+    }
   }
 
   listCheckpoints(): Array<{ id: string; timestamp: string }> {
@@ -702,7 +719,66 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
   }
 }
 
-function rowToEvent(row: EpisodicRow): EpisodicEvent {
+function rowsToEvents(rows: EpisodicRow[], limit: number): EpisodicEvent[] {
+  if (limit === 0) {
+    return [];
+  }
+
+  const events: EpisodicEvent[] = [];
+  for (const row of rows) {
+    const event = rowToEvent(row);
+    if (event) {
+      events.push(event);
+      if (limit >= 0 && events.length >= limit) {
+        break;
+      }
+    }
+  }
+  return events;
+}
+
+function collectRowsToEvents(
+  fetchRows: (limit: number, offset: number) => EpisodicRow[],
+  limit: number,
+): EpisodicEvent[] {
+  if (limit === 0) {
+    return [];
+  }
+
+  const events: EpisodicEvent[] = [];
+  const target = limit < 0 ? Number.POSITIVE_INFINITY : limit;
+  const batchSize = limit < 0
+    ? CORRUPT_JSON_SCAN_BATCH_SIZE
+    : Math.max(CORRUPT_JSON_SCAN_BATCH_SIZE, limit * 2);
+
+  for (let offset = 0; events.length < target; offset += batchSize) {
+    const rows = fetchRows(batchSize, offset);
+    for (const row of rows) {
+      const event = rowToEvent(row);
+      if (event) {
+        events.push(event);
+        if (events.length >= target) {
+          break;
+        }
+      }
+    }
+    if (rows.length < batchSize) {
+      break;
+    }
+  }
+
+  return events;
+}
+
+function parseCheckpointState(row: CheckpointRow): ExecutionState | null {
+  try {
+    return JSON.parse(row.state) as ExecutionState;
+  } catch {
+    return null;
+  }
+}
+
+function rowToEvent(row: EpisodicRow): EpisodicEvent | null {
   const event: EpisodicEvent = {
     id: row.id,
     type: row.type as EpisodicEventType,
@@ -710,6 +786,12 @@ function rowToEvent(row: EpisodicRow): EpisodicEvent {
     createdAt: row.created_at,
   };
   if (row.step) event.step = row.step;
-  if (row.details) event.details = JSON.parse(row.details) as Record<string, unknown>;
+  if (row.details) {
+    try {
+      event.details = JSON.parse(row.details) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
   return event;
 }

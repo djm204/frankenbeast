@@ -30,6 +30,17 @@ const CATALOG: BeastCatalogEntry[] = [
       { key: 'outputDir', prompt: 'Where should the chunk plan be written?', kind: 'directory', required: true },
     ],
   },
+  {
+    id: 'martin-loop',
+    label: 'Martin Loop',
+    description: 'Run MartinLoop against an existing chunk directory',
+    executionModeDefault: 'process',
+    interviewPrompts: [
+      { key: 'provider', prompt: 'Which provider should run the martin loop?', kind: 'string', required: true, options: ['claude', 'codex'] },
+      { key: 'objective', prompt: 'What should the martin loop accomplish?', kind: 'string', required: true },
+      { key: 'chunkDirectory', prompt: 'Which chunk directory should MartinLoop execute from?', kind: 'directory', required: true },
+    ],
+  },
 ];
 
 function renderWizard(props: WizardDialogTestProps = {}) {
@@ -100,11 +111,36 @@ describe('WizardDialog validation', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle form mode' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Launch Agent' }));
+    const launchButton = screen.getByRole('button', { name: 'Launch Agent' });
+    expect(launchButton).toHaveProperty('disabled', true);
+    fireEvent.click(launchButton);
 
     expect(onLaunch).not.toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toContain('Identity: Agent name is required');
     expect(screen.getByRole('alert').textContent).toContain('Workflow: Workflow type is required');
+  });
+
+  it('keeps review-step launch disabled when martin-loop is missing its required chunk directory', () => {
+    const onLaunch = vi.fn();
+    const store = useBeastStore.getState();
+    store.setStepValues(0, { name: 'Martin Agent' });
+    store.setStepValues(1, {
+      workflowType: 'martin-loop',
+      provider: 'codex',
+      objective: 'Implement chunks',
+    });
+    store.markStepCompleted(6);
+    store.setWizardStep(7);
+
+    renderWizard({ onLaunch });
+
+    const launchButton = screen.getByRole('button', { name: 'Launch Agent' });
+    expect(launchButton).toHaveProperty('disabled', true);
+    fireEvent.click(launchButton);
+
+    expect(onLaunch).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Workflow: Chunk directory path is required');
+    expect(screen.getByText('Required workflow fields are missing:')).toBeTruthy();
   });
 
   it('includes the review summary in form view before the launch action', () => {

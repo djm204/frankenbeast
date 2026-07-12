@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.16...franken-critique-v0.7.0) (2026-07-11)
+
+
+### Features
+
+* **learning:** add lesson-to-test traceability map ([#1872](https://github.com/djm204/frankenbeast/issues/1872)) ([e9b099e](https://github.com/djm204/frankenbeast/commit/e9b099e2c69bb8b01c39afff5f241b658729f244))
+* **learning:** add post-pr lesson extraction template ([#1889](https://github.com/djm204/frankenbeast/issues/1889)) ([73f17c0](https://github.com/djm204/frankenbeast/commit/73f17c03e9f208d294887d507ce677f987aac36e))
+* **learning:** capture reviewer-feedback lessons ([#1887](https://github.com/djm204/frankenbeast/issues/1887)) ([0c4af52](https://github.com/djm204/frankenbeast/commit/0c4af52c70259714a8426bcbeacfbd556635bb2c))
+* **learning:** sandbox new critique lessons ([#1882](https://github.com/djm204/frankenbeast/issues/1882)) ([7fd71d2](https://github.com/djm204/frankenbeast/commit/7fd71d25aae4cc2d798ddb04c4b198b93cf6c224))
+
+## [0.6.16](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.15...franken-critique-v0.6.16) (2026-07-11)
+
+
+### Bug Fixes
+
+* **critique:** count inline unresolved comments ([6a6dce3](https://github.com/djm204/frankenbeast/commit/6a6dce38c46766891899697a3e40b24547b3142a)), closes [#1070](https://github.com/djm204/frankenbeast/issues/1070)
+* **critique:** handle late typed complexity edge cases ([edbb9b7](https://github.com/djm204/frankenbeast/commit/edbb9b7fc392aa7da7d1d74ff615eb204b9e501a))
+* **critique:** include typed functions in complexity checks ([#1406](https://github.com/djm204/frankenbeast/issues/1406)) ([6499f28](https://github.com/djm204/frankenbeast/commit/6499f28ada0f18d76ce988baa7c54e53c8e14715))
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **critique:** add package typecheck script ([#1517](https://github.com/djm204/frankenbeast/issues/1517)) ([7df9f94](https://github.com/djm204/frankenbeast/commit/7df9f94bd576f627b2f02c901d021c947781b1be)), closes [#943](https://github.com/djm204/frankenbeast/issues/943)
+
+
+### Documentation
+
+* **critique:** add package README ([7f4cb3e](https://github.com/djm204/frankenbeast/commit/7f4cb3efb49241a60e3bc274ef21b78e6dede04c)), closes [#955](https://github.com/djm204/frankenbeast/issues/955)
+* **ramp-up:** refresh package safety status ([ee13582](https://github.com/djm204/frankenbeast/commit/ee135822f14bbc89212e2c5cca246cb0ef71206b)), closes [#949](https://github.com/djm204/frankenbeast/issues/949)
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* **critique:** add real worker-timeout regression ([#1496](https://github.com/djm204/frankenbeast/issues/1496)) ([45bccd4](https://github.com/djm204/frankenbeast/commit/45bccd472d91696a8b096b6c849f2a46746d8f41))
+* **critique:** cover postfix division and nested function bodies ([#1546](https://github.com/djm204/frankenbeast/issues/1546)) ([f957720](https://github.com/djm204/frankenbeast/commit/f95772030c65d81f5ee4ef32535a598b65c12d93))
+* **critique:** cover SafetyEvaluator worker timeout recovery ([52894bf](https://github.com/djm204/frankenbeast/commit/52894bf99410e367466441f3ab52bc158ad1cde6)), closes [#1127](https://github.com/djm204/frankenbeast/issues/1127)
+* wire brain critique integration suites ([#1463](https://github.com/djm204/frankenbeast/issues/1463)) ([38c92ca](https://github.com/djm204/frankenbeast/commit/38c92ca67b652229954bf25b641e2f7206e894e8)), closes [#973](https://github.com/djm204/frankenbeast/issues/973)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
 ## [0.6.15](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.14...franken-critique-v0.6.15) (2026-07-10)
 
 

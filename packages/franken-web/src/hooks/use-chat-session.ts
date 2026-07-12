@@ -419,6 +419,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
     clearTimeout(pending.timeoutId);
     pendingSendsRef.current.delete(messageId);
+    setShowTypingIndicator(false);
     setMessages((current) => markMessageFailed(current, messageId, error.message, canRetry));
     setStatus('error');
     pending.reject(error);
@@ -615,6 +616,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       } catch {
         // Ignore close failures; the protocol-error banner already tells the user how to recover.
       }
+      setShowTypingIndicator(false);
       setStatus('error');
       setConnectionStatus('error');
       failAllPendingSends(new Error(message));
@@ -780,6 +782,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           if (payload.code === 'APPROVAL_PENDING') {
             void refreshSession();
           }
+          setShowTypingIndicator(false);
           updateApprovalResolving(false);
           setApprovalError(payload.message);
           setActivity((current) => [
@@ -818,6 +821,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         return;
       }
       const hadPendingSends = pendingSendsRef.current.size > 0;
+      setShowTypingIndicator(false);
       failAllPendingSends(new Error('WebSocket send failed before the server acknowledged the message.'));
       if (approvalResolvingRef.current) {
         updateApprovalResolving(false);
@@ -848,6 +852,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         return;
       }
       socketRef.current = null;
+      setShowTypingIndicator(false);
       failAllPendingSends(new Error('Connection closed before the server acknowledged the message.'));
       if (approvalResolvingRef.current) {
         updateApprovalResolving(false);
@@ -978,6 +983,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           'Retry last message',
           'message_send_failed',
         ));
+        setShowTypingIndicator(false);
         setStatus('error');
         throw sendError;
       }

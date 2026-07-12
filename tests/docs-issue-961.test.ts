@@ -46,3 +46,18 @@ describe('issue #961 local CLI linking docs', () => {
     }
   });
 });
+
+describe('issue #1022 quickstart orchestrator CLI docs', () => {
+  it('links local workspace binaries before invoking frankenbeast', () => {
+    const quickstart = readText('docs/guides/quickstart.md');
+
+    expect(quickstart).toContain('The repository root is private');
+    expect(quickstart).toContain('npm run local:link');
+    expect(quickstart.indexOf('npm run local:link')).toBeLessThan(quickstart.indexOf('frankenbeast --help'));
+    expect(quickstart).toContain('frankenbeast interview');
+    expect(quickstart).toContain('frankenbeast plan --design-doc docs/my-feature-design.md');
+    expect(quickstart).toContain('frankenbeast run --plan-dir .fbeast/plans/my-plan/');
+    expect(quickstart).toContain('frankenbeast issues --repo owner/repo --dry-run');
+    expect(quickstart).not.toContain('npx frankenbeast');
+  });
+});

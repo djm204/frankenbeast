@@ -587,6 +587,7 @@ button {
 
 .message-card__content {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message-card__error {

@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  ROOT,
+  getWorkspacePackageManifestPaths,
+  getWorkspacePackages,
+  readJson,
+} from "./helpers/workspaces.js";
 
-const ROOT = join(import.meta.dirname, "..");
-const readJson = (rel: string) =>
-  JSON.parse(readFileSync(join(ROOT, rel), "utf8"));
 const readPkg = readJson;
 
 const majorMinorPatch = (version: string) => {
@@ -31,6 +34,22 @@ describe("npm workspaces configuration", () => {
 
     it("has workspaces field set to packages/*", () => {
       expect(rootPkg.workspaces).toEqual(["packages/*"]);
+    });
+
+    it("derives the complete package inventory from the workspace glob", () => {
+      const packageDirs = readdirSync(join(ROOT, "packages"), {
+        withFileTypes: true,
+      })
+        .filter((entry) => entry.isDirectory())
+        .filter((entry) =>
+          existsSync(join(ROOT, "packages", entry.name, "package.json")),
+        )
+        .map((entry) => `packages/${entry.name}`)
+        .sort();
+
+      expect(
+        getWorkspacePackages().map((workspacePackage) => workspacePackage.dir),
+      ).toEqual(packageDirs);
     });
 
     it("remains private (required for workspaces)", () => {
@@ -95,11 +114,7 @@ describe("npm workspaces configuration", () => {
   });
 
   describe("workspace coverage scripts", () => {
-    const packageJsonPaths = readdirSync(join(ROOT, "packages"), {
-      withFileTypes: true,
-    })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `packages/${entry.name}/package.json`);
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
 
     it("registers a Turbo coverage task for package workspaces", () => {
       const turbo = readJson("turbo.json");
@@ -127,9 +142,7 @@ describe("npm workspaces configuration", () => {
     const minimumVitest = "4.1.9";
     const packageJsonPaths = [
       "package.json",
-      ...readdirSync(join(ROOT, "packages"), { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => `packages/${entry.name}/package.json`),
+      ...getWorkspacePackageManifestPaths(),
     ];
     const dependencySections = [
       "dependencies",
@@ -367,11 +380,7 @@ describe("npm workspaces configuration", () => {
   });
 
   describe("cross-module dependencies use coherent internal versions", () => {
-    const packageJsonPaths = readdirSync(join(ROOT, "packages"), {
-      withFileTypes: true,
-    })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `packages/${entry.name}/package.json`);
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
     const packageManifests = packageJsonPaths.map((path) => ({
       path,
       pkg: readPkg(path),
@@ -405,11 +414,7 @@ describe("npm workspaces configuration", () => {
   });
 
   describe("publishable package manifests", () => {
-    const packageJsonPaths = readdirSync(join(ROOT, "packages"), {
-      withFileTypes: true,
-    })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `packages/${entry.name}/package.json`);
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
 
     it("declares the shared MIT license on every publishable package and the top-level README", () => {
       for (const path of packageJsonPaths) {
@@ -482,11 +487,7 @@ describe("npm workspaces configuration", () => {
   });
 
   describe("workspace lint coverage", () => {
-    const packageJsonPaths = readdirSync(join(ROOT, "packages"), {
-      withFileTypes: true,
-    })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `packages/${entry.name}/package.json`);
+    const packageJsonPaths = getWorkspacePackageManifestPaths();
 
     it("gives every workspace an explicit lint script and ESLint config", () => {
       for (const path of packageJsonPaths) {
@@ -529,63 +530,95 @@ describe("npm workspaces configuration", () => {
       );
 
       expect(auditScript).toContain("fileURLToPath");
-      expect(auditScript).toContain("fileURLToPath(new URL('..', import.meta.url))");
-      expect(auditScript).not.toContain("new URL('..', import.meta.url).pathname");
+      expect(auditScript).toContain(
+        "fileURLToPath(new URL('..', import.meta.url))",
+      );
+      expect(auditScript).not.toContain(
+        "new URL('..', import.meta.url).pathname",
+      );
     });
   });
 
   describe("no file: dependencies remain anywhere", () => {
-    const allPackages = readdirSync(join(ROOT, "packages"), {
-      withFileTypes: true,
-    })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
+    const dependencySections = [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ] as const;
+    type DependencySection = (typeof dependencySections)[number];
+    type DependencyEntry = {
+      section: DependencySection;
+      name: string;
+      version: string;
+    };
+    const collectDependencyEntries = (
+      pkg: Partial<Record<DependencySection, Record<string, string>>>,
+    ): DependencyEntry[] =>
+      dependencySections.flatMap((section) =>
+        Object.entries(pkg[section] ?? {}).map(([name, version]) => ({
+          section,
+          name,
+          version,
+        })),
+      );
 
-    for (const module of allPackages) {
-      it(`packages/${module}/package.json has no file: dependencies`, () => {
-        const pkg = readPkg(`packages/${module}/package.json`);
-        const allDeps = {
-          ...pkg.dependencies,
-          ...pkg.devDependencies,
-        };
-        for (const [name, version] of Object.entries(allDeps)) {
-          expect(version, `${name} in ${module} uses file: path`).not.toMatch(
-            /^file:/,
-          );
+    const workspacePackages = getWorkspacePackages();
+
+    it("scans every dependency bucket that can carry package specifiers", () => {
+      const entries = collectDependencyEntries({
+        dependencies: { regular: "^1.0.0" },
+        devDependencies: { dev: "^1.0.0" },
+        optionalDependencies: { optional: "file:../optional" },
+        peerDependencies: { peer: "file:../peer" },
+      });
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          {
+            section: "optionalDependencies",
+            name: "optional",
+            version: "file:../optional",
+          },
+          {
+            section: "peerDependencies",
+            name: "peer",
+            version: "file:../peer",
+          },
+        ]),
+      );
+    });
+
+    for (const workspacePackage of workspacePackages) {
+      it(`${workspacePackage.manifestPath} has no file: dependencies`, () => {
+        const pkg = readPkg(workspacePackage.manifestPath);
+        for (const { section, name, version } of collectDependencyEntries(
+          pkg,
+        )) {
+          expect(
+            version,
+            `${name} in ${workspacePackage.packageDirName} ${section} uses file: path`,
+          ).not.toMatch(/^file:/);
         }
       });
     }
   });
 
   describe("canonical package namespace strategy", () => {
-    const expectedNames: Record<string, string> = {
-      "franken-brain": "@franken/brain",
-      "franken-critique": "@franken/critique",
-      "franken-governor": "@franken/governor",
-      "franken-mcp-suite": "@franken/mcp-suite",
-      "franken-observer": "@franken/observer",
-      "franken-orchestrator": "@franken/orchestrator",
-      "franken-planner": "@franken/planner",
-      "franken-types": "@franken/types",
-      "franken-web": "@franken/web",
-      "live-bench": "@franken/live-bench",
-    };
+    const workspacePackages = getWorkspacePackages();
+    const canonicalNameForPackageDir = (dir: string) =>
+      `@franken/${dir.replace(/^franken-/, "")}`;
 
-    for (const [dir, name] of Object.entries(expectedNames)) {
-      it(`packages/${dir}/package.json uses canonical name "${name}"`, () => {
-        const pkg = readPkg(`packages/${dir}/package.json`);
-        expect(pkg.name).toBe(name);
+    for (const workspacePackage of workspacePackages) {
+      it(`${workspacePackage.manifestPath} uses the canonical @franken package name`, () => {
+        expect(workspacePackage.name).toBe(
+          canonicalNameForPackageDir(workspacePackage.packageDirName),
+        );
       });
     }
 
     it("keeps every publishable package under the @franken npm scope", () => {
-      const allPackageJsonPaths = readdirSync(join(ROOT, "packages"), {
-        withFileTypes: true,
-      })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => `packages/${entry.name}/package.json`);
-
-      for (const path of allPackageJsonPaths) {
+      for (const path of getWorkspacePackageManifestPaths()) {
         const pkg = readPkg(path);
         if (pkg.private === true) continue;
         expect(
