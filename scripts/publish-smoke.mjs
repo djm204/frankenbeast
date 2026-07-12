@@ -24,7 +24,7 @@
  * Run: node scripts/publish-smoke.mjs
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,11 @@ export function runWithTempCleanup(getDirs, action) {
   } finally {
     cleanupTempDirs(getDirs());
   }
+}
+
+export function isDirectRun(metaUrl, argvPath = process.argv[1], realpath = realpathSync) {
+  if (!argvPath) return false;
+  return fileURLToPath(metaUrl) === realpath(argvPath);
 }
 
 // Packages we install + run. web is a browser SPA (no runtime bin) so it is
@@ -169,6 +174,6 @@ export function main() {
   log('all publish smoke checks passed ✓');
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isDirectRun(import.meta.url)) {
   main();
 }
