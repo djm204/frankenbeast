@@ -37,6 +37,30 @@ describe('wizard validation', () => {
     expect(errors).toEqual({});
   });
 
+  it('rejects unsafe design-interview output paths before launch', () => {
+    const errors = validateWizardStep(1, {
+      1: { workflowType: 'design-interview', goal: 'Draft billing design', outputPath: '../secret.md' },
+    });
+
+    expect(errors.outputPath).toBe('Path must be a repo-relative path without traversal.');
+  });
+
+  it('rejects unsafe custom catalog file prompts by kind', () => {
+    const errors = validateWizardStep(1, {
+      1: { workflowType: 'custom-beast', artifactFile: '../secret.md' },
+    }, [{
+      id: 'custom-beast',
+      label: 'Custom Beast',
+      description: 'Custom catalog definition',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'artifactFile', prompt: 'Artifact file?', kind: 'file', required: true },
+      ],
+    }]);
+
+    expect(errors.artifactFile).toBe('Path must be a repo-relative path without traversal.');
+  });
+
   it.each([
     '/tmp/design.md',
     'C:\\tmp\\design.md',

@@ -14,6 +14,51 @@ describe('buildWizardLaunchConfig', () => {
     });
   });
 
+  it('normalizes path-style fields before launch submission', () => {
+    expect(buildWizardLaunchConfig({
+      1: {
+        workflowType: 'chunk-plan',
+        designDocPath: 'docs//./design.md',
+        outputDir: 'tasks/./chunks',
+      },
+    })).toMatchObject({
+      workflow: {
+        designDocPath: 'docs/design.md',
+        outputDir: 'tasks/chunks',
+      },
+      designDocPath: 'docs/design.md',
+      outputDir: 'tasks/chunks',
+    });
+  });
+
+  it('normalizes custom catalog path prompts by prompt kind', () => {
+    const catalog: BeastCatalogEntry[] = [{
+      id: 'custom-path-beast',
+      label: 'Custom Path Beast',
+      description: 'Served by backend catalog',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'artifactFile', prompt: 'Artifact file?', kind: 'file', required: true },
+      ],
+    }];
+
+    expect(buildWizardLaunchConfig({
+      1: { workflowType: 'custom-path-beast', artifactFile: 'docs//./artifact.md' },
+    }, catalog)).toMatchObject({
+      artifactFile: 'docs/artifact.md',
+    });
+  });
+
+  it('rejects unsafe path-style fields before launch submission', () => {
+    expect(() => buildWizardLaunchConfig({
+      1: { workflowType: 'design-interview', goal: 'Draft a billing design', outputPath: '../secret.md' },
+    })).toThrow(/outputPath: Path traversal is not allowed/i);
+
+    expect(() => buildWizardLaunchConfig({
+      1: { workflowType: 'chunk-plan', designDocPath: '/etc/passwd', outputDir: 'tasks/chunks' },
+    })).toThrow(/designDocPath must be a repo-relative path without traversal/i);
+  });
+
   it('frontloads prompt text and attached files into run config promptConfig', () => {
     const config = buildWizardLaunchConfig({
       1: { workflowType: 'design-interview', goal: 'Draft a billing design', outputPath: 'docs/billing.md' },
