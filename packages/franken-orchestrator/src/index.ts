@@ -153,8 +153,11 @@ export {
   deserializeContext,
   saveContext,
   loadContext,
+  ContextSnapshotSizeError,
+  ContextSnapshotFileTypeError,
+  DEFAULT_CONTEXT_SNAPSHOT_MAX_BYTES,
 } from './resilience/context-serializer.js';
-export type { ContextSnapshot } from './resilience/context-serializer.js';
+export type { ContextSnapshot, LoadContextOptions } from './resilience/context-serializer.js';
 export { GracefulShutdown } from './resilience/graceful-shutdown.js';
 export type { ShutdownHandler } from './resilience/graceful-shutdown.js';
 export { checkModuleHealth, allHealthy } from './resilience/module-initializer.js';
