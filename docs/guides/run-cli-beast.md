@@ -261,11 +261,17 @@ frankenbeast issues --dry-run              # preview without executing
 
 ## 10. Network services
 
+Use `up` and `down` for the whole configured network lifecycle. Use `start`, `stop`, and `restart` when you want to control one managed service, or pass `all` to apply the action to every service without changing the operator config.
+
 ```bash
 frankenbeast network up                    # start configured services
 frankenbeast network up -d                 # detached (daemon mode)
 frankenbeast network status                # show service health and URLs
-frankenbeast network down                  # tear down
+frankenbeast network start chat-server     # start one managed service
+frankenbeast network stop dashboard-web    # stop one managed service
+frankenbeast network restart beasts-daemon # restart one managed service
+frankenbeast network restart all           # restart every managed service
+frankenbeast network down                  # tear down the managed network
 frankenbeast network logs <service|all>    # show service logs
 frankenbeast network config                # inspect operator config
 ```
