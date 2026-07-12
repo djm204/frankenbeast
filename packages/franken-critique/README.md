@@ -123,6 +123,14 @@ New lessons recorded by `LessonRecorder` also include an `experimentSandbox` obj
 
 Failing iterations without actionable findings, and infrastructure-only evaluator exceptions, do not create sandboxed lessons. This keeps broken evaluator/tooling noise from entering the learning pipeline as experimental guidance.
 
+## Learning cooldown
+
+`LessonRecorder` applies a deterministic cooldown to equivalent critique lessons so repeated reviewer/worker feedback does not churn memory, PM handoffs, or promotion/retirement flows. By default, equivalent lessons are keyed by evaluator name plus the normalized finding messages and suppressed for 24 hours after the first successful record.
+
+Recorded lessons include a `cooldown` object with the key, window, `recordedAt`, `suppressUntil`, and operator guidance. The `record()` call returns a `LessonRecordingResult` containing `recorded` and `suppressedByCooldown`; suppressed entries include the task id, evaluator name, suppression timestamp, remaining milliseconds, and reason so PM/liveness tooling can report the skipped duplicate instead of silently drifting.
+
+Callers that need a different window can construct `new LessonRecorder(memory, { cooldownMs })`; pass `cooldownMs: 0` to disable suppression. The recorder uses an advancing wall-clock by default and only uses the injected `now` callback for tests/replay callers that explicitly pass one. Cooldown state is instance-local unless callers pass a reused `cooldownStore` map in `LessonRecorderOptions`, which lets reviewer rebuilds in the same worker suppress duplicate lessons without leaking state into unrelated tests or pipelines. Recorders that reuse the same store also share in-flight admission reservations, so concurrent rebuilds do not double-persist the same equivalent lesson. Invalid negative or non-finite cooldown windows throw a `RangeError` during construction.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.

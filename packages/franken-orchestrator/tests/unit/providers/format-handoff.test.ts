@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import type { BrainSnapshot } from '@franken/types';
-import { formatHandoff, truncateSnapshot } from '../../../src/providers/format-handoff.js';
+import {
+  assessPmHandoffQuality,
+  formatHandoff,
+  truncateSnapshot,
+} from '../../../src/providers/format-handoff.js';
 
 function makeSnapshot(overrides: Partial<BrainSnapshot> = {}): BrainSnapshot {
   return {
@@ -71,6 +75,183 @@ describe('formatHandoff', () => {
     expect(text).toMatch(/^--- BRAIN STATE HANDOFF ---/);
     expect(text).toMatch(/--- END HANDOFF ---$/);
   });
+
+  it('includes the PM handoff quality rubric with operator guidance', () => {
+    const text = formatHandoff(
+      makeSnapshot({
+        working: {
+          issue: '#1862 add PM handoff quality rubric with goal to improve PM handoffs; out-of-scope: unrelated learning changes',
+          status: 'completed docs and implementation',
+          verification: 'npm test -- --run tests/unit/providers/format-handoff.test.ts passed',
+          blocker: 'needs review before merge PR',
+          artifact: 'branch resolve/issue-1862-feat-learning-add-pm-handoff-quality-rubric',
+          lesson: 'Future workers can use this rubric before promotion',
+        },
+      }),
+    );
+
+    expect(text).toContain('PM rubric: 6/6 (1)');
+    expect(text).toContain('scope: pass');
+    expect(text).toContain('verification: pass');
+    expect(text).toContain('PM guidance: complete');
+  });
+});
+
+describe('assessPmHandoffQuality', () => {
+  it('scores a complete PM handoff with deterministic evidence for every criterion', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {
+          goal: 'Resolve issue #1862 without broadening scope; out-of-scope: unrelated learning changes',
+          status: 'implementation completed with decisions recorded',
+          verificationCommand: 'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts passed',
+          blocker: 'needs review before merge',
+          pr: 'https://github.com/djm204/frankenbeast/pull/9999',
+          retrospective: 'lesson captured for PM handoffs',
+        },
+      }),
+    );
+
+    expect(assessment.score).toBe(1);
+    expect(assessment.passed).toBe(6);
+    expect(assessment.results.every((result) => result.status === 'pass')).toBe(true);
+  });
+
+  it('flags sparse handoffs instead of inventing missing evidence', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {},
+        episodic: [
+          {
+            type: 'observation',
+            summary: 'Agent said hello',
+            createdAt: '2026-03-22T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    expect(assessment.score).toBe(0);
+    expect(assessment.results.map((result) => result.status)).toEqual(
+      Array.from({ length: 6 }, () => 'needs-attention'),
+    );
+    expect(assessment.operatorGuidance).toContain('missing one or more rubric criteria');
+  });
+
+  it('ignores empty placeholder fields when scoring evidence', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {
+          verification: '',
+          blocker: null,
+          pr: undefined,
+          issue: '   ',
+          handoff: { verification: '', blocker: null, nested: { pr: ' ' } },
+          absentSignals: { verification: false, blocker: false, pr: false },
+        },
+        episodic: [
+          {
+            type: 'observation',
+            summary: 'Agent said hello',
+            details: { blocker: null, verification: '' },
+            createdAt: '2026-03-22T00:00:00.000Z',
+          },
+        ],
+        checkpoint: {
+          runId: 'run-1',
+          phase: '2',
+          step: 0,
+          context: { pr: '', verification: null },
+          timestamp: '2026-03-22T00:00:00.000Z',
+        },
+      }),
+    );
+
+    expect(assessment.score).toBe(0.17);
+    expect(assessment.results.find((result) => result.id === 'state')?.status).toBe('pass');
+    expect(
+      assessment.results
+        .filter((result) => result.id !== 'state')
+        .every((result) => result.evidence.length === 0),
+    ).toBe(true);
+  });
+
+  it('counts checkpoint labels as current-state evidence', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {},
+        episodic: [],
+        checkpoint: {
+          runId: 'run-1',
+          phase: 'execution',
+          step: 4,
+          context: {},
+          timestamp: '2026-03-22T00:00:00.000Z',
+        },
+      }),
+    );
+
+    const state = assessment.results.find((result) => result.id === 'state');
+    expect(state?.status).toBe('pass');
+    expect(state?.evidence.join(' ')).toContain('checkpoint: phase=execution');
+  });
+
+  it('accepts plural blocker and next-step headings', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {
+          blockers: 'none',
+          nextSteps: 'run tests',
+        },
+        episodic: [],
+      }),
+    );
+
+    expect(assessment.results.find((result) => result.id === 'blockers')?.status).toBe('pass');
+  });
+
+  it('requires command and outcome signals for verification evidence', () => {
+    const missingOutcome = assessPmHandoffQuality(
+      makeSnapshot({
+        working: { task: 'build login page' },
+        episodic: [],
+      }),
+    );
+    expect(missingOutcome.results.find((result) => result.id === 'verification')?.status).toBe(
+      'needs-attention',
+    );
+
+    const verified = assessPmHandoffQuality(
+      makeSnapshot({
+        working: { verification: 'npm test passed' },
+        episodic: [],
+      }),
+    );
+    expect(verified.results.find((result) => result.id === 'verification')?.status).toBe('pass');
+  });
+
+  it('bounds large checkpoint context evidence in the formatted rubric', () => {
+    const text = formatHandoff(
+      makeSnapshot({
+        working: {},
+        episodic: [],
+        checkpoint: {
+          runId: 'run-1',
+          phase: 'decision',
+          step: 2,
+          context: { huge: 'verified '.repeat(200) },
+          timestamp: '2026-03-22T00:00:00.000Z',
+        },
+      }),
+    );
+
+    const checkpointEvidence = text
+      .split('\n')
+      .find((line) => line.includes('checkpoint: phase=decision'));
+    expect(checkpointEvidence).toBeTruthy();
+    expect(checkpointEvidence!.length).toBeLessThan(360);
+    expect(checkpointEvidence).toContain('…');
+  });
 });
 
 describe('truncateSnapshot', () => {
@@ -106,7 +287,7 @@ describe('truncateSnapshot', () => {
         medium: 'y'.repeat(500),
       },
     });
-    const truncated = truncateSnapshot(snapshot, 300);
+    const truncated = truncateSnapshot(snapshot, 500);
     const workingKeys = Object.keys(truncated.working as Record<string, unknown>);
 
     // Largest value should be removed first
@@ -147,6 +328,23 @@ describe('truncateSnapshot', () => {
     truncateSnapshot(snapshot, 500);
 
     expect(snapshot.episodic).toHaveLength(50);
+  });
+
+  it('keeps formatted output within a tight 300-token budget after trimming', () => {
+    const snapshot = makeSnapshot({
+      episodic: Array.from({ length: 50 }, (_, i) => ({
+        type: 'observation' as const,
+        summary: `Step ${i}: ${'x'.repeat(200)}`,
+        createdAt: '2026-03-22T00:00:00.000Z',
+      })),
+      working: {
+        task: 'fix auth',
+        huge: 'x'.repeat(5000),
+      },
+    });
+    const text = formatHandoff(truncateSnapshot(snapshot, 300));
+
+    expect(text.length).toBeLessThanOrEqual(300 * 4);
   });
 
   it('produces valid output that formatHandoff can render', () => {

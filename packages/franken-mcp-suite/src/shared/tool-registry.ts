@@ -51,7 +51,7 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
   }
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > MAX_MEMORY_QUERY_LIMIT) {
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_MEMORY_QUERY_LIMIT) {
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
   }
   return { ok: true, value: parsed };

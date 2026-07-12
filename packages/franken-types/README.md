@@ -32,8 +32,8 @@ import {
 Subpath exports are available for focused imports:
 
 ```ts
-import { resolveContainedPath } from '@franken/types/path-containment';
 import { parseJsonPointer, setJsonPointerValue } from '@franken/types/json-pointer';
+import { resolveArchiveEntryPath, resolveContainedPath } from '@franken/types/path-containment';
 import { createSeededRandom, deterministicUuid } from '@franken/types/utils';
 ```
 
@@ -42,6 +42,12 @@ import { createSeededRandom, deterministicUuid } from '@franken/types/utils';
 Use `parseJsonPointer`, `getJsonPointerValue`, `setJsonPointerValue`, or `assertSafeJsonPointer` before accepting JSON Pointer input from API, control-plane, approval, token, or state-mutation paths. The helpers default to deny-by-default behavior for prototype-pollution segments (`__proto__`, `constructor`, and `prototype`), validate RFC 6901 escaping, cap segment counts/lengths, and write missing branches as own data properties instead of following inherited properties.
 
 Only pass `{ allowUnsafePrototypeSegments: true }` for trusted migration or compatibility code that must treat those names as data keys. Keep the default for untrusted operator, dashboard, LLM, or network input.
+
+## Path and archive extraction safety
+
+Use `resolveArchiveEntryPath(extractionRoot, entryName)` before writing files from an untrusted ZIP, tar, or other archive. It denies zip-slip entries by default: parent-directory segments, POSIX/Windows absolute paths, drive/UNC paths, empty names, NUL bytes, Windows-trimmed component names, Windows alternate data streams, and Windows reserved device names all throw explicit errors before a destination is returned. It also resolves the nearest existing ancestor and rejects symlink ancestors or leaves so a lexically safe member cannot write through a symlink outside the extraction root.
+
+Only set `allowUnsafeArchiveEntryPaths: true` for archives from a trusted operator-controlled source that requires legacy non-portable member names. The override still enforces final containment inside the extraction root; extraction code should also refuse archive symlink entries unless the caller has a separate explicit symlink policy.
 
 ## Export groups
 

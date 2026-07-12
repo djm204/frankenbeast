@@ -118,7 +118,9 @@ export class ChatRuntime {
     const trimmed = input.trim();
     const command = trimmed.startsWith('/') ? trimmed.split(/\s+/)[0]?.toLowerCase() : undefined;
 
-    if (state.pendingApproval && !state.approvalResolved && command !== '/approve' && command !== '/reject') {
+    const isApprovedReplay = state.approvalResolved === true && command === '/run';
+
+    if (state.pendingApproval && command !== '/approve' && command !== '/reject' && !isApprovedReplay) {
       if (trimmed.toLowerCase().startsWith('action rejected by user:')) {
         return this.result({ ...state, pendingApproval: false }, [
           { kind: 'approval', content: 'Rejected.' },
@@ -272,7 +274,7 @@ export class ChatRuntime {
       }
     }
 
-    const result = await this.engine.processTurn(input, state.transcript);
+    const result = await this.engine.processTurn(input, state.transcript, { sessionId: state.sessionId });
     const transcript = [...state.transcript, ...result.newMessages];
 
     switch (result.outcome.kind) {

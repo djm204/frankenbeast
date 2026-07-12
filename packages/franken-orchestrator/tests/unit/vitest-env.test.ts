@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,7 @@ type VitestConfig = {
   test?: {
     include?: string[];
     exclude?: string[];
+    passWithNoTests?: boolean;
   };
 };
 
@@ -95,6 +97,13 @@ describe('Vitest environment flags', () => {
     expect(config).toContain("arg.includes('test/e2e/')");
     expect(config).toContain("'tests/e2e/**/*.test.ts'");
     expect(config).toContain("'test/e2e/**/*.test.ts'");
+    expect(config).toContain('passWithNoTests: false');
+  });
+
+  it('fails instead of passing when no E2E tests are discovered', async () => {
+    const config = await loadPackageVitestConfig({ E2E: 'true' });
+
+    expect(config.test?.passWithNoTests).toBe(false);
   });
 
   it('treats false-like suite flags as default unit test selection', async () => {
@@ -147,5 +156,35 @@ describe('Vitest environment flags', () => {
 
     expect(lintScript).toContain('tests/');
     expect(lintScript).toContain('test/');
+  });
+
+  it('does not let the package E2E command pass when zero tests are discovered', async () => {
+    const config = await loadPackageVitestConfig({ E2E: 'true' });
+    expect(config.test?.passWithNoTests).not.toBe(true);
+
+    const packageRoot = resolve(import.meta.dirname, '../..');
+    const repoRoot = resolve(packageRoot, '../..');
+    const result = spawnSync(
+      'npm',
+      [
+        'run',
+        'test:e2e',
+        '--workspace=@franken/orchestrator',
+        '--',
+        'test/e2e/__missing-zero-discovery__.test.ts',
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          E2E: 'true',
+        },
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, output).not.toBe(0);
+    expect(output).toContain('No test files found');
   });
 });

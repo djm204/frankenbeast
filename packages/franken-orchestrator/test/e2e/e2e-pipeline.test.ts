@@ -22,7 +22,7 @@
  *   8. rm -rf /tmp/fb-smoke
  *
  * RUN:
- *   E2E=true npx vitest run test/e2e/e2e-pipeline.test.ts
+ *   npm run test:e2e --workspace @franken/orchestrator -- test/e2e/e2e-pipeline.test.ts
  */
 
 import { describe, it, expect, afterAll, beforeAll } from 'vitest';

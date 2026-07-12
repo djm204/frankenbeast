@@ -28,8 +28,12 @@ export class ClaudeProvider implements ICliProvider {
     ];
 
     if (opts.sessionContinue) {
-      args.push('--continue');
-    } else {
+      if (opts.sessionId) {
+        args.push('--resume', opts.sessionId);
+      } else {
+        args.push('--continue');
+      }
+    } else if (!opts.chatMode || !opts.sessionId) {
       args.push('--no-session-persistence');
     }
 

@@ -29,6 +29,7 @@ export default defineConfig({
     setupFiles: [fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url))],
     globals: false,
     environment: 'node',
+    passWithNoTests: false,
     include: runMixed
       ? ['tests/**/*.test.ts', 'test/**/*.test.ts']
       : runE2e
