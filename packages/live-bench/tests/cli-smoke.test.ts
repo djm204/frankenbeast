@@ -7,7 +7,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = dirname(dirname(packageRoot));
-const corpusRoot = join(packageRoot, 'corpus');
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 beforeAll(() => {
@@ -38,9 +37,21 @@ describe('live-bench CLI smoke coverage', () => {
     expect(result.stdout).toContain('list <corpus-root>');
   });
 
-  it('lists benchmark task ids for a valid corpus', () => {
+  it('lists benchmark task ids sorted for a valid corpus', () => {
     const corpusDir = mkdtempSync(join(tmpdir(), 'live-bench-corpus-'));
     const taskOne = {
+      taskId: 'zeta-task',
+      tier: 'candidate',
+      taskClass: 'tool-critical',
+      projectFixture: 'project',
+      prompt: 'run check',
+      expectedArtifacts: ['artifacts/out.txt'],
+      requiredChecks: [{ type: 'file-exists', path: 'artifacts/out.txt' }],
+      timeoutMs: 45_000,
+      allowedNondeterminism: [],
+      baselineSupported: false,
+    };
+    const taskTwo = {
       taskId: 'alpha-task',
       tier: 'core',
       taskClass: 'workflow-critical',
@@ -57,30 +68,16 @@ describe('live-bench CLI smoke coverage', () => {
       allowedNondeterminism: [],
       baselineSupported: true,
     };
-    const taskTwo = {
-      taskId: 'beta-task',
-      tier: 'candidate',
-      taskClass: 'tool-critical',
-      projectFixture: 'project',
-      prompt: 'run check',
-      expectedArtifacts: ['artifacts/out.txt'],
-      requiredChecks: [{ type: 'file-exists', path: 'artifacts/out.txt' }],
-      timeoutMs: 45_000,
-      allowedNondeterminism: [],
-      baselineSupported: false,
-    };
 
-    writeFileSync(join(corpusDir, 'alpha.task.json'), JSON.stringify(taskOne));
-    writeFileSync(join(corpusDir, 'beta.task.json'), JSON.stringify(taskTwo));
+    writeFileSync(join(corpusDir, 'zeta.task.json'), JSON.stringify(taskOne));
+    writeFileSync(join(corpusDir, 'alpha.task.json'), JSON.stringify(taskTwo));
 
     try {
       const result = runCli(['list', corpusDir]);
 
       expect(result.status).toBe(0);
-      const taskIds = result.stdout.split('\n').filter(Boolean);
-      expect(taskIds).toContain('alpha-task');
-      expect(taskIds).toContain('beta-task');
-      expect(taskIds.length).toBe(2);
+      expect(result.stdout.split('\n').filter(Boolean)).toEqual(['alpha-task', 'zeta-task']);
+      expect(result.stderr).toBe('');
     } finally {
       rmSync(corpusDir, { recursive: true, force: true });
     }
@@ -100,9 +97,18 @@ describe('live-bench CLI smoke coverage', () => {
     expect(result.stderr).toContain('Unknown command: unsupported');
   });
 
-  it('returns non-zero for invalid corpus paths', () => {
-    const result = runCli(['list', join(corpusRoot, 'definitely-missing')]);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toBeTruthy();
+  it('returns non-zero and surfaces invalid corpus files', () => {
+    const corpusDir = mkdtempSync(join(tmpdir(), 'live-bench-invalid-corpus-'));
+    writeFileSync(join(corpusDir, 'broken.task.json'), '{not-json', 'utf8');
+
+    try {
+      const result = runCli(['list', corpusDir]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Invalid benchmark task');
+      expect(result.stderr).toContain('broken.task.json');
+    } finally {
+      rmSync(corpusDir, { recursive: true, force: true });
+    }
   });
 });
