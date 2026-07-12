@@ -150,13 +150,17 @@ on:
       const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
         scripts?: Record<string, string>;
       };
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+      const ciTestStep = expectSteps(buildTestLint).find((step) => step.name === 'Run root and package CI test suite');
+      const testCiScript = packageJson.scripts?.['test:ci'] ?? '';
 
-      expect(content).toMatch(/name:\s*Run CI test suite/);
-      expect(packageJson.scripts?.['test:ci']).toContain('npm run ci:test:root');
+      expect(ciTestStep, 'CI should have an explicit root-and-package test step').toBeTruthy();
+      expect(ciTestStep?.run).toBe('npm run test:ci');
+      expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
+      expect(testCiScript).toContain('npm run ci:test:root');
+      expect(testCiScript.indexOf('npm run ci:test:root')).toBeLessThan(testCiScript.indexOf('npm run ci:test:packages'));
       expect(content).not.toMatch(/npm run test:root --/);
-      expect(packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:root')).toBeLessThan(
-        packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:packages') ?? -1,
-      );
     });
 
     it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
@@ -200,10 +204,10 @@ on:
       expect(content).not.toContain('run: npx turbo run test');
     });
 
-    it('documents the package build, typecheck, workspace lint, and shared CI test targets in step names', () => {
+    it('documents the package build, typecheck, workspace lint, and shared root/package CI test targets in step names', () => {
       expect(content).toMatch(/name:\s*Run package build and typecheck/);
       expect(content).toMatch(/name:\s*Run workspace lint gate/);
-      expect(content).toMatch(/name:\s*Run CI test suite/);
+      expect(content).toMatch(/name:\s*Run root and package CI test suite/);
     });
 
     it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {
