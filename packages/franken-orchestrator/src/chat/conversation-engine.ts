@@ -100,7 +100,7 @@ export class ConversationEngine {
         // sessions that this engine has actually primed with a prior LLM reply so
         // a shared HTTP runtime cannot leak continuation state across independent
         // or resumed chat sessions.
-        const sessionId = options.sessionId;
+        const sessionId = this.sessionContinuation ? options.sessionId : undefined;
         const shouldContinue = this.sessionContinuation
           && (sessionId ? this.primedSessions.has(sessionId) : history.length > 0);
         const prompt = shouldContinue
