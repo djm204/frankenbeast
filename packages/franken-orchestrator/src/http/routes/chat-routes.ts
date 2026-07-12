@@ -252,7 +252,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
     return withChatMutationAdmission(c, session.id, async () => {
       if (!session.pendingApproval && session.state !== 'pending_approval') {
-        return c.json({ data: { id: session.id, approved, state: session.state } });
+        return c.json({ data: { id: session.id, approved, state: session.state, pendingApproval: null } });
       }
 
       let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;

@@ -30,6 +30,25 @@ describe('chat approval route persistence', () => {
     rmSync(sessionStoreDir, { recursive: true, force: true });
   });
 
+  it('reports no pending approval for no-op HTTP approval responses', async () => {
+    const app = createChatApp({
+      sessionStore,
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'chat-approval-route-test',
+    });
+    const session = sessionStore.create('project-1');
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { approved: boolean; state: string; pendingApproval?: unknown } };
+    expect(body.data).toMatchObject({ approved: true, state: session.state, pendingApproval: null });
+  });
+
   it('clears pending approval metadata when a session is approved over HTTP', async () => {
     const app = createChatApp({
       sessionStore,
