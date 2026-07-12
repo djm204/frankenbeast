@@ -110,6 +110,12 @@ The local server is intentionally conservative by default:
 
 Only bind to `0.0.0.0` when you actually need remote access.
 
+Approval replay also fails closed on model-derived command text that looks like
+control input rather than a single command description. Stored pending approvals
+with multiline/control-character payloads or a leading chat slash command are not
+executed when the operator clicks Approve; reject that approval and submit a
+fresh explicit `/run <command>` if you intentionally need to override it.
+
 ## Troubleshooting
 
 `The server starts but chat replies fail`
