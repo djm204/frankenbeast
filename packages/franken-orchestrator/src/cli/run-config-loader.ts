@@ -56,13 +56,32 @@ export const RunConfigSchema = z.object({
 
 export type RunConfig = z.infer<typeof RunConfigSchema>;
 
+export class RunConfigParseError extends Error {
+  public readonly code = 'RUN_CONFIG_PARSE_ERROR';
+
+  constructor(
+    public readonly filePath: string,
+    public readonly reason: string,
+    options?: ErrorOptions,
+  ) {
+    super(`Failed to parse run config JSON at ${filePath}: ${reason}`, options);
+    this.name = 'RunConfigParseError';
+  }
+}
+
 /**
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
  */
 export function loadRunConfig(filePath: string): RunConfig {
   const raw = readFileSync(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new RunConfigParseError(filePath, reason, error instanceof Error ? { cause: error } : undefined);
+  }
   return RunConfigSchema.parse(parsed);
 }
 
