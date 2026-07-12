@@ -31,6 +31,11 @@ function isWindowsAbsolutePath(path: string): boolean {
   return win32.isAbsolute(path) || /^[a-zA-Z]:/.test(path);
 }
 
+function isWindowsReservedDeviceSegment(segment: string): boolean {
+  const stem = segment.replace(/[ .]+$/u, '').split('.')[0]?.toUpperCase() ?? '';
+  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/u.test(stem);
+}
+
 function normalizeArchiveEntryPath(entryPath: string, fieldName: string): string {
   if (entryPath.length === 0) {
     throw archiveEntryError(fieldName, 'empty path');
@@ -48,6 +53,12 @@ function normalizeArchiveEntryPath(entryPath: string, fieldName: string): string
   }
   if (segments.some(segment => segment === '..')) {
     throw archiveEntryError(fieldName, 'parent directory segment');
+  }
+  if (segments.some(segment => segment.includes(':'))) {
+    throw archiveEntryError(fieldName, 'Windows alternate data stream separator');
+  }
+  if (segments.some(isWindowsReservedDeviceSegment)) {
+    throw archiveEntryError(fieldName, 'Windows reserved device name');
   }
 
   return segments.join('/');
@@ -77,6 +88,24 @@ function lstatIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   }
 }
 
+function rejectSymlinkComponents(baseRealPath: string, targetExistingPath: string, fieldName: string): void {
+  const relativeExistingPath = relative(baseRealPath, targetExistingPath);
+  if (relativeExistingPath === '') {
+    return;
+  }
+  if (relativeExistingPath === '..' || relativeExistingPath.startsWith(`..${sep}`) || isAbsolute(relativeExistingPath)) {
+    throw containmentError(fieldName);
+  }
+
+  let cursor = baseRealPath;
+  for (const segment of relativeExistingPath.split(sep)) {
+    cursor = resolve(cursor, segment);
+    if (lstatSync(cursor).isSymbolicLink()) {
+      throw symbolicLinkError(fieldName);
+    }
+  }
+}
+
 function resolveViaNearestExistingAncestor(baseRealPath: string, requestedAbsolutePath: string, fieldName: string): string {
   const missingSegments: string[] = [];
   let cursor = requestedAbsolutePath;
@@ -95,6 +124,7 @@ function resolveViaNearestExistingAncestor(baseRealPath: string, requestedAbsolu
   if (stats.isSymbolicLink()) {
     throw symbolicLinkError(fieldName);
   }
+  rejectSymlinkComponents(baseRealPath, cursor, fieldName);
 
   const ancestorRealPath = realpathSync(cursor);
   if (!isContainedBy(baseRealPath, ancestorRealPath)) {

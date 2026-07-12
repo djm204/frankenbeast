@@ -140,6 +140,18 @@ describe('realpath containment helpers', () => {
     });
   });
 
+  it('rejects archive entries that pass through any existing symlink component', () => {
+    withTempRoot('archive-entry-contained-symlink', root => {
+      const actual = join(root, 'actual', 'existing');
+      mkdirSync(actual, { recursive: true });
+      symlinkSync(join(root, 'actual'), join(root, 'link'), 'dir');
+
+      expect(() => resolveArchiveEntryPath(root, 'link/existing/file.txt')).toThrow(
+        /archiveEntryPath resolves through a symbolic link/i,
+      );
+    });
+  });
+
   it('rejects absolute, Windows drive, UNC, empty, and NUL archive entries by default', () => {
     withTempRoot('archive-entry-denylist', root => {
       expect(() => resolveArchiveEntryPath(root, '/tmp/evil.txt')).toThrow(/absolute path/i);
@@ -147,6 +159,17 @@ describe('realpath containment helpers', () => {
       expect(() => resolveArchiveEntryPath(root, '\\\\server\\share\\evil.txt')).toThrow(/absolute path/i);
       expect(() => resolveArchiveEntryPath(root, '')).toThrow(/empty path/i);
       expect(() => resolveArchiveEntryPath(root, '\0evil.txt')).toThrow(/NUL byte/i);
+    });
+  });
+
+  it('rejects Windows alternate data streams and reserved device names in archive entries', () => {
+    withTempRoot('archive-entry-windows-names', root => {
+      expect(() => resolveArchiveEntryPath(root, 'docs/victim.txt:payload')).toThrow(
+        /Windows alternate data stream separator/i,
+      );
+      expect(() => resolveArchiveEntryPath(root, 'docs/NUL')).toThrow(/Windows reserved device name/i);
+      expect(() => resolveArchiveEntryPath(root, 'docs/con.txt')).toThrow(/Windows reserved device name/i);
+      expect(() => resolveArchiveEntryPath(root, 'docs/LPT1.')).toThrow(/Windows reserved device name/i);
     });
   });
 
