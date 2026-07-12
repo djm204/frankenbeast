@@ -121,6 +121,44 @@ export interface PostPrLessonExtractionTemplate {
   readonly insufficientEvidenceGuidance: string;
 }
 
+/** Cooldown metadata attached to a recorded lesson so PM/liveness tooling can prevent churn. */
+export interface LessonCooldownMetadata {
+  /** Stable key used to deduplicate equivalent lessons across task ids during the cooldown window. */
+  readonly key: string;
+  /** Cooldown window in milliseconds. */
+  readonly windowMs: number;
+  /** Timestamp when this lesson was admitted to memory. */
+  readonly recordedAt: string;
+  /** Equivalent lessons should be suppressed until this timestamp. */
+  readonly suppressUntil: string;
+  /** Operator-facing guidance for interpreting suppressed lessons. */
+  readonly guidance: string;
+}
+
+/** Structured record of a lesson suppressed by the learning cooldown. */
+export interface LessonCooldownSuppression {
+  /** Stable key that matched an in-cooldown lesson. */
+  readonly key: string;
+  /** Task that attempted to record the duplicate lesson. */
+  readonly taskId: TaskId;
+  /** Evaluator that produced the duplicate lesson. */
+  readonly evaluatorName: string;
+  /** Timestamp when the duplicate was suppressed. */
+  readonly suppressedAt: string;
+  /** Timestamp after which this lesson key may be recorded again. */
+  readonly suppressUntil: string;
+  /** Milliseconds remaining in the cooldown at suppression time. */
+  readonly remainingMs: number;
+  /** Deterministic operator-facing reason for PM/liveness output. */
+  readonly reason: string;
+}
+
+/** Summary returned by LessonRecorder.record for PM/liveness consumers. */
+export interface LessonRecordingResult {
+  readonly recorded: number;
+  readonly suppressedByCooldown: readonly LessonCooldownSuppression[];
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -136,6 +174,8 @@ export interface CritiqueLesson {
   readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
   /** Structured template for extracting reusable lessons from post-PR review/merge evidence. */
   readonly postPrLessonExtractionTemplate?: PostPrLessonExtractionTemplate;
+  /** Cooldown guard that prevents equivalent lessons from being re-recorded until suppressUntil. */
+  readonly cooldown?: LessonCooldownMetadata;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */
