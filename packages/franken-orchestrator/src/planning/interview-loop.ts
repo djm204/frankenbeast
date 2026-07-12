@@ -89,18 +89,22 @@ export class InterviewLoop implements GraphBuilder {
   }
 
   private parseQuestionLine(line: string): string | null {
-    const patterns = [
-      /^\d+[.)]\s*(.+)/,
-      /^[-*•]\s+(.+)/,
-      /^(?:q(?:uestion)?|clarifying\s+question)\s*\d*\s*[:.)-]\s*(.+)/i,
-    ];
+    const numbered = line.match(/^\d+[.)]\s*(.+)/);
+    if (numbered) {
+      return this.stripQuestionPrefix(numbered[1]);
+    }
 
-    for (const pattern of patterns) {
-      const match = line.match(pattern);
-      const question = this.stripQuestionPrefix(match?.[1]?.trim());
-      if (question) {
-        return question;
-      }
+    const bullet = line.match(/^[-*•]\s+(.+)/);
+    if (bullet) {
+      const question = this.stripQuestionPrefix(bullet[1]);
+      return question?.includes('?') ? question : null;
+    }
+
+    const prefixed = line.match(
+      /^(?:q(?:uestion)?|clarifying\s+question)\s*\d*\s*[:.)-]\s*(.+)/i,
+    );
+    if (prefixed) {
+      return this.stripQuestionPrefix(prefixed[1]);
     }
 
     return line.includes('?') ? this.stripQuestionPrefix(line) : null;
