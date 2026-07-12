@@ -45,8 +45,8 @@ export function isCookieOperatorAuthAllowed(options: {
     return true;
   }
 
-  if (options.secFetchSite) {
-    return options.secFetchSite === 'same-origin' || options.secFetchSite === 'none';
+  if (options.secFetchSite && options.secFetchSite !== 'same-origin') {
+    return false;
   }
 
   if (!options.origin) {
