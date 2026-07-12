@@ -167,7 +167,7 @@ updates:
     expect(result.stderr).toContain('must ignore');
   });
 
-  it('fails internal-scope ignores that only cover version-update PRs', () => {
+  it('fails internal-scope ignores that only cover filtered update PRs', () => {
     const result = runDependabotSupplyChainGuard(`
 version: 2
 updates:
@@ -187,6 +187,43 @@ updates:
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('without update-types filters');
+
+    const versionFiltered = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    groups:
+      external-npm:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+    ignore:
+      - dependency-name: "@franken/*"
+        versions: ["<1.0.0"]
+`);
+
+    expect(versionFiltered.status).toBe(1);
+    expect(versionFiltered.stderr).toContain('without update-types filters');
+  });
+
+  it('fails npm entries that target release branches instead of default-branch security coverage', () => {
+    const result = runDependabotSupplyChainGuard(`
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: release/0.45
+    groups:
+      external-npm:
+        patterns: ["*"]
+        exclude-patterns: ["@franken/*"]
+    ignore:
+      - dependency-name: "@franken/*"
+`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('target-branch');
+    expect(result.stderr).toContain('default branch');
   });
 
   it('fails every npm group that lacks an internal-scope exclusion', () => {

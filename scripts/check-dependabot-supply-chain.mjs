@@ -76,11 +76,19 @@ export function validateDependabotSupplyChainConfig(config) {
   for (const update of npmUpdates) {
     const directory =
       typeof update.directory === 'string' ? update.directory : '<missing directory>';
+    if (Object.prototype.hasOwnProperty.call(update, 'target-branch')) {
+      failures.push(
+        `npm Dependabot entry ${directory} must not set target-branch; security updates are evaluated on the default branch and need this internal-scope policy there.`,
+      );
+    }
+
     const ignoreRules = asArray(update.ignore);
     const ignoresInternalScope = ignoreRules.some((rule) => {
       if (!rule || typeof rule !== 'object') return false;
-      const updateTypes = asArray(rule['update-types']);
-      return rule['dependency-name'] === INTERNAL_SCOPE_PATTERN && updateTypes.length === 0;
+      return (
+        rule['dependency-name'] === INTERNAL_SCOPE_PATTERN &&
+        Object.keys(rule).every((key) => key === 'dependency-name')
+      );
     });
 
     if (!ignoresInternalScope) {
