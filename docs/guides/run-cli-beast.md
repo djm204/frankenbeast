@@ -157,7 +157,13 @@ frankenbeast beasts logs <run-id>
 frankenbeast beasts stop <run-id>
 frankenbeast beasts kill <run-id>
 frankenbeast beasts restart <run-id>
+
+# Manage tracked dashboard agents
+frankenbeast beasts resume <agent-id>
+frankenbeast beasts delete <agent-id>
 ```
+
+`resume` and `delete` operate on tracked agent IDs, not run IDs. Use `resume` to continue the agent's linked run and `delete` to soft-delete the tracked agent.
 
 Available catalog entries: `design-interview`, `chunk-plan`, `martin-loop`.
 
