@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 
 interface ResolveContainedPathOptions {
@@ -62,17 +62,38 @@ function resolveRequestedPath(
   return isAbsolute(requestedPath) ? resolve(requestedPath) : resolve(relativeBase, requestedPath);
 }
 
+function symbolicLinkError(fieldName: string): Error {
+  return new Error(`${fieldName} resolves through a symbolic link`);
+}
+
+function lstatIfPresent(path: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(path);
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+}
+
 function resolveViaNearestExistingAncestor(baseRealPath: string, requestedAbsolutePath: string, fieldName: string): string {
   const missingSegments: string[] = [];
   let cursor = requestedAbsolutePath;
+  let stats = lstatIfPresent(cursor);
 
-  while (!existsSync(cursor)) {
+  while (!stats) {
     missingSegments.unshift(basename(cursor));
     const parent = dirname(cursor);
     if (parent === cursor) {
       throw containmentError(fieldName);
     }
     cursor = parent;
+    stats = lstatIfPresent(cursor);
+  }
+
+  if (stats.isSymbolicLink()) {
+    throw symbolicLinkError(fieldName);
   }
 
   const ancestorRealPath = realpathSync(cursor);

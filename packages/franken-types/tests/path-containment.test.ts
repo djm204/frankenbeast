@@ -122,11 +122,21 @@ describe('realpath containment helpers', () => {
 
       try {
         expect(() => resolveArchiveEntryPath(root, 'linked-outside/pwned.txt')).toThrow(
-          /archiveEntryPath resolves outside base directory/i,
+          /archiveEntryPath resolves through a symbolic link/i,
         );
       } finally {
         rmSync(outside, { recursive: true, force: true });
       }
+    });
+  });
+
+  it('rejects archive entries whose existing leaf is a broken symlink', () => {
+    withTempRoot('archive-entry-broken-symlink', root => {
+      symlinkSync(join(root, '..', `missing-${randomUUID()}`, 'outside.txt'), join(root, 'broken-link'));
+
+      expect(() => resolveArchiveEntryPath(root, 'broken-link')).toThrow(
+        /archiveEntryPath resolves through a symbolic link/i,
+      );
     });
   });
 
