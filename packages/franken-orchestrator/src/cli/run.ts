@@ -310,23 +310,17 @@ function canInitHandleConfigLoadError(args: CliArgs): boolean {
   return args.subcommand === 'init';
 }
 
-async function isInitConfigFileError(configFile: string, error: unknown): Promise<boolean> {
+async function isInitConfigFileError(error: unknown): Promise<boolean> {
   if (error instanceof SyntaxError) {
-    return true;
-  }
-  if (error instanceof TypeError && /config file must contain a json object/i.test(error.message)) {
     return true;
   }
   if (error instanceof Error && error.message.startsWith('Config file not found:')) {
     return true;
   }
-  try {
-    const raw = await readFile(configFile, 'utf-8');
-    const value = JSON.parse(raw) as unknown;
-    return value === null || typeof value !== 'object' || Array.isArray(value);
-  } catch (fileError) {
-    return fileError instanceof SyntaxError;
+  if (error instanceof Error && /config(?: file)? (?:must contain|must be).*object|expected object|received (?:null|array)/i.test(error.message)) {
+    return true;
   }
+  return false;
 }
 
 function initFallbackConfig(args: CliArgs): OrchestratorConfig {
@@ -860,7 +854,7 @@ export async function main(): Promise<void> {
   try {
     config = await resolveConfig(args, paths.configFile);
   } catch (error) {
-    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(args.config ?? paths.configFile, error)) {
+    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(error)) {
       throw error;
     }
     config = initFallbackConfig(args);
