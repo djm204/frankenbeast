@@ -16,6 +16,10 @@ const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
 
 const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_LESSON_COOLDOWN_MS = 100 * 365 * 24 * 60 * 60 * 1000;
+const PENDING_ADMISSIONS_BY_COOLDOWN_STORE = new WeakMap<
+  Map<string, number>,
+  Map<string, Promise<boolean>>
+>();
 
 const LEARNING_COOLDOWN_GUIDANCE =
   'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.';
@@ -68,7 +72,7 @@ export class LessonRecorder {
   private readonly cooldownMs: number;
   private readonly now: () => string;
   private readonly cooldowns: Map<string, number>;
-  private readonly pendingAdmissions = new Map<string, Promise<boolean>>();
+  private readonly pendingAdmissions: Map<string, Promise<boolean>>;
 
   constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
     const cooldownMs = options.cooldownMs ?? DEFAULT_LESSON_COOLDOWN_MS;
@@ -87,6 +91,9 @@ export class LessonRecorder {
     const now = options.now ?? ((): Date => new Date());
     this.now = (): string => normalizeTimestamp(now());
     this.cooldowns = options.cooldownStore ?? new Map<string, number>();
+    this.pendingAdmissions = options.cooldownStore
+      ? getPendingAdmissions(options.cooldownStore)
+      : new Map<string, Promise<boolean>>();
   }
 
   async record(
@@ -113,7 +120,8 @@ export class LessonRecorder {
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const lesson of lessons) {
-        const cooldownKey = lesson.cooldown?.key;
+        const cooldownKey =
+          this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
         let admissionSettled: ((admitted: boolean) => void) | undefined;
         let admissionPromise: Promise<boolean> | undefined;
         if (cooldownKey) {
@@ -301,6 +309,17 @@ export class LessonRecorder {
   private createSuppressUntilMs(): number {
     return addCooldownWindowMs(Date.parse(this.now()), this.cooldownMs);
   }
+}
+
+function getPendingAdmissions(
+  cooldownStore: Map<string, number>,
+): Map<string, Promise<boolean>> {
+  let pending = PENDING_ADMISSIONS_BY_COOLDOWN_STORE.get(cooldownStore);
+  if (!pending) {
+    pending = new Map<string, Promise<boolean>>();
+    PENDING_ADMISSIONS_BY_COOLDOWN_STORE.set(cooldownStore, pending);
+  }
+  return pending;
 }
 
 interface MutableLessonRecordingResult {

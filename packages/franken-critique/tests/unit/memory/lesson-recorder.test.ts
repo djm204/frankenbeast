@@ -463,6 +463,98 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('shares pending admissions when recorder instances reuse a cooldown store', async () => {
+    const port = createMockMemoryPort();
+    const cooldownStore = new Map<string, number>();
+    let releasePersistence!: () => void;
+    const persistenceStarted = new Promise<void>((resolve) => {
+      (port.recordLesson as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        () =>
+          new Promise<void>((release) => {
+            releasePersistence = release;
+            resolve();
+          }),
+      );
+    });
+    const firstRecorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+      cooldownStore,
+    });
+    const secondRecorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+      cooldownStore,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message:
+              'Concurrent shared reviewer rebuild should suppress duplicates',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstRecord = firstRecorder.record(result, 'first-task');
+    await persistenceStarted;
+    const secondRecord = secondRecorder.record(result, 'second-task');
+    releasePersistence();
+    const [firstSummary, secondSummary] = await Promise.all([
+      firstRecord,
+      secondRecord,
+    ]);
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(firstSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(secondSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [
+        expect.objectContaining({ taskId: 'second-task' }),
+      ],
+    });
+  });
+
+  it('honors cooldownMs 0 even when a cooldown store is reused', async () => {
+    const port = createMockMemoryPort();
+    const cooldownStore = new Map<string, number>();
+    const enabledRecorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+      cooldownStore,
+    });
+    const disabledRecorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      now: (): Date => new Date('2026-07-12T10:00:30.000Z'),
+      cooldownStore,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Disabled cooldown should not reuse shared suppression',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await enabledRecorder.record(result, 'first-task');
+    const disabledSummary = await disabledRecorder.record(
+      result,
+      'second-task',
+    );
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(disabledSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+  });
+
   it('starts the local cooldown window after persistence succeeds', async () => {
     const port = createMockMemoryPort();
     let now = new Date('2026-07-12T10:00:00.000Z');
