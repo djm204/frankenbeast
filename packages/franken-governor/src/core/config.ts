@@ -6,6 +6,8 @@ export interface GovernorConfig {
   readonly signingSecret?: string;
 }
 
+export type GovernorConfigOverrides = Partial<GovernorConfig>;
+
 export function defaultConfig(): GovernorConfig {
   return {
     timeoutMs: 300_000,
@@ -13,4 +15,23 @@ export function defaultConfig(): GovernorConfig {
     operatorName: 'operator',
     sessionTokenTtlMs: 3_600_000,
   };
+}
+
+function assertPositiveFiniteNumber(value: number, fieldName: string): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`${fieldName} must be a positive finite number`);
+  }
+}
+
+export function validateGovernorConfig(config: GovernorConfig): GovernorConfig {
+  assertPositiveFiniteNumber(config.timeoutMs, 'timeoutMs');
+  assertPositiveFiniteNumber(config.sessionTokenTtlMs, 'sessionTokenTtlMs');
+  return config;
+}
+
+export function normalizeGovernorConfig(overrides: GovernorConfigOverrides = {}): GovernorConfig {
+  return validateGovernorConfig({
+    ...defaultConfig(),
+    ...overrides,
+  });
 }

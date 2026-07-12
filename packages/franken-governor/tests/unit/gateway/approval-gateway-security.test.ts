@@ -260,12 +260,30 @@ describe('ApprovalGateway — security integration', () => {
   });
 
   it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('rejects invalid %s timeoutMs config before contacting the channel', (_name: string, timeoutMs: number) => {
+    const channel = makeFakeChannel();
+    const auditRecorder = makeFakeAuditRecorder();
+
+    expect(() => new ApprovalGateway({
+      channel,
+      auditRecorder,
+      config: { ...defaultConfig(), timeoutMs },
+    })).toThrow(ApprovalConfigurationError);
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+    expect(auditRecorder.record).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
     ['zero', 0],
     ['negative', -1],
     ['overflow', Number.MAX_SAFE_INTEGER],
-  ])('rejects invalid %s sessionTokenTtlMs config before contacting the channel', (_name, sessionTokenTtlMs) => {
+  ])('rejects invalid %s sessionTokenTtlMs config before contacting the channel', (_name: string, sessionTokenTtlMs: number) => {
     const channel = makeFakeChannel();
     const auditRecorder = makeFakeAuditRecorder();
 
