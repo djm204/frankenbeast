@@ -21,6 +21,10 @@ const PENDING_ADMISSIONS_BY_COOLDOWN_STORE = new WeakMap<
   Map<string, number>,
   Map<string, Promise<boolean>>
 >();
+const PENDING_BLOCKER_ADMISSIONS_BY_STORE = new WeakMap<
+  Map<string, BlockerPatternState>,
+  Map<string, Promise<void>>
+>();
 
 const LEARNING_COOLDOWN_GUIDANCE =
   'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.';
@@ -104,7 +108,7 @@ export class LessonRecorder {
   private readonly pendingAdmissions: Map<string, Promise<boolean>>;
   private readonly blockerPatternThreshold: number;
   private readonly blockerPatterns: Map<string, BlockerPatternState>;
-  private readonly pendingBlockerAdmissions = new Map<string, Promise<void>>();
+  private readonly pendingBlockerAdmissions: Map<string, Promise<void>>;
   private readonly pendingBlockerObservations = new WeakMap<
     CritiqueLesson,
     PendingBlockerPatternObservation[]
@@ -136,6 +140,9 @@ export class LessonRecorder {
     }
     this.blockerPatternThreshold = blockerPatternThreshold;
     this.blockerPatterns = options.blockerPatternStore ?? new Map();
+    this.pendingBlockerAdmissions = getPendingBlockerAdmissions(
+      this.blockerPatterns,
+    );
     const now = options.now ?? ((): Date => new Date());
     this.now = (): string => normalizeTimestamp(now());
     this.cooldowns = options.cooldownStore ?? new Map<string, number>();
@@ -629,6 +636,17 @@ function getPendingAdmissions(
   if (!pending) {
     pending = new Map<string, Promise<boolean>>();
     PENDING_ADMISSIONS_BY_COOLDOWN_STORE.set(cooldownStore, pending);
+  }
+  return pending;
+}
+
+function getPendingBlockerAdmissions(
+  blockerPatternStore: Map<string, BlockerPatternState>,
+): Map<string, Promise<void>> {
+  let pending = PENDING_BLOCKER_ADMISSIONS_BY_STORE.get(blockerPatternStore);
+  if (!pending) {
+    pending = new Map<string, Promise<void>>();
+    PENDING_BLOCKER_ADMISSIONS_BY_STORE.set(blockerPatternStore, pending);
   }
   return pending;
 }
