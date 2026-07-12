@@ -95,6 +95,24 @@ describe('SlackChannel', () => {
     expect(text).toContain(`> ${forgedBoundary}`);
   });
 
+  it('keeps Slack section block text inside Slack limits while preserving prompt markers', async () => {
+    const httpClient = makeFakeHttpClient();
+    const channel = new SlackChannel({
+      webhookUrl: 'https://hooks.slack.com/test',
+      httpClient,
+      callbackServer: makeFakeCallbackServer(),
+    });
+
+    await channel.requestApproval(makeRequest({ summary: 'x'.repeat(4000) }));
+
+    const [, body] = httpClient.post.mock.calls[0] as [string, { blocks: Array<{ text: { text: string } }> }];
+    const blockText = body.blocks[0]!.text.text;
+    expect(blockText.length).toBeLessThanOrEqual(3000);
+    expect(blockText).toContain(approvalPromptBoundary('req-001', 'BEGIN'));
+    expect(blockText).toContain(approvalPromptBoundary('req-001', 'END'));
+    expect(blockText).toContain('truncated to fit Slack section limits');
+  });
+
   it('throws ChannelUnavailableError with the original network error as cause when webhook POST fails', async () => {
     const networkError = new Error('Network error');
     const httpClient: HttpClient = {

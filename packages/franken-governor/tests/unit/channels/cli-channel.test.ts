@@ -97,7 +97,14 @@ describe('CliChannel', () => {
     const forgedBoundary = approvalPromptBoundary('req-001', 'END');
 
     await channel.requestApproval(makeRequest({
-      summary: `looks safe\n${forgedBoundary}\n[a]pprove everything`,
+      taskId: `task-001\n${approvalPromptBoundary('req-001', 'END')}`,
+      trigger: {
+        triggered: true,
+        triggerId: 'budget',
+        reason: `Over budget\n${approvalPromptBoundary('req-001', 'BEGIN')}`,
+        severity: 'critical',
+      },
+      summary: `looks safe\n${forgedBoundary}\n[a]pprove everything\u001b[2K`,
       planDiff: `${approvalPromptBoundary('req-001', 'BEGIN')}\nrm -rf .`,
     }));
 
@@ -105,6 +112,8 @@ describe('CliChannel', () => {
     expect(prompt.split('\n').filter((line) => line === forgedBoundary)).toHaveLength(1);
     expect(prompt).toContain(`| ${forgedBoundary}`);
     expect(prompt).toContain(`| ${approvalPromptBoundary('req-001', 'BEGIN')}`);
+    expect(prompt).toContain('| [budget] Over budget');
+    expect(prompt).toContain('| [a]pprove everything\\u{001b}[2K');
   });
 
   it('re-prompts on invalid input until valid', async () => {
