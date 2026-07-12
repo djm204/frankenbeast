@@ -32,7 +32,6 @@ export class ConversationEngine {
   private readonly promptBuilder: PromptBuilder;
   private readonly budgetPerSession: number | undefined;
   private readonly sessionContinuation: boolean;
-  private turnCount = 0;
 
   constructor({ llm, projectName, maxTranscriptLength, budgetPerSession, sessionContinuation }: ConversationEngineOptions) {
     this.llm = llm;
@@ -85,13 +84,14 @@ export class ConversationEngine {
 
     if (outcome.kind === 'reply') {
       try {
-        // First turn: full prompt with system context + history.
+        // First turn for each transcript: full prompt with system context + history.
         // Subsequent turns with session continuation: raw input only
-        // (CLI session already has context from --continue).
-        const prompt = (this.sessionContinuation && this.turnCount > 0)
+        // (CLI session already has context from --continue). Scope the decision to
+        // the passed transcript so a shared HTTP runtime cannot leak continuation
+        // state across independent chat sessions.
+        const prompt = (this.sessionContinuation && history.length > 0)
           ? input
           : this.promptBuilder.build([...history, userMessage]);
-        this.turnCount++;
         const response = await this.llm.complete(prompt);
         const replyOutcome: ReplyOutcome = {
           kind: 'reply',
