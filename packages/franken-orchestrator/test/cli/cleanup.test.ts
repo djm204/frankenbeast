@@ -90,7 +90,19 @@ describe('cleanupBuild', () => {
     rmSync(buildDir, { recursive: true, force: true });
     symlinkSync(realBuildDir, buildDir, 'dir');
 
-    expect(() => cleanupBuild(buildDir)).toThrow(/Refusing to clean symlinked build directory/i);
+    expect(() => cleanupBuild(buildDir)).toThrow(/Refusing to clean build directory with symlinked path component/i);
+    expect(readFileSync(outsideFile, 'utf8')).toBe('do not delete');
+  });
+
+  it('refuses to clean through a symlinked ancestor', () => {
+    const realFbeastDir = join(tmpDir, 'real-fbeast');
+    mkdirSync(join(realFbeastDir, '.build'), { recursive: true });
+    const outsideFile = join(realFbeastDir, '.build', 'keep.log');
+    writeFileSync(outsideFile, 'do not delete');
+    rmSync(join(tmpDir, '.fbeast'), { recursive: true, force: true });
+    symlinkSync(realFbeastDir, join(tmpDir, '.fbeast'), 'dir');
+
+    expect(() => cleanupBuild(buildDir)).toThrow(/Refusing to clean build directory with symlinked path component/i);
     expect(readFileSync(outsideFile, 'utf8')).toBe('do not delete');
   });
 });

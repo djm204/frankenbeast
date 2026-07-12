@@ -47,7 +47,27 @@ describe('cleanupBuild', () => {
     symlinkSync(outside, linkRoot, 'dir');
 
     try {
-      expect(() => cleanupBuild(linkRoot)).toThrow(/Refusing to clean symlinked build directory/i);
+      expect(() => cleanupBuild(linkRoot)).toThrow(/Refusing to clean build directory with symlinked path component/i);
+      expect(readFileSync(outsideFile, 'utf8')).toBe('outside artifact');
+    } finally {
+      rmSync(linkParent, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses symlinked cleanup ancestors without an explicit override', () => {
+    const linkParent = mkdtempSync(join(tmpdir(), 'cleanup-link-parent-'));
+    const outside = mkdtempSync(join(tmpdir(), 'cleanup-outside-'));
+    const realBuild = join(outside, '.build');
+    const linkAncestor = join(linkParent, '.fbeast');
+    const linkRoot = join(linkAncestor, '.build');
+    const outsideFile = join(realBuild, 'keep.log');
+    mkdirSync(realBuild, { recursive: true });
+    writeFileSync(outsideFile, 'outside artifact');
+    symlinkSync(outside, linkAncestor, 'dir');
+
+    try {
+      expect(() => cleanupBuild(linkRoot)).toThrow(/Refusing to clean build directory with symlinked path component/i);
       expect(readFileSync(outsideFile, 'utf8')).toBe('outside artifact');
     } finally {
       rmSync(linkParent, { recursive: true, force: true });

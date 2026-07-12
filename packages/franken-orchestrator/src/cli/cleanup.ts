@@ -1,5 +1,5 @@
 import { lstatSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, parse, resolve, sep } from 'node:path';
 
 export interface CleanupBuildOptions {
   /**
@@ -19,6 +19,21 @@ function lstatOptional(target: string): ReturnType<typeof lstatSync> | undefined
   }
 }
 
+function assertNoSymlinkedPathComponents(target: string): void {
+  const absoluteTarget = resolve(target);
+  const root = parse(absoluteTarget).root;
+  let current = root;
+
+  for (const part of absoluteTarget.slice(root.length).split(sep).filter(Boolean)) {
+    current = join(current, part);
+    const stat = lstatOptional(current);
+    if (!stat) return;
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Refusing to clean build directory with symlinked path component: ${current}`);
+    }
+  }
+}
+
 /**
  * Removes all files from the .build/ directory (logs, checkpoints, traces db).
  * Symlinked entries under .build/ are unlinked, not traversed. A symlinked
@@ -27,6 +42,10 @@ function lstatOptional(target: string): ReturnType<typeof lstatSync> | undefined
  * Returns the number of files removed.
  */
 export function cleanupBuild(buildDir: string, options: CleanupBuildOptions = {}): number {
+  if (!options.allowSymlinkedBuildDir) {
+    assertNoSymlinkedPathComponents(buildDir);
+  }
+
   const rootStat = lstatOptional(buildDir);
   if (!rootStat) return 0;
   if (rootStat.isSymbolicLink() && !options.allowSymlinkedBuildDir) {
