@@ -9,6 +9,10 @@ updates:
       npm-security-and-maintenance:
         patterns:
           - "*"
+        exclude-patterns:
+          - "@franken/*"
+    ignore:
+      - dependency-name: "@franken/*"
 
   - package-ecosystem: github-actions
     directory: /
