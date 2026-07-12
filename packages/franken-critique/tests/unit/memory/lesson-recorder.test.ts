@@ -453,13 +453,16 @@ describe('LessonRecorder', () => {
 
     const firstRecord = recorder.record(result, 'first-task');
     await persistenceStarted;
-    const secondRecord = await recorder.record(result, 'second-task');
+    const secondRecord = recorder.record(result, 'second-task');
     releasePersistence();
-    const firstSummary = await firstRecord;
+    const [firstSummary, secondSummary] = await Promise.all([
+      firstRecord,
+      secondRecord,
+    ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
     expect(firstSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
-    expect(secondRecord).toEqual({
+    expect(secondSummary).toEqual({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -469,6 +472,51 @@ describe('LessonRecorder', () => {
         }),
       ],
     });
+  });
+
+  it('does not suppress a concurrent duplicate when the admitting persistence fails', async () => {
+    const port = createMockMemoryPort();
+    let rejectFirstPersistence!: (error: Error) => void;
+    const firstPersistenceStarted = new Promise<void>((resolve) => {
+      (port.recordLesson as ReturnType<typeof vi.fn>)
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((_release, reject) => {
+              rejectFirstPersistence = reject;
+              resolve();
+            }),
+        )
+        .mockResolvedValue(undefined);
+    });
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Retry should persist if first store write fails',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstRecord = recorder.record(result, 'first-task');
+    await firstPersistenceStarted;
+    const secondRecord = recorder.record(result, 'second-task');
+    rejectFirstPersistence(new Error('transient store failure'));
+    const [firstSummary, secondSummary] = await Promise.all([
+      firstRecord,
+      secondRecord,
+    ]);
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(firstSummary).toEqual({ recorded: 0, suppressedByCooldown: [] });
+    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
   });
 
   it('keeps multiline finding boundaries distinct in cooldown keys', async () => {

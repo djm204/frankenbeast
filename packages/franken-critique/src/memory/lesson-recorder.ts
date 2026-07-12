@@ -10,6 +10,7 @@ import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
 import { isoNow } from '@franken/types';
+import { createHash } from 'node:crypto';
 
 const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
   'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
@@ -66,6 +67,7 @@ export class LessonRecorder {
   private readonly cooldownMs: number;
   private readonly now: () => string;
   private readonly cooldowns = new Map<string, number>();
+  private readonly pendingAdmissions = new Map<string, Promise<boolean>>();
 
   constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
     const cooldownMs = options.cooldownMs ?? DEFAULT_LESSON_COOLDOWN_MS;
@@ -110,8 +112,8 @@ export class LessonRecorder {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const lesson of lessons) {
         const cooldownKey = lesson.cooldown?.key;
-        let reservedUntilMs: number | null = null;
-        let previousSuppressUntilMs: number | undefined;
+        let admissionSettled: ((admitted: boolean) => void) | undefined;
+        let admissionPromise: Promise<boolean> | undefined;
         if (cooldownKey) {
           const suppression = this.getCooldownSuppression(lesson, cooldownKey);
           if (suppression) {
@@ -119,25 +121,52 @@ export class LessonRecorder {
             continue;
           }
 
+          const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
+          if (pendingAdmission) {
+            const admitted = await pendingAdmission;
+            if (admitted) {
+              const postAdmissionSuppression = this.getCooldownSuppression(
+                lesson,
+                cooldownKey,
+              );
+              if (postAdmissionSuppression) {
+                recordingResult.suppressedByCooldown.push(
+                  postAdmissionSuppression,
+                );
+                continue;
+              }
+            }
+          }
+
           if (this.cooldownMs > 0) {
-            previousSuppressUntilMs = this.cooldowns.get(cooldownKey);
-            reservedUntilMs = Date.parse(lesson.cooldown!.suppressUntil);
-            this.cooldowns.set(cooldownKey, reservedUntilMs);
+            admissionPromise = new Promise<boolean>((resolve) => {
+              admissionSettled = resolve;
+            });
+            this.pendingAdmissions.set(cooldownKey, admissionPromise);
           }
         }
 
         try {
           await this.memory.recordLesson(lesson);
           recordingResult.recorded += 1;
-        } catch {
-          if (cooldownKey && reservedUntilMs !== null) {
-            if (previousSuppressUntilMs === undefined) {
-              this.cooldowns.delete(cooldownKey);
-            } else {
-              this.cooldowns.set(cooldownKey, previousSuppressUntilMs);
-            }
+          if (cooldownKey && this.cooldownMs > 0) {
+            this.cooldowns.set(
+              cooldownKey,
+              Date.parse(lesson.cooldown!.suppressUntil),
+            );
           }
+          admissionSettled?.(true);
+        } catch {
+          admissionSettled?.(false);
           // Non-fatal: log failure but don't disrupt the critique flow
+        } finally {
+          if (
+            cooldownKey &&
+            admissionPromise &&
+            this.pendingAdmissions.get(cooldownKey) === admissionPromise
+          ) {
+            this.pendingAdmissions.delete(cooldownKey);
+          }
         }
       }
     }
@@ -357,12 +386,7 @@ function addCooldownWindow(recordedAt: string, cooldownMs: number): string {
 }
 
 function stableHash(value: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(36);
+  return createHash('sha256').update(value).digest('base64url');
 }
 
 function sanitizeLessonIdPart(value: string): string {
