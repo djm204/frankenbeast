@@ -155,10 +155,13 @@ describe("Turborepo configuration", () => {
 
     it("test:ci script runs the same root-plus-package test target as CI", () => {
       expect(rootPkg.scripts["test:ci"]).toBe(
-        "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration",
+        "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval",
       );
       expect(rootPkg.scripts["ci:test:planner-integration"]).toBe(
         "node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner",
+      );
+      expect(rootPkg.scripts["ci:test:observer-eval"]).toBe(
+        "node scripts/retry-ci-command.mjs -- npm run test:eval --workspace @franken/observer",
       );
 
       const ciWorkflow = readFileSync(

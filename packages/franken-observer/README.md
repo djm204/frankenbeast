@@ -753,7 +753,7 @@ npm test
 # Integration tests (real SQLite, real HTTP)
 INTEGRATION=true npm run test:integration
 
-# LLM-judge evals (requires real LLM; not run in CI)
+# Eval suite (included in CI via the root test:ci script)
 EVAL=true npm run test:eval
 
 # Watch mode
