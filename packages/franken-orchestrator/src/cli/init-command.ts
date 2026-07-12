@@ -12,6 +12,7 @@ import { createSecretStore } from '../network/secret-store.js';
 export interface InitCommandOptions {
   args: CliArgs;
   config: OrchestratorConfig;
+  configLoadFallback?: boolean | undefined;
   io: InterviewIO;
   paths: ProjectPaths;
   print: (message: string) => void;
@@ -55,24 +56,6 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     return;
   }
 
-  if (options.args.initRepair) {
-    const verification = await verifyInit({
-      configFile,
-      stateStore,
-      allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
-    });
-    const invalidJsonIssues = verification.issues.filter((issue) =>
-      issue.code === 'invalid-config-json');
-    if (invalidJsonIssues.length > 0) {
-      throw new Error(
-        [
-          'Cannot repair init because required init JSON is malformed:',
-          ...invalidJsonIssues.map((issue) => `- ${issue.message}`),
-        ].join('\n'),
-      );
-    }
-  }
-
   // Interactive and repair paths need the secret store
   const secureBackend = options.config.network.secureBackend ?? 'local-encrypted';
   let passphrase: string | undefined = process.env.FRANKENBEAST_PASSPHRASE;
@@ -92,6 +75,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
       stateStore,
       io: options.io,
       initBackend,
+      baseConfig: options.configLoadFallback ? options.config : undefined,
       secretStore,
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
@@ -105,6 +89,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
     stateStore,
     io: options.io,
     initBackend,
+    baseConfig: options.configLoadFallback ? options.config : undefined,
     secretStore,
     allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
   });

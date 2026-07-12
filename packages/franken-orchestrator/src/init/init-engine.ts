@@ -132,12 +132,10 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
   const invalidJsonIssues = verification.issues.filter((issue) =>
     issue.code === 'invalid-config-json');
   if (invalidJsonIssues.length > 0) {
-    throw new Error(
-      [
-        'Cannot repair init because required init JSON is malformed:',
-        ...invalidJsonIssues.map((issue) => `- ${issue.message}`),
-      ].join('\n'),
-    );
+    return runInteractiveInit({
+      ...options,
+      baseConfig: options.baseConfig ?? defaultConfig(),
+    });
   }
 
   const needsFullWizard = verification.issues.some((issue) =>

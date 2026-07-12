@@ -851,6 +851,7 @@ export async function main(): Promise<void> {
       : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
   let config: OrchestratorConfig;
+  let configLoadFallback = false;
   try {
     config = await resolveConfig(args, paths.configFile);
   } catch (error) {
@@ -858,6 +859,7 @@ export async function main(): Promise<void> {
       throw error;
     }
     config = initFallbackConfig(args);
+    configLoadFallback = true;
   }
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
@@ -915,6 +917,7 @@ export async function main(): Promise<void> {
       await handleInitCommand({
         args,
         config,
+        configLoadFallback,
         io,
         paths,
         print: printLine,
