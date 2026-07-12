@@ -2,7 +2,7 @@ import type { BrainSnapshot, EpisodicEvent } from '@franken/types';
 
 /** Rough char-to-token ratio (1 token ≈ 4 chars) */
 const CHARS_PER_TOKEN = 4;
-const MAX_RUBRIC_EVIDENCE_CHARS = 240;
+const MAX_RUBRIC_EVIDENCE_CHARS = 120;
 
 export type PmHandoffRubricStatus = 'pass' | 'needs-attention';
 
@@ -57,13 +57,17 @@ export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
     id: 'verification',
     label: 'Verification evidence',
     guidance: 'Include deterministic test, lint, build, or verifier commands and their outcome before promotion or retirement.',
-    evidencePatterns: [/\b(test|lint|typecheck|build|verified|verification|pass(?:ed)?|fail(?:ed)?|fixture)\b/i],
+    evidencePatterns: [/\b(test|lint|typecheck|build|verified|verification|pass(?:ed)?|fail(?:ed)?|fixture|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i],
+    requiredEvidencePatterns: [
+      /\b(test|lint|typecheck|build|verified|verification|fixture|npm|pnpm|yarn|vitest|tsc|eslint|pytest)\b/i,
+      /\b(pass(?:ed)?|fail(?:ed)?|exit|0 errors|green|succeed(?:ed)?)\b/i,
+    ],
   },
   {
     id: 'blockers',
     label: 'Blockers and next action',
     guidance: 'Make blockers, owner, and next action explicit instead of leaving the receiving PM to infer what to do.',
-    evidencePatterns: [/\b(blocker|blocked|risk|next action|next step|owner|assignee|needs review|follow[- ]?up)\b/i],
+    evidencePatterns: [/\b(blocker|blockers|blocked|risk|next action|next step|next steps|owner|assignee|needs review|follow[- ]?up)\b/i],
   },
   {
     id: 'artifacts',
@@ -146,7 +150,7 @@ export function assessPmHandoffQuality(
         criterion.evidencePatterns.some((pattern) => pattern.test(entry.searchable)),
       )
       .map((entry) => entry.display)
-      .slice(0, 3);
+      .slice(0, 1);
     return {
       id: criterion.id,
       label: criterion.label,

@@ -104,7 +104,7 @@ describe('assessPmHandoffQuality', () => {
         working: {
           goal: 'Resolve issue #1862 without broadening scope; out-of-scope: unrelated learning changes',
           status: 'implementation completed with decisions recorded',
-          verificationCommand: 'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts',
+          verificationCommand: 'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts passed',
           blocker: 'needs review before merge',
           pr: 'https://github.com/djm204/frankenbeast/pull/9999',
           retrospective: 'lesson captured for PM handoffs',
@@ -194,6 +194,40 @@ describe('assessPmHandoffQuality', () => {
     const state = assessment.results.find((result) => result.id === 'state');
     expect(state?.status).toBe('pass');
     expect(state?.evidence.join(' ')).toContain('checkpoint: phase=execution');
+  });
+
+  it('accepts plural blocker and next-step headings', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {
+          blockers: 'none',
+          nextSteps: 'run tests',
+        },
+        episodic: [],
+      }),
+    );
+
+    expect(assessment.results.find((result) => result.id === 'blockers')?.status).toBe('pass');
+  });
+
+  it('requires command and outcome signals for verification evidence', () => {
+    const missingOutcome = assessPmHandoffQuality(
+      makeSnapshot({
+        working: { task: 'build login page' },
+        episodic: [],
+      }),
+    );
+    expect(missingOutcome.results.find((result) => result.id === 'verification')?.status).toBe(
+      'needs-attention',
+    );
+
+    const verified = assessPmHandoffQuality(
+      makeSnapshot({
+        working: { verification: 'npm test passed' },
+        episodic: [],
+      }),
+    );
+    expect(verified.results.find((result) => result.id === 'verification')?.status).toBe('pass');
   });
 
   it('bounds large checkpoint context evidence in the formatted rubric', () => {
