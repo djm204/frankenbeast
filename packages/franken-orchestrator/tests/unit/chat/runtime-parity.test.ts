@@ -128,6 +128,32 @@ describe('chat runtime parity', () => {
     expect(engine.processTurn).not.toHaveBeenCalled();
   });
 
+  it('blocks stale normal chat turns even when a caller marks approval resolved', async () => {
+    const engine = { processTurn: vi.fn() };
+    const runner = new TurnRunner({ execute: vi.fn() });
+    const runtime = new ChatRuntime({
+      engine: engine as unknown as ConversationEngine,
+      turnRunner: runner,
+    });
+
+    const result = await runtime.run('please continue anyway', {
+      sessionId: 'session-1',
+      pendingApproval: true,
+      approvalResolved: true,
+      pendingApprovalDescription: 'deploy staging',
+      pendingApprovalContext: { tool: 'execution', command: 'deploy staging', sessionId: 'session-1' },
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    expect(result.state).toBe('pending_approval');
+    expect(result.pendingApproval).toBe(true);
+    expect(result.pendingApprovalDescription).toBe('deploy staging');
+    expect(result.pendingApprovalContext).toEqual(expect.objectContaining({ command: 'deploy staging' }));
+    expect(result.displayMessages[0]?.content).toContain('Approval is pending');
+    expect(engine.processTurn).not.toHaveBeenCalled();
+  });
+
   it('blocks mutating slash commands while approval is pending', async () => {
     const runtime = createChatRuntime({
       chatLlm: { complete: vi.fn().mockResolvedValue('chat ignored') },
@@ -149,6 +175,35 @@ describe('chat runtime parity', () => {
     expect(result.pendingApprovalDescription).toBe('deploy staging');
     expect(result.pendingApprovalContext).toEqual(expect.objectContaining({ command: 'deploy staging' }));
     expect(result.displayMessages[0]?.content).toContain('Approval is pending');
+  });
+
+  it('allows approved /run replay to resolve pending approval', async () => {
+    const execute = vi.fn().mockResolvedValue({
+      status: 'success',
+      summary: 'deployed',
+      filesChanged: [],
+      testsRun: 0,
+      errors: [],
+    });
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+
+    const result = await runtime.run('/run deploy staging', {
+      sessionId: 'session-1',
+      pendingApproval: true,
+      approvalResolved: true,
+      pendingApprovalDescription: 'deploy staging',
+      pendingApprovalContext: { tool: 'execution', command: 'deploy staging', sessionId: 'session-1' },
+      projectId: 'test-project',
+      transcript: [],
+    });
+
+    expect(result.state).toBe('active');
+    expect(result.pendingApproval).toBe(false);
+    expect(result.displayMessages[0]).toMatchObject({ kind: 'execution', content: expect.stringContaining('deployed') });
+    expect(execute).toHaveBeenCalledWith({ userInput: 'deploy staging' });
   });
 
   it('maps /reject to a rejected approval state', async () => {
