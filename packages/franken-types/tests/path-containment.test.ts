@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
+  resolveArchiveEntryPath,
   resolveContainedExistingPath,
   resolveContainedPath,
 } from '../src/path-containment.js';
@@ -91,6 +92,45 @@ describe('realpath containment helpers', () => {
       } finally {
         rmSync(outside, { recursive: true, force: true });
       }
+    });
+  });
+
+  it('resolves safe archive entries under the extraction root before nested parents exist', () => {
+    withTempRoot('archive-entry-safe', root => {
+      expect(resolveArchiveEntryPath(root, 'nested/docs/readme.md')).toBe(resolve(root, 'nested/docs/readme.md'));
+      expect(resolveArchiveEntryPath(root, './/nested\\docs/./guide.md')).toBe(resolve(root, 'nested/docs/guide.md'));
+    });
+  });
+
+  it('rejects archive entries that could escape through zip-slip traversal', () => {
+    withTempRoot('archive-entry-zip-slip', root => {
+      expect(() => resolveArchiveEntryPath(root, '../secret.txt')).toThrow(
+        /archiveEntryPath is not a safe archive entry path: parent directory segment/i,
+      );
+      expect(() => resolveArchiveEntryPath(root, 'nested/../../secret.txt')).toThrow(
+        /archiveEntryPath is not a safe archive entry path: parent directory segment/i,
+      );
+    });
+  });
+
+  it('rejects absolute, Windows drive, UNC, empty, and NUL archive entries by default', () => {
+    withTempRoot('archive-entry-denylist', root => {
+      expect(() => resolveArchiveEntryPath(root, '/tmp/evil.txt')).toThrow(/absolute path/i);
+      expect(() => resolveArchiveEntryPath(root, 'C:\\tmp\\evil.txt')).toThrow(/absolute path/i);
+      expect(() => resolveArchiveEntryPath(root, '\\\\server\\share\\evil.txt')).toThrow(/absolute path/i);
+      expect(() => resolveArchiveEntryPath(root, '')).toThrow(/empty path/i);
+      expect(() => resolveArchiveEntryPath(root, '\0evil.txt')).toThrow(/NUL byte/i);
+    });
+  });
+
+  it('keeps explicit unsafe archive-entry overrides contained inside the extraction root', () => {
+    withTempRoot('archive-entry-unsafe-override', root => {
+      expect(resolveArchiveEntryPath(root, 'trusted/../kept.txt', 'archiveEntryPath', {
+        allowUnsafeArchiveEntryPaths: true,
+      })).toBe(resolve(root, 'kept.txt'));
+      expect(() => resolveArchiveEntryPath(root, '../outside.txt', 'archiveEntryPath', {
+        allowUnsafeArchiveEntryPaths: true,
+      })).toThrow(/archiveEntryPath resolves outside base directory/i);
     });
   });
 });
