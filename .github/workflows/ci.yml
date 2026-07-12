@@ -83,7 +83,7 @@ jobs:
       - name: Run workspace lint gate
         run: npm run lint
 
-      - name: Run CI test suite
+      - name: Run root and package CI test suite
         run: npm run test:ci
 
       - name: Phantom dependency check (every runtime import is declared)
