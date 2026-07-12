@@ -16,10 +16,16 @@ describe("Chunk 10: full verification pass", () => {
     it("does not rely on shell pipeline parsing in the default suite", () => {
       const source = readFileSync(import.meta.filename, "utf8");
       const pipe = String.fromCharCode(124);
+      const countFlag = ["--", "count"].join("");
 
       expect(source).not.toContain(`${pipe} wc -l`);
       expect(source).not.toContain(`${pipe} head`);
       expect(source).not.toContain(["git", "log"].join(" "));
+      expect(source).not.toContain(["git", "rev-list"].join(" "));
+      expect(source).not.toContain(countFlag);
+      expect(source).not.toMatch(
+        /to(?:Be|Equal|BeGreaterThanOrEqual)\((?:3|108|1572)\)/,
+      );
       expect(source).toMatch(
         /process\.platform\s*===\s*['"]win32['"]\s*\?\s*['"]npm\.cmd['"]\s*:\s*['"]npm['"]/,
       );
