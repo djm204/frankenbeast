@@ -385,6 +385,19 @@ function resolvePreflightCliProviderName(
   return catalogEntry.cliRegistryName ?? providerName;
 }
 
+function resolvePreflightCommandOverride(
+  providerName: string,
+  cliProviderName: string,
+  overrides: OrchestratorConfig['providers']['overrides'] = {},
+  consolidatedProviders: OrchestratorConfig['consolidatedProviders'] = [],
+): string | undefined {
+  const configured = consolidatedProviders
+    ?.find((provider) => provider.name === providerName || provider.type === providerName);
+  return overrides?.[providerName]?.command
+    ?? overrides?.[cliProviderName]?.command
+    ?? configured?.cliPath;
+}
+
 export function checkProviderCliAvailability(
   selectedProvider: string,
   fallbackChain: readonly string[],
@@ -395,7 +408,8 @@ export function checkProviderCliAvailability(
   const providerNames = [...new Set([selectedProvider, ...fallbackChain].filter(Boolean))];
   return providerNames.map((provider) => {
     const cliProvider = resolvePreflightCliProviderName(provider, consolidatedProviders);
-    const command = overrides?.[provider]?.command ?? registry.get(cliProvider).command;
+    const command = resolvePreflightCommandOverride(provider, cliProvider, overrides, consolidatedProviders)
+      ?? registry.get(cliProvider).command;
     return {
       provider,
       command,

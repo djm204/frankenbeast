@@ -488,6 +488,70 @@ describe('dep-factory provider wiring', () => {
     );
   });
 
+  it('lets explicit run-config models override consolidated provider defaults', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      runConfig: {
+        objective: 'Use selected custom model',
+        provider: 'prod-claude',
+        model: 'haiku',
+        llmConfig: {
+          default: { provider: 'prod-claude', model: 'sonnet' },
+          overrides: {
+            'cli-session': { provider: 'prod-claude', model: 'haiku' },
+          },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        model: 'haiku',
+        providerOverrides: expect.objectContaining({
+          'prod-claude': expect.not.objectContaining({ model: 'sonnet' }),
+        }),
+      }),
+    );
+  });
+
+  it('preserves model-only consolidated provider defaults when no explicit model is selected', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      runConfig: {
+        objective: 'Use configured custom provider defaults',
+        provider: 'prod-claude',
+        llmConfig: {
+          default: { provider: 'prod-claude' },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet', extraArgs: ['--verbose'] },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        model: 'sonnet',
+        providerOverrides: expect.objectContaining({
+          'prod-claude': expect.objectContaining({ model: 'sonnet', extraArgs: ['--verbose'] }),
+        }),
+      }),
+    );
+  });
+
   it('rejects command overrides from providersConfig unless explicitly trusted', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
@@ -619,6 +683,11 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'codex',
+      runConfig: {
+        objective: 'Use selected codex model',
+        provider: 'codex',
+        model: 'gpt-5.3-codex-spark',
+      },
       providers: ['codex'],
       trustProviderCommandOverrides: true,
       providersConfig: {
@@ -638,6 +707,7 @@ describe('dep-factory provider wiring', () => {
 
     expect(cliExecutorCall.mock.calls[0]?.[6]).toEqual(expect.objectContaining({
       provider: 'codex',
+      model: 'gpt-5.3-codex-spark',
       providers: ['codex'],
       command: '/usr/local/bin/codex',
     }));

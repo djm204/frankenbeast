@@ -305,10 +305,17 @@ function resolveProviderCommandOverride(
 ): (ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }) | undefined {
   const configuredProvider = options.orchestratorConfig?.consolidatedProviders
     ?.find((provider) => provider.name === providerName || provider.type === providerName);
-  const consolidatedOverride = configuredProvider?.cliPath
+  const hasConsolidatedDefaults = configuredProvider !== undefined && (
+    configuredProvider.cliPath !== undefined
+    || configuredProvider.model !== undefined
+    || configuredProvider.extraArgs !== undefined
+  );
+  const consolidatedOverride = hasConsolidatedDefaults
     ? {
-        cliPath: configuredProvider.cliPath,
-        command: configuredProvider.cliPath,
+        ...(configuredProvider.cliPath !== undefined ? {
+          cliPath: configuredProvider.cliPath,
+          command: configuredProvider.cliPath,
+        } : {}),
         trustCommandOverride: configuredProvider.trustCommandOverride,
         trustedCommandPaths: configuredProvider.trustedCommandPaths,
         model: configuredProvider.model,
@@ -335,14 +342,20 @@ function consolidatedProviderCommandOverrides(
   providers: readonly ProviderConfig[] | undefined,
 ): Array<readonly [string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }]> {
   return providers
-    ?.filter((provider) => provider.type.endsWith('-cli') && Boolean(provider.cliPath))
+    ?.filter((provider) => provider.type.endsWith('-cli') && (
+      provider.cliPath !== undefined
+      || provider.model !== undefined
+      || provider.extraArgs !== undefined
+    ))
     .flatMap((provider) => {
       const registryName = resolveProviderCatalogEntry(provider.type).cliRegistryName;
       return [provider.type, provider.name, registryName]
         .filter((name, index, names): name is string => Boolean(name) && names.indexOf(name) === index)
         .map((name) => [name, {
-          cliPath: provider.cliPath,
-          command: provider.cliPath,
+          ...(provider.cliPath !== undefined ? {
+            cliPath: provider.cliPath,
+            command: provider.cliPath,
+          } : {}),
           trustCommandOverride: provider.trustCommandOverride,
           trustedCommandPaths: provider.trustedCommandPaths,
           model: provider.model,
@@ -351,11 +364,29 @@ function consolidatedProviderCommandOverrides(
     }) ?? [];
 }
 
-function providerCommandOverrides(options: CliDepOptions): Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> {
-  return {
+function providerCommandOverrides(
+  options: CliDepOptions,
+  activeProviderName?: string | undefined,
+  activeRegistryProviderName?: string | undefined,
+  explicitActiveModel?: string | undefined,
+): Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> {
+  const overrides: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> = {
     ...Object.fromEntries(consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders)),
     ...(options.providersConfig ?? {}),
   };
+
+  if (explicitActiveModel === undefined || activeProviderName === undefined) {
+    return overrides;
+  }
+
+  for (const name of [activeProviderName, activeRegistryProviderName].filter((value): value is string => Boolean(value))) {
+    const override = overrides[name];
+    if (override?.model === undefined) continue;
+    const { model: _model, ...withoutModel } = override;
+    overrides[name] = withoutModel;
+  }
+
+  return overrides;
 }
 
 function createSessionArtifacts(options: CliDepOptions): SessionArtifacts {
@@ -531,7 +562,7 @@ function createCachedCliLlmClient(
     replayRecorder: (record) => observer.observerBridge.recordReplay(record),
     ...(options.providers ? { providers: options.providers } : {}),
     registry: stack.registry,
-    providerOverrides: providerCommandOverrides(options),
+    providerOverrides: providerCommandOverrides(options, providerName, registryProviderName, model),
   });
 
   new AdapterLlmClient(
@@ -857,6 +888,7 @@ function createCliExecutorDeps(
           maxTokens,
         }),
       providers: options.providers,
+      ...(config.model !== undefined ? { model: config.model } : {}),
       ...(override?.command ? { command: override.command } : {}),
       ...(Object.keys(providerCommands).length > 0 ? { providerCommands } : {}),
     },

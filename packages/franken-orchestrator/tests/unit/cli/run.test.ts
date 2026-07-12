@@ -420,6 +420,16 @@ describe('provider CLI availability preflight', () => {
     expect(report[0]?.provider).toBe('prod-claude');
     expect(report[0]?.command).toBe('claude');
   });
+
+  it('preflights consolidated providers with their trusted cliPath', () => {
+    const report = checkProviderCliAvailability('prod-claude', [], {}, [
+      { name: 'prod-claude', type: 'claude-cli', cliPath: 'sh', trustCommandOverride: true },
+    ] as never);
+
+    expect(report).toEqual([
+      { provider: 'prod-claude', command: 'sh', available: true },
+    ]);
+  });
 });
 
 describe('dashboard provider snapshots', () => {

@@ -31,6 +31,7 @@ export interface MartinLoopConfig {
   readonly staleMateLimit?: number | undefined;
   readonly maxTurns: number;
   readonly provider: string;
+  readonly model?: string | undefined;
   readonly command?: string | undefined;
   readonly providerCommands?: Readonly<Record<string, string>> | undefined;
   readonly timeoutMs: number;
