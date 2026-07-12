@@ -2,8 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 import { LessonRecorder } from '../../../src/memory/lesson-recorder.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { MemoryPort } from '../../../src/types/contracts.js';
-import type { CritiqueLoopResult, CritiqueIteration } from '../../../src/types/loop.js';
-import type { CritiqueResult, EvaluationFinding } from '../../../src/types/evaluation.js';
+import type {
+  CritiqueLoopResult,
+  CritiqueIteration,
+} from '../../../src/types/loop.js';
+import type {
+  CritiqueResult,
+  EvaluationFinding,
+} from '../../../src/types/evaluation.js';
 
 function createMockMemoryPort(): MemoryPort {
   return {
@@ -64,7 +70,12 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'safety', [{ message: `${unsafeDynamicCallName}() detected`, severity: 'critical' }]),
+        createIteration(0, 'fail', 'safety', [
+          {
+            message: `${unsafeDynamicCallName}() detected`,
+            severity: 'critical',
+          },
+        ]),
         createIteration(1, 'pass'),
       ],
     };
@@ -75,7 +86,9 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).toHaveBeenCalledWith(
       expect.objectContaining({
         evaluatorName: 'safety',
-        failureDescription: expect.stringContaining(`${unsafeDynamicCallName}()`),
+        failureDescription: expect.stringContaining(
+          `${unsafeDynamicCallName}()`,
+        ),
         taskId: 'test-task',
       }),
     );
@@ -97,7 +110,8 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'Task 123');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.testTraceability).toEqual([
       {
         lessonId: 'task-123:safety-gate:iteration-0',
@@ -125,7 +139,8 @@ describe('LessonRecorder', () => {
             message: 'PR summary omits the verification command',
             severity: 'warning',
             location: 'pull-request-body',
-            suggestion: 'Add the exact targeted test command and result to the PR description.',
+            suggestion:
+              'Add the exact targeted test command and result to the PR description.',
           },
         ]),
         createIteration(1, 'pass'),
@@ -134,7 +149,8 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'review-feedback-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.reviewerFeedback).toEqual({
       summary: 'PR summary omits the verification command',
       findings: [
@@ -144,7 +160,8 @@ describe('LessonRecorder', () => {
           message: 'PR summary omits the verification command',
           severity: 'warning',
           location: 'pull-request-body',
-          suggestion: 'Add the exact targeted test command and result to the PR description.',
+          suggestion:
+            'Add the exact targeted test command and result to the PR description.',
         },
       ],
       suggestionsComplete: true,
@@ -159,7 +176,11 @@ describe('LessonRecorder', () => {
       verdict: 'pass',
       iterations: [
         createIteration(0, 'fail', 'reviewer', [
-          { message: 'Review identified a handoff gap without remediation guidance', severity: 'critical' },
+          {
+            message:
+              'Review identified a handoff gap without remediation guidance',
+            severity: 'critical',
+          },
         ]),
         createIteration(1, 'pass'),
       ],
@@ -167,14 +188,16 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'missing-suggestion-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.reviewerFeedback).toEqual({
       summary: 'Review identified a handoff gap without remediation guidance',
       findings: [
         {
           sourceIteration: 0,
           evaluatorName: 'reviewer',
-          message: 'Review identified a handoff gap without remediation guidance',
+          message:
+            'Review identified a handoff gap without remediation guidance',
           severity: 'critical',
         },
       ],
@@ -195,7 +218,8 @@ describe('LessonRecorder', () => {
           {
             message: 'PR omitted the regression evidence from the handoff',
             severity: 'warning',
-            suggestion: 'Add the exact verifier command and result before requesting promotion.',
+            suggestion:
+              'Add the exact verifier command and result before requesting promotion.',
           },
         ]),
         createIteration(1, 'pass'),
@@ -204,7 +228,8 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'post-pr-template-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.postPrLessonExtractionTemplate).toEqual({
       templateId: 'post-pr-lesson-extraction-v1',
       trigger: 'after-pr-review-or-merge',
@@ -265,7 +290,10 @@ describe('LessonRecorder', () => {
       verdict: 'pass',
       iterations: [
         createIteration(0, 'fail', 'factuality', [
-          { message: 'handoff cited an unverified file path', severity: 'critical' },
+          {
+            message: 'handoff cited an unverified file path',
+            severity: 'critical',
+          },
         ]),
         createIteration(1, 'pass'),
       ],
@@ -273,7 +301,8 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'sandbox-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.experimentSandbox).toEqual({
       state: 'experimental',
       promotionBlocked: true,
@@ -289,13 +318,133 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('attaches learning cooldown metadata to recorded lessons for PM/liveness tooling', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Lesson was promoted without verification evidence',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const summary = await recorder.record(result, 'cooldown-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(summary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(lesson.cooldown).toEqual({
+      key: expect.stringMatching(/^critique-lesson:learning-reviewer:/),
+      windowMs: 60_000,
+      recordedAt: '2026-07-12T10:00:00.000Z',
+      suppressUntil: '2026-07-12T10:01:00.000Z',
+      guidance:
+        'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.',
+    });
+    expect(lesson.timestamp).toBe('2026-07-12T10:00:00.000Z');
+  });
+
+  it('suppresses equivalent lessons inside the cooldown window and returns structured evidence', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Repeated PM handoff lesson caused churn',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'first-task');
+    now = new Date('2026-07-12T10:00:30.000Z');
+    const suppressed = await recorder.record(result, 'second-task');
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(suppressed.recorded).toBe(0);
+    expect(suppressed.suppressedByCooldown).toEqual([
+      {
+        key: expect.stringMatching(/^critique-lesson:learning-reviewer:/),
+        taskId: 'second-task',
+        evaluatorName: 'learning-reviewer',
+        suppressedAt: '2026-07-12T10:00:30.000Z',
+        suppressUntil: '2026-07-12T10:01:00.000Z',
+        remainingMs: 30_000,
+        reason:
+          'Equivalent critique lesson is still inside the learning cooldown window; reuse the existing lesson metadata instead of recording another copy.',
+      },
+    ]);
+  });
+
+  it('records equivalent lessons again after the cooldown expires', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Cooldown edge should expire deterministically',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'first-task');
+    now = new Date('2026-07-12T10:01:00.001Z');
+    const admitted = await recorder.record(result, 'second-task');
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(admitted).toEqual({ recorded: 1, suppressedByCooldown: [] });
+  });
+
+  it('rejects invalid cooldown windows explicitly', () => {
+    const port = createMockMemoryPort();
+
+    expect(() => new LessonRecorder(port, { cooldownMs: -1 })).toThrow(
+      'LessonRecorder cooldownMs must be a finite, non-negative number.',
+    );
+    expect(
+      () => new LessonRecorder(port, { cooldownMs: Number.POSITIVE_INFINITY }),
+    ).toThrow(
+      'LessonRecorder cooldownMs must be a finite, non-negative number.',
+    );
+  });
+
   it('does not create an experimental sandbox entry for failing iterations with no actionable finding', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
 
     const result: CritiqueLoopResult = {
       verdict: 'pass',
-      iterations: [createIteration(0, 'fail', 'empty-failure'), createIteration(1, 'pass')],
+      iterations: [
+        createIteration(0, 'fail', 'empty-failure'),
+        createIteration(1, 'pass'),
+      ],
     };
 
     await recorder.record(result, 'sandbox-task');
@@ -333,14 +482,17 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'complexity', [{ message: 'too many params', severity: 'warning' }]),
+        createIteration(0, 'fail', 'complexity', [
+          { message: 'too many params', severity: 'warning' },
+        ]),
         createIteration(1, 'pass'),
       ],
     };
 
     await recorder.record(result, 'task-123');
 
-    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as {
       correctionApplied: string;
       timestamp: string;
     };
@@ -355,14 +507,19 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'warn',
       iterations: [
-        createIteration(0, 'fail', 'complexity', [{ message: 'too many params', severity: 'warning' }]),
-        createIteration(1, 'warn', 'adr-compliance', [{ message: 'review ADR', severity: 'warning' }]),
+        createIteration(0, 'fail', 'complexity', [
+          { message: 'too many params', severity: 'warning' },
+        ]),
+        createIteration(1, 'warn', 'adr-compliance', [
+          { message: 'review ADR', severity: 'warning' },
+        ]),
       ],
     };
 
     await recorder.record(result, 'task-123');
 
-    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as {
       correctionApplied: string;
     };
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
@@ -378,7 +535,8 @@ describe('LessonRecorder', () => {
       iterations: [
         createIteration(0, 'fail', 'adr-compliance', [
           {
-            message: 'Evaluator "adr-compliance" failed because an internal evaluator error occurred.',
+            message:
+              'Evaluator "adr-compliance" failed because an internal evaluator error occurred.',
             severity: 'critical',
             location: EVALUATOR_EXCEPTION_LOCATION,
           },
@@ -399,7 +557,12 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'fail',
       iterations: [createIteration(0, 'fail')],
-      correction: { summary: 'fix it', findings: [], score: 0.3, iterationCount: 1 },
+      correction: {
+        summary: 'fix it',
+        findings: [],
+        score: 0.3,
+        iterationCount: 1,
+      },
     };
 
     await recorder.record(result, 'test-task');
@@ -424,18 +587,25 @@ describe('LessonRecorder', () => {
 
   it('swallows errors from MemoryPort gracefully', async () => {
     const port = createMockMemoryPort();
-    (port.recordLesson as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('DB down'));
+    (port.recordLesson as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('DB down'),
+    );
     const recorder = new LessonRecorder(port);
 
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'safety', [{ message: 'issue', severity: 'critical' }]),
+        createIteration(0, 'fail', 'safety', [
+          { message: 'issue', severity: 'critical' },
+        ]),
         createIteration(1, 'pass'),
       ],
     };
 
-    // Should not throw
-    await expect(recorder.record(result, 'test-task')).resolves.toBeUndefined();
+    // Should not throw and should report that no lesson was persisted.
+    await expect(recorder.record(result, 'test-task')).resolves.toEqual({
+      recorded: 0,
+      suppressedByCooldown: [],
+    });
   });
 });

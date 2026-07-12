@@ -1,16 +1,29 @@
 import type {
   MemoryPort,
   CritiqueLesson,
+  LessonCooldownSuppression,
+  LessonRecordingResult,
   ReviewerFeedbackLessonCapture,
   PostPrLessonExtractionTemplate,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
-import { isoNow } from '@franken/types';
 
 const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
   'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
+
+const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+const LEARNING_COOLDOWN_GUIDANCE =
+  'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.';
+
+export interface LessonRecorderOptions {
+  /** Milliseconds to suppress equivalent lessons after one is admitted. Defaults to 24 hours. */
+  readonly cooldownMs?: number;
+  /** Clock injection for deterministic tests and replay tooling. */
+  readonly now?: () => Date;
+}
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
   'New critique lessons are experimental until their traceability map and regression evidence are independently verified.';
@@ -48,15 +61,38 @@ const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
+  private readonly cooldownMs: number;
+  private readonly now: () => Date;
+  private readonly cooldowns = new Map<string, number>();
 
-  constructor(memory: MemoryPort) {
+  constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
+    const cooldownMs = options.cooldownMs ?? DEFAULT_LESSON_COOLDOWN_MS;
+    if (!Number.isFinite(cooldownMs) || cooldownMs < 0) {
+      throw new RangeError(
+        'LessonRecorder cooldownMs must be a finite, non-negative number.',
+      );
+    }
+
     this.memory = memory;
+    this.cooldownMs = cooldownMs;
+    this.now = options.now ?? ((): Date => new Date());
   }
 
-  async record(result: CritiqueLoopResult, taskId: TaskId): Promise<void> {
+  async record(
+    result: CritiqueLoopResult,
+    taskId: TaskId,
+  ): Promise<LessonRecordingResult> {
+    const recordingResult: MutableLessonRecordingResult = {
+      recorded: 0,
+      suppressedByCooldown: [],
+    };
+
     // Only record lessons from multi-iteration pass/warn successes.
-    if ((result.verdict !== 'pass' && result.verdict !== 'warn') || result.iterations.length <= 1) {
-      return;
+    if (
+      (result.verdict !== 'pass' && result.verdict !== 'warn') ||
+      result.iterations.length <= 1
+    ) {
+      return recordingResult;
     }
 
     const failingIterations = result.iterations.filter(
@@ -66,13 +102,31 @@ export class LessonRecorder {
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const lesson of lessons) {
+        const cooldownKey = lesson.cooldown?.key;
+        if (cooldownKey) {
+          const suppression = this.getCooldownSuppression(lesson, cooldownKey);
+          if (suppression) {
+            recordingResult.suppressedByCooldown.push(suppression);
+            continue;
+          }
+        }
+
         try {
           await this.memory.recordLesson(lesson);
+          recordingResult.recorded += 1;
+          if (cooldownKey && this.cooldownMs > 0) {
+            this.cooldowns.set(
+              cooldownKey,
+              Date.parse(lesson.cooldown!.suppressUntil),
+            );
+          }
         } catch {
           // Non-fatal: log failure but don't disrupt the critique flow
         }
       }
     }
+
+    return recordingResult;
   }
 
   private extractLessons(
@@ -91,9 +145,22 @@ export class LessonRecorder {
       );
 
       if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
-        const resolvedIteration = passingIteration?.index ?? failingIteration.index;
-        const lessonId = createLessonId(taskId, evalResult.evaluatorName, failingIteration.index);
+        const resolvedIteration =
+          passingIteration?.index ?? failingIteration.index;
+        const lessonId = createLessonId(
+          taskId,
+          evalResult.evaluatorName,
+          failingIteration.index,
+        );
         const findingMessages = critiqueFindings.map((f) => f.message);
+        const recordedAt = this.now().toISOString();
+        const cooldownKey = createCooldownKey(
+          evalResult.evaluatorName,
+          findingMessages,
+        );
+        const suppressUntil = new Date(
+          Date.parse(recordedAt) + this.cooldownMs,
+        ).toISOString();
 
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
@@ -102,7 +169,7 @@ export class LessonRecorder {
             ? `Corrected in iteration ${passingIteration.index}`
             : 'Unknown correction',
           taskId,
-          timestamp: isoNow(),
+          timestamp: recordedAt,
           experimentSandbox: {
             state: 'experimental',
             promotionBlocked: true,
@@ -131,13 +198,54 @@ export class LessonRecorder {
             evalResult.evaluatorName,
             critiqueFindings,
           ),
-          postPrLessonExtractionTemplate: createPostPrLessonExtractionTemplate(),
+          postPrLessonExtractionTemplate:
+            createPostPrLessonExtractionTemplate(),
+          cooldown: {
+            key: cooldownKey,
+            windowMs: this.cooldownMs,
+            recordedAt,
+            suppressUntil,
+            guidance: LEARNING_COOLDOWN_GUIDANCE,
+          },
         });
       }
     }
 
     return lessons;
   }
+
+  private getCooldownSuppression(
+    lesson: CritiqueLesson,
+    cooldownKey: string,
+  ): LessonCooldownSuppression | null {
+    const suppressUntilMs = this.cooldowns.get(cooldownKey);
+    if (!suppressUntilMs) {
+      return null;
+    }
+
+    const suppressedAt = this.now();
+    const remainingMs = suppressUntilMs - suppressedAt.getTime();
+    if (remainingMs <= 0) {
+      this.cooldowns.delete(cooldownKey);
+      return null;
+    }
+
+    return {
+      key: cooldownKey,
+      taskId: lesson.taskId,
+      evaluatorName: lesson.evaluatorName,
+      suppressedAt: suppressedAt.toISOString(),
+      suppressUntil: new Date(suppressUntilMs).toISOString(),
+      remainingMs,
+      reason:
+        'Equivalent critique lesson is still inside the learning cooldown window; reuse the existing lesson metadata instead of recording another copy.',
+    };
+  }
+}
+
+interface MutableLessonRecordingResult {
+  recorded: number;
+  suppressedByCooldown: LessonCooldownSuppression[];
 }
 
 function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {
@@ -167,23 +275,58 @@ function createReviewerFeedbackCapture(
     ...(finding.location ? { location: finding.location } : {}),
     ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
   }));
-  const suggestionsComplete = capturedFindings.every((finding) => Boolean(finding.suggestion));
+  const suggestionsComplete = capturedFindings.every((finding) =>
+    Boolean(finding.suggestion),
+  );
 
   return {
     summary: capturedFindings.map((finding) => finding.message).join('; '),
     findings: capturedFindings,
     suggestionsComplete,
-    ...(suggestionsComplete ? {} : { missingSuggestionGuidance: MISSING_REVIEWER_SUGGESTION_GUIDANCE }),
+    ...(suggestionsComplete
+      ? {}
+      : { missingSuggestionGuidance: MISSING_REVIEWER_SUGGESTION_GUIDANCE }),
   };
 }
 
-function createLessonId(taskId: TaskId, evaluatorName: string, iterationIndex: number): string {
+function createLessonId(
+  taskId: TaskId,
+  evaluatorName: string,
+  iterationIndex: number,
+): string {
   return [taskId, evaluatorName, `iteration-${iterationIndex}`]
     .map((part) => sanitizeLessonIdPart(part))
     .join(':');
 }
 
+function createCooldownKey(
+  evaluatorName: string,
+  findingMessages: readonly string[],
+): string {
+  const normalizedFindings = findingMessages
+    .map((message) => message.trim())
+    .sort()
+    .join('\n');
+  return [
+    'critique-lesson',
+    sanitizeLessonIdPart(evaluatorName),
+    stableHash(normalizedFindings),
+  ].join(':');
+}
+
+function stableHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 function sanitizeLessonIdPart(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-');
   return normalized.replace(/^-+|-+$/g, '') || 'unknown';
 }
