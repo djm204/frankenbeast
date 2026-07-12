@@ -342,7 +342,11 @@ describe('LessonRecorder', () => {
 
     const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[0]![0];
-    expect(summary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(summary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
     expect(lesson.cooldown).toEqual({
       key: expect.stringMatching(/^critique-lesson:learning-reviewer:/),
       windowMs: 60_000,
@@ -419,7 +423,11 @@ describe('LessonRecorder', () => {
     const admitted = await recorder.record(result, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(admitted).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(admitted).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
   });
 
   it('honors shared cooldown state across recorder instances', async () => {
@@ -460,6 +468,7 @@ describe('LessonRecorder', () => {
           remainingMs: 30_000,
         }),
       ],
+      minedBlockerPatterns: [],
     });
   });
 
@@ -510,12 +519,17 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(firstSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
     expect(secondSummary).toEqual({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({ taskId: 'second-task' }),
       ],
+      minedBlockerPatterns: [],
     });
   });
 
@@ -552,7 +566,11 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(disabledSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(disabledSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
   });
 
   it('aligns local suppression with the recorded cooldown metadata', async () => {
@@ -577,7 +595,8 @@ describe('LessonRecorder', () => {
       iterations: [
         createIteration(0, 'fail', 'learning-reviewer', [
           {
-            message: 'Slow memory writes should keep recorded and live cooldowns aligned',
+            message:
+              'Slow memory writes should keep recorded and live cooldowns aligned',
             severity: 'warning',
           },
         ]),
@@ -592,12 +611,18 @@ describe('LessonRecorder', () => {
     await firstRecord;
     const secondSummary = await recorder.record(result, 'second-task');
     const firstLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
-      .calls[0]![0] as { cooldown: { recordedAt: string; suppressUntil: string } };
+      .calls[0]![0] as {
+      cooldown: { recordedAt: string; suppressUntil: string };
+    };
 
     expect(firstLesson.cooldown.recordedAt).toBe('2026-07-12T10:00:00.000Z');
     expect(firstLesson.cooldown.suppressUntil).toBe('2026-07-12T10:00:01.000Z');
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(secondSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
   });
 
   it('reserves cooldown admission before async persistence completes', async () => {
@@ -639,7 +664,11 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(firstSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
     expect(secondSummary).toEqual({
       recorded: 0,
       suppressedByCooldown: [
@@ -649,6 +678,7 @@ describe('LessonRecorder', () => {
           remainingMs: 60_000,
         }),
       ],
+      minedBlockerPatterns: [],
     });
   });
 
@@ -695,8 +725,16 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(firstSummary).toEqual({ recorded: 0, suppressedByCooldown: [] });
-    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(firstSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
+    expect(secondSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
     expect(thirdSummary).toEqual({
       recorded: 0,
       suppressedByCooldown: [
@@ -705,6 +743,7 @@ describe('LessonRecorder', () => {
           evaluatorName: 'learning-reviewer',
         }),
       ],
+      minedBlockerPatterns: [],
     });
   });
 
@@ -741,7 +780,11 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(secondSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
   });
 
   it('keeps evaluator names distinct even when their display slugs collide', async () => {
@@ -773,7 +816,439 @@ describe('LessonRecorder', () => {
     const secondSummary = await recorder.record(policyDash, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(secondSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
+  });
+
+  it('mines cross-task blocker patterns after equivalent critical findings recur across distinct tasks', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Codex usage-limit blocker stopped the current-head review gate',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstSummary = await recorder.record(result, 'task-a');
+    now = new Date('2026-07-12T10:05:00.000Z');
+    const secondSummary = await recorder.record(result, 'task-b');
+    const secondLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[1]![0];
+
+    expect(firstSummary.minedBlockerPatterns).toEqual([]);
+    expect(secondSummary.minedBlockerPatterns).toEqual([
+      {
+        key: expect.stringMatching(/^blocker-pattern:codex-review:/),
+        evaluatorName: 'codex-review',
+        normalizedFinding:
+          'codex usage-limit blocker stopped the current-head review gate',
+        threshold: 2,
+        occurrences: 2,
+        taskIds: ['task-a', 'task-b'],
+        firstSeenAt: '2026-07-12T10:00:00.000Z',
+        lastSeenAt: '2026-07-12T10:05:00.000Z',
+        guidance:
+          'Equivalent blocker findings have recurred across distinct tasks; PM/liveness handoffs should treat this as a cross-task pattern and route a durable mitigation instead of rediscovering it per task.',
+      },
+    ]);
+    expect(secondLesson.blockerPatterns).toEqual(
+      secondSummary.minedBlockerPatterns,
+    );
+  });
+
+  it('persists a mined blocker pattern even when the equivalent lesson is inside cooldown', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      blockerPatternThreshold: 2,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Same current-head Codex review blocker should be routed durably',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-a');
+    now = new Date('2026-07-12T10:00:30.000Z');
+    const secondSummary = await recorder.record(result, 'task-b');
+    const secondLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[1]![0];
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(secondSummary.recorded).toBe(1);
+    expect(secondSummary.suppressedByCooldown).toEqual([]);
+    expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
+    expect(secondLesson.blockerPatterns).toEqual(
+      secondSummary.minedBlockerPatterns,
+    );
+  });
+
+  it('counts suppressed repeats and only bypasses cooldown on threshold crossing', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      blockerPatternThreshold: 3,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Suppressed repeat should still count toward blocker threshold',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-a');
+    now = new Date('2026-07-12T10:00:10.000Z');
+    const secondSummary = await recorder.record(result, 'task-b');
+    now = new Date('2026-07-12T10:00:20.000Z');
+    const thirdSummary = await recorder.record(result, 'task-c');
+    const thirdLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[1]![0];
+
+    expect(secondSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
+      minedBlockerPatterns: [],
+    });
+    expect(thirdSummary.recorded).toBe(1);
+    expect(thirdSummary.suppressedByCooldown).toEqual([]);
+    expect(thirdSummary.minedBlockerPatterns).toEqual([
+      expect.objectContaining({
+        occurrences: 3,
+        taskIds: ['task-a', 'task-b', 'task-c'],
+      }),
+    ]);
+    expect(thirdLesson.blockerPatterns).toEqual(
+      thirdSummary.minedBlockerPatterns,
+    );
+  });
+
+  it('serializes blocker mining by pattern key before committing observations', async () => {
+    const port = createMockMemoryPort();
+    const releaseRecordLesson: (() => void)[] = [];
+    (port.recordLesson as ReturnType<typeof vi.fn>).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseRecordLesson.push(resolve);
+        }),
+    );
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Concurrent blockers must not cross threshold without reporting',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstRecord = recorder.record(result, 'task-a');
+    await Promise.resolve();
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+
+    const secondRecord = recorder.record(result, 'task-b');
+    await Promise.resolve();
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+
+    releaseRecordLesson[0]!();
+    const firstSummary = await firstRecord;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(firstSummary.minedBlockerPatterns).toEqual([]);
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    const secondLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[1]![0];
+
+    releaseRecordLesson[1]!();
+    const secondSummary = await secondRecord;
+
+    expect(secondSummary.minedBlockerPatterns).toEqual([
+      expect.objectContaining({
+        occurrences: 2,
+        taskIds: ['task-a', 'task-b'],
+      }),
+    ]);
+    expect(secondLesson.blockerPatterns).toEqual(
+      secondSummary.minedBlockerPatterns,
+    );
+  });
+
+  it('serializes blocker mining across recorders that share a blocker store', async () => {
+    const firstPort = createMockMemoryPort();
+    const secondPort = createMockMemoryPort();
+    const sharedBlockerStore = new Map();
+    const releaseFirstRecordLesson: (() => void)[] = [];
+    (firstPort.recordLesson as ReturnType<typeof vi.fn>).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFirstRecordLesson.push(resolve);
+        }),
+    );
+    const firstRecorder = new LessonRecorder(firstPort, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      blockerPatternStore: sharedBlockerStore,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const secondRecorder = new LessonRecorder(secondPort, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      blockerPatternStore: sharedBlockerStore,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Shared recorder stores must not miss threshold crossing',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstRecord = firstRecorder.record(result, 'task-a');
+    await Promise.resolve();
+    expect(firstPort.recordLesson).toHaveBeenCalledTimes(1);
+
+    const secondRecord = secondRecorder.record(result, 'task-b');
+    await Promise.resolve();
+    expect(secondPort.recordLesson).not.toHaveBeenCalled();
+
+    releaseFirstRecordLesson[0]!();
+    await firstRecord;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(secondPort.recordLesson).toHaveBeenCalledTimes(1);
+    const secondSummary = await secondRecord;
+
+    expect(secondSummary.minedBlockerPatterns).toEqual([
+      expect.objectContaining({
+        occurrences: 2,
+        taskIds: ['task-a', 'task-b'],
+      }),
+    ]);
+  });
+
+  it('deduplicates repeated critical blocker findings within one lesson', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const firstResult: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message: 'Duplicate critical blocker should be mined once',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+    const duplicateResult: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message: 'Duplicate critical blocker should be mined once',
+            severity: 'critical',
+          },
+          {
+            message: 'Duplicate critical blocker should be mined once',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(firstResult, 'task-a');
+    const secondSummary = await recorder.record(duplicateResult, 'task-b');
+
+    expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
+    expect(secondSummary.minedBlockerPatterns[0]!.taskIds).toEqual([
+      'task-a',
+      'task-b',
+    ]);
+  });
+
+  it('keeps already-mined blocker repeats subject to cooldown', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      blockerPatternThreshold: 2,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Already-routed blocker pattern should not bypass cooldown forever',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-a');
+    now = new Date('2026-07-12T10:00:10.000Z');
+    const secondSummary = await recorder.record(result, 'task-b');
+    now = new Date('2026-07-12T10:00:20.000Z');
+    const thirdSummary = await recorder.record(result, 'task-c');
+
+    expect(secondSummary.recorded).toBe(1);
+    expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(thirdSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [expect.objectContaining({ taskId: 'task-c' })],
+      minedBlockerPatterns: [],
+    });
+  });
+
+  it('rolls back blocker observations when lesson persistence fails', async () => {
+    const port = createMockMemoryPort();
+    (port.recordLesson as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('transient memory failure'))
+      .mockResolvedValue(undefined);
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Memory failure should not leave phantom blocker observations',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const failedSummary = await recorder.record(result, 'task-a');
+    const secondSummary = await recorder.record(result, 'task-b');
+
+    expect(failedSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
+    expect(secondSummary).toEqual({
+      recorded: 1,
+      suppressedByCooldown: [],
+      minedBlockerPatterns: [],
+    });
+  });
+
+  it('does not mine blocker patterns from repeated observations on the same task', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message: 'Approval blocker prevented pushing the prepared fix',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-a');
+    const secondSummary = await recorder.record(result, 'task-a');
+
+    expect(secondSummary.minedBlockerPatterns).toEqual([]);
+  });
+
+  it('does not mine warning-only findings as blocker patterns', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'PR handoff omitted one optional verification note',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-a');
+    const secondSummary = await recorder.record(result, 'task-b');
+
+    expect(secondSummary.minedBlockerPatterns).toEqual([]);
   });
 
   it('rejects invalid cooldown windows explicitly', () => {
@@ -963,6 +1438,7 @@ describe('LessonRecorder', () => {
     await expect(recorder.record(result, 'test-task')).resolves.toEqual({
       recorded: 0,
       suppressedByCooldown: [],
+      minedBlockerPatterns: [],
     });
   });
 });
