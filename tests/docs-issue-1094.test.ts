@@ -71,7 +71,7 @@ const markdownLinkIssues = (): string[] =>
           continue;
         }
 
-        if (isUnsafeLocalMarkdownLinkTarget(pathOnly)) {
+        if (isUnsafeLocalMarkdownLinkTarget(rawTarget)) {
           issues.push(`${relativeFile}:${lineIndex + 1} unsafe local Markdown link target`);
           continue;
         }
@@ -101,6 +101,7 @@ describe("issue #1094, #1447, and #1791 local docs links", () => {
     expect(isUnsafeLocalMarkdownLinkTarget("docs/guide.md%3Btouch-pwned")).toBe(true);
     expect(isUnsafeLocalMarkdownLinkTarget("docs/%60whoami%60.md")).toBe(true);
     expect(isUnsafeLocalMarkdownLinkTarget("docs/%24HOME.md")).toBe(true);
+    expect(isUnsafeLocalMarkdownLinkTarget("docs/guides/quickstart.md#%60whoami%60")).toBe(true);
     expect(isUnsafeLocalMarkdownLinkTarget("docs/bad%ZZ.md")).toBe(true);
     expect(isUnsafeLocalMarkdownLinkTarget("docs/guides/quickstart.md")).toBe(false);
   });
