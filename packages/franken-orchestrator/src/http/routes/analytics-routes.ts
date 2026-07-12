@@ -17,32 +17,49 @@ const OUTCOMES = new Set<AnalyticsOutcome>([
 const TIME_WINDOWS = ['24h', '7d', '30d', 'all'] as const;
 const TIME_WINDOW_SET = new Set<string>(TIME_WINDOWS);
 
-type FilterValidationError = 'invalid_time_window' | 'invalid_outcome';
-type FiltersResult = { ok: true; filters: AnalyticsFilters } | { ok: false; reason: FilterValidationError };
+type TextFilterParameter = 'sessionId' | 'toolQuery';
+type NonTextFilterValidationError = 'invalid_time_window' | 'invalid_outcome';
+type FiltersResult =
+  | { ok: true; filters: AnalyticsFilters }
+  | { ok: false; reason: NonTextFilterValidationError }
+  | { ok: false; reason: 'invalid_filter_text'; parameter: TextFilterParameter };
 type PageRequestResult =
   | { ok: true; request: AnalyticsPageRequest }
-  | { ok: false; reason: FilterValidationError }
+  | { ok: false; reason: NonTextFilterValidationError }
+  | { ok: false; reason: 'invalid_filter_text'; parameter: TextFilterParameter }
   | { ok: false; reason: 'invalid_pagination'; parameter: 'page' | 'pageSize' };
+
+const TEXT_FILTER_LIMITS: Record<TextFilterParameter, number> = {
+  sessionId: 256,
+  toolQuery: 128,
+};
 
 export function createAnalyticsRoutes(deps: AnalyticsRouteDeps): Hono {
   const app = new Hono();
 
   app.get('/summary', async (c) => {
     const result = readFilters(c.req.query());
-    if (!result.ok) return invalidFilter(c, result.reason);
+    if (!result.ok) {
+      return result.reason === 'invalid_filter_text' ? invalidTextFilter(c, result.parameter) : invalidFilter(c, result.reason);
+    }
     return c.json(await deps.analytics.getSummary(result.filters));
   });
 
   app.get('/sessions', async (c) => {
     const result = readFilters(c.req.query());
-    if (!result.ok) return invalidFilter(c, result.reason);
+    if (!result.ok) {
+      return result.reason === 'invalid_filter_text' ? invalidTextFilter(c, result.parameter) : invalidFilter(c, result.reason);
+    }
     return c.json({ sessions: await deps.analytics.listSessions(result.filters) });
   });
 
   app.get('/events', async (c) => {
     const result = readPageRequest(c.req.query());
     if (!result.ok) {
-      return result.reason === 'invalid_pagination' ? invalidPagination(c, result.parameter) : invalidFilter(c, result.reason);
+      if (result.reason === 'invalid_pagination') {
+        return invalidPagination(c, result.parameter);
+      }
+      return result.reason === 'invalid_filter_text' ? invalidTextFilter(c, result.parameter) : invalidFilter(c, result.reason);
     }
     return c.json(await deps.analytics.listEvents(result.request));
   });
@@ -61,7 +78,9 @@ export function createAnalyticsRoutes(deps: AnalyticsRouteDeps): Hono {
 function readPageRequest(query: Record<string, string>): PageRequestResult {
   const filters = readFilters(query);
   if (!filters.ok) {
-    return { ok: false, reason: filters.reason };
+    return filters.reason === 'invalid_filter_text'
+      ? { ok: false, reason: filters.reason, parameter: filters.parameter }
+      : { ok: false, reason: filters.reason };
   }
   const page = readPositiveInteger(query['page']);
   if (!page.ok) {
@@ -91,18 +110,44 @@ function readFilters(query: Record<string, string>): FiltersResult {
   if (outcome && !OUTCOMES.has(outcome as AnalyticsOutcome)) {
     return { ok: false, reason: 'invalid_outcome' };
   }
+  const sessionId = query['sessionId'];
+  const toolQuery = query['toolQuery'];
+  const sessionIdValidation = validateTextFilter('sessionId', sessionId);
+  if (!sessionIdValidation.ok) {
+    return sessionIdValidation;
+  }
+  const toolQueryValidation = validateTextFilter('toolQuery', toolQuery);
+  if (!toolQueryValidation.ok) {
+    return toolQueryValidation;
+  }
   return {
     ok: true,
     filters: {
-      ...(query['sessionId'] ? { sessionId: query['sessionId'] } : {}),
-      ...(query['toolQuery'] ? { toolQuery: query['toolQuery'] } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(toolQuery ? { toolQuery } : {}),
       ...(outcome ? { outcome: outcome as AnalyticsOutcome } : {}),
       ...(timeWindow ? { timeWindow } : {}),
     },
   };
 }
 
-function invalidFilter(c: Context, reason: FilterValidationError) {
+type TextFilterValidationResult = { ok: true } | { ok: false; reason: 'invalid_filter_text'; parameter: TextFilterParameter };
+
+function validateTextFilter(parameter: TextFilterParameter, value: string | undefined): TextFilterValidationResult {
+  if (value === undefined || value === '') {
+    return { ok: true };
+  }
+  if (value.length > TEXT_FILTER_LIMITS[parameter] || !isPrintableFilterText(value)) {
+    return { ok: false, reason: 'invalid_filter_text', parameter };
+  }
+  return { ok: true };
+}
+
+function isPrintableFilterText(value: string): boolean {
+  return /^[\u0020-\u007e]+$/.test(value);
+}
+
+function invalidFilter(c: Context, reason: NonTextFilterValidationError) {
   return reason === 'invalid_outcome' ? invalidOutcome(c) : invalidTimeWindow(c);
 }
 
@@ -122,6 +167,17 @@ function invalidOutcome(c: Context) {
       message: 'Unsupported Analytics outcome filter',
       code: 'invalid_outcome',
       allowedValues: [...OUTCOMES],
+    },
+  }, 400);
+}
+
+function invalidTextFilter(c: Context, parameter: TextFilterParameter) {
+  return c.json({
+    error: {
+      message: 'Unsafe Analytics filter value',
+      code: 'invalid_filter_text',
+      parameter,
+      expected: 'printable text within dashboard filter length limits',
     },
   }, 400);
 }
