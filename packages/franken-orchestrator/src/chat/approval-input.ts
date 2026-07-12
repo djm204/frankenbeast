@@ -10,10 +10,12 @@ export class UnsafeApprovalCommandError extends Error {
 }
 
 function normalizePendingCommand(command: string): string {
+  if (CONTROL_CHARACTER_PATTERN.test(command)) {
+    throw new UnsafeApprovalCommandError();
+  }
   const normalized = command.trim();
   if (
     normalized.length === 0
-    || CONTROL_CHARACTER_PATTERN.test(normalized)
     || normalized.startsWith('/')
   ) {
     throw new UnsafeApprovalCommandError();

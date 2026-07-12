@@ -426,6 +426,34 @@ export class ChatSocketController {
 
     const pendingApproval = session.pendingApproval ?? null;
     const originalState = session.state;
+    let runtimeInput: string;
+    try {
+      runtimeInput = approvalRuntimeInput(pendingApproval);
+    } catch (error) {
+      if (error instanceof UnsafeApprovalCommandError) {
+        const timestamp = nowIso();
+        this.emit(peer, {
+          type: 'turn.error',
+          code: 'UNSAFE_APPROVAL_COMMAND',
+          message: error.message,
+          timestamp,
+        });
+        if (pendingApproval) {
+          this.emit(peer, {
+            type: 'turn.approval.requested',
+            description: pendingApproval.description,
+            timestamp: pendingApproval.requestedAt,
+            ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
+            ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
+            ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
+            ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
+            ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
+          });
+        }
+        return;
+      }
+      throw error;
+    }
     session.pendingApproval = null;
     session.state = 'approved';
     session.updatedAt = nowIso();
@@ -439,7 +467,6 @@ export class ChatSocketController {
 
     let result: Awaited<ReturnType<ChatRuntime['run']>>;
     try {
-      const runtimeInput = approvalRuntimeInput(pendingApproval);
       result = await this.runtime.run(runtimeInput, {
         sessionId: session.id,
         pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
@@ -462,27 +489,6 @@ export class ChatSocketController {
       session.state = originalState;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
-      if (error instanceof UnsafeApprovalCommandError) {
-        this.emit(peer, {
-          type: 'turn.error',
-          code: 'UNSAFE_APPROVAL_COMMAND',
-          message: error.message,
-          timestamp: session.updatedAt,
-        });
-        if (pendingApproval) {
-          this.emit(peer, {
-            type: 'turn.approval.requested',
-            description: pendingApproval.description,
-            timestamp: pendingApproval.requestedAt,
-            ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
-            ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
-            ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
-            ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
-            ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
-          });
-        }
-        return;
-      }
       this.emit(peer, {
         type: 'turn.error',
         code: 'APPROVAL_EXECUTION_FAILED',

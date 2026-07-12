@@ -259,13 +259,26 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       if (approved) {
         const pendingApproval = session.pendingApproval ?? null;
         const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
+        let runtimeInput: string;
+        try {
+          runtimeInput = approvalRuntimeInput(pendingApproval);
+        } catch (error) {
+          if (error instanceof UnsafeApprovalCommandError) {
+            return c.json({
+              error: {
+                code: 'UNSAFE_APPROVAL_COMMAND',
+                message: error.message,
+              },
+            }, 400);
+          }
+          throw error;
+        }
         const originalState = session.state;
         session.pendingApproval = null;
         session.state = 'approved';
         session.updatedAt = isoNow();
         sessionStore.save(session);
         try {
-          const runtimeInput = approvalRuntimeInput(pendingApproval);
           result = await runtime.run(runtimeInput, {
             sessionId: session.id,
             pendingApproval: wasPendingApproval,
@@ -279,14 +292,6 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           session.state = originalState;
           session.updatedAt = isoNow();
           sessionStore.save(session);
-          if (error instanceof UnsafeApprovalCommandError) {
-            return c.json({
-              error: {
-                code: 'UNSAFE_APPROVAL_COMMAND',
-                message: error.message,
-              },
-            }, 400);
-          }
           throw error;
         }
 
