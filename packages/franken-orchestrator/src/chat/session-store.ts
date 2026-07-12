@@ -1,8 +1,16 @@
-import { readFileSync, writeFileSync, readdirSync, unlinkSync, mkdirSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync, readdirSync, unlinkSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { ChatSessionSchema, type ChatSession } from './types.js';
 import { isoNow, now as deterministicNow } from '@franken/types';
+
+export interface CorruptChatSessionFile {
+  id: string;
+  projectId?: string;
+  path: string;
+  quarantinePath: string;
+  reason: string;
+}
 
 export interface ISessionStore {
   create(projectId: string): ChatSession;
@@ -10,11 +18,13 @@ export interface ISessionStore {
   save(session: ChatSession): void;
   list(): string[];
   listSessions(projectId?: string): ChatSession[];
+  listCorruptions?(projectId?: string): CorruptChatSessionFile[];
   delete(id: string): void;
 }
 
 export class FileSessionStore implements ISessionStore {
   private readonly storeDir: string;
+  private readonly corruptions = new Map<string, CorruptChatSessionFile>();
 
   constructor(storeDir: string) {
     this.storeDir = storeDir;
@@ -38,10 +48,22 @@ export class FileSessionStore implements ISessionStore {
   }
 
   get(id: string): ChatSession | undefined {
+    const path = this.safeFilePath(id);
+    if (path === undefined) {
+      return undefined;
+    }
+
+    let raw: string;
     try {
-      const raw = readFileSync(this.filePath(id), 'utf-8');
-      return ChatSessionSchema.parse(JSON.parse(raw));
+      raw = readFileSync(path, 'utf-8');
     } catch {
+      return undefined;
+    }
+
+    try {
+      return ChatSessionSchema.parse(JSON.parse(raw));
+    } catch (error) {
+      this.quarantineCorruptSession(id, path, raw, error);
       return undefined;
     }
   }
@@ -68,6 +90,21 @@ export class FileSessionStore implements ISessionStore {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
+  listCorruptions(projectId?: string): CorruptChatSessionFile[] {
+    for (const diagnostic of this.listQuarantinedFiles()) {
+      if (this.hasValidCurrentSessionFile(diagnostic.id)) {
+        this.corruptions.delete(diagnostic.id);
+        continue;
+      }
+      if (!this.corruptions.has(diagnostic.id)) {
+        this.corruptions.set(diagnostic.id, diagnostic);
+      }
+    }
+    return Array.from(this.corruptions.values())
+      .filter((diagnostic) => projectId === undefined || diagnostic.projectId === undefined || diagnostic.projectId === projectId)
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
   delete(id: string): void {
     try {
       unlinkSync(this.filePath(id));
@@ -80,8 +117,122 @@ export class FileSessionStore implements ISessionStore {
     return join(this.storeDir, `${id}.json`);
   }
 
+  private safeFilePath(id: string): string | undefined {
+    const resolvedStoreDir = resolve(this.storeDir);
+    const resolvedPath = resolve(this.storeDir, `${id}.json`);
+    if (resolvedPath === resolvedStoreDir || !resolvedPath.startsWith(`${resolvedStoreDir}${sep}`)) {
+      console.warn(`[chat-session-store] ignoring invalid chat session id ${JSON.stringify(id)}`);
+      return undefined;
+    }
+    return resolvedPath;
+  }
+
   private writeToDisk(session: ChatSession): void {
     mkdirSync(this.storeDir, { recursive: true });
-    writeFileSync(this.filePath(session.id), JSON.stringify(session, null, 2), 'utf-8');
+    const destination = this.safeFilePath(session.id);
+    if (destination === undefined) {
+      throw new Error(`Invalid chat session id: ${JSON.stringify(session.id)}`);
+    }
+    const tmpPath = `${destination}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    try {
+      const existingMode = this.existingFileMode(destination);
+      writeFileSync(tmpPath, JSON.stringify(session, null, 2), { encoding: 'utf-8', mode: existingMode ?? 0o600 });
+      if (existingMode !== undefined) {
+        chmodSync(tmpPath, existingMode);
+      }
+      renameSync(tmpPath, destination);
+      this.corruptions.delete(session.id);
+    } catch (error) {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        // Best-effort cleanup only; preserve the original write failure.
+      }
+      throw error;
+    }
+  }
+
+  private existingFileMode(path: string): number | undefined {
+    try {
+      return statSync(path).mode & 0o777;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private hasValidCurrentSessionFile(id: string): boolean {
+    const path = this.safeFilePath(id);
+    if (path === undefined) {
+      return false;
+    }
+
+    try {
+      ChatSessionSchema.parse(JSON.parse(readFileSync(path, 'utf-8')));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private quarantineCorruptSession(id: string, path: string, raw: string, error: unknown): void {
+    const quarantinePath = `${path}.corrupt-${deterministicNow()}-${randomBytes(3).toString('hex')}`;
+    const reason = error instanceof Error ? error.message : String(error);
+    const projectId = this.extractProjectId(raw);
+    const diagnostic: CorruptChatSessionFile = {
+      id,
+      ...(projectId === undefined ? {} : { projectId }),
+      path,
+      quarantinePath,
+      reason,
+    };
+    this.corruptions.set(id, diagnostic);
+
+    try {
+      renameSync(path, quarantinePath);
+    } catch (renameError) {
+      diagnostic.reason = `${reason}; failed to quarantine: ${renameError instanceof Error ? renameError.message : String(renameError)}`;
+    }
+
+    console.warn(
+      `[chat-session-store] corrupt chat session ${id} quarantined at ${diagnostic.quarantinePath}: ${diagnostic.reason}`,
+    );
+  }
+
+  private listQuarantinedFiles(): CorruptChatSessionFile[] {
+    try {
+      return readdirSync(this.storeDir)
+        .filter((file) => file.includes('.json.corrupt-'))
+        .map((file) => {
+          const id = file.slice(0, file.indexOf('.json.corrupt-'));
+          const quarantinePath = join(this.storeDir, file);
+          const projectId = this.extractProjectIdFromFile(quarantinePath);
+          return {
+            id,
+            ...(projectId === undefined ? {} : { projectId }),
+            path: this.filePath(id),
+            quarantinePath,
+            reason: 'previously quarantined corrupt chat session file',
+          };
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  private extractProjectIdFromFile(path: string): string | undefined {
+    try {
+      return this.extractProjectId(readFileSync(path, 'utf-8'));
+    } catch {
+      return undefined;
+    }
+  }
+
+  private extractProjectId(raw: string): string | undefined {
+    try {
+      const parsed = JSON.parse(raw) as { projectId?: unknown };
+      return typeof parsed.projectId === 'string' ? parsed.projectId : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }

@@ -169,6 +169,42 @@ function viewModelForActivity(event: ActivityEvent): ActivityViewModel {
   };
 }
 
+const UNABLE_TO_STRINGIFY_EVENT_DATA = '[unserializable event data]';
+
+function formatEventData(data: Record<string, unknown>): string {
+  const ancestors: object[] = [];
+  const replacer = function (this: unknown, _key: string, value: unknown): unknown {
+    if (typeof value === 'bigint') {
+      return `BigInt(${value.toString()})`;
+    }
+    if (typeof value === 'object' && value !== null) {
+      while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) {
+        ancestors.pop();
+      }
+      if (ancestors.includes(value)) {
+        return '[Circular]';
+      }
+      ancestors.push(value);
+    }
+    return value;
+  };
+
+  try {
+    return JSON.stringify(data, replacer, 2);
+  } catch {
+    return UNABLE_TO_STRINGIFY_EVENT_DATA;
+  }
+}
+
+function safeEventDataSummary(data: Record<string, unknown>): string {
+  const serialized = formatEventData(data);
+  if (serialized === UNABLE_TO_STRINGIFY_EVENT_DATA) {
+    return UNABLE_TO_STRINGIFY_EVENT_DATA;
+  }
+
+  return serialized;
+}
+
 export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
   const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll<HTMLOListElement, HTMLLIElement>(
     events.length,
@@ -210,7 +246,7 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
               )}
               <details className="activity-event__details">
                 <summary>Raw event details</summary>
-                <pre>{JSON.stringify(event.data ?? {}, null, 2)}</pre>
+                <pre>{safeEventDataSummary(event.data ?? {})}</pre>
               </details>
             </li>
           );

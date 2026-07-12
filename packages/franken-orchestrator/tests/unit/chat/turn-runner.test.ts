@@ -48,6 +48,8 @@ describe('TurnRunner', () => {
 
   it('handles plan outcomes without executing', async () => {
     const runner = new TurnRunner(mockExecutor);
+    const events: string[] = [];
+    runner.on('event', (e) => events.push(e.type));
     const outcome: PlanOutcome = {
       kind: 'plan',
       planSummary: 'Add authentication in 3 chunks',
@@ -58,6 +60,44 @@ describe('TurnRunner', () => {
     expect(result.status).toBe('completed');
     expect(result.summary).toContain('3 chunks');
     expect(mockExecutor.execute).not.toHaveBeenCalled();
+    expect(events).toEqual(['complete']);
+    expect(result.events.map((event) => event.type)).toEqual(['complete']);
+  });
+
+  it('emits a terminal complete event after approval-required turns', async () => {
+    const runner = new TurnRunner(mockExecutor);
+    const events: string[] = [];
+    runner.on('event', (e) => events.push(e.type));
+    const outcome: ExecuteOutcome = {
+      kind: 'execute',
+      taskDescription: 'Push to main',
+      approvalRequired: true,
+    };
+
+    const result = await runner.run(outcome, { sessionId: 'session-1' });
+
+    expect(result.status).toBe('pending_approval');
+    expect(events).toEqual(['approval_request', 'complete']);
+    expect(result.events.map((event) => event.type)).toEqual(['approval_request', 'complete']);
+  });
+
+  it('emits a terminal failure event before executor errors propagate', async () => {
+    const erroringExecutor = {
+      execute: vi.fn().mockRejectedValue(new Error('boom')),
+    };
+    const runner = new TurnRunner(erroringExecutor);
+    const events: Array<{ type: string; data?: unknown }> = [];
+    runner.on('event', (event) => events.push(event));
+    const outcome: ExecuteOutcome = {
+      kind: 'execute',
+      taskDescription: 'Explode',
+      approvalRequired: false,
+    };
+
+    await expect(runner.run(outcome, { sessionId: 'session-1' })).rejects.toThrow('boom');
+
+    expect(events.map((event) => event.type)).toEqual(['start', 'complete']);
+    expect(events[1]?.data).toMatchObject({ status: 'failed' });
   });
 
   it('emits start and complete events in order', async () => {

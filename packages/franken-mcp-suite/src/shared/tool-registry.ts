@@ -57,6 +57,53 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
   return { ok: true, value: parsed };
 }
 
+function parseNonNegativeIntegerArg(name: string, value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
+  }
+  const raw = typeof value === 'string' ? value.trim() : String(value);
+  if (raw.length === 0) {
+    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 0) {
+    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseOptionalNonNegativeNumberArg(name: string, value: unknown): { ok: true; value: number | undefined } | { ok: false; message: string } {
+  if (value == null) {
+    return { ok: true, value: undefined };
+  }
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    return { ok: false, message: `${name} must be a finite non-negative number` };
+  }
+  const raw = typeof value === 'string' ? value.trim() : String(value);
+  if (raw.length === 0) {
+    return { ok: false, message: `${name} must be a finite non-negative number` };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { ok: false, message: `${name} must be a finite non-negative number` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseNonEmptyStringArg(name: string, value: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return { ok: false, message: `${name} must be a non-empty string` };
+  }
+  return { ok: true, value };
+}
+
+function parseStringArg(name: string, value: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof value !== 'string') {
+    return { ok: false, message: `${name} must be a string` };
+  }
+  return { ok: true, value };
+}
+
 export function createAdapterSet(dbPath: string, options: { root?: string | undefined; configPath?: string | undefined } = {}): AdapterSet {
   return {
     brain: createBrainAdapter(dbPath),
@@ -353,11 +400,20 @@ const TOOLS: ToolFull[] = [
       required: ['event', 'metadata', 'sessionId'],
     },
     makeHandler: ({ observer }) => async (args) => {
-      const event = String(args['event']);
-      const metadata = String(args['metadata']);
-      const sessionId = String(args['sessionId']);
-      const result = await observer.log({ event, metadata, sessionId });
-      return { content: [{ type: 'text', text: `Logged event: ${event} (id: ${result.id}, hash: ${result.hash})` }] };
+      const eventArg = parseNonEmptyStringArg('event', args['event']);
+      if (!eventArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${eventArg.message}` }], isError: true };
+      }
+      const metadataArg = parseStringArg('metadata', args['metadata']);
+      if (!metadataArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${metadataArg.message}` }], isError: true };
+      }
+      const sessionIdArg = parseNonEmptyStringArg('sessionId', args['sessionId']);
+      if (!sessionIdArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log ${sessionIdArg.message}` }], isError: true };
+      }
+      const result = await observer.log({ event: eventArg.value, metadata: metadataArg.value, sessionId: sessionIdArg.value });
+      return { content: [{ type: 'text', text: `Logged event: ${eventArg.value} (id: ${result.id}, hash: ${result.hash})` }] };
     },
   },
   {
@@ -378,10 +434,21 @@ const TOOLS: ToolFull[] = [
     makeHandler: ({ observer }) => async (args) => {
       const sessionId = String(args['sessionId']);
       const model = String(args['model']);
-      const promptTokens = Number(args['promptTokens']);
-      const completionTokens = Number(args['completionTokens']);
-      const costUsdArg = args['costUsd'] != null ? Number(args['costUsd']) : undefined;
-      const result = await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg != null ? { costUsd: costUsdArg } : {}) });
+      const promptTokensArg = parseNonNegativeIntegerArg('promptTokens', args['promptTokens']);
+      if (!promptTokensArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${promptTokensArg.message}` }], isError: true };
+      }
+      const completionTokensArg = parseNonNegativeIntegerArg('completionTokens', args['completionTokens']);
+      if (!completionTokensArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${completionTokensArg.message}` }], isError: true };
+      }
+      const costUsdArg = parseOptionalNonNegativeNumberArg('costUsd', args['costUsd']);
+      if (!costUsdArg.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${costUsdArg.message}` }], isError: true };
+      }
+      const promptTokens = promptTokensArg.value;
+      const completionTokens = completionTokensArg.value;
+      const result = await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg.value !== undefined ? { costUsd: costUsdArg.value } : {}) });
       const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
       return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };
     },

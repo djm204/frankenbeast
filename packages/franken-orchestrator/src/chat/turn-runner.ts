@@ -48,17 +48,21 @@ export class TurnRunner extends EventEmitter {
   async run(outcome: ExecuteOutcome | PlanOutcome, options?: TurnRunOptions): Promise<TurnRunResult> {
     const events: TurnEvent[] = [];
     const sessionId = options?.sessionId ?? 'unknown-session';
+    const emitTurnEvent = (event: TurnEvent): void => {
+      events.push(event);
+      this.emit('event', event);
+      options?.onEvent?.(event);
+    };
 
     if (outcome.kind === 'plan') {
       const summary = `Plan created: ${outcome.planSummary} (${outcome.chunkCount} chunks)`;
+      emitTurnEvent({ type: 'complete', sessionId, data: { status: 'completed' } });
       return { status: 'completed', summary, events };
     }
 
     if (outcome.approvalRequired) {
-      const event: TurnEvent = { type: 'approval_request', sessionId, data: { taskDescription: outcome.taskDescription } };
-      events.push(event);
-      this.emit('event', event);
-      options?.onEvent?.(event);
+      emitTurnEvent({ type: 'approval_request', sessionId, data: { taskDescription: outcome.taskDescription } });
+      emitTurnEvent({ type: 'complete', sessionId, data: { status: 'pending_approval' } });
       return {
         status: 'pending_approval',
         summary: `Approval required: ${outcome.taskDescription}`,
@@ -66,20 +70,24 @@ export class TurnRunner extends EventEmitter {
       };
     }
 
-    const startEvent: TurnEvent = { type: 'start', sessionId, data: { taskDescription: outcome.taskDescription } };
-    events.push(startEvent);
-    this.emit('event', startEvent);
-    options?.onEvent?.(startEvent);
+    emitTurnEvent({ type: 'start', sessionId, data: { taskDescription: outcome.taskDescription } });
 
-    const executionResult = await this.executor.execute({ userInput: outcome.taskDescription });
+    let executionResult: ExecutionResult;
+    try {
+      executionResult = await this.executor.execute({ userInput: outcome.taskDescription });
+    } catch (error) {
+      emitTurnEvent({
+        type: 'complete',
+        sessionId,
+        data: { status: 'failed', error: error instanceof Error ? error.message : String(error) },
+      });
+      throw error;
+    }
 
     const summary = TurnSummarizer.summarize(executionResult);
     const status: TurnRunResult['status'] = executionResult.status === 'success' ? 'completed' : 'failed';
 
-    const completeEvent: TurnEvent = { type: 'complete', sessionId, data: { status: executionResult.status } };
-    events.push(completeEvent);
-    this.emit('event', completeEvent);
-    options?.onEvent?.(completeEvent);
+    emitTurnEvent({ type: 'complete', sessionId, data: { status: executionResult.status } });
 
     return { status, summary, events };
   }

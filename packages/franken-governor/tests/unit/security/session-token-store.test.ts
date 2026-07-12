@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { SessionToken } from '../../../src/core/types.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
 
@@ -47,6 +48,20 @@ describe('SessionTokenStore', () => {
     expect(store.get(token.tokenId)).toBeUndefined();
   });
 
+  it('cleanupExpired() prunes expired in-memory tokens that were never queried', () => {
+    const store = new SessionTokenStore();
+    const expired = makeToken(1000);
+    const fresh = makeToken(10_000);
+
+    store.store(expired);
+    vi.advanceTimersByTime(2000);
+    store.store(fresh);
+
+    expect(store.cleanupExpired()).toBe(0);
+    expect(store.get(expired.tokenId)).toBeUndefined();
+    expect(store.get(fresh.tokenId)).toEqual(fresh);
+  });
+
   it('revoke() removes a token', () => {
     const store = new SessionTokenStore();
     const token = makeToken();
@@ -73,6 +88,19 @@ describe('SessionTokenStore', () => {
     store.store(token);
     vi.advanceTimersByTime(2000);
 
+    expect(store.isValid(token.tokenId)).toBe(false);
+  });
+
+  it('treats invalid expiresAt dates as expired', () => {
+    const store = new SessionTokenStore();
+    const token: SessionToken = {
+      ...makeToken(10_000),
+      expiresAt: new Date(Number.NaN),
+    };
+
+    store.store(token);
+
+    expect(store.get(token.tokenId)).toBeUndefined();
     expect(store.isValid(token.tokenId)).toBe(false);
   });
 
@@ -174,22 +202,22 @@ describe('SessionTokenStore', () => {
     }
   });
 
-  it('ignores expired tokens on read and prunes them on the next write', () => {
+  it('cleanupExpired() rewrites persisted stores with unqueried expired tokens', () => {
     const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
     const persistenceFile = join(dir, 'tokens.json');
     try {
       const store = new SessionTokenStore({ persistenceFile });
-      const token = makeToken(1000);
-      store.store(token);
+      const expired = makeToken(1000);
+      const fresh = makeToken(10_000);
+      store.store(expired);
+      store.store(fresh);
 
       vi.advanceTimersByTime(2000);
 
-      expect(store.get(token.tokenId)).toBeUndefined();
-      const beforeWrite = JSON.parse(readFileSync(persistenceFile, 'utf8'));
-      expect(beforeWrite).toHaveLength(1);
+      const beforeCleanup = JSON.parse(readFileSync(persistenceFile, 'utf8'));
+      expect(beforeCleanup).toHaveLength(2);
 
-      const fresh = makeToken(10_000);
-      store.store(fresh);
+      expect(store.cleanupExpired()).toBe(1);
 
       const persisted = JSON.parse(readFileSync(persistenceFile, 'utf8'));
       expect(persisted).toHaveLength(1);

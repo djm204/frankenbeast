@@ -263,7 +263,7 @@ describe('AnalyticsPage', () => {
     const next = screen.getByRole('button', { name: 'Next' });
     expect(previous).toHaveProperty('disabled', true);
     expect(next).toHaveProperty('disabled', false);
-    expect(screen.getByText('Page 1 of 2 · 75 events')).toBeTruthy();
+    expect(screen.getByText('Showing 1–50 of 75 events · Page 1 of 2')).toBeTruthy();
 
     fireEvent.click(next);
 
@@ -276,7 +276,7 @@ describe('AnalyticsPage', () => {
     expect(client.fetchEvents).toHaveBeenCalledTimes(2);
 
     resolveSecondPage({ total: 75, page: 2, pageSize: 50, events: [] });
-    expect(await screen.findByText('Page 2 of 2 · 75 events')).toBeTruthy();
+    expect(await screen.findByText('Showing 51–75 of 75 events · Page 2 of 2')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', true);
   });
 
@@ -288,7 +288,7 @@ describe('AnalyticsPage', () => {
       .mockResolvedValueOnce({ total: 75, page: 1, pageSize: 25, events: [] });
 
     render(<AnalyticsPage client={client} />);
-    await screen.findByText('Page 1 of 2 · 75 events');
+    await screen.findByText('Showing 1–50 of 75 events · Page 1 of 2');
 
     expect(client.fetchSummary).toHaveBeenCalledTimes(1);
     expect(client.fetchSessions).toHaveBeenCalledTimes(1);
@@ -339,7 +339,7 @@ describe('AnalyticsPage', () => {
 
     expect(await screen.findByText('HTTP 500')).toBeTruthy();
     expect(screen.queryByText('First page event')).toBeNull();
-    expect(screen.getByText('Page 2 of 2 · 0 events')).toBeTruthy();
+    expect(screen.getByText('Showing 0 of 0 events · Page 2 of 2')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Previous' })).toHaveProperty('disabled', false);
   });
 
@@ -377,7 +377,7 @@ describe('AnalyticsPage', () => {
     expect(await screen.findByText('events timeout')).toBeTruthy();
     expect(screen.queryByText('Old filter event')).toBeNull();
     expect(screen.getByText('0 normalized events')).toBeTruthy();
-    expect(screen.getByText('Page 1 of 1 · 0 events')).toBeTruthy();
+    expect(screen.getByText('Showing 0 of 0 events · Page 1 of 1')).toBeTruthy();
     expect(screen.getAllByText('No events match the current filters.').length).toBeGreaterThan(0);
   });
 
@@ -405,6 +405,105 @@ describe('AnalyticsPage', () => {
     await waitFor(() => {
       expect(client.fetchEvents).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-a', page: 1, pageSize: 25 }));
     });
+  });
+
+  it('keeps the latest selected event detail when earlier detail requests resolve later', async () => {
+    const client = mockClient();
+    let resolveAuditDetail!: (event: Awaited<ReturnType<AnalyticsApiClient['fetchEventDetail']>>) => void;
+    let resolveGovernorDetail!: (event: Awaited<ReturnType<AnalyticsApiClient['fetchEventDetail']>>) => void;
+    vi.mocked(client.fetchEventDetail)
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveAuditDetail = resolve;
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveGovernorDetail = resolve;
+      }));
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Logged audit event' }));
+    const governorDetailButton = document.querySelector<HTMLElement>('[data-analytics-event-id="governor:1"]');
+    expect(governorDetailButton).toBeTruthy();
+    fireEvent.click(governorDetailButton!);
+
+    resolveGovernorDetail({
+      id: 'governor:1',
+      timestamp: '2026-04-28T12:01:00.000Z',
+      sessionId: 'session-a',
+      toolName: 'exec_command',
+      source: 'governor',
+      category: 'decision',
+      outcome: 'denied',
+      summary: 'Denied destructive command',
+      severity: 'error',
+      raw: { decision: 'denied', current: true },
+      links: {},
+    });
+
+    expect(await screen.findByText('"current": true')).toBeTruthy();
+
+    resolveAuditDetail({
+      id: 'audit:1',
+      timestamp: '2026-04-28T12:00:00.000Z',
+      sessionId: 'session-a',
+      toolName: 'fbeast_observer_log',
+      source: 'observer',
+      category: 'tool_call',
+      outcome: 'approved',
+      summary: 'Logged audit event',
+      severity: 'info',
+      raw: { event: 'tool_call', stale: true },
+      links: {},
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Denied destructive command' })).toBeTruthy();
+      expect(screen.getByText('"current": true')).toBeTruthy();
+      expect(screen.queryByText('"stale": true')).toBeNull();
+    });
+    expect(client.fetchEventDetail).toHaveBeenNthCalledWith(1, 'audit:1');
+    expect(client.fetchEventDetail).toHaveBeenNthCalledWith(2, 'governor:1');
+  });
+
+  it('ignores stale detail errors from an earlier selection', async () => {
+    const client = mockClient();
+    let rejectAuditDetail!: (error: Error) => void;
+    let resolveGovernorDetail!: (event: Awaited<ReturnType<AnalyticsApiClient['fetchEventDetail']>>) => void;
+    vi.mocked(client.fetchEventDetail)
+      .mockReturnValueOnce(new Promise((_, reject) => {
+        rejectAuditDetail = reject;
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveGovernorDetail = resolve;
+      }));
+
+    render(<AnalyticsPage client={client} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Logged audit event' }));
+    const governorDetailButton = document.querySelector<HTMLElement>('[data-analytics-event-id="governor:1"]');
+    expect(governorDetailButton).toBeTruthy();
+    fireEvent.click(governorDetailButton!);
+
+    rejectAuditDetail(new Error('audit detail timeout'));
+    await waitFor(() => {
+      expect(screen.queryByText('audit detail timeout')).toBeNull();
+      expect(screen.getByRole('dialog', { name: 'Denied destructive command' })).toBeTruthy();
+    });
+
+    resolveGovernorDetail({
+      id: 'governor:1',
+      timestamp: '2026-04-28T12:01:00.000Z',
+      sessionId: 'session-a',
+      toolName: 'exec_command',
+      source: 'governor',
+      category: 'decision',
+      outcome: 'denied',
+      summary: 'Denied destructive command',
+      severity: 'error',
+      raw: { decision: 'denied', current: true },
+      links: {},
+    });
+
+    expect(await screen.findByText('"current": true')).toBeTruthy();
+    expect(screen.queryByText('audit detail timeout')).toBeNull();
   });
 
   it('opens event details in a labelled modal dialog and focuses the close button', async () => {

@@ -214,6 +214,76 @@ describe('useChatSession error banners', () => {
     });
   });
 
+  it('clears the typing indicator when a socket turn errors before completion', async () => {
+    vi.stubGlobal('fetch', chatFetch());
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'assistant.typing.start',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.showTypingIndicator).toBe(true);
+
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'turn.error',
+          code: 'TOOL_DENIED',
+          message: 'Approval denied by policy.',
+          timestamp: '2026-07-05T00:00:01.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.showTypingIndicator).toBe(false);
+    expect(result.current.activity[0]).toMatchObject({
+      type: 'turn.error',
+      data: { code: 'TOOL_DENIED', message: 'Approval denied by policy.' },
+    });
+  });
+
+  it('clears the typing indicator when the websocket errors mid-turn', async () => {
+    const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2'] });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]!.onmessage?.({
+        data: JSON.stringify({
+          type: 'assistant.typing.start',
+          timestamp: '2026-07-05T00:00:00.000Z',
+        }),
+      });
+    });
+
+    expect(result.current.showTypingIndicator).toBe(true);
+
+    act(() => {
+      MockWebSocket.instances[0]!.onerror?.();
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.showTypingIndicator).toBe(false);
+  });
+
   it('preserves approval metadata on activity events for readable timeline chips', async () => {
     vi.stubGlobal('fetch', chatFetch());
     vi.stubGlobal('WebSocket', MockWebSocket);
@@ -306,12 +376,23 @@ describe('useChatSession error banners', () => {
     expect(MockWebSocket.instances[0]!.send).toHaveBeenCalledTimes(2);
   });
 
-  it('does not offer message retry when delivery succeeded but transcript refresh failed', async () => {
+  it('preserves the composer draft but does not retry when fallback HTTP refresh fails', async () => {
     const fetch = chatFetch({
       responses: [
         jsonResponse(sessionResponse()),
         jsonResponse({ data: { tier: 'cheap' } }),
         jsonResponse({ error: { message: 'refresh failed' } }, 500),
+        jsonResponse(sessionResponse()),
+        jsonResponse(sessionResponse({
+          transcript: [
+            {
+              id: 'server-user-accepted-after-refresh',
+              role: 'user',
+              content: 'launch beast',
+              timestamp: '2026-07-06T00:00:00.000Z',
+            },
+          ],
+        })),
       ],
     });
     vi.stubGlobal('fetch', fetch);
@@ -325,14 +406,62 @@ describe('useChatSession error banners', () => {
     MockWebSocket.instances[0]!.readyState = 0;
 
     await act(async () => {
-      await result.current.send('launch beast');
+      await expect(result.current.send('launch beast')).rejects.toMatchObject({ retryableSend: false });
     });
 
+    expect(result.current.status).toBe('idle');
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: 'launch beast',
+        receipt: 'accepted',
+      }),
+    ]);
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
     expect(result.current.errorBanners[0]).toMatchObject({
       title: 'Message sent; refresh failed',
       code: 'session_refresh_failed',
       actionLabel: 'Refresh chat',
     });
+
+    const refreshBanner = result.current.errorBanners[0]!;
+    act(() => {
+      void result.current.retryError(refreshBanner.id);
+    });
+
+    await waitFor(() => {
+      expect(result.current.errorBanners).toHaveLength(0);
+    });
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      content: 'launch beast',
+      receipt: 'accepted',
+      canRetry: false,
+    }));
+    expect(result.current.clearedFailedDraft).toBeUndefined();
+
+    act(() => {
+      result.current.reconnect();
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toContainEqual(expect.objectContaining({
+        id: 'server-user-accepted-after-refresh',
+        content: 'launch beast',
+      }));
+    });
+    expect(result.current.clearedFailedDraft).toMatchObject({ content: 'launch beast' });
+  });
+
+  it('rejects sends attempted before a session id exists', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('session bootstrap failed')));
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('error');
+    });
+
+    await expect(result.current.send('keep this draft')).rejects.toThrow('Chat session is not ready yet. Your draft was kept.');
   });
 
   it('waits for fallback HTTP refresh before adding the sent message', async () => {

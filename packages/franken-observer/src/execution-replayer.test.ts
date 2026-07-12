@@ -20,8 +20,15 @@ function buildTrail(
   return trail;
 }
 
-function corruptTimestamp(trail: AuditTrail, index: number, timestamp: string): void {
-  (trail.getAll()[index] as { timestamp: string }).timestamp = timestamp;
+function corruptTimestamp(trail: AuditTrail, index: number, timestamp: string): AuditTrail {
+  const corrupted = new AuditTrail();
+  trail.getAll().forEach((event, eventIndex) => {
+    corrupted.append({
+      ...event,
+      timestamp: eventIndex === index ? timestamp : event.timestamp,
+    });
+  });
+  return corrupted;
 }
 
 describe('ExecutionReplayer', () => {
@@ -80,9 +87,9 @@ describe('ExecutionReplayer', () => {
       { type: 'run.start', phase: 'planning', provider: 'claude-cli' },
       { type: 'phase.end', phase: 'planning', provider: 'claude-cli' },
     ]);
-    corruptTimestamp(trail, 0, 'not-a-date');
+    const corrupted = corruptTimestamp(trail, 0, 'not-a-date');
 
-    expect(() => replayer.replay(trail)).toThrow(
+    expect(() => replayer.replay(corrupted)).toThrow(
       /Invalid audit event timestamp during replay \(phase planning\): eventId=.*phase=planning, type=run\.start, timestamp="not-a-date"/,
     );
   });
@@ -94,9 +101,9 @@ describe('ExecutionReplayer', () => {
       { type: 'phase.start', phase: 'execution', provider: 'codex-cli' },
       { type: 'phase.end', phase: 'execution', provider: 'codex-cli' },
     ]);
-    corruptTimestamp(trail, 3, 'still-not-a-date');
+    const corrupted = corruptTimestamp(trail, 3, 'still-not-a-date');
 
-    expect(() => replayer.replay(trail)).toThrow(
+    expect(() => replayer.replay(corrupted)).toThrow(
       /Invalid audit event timestamp during replay \(phase execution\): eventId=.*phase=execution, type=phase\.end, timestamp="still-not-a-date"/,
     );
   });
@@ -106,9 +113,9 @@ describe('ExecutionReplayer', () => {
       { type: 'phase.start', phase: 'planning', provider: 'claude-cli' },
       { type: 'phase.end', phase: 'planning', provider: 'claude-cli' },
     ]);
-    corruptTimestamp(trail, 1, '2026-02-31T00:00:00.000Z');
+    const corrupted = corruptTimestamp(trail, 1, '2026-02-31T00:00:00.000Z');
 
-    expect(() => replayer.replay(trail)).toThrow(
+    expect(() => replayer.replay(corrupted)).toThrow(
       /Invalid audit event timestamp during replay \(phase planning\): eventId=.*phase=planning, type=phase\.end, timestamp="2026-02-31T00:00:00.000Z"/,
     );
   });

@@ -9,6 +9,7 @@ import { CostBadge } from './cost-badge';
 import { NetworkPage } from '../pages/network-page';
 import {
   BeastApiClient,
+  BeastApiError,
   type BeastContainerRuntimeStatus,
   type BeastCatalogEntry,
   type BeastRunDetail,
@@ -17,7 +18,7 @@ import {
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
 } from '../lib/beast-api';
-import { ChatApiClient, type ChatSessionSummary } from '../lib/api';
+import { ChatApiClient, type ChatSessionSummary, type CorruptChatSessionFile } from '../lib/api';
 import { NetworkApiClient, type NetworkConfigResponse, type NetworkStatusResponse } from '../lib/network-api';
 import { BeastsPage } from '../pages/beasts-page';
 import type { AgentLifecycleAction } from './beasts/agent-action-bar';
@@ -112,6 +113,10 @@ function formatSessionOptionLabel(session: ChatSessionSummary): string {
 function routeFromHash(hash: string): RouteId {
   const candidate = hash.replace(/^#\/?/, '') as RouteId;
   return PRIMARY_NAV_ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
+}
+
+function networkErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
@@ -257,10 +262,20 @@ export function buildInitAction(
       kind: 'martin-loop',
       command: 'martin-loop',
       config,
+      ...(chatSessionId ? { chatSessionId } : {}),
     };
   }
 
   throw new Error(`Unsupported Beast workflow definition: ${definitionId}`);
+}
+
+export function resolveWizardDefinitionId(config: Record<string, unknown>): string {
+  const workflow = config.workflow as Record<string, unknown> | undefined;
+  const workflowType = workflow?.workflowType;
+  if (typeof workflowType !== 'string' || workflowType.trim().length === 0) {
+    throw new Error('Workflow type is required before launching a Beast agent.');
+  }
+  return workflowType.trim();
 }
 
 export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellProps) {
@@ -275,6 +290,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [preserveComposerDraft, setPreserveComposerDraft] = useState(!sessionId);
   const [clearedFailedDraft, setClearedFailedDraft] = useState<{ content: string; nonce: number } | undefined>(undefined);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  const [corruptChatSessions, setCorruptChatSessions] = useState<CorruptChatSessionFile[]>([]);
   const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
   const [chatSessionsError, setChatSessionsError] = useState<string | null>(null);
   const [chatSessionsRefreshNonce, setChatSessionsRefreshNonce] = useState(0);
@@ -306,6 +322,12 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const [selectedNetworkLogServiceId, setSelectedNetworkLogServiceId] = useState<string | undefined>(undefined);
   const [networkLogsLoading, setNetworkLogsLoading] = useState(false);
   const [networkLogsError, setNetworkLogsError] = useState<string | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
+  const [networkConfigError, setNetworkConfigError] = useState<string | null>(null);
+  const networkStatusRequestIdRef = useRef(0);
+  const networkStatusSuccessRequestIdRef = useRef(0);
+  const networkStatusSettledRequestIdRef = useRef(0);
+  const networkConfigRequestIdRef = useRef(0);
   const networkLogsRequestIdRef = useRef(0);
   const {
     activity,
@@ -315,6 +337,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     clearedFailedDraft: reconciledFailedDraft,
     connectionStatus,
     costUsd,
+    costTelemetryStatus,
     dismissError,
     errorBanners,
     messages,
@@ -329,6 +352,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     showTypingIndicator,
     status,
     tier,
+    tokenTelemetryStatus,
     tokenTotals,
   } = useChatSession({
     baseUrl,
@@ -365,20 +389,87 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   useEffect(() => {
     const client = new NetworkApiClient(baseUrl);
-    void Promise.allSettled([client.getStatus(), client.getConfig()]).then(([statusResult, configResult]) => {
-      if (statusResult.status === 'fulfilled') {
-        setNetworkStatus(statusResult.value);
-      }
-      if (configResult.status === 'fulfilled') {
-        setNetworkConfig(configResult.value);
-      }
-    });
+    const statusRequestId = ++networkStatusRequestIdRef.current;
+    void client.getStatus()
+      .then((nextStatus) => {
+        if (statusRequestId === networkStatusRequestIdRef.current) {
+          setNetworkStatus(nextStatus);
+          networkStatusSuccessRequestIdRef.current = statusRequestId;
+          networkStatusSettledRequestIdRef.current = statusRequestId;
+          setNetworkError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (statusRequestId === networkStatusRequestIdRef.current) {
+          networkStatusSettledRequestIdRef.current = statusRequestId;
+          setNetworkError(`Unable to load network status: ${networkErrorMessage(error, 'Request failed.')}`);
+        }
+      });
+    const configRequestId = ++networkConfigRequestIdRef.current;
+    void client.getConfig()
+      .then((nextConfig) => {
+        if (configRequestId === networkConfigRequestIdRef.current) {
+          setNetworkConfig(nextConfig);
+        }
+      })
+      .catch(() => undefined);
   }, [baseUrl]);
 
   const composerSessionKey = preserveComposerDraft
     ? `anonymous:${sessionSeed}`
     : selectedSessionId ?? activeSessionId ?? `anonymous:${sessionSeed}`;
   const beastCreationDisabled = Boolean(beastCreationUnavailableReason);
+
+  const refreshNetworkStatusAfterAction = (client: NetworkApiClient): Promise<void> => {
+    const statusRequestId = ++networkStatusRequestIdRef.current;
+    let done = false;
+    const waitForSupersedingStatusRefresh = (): Promise<void> => new Promise((resolve, reject) => {
+      const checkSupersedingStatus = () => {
+        if (done) {
+          resolve();
+          return;
+        }
+        if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
+          resolve();
+          return;
+        }
+        if (networkStatusSettledRequestIdRef.current > statusRequestId) {
+          reject(new Error('Network status refresh was superseded before a newer refresh succeeded.'));
+          return;
+        }
+        window.setTimeout(checkSupersedingStatus, 25);
+      };
+      checkSupersedingStatus();
+    });
+    const statusRefresh = client.getStatus()
+      .then((nextStatus) => {
+        if (statusRequestId !== networkStatusRequestIdRef.current) {
+          if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
+            return undefined;
+          }
+          return waitForSupersedingStatusRefresh();
+        }
+        setNetworkStatus(nextStatus);
+        networkStatusSuccessRequestIdRef.current = statusRequestId;
+        networkStatusSettledRequestIdRef.current = statusRequestId;
+        setNetworkError(null);
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        if (statusRequestId !== networkStatusRequestIdRef.current) {
+          if (networkStatusSuccessRequestIdRef.current > statusRequestId) {
+            return undefined;
+          }
+          return waitForSupersedingStatusRefresh();
+        }
+        networkStatusSettledRequestIdRef.current = statusRequestId;
+        throw error;
+      });
+    return Promise.race([statusRefresh, waitForSupersedingStatusRefresh()])
+      .finally(() => {
+        done = true;
+      });
+  };
 
   useEffect(() => {
     if (preserveComposerDraft || !activeSessionId || selectedSessionId) {
@@ -392,15 +483,17 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     setChatSessionsLoading(true);
     setChatSessionsError(null);
 
-    void chatClient.listSessions(projectId)
-      .then((sessions) => {
+    void chatClient.listSessionsWithDiagnostics(projectId)
+      .then(({ sessions, corruptSessions }) => {
         if (!cancelled) {
           setChatSessions(sessions);
+          setCorruptChatSessions(corruptSessions);
         }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setChatSessions([]);
+          setCorruptChatSessions([]);
           setChatSessionsError(error instanceof Error ? error.message : 'Unable to load conversations.');
         }
       })
@@ -468,7 +561,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       setBeastAgents(agents);
       setBeastRuns(runs);
       setBeastContainerRuntime(containerRuntime);
-      const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? agents[0]?.id ?? null : null);
+      const autoSelectedAgentId = agents.find((agent) => agent.status !== 'deleted')?.id ?? null;
+      const currentAgentId = selectedBeastAgentId ?? (shouldAutoSelectBeastAgentRef.current ? autoSelectedAgentId : null);
       setSelectedBeastAgentId(currentAgentId);
 
       try {
@@ -788,6 +882,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   }
 
   const hasPendingApproval = Boolean(pendingApproval) || sessionState === 'pending_approval';
+  const spendLabel = costTelemetryStatus === 'available' ? `$${costUsd.toFixed(2)}` : 'Unavailable';
   const composerDisabled = status === 'connecting'
     || status === 'sending'
     || status === 'streaming'
@@ -896,7 +991,9 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             </div>
             <div>
               <dt>Spend</dt>
-              <dd>${costUsd.toFixed(2)}</dd>
+              <dd title={costTelemetryStatus === 'available' ? undefined : 'Cost telemetry has not been reported by this session yet.'}>
+                {spendLabel}
+              </dd>
             </div>
           </dl>
         </header>
@@ -952,6 +1049,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                         {chatSessions.length} saved {chatSessions.length === 1 ? 'conversation' : 'conversations'} available.
                       </small>
                     )}
+                    {!chatSessionsLoading && !chatSessionsError && corruptChatSessions.length > 0 ? (
+                      <small className="field-error" role="alert">
+                        {corruptChatSessions.length} corrupted saved {corruptChatSessions.length === 1 ? 'conversation was' : 'conversations were'} quarantined and omitted.
+                      </small>
+                    ) : null}
                   </label>
                   {chatSessionsError ? (
                     <button
@@ -1020,7 +1122,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             </section>
 
             <aside className="chat-page__rail">
-              <CostBadge tier={tier ?? 'pending'} tokenTotals={tokenTotals} costUsd={costUsd} />
+              <CostBadge
+                tier={tier ?? 'pending'}
+                costTelemetryStatus={costTelemetryStatus}
+                tokenTelemetryStatus={tokenTelemetryStatus}
+                tokenTotals={tokenTotals}
+                costUsd={costUsd}
+              />
               <ActivityPane events={activity} resetKey={`${activeProjectId}:${activeSessionId ?? selectedSessionId ?? 'new'}:${sessionSeed}`} />
               <ApprovalCard
                 pending={hasPendingApproval}
@@ -1050,6 +1158,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             logs={beastAgentDetail?.run?.logs ?? []}
             pendingAgentActions={pendingBeastAgentActions}
             selectedAgentId={selectedBeastAgentId}
+            dashboardClient={dashboardClient}
             onClose={() => {
               shouldAutoSelectBeastAgentRef.current = false;
               selectedBeastAgentIdRef.current = null;
@@ -1057,19 +1166,42 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               setBeastAgentDetail(null);
             }}
             onLaunch={async (config) => {
-              const workflow = config.workflow as Record<string, unknown> | undefined;
-              const definitionId = String(workflow?.workflowType ?? 'martin-loop');
+              const definitionId = resolveWizardDefinitionId(config);
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
-              const initAction = buildInitAction(definitionId, config, selectedSessionId);
-              await beastClient.createAgent({ definitionId, initAction, initConfig: config, executionMode });
-              setBeastRefreshNonce((current) => current + 1);
+              const launchChatSessionId = selectedSessionId ?? activeSessionId ?? undefined;
+              const initAction = buildInitAction(definitionId, config, launchChatSessionId);
+              try {
+                await beastClient.createAgent({
+                  definitionId,
+                  initAction,
+                  initConfig: config,
+                  executionMode,
+                  ...(launchChatSessionId ? { chatSessionId: launchChatSessionId } : {}),
+                });
+                setBeastRefreshNonce((current) => current + 1);
+              } catch (error) {
+                if (error instanceof BeastApiError && error.code === 'AGENT_DISPATCH_FAILED') {
+                  setBeastRefreshNonce((current) => current + 1);
+                }
+                throw error;
+              }
             }}
             onDelete={(agentId) => {
               runBeastAgentLifecycleAction({
                 agentId,
                 action: 'delete',
                 request: () => beastClient.deleteAgent(agentId),
-                onSuccess: () => setSelectedBeastAgentId((current) => current === agentId ? null : current),
+                onSuccess: () => {
+                  shouldAutoSelectBeastAgentRef.current = false;
+                  setSelectedBeastAgentId((current) => {
+                    if (current !== agentId) {
+                      return current;
+                    }
+                    selectedBeastAgentIdRef.current = null;
+                    return null;
+                  });
+                  setBeastAgentDetail((current) => current?.agent.id === agentId ? null : current);
+                },
                 errorMessage: 'Unable to delete tracked agent.',
               });
             }}
@@ -1131,35 +1263,66 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         ) : route === 'network' ? (
           <NetworkPage
             config={networkConfig}
+            error={networkError ?? networkConfigError}
             logs={networkLogs}
             logsError={networkLogsError}
             logsLoading={networkLogsLoading}
             onRefresh={() => {
               const client = new NetworkApiClient(baseUrl);
               const logServiceId = selectedNetworkLogServiceId;
+              const statusRequestId = ++networkStatusRequestIdRef.current;
               const requestId = ++networkLogsRequestIdRef.current;
               if (logServiceId) {
                 setNetworkLogsLoading(true);
                 setNetworkLogsError(null);
               }
-              void Promise.allSettled([client.getStatus(), logServiceId ? client.getLogs(logServiceId) : Promise.resolve(null)])
-                .then(([statusResult, logsResult]) => {
-                  if (statusResult.status === 'fulfilled') {
-                    setNetworkStatus(statusResult.value);
+              void client.getStatus()
+                .then((nextStatus) => {
+                  if (statusRequestId === networkStatusRequestIdRef.current) {
+                    setNetworkStatus(nextStatus);
+                    networkStatusSuccessRequestIdRef.current = statusRequestId;
+                    networkStatusSettledRequestIdRef.current = statusRequestId;
+                    setNetworkError(null);
                   }
+                })
+                .catch((error: unknown) => {
+                  if (statusRequestId === networkStatusRequestIdRef.current) {
+                    networkStatusSettledRequestIdRef.current = statusRequestId;
+                    setNetworkError(`Unable to refresh network status: ${networkErrorMessage(error, 'Request failed.')}`);
+                  }
+                });
+              const configRequestId = ++networkConfigRequestIdRef.current;
+              void client.getConfig()
+                .then((nextConfig) => {
+                  if (configRequestId === networkConfigRequestIdRef.current) {
+                    setNetworkConfig(nextConfig);
+                    setNetworkConfigError(null);
+                  }
+                })
+                .catch((error: unknown) => {
+                  if (configRequestId === networkConfigRequestIdRef.current) {
+                    setNetworkConfigError(`Unable to refresh network config: ${networkErrorMessage(error, 'Request failed.')}`);
+                  }
+                });
+              if (!logServiceId) {
+                return;
+              }
+              void client.getLogs(logServiceId)
+                .then((logsResult) => {
                   if (requestId !== networkLogsRequestIdRef.current) {
                     return;
                   }
-                  if (logsResult.status === 'fulfilled' && logsResult.value) {
-                    setNetworkLogs(logsResult.value.logs);
-                    setNetworkLogsError(null);
-                  } else if (logServiceId && logsResult.status === 'rejected') {
+                  setNetworkLogs(logsResult.logs);
+                  setNetworkLogsError(null);
+                })
+                .catch((error: unknown) => {
+                  if (requestId === networkLogsRequestIdRef.current) {
                     setNetworkLogs([]);
-                    setNetworkLogsError(logsResult.reason instanceof Error ? logsResult.reason.message : 'Unable to refresh logs.');
+                    setNetworkLogsError(error instanceof Error ? error.message : 'Unable to refresh logs.');
                   }
                 })
                 .finally(() => {
-                  if (requestId === networkLogsRequestIdRef.current && logServiceId) {
+                  if (requestId === networkLogsRequestIdRef.current) {
                     setNetworkLogsLoading(false);
                   }
                 });
@@ -1167,13 +1330,15 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onRestart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.restart(serviceId).then(() => {
-                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+                return refreshNetworkStatusAfterAction(client);
               });
             }}
             onSaveConfig={(assignments) => {
               const client = new NetworkApiClient(baseUrl);
               return client.updateConfig(assignments).then((nextConfig) => {
+                networkConfigRequestIdRef.current += 1;
                 setNetworkConfig(nextConfig);
+                setNetworkConfigError(null);
               });
             }}
             onSelectLogService={(serviceId) => {
@@ -1212,13 +1377,13 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
             onStart={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.start(serviceId).then(() => {
-                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+                return refreshNetworkStatusAfterAction(client);
               });
             }}
             onStop={(serviceId) => {
               const client = new NetworkApiClient(baseUrl);
               return client.stop(serviceId).then(() => {
-                void client.getStatus().then(setNetworkStatus).catch(() => undefined);
+                return refreshNetworkStatusAfterAction(client);
               });
             }}
             selectedLogServiceId={selectedNetworkLogServiceId}

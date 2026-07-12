@@ -160,6 +160,96 @@ describe('useChatSession', () => {
     ]);
   });
 
+  it('marks a new session without usage metadata as unavailable telemetry instead of confirmed zero spend', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.costUsd).toBe(0);
+    expect(result.current.tokenTotals).toEqual({ cheap: 0, premiumReasoning: 0, premiumExecution: 0 });
+    expect(result.current.costTelemetryStatus).toBe('unavailable');
+    expect(result.current.tokenTelemetryStatus).toBe('unavailable');
+  });
+
+  it('distinguishes reported zero-cost telemetry from unavailable telemetry', async () => {
+    mockCreateSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{ role: 'assistant', content: 'Free cached reply', timestamp: '2026-03-09T00:00:01Z', tokens: 0, costUsd: 0 }],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    });
+
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.costUsd).toBe(0);
+    expect(result.current.costTelemetryStatus).toBe('available');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
+  });
+
+  it('keeps spend unavailable when only token telemetry is reported', async () => {
+    mockCreateSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{ role: 'assistant', content: 'Token-only reply', timestamp: '2026-03-09T00:00:01Z', tokens: 12 }],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 12, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    });
+
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.tokenTotals.cheap).toBe(12);
+    expect(result.current.costUsd).toBe(0);
+    expect(result.current.costTelemetryStatus).toBe('unavailable');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
+  });
+
+  it('marks sessions with non-zero usage as available telemetry', async () => {
+    mockCreateSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{ role: 'assistant', content: 'Metered reply', timestamp: '2026-03-09T00:00:01Z', tokens: 12, costUsd: 0.05 }],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 12, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.05,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    });
+
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.tokenTotals.cheap).toBe(12);
+    expect(result.current.costUsd).toBe(0.05);
+    expect(result.current.costTelemetryStatus).toBe('available');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
+  });
+
   it('streams assistant messages and updates receipts', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -387,7 +477,7 @@ describe('useChatSession', () => {
     }));
   });
 
-  it('does not offer a retry when HTTP send succeeds but refresh fails', async () => {
+  it('keeps the draft but does not retry when HTTP fallback refresh fails', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -397,7 +487,7 @@ describe('useChatSession', () => {
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
 
     await act(async () => {
-      await result.current.send('Already ran on the server');
+      await expect(result.current.send('Already ran on the server')).rejects.toMatchObject({ retryableSend: false });
     });
 
     expect(result.current.status).toBe('idle');
@@ -406,6 +496,10 @@ describe('useChatSession', () => {
       receipt: 'accepted',
     }));
     expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Message sent; refresh failed',
+      actionLabel: 'Refresh chat',
+    });
   });
 
   it('removes stale failed drafts when an HTTP composer retry succeeds but refresh fails', async () => {
@@ -427,7 +521,7 @@ describe('useChatSession', () => {
 
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
     await act(async () => {
-      await result.current.send('retry over HTTP');
+      await expect(result.current.send('retry over HTTP')).rejects.toMatchObject({ retryableSend: false });
     });
 
     expect(result.current.status).toBe('idle');

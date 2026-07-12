@@ -74,6 +74,20 @@ interface RemoteChatSession {
   socket: WebSocket;
 }
 
+const REMOTE_CHAT_TIMEOUT_MS = 30_000;
+
+function parseManagedChatMessage(data: string, phase: string): Record<string, unknown> {
+  try {
+    const payload = JSON.parse(data) as unknown;
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      return payload as Record<string, unknown>;
+    }
+  } catch {
+    // Fall through to the uniform managed-chat diagnostic below.
+  }
+  throw new Error(`Invalid managed chat websocket message during ${phase}`);
+}
+
 async function createRemoteSession(target: ManagedChatAttachment, projectId: string): Promise<RemoteChatSession> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (target.operatorToken) {
@@ -112,19 +126,57 @@ async function createRemoteSession(target: ManagedChatAttachment, projectId: str
     [CHAT_SOCKET_PROTOCOL, `${CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX}${ticketBody.data.ticket}`],
   );
   await new Promise<void>((resolve, reject) => {
-    socket.addEventListener('open', () => resolve(), { once: true });
-    socket.addEventListener('error', () => reject(new Error('Managed chat websocket failed to connect')), { once: true });
+    const cleanup = (): void => {
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('error', onError);
+    };
+    const onOpen = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (): void => {
+      cleanup();
+      reject(new Error('Managed chat websocket failed to connect'));
+    };
+    socket.addEventListener('open', onOpen, { once: true });
+    socket.addEventListener('error', onError, { once: true });
   });
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      socket.close();
+      reject(new Error('Timed out waiting for managed chat session readiness'));
+    }, REMOTE_CHAT_TIMEOUT_MS);
+
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      socket.removeEventListener('message', onMessage);
+      socket.removeEventListener('error', onError);
+    };
+
+    const onError = (): void => {
+      cleanup();
+      reject(new Error('Managed chat websocket error while waiting for session readiness'));
+    };
+
     const onMessage = (event: MessageEvent<string>) => {
-      const payload = JSON.parse(event.data) as { type?: string };
+      let payload: Record<string, unknown>;
+      try {
+        payload = parseManagedChatMessage(event.data, 'session readiness');
+      } catch (error) {
+        cleanup();
+        socket.close();
+        reject(error);
+        return;
+      }
       if (payload.type === 'session.ready') {
-        socket.removeEventListener('message', onMessage);
+        cleanup();
         resolve();
       }
     };
     socket.addEventListener('message', onMessage);
+    socket.addEventListener('error', onError, { once: true });
   });
 
   return {
@@ -152,7 +204,7 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
     const timeout = setTimeout(() => {
       cleanup();
       reject(new Error('Timed out waiting for managed chat reply'));
-    }, 30_000);
+    }, REMOTE_CHAT_TIMEOUT_MS);
 
     const cleanup = (): void => {
       clearTimeout(timeout);
@@ -166,7 +218,14 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
     };
 
     const onMessage = (event: MessageEvent<string>): void => {
-      const payload = JSON.parse(event.data) as Record<string, unknown>;
+      let payload: Record<string, unknown>;
+      try {
+        payload = parseManagedChatMessage(event.data, 'reply handling');
+      } catch (error) {
+        cleanup();
+        reject(error);
+        return;
+      }
       switch (payload.type) {
         case 'assistant.message.delta':
           process.stdout.write(String(payload.chunk ?? ''));
@@ -206,6 +265,12 @@ async function awaitRemoteReply(socket: WebSocket, verbose: boolean): Promise<vo
     socket.addEventListener('error', onError, { once: true });
   });
 }
+
+export const __chatAttachTestHooks = {
+  awaitRemoteReply,
+  createRemoteSession,
+  parseManagedChatMessage,
+};
 
 export async function runManagedChatRepl(options: {
   attachment: ManagedChatAttachment;

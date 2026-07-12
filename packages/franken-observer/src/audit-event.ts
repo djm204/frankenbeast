@@ -116,6 +116,156 @@ export function createAuditEvent(
 
 export { hashContent };
 
+function cloneArrayBufferView<T extends ArrayBufferView>(value: T): T {
+  if (value instanceof DataView) {
+    const copy = new Uint8Array(value.byteLength);
+    copy.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    return new DataView(copy.buffer) as unknown as T;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return Buffer.from(value) as unknown as T;
+  }
+
+  const TypedArray = value.constructor as new (source: ArrayLike<number>) => T;
+  return new TypedArray(value as unknown as ArrayLike<number>);
+}
+
+function cloneArrayBuffer<T extends ArrayBuffer | SharedArrayBuffer>(value: T): ArrayBuffer {
+  const copy = new Uint8Array(value.byteLength);
+  copy.set(new Uint8Array(value));
+  return copy.buffer;
+}
+
+function cloneValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
+    return value;
+  }
+
+  const existing = seen.get(value);
+  if (existing !== undefined) {
+    return existing as T;
+  }
+
+  if (typeof value === 'function') {
+    seen.set(value, value);
+    freezeValue(value);
+    return value;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return Buffer.from(value) as T;
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime()) as T;
+  }
+
+  if (Array.isArray(value)) {
+    const clone: unknown[] = [];
+    seen.set(value, clone);
+    for (const item of value) {
+      clone.push(cloneValue(item, seen));
+    }
+    return clone as T;
+  }
+
+  if (value instanceof Map) {
+    const clone = new Map<unknown, unknown>();
+    seen.set(value, clone);
+    for (const [key, item] of value) {
+      clone.set(cloneValue(key, seen), cloneValue(item, seen));
+    }
+    return clone as T;
+  }
+
+  if (value instanceof Set) {
+    const clone = new Set<unknown>();
+    seen.set(value, clone);
+    for (const item of value) {
+      clone.add(cloneValue(item, seen));
+    }
+    return clone as T;
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return cloneArrayBufferView(value) as T;
+  }
+
+  if (value instanceof ArrayBuffer || value instanceof SharedArrayBuffer) {
+    return cloneArrayBuffer(value) as T;
+  }
+
+  const toJSON = (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === 'function') {
+    return cloneValue(toJSON.call(value), seen) as T;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype === Object.prototype || prototype === null) {
+    const clone: Record<string, unknown> = {};
+    seen.set(value, clone);
+    for (const [key, item] of Object.entries(value)) {
+      clone[key] = cloneValue(item, seen);
+    }
+    return clone as T;
+  }
+
+  try {
+    return structuredClone(value);
+  } catch {
+    const clone: Record<string, unknown> = {};
+    seen.set(value, clone);
+    for (const [key, item] of Object.entries(value)) {
+      clone[key] = cloneValue(item, seen);
+    }
+    return clone as T;
+  }
+}
+
+function freezeValue<T>(value: T, seen = new WeakSet<object>()): T {
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null || seen.has(value)) {
+    return value;
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      freezeValue(item, seen);
+    }
+  } else if (value instanceof Map) {
+    for (const [key, item] of value) {
+      freezeValue(key, seen);
+      freezeValue(item, seen);
+    }
+  } else if (value instanceof Set) {
+    for (const item of value) {
+      freezeValue(item, seen);
+    }
+  } else {
+    for (const item of Object.values(value)) {
+      freezeValue(item, seen);
+    }
+  }
+
+  if (!ArrayBuffer.isView(value)) {
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function immutableAuditEvent(event: AuditEvent): AuditEvent {
+  return freezeValue(cloneValue(event));
+}
+
+function auditEventForJson(event: AuditEvent): AuditEvent {
+  return freezeValue({
+    ...cloneValue(event),
+    payload: event.payload === undefined ? null : cloneValue(event.payload),
+  });
+}
+
 /**
  * Append-only, immutable audit trail.
  * Records every execution decision for compliance auditing.
@@ -124,30 +274,27 @@ export class AuditTrail {
   private events: AuditEvent[] = [];
 
   append(event: AuditEvent): void {
-    this.events.push(event);
+    this.events.push(immutableAuditEvent(event));
   }
 
   getAll(): readonly AuditEvent[] {
-    return this.events;
+    return this.events.map((event) => immutableAuditEvent(event));
   }
 
   getByType(type: string): AuditEvent[] {
-    return this.events.filter((e) => e.type === type);
+    return this.events.filter((e) => e.type === type).map((event) => immutableAuditEvent(event));
   }
 
   getByPhase(phase: string): AuditEvent[] {
-    return this.events.filter((e) => e.phase === phase);
+    return this.events.filter((e) => e.phase === phase).map((event) => immutableAuditEvent(event));
   }
 
   getChildren(parentEventId: string): AuditEvent[] {
-    return this.events.filter((e) => e.parentEventId === parentEventId);
+    return this.events.filter((e) => e.parentEventId === parentEventId).map((event) => immutableAuditEvent(event));
   }
 
   toJSON(): AuditEvent[] {
-    return this.events.map((event) => ({
-      ...event,
-      payload: event.payload === undefined ? null : event.payload,
-    }));
+    return this.events.map((event) => auditEventForJson(event));
   }
 
   static fromJSON(events: unknown): AuditTrail {
@@ -166,13 +313,17 @@ export class AuditTrail {
     for (const event of this.events) {
       if (event.inputHash) {
         const content = contentMap.get(`${event.eventId}:input`);
-        if (content !== undefined && hashContent(content) !== event.inputHash) {
+        if (content === undefined) {
+          mismatches.push(`${event.eventId}: input content missing`);
+        } else if (hashContent(content) !== event.inputHash) {
           mismatches.push(`${event.eventId}: input hash mismatch`);
         }
       }
       if (event.outputHash) {
         const content = contentMap.get(`${event.eventId}:output`);
-        if (content !== undefined && hashContent(content) !== event.outputHash) {
+        if (content === undefined) {
+          mismatches.push(`${event.eventId}: output content missing`);
+        } else if (hashContent(content) !== event.outputHash) {
           mismatches.push(`${event.eventId}: output hash mismatch`);
         }
       }

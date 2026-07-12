@@ -108,7 +108,10 @@ function initJsonClient(options: {
     pruneFbeastMcpServerEntries(settings);
   }
   pruneFbeastMcpServerEntries(mcpConfig);
-  const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
+  const mcpServers = readMcpServersObject(
+    mcpConfig,
+    client === 'claude' ? '.mcp.json' : 'settings.json',
+  );
   const dbPath = client === 'claude' ? '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db' : join('.fbeast', 'beast.db');
   const configPath = join('.fbeast', 'config.json');
   const proxyArgs = ['--db', dbPath, '--config', configPath];
@@ -500,12 +503,26 @@ function pruneFbeastMcpServerEntries(config: Record<string, unknown>): void {
   config['mcpServers'] = mcpServers;
 }
 
+function readMcpServersObject(
+  config: Record<string, unknown>,
+  configLabel: string,
+): Record<string, unknown> {
+  const mcpServers = config['mcpServers'];
+  if (mcpServers === undefined) return {};
+  if (isObjectRecord(mcpServers)) return mcpServers;
+
+  throw new Error(
+    `fbeast init: ${configLabel} mcpServers must be a JSON object; `
+      + 'remove or replace the existing mcpServers value before running init again.',
+  );
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 // Re-export for test access

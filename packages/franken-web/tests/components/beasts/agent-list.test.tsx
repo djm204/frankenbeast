@@ -18,6 +18,18 @@ const agents: TrackedAgentSummary[] = [
     initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
     initConfig: {}, createdAt: '2026-03-15T09:00:00Z', updatedAt: '2026-03-15T09:30:00Z',
   },
+  {
+    id: 'agent-3', definitionId: 'design-interview', status: 'awaiting_approval',
+    source: 'dashboard', createdByUser: 'pfk',
+    initAction: { kind: 'design-interview', command: '/interview', config: {} },
+    initConfig: {}, createdAt: '2026-03-15T08:00:00Z', updatedAt: '2026-03-15T08:30:00Z',
+  },
+  {
+    id: 'agent-4', definitionId: 'chunk-plan', status: 'deleted',
+    source: 'dashboard', createdByUser: 'pfk',
+    initAction: { kind: 'chunk-plan', command: '/plan', config: {} },
+    initConfig: {}, createdAt: '2026-03-15T07:00:00Z', updatedAt: '2026-03-15T07:30:00Z',
+  },
 ];
 
 describe('AgentList', () => {
@@ -46,6 +58,36 @@ describe('AgentList', () => {
     fireEvent.change(statusSelect, { target: { value: 'running' } });
     expect(screen.getByText('agent-1')).toBeTruthy();
     expect(screen.queryByText('agent-2')).toBeNull();
+    expect(screen.queryByText('agent-3')).toBeNull();
+    expect(screen.queryByText('agent-4')).toBeNull();
+  });
+
+  it('exposes backend-only tracked agent statuses in the status filter', () => {
+    render(<AgentList agents={agents} runs={[]} selectedAgentId={null} onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} />);
+    const statusSelect = screen.getByLabelText(/filter by status/i) as HTMLSelectElement;
+
+    const optionValues = Array.from(statusSelect.options).map((option) => option.value);
+    expect(optionValues).toEqual([
+      '',
+      'initializing',
+      'awaiting_approval',
+      'dispatching',
+      'running',
+      'completed',
+      'failed',
+      'stopped',
+      'deleted',
+    ]);
+
+    fireEvent.change(statusSelect, { target: { value: 'awaiting_approval' } });
+    expect(screen.getByText('agent-3')).toBeTruthy();
+    expect(screen.queryByText('agent-1')).toBeNull();
+    expect(screen.queryByText('agent-4')).toBeNull();
+
+    fireEvent.change(statusSelect, { target: { value: 'deleted' } });
+    expect(screen.getByText('agent-4')).toBeTruthy();
+    expect(screen.queryByText('agent-1')).toBeNull();
+    expect(screen.queryByText('agent-3')).toBeNull();
   });
 
   it('has create agent button in empty state', () => {

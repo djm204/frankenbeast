@@ -49,10 +49,12 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
       const toolsPath = join(skillDir, 'tools.json');
       const mcpPath = join(skillDir, 'mcp.json');
 
+      const context = readOptionalTextFile(contextPath);
+
       return {
         ...summary,
         hasContext: existsSync(contextPath),
-        context: existsSync(contextPath) ? readFileSync(contextPath, 'utf8') : undefined,
+        context,
         mcpConfig: readJsonFile(mcpPath),
         tools: readJsonFile(toolsPath) ?? [],
       };
@@ -65,7 +67,14 @@ function listInstalledSkills(skillsDir: string, enabledSkills: Set<string>): Ski
     return [];
   }
 
-  return readdirSync(skillsDir, { withFileTypes: true })
+  let entries;
+  try {
+    entries = readdirSync(skillsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  return entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => readSkillSummary(skillsDir, entry.name, enabledSkills))
     .filter((entry): entry is SkillsListEntry => entry !== undefined)
@@ -84,7 +93,13 @@ function readSkillSummary(
     return undefined;
   }
 
-  const stat = statSync(skillDir);
+  let stat;
+  try {
+    stat = statSync(skillDir);
+  } catch {
+    return undefined;
+  }
+
   return {
     name,
     enabled: enabledSkills.has(name),
@@ -95,8 +110,9 @@ function readSkillSummary(
 
 function inferDescription(skillDir: string, name: string): string {
   const contextPath = join(skillDir, 'context.md');
-  if (existsSync(contextPath)) {
-    const firstMeaningfulLine = readFileSync(contextPath, 'utf8')
+  const context = readOptionalTextFile(contextPath);
+  if (context !== undefined) {
+    const firstMeaningfulLine = context
       .split('\n')
       .map((line) => line.trim())
       .find((line) => line.length > 0);
@@ -134,6 +150,18 @@ function readJsonFile(path: string): unknown {
 
   try {
     return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+function readOptionalTextFile(path: string): string | undefined {
+  if (!existsSync(path)) {
+    return undefined;
+  }
+
+  try {
+    return readFileSync(path, 'utf8');
   } catch {
     return undefined;
   }

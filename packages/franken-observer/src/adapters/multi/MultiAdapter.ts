@@ -56,15 +56,47 @@ export class MultiAdapter implements ExportAdapter {
   }
 
   async queryByTraceId(traceId: string): Promise<Trace | null> {
+    const errors: unknown[] = []
+
     for (const adapter of this.adapters) {
-      const result = await adapter.queryByTraceId(traceId)
-      if (result !== null) return result
+      try {
+        const result = await adapter.queryByTraceId(traceId)
+        if (result !== null) return result
+      } catch (error) {
+        errors.push(error)
+      }
     }
+
+    if (this.throwOnError && errors.length > 0) {
+      throw this.createReadAggregateError('queryByTraceId', errors)
+    }
+
     return null
   }
 
   async listTraceIds(): Promise<string[]> {
-    const sets = await Promise.all(this.adapters.map(a => a.listTraceIds()))
-    return [...new Set(sets.flat())]
+    const results = await Promise.allSettled(this.adapters.map(a => a.listTraceIds()))
+    const sets = results.filter((r): r is PromiseFulfilledResult<string[]> => r.status === 'fulfilled').map(r => r.value)
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+
+    const traceIds = sets.flat()
+
+    if (this.throwOnError && traceIds.length === 0 && failed.length > 0) {
+      throw this.createReadAggregateError(
+        'listTraceIds',
+        failed.map(f => f.reason),
+      )
+    }
+
+    return [...new Set(traceIds)]
+  }
+
+  private createReadAggregateError(operation: string, errors: unknown[]): AggregateError {
+    return new AggregateError(
+      errors,
+      `MultiAdapter: ${errors.length} adapter(s) failed during ${operation}: ${errors
+        .map(e => (e instanceof Error ? e.message : String(e)))
+        .join('; ')}`,
+    )
   }
 }

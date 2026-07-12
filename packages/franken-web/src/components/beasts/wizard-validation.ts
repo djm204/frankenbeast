@@ -20,15 +20,63 @@ type WorkflowValues = {
   chunkDir?: unknown;
 };
 
+const MODULE_NUMERIC_FIELDS = [
+  {
+    moduleKey: 'planner',
+    configKey: 'plannerConfig',
+    field: 'maxDagDepth',
+    label: 'Max DAG Depth',
+    min: 1,
+    max: 50,
+  },
+  {
+    moduleKey: 'planner',
+    configKey: 'plannerConfig',
+    field: 'parallelTaskLimit',
+    label: 'Parallel Task Limit',
+    min: 1,
+    max: 20,
+  },
+  {
+    moduleKey: 'critique',
+    configKey: 'critiqueConfig',
+    field: 'maxIterations',
+    label: 'Max Iterations',
+    min: 1,
+    max: 10,
+  },
+  {
+    moduleKey: 'heartbeat',
+    configKey: 'heartbeatConfig',
+    field: 'reflectionInterval',
+    label: 'Reflection Interval',
+    min: 10,
+    max: 600,
+  },
+] as const;
+
 function isBlank(value: unknown): boolean {
   return typeof value !== 'string' || value.trim().length === 0;
 }
 
+function hasUnsafeRepoPathSegments(value: string): boolean {
+  if (value.includes('\0')) return true;
+  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:/.test(value)) return true;
+  return value.split(/[\\/]+/).includes('..');
+}
+
+function isBrowserFakePath(value: string): boolean {
+  return /^(?:[a-zA-Z]:)?[\\/]*fakepath[\\/]/i.test(value);
+}
+
 function isRepoRelativeMarkdownDesignDocPath(value: string): boolean {
-  if (value.includes('\0')) return false;
-  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:/.test(value)) return false;
-  if (value.split(/[\\/]+/).includes('..')) return false;
+  if (hasUnsafeRepoPathSegments(value)) return false;
   return /\.(?:md|mdx|markdown)$/i.test(value);
+}
+
+function isDirectoryPathPrompt(prompt: BeastInterviewPrompt): boolean {
+  const key = prompt.key.toLowerCase();
+  return prompt.kind === 'directory' || key.includes('dir') || key.includes('directory');
 }
 
 function requiredMessage(prompt: BeastInterviewPrompt): string {
@@ -55,6 +103,36 @@ function validateCatalogPrompt(
   }
   if (prompt.key === 'designDocPath' && typeof value === 'string' && !isRepoRelativeMarkdownDesignDocPath(value)) {
     errors.designDocPath = 'Design doc path must be a repo-relative Markdown file without traversal.';
+  }
+  if (isDirectoryPathPrompt(prompt) && typeof value === 'string' && (isBrowserFakePath(value) || hasUnsafeRepoPathSegments(value))) {
+    errors[errorKey] = isBrowserFakePath(value)
+      ? 'Directory path must be a repo-relative path, not a browser fake path.'
+      : 'Directory path must be a repo-relative path without traversal.';
+  }
+}
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function addModuleNumericErrors(errors: WizardValidationErrors, values: Record<string, unknown> | undefined): void {
+  if (!values) return;
+
+  for (const fieldSpec of MODULE_NUMERIC_FIELDS) {
+    if (values[fieldSpec.moduleKey] !== true) continue;
+
+    const config = values[fieldSpec.configKey];
+    if (config === undefined) continue;
+    if (!isRecordObject(config)) {
+      errors[fieldSpec.configKey] = `${fieldSpec.label} configuration is malformed.`;
+      continue;
+    }
+    if (!(fieldSpec.field in config)) continue;
+
+    const value = config[fieldSpec.field];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < fieldSpec.min || value > fieldSpec.max) {
+      errors[`${fieldSpec.configKey}.${fieldSpec.field}`] = `${fieldSpec.label} must be a whole number from ${fieldSpec.min} to ${fieldSpec.max}.`;
+    }
   }
 }
 
@@ -87,6 +165,10 @@ export function validateWizardStep(
     for (const prompt of selectedDefinition?.interviewPrompts ?? []) {
       validateCatalogPrompt(errors, values, prompt);
     }
+  }
+
+  if (step === 3) {
+    addModuleNumericErrors(errors, stepValues[3]);
   }
 
   if (step === 7) {
