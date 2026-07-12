@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { createCritiqueApp } from '../../../src/server/app.js';
+import {
+  createCritiqueApp,
+  evictExpiredRateLimitBuckets,
+} from '../../../src/server/app.js';
 import { timingSafeBearerTokenMatches } from '../../../src/server/token-auth.js';
 import { CritiquePipeline } from '../../../src/pipeline/critique-pipeline.js';
-import type { Evaluator, EvaluationInput, EvaluationResult } from '../../../src/types/evaluation.js';
+import type {
+  Evaluator,
+  EvaluationInput,
+  EvaluationResult,
+} from '../../../src/types/evaluation.js';
 
 /** Minimal evaluator that always passes. */
 function makePassEvaluator(name = 'test-eval'): Evaluator {
@@ -103,13 +110,25 @@ describe('Critique Hono Server', () => {
 
   describe('auth', () => {
     it('compares bearer tokens through a timing-safe helper', () => {
-      expect(timingSafeBearerTokenMatches('Bearer secret-token', 'secret-token')).toBe(true);
-      expect(timingSafeBearerTokenMatches('Bearer secret-token', 'secret-token-extra')).toBe(false);
-      expect(timingSafeBearerTokenMatches('Basic secret-token', 'secret-token')).toBe(false);
+      expect(
+        timingSafeBearerTokenMatches('Bearer secret-token', 'secret-token'),
+      ).toBe(true);
+      expect(
+        timingSafeBearerTokenMatches(
+          'Bearer secret-token',
+          'secret-token-extra',
+        ),
+      ).toBe(false);
+      expect(
+        timingSafeBearerTokenMatches('Basic secret-token', 'secret-token'),
+      ).toBe(false);
     });
 
     it('returns 401 without bearer token', async () => {
-      const app = createCritiqueApp({ bearerToken: 'secret-token', pipeline: makePipeline() });
+      const app = createCritiqueApp({
+        bearerToken: 'secret-token',
+        pipeline: makePipeline(),
+      });
       const res = await app.request('/v1/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,7 +139,10 @@ describe('Critique Hono Server', () => {
     });
 
     it('returns 200 with valid bearer token', async () => {
-      const app = createCritiqueApp({ bearerToken: 'secret-token', pipeline: makePipeline() });
+      const app = createCritiqueApp({
+        bearerToken: 'secret-token',
+        pipeline: makePipeline(),
+      });
       const res = await app.request('/v1/review', {
         method: 'POST',
         headers: {
@@ -135,8 +157,23 @@ describe('Critique Hono Server', () => {
   });
 
   describe('rate limiting', () => {
+    it('evicts expired inactive rate-limit buckets during cleanup', () => {
+      const requestCounts = new Map([
+        ['stale-a', { count: 1, resetAt: 1_000 }],
+        ['active', { count: 1, resetAt: 5_000 }],
+        ['stale-b', { count: 1, resetAt: 2_000 }],
+      ]);
+
+      evictExpiredRateLimitBuckets(requestCounts, 3_000);
+
+      expect([...requestCounts.keys()]).toEqual(['active']);
+    });
+
     it('returns 429 after exceeding limit', async () => {
-      const app = createCritiqueApp({ rateLimitPerMinute: 2, pipeline: makePipeline() });
+      const app = createCritiqueApp({
+        rateLimitPerMinute: 2,
+        pipeline: makePipeline(),
+      });
 
       // First two requests should succeed
       for (let i = 0; i < 2; i++) {
