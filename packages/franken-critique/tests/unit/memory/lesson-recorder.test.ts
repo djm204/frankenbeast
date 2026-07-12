@@ -422,16 +422,104 @@ describe('LessonRecorder', () => {
     expect(admitted).toEqual({ recorded: 1, suppressedByCooldown: [] });
   });
 
+  it('reserves cooldown admission before async persistence completes', async () => {
+    const port = createMockMemoryPort();
+    let releasePersistence!: () => void;
+    const persistenceStarted = new Promise<void>((resolve) => {
+      (port.recordLesson as ReturnType<typeof vi.fn>).mockImplementation(
+        () =>
+          new Promise<void>((release) => {
+            releasePersistence = release;
+            resolve();
+          }),
+      );
+    });
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Concurrent review should not double-record',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const firstRecord = recorder.record(result, 'first-task');
+    await persistenceStarted;
+    const secondRecord = await recorder.record(result, 'second-task');
+    releasePersistence();
+    const firstSummary = await firstRecord;
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(firstSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+    expect(secondRecord).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [
+        expect.objectContaining({
+          taskId: 'second-task',
+          evaluatorName: 'learning-reviewer',
+          remainingMs: 60_000,
+        }),
+      ],
+    });
+  });
+
+  it('keeps multiline finding boundaries distinct in cooldown keys', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const multilineFinding: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          { message: 'a\nb', severity: 'warning' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+    const separateFindings: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          { message: 'a', severity: 'warning' },
+          { message: 'b', severity: 'warning' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(multilineFinding, 'first-task');
+    const secondSummary = await recorder.record(
+      separateFindings,
+      'second-task',
+    );
+
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(secondSummary).toEqual({ recorded: 1, suppressedByCooldown: [] });
+  });
+
   it('rejects invalid cooldown windows explicitly', () => {
     const port = createMockMemoryPort();
+    const expectedMessage =
+      'LessonRecorder cooldownMs must be a finite, non-negative number within the supported Date range.';
 
     expect(() => new LessonRecorder(port, { cooldownMs: -1 })).toThrow(
-      'LessonRecorder cooldownMs must be a finite, non-negative number.',
+      expectedMessage,
     );
     expect(
       () => new LessonRecorder(port, { cooldownMs: Number.POSITIVE_INFINITY }),
-    ).toThrow(
-      'LessonRecorder cooldownMs must be a finite, non-negative number.',
+    ).toThrow(expectedMessage);
+    expect(() => new LessonRecorder(port, { cooldownMs: 10 ** 16 })).toThrow(
+      expectedMessage,
     );
   });
 

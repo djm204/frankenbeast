@@ -9,11 +9,13 @@ import type {
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
+import { isoNow } from '@franken/types';
 
 const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
   'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
 
 const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const MAX_LESSON_COOLDOWN_MS = 100 * 365 * 24 * 60 * 60 * 1000;
 
 const LEARNING_COOLDOWN_GUIDANCE =
   'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.';
@@ -22,7 +24,7 @@ export interface LessonRecorderOptions {
   /** Milliseconds to suppress equivalent lessons after one is admitted. Defaults to 24 hours. */
   readonly cooldownMs?: number;
   /** Clock injection for deterministic tests and replay tooling. */
-  readonly now?: () => Date;
+  readonly now?: () => Date | string;
 }
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
@@ -62,20 +64,25 @@ const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
 export class LessonRecorder {
   private readonly memory: MemoryPort;
   private readonly cooldownMs: number;
-  private readonly now: () => Date;
+  private readonly now: () => string;
   private readonly cooldowns = new Map<string, number>();
 
   constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
     const cooldownMs = options.cooldownMs ?? DEFAULT_LESSON_COOLDOWN_MS;
-    if (!Number.isFinite(cooldownMs) || cooldownMs < 0) {
+    if (
+      !Number.isFinite(cooldownMs) ||
+      cooldownMs < 0 ||
+      cooldownMs > MAX_LESSON_COOLDOWN_MS
+    ) {
       throw new RangeError(
-        'LessonRecorder cooldownMs must be a finite, non-negative number.',
+        'LessonRecorder cooldownMs must be a finite, non-negative number within the supported Date range.',
       );
     }
 
     this.memory = memory;
     this.cooldownMs = cooldownMs;
-    this.now = options.now ?? ((): Date => new Date());
+    const now = options.now ?? isoNow;
+    this.now = (): string => normalizeTimestamp(now());
   }
 
   async record(
@@ -103,24 +110,33 @@ export class LessonRecorder {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const lesson of lessons) {
         const cooldownKey = lesson.cooldown?.key;
+        let reservedUntilMs: number | null = null;
+        let previousSuppressUntilMs: number | undefined;
         if (cooldownKey) {
           const suppression = this.getCooldownSuppression(lesson, cooldownKey);
           if (suppression) {
             recordingResult.suppressedByCooldown.push(suppression);
             continue;
           }
+
+          if (this.cooldownMs > 0) {
+            previousSuppressUntilMs = this.cooldowns.get(cooldownKey);
+            reservedUntilMs = Date.parse(lesson.cooldown!.suppressUntil);
+            this.cooldowns.set(cooldownKey, reservedUntilMs);
+          }
         }
 
         try {
           await this.memory.recordLesson(lesson);
           recordingResult.recorded += 1;
-          if (cooldownKey && this.cooldownMs > 0) {
-            this.cooldowns.set(
-              cooldownKey,
-              Date.parse(lesson.cooldown!.suppressUntil),
-            );
-          }
         } catch {
+          if (cooldownKey && reservedUntilMs !== null) {
+            if (previousSuppressUntilMs === undefined) {
+              this.cooldowns.delete(cooldownKey);
+            } else {
+              this.cooldowns.set(cooldownKey, previousSuppressUntilMs);
+            }
+          }
           // Non-fatal: log failure but don't disrupt the critique flow
         }
       }
@@ -153,14 +169,13 @@ export class LessonRecorder {
           failingIteration.index,
         );
         const findingMessages = critiqueFindings.map((f) => f.message);
-        const recordedAt = this.now().toISOString();
+        const recordedAt = this.now();
+        this.pruneExpiredCooldowns(Date.parse(recordedAt));
         const cooldownKey = createCooldownKey(
           evalResult.evaluatorName,
           findingMessages,
         );
-        const suppressUntil = new Date(
-          Date.parse(recordedAt) + this.cooldownMs,
-        ).toISOString();
+        const suppressUntil = addCooldownWindow(recordedAt, this.cooldownMs);
 
         lessons.push({
           evaluatorName: evalResult.evaluatorName,
@@ -224,7 +239,8 @@ export class LessonRecorder {
     }
 
     const suppressedAt = this.now();
-    const remainingMs = suppressUntilMs - suppressedAt.getTime();
+    const suppressedAtMs = Date.parse(suppressedAt);
+    const remainingMs = suppressUntilMs - suppressedAtMs;
     if (remainingMs <= 0) {
       this.cooldowns.delete(cooldownKey);
       return null;
@@ -234,12 +250,20 @@ export class LessonRecorder {
       key: cooldownKey,
       taskId: lesson.taskId,
       evaluatorName: lesson.evaluatorName,
-      suppressedAt: suppressedAt.toISOString(),
+      suppressedAt,
       suppressUntil: new Date(suppressUntilMs).toISOString(),
       remainingMs,
       reason:
         'Equivalent critique lesson is still inside the learning cooldown window; reuse the existing lesson metadata instead of recording another copy.',
     };
+  }
+
+  private pruneExpiredCooldowns(nowMs: number): void {
+    for (const [key, suppressUntilMs] of this.cooldowns) {
+      if (suppressUntilMs <= nowMs) {
+        this.cooldowns.delete(key);
+      }
+    }
   }
 }
 
@@ -303,15 +327,33 @@ function createCooldownKey(
   evaluatorName: string,
   findingMessages: readonly string[],
 ): string {
-  const normalizedFindings = findingMessages
-    .map((message) => message.trim())
-    .sort()
-    .join('\n');
+  const normalizedFindings = JSON.stringify(
+    findingMessages.map((message) => message.trim()).sort(),
+  );
   return [
     'critique-lesson',
     sanitizeLessonIdPart(evaluatorName),
     stableHash(normalizedFindings),
   ].join(':');
+}
+
+function normalizeTimestamp(value: Date | string): string {
+  const timestamp = value instanceof Date ? value.toISOString() : value;
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    throw new RangeError('LessonRecorder clock returned an invalid timestamp.');
+  }
+  return new Date(parsed).toISOString();
+}
+
+function addCooldownWindow(recordedAt: string, cooldownMs: number): string {
+  const suppressUntilMs = Date.parse(recordedAt) + cooldownMs;
+  if (!Number.isFinite(suppressUntilMs)) {
+    throw new RangeError(
+      'LessonRecorder cooldownMs produced an invalid suppressUntil timestamp.',
+    );
+  }
+  return new Date(suppressUntilMs).toISOString();
 }
 
 function stableHash(value: string): string {
