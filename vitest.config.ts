@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { readVitestFlags } from './scripts/vitest-env.js';
 
@@ -108,11 +109,13 @@ export default defineConfig({
       '@franken/observer': resolve(__dirname, 'packages/franken-observer/src/index.ts'),
       '@franken/critique': resolve(__dirname, 'packages/franken-critique/src/index.ts'),
       '@franken/governor': resolve(__dirname, 'packages/franken-governor/src/index.ts'),
+      '@franken/types/utils': resolve(__dirname, 'packages/franken-types/src/utils/index.ts'),
       '@franken/types': resolve(__dirname, 'packages/franken-types/src/index.ts'),
       '@franken/orchestrator': resolve(__dirname, 'packages/franken-orchestrator/src/index.ts'),
     },
   },
   test: {
+    setupFiles: [fileURLToPath(new URL('./scripts/vitest-deterministic-setup.ts', import.meta.url))],
     // Default root CI suite: deterministic repository policy/config tests only.
     // INTEGRATION=true or an explicit tests/integration path opts into root integration tests.
     // E2E=true or an explicit e2e path opts into root end-to-end tests.

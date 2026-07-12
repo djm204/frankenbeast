@@ -1,9 +1,7 @@
 import { SqliteBrain } from '@franken/brain';
 import { ProviderRegistry } from '../providers/provider-registry.js';
-import {
-  createLlmProvider,
-  type ProviderConfig,
-} from '../providers/provider-config.js';
+import { createLlmProvider, type ProviderConfig } from '../providers/provider-config.js';
+import { now as deterministicNow } from '@franken/types';
 import {
   buildMiddlewareChain,
   resolveSecurityConfig,
@@ -16,7 +14,6 @@ import { SkillConfigStore } from '../skills/skill-config-store.js';
 import { AuditTrail, AuditTrailStore, createAuditEvent } from '@franken/observer';
 import { ReplayContentStore } from '../replay/replay-content-store.js';
 import { join, basename, dirname } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
 
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
@@ -185,7 +182,7 @@ export function createBeastDeps(
     governor: existingDeps.governor,
     heartbeat,
     logger: existingDeps.logger,
-    clock: existingDeps.clock ?? (() => new Date()),
+    clock: existingDeps.clock ?? (() => new Date(deterministicNow())),
     mcp,
 
     // Direct access to new components
@@ -197,16 +194,8 @@ export function createBeastDeps(
     getTokenUsage: () => registry.getTokenUsage(),
     persistAuditTrail: (runId: string) => {
       const store = new AuditTrailStore(auditTrailProjectRoot);
-      const eventPath = store.save(runId, auditTrail);
       const replayManifest = observer.getReplayManifest();
-      if (replayManifest.length > 0) {
-        mkdirSync(auditRoot, { recursive: true });
-        writeFileSync(
-          join(auditRoot, `${runId}.replay.json`),
-          JSON.stringify(replayManifest, null, 2),
-          'utf8',
-        );
-      }
+      const eventPath = store.save(runId, auditTrail, replayManifest.length > 0 ? replayManifest : undefined);
       return eventPath;
     },
 

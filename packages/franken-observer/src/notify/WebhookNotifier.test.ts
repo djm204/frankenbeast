@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { seededRandom } from '@franken/types'
 import { WebhookNotifier } from './WebhookNotifier.js'
 import { CircuitBreaker } from '../cost/CircuitBreaker.js'
 import { LoopDetector } from '../incident/LoopDetector.js'
 
 describe('WebhookNotifier', () => {
   let mockFetch: ReturnType<typeof vi.fn>
+
+  const drainAsync = () => Promise.resolve()
 
   beforeEach(() => {
     mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
@@ -125,8 +128,7 @@ describe('WebhookNotifier', () => {
         void notifier.send({ type: 'circuit-breaker', ...result })
       })
       breaker.check(1.0) // below limit
-      // Give the event loop a tick — no delivery should happen
-      await new Promise(r => setTimeout(r, 0))
+      await drainAsync()
       expect(mockFetch).not.toHaveBeenCalled()
     })
   })
@@ -181,7 +183,7 @@ describe('WebhookNotifier', () => {
         sleep: sleepFn,
       })
       await expect(notifier.send({ type: 'test' })).rejects.toThrow()
-      const delays = sleepFn.mock.calls.map(args => args[0] as number)
+      const delays = sleepFn.mock.calls.map((args: unknown[]) => args[0] as number)
       expect(delays[0]).toBe(100)  // 100 * 2^0
       expect(delays[1]).toBe(200)  // 100 * 2^1
       expect(delays[2]).toBe(400)  // 100 * 2^2
@@ -197,11 +199,65 @@ describe('WebhookNotifier', () => {
         sleep: sleepFn,
       })
       await expect(notifier.send({ type: 'test' })).rejects.toThrow()
-      const delays = sleepFn.mock.calls.map(args => args[0] as number)
+      const delays = sleepFn.mock.calls.map((args: unknown[]) => args[0] as number)
       expect(delays[0]).toBe(100)
       expect(delays[1]).toBe(200)
       expect(delays[2]).toBe(250) // capped
       expect(delays[3]).toBe(250) // capped
+    })
+
+    it('clamps jittered delay at maxDelayMs', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const randomSpy = vi.spyOn(seededRandom, 'random').mockReturnValue(0.99)
+      const notifier = new WebhookNotifier({
+        url: 'https://hooks.example.com/signal',
+        fetch: mockFetch,
+        retry: { maxRetries: 1, baseDelayMs: 200, maxDelayMs: 200, jitter: true },
+        sleep: sleepFn,
+      })
+
+      try {
+        await expect(notifier.send({ type: 'test' })).rejects.toThrow()
+
+        expect(sleepFn).toHaveBeenCalledWith(200)
+      } finally {
+        randomSpy.mockRestore()
+      }
+    })
+
+    it('does not retry non-transient 4xx responses', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const notifier = new WebhookNotifier({
+        url: 'https://hooks.example.com/signal',
+        fetch: mockFetch,
+        retry: { maxRetries: 3 },
+        sleep: sleepFn,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow('401')
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(sleepFn).not.toHaveBeenCalled()
+    })
+
+    it('still retries 429 responses', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 429, statusText: 'Too Many Requests' })
+        .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const notifier = new WebhookNotifier({
+        url: 'https://hooks.example.com/signal',
+        fetch: mockFetch,
+        retry: { maxRetries: 2, jitter: false },
+        sleep: sleepFn,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(sleepFn).toHaveBeenCalledTimes(1)
     })
 
     it('retries on network errors (fetch rejection)', async () => {
@@ -246,7 +302,7 @@ describe('WebhookNotifier', () => {
         sleep: sleepFn,
       })
       await expect(notifier.send({ type: 'test' })).rejects.toThrow()
-      const delays = sleepFn.mock.calls.map(args => args[0] as number)
+      const delays = sleepFn.mock.calls.map((args: unknown[]) => args[0] as number)
       // With jitter each delay is base*2^i + random(0..base), so >= base*2^i and < 2*base*2^i
       expect(delays[0]).toBeGreaterThanOrEqual(100)
       expect(delays[0]).toBeLessThan(200)

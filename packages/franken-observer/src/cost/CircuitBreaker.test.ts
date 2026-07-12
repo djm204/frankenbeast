@@ -29,6 +29,15 @@ describe('CircuitBreaker', () => {
       expect(result.limitUsd).toBe(0.50)
       expect(result.spendUsd).toBe(0.75)
     })
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative values', -0.01],
+    ])('throws RangeError for invalid spendUsd: %s', (_label, spendUsd) => {
+      expect(() => breaker.check(spendUsd)).toThrow(RangeError)
+      expect(() => breaker.check(spendUsd)).toThrow('spendUsd must be a finite non-negative number')
+    })
   })
 
   describe('HITL event emission', () => {
@@ -93,6 +102,32 @@ describe('CircuitBreaker', () => {
       expect(() => breaker.check(999)).not.toThrow()
     })
 
+    it('isolates handler failures and still returns the trip result', () => {
+      breaker.on('limit-reached', () => {
+        throw new Error('webhook failed')
+      })
+
+      expect(() => breaker.check(0.51)).not.toThrow()
+      expect(breaker.check(0.60)).toEqual({ tripped: true, limitUsd: 0.50, spendUsd: 0.60 })
+    })
+
+    it('attempts later handlers after an earlier limit-reached handler throws', () => {
+      const throwingHandler = vi.fn(() => {
+        throw new Error('webhook failed')
+      })
+      const laterHandler = vi.fn()
+
+      breaker.on('limit-reached', throwingHandler)
+      breaker.on('limit-reached', laterHandler)
+
+      expect(() => breaker.check(0.51)).not.toThrow()
+      expect(throwingHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ tripped: true, limitUsd: 0.50, spendUsd: 0.51 }),
+      )
+    })
+
     it('continues returning results after trip', () => {
       breaker.check(1.00)
       const result = breaker.check(2.00)
@@ -106,6 +141,15 @@ describe('CircuitBreaker', () => {
       const strict = new CircuitBreaker({ limitUsd: 0.01 })
       expect(strict.check(0.011).tripped).toBe(true)
       expect(strict.check(0.010).tripped).toBe(false)
+    })
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative values', -0.01],
+    ])('throws RangeError for invalid limitUsd: %s', (_label, limitUsd) => {
+      expect(() => new CircuitBreaker({ limitUsd })).toThrow(RangeError)
+      expect(() => new CircuitBreaker({ limitUsd })).toThrow('limitUsd must be a finite non-negative number')
     })
   })
 })

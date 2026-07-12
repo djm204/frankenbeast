@@ -61,8 +61,12 @@ class MockWebSocket {
   }
 
   message(payload: unknown) {
+    this.rawMessage(JSON.stringify(payload));
+  }
+
+  rawMessage(data: string) {
     this.onmessage?.(
-      new MessageEvent('message', { data: JSON.stringify(payload) }),
+      new MessageEvent('message', { data }),
     );
   }
 
@@ -154,6 +158,96 @@ describe('useChatSession', () => {
       'franken.chat.v1',
       'franken.chat.token.signed-token',
     ]);
+  });
+
+  it('marks a new session without usage metadata as unavailable telemetry instead of confirmed zero spend', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.costUsd).toBe(0);
+    expect(result.current.tokenTotals).toEqual({ cheap: 0, premiumReasoning: 0, premiumExecution: 0 });
+    expect(result.current.costTelemetryStatus).toBe('unavailable');
+    expect(result.current.tokenTelemetryStatus).toBe('unavailable');
+  });
+
+  it('distinguishes reported zero-cost telemetry from unavailable telemetry', async () => {
+    mockCreateSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{ role: 'assistant', content: 'Free cached reply', timestamp: '2026-03-09T00:00:01Z', tokens: 0, costUsd: 0 }],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    });
+
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.costUsd).toBe(0);
+    expect(result.current.costTelemetryStatus).toBe('available');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
+  });
+
+  it('keeps spend unavailable when only token telemetry is reported', async () => {
+    mockCreateSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{ role: 'assistant', content: 'Token-only reply', timestamp: '2026-03-09T00:00:01Z', tokens: 12 }],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 12, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    });
+
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.tokenTotals.cheap).toBe(12);
+    expect(result.current.costUsd).toBe(0);
+    expect(result.current.costTelemetryStatus).toBe('unavailable');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
+  });
+
+  it('marks sessions with non-zero usage as available telemetry', async () => {
+    mockCreateSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{ role: 'assistant', content: 'Metered reply', timestamp: '2026-03-09T00:00:01Z', tokens: 12, costUsd: 0.05 }],
+      state: 'active',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 12, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.05,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:01Z',
+    });
+
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    expect(result.current.tokenTotals.cheap).toBe(12);
+    expect(result.current.costUsd).toBe(0.05);
+    expect(result.current.costTelemetryStatus).toBe('available');
+    expect(result.current.tokenTelemetryStatus).toBe('available');
   });
 
   it('streams assistant messages and updates receipts', async () => {
@@ -252,6 +346,35 @@ describe('useChatSession', () => {
     expect(result.current.connectionStatus).toBe('connected');
   });
 
+  it.each([
+    ['invalid JSON', (socket: MockWebSocket) => socket.rawMessage('{not json')],
+    ['malformed known event', (socket: MockWebSocket) => socket.message({ type: 'assistant.message.delta', messageId: 'assistant-1' })],
+    ['unknown event type', (socket: MockWebSocket) => socket.message({ type: 'session.unknown', timestamp: '2026-03-09T00:00:01Z' })],
+  ])('surfaces %s as a recoverable websocket protocol error without mutating chat state', async (_name, sendInvalidEvent) => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      sendInvalidEvent(socket);
+    });
+
+    expect(result.current.connectionStatus).toBe('error');
+    expect(result.current.status).toBe('error');
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.activity).toHaveLength(0);
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Chat protocol error',
+      action: 'reconnect',
+      code: 'invalid_socket_event',
+    });
+  });
+
   it('falls back to HTTP send when the websocket is not ready', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -269,6 +392,52 @@ describe('useChatSession', () => {
     expect(mockGetSession).toHaveBeenCalledWith('chat-1');
     expect(socket.sent).toHaveLength(0);
     expect(result.current.status).toBe('idle');
+  });
+
+  it('rejects malformed accepted events instead of resolving pending websocket sends', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+
+    let sendPromise!: Promise<void>;
+    act(() => {
+      sendPromise = result.current.send('Wait for malformed ack');
+    });
+    const clientMessageId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
+
+    act(() => {
+      socket.message({
+        type: 'message.accepted',
+        timestamp: '2026-03-09T00:00:01Z',
+      });
+    });
+
+    act(() => {
+      socket.message({
+        type: 'message.accepted',
+        clientMessageId,
+        sessionId: 'chat-1',
+        timestamp: '2026-03-09T00:00:02Z',
+      });
+    });
+
+    await expect(sendPromise).rejects.toThrow('invalid event');
+    expect(result.current.messages).toContainEqual(expect.objectContaining({
+      id: clientMessageId,
+      receipt: 'failed',
+      canRetry: true,
+    }));
+    expect(result.current.errorBanners[0]).toMatchObject({
+      action: 'reconnect',
+      code: 'invalid_socket_event',
+    });
   });
 
   it('refreshes approval metadata when an HTTP fallback send is blocked', async () => {
@@ -308,7 +477,7 @@ describe('useChatSession', () => {
     }));
   });
 
-  it('does not offer a retry when HTTP send succeeds but refresh fails', async () => {
+  it('keeps the draft but does not retry when HTTP fallback refresh fails', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -318,7 +487,7 @@ describe('useChatSession', () => {
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
 
     await act(async () => {
-      await result.current.send('Already ran on the server');
+      await expect(result.current.send('Already ran on the server')).rejects.toMatchObject({ retryableSend: false });
     });
 
     expect(result.current.status).toBe('idle');
@@ -327,6 +496,10 @@ describe('useChatSession', () => {
       receipt: 'accepted',
     }));
     expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'failed' }));
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Message sent; refresh failed',
+      actionLabel: 'Refresh chat',
+    });
   });
 
   it('removes stale failed drafts when an HTTP composer retry succeeds but refresh fails', async () => {
@@ -348,7 +521,7 @@ describe('useChatSession', () => {
 
     mockGetSession.mockRejectedValueOnce(new Error('refresh failed'));
     await act(async () => {
-      await result.current.send('retry over HTTP');
+      await expect(result.current.send('retry over HTTP')).rejects.toMatchObject({ retryableSend: false });
     });
 
     expect(result.current.status).toBe('idle');
@@ -428,6 +601,7 @@ describe('useChatSession', () => {
       socket.message({
         type: 'message.accepted',
         clientMessageId: retryId,
+        sessionId: 'chat-1',
         timestamp: '2026-03-09T00:00:02Z',
       });
     });
@@ -504,7 +678,7 @@ describe('useChatSession', () => {
     });
     const firstId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: firstId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: firstId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await firstSend;
@@ -516,7 +690,7 @@ describe('useChatSession', () => {
     });
     const secondId = (JSON.parse(socket.sent[1] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: secondId, timestamp: '2026-03-09T00:00:02Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: secondId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:02Z' });
     });
     await act(async () => {
       await secondSend;
@@ -556,7 +730,7 @@ describe('useChatSession', () => {
     });
     const firstId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: firstId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: firstId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await firstSend;
@@ -616,7 +790,7 @@ describe('useChatSession', () => {
     });
     const slashId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId: slashId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId: slashId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await slashSend;
@@ -672,7 +846,7 @@ describe('useChatSession', () => {
     }));
 
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId, timestamp: '2026-03-09T00:00:02Z' });
+      socket.message({ type: 'message.accepted', clientMessageId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:02Z' });
     });
 
     expect(result.current.messages).toContainEqual(expect.objectContaining({
@@ -746,7 +920,7 @@ describe('useChatSession', () => {
     const clientMessageId = (JSON.parse(socket.sent[0] ?? '{}') as { clientMessageId: string }).clientMessageId;
 
     act(() => {
-      socket.message({ type: 'message.accepted', clientMessageId, timestamp: '2026-03-09T00:00:01Z' });
+      socket.message({ type: 'message.accepted', clientMessageId, sessionId: 'chat-1', timestamp: '2026-03-09T00:00:01Z' });
     });
     await act(async () => {
       await sendPromise;
@@ -960,6 +1134,45 @@ describe('useChatSession', () => {
     expect(mockApprove).toHaveBeenCalledWith('chat-1', false);
   });
 
+  it('clears approval resolving state after protocol errors so users can retry', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    expect(result.current.approvalResolving).toBe(true);
+
+    act(() => socket.message({ type: 'message.accepted', timestamp: '2026-03-09T00:00:07Z' }));
+
+    await waitFor(() => {
+      expect(result.current.approvalResolving).toBe(false);
+      expect(result.current.approvalError).toContain('invalid response');
+    });
+
+    await act(async () => {
+      await result.current.approve(false);
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    expect(mockApprove).toHaveBeenCalledWith('chat-1', false);
+  });
+
   it('preserves streamed messages after HTTP approval fallback', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -1061,6 +1274,7 @@ describe('useChatSession', () => {
       socket.message({
         type: 'message.accepted',
         clientMessageId: outbound.clientMessageId,
+        sessionId: 'chat-1',
         timestamp: '2026-03-09T00:00:01Z',
       });
     });

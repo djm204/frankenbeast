@@ -1,4 +1,5 @@
 import type { Task, RationaleBlock } from '../core/types.js';
+import { now as deterministicNow } from '@franken/types';
 
 /**
  * Generates a RationaleBlock from a Task.
@@ -11,7 +12,7 @@ export class RationaleEnforcer {
       taskId: task.id,
       reasoning: `Executing task: ${task.objective}`,
       expectedOutcome: `Task '${task.id}' completes successfully`,
-      timestamp: new Date(),
+      timestamp: new Date(deterministicNow()),
     };
 
     const tool = task.metadata?.['tool'];

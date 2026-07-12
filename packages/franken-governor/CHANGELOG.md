@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.5.14](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.13...franken-governor-v0.5.14) (2026-07-11)
+
+
+### Bug Fixes
+
+* **governor:** handle trigger evaluator exceptions ([#1530](https://github.com/djm204/frankenbeast/issues/1530)) ([ec95839](https://github.com/djm204/frankenbeast/commit/ec95839d6a9ad18e39ab70437bf9a6847f1a8cec)), closes [#1184](https://github.com/djm204/frankenbeast/issues/1184)
+* **governor:** prune expired session tokens on write ([7d20cdb](https://github.com/djm204/frankenbeast/commit/7d20cdb93ceea33b9f528d43956ac08ffc9c8622)), closes [#1109](https://github.com/djm204/frankenbeast/issues/1109)
+* **governor:** reject invalid session token TTLs ([2c28524](https://github.com/djm204/frankenbeast/commit/2c285243010b99b32f4c018693e02712c50730b8)), closes [#1171](https://github.com/djm204/frankenbeast/issues/1171)
+* **governor:** verify Slack webhooks from raw bytes ([ce02e1a](https://github.com/djm204/frankenbeast/commit/ce02e1a43322b2f5ab6e7ee8efe46637c3462975))
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **ci:** make workspace lint coverage explicit ([#1596](https://github.com/djm204/frankenbeast/issues/1596)) ([c1674ed](https://github.com/djm204/frankenbeast/commit/c1674ed69e460a9c7c14d8b7af2e4039edf174d8))
+
+
+### Documentation
+
+* **ramp-up:** refresh package safety status ([ee13582](https://github.com/djm204/frankenbeast/commit/ee135822f14bbc89212e2c5cca246cb0ef71206b)), closes [#949](https://github.com/djm204/frankenbeast/issues/949)
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
+## [0.5.13](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.12...franken-governor-v0.5.13) (2026-07-10)
+
+
+### Bug Fixes
+
+* **governor:** audit failed signature verification ([ead0094](https://github.com/djm204/frankenbeast/commit/ead009461aaa4c28a1a220f60220d3dbf8255b20)), closes [#1108](https://github.com/djm204/frankenbeast/issues/1108)
+* **governor:** persist approval session tokens ([#1302](https://github.com/djm204/frankenbeast/issues/1302)) ([16be6a9](https://github.com/djm204/frankenbeast/commit/16be6a917c1b6bb335ef0c242a08c870c09fb003))
+* **governor:** refresh approval signature verifier ([4d331ac](https://github.com/djm204/frankenbeast/commit/4d331ac3436325982273a9f1a6c4fdb1f5e58fe9)), closes [#933](https://github.com/djm204/frankenbeast/issues/933)
+* **governor:** sign approval responder metadata ([#1351](https://github.com/djm204/frankenbeast/issues/1351)) ([69c26b0](https://github.com/djm204/frankenbeast/commit/69c26b0304d990867102e9ce7d880746cc942318))
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+* **web:** secure chat websocket authentication ([679b15d](https://github.com/djm204/frankenbeast/commit/679b15dfbd8cc592ed04b67339230494a5586a8c)), closes [#703](https://github.com/djm204/frankenbeast/issues/703)
+
+
+### Documentation
+
+* fix broken internal markdown links ([#1374](https://github.com/djm204/frankenbeast/issues/1374)) ([51068df](https://github.com/djm204/frankenbeast/commit/51068df99e04355d51ae54bae07d0d83001c9681))
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.1 to 0.8.2
+
 ## [0.5.12](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.11...franken-governor-v0.5.12) (2026-07-08)
 
 

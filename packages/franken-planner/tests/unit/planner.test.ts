@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Planner } from '../../src/planner';
 import { LinearPlanner } from '../../src/planners/linear';
+import { RecursivePlanner } from '../../src/planners/recursive';
 import { StubHITLGate } from '../../src/hitl/stub-hitl-gate';
 import { RecoveryController } from '../../src/recovery/recovery-controller';
 import { PlanGraph } from '../../src/core/dag';
 import {
   CyclicDependencyError,
+  DuplicateTaskError,
   MaxRecoveryAttemptsError,
   RecursionDepthExceededError,
   TaskNotFoundError,
@@ -356,6 +358,17 @@ describe('Planner — self-correction loop', () => {
     ]);
   });
 
+  it('does not convert recovery graph domain errors into synthetic planner failures', async () => {
+    const graph = PlanGraph.empty().addTask(makeTask('t-1'));
+    const error = new DuplicateTaskError('fix-t-1-attempt-1');
+    const executor = vi.fn().mockResolvedValue(failure('t-1', 'disk full'));
+    const recovery = { recover: vi.fn().mockRejectedValue(error) };
+
+    const { planner } = buildPlanner({ graph, executor, recovery });
+
+    await expect(planner.plan('do something')).rejects.toBe(error);
+  });
+
   it('returns failed when error is unknown (no known fix)', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1'));
     const memory = makeMemory([]); // no known errors
@@ -366,9 +379,116 @@ describe('Planner — self-correction loop', () => {
 
     expect(result.status).toBe('failed');
   });
+
+  it('recovers failed dynamic sub-tasks within their recursive sub-graph', async () => {
+    const setup = makeTask('setup');
+    const parent = makeTask('parent');
+    const child = makeTask('child');
+    const sibling = makeTask('sibling');
+    const graph = PlanGraph.empty().addTask(setup).addTask(parent).addTask(sibling);
+    const executedTaskIds: TaskId[] = [];
+    const executor = vi.fn().mockImplementation((task: Task) => {
+      executedTaskIds.push(task.id);
+      if (task.id === createTaskId('parent')) {
+        return Promise.resolve(expand('parent', [child]));
+      }
+      if (task.id === createTaskId('child') && !executedTaskIds.includes(createTaskId('fix-child-attempt-1'))) {
+        return Promise.resolve(failure('child', 'disk full'));
+      }
+      return Promise.resolve(success(task.id));
+    });
+    const recovery = {
+      recover: vi.fn(async (failedTaskId: TaskId, _err: Error, recoveryGraph: PlanGraph, attempt: number) => {
+        const fixTask: Task = {
+          id: createTaskId(`fix-${failedTaskId}-attempt-${attempt}`),
+          objective: `Fix ${failedTaskId}`,
+          requiredSkills: [],
+          dependsOn: [],
+          status: 'pending',
+        };
+        return recoveryGraph.insertFixItTask(failedTaskId, fixTask);
+      }),
+    };
+
+    const { planner } = buildPlanner({ graph, executor, recovery, strategy: new RecursivePlanner() });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('completed');
+    expect(recovery.recover).toHaveBeenCalledWith(
+      createTaskId('child'),
+      expect.any(Error),
+      expect.objectContaining({ reason: 'recursive expansion' }),
+      1
+    );
+    expect(executedTaskIds).toEqual([
+      createTaskId('setup'),
+      createTaskId('parent'),
+      createTaskId('child'),
+      createTaskId('fix-child-attempt-1'),
+      createTaskId('child'),
+      createTaskId('sibling'),
+    ]);
+    if (result.status !== 'completed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('setup'),
+      createTaskId('parent'),
+      createTaskId('fix-child-attempt-1'),
+      createTaskId('child'),
+      createTaskId('sibling'),
+    ]);
+  });
 });
 
-describe('Planner — strategy domain exceptions', () => {
+describe('Planner — domain exceptions', () => {
+  it('converts cyclic graph export errors before HITL into failed plan results', async () => {
+    const a = makeTask('a');
+    const b = makeTask('b');
+    const graph = PlanGraph.createWithRawEdges(
+      new Map([
+        [a.id, a],
+        [b.id, b],
+      ]),
+      new Map([
+        [a.id, new Set([b.id])],
+        [b.id, new Set([a.id])],
+      ])
+    );
+    const hitlGate: HITLGate = { requestApproval: vi.fn().mockResolvedValue({ decision: 'approved' }) };
+    const recovery = { recover: vi.fn() };
+
+    const { planner } = buildPlanner({ graph, hitlGate, recovery });
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBeInstanceOf(CyclicDependencyError);
+    expect(hitlGate.requestApproval).not.toHaveBeenCalled();
+    expect(recovery.recover).not.toHaveBeenCalled();
+  });
+
+  it('converts graph builder recursion depth errors into failed plan results', async () => {
+    const error = new RecursionDepthExceededError(11);
+    const graphBuilder: GraphBuilder = { build: vi.fn().mockRejectedValue(error) };
+    const recovery = { recover: vi.fn() };
+    const planner = new Planner(
+      makeGuardrails(),
+      graphBuilder,
+      vi.fn().mockResolvedValue(success('t-1')),
+      new StubHITLGate(),
+      new LinearPlanner(),
+      recovery
+    );
+
+    const result = await planner.plan('do something');
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unexpected');
+    expect(result.failedTaskId).toBe(createTaskId('planner-domain-error'));
+    expect(result.error).toBe(error);
+    expect(recovery.recover).not.toHaveBeenCalled();
+  });
+
   it('converts cyclic dependency errors from strategies into failed plan results', async () => {
     const graph = PlanGraph.empty().addTask(makeTask('t-1'));
     const error = new CyclicDependencyError('Graph contains a cycle');

@@ -1,5 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import type { TranscriptMessage } from './types.js';
+import { isoNow } from '@franken/types';
 
 export interface TranscriptPolicyOptions {
   maxMessages: number;
@@ -40,7 +41,7 @@ export class TranscriptPolicy {
     const summaryMessage: TranscriptMessage = {
       role: 'system',
       content: summary,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
     };
 
     return [summaryMessage, ...kept];

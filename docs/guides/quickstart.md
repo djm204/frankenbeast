@@ -11,12 +11,18 @@ Get Frankenbeast running locally.
 ## 1. Install dependencies
 
 ```bash
-if ! command -v corepack >/dev/null 2>&1; then npm install -g corepack; fi
-corepack enable npm
-corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
-npm run check:package-manager
-npm install
+npm run bootstrap -- --no-docker
 ```
+
+For CI-style validation without mutating files or installing dependencies, run:
+
+```bash
+./scripts/bootstrap.sh --dry-run
+```
+
+If Corepack is not available yet, install it first with `npm install -g corepack`; the bootstrap script then activates and verifies the root `packageManager` pin.
+
+Dependency locking is centralized at the workspace root: commit updates to the root `package-lock.json` only. Package workspaces under `packages/*` must not carry their own nested `package-lock.json` files; run installs from the repository root so npm records workspace dependency changes in the root lockfile. Standalone example projects under `examples/` may keep their own lockfiles because they are scaffolded outside the monorepo workspace.
 
 Run reproducible dependency audits through the guarded script so the live npm
 binary still matches the root `packageManager` pin before `npm audit` runs:
@@ -28,8 +34,9 @@ npm run audit:security
 ## 2. Configure environment
 
 ```bash
-cp .env.example .env
-# Edit .env with provider API keys or local runtime settings as needed:
+# Bootstrap creates .env when it is missing; edit the existing file without overwriting it.
+${EDITOR:-vi} .env
+# Add provider API keys or local runtime settings as needed:
 #   ANTHROPIC_API_KEY for Claude, OPENAI_API_KEY for OpenAI,
 #   or GOOGLE_API_KEY / GEMINI_API_KEY for Gemini.
 # Before starting the full Docker stack, uncomment GRAFANA_USER=admin and set a
@@ -39,7 +46,8 @@ cp .env.example .env
 ## 3. Optional: start infrastructure
 
 ```bash
-docker compose up -d
+# The bootstrap script validates Grafana credentials before starting compose.
+npm run bootstrap -- --with-docker
 ```
 
 This starts the services defined in `docker-compose.yml`:
@@ -61,25 +69,34 @@ npm run typecheck
 npm test
 ```
 
-Root scripts currently include `build`, `typecheck`, `test`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts.
+Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. Use `test:ci` for the same root-plus-package test target that CI runs locally; it first builds the shared `@franken/types` workspace so fresh checkouts can resolve workspace package exports, and it intentionally excludes Docker smoke, security, dependency, lint, and live/e2e gates that remain separate CI steps. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
 ## 5. Try the orchestrator CLI
 
+The repository root is private and does not publish a root `frankenbeast` binary
+for `npx` to resolve. Link the local workspace CLIs first; the `local:link`
+script builds the packages and links both `@franken/orchestrator` and
+`@franken/mcp-suite` so `frankenbeast`, `franken`, `frkn`, and `fbeast` are on
+your PATH.
+
 ```bash
+# Build and link the local workspace binaries once from the repo root
+npm run local:link
+
 # Show supported commands and flags
-npx frankenbeast --help
+frankenbeast --help
 
 # Interview only — generates a design doc under .fbeast/plans/
-npx frankenbeast interview
+frankenbeast interview
 
 # Plan from an existing design doc
-npx frankenbeast plan --design-doc docs/my-feature-design.md
+frankenbeast plan --design-doc docs/my-feature-design.md
 
 # Execute chunks from .fbeast/plans/ or a supplied plan directory
-npx frankenbeast run --plan-dir .fbeast/plans/my-plan/
+frankenbeast run --plan-dir .fbeast/plans/my-plan/
 
 # Preview GitHub issue triage without executing fixes
-npx frankenbeast issues --repo owner/repo --dry-run
+frankenbeast issues --repo owner/repo --dry-run
 ```
 
 `--dry-run` is an issue-workflow flag; it is not a global CLI dry-run flag.
@@ -136,4 +153,7 @@ npm run test:root
 
 # Single package via Turbo filter
 npx turbo run test --filter=franken-brain
+
+# Explicit opt-in live benchmark suite (sets FBEAST_LIVE_BENCH_E2E=1)
+npm run test:live:bench
 ```

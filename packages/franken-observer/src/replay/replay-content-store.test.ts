@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ReplayContentStore } from './replay-content-store.js';
@@ -31,6 +31,19 @@ describe('ReplayContentStore', () => {
     corruptReplayBlob(root, ref, 'tampered');
 
     expect(() => store.get(ref)).toThrow(/hash mismatch/i);
+  });
+
+  it('repairs a corrupt existing blob before returning its content ref', () => {
+    const root = mkdtempSync(join(tmpdir(), 'replay-'));
+    const store = new ReplayContentStore(root);
+    const content = 'original';
+    const ref = store.put(content);
+    const blobPath = join(root, 'blobs', ref);
+    corruptReplayBlob(root, ref, 'partial write');
+
+    expect(store.put(content)).toBe(ref);
+    expect(readFileSync(blobPath, 'utf8')).toBe(content);
+    expect(store.get(ref)).toBe(content);
   });
 
   it('rejects refs that are not exact lowercase sha256 hex before reading', () => {

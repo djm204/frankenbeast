@@ -6,13 +6,17 @@ import { codexServerName, codexServerNames } from './codex-server-names.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 
 function tmpDir(): string {
   const dir = join(tmpdir(), `fbeast-uninst-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function jsonBackups(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.startsWith('settings.json.invalid-'));
 }
 
 describe('fbeast uninstall', () => {
@@ -59,6 +63,38 @@ describe('fbeast uninstall', () => {
     const after = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     expect(after.mcpServers['my-server']).toBeDefined();
     expect(after.mcpServers['fbeast-memory']).toBeUndefined();
+  });
+
+  it('backs up invalid Claude settings.json during uninstall without SyntaxError', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, 'settings.json'), '{ invalid json');
+
+    await expect(runUninstall({ root, claudeDir, purge: false })).resolves.toBeUndefined();
+
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers).toEqual({});
+    const backups = jsonBackups(claudeDir);
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(claudeDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
+  });
+
+  it('backs up invalid Gemini settings.json during uninstall without SyntaxError', async () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    writeFileSync(join(geminiDir, 'settings.json'), '{ invalid json');
+
+    await expect(runUninstall({ root, claudeDir: geminiDir, client: 'gemini', purge: false })).resolves.toBeUndefined();
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers).toEqual({});
+    const backups = jsonBackups(geminiDir);
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(geminiDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
   });
 
   it('removes fbeast-instructions.md', async () => {

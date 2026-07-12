@@ -16,6 +16,16 @@ export {
   createTraceId,
 } from './ids.js';
 
+export type { SeededRandom } from './deterministic.js';
+export {
+  deterministicUuid,
+  hashSeed,
+  isoNow,
+  now,
+  seededRandom,
+  wallClockNow,
+} from './deterministic.js';
+
 // Severity
 export type {
   Severity,
@@ -97,6 +107,8 @@ export {
 // Web/API contract DTOs
 export * from './api-contracts.js';
 
+// Deterministic utilities
+export * from './utils/index.js';
 
 // Skill schemas
 export type { McpConfig, SkillInfo, SkillToolManifest } from './skill.js';

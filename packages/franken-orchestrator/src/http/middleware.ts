@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
 import type { Context, ErrorHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import type { ZodSchema } from 'zod';
+import { deterministicUuid } from '@franken/types';
 
 export interface ApiError {
   error: {
@@ -24,7 +24,7 @@ export class HttpError extends Error {
 }
 
 export const requestId = createMiddleware(async (c, next) => {
-  const id = c.req.header('x-request-id') ?? randomUUID();
+  const id = c.req.header('x-request-id') ?? deterministicUuid('packages/franken-orchestrator/src/http/middleware.ts');
   c.set('requestId', id);
   c.header('x-request-id', id);
   await next();

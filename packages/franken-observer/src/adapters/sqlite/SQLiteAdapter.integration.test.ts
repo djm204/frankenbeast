@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { unlinkSync, existsSync } from 'node:fs'
+import { unlinkSync, existsSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { TraceContext } from '../../core/TraceContext.js'
@@ -31,6 +31,26 @@ describe('SQLiteAdapter', () => {
   afterEach(() => {
     adapter.close()
     cleanup(dbPath)
+  })
+
+  describe('database open hardening', () => {
+    it('creates nested database directories and configures durability pragmas', () => {
+      const root = join(tmpdir(), `franken-observer-nested-${randomUUID()}`)
+      const nestedDbPath = join(root, 'missing', 'observer.db')
+      const nestedAdapter = new SQLiteAdapter(nestedDbPath)
+
+      try {
+        expect(existsSync(dirname(nestedDbPath))).toBe(true)
+
+        const handle = (nestedAdapter as unknown as { db: Database.Database }).db
+        expect(handle.pragma('busy_timeout', { simple: true })).toBe(5000)
+        expect(String(handle.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal')
+        expect(handle.pragma('foreign_keys', { simple: true })).toBe(1)
+      } finally {
+        nestedAdapter.close()
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
   })
 
   describe('flush() + queryByTraceId()', () => {

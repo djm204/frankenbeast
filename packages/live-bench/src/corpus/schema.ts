@@ -52,7 +52,7 @@ const BenchmarkCheckSchema = z.preprocess((value) => {
   z.object({
     type: z.literal('tool-call'),
     tool: z.string().min(1),
-    requiredParams: z.array(z.string().min(1)),
+    requiredParams: z.array(z.string().min(1)).min(1, 'tool-call checks must require at least one parameter'),
   }).strict(),
 ]));
 
@@ -62,8 +62,8 @@ const BenchmarkTaskShape = z.object({
   taskClass: z.enum(['tool-critical', 'workflow-critical', 'artifact-critical']),
   projectFixture: z.string().min(1),
   prompt: z.string().min(1),
-  expectedArtifacts: z.array(z.string().min(1)),
-  requiredChecks: z.array(BenchmarkCheckSchema),
+  expectedArtifacts: z.array(z.string().min(1)).min(1, 'benchmark tasks must expect at least one artifact'),
+  requiredChecks: z.array(BenchmarkCheckSchema).min(1, 'benchmark tasks must require at least one check'),
   timeoutMs: z.number().int().positive(),
   allowedNondeterminism: z.array(z.string()),
   baselineSupported: z.boolean(),

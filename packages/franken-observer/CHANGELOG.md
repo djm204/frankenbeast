@@ -1,5 +1,100 @@
 # Changelog
 
+## [0.7.16](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.15...franken-observer-v0.7.16) (2026-07-11)
+
+
+### Bug Fixes
+
+* **observer:** bound webhook retry jitter ([981938e](https://github.com/djm204/frankenbeast/commit/981938e796d4306a60e70267671b0e7a428a2d54))
+* **observer:** clamp webhook retry jitter delay ([#1563](https://github.com/djm204/frankenbeast/issues/1563)) ([d3d802f](https://github.com/djm204/frankenbeast/commit/d3d802f734dd621a965ea6717f758e57c75dca47))
+* **observer:** clone redacted spans before export ([6d62135](https://github.com/djm204/frankenbeast/commit/6d621352a63b24574a295a5861661bc5de44ade4))
+* **observer:** cover empty Grafana dashboard UID derivation ([#1499](https://github.com/djm204/frankenbeast/issues/1499)) ([2db7ca6](https://github.com/djm204/frankenbeast/commit/2db7ca6f1f9151acb0a321fc2648224447db0a93))
+* **observer:** fail audit verification for missing hashed content ([ed2975f](https://github.com/djm204/frankenbeast/commit/ed2975f8aa56de3af03a25ba2619093c51b5ac22)), closes [#1014](https://github.com/djm204/frankenbeast/issues/1014)
+* **observer:** harden SQLite adapter database opens ([e809f8d](https://github.com/djm204/frankenbeast/commit/e809f8d901ef0de24ab18052c0554d7c23f4456e)), closes [#1025](https://github.com/djm204/frankenbeast/issues/1025)
+* **observer:** isolate circuit breaker handler failures ([8d1ab97](https://github.com/djm204/frankenbeast/commit/8d1ab97a5160c2580ff9bb51d791bd295eaeda45))
+* **observer:** isolate LoopDetector handler failures ([#1628](https://github.com/djm204/frankenbeast/issues/1628)) ([446ba1c](https://github.com/djm204/frankenbeast/commit/446ba1c4502efd93a8fe072fea34b079a3cbf865))
+* **observer:** isolate multi adapter read failures ([4773bd1](https://github.com/djm204/frankenbeast/commit/4773bd1461999fdf0cee236f3ffc8b7548197779)), closes [#1188](https://github.com/djm204/frankenbeast/issues/1188)
+* **observer:** make SpanRedactor regex rules stateless ([#1603](https://github.com/djm204/frankenbeast/issues/1603)) ([f3adcd1](https://github.com/djm204/frankenbeast/commit/f3adcd10ad3c793286baf8d3e5dda14955a8cce4))
+* **observer:** protect AuditTrail immutable state ([#1635](https://github.com/djm204/frankenbeast/issues/1635)) ([4914dab](https://github.com/djm204/frankenbeast/commit/4914dab87467ff62611590701f48bf9d4652070a))
+* **observer:** reject invalid replay timestamps ([c68da2c](https://github.com/djm204/frankenbeast/commit/c68da2c6423ca99170c8a804afbbae404291f67b)), closes [#1143](https://github.com/djm204/frankenbeast/issues/1143)
+* **observer:** reject invalid TraceSampler numeric options ([1757c35](https://github.com/djm204/frankenbeast/commit/1757c3558e62a92388a8801b68fc7b7d95230de1)), closes [#1118](https://github.com/djm204/frankenbeast/issues/1118)
+* **observer:** reject traces with active spans ([4a3a3b7](https://github.com/djm204/frankenbeast/commit/4a3a3b7dd5c9dc9ce3a07f6678e8a0a922b3f425)), closes [#1074](https://github.com/djm204/frankenbeast/issues/1074)
+* **observer:** repair corrupt replay blobs atomically ([01b8ed2](https://github.com/djm204/frankenbeast/commit/01b8ed23c0e311a1ec17f3a63cf352a2bf0c4e1a))
+* **observer:** sanitize tracestate parsing and formatting ([#1500](https://github.com/djm204/frankenbeast/issues/1500)) ([7df5c52](https://github.com/djm204/frankenbeast/commit/7df5c52bd1b25c8a3fbdaccff8d6fb9b18ac5f21))
+* **observer:** snapshot in-memory traces ([#1630](https://github.com/djm204/frankenbeast/issues/1630)) ([3d193ca](https://github.com/djm204/frankenbeast/commit/3d193ca60287596bf3673e0ef6c3bf9fbcceb548))
+* **observer:** tighten W3C traceparent validation ([c10882b](https://github.com/djm204/frankenbeast/commit/c10882bba677805abc53a129e7cfa8b6e428e7a0))
+* **observer:** tolerate invalid post-mortem timestamps ([#1443](https://github.com/djm204/frankenbeast/issues/1443)) ([61c0060](https://github.com/djm204/frankenbeast/commit/61c0060cae7d97cc98b54403fd2e22c797d694b0))
+* **observer:** validate BatchAdapter numeric options ([7385994](https://github.com/djm204/frankenbeast/commit/7385994b47d993720ee26569d503ebf2c6d0db4f)), closes [#1227](https://github.com/djm204/frankenbeast/issues/1227)
+* **observer:** validate circuit breaker spend inputs ([b9764ee](https://github.com/djm204/frankenbeast/commit/b9764ee1aeff6b2d87eaaa87c25b88ccc8f43824)), closes [#1218](https://github.com/djm204/frankenbeast/issues/1218)
+* **observer:** validate ModelAttribution token counts ([f3f6390](https://github.com/djm204/frankenbeast/commit/f3f6390bee0f637b872efa0b53f05df0329d3d04))
+* **observer:** validate rate limit sampler maximum ([97d7d90](https://github.com/djm204/frankenbeast/commit/97d7d904813f3450779a467b45acda23ea62fe2c))
+* **observer:** validate rate limit sampler windows ([a2279f5](https://github.com/djm204/frankenbeast/commit/a2279f5d8edb56f583d508542b775e6f9e6003e0)), closes [#1126](https://github.com/djm204/frankenbeast/issues/1126)
+* **observer:** write audit trails atomically ([#1625](https://github.com/djm204/frankenbeast/issues/1625)) ([966521a](https://github.com/djm204/frankenbeast/commit/966521a41ac38f290c82abe1c6eaf1340acb4328))
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **ci:** make workspace lint coverage explicit ([#1596](https://github.com/djm204/frankenbeast/issues/1596)) ([c1674ed](https://github.com/djm204/frankenbeast/commit/c1674ed69e460a9c7c14d8b7af2e4039edf174d8))
+* **package:** normalize workspace metadata ([#1573](https://github.com/djm204/frankenbeast/issues/1573)) ([921c557](https://github.com/djm204/frankenbeast/commit/921c557e9f8392f1202f3fa2cdcc7952ffccd255))
+
+
+### Documentation
+
+* **observer:** avoid I/O in W3CTraceContext examples ([#1491](https://github.com/djm204/frankenbeast/issues/1491)) ([dbfeb1e](https://github.com/djm204/frankenbeast/commit/dbfeb1e87e4ebecff5ab33b0f6ff4bd3ddf189f6))
+* **observer:** clarify ESM-only build output contract ([#1457](https://github.com/djm204/frankenbeast/issues/1457)) ([989824e](https://github.com/djm204/frankenbeast/commit/989824ef040473eb511296290f65f89f6c68ab45)), closes [#1453](https://github.com/djm204/frankenbeast/issues/1453)
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* add workspace coverage task ([#1589](https://github.com/djm204/frankenbeast/issues/1589)) ([1934756](https://github.com/djm204/frankenbeast/commit/1934756851e520c033f2a43c5b440c8268662714)), closes [#948](https://github.com/djm204/frankenbeast/issues/948)
+* **ci:** stabilize observer discovery smoke tests ([#1620](https://github.com/djm204/frankenbeast/issues/1620)) ([a2aac90](https://github.com/djm204/frankenbeast/commit/a2aac9023d9ea67319def8c65bb0e39a7b71d072))
+* **observer:** avoid flaky setTimeout in circuit-breaker limit-not-reached test ([440ec02](https://github.com/djm204/frankenbeast/commit/440ec027c27aac747e337f871b12b1072dc3ea33)), closes [#1123](https://github.com/djm204/frankenbeast/issues/1123)
+* **observer:** cover BatchAdapter failed drain retention ([0c3a926](https://github.com/djm204/frankenbeast/commit/0c3a926a1ba1bd8dca75a70f6cec07ee5a84e3c6))
+* **observer:** fail on empty test discovery ([93e69c1](https://github.com/djm204/frankenbeast/commit/93e69c1adfe47c615d8eff328dd7c9380cb819c7))
+* **observer:** run eval suite from eval script ([db1b238](https://github.com/djm204/frankenbeast/commit/db1b238107222cfd02ef332a86929557a402ed27)), closes [#1185](https://github.com/djm204/frankenbeast/issues/1185)
+* **vitest:** parse suite env flags strictly ([#1658](https://github.com/djm204/frankenbeast/issues/1658)) ([e42e95e](https://github.com/djm204/frankenbeast/commit/e42e95e15e40a8b7ef14cb3cd7aa7c926c898b96))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
+## [0.7.15](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.14...franken-observer-v0.7.15) (2026-07-10)
+
+
+### Bug Fixes
+
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **observer:** close cache follow-up findings ([#1310](https://github.com/djm204/frankenbeast/issues/1310)) ([df47845](https://github.com/djm204/frankenbeast/commit/df47845b48d9dcf06a149a3ff2f8064d82ec895b))
+* **observer:** enforce GoldenTraceEval span order ([0845425](https://github.com/djm204/frankenbeast/commit/0845425cbd563533ea6ce5c544bf2d5f9c442b5f))
+* **observer:** flush only new dirty spans ([#1297](https://github.com/djm204/frankenbeast/issues/1297)) ([136da1e](https://github.com/djm204/frankenbeast/commit/136da1ed41ed5e910829127793bc568b9c9b48b5))
+* **observer:** reject invalid Prometheus token metadata ([fd2d70c](https://github.com/djm204/frankenbeast/commit/fd2d70c8d6a1343ab74b908ab7a2eff12d0b9fd4)), closes [#1224](https://github.com/djm204/frankenbeast/issues/1224)
+* **observer:** report ADR rule exceptions by rule ([7f9362c](https://github.com/djm204/frankenbeast/commit/7f9362cf59955773371c56b3323b70499cac43b8))
+* **observer:** sanitize non-finite OTEL numeric attributes ([b7c54a1](https://github.com/djm204/frankenbeast/commit/b7c54a1c790038f3f721d6ad28358797bc89d076)), closes [#1225](https://github.com/djm204/frankenbeast/issues/1225)
+* **observer:** validate http retry bounds ([#1391](https://github.com/djm204/frankenbeast/issues/1391)) ([d7abdb5](https://github.com/djm204/frankenbeast/commit/d7abdb54ecb7aca009fc93737e7c194c9b94ebd9))
+* **observer:** validate LLMJudgeEval scores ([4605c8d](https://github.com/djm204/frankenbeast/commit/4605c8dd34286beb02ea1db698b37b437278f581)), closes [#1221](https://github.com/djm204/frankenbeast/issues/1221)
+* **observer:** validate LoopDetector numeric options ([#1401](https://github.com/djm204/frankenbeast/issues/1401)) ([0b926b7](https://github.com/djm204/frankenbeast/commit/0b926b7fa27e9fa4c19dbf2102c484548ce6e4df))
+* **observer:** validate persisted audit trail shape ([#1402](https://github.com/djm204/frankenbeast/issues/1402)) ([255afb4](https://github.com/djm204/frankenbeast/commit/255afb4c320c27d0077817c866e09bd6bff1b5dd))
+* **observer:** validate span lifecycle token counts ([#1387](https://github.com/djm204/frankenbeast/issues/1387)) ([5dda43e](https://github.com/djm204/frankenbeast/commit/5dda43ec559f895e231711402abd59a915f83b4b))
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+
+
+### Documentation
+
+* **observer:** document ESM-only build outputs ([#1393](https://github.com/djm204/frankenbeast/issues/1393)) ([d1cad94](https://github.com/djm204/frankenbeast/commit/d1cad942471fd1eb5fca6a718f8b1a5dc256004a))
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.8.1 to 0.8.2
+
 ## [0.7.14](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.13...franken-observer-v0.7.14) (2026-07-08)
 
 

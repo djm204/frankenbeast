@@ -47,21 +47,36 @@ export class Planner {
   ) {}
 
   async plan(rawInput: string): Promise<PlanResult> {
-    // 1. Sanitize via MOD-01
-    const intent = await this.guardrails.getSanitizedIntent(rawInput);
+    return this.executePlan(rawInput);
+  }
 
-    // 2. Build task graph
-    let graph = await this.graphBuilder.build(intent);
+  private async executePlan(rawInput: string): Promise<PlanResult> {
+    let graph: PlanGraph;
+    try {
+      // 1. Sanitize via MOD-01
+      const intent = await this.guardrails.getSanitizedIntent(rawInput);
 
-    // 3. HITL approval gate
-    const markdown = this.planExporter.toMarkdown(graph);
-    const approval = await this.hitlGate.requestApproval(markdown);
+      // 2. Build task graph
+      graph = await this.graphBuilder.build(intent);
 
-    if (approval.decision === 'aborted') {
-      return { status: 'aborted', reason: approval.reason };
-    }
-    if (approval.decision === 'modified') {
-      graph = applyModifications(graph, approval.changes);
+      // 3. HITL approval gate
+      const markdown = this.planExporter.toMarkdown(graph);
+      const approval = await this.hitlGate.requestApproval(markdown);
+
+      if (approval.decision === 'aborted') {
+        return { status: 'aborted', reason: approval.reason };
+      }
+      if (approval.decision === 'modified') {
+        graph = applyModifications(graph, approval.changes);
+      }
+    } catch (err) {
+      if (err instanceof RationaleRejectedError) {
+        return { status: 'rationale_rejected', taskId: createTaskId(err.taskId) };
+      }
+      if (Planner.isStrategyDomainError(err)) {
+        return Planner.toStrategyDomainFailure(err);
+      }
+      throw err;
     }
 
     // 4. Optionally wrap executor with CoT gate (MOD-07)
@@ -74,6 +89,7 @@ export class Planner {
     const recoveryAttemptsByTask = new Map<TaskId, number>();
     const completedTaskIds = new Set<TaskId>();
     const completedTaskResults = new Map<TaskId, TaskResult>();
+    const recoveryContinuationGraphs: PlanGraph[] = [];
 
     for (;;) {
       let result: PlanResult;
@@ -91,6 +107,11 @@ export class Planner {
 
       if (result.status === 'completed') {
         Planner.recordCompletedTasks(result.taskResults, completedTaskIds, completedTaskResults);
+        const continuationGraph = recoveryContinuationGraphs.shift();
+        if (continuationGraph) {
+          currentGraph = continuationGraph;
+          continue;
+        }
         return { status: 'completed', taskResults: Array.from(completedTaskResults.values()) };
       }
       if (result.status !== 'failed') return result; // defensive: unexpected status
@@ -101,12 +122,14 @@ export class Planner {
       const failedTaskLineage = Planner.getRecoveryLineageRoot(result.failedTaskId);
       const attempt = (recoveryAttemptsByTask.get(failedTaskLineage) ?? 0) + 1;
       try {
+        const recoveryGraph = result.recoveryGraph ?? currentGraph;
         currentGraph = await this.recovery.recover(
           result.failedTaskId,
           result.error,
-          currentGraph,
+          recoveryGraph,
           attempt
         );
+        recoveryContinuationGraphs.unshift(...(result.recoveryContinuationGraphs ?? []));
         recoveryAttemptsByTask.set(failedTaskLineage, attempt);
       } catch (recoveryErr) {
         if (

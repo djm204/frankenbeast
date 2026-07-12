@@ -70,6 +70,53 @@ describe('LoopDetector', () => {
     })
   })
 
+  describe('option validation', () => {
+    it.each([
+      ['windowSize', { windowSize: 0 }],
+      ['windowSize', { windowSize: -1 }],
+      ['windowSize', { windowSize: 1.5 }],
+      ['windowSize', { windowSize: Number.NaN }],
+      ['repeatThreshold', { repeatThreshold: 0 }],
+      ['repeatThreshold', { repeatThreshold: -1 }],
+      ['repeatThreshold', { repeatThreshold: 1.5 }],
+      ['repeatThreshold', { repeatThreshold: Number.POSITIVE_INFINITY }],
+      ['historyLimit', { historyLimit: 0 }],
+      ['historyLimit', { historyLimit: -1 }],
+      ['historyLimit', { historyLimit: 1.5 }],
+      ['historyLimit', { historyLimit: Number.NaN }],
+    ])('rejects invalid positive integer option %s=%j', (optionName, options) => {
+      expect(() => new LoopDetector(options)).toThrow(new RangeError(`${optionName} must be a finite positive integer`))
+    })
+
+    it.each([
+      ['maxGapBetweenRepetitions', { maxGapBetweenRepetitions: -1 }],
+      ['maxGapBetweenRepetitions', { maxGapBetweenRepetitions: 1.5 }],
+      ['maxGapBetweenRepetitions', { maxGapBetweenRepetitions: Number.NaN }],
+    ])('rejects invalid non-negative integer option %s=%j', (optionName, options) => {
+      expect(() => new LoopDetector(options)).toThrow(
+        new RangeError(`${optionName} must be a finite non-negative integer`),
+      )
+    })
+
+    it.each([
+      ['similarityThreshold', { similarityThreshold: -0.01 }],
+      ['similarityThreshold', { similarityThreshold: 1.01 }],
+      ['similarityThreshold', { similarityThreshold: Number.NaN }],
+      ['similarityThreshold', { similarityThreshold: Number.POSITIVE_INFINITY }],
+    ])('rejects invalid threshold option %s=%j', (optionName, options) => {
+      expect(() => new LoopDetector(options)).toThrow(new RangeError(`${optionName} must be a finite number between 0 and 1`))
+    })
+
+    it('allows zero maxGapBetweenRepetitions and threshold bounds', () => {
+      expect(() => new LoopDetector({ maxGapBetweenRepetitions: 0, similarityThreshold: 0 })).not.toThrow()
+      expect(() => new LoopDetector({ similarityThreshold: 1 })).not.toThrow()
+    })
+
+    it('rejects windowSize 0 before it can emit an empty detected pattern', () => {
+      expect(() => new LoopDetector({ windowSize: 0, repeatThreshold: 3 })).toThrow(RangeError)
+    })
+  })
+
   describe('varied repetition patterns', () => {
     it('detects fuzzy span-name repetitions with volatile metadata differences', () => {
       const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 3 })
@@ -175,6 +222,28 @@ describe('LoopDetector', () => {
       detector.off('loop-detected', handler)
       for (const n of ['a', 'b', 'a', 'b']) detector.check(n)
       expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('isolates throwing handlers and continues notifying later listeners', () => {
+      const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 2 })
+      const throwingHandler = vi.fn(() => {
+        throw new Error('webhook failed')
+      })
+      const laterHandler = vi.fn()
+
+      detector.on('loop-detected', throwingHandler)
+      detector.on('loop-detected', laterHandler)
+
+      detector.check('a')
+      detector.check('b')
+      detector.check('a')
+
+      expect(() => detector.check('b')).not.toThrow()
+      expect(throwingHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledOnce()
+      expect(laterHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ detected: true, detectedPattern: ['a', 'b'], repetitions: 2 }),
+      )
     })
   })
 

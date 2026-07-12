@@ -324,6 +324,17 @@ describe('parseArgs', () => {
       expect(args.subcommand).toBe('issues');
       expect(args.issueLimit).toBe(50);
     });
+
+    it('rejects malformed --limit values before issue selection', () => {
+      for (const value of ['abc', '10abc', '1.5', 'Infinity']) {
+        expect(() => parseArgs(['issues', '--limit', value])).toThrow(/Invalid --limit/);
+      }
+    });
+
+    it('rejects non-positive --limit values', () => {
+      expect(() => parseArgs(['issues', '--limit', '0'])).toThrow(/Invalid --limit/);
+      expect(() => parseArgs(['issues', '--limit=-1'])).toThrow(/Invalid --limit/);
+    });
     it('parses --repo', () => {
       const args = parseArgs(['issues', '--repo', 'djm204/frankenbeast']);
       expect(args.subcommand).toBe('issues');
@@ -535,7 +546,7 @@ describe('parseArgs', () => {
       expect(issueArgs.issueLimit).toBe(50);
     });
 
-    it.each(['NaN', 'Infinity', '12abc'])('rejects invalid budget value %s', (value) => {
+    it.each(['abc', 'NaN', 'Infinity', '12abc'])('rejects invalid budget value %s', (value) => {
       expect(() => parseArgs(['--budget', value])).toThrow(/Invalid --budget/);
     });
 

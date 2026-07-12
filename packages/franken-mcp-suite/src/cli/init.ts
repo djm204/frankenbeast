@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { writeHookScripts } from './hook-scripts.js';
 import { codexServerName, ensureCodexProjectId } from './codex-server-names.js';
-import { parseJsonObjectWithComments, writeJsonFileAtomic } from './settings-json.js';
+import { readJsonObjectFileOrRecover, writeJsonFileAtomic } from './settings-json.js';
 
 const ALL_SERVERS: FbeastServer[] = [
   'memory', 'planner', 'critique', 'firewall', 'observer', 'governor', 'skills',
@@ -92,23 +92,27 @@ function initJsonClient(options: {
   const settingsPath = join(claudeDir, 'settings.json');
   let settings: Record<string, unknown> = {};
   if (existsSync(settingsPath)) {
-    settings = parseJsonObjectWithComments(readFileSync(settingsPath, 'utf-8'));
+    settings = readJsonObjectFileOrRecover(settingsPath, readFileSync(settingsPath, 'utf-8'));
   }
 
   // Add MCP server entries. Claude project-scoped MCP registrations belong in
-  // .mcp.json; Gemini uses .gemini/settings.json. Keep paths cwd-relative so a
-  // config file never pins one checkout's absolute database path into another.
+  // .mcp.json; Gemini uses .gemini/settings.json. Claude may launch project
+  // MCP servers from outside the workspace, so anchor its relative database path
+  // with CLAUDE_PROJECT_DIR instead of relying on the launcher cwd.
   const mcpConfigPath = client === 'claude' ? join(root, '.mcp.json') : settingsPath;
   let mcpConfig: Record<string, unknown> = client === 'claude' ? {} : settings;
   if (client === 'claude' && existsSync(mcpConfigPath)) {
-    mcpConfig = parseJsonObjectWithComments(readFileSync(mcpConfigPath, 'utf-8'));
+    mcpConfig = readJsonObjectFileOrRecover(mcpConfigPath, readFileSync(mcpConfigPath, 'utf-8'));
   }
   if (client === 'claude') {
     pruneFbeastMcpServerEntries(settings);
   }
   pruneFbeastMcpServerEntries(mcpConfig);
-  const mcpServers = (mcpConfig['mcpServers'] as Record<string, unknown>) ?? {};
-  const dbPath = join('.fbeast', 'beast.db');
+  const mcpServers = readMcpServersObject(
+    mcpConfig,
+    client === 'claude' ? '.mcp.json' : 'settings.json',
+  );
+  const dbPath = client === 'claude' ? '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db' : join('.fbeast', 'beast.db');
   const configPath = join('.fbeast', 'config.json');
   const proxyArgs = ['--db', dbPath, '--config', configPath];
   const standardServerArgs = (srv: FbeastServer) => srv === 'firewall'
@@ -269,16 +273,17 @@ function tomlString(value: string): string {
 
 function projectRootHookCommand(scriptPath: string): string {
   const normalizedPath = scriptPath.split('\\').join('/');
-  const executablePath = `./${normalizedPath}`;
   const lookup = [
+    `script=${shellQuote(normalizedPath)}`,
+    'executable="./$script"',
     `p=\${CLAUDE_PROJECT_DIR:-\${GEMINI_PROJECT_ROOT:-}}`,
-    `if [ -n "$p" ] && [ -x "$p/${normalizedPath}" ]; then cd "$p" && exec "${executablePath}"; fi`,
+    'if [ -n "$p" ] && [ -x "$p/$script" ]; then cd "$p" && exec "$executable"; fi',
     'd=$PWD',
     'while [ "$d" != / ]; do '
-      + `if [ -x "$d/${normalizedPath}" ]; then cd "$d" && exec "${executablePath}"; fi; `
+      + 'if [ -x "$d/$script" ]; then cd "$d" && exec "$executable"; fi; '
       + 'd=$(dirname "$d")',
     'done',
-    `echo "fbeast hook script not found: ${normalizedPath}" >&2`,
+    'echo "fbeast hook script not found: $script" >&2',
     'exit 127',
   ].join('; ');
   return `sh -c ${shellQuote(lookup)}`;
@@ -498,12 +503,26 @@ function pruneFbeastMcpServerEntries(config: Record<string, unknown>): void {
   config['mcpServers'] = mcpServers;
 }
 
+function readMcpServersObject(
+  config: Record<string, unknown>,
+  configLabel: string,
+): Record<string, unknown> {
+  const mcpServers = config['mcpServers'];
+  if (mcpServers === undefined) return {};
+  if (isObjectRecord(mcpServers)) return mcpServers;
+
+  throw new Error(
+    `fbeast init: ${configLabel} mcpServers must be a JSON object; `
+      + 'remove or replace the existing mcpServers value before running init again.',
+  );
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 // Re-export for test access

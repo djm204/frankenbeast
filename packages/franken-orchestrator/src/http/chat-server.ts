@@ -29,6 +29,7 @@ import { resolveSecurityConfig, type SecurityConfig } from '../middleware/securi
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
+import { isoNow } from '@franken/types';
 
 export interface StartChatServerOptions {
   host?: string;
@@ -137,7 +138,7 @@ function createCommsRuntimeAdapter(
       };
     },
     create: async (id, data) => {
-      const now = new Date().toISOString();
+      const now = isoNow();
       const storedId = toStoredSessionId(id);
       const session: ChatSessionWithRouting = {
         id: storedId,
@@ -166,7 +167,7 @@ function createCommsRuntimeAdapter(
     save: async (id, data) => {
       const storedId = toStoredSessionId(id);
       const existing = sessionStore.get(storedId) as ChatSessionWithRouting | undefined;
-      const now = new Date().toISOString();
+      const now = isoNow();
       const session: ChatSessionWithRouting = {
         id: storedId,
         projectId: typeof data.projectId === 'string' ? data.projectId : (existing?.projectId ?? projectName),

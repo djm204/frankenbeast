@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
@@ -17,9 +19,15 @@ describe('local setup scripts', () => {
 
     expect(read('.nvmrc').trim()).toBe('22.13.0');
     expect(read('.npmrc')).toContain('engine-strict=true');
+    expect(read('README.md')).toContain('Node.js** `>=22.13.0 <23 || >=24.0.0 <26`');
+    expect(read('README.md')).toContain('local default is pinned in [.nvmrc](.nvmrc)');
+    expect(read('README.md')).toContain('**npm** 11.5.1 via the root `packageManager` pin');
+    expect(read('packages/franken-brain/README.md')).toContain('npm 11.5.1 via the repository `packageManager` setting');
+    expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
     expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
-    expect(read('docs/guides/quickstart.md')).toContain('corepack enable npm');
-    expect(read('docs/guides/quickstart.md')).toContain('npm run check:package-manager');
+    expect(read('scripts/bootstrap.sh')).toContain('command -v corepack');
+    expect(read('scripts/bootstrap.sh')).toContain('corepack enable npm');
+    expect(read('scripts/bootstrap.sh')).toContain('corepack prepare "$expected_pm" --activate');
 
     for (const packagePath of packagePaths) {
       const manifest = JSON.parse(read(packagePath)) as { engines?: { node?: string } };
@@ -38,6 +46,59 @@ describe('local setup scripts', () => {
     expect(source).not.toContain('Firewall server');
   });
 
+  it('verify-setup supports a dry-run that validates bootstrap prerequisites without probing services', () => {
+    const source = read('scripts/verify-setup.ts');
+    const packageJson = JSON.parse(read('package.json')) as { scripts?: Record<string, string> };
+
+    expect(packageJson.scripts?.['bootstrap:dry-run']).toBe('tsx scripts/verify-setup.ts --dry-run --env-file .env.example');
+    expect(source).toContain('--dry-run');
+    expect(source).toContain('--env-file');
+    expect(source).toContain('Required bootstrap env vars');
+    expect(source).toContain('if (options.dryRun)');
+    expect(source).toContain("envFile.get('CHROMA_URL')");
+    expect(source).toContain("shell: process.platform === 'win32'");
+    expect(source).toContain('Skipping live service probes in dry-run mode');
+  });
+
+  it('bootstrap dry-run succeeds against .env.example and fails when required env vars are missing', () => {
+    const ok = spawnSync('npx', ['tsx', 'scripts/verify-setup.ts', '--dry-run', '--env-file', '.env.example'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+    expect(ok.status).toBe(0);
+    expect(`${ok.stdout}\n${ok.stderr}`).toContain('Skipping live service probes in dry-run mode');
+
+    const dir = mkdtempSync(join(tmpdir(), 'frankenbeast-verify-setup-'));
+    try {
+      const envPath = join(dir, '.env.missing');
+      writeFileSync(envPath, 'CHROMA_URL=http://localhost:8000\n');
+      const scrubbedEnv = { ...process.env };
+      for (const key of [
+        'CHROMA_URL',
+        'FRANKEN_MAX_TOTAL_TOKENS',
+        'FRANKEN_MAX_DURATION_MS',
+        'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+        'FRANKEN_ENABLE_HEARTBEAT',
+        'FRANKEN_ENABLE_TRACING',
+        'FRANKEN_ENABLE_REFLECTION',
+        'FRANKEN_MIN_CRITIQUE_SCORE',
+      ]) {
+        delete scrubbedEnv[key];
+      }
+      const missing = spawnSync('npx', ['tsx', 'scripts/verify-setup.ts', '--dry-run', '--env-file', envPath], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env: scrubbedEnv,
+      });
+
+      expect(missing.status).not.toBe(0);
+      expect(`${missing.stdout}\n${missing.stderr}`).toContain('Required bootstrap env vars');
+      expect(`${missing.stdout}\n${missing.stderr}`).toContain('FRANKEN_MAX_TOTAL_TOKENS');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('seed script uses the Chroma v2 tenant/database collection API', () => {
     const source = read('scripts/seed.ts');
 
@@ -47,6 +108,92 @@ describe('local setup scripts', () => {
     expect(source).toContain("default_database");
     expect(source).not.toContain('/api/v1/collections');
     expect(source).not.toContain('/api/v1/heartbeat');
+  });
+
+  it('exposes discoverable npm scripts for local seed and setup verification', () => {
+    const manifest = JSON.parse(read('package.json')) as { scripts?: Record<string, string> };
+    const readme = read('README.md');
+    const onboarding = read('ONBOARDING.md');
+    const seedScript = read('scripts/seed.ts');
+    const verifyScript = read('scripts/verify-setup.ts');
+
+    expect(manifest.scripts?.['local:seed']).toBe('tsx scripts/seed.ts');
+    expect(manifest.scripts?.['local:verify-setup']).toBe('tsx scripts/verify-setup.ts');
+    expect(readme).toContain('npm run local:seed');
+    expect(readme).toContain('npm run local:verify-setup');
+    expect(onboarding).toContain('npm run local:seed');
+    expect(onboarding).toContain('npm run local:verify-setup');
+    expect(seedScript).toContain('Usage: npm run local:seed');
+    expect(verifyScript).toContain('Usage: npm run local:verify-setup');
+  });
+
+  it('provides a one-click bootstrap script and CI dry-run gate', () => {
+    const manifest = JSON.parse(read('package.json')) as { scripts?: Record<string, string> };
+    const scriptPath = join(ROOT, 'scripts/bootstrap.sh');
+    const script = read('scripts/bootstrap.sh');
+    const readme = read('README.md');
+    const onboarding = read('ONBOARDING.md');
+    const quickstart = read('docs/guides/quickstart.md');
+    const ci = read('.github/workflows/ci.yml');
+
+    expect(manifest.scripts?.bootstrap).toBe('bash scripts/bootstrap.sh');
+    expect(statSync(scriptPath).mode & 0o111).not.toBe(0);
+    expect(script).toContain('--dry-run');
+    expect(script).toContain('--services');
+    expect(script).toContain('Node.js >=22.13.0 <23 or >=24.0.0 <26');
+    expect(script).toContain('cp .env.example .env');
+    expect(script).toContain('default_keys');
+    expect(script).toContain('GRAFANA_USER=admin');
+    expect(script).toContain('npm ci');
+    expect(script).toContain('docker compose up -d');
+    expect(readme).toContain('## 🚀 One-click onboarding');
+    expect(readme).toContain('[Frankenbeast onboarding checklist](ONBOARDING.md)');
+    expect(readme).toContain('[`scripts/bootstrap.sh`](scripts/bootstrap.sh)');
+    expect(readme).toContain('npm run bootstrap -- --no-docker');
+    expect(readme).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(onboarding).toMatch(/^---\ntitle: Frankenbeast Onboarding Checklist\ndescription: /);
+    expect(onboarding).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(quickstart).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(ci).toContain('Validate bootstrap dry-run');
+    expect(ci).toContain('./scripts/bootstrap.sh --dry-run');
+    expect(ci.indexOf('./scripts/bootstrap.sh --dry-run')).toBeLessThan(ci.indexOf('npm ci'));
+
+    const dryRun = spawnSync('bash', [scriptPath, '--dry-run'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(dryRun.status, dryRun.stderr || dryRun.stdout).toBe(0);
+    expect(dryRun.stdout).toMatch(/dry-run: would copy \.env\.example to \.env|\.env already exists; leaving it unchanged\./);
+    expect(dryRun.stdout).toContain('dry-run: npm ci');
+
+    const servicesDryRun = spawnSync('bash', [scriptPath, '--dry-run', '--services'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(servicesDryRun.status, servicesDryRun.stderr || servicesDryRun.stdout).toBe(0);
+    expect(servicesDryRun.stdout).toContain('dry-run: docker compose up -d');
+
+    const invalidEnvRoot = mkdtempSync(join(tmpdir(), 'franken-bootstrap-invalid-env-'));
+    try {
+      mkdirSync(join(invalidEnvRoot, 'scripts'));
+      writeFileSync(join(invalidEnvRoot, 'scripts/bootstrap.sh'), script);
+      writeFileSync(join(invalidEnvRoot, 'package.json'), JSON.stringify({ packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(invalidEnvRoot, '.env.example'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=change-me-random-grafana-password\n');
+      writeFileSync(join(invalidEnvRoot, '.env'), 'GRAFANA_USER=admin\nGRAFANA_PASSWORD=admin\n');
+
+      const invalidServicesDryRun = spawnSync('bash', [join(invalidEnvRoot, 'scripts/bootstrap.sh'), '--dry-run', '--services'], {
+        cwd: invalidEnvRoot,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(invalidServicesDryRun.status).not.toBe(0);
+      expect(invalidServicesDryRun.stderr).toContain('requires GRAFANA_USER=admin and a unique non-default GRAFANA_PASSWORD');
+      expect(invalidServicesDryRun.stdout).not.toContain('dry-run: npm ci');
+    } finally {
+      rmSync(invalidEnvRoot, { recursive: true, force: true });
+    }
   });
 
   it('docker compose healthcheck targets the Chroma v2 heartbeat', () => {
@@ -192,6 +339,77 @@ describe('local setup scripts', () => {
       'FRANKEN_MIN_CRITIQUE_SCORE',
     ]) {
       expect(readme).toContain(frankenOverride);
+    }
+  });
+
+  it('scaffolds the quick-start example into a fresh project and runs npm ci', () => {
+    const packageJson = JSON.parse(read('package.json')) as { scripts?: Record<string, string> };
+    const scriptPath = join(ROOT, 'scripts/create-project.sh');
+    const script = read('scripts/create-project.sh');
+    const tempRoot = mkdtempSync(join(tmpdir(), 'frankenbeast-create-project-'));
+    const target = join(tempRoot, 'quick-start-app');
+
+    try {
+      expect(packageJson.scripts?.['create:project']).toBe('bash scripts/create-project.sh');
+      expect(statSync(scriptPath).mode & 0o111).not.toBe(0);
+      expect(script).toContain('examples/$example_name');
+      expect(script).toContain('npm ci');
+      expect(script).toContain('.env.example');
+      expect(script).not.toContain('-printf');
+      expect(existsSync(join(ROOT, 'examples/quick-start/package-lock.json'))).toBe(true);
+      expect(read('README.md')).toContain('npm run create:project -- quick-start');
+      expect(read('ONBOARDING.md')).toContain('npm run create:project -- quick-start');
+
+      const dotExample = spawnSync('bash', [scriptPath, '..', join(tempRoot, 'dot-example')], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(dotExample.status).toBe(64);
+      expect(dotExample.stderr).toContain('Invalid example name: ..');
+
+      const realTarget = join(tempRoot, 'real-target');
+      const linkedTarget = join(tempRoot, 'linked-target');
+      mkdirSync(realTarget);
+      writeFileSync(join(realTarget, 'README.md'), 'existing project\n');
+      symlinkSync(realTarget, linkedTarget, 'dir');
+      const symlinkResult = spawnSync('bash', [scriptPath, 'quick-start', linkedTarget], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(symlinkResult.status).toBe(73);
+      expect(symlinkResult.stderr).toContain('Target directory is not empty');
+
+      const result = spawnSync('bash', [scriptPath, 'quick-start', target], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 120_000,
+      });
+
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      expect(result.stdout).toContain('Created Frankenbeast example project');
+      expect(result.stdout).toContain('Env:     .env created');
+      expect(existsSync(join(target, '.env'))).toBe(true);
+      expect(existsSync(join(target, 'package-lock.json'))).toBe(true);
+      expect(result.stdout).toContain('up to date');
+
+      const scaffoldManifest = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8')) as {
+        scripts?: Record<string, string>;
+      };
+      expect(scaffoldManifest.scripts?.start).toBe('node --env-file=.env src/index.js');
+      writeFileSync(join(target, '.env'), 'FRANKENBEAST_EXAMPLE_MESSAGE=Custom scaffold message\n');
+
+      const start = spawnSync('npm', ['start'], {
+        cwd: target,
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+
+      expect(start.status, start.stderr || start.stdout).toBe(0);
+      expect(start.stdout).toContain('Custom scaffold message');
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
     }
   });
 

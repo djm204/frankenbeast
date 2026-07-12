@@ -1,5 +1,6 @@
 import { createPublicKey, verify, type KeyObject } from 'node:crypto';
 import type { Context, Next } from 'hono';
+import { wallClockNow } from '@franken/types';
 
 export interface DiscordSignatureOptions {
   publicKey: string;
@@ -50,7 +51,7 @@ export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
     if (!Number.isFinite(timestampSeconds)) {
       return c.json({ error: 'Invalid signature timestamp' }, 401);
     }
-    const nowSeconds = Date.now() / 1000;
+    const nowSeconds = wallClockNow() / 1000;
     if (Math.abs(nowSeconds - timestampSeconds) > toleranceSeconds) {
       return c.json({ error: 'Stale signature timestamp' }, 401);
     }

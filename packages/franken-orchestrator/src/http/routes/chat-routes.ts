@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { approvalRuntimeInput } from '../../chat/approval-input.js';
-import type { ISessionStore } from '../../chat/session-store.js';
+import type { CorruptChatSessionFile, ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
@@ -14,6 +14,7 @@ import type {
   MessageResult,
   TurnOutcome,
 } from '@franken/types';
+import { isoNow } from '@franken/types';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -127,7 +128,17 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     }));
-    return c.json({ data: { sessions } } satisfies ApiDataEnvelope<{ sessions: ChatSessionSummary[] }>);
+    const corruptSessions = (sessionStore.listCorruptions?.(projectId) ?? []).map(({ id, projectId, reason }) => ({
+      id,
+      ...(projectId === undefined ? {} : { projectId }),
+      reason,
+    }));
+    return c.json({
+      data: { sessions, corruptSessions },
+    } satisfies ApiDataEnvelope<{
+      sessions: ChatSessionSummary[];
+      corruptSessions: Pick<CorruptChatSessionFile, 'id' | 'projectId' | 'reason'>[];
+    }>);
   });
 
   // Get session
@@ -178,12 +189,12 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       session.pendingApproval = result.pendingApproval && result.pendingApprovalDescription
         ? {
             description: result.pendingApprovalDescription,
-            requestedAt: result.pendingApprovalRequestedAt ?? new Date().toISOString(),
+            requestedAt: result.pendingApprovalRequestedAt ?? isoNow(),
             ...result.pendingApprovalContext,
           }
         : null;
       session.beastContext = result.beastContext ?? null;
-      session.updatedAt = new Date().toISOString();
+      session.updatedAt = isoNow();
       sessionStore.save(session);
 
       const outcome: TurnOutcome = result.outcome ?? {
@@ -246,7 +257,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         const originalState = session.state;
         session.pendingApproval = null;
         session.state = 'approved';
-        session.updatedAt = new Date().toISOString();
+        session.updatedAt = isoNow();
         sessionStore.save(session);
         try {
           result = await runtime.run(runtimeInput, {
@@ -260,7 +271,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         } catch (error) {
           session.pendingApproval = pendingApproval;
           session.state = originalState;
-          session.updatedAt = new Date().toISOString();
+          session.updatedAt = isoNow();
           sessionStore.save(session);
           throw error;
         }
@@ -272,7 +283,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         session.state = 'rejected';
         session.pendingApproval = null;
       }
-      session.updatedAt = new Date().toISOString();
+      session.updatedAt = isoNow();
       sessionStore.save(session);
 
       return c.json({

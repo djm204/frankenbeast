@@ -2,6 +2,7 @@ import { CacheMetrics } from './cache-metrics.js';
 import { LlmCacheStore } from './llm-cache-store.js';
 import { LlmCachePolicy, type CacheablePromptRequest } from './llm-cache-policy.js';
 import { ProviderSessionStore } from './provider-session-store.js';
+import { isoNow } from '@franken/types';
 
 export interface NativeSessionResult {
   content: string;
@@ -76,7 +77,7 @@ export class CachedLlmClient {
           this.metrics.recordNativeSessionHit();
           const sessionId = resumed.sessionId ?? existingSession?.sessionId;
           if (sessionId) {
-            const now = new Date().toISOString();
+            const now = isoNow();
             await this.deps.providerSessions.save({
               projectId: request.scope.projectId,
               workId,
@@ -113,7 +114,7 @@ export class CachedLlmClient {
       await this.deps.cacheStore.saveProjectEntry(request.scope.projectId, computed.projectStableKey, {
         content: computed.stableText,
         fingerprint: computed.sessionFingerprint,
-        createdAt: new Date().toISOString(),
+        createdAt: isoNow(),
         metadata: {
           kind: 'project',
         },
@@ -124,7 +125,7 @@ export class CachedLlmClient {
       await this.deps.cacheStore.saveWorkEntry(request.scope.projectId, request.scope.workId, computed.workKey, {
         content: computed.workText,
         fingerprint: computed.sessionFingerprint,
-        createdAt: new Date().toISOString(),
+        createdAt: isoNow(),
         metadata: {
           kind: 'work',
         },
@@ -135,7 +136,7 @@ export class CachedLlmClient {
       await this.deps.cacheStore.saveWorkEntry(request.scope.projectId, request.scope.workId, computed.responseKey, {
         content: response,
         fingerprint: computed.sessionFingerprint,
-        createdAt: new Date().toISOString(),
+        createdAt: isoNow(),
         metadata: {
           kind: 'work',
         },
@@ -144,7 +145,7 @@ export class CachedLlmClient {
       await this.deps.cacheStore.saveProjectEntry(request.scope.projectId, computed.responseKey, {
         content: response,
         fingerprint: computed.sessionFingerprint,
-        createdAt: new Date().toISOString(),
+        createdAt: isoNow(),
         metadata: {
           kind: 'project',
         },

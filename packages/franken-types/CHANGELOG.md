@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.8.2...franken-types-v0.9.0) (2026-07-11)
+
+
+### Features
+
+* **types:** add deterministic utility helpers ([#1440](https://github.com/djm204/frankenbeast/issues/1440)) ([1bab25d](https://github.com/djm204/frankenbeast/commit/1bab25da77c4eb27a4bc0766f0e44c77391799cd))
+
+
+### Bug Fixes
+
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+* **web:** expose tracked agent status filters ([#1506](https://github.com/djm204/frankenbeast/issues/1506)) ([6bf1e20](https://github.com/djm204/frankenbeast/commit/6bf1e2091ada17b0cbc24748c9b77f3aada42b9b)), closes [#1102](https://github.com/djm204/frankenbeast/issues/1102)
+
+
+### Miscellaneous
+
+* **ci:** make workspace lint coverage explicit ([#1596](https://github.com/djm204/frankenbeast/issues/1596)) ([c1674ed](https://github.com/djm204/frankenbeast/commit/c1674ed69e460a9c7c14d8b7af2e4039edf174d8))
+* **package:** normalize workspace metadata ([#1573](https://github.com/djm204/frankenbeast/issues/1573)) ([921c557](https://github.com/djm204/frankenbeast/commit/921c557e9f8392f1202f3fa2cdcc7952ffccd255))
+
+
+### Documentation
+
+* **packages:** add remaining workspace READMEs ([#1576](https://github.com/djm204/frankenbeast/issues/1576)) ([c050151](https://github.com/djm204/frankenbeast/commit/c050151bcda2973825fd13d17751f348c8ce74f6))
+* **skills:** clarify SkillManager phase status ([#1462](https://github.com/djm204/frankenbeast/issues/1462)) ([4b3cd35](https://github.com/djm204/frankenbeast/commit/4b3cd35f74f0fa7ce443a312d10484bb749bb46b)), closes [#986](https://github.com/djm204/frankenbeast/issues/986)
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* add workspace coverage task ([#1589](https://github.com/djm204/frankenbeast/issues/1589)) ([1934756](https://github.com/djm204/frankenbeast/commit/1934756851e520c033f2a43c5b440c8268662714)), closes [#948](https://github.com/djm204/frankenbeast/issues/948)
+
+## [0.8.2](https://github.com/djm204/frankenbeast/compare/franken-types-v0.8.1...franken-types-v0.8.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **types:** validate provider token usage counts ([#1348](https://github.com/djm204/frankenbeast/issues/1348)) ([e2387f3](https://github.com/djm204/frankenbeast/commit/e2387f32c91a04452da269c022e8297d81f8ab94))
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+* **web:** secure chat websocket authentication ([679b15d](https://github.com/djm204/frankenbeast/commit/679b15dfbd8cc592ed04b67339230494a5586a8c)), closes [#703](https://github.com/djm204/frankenbeast/issues/703)
+
+
+### Miscellaneous
+
+* **types:** disambiguate critique contracts ([#1360](https://github.com/djm204/frankenbeast/issues/1360)) ([ddd0bd0](https://github.com/djm204/frankenbeast/commit/ddd0bd0b1dfc8a5a0d2a78cd9b4a570e7974e57f))
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Tests
+
+* **types:** fail when no tests are discovered ([8817b8b](https://github.com/djm204/frankenbeast/commit/8817b8b29c3a20af1fee5d0593669ae1b28fb15b)), closes [#970](https://github.com/djm204/frankenbeast/issues/970)
+
 ## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.8.0...franken-types-v0.8.1) (2026-07-08)
 
 

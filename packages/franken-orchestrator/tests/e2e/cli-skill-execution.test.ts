@@ -25,8 +25,9 @@ import {
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { readVitestFlag } from '../../../../scripts/vitest-env.js';
 
-describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
+describe.skipIf(!readVitestFlag(process.env, 'E2E'))('E2E: CLI Skill Execution', () => {
   const PROMISE_TAG = 'IMPL_test-chunk_DONE';
   const PROMISE_OUTPUT = `Implementation complete\n<promise>${PROMISE_TAG}</promise>`;
 

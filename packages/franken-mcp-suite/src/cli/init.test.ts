@@ -5,7 +5,8 @@ import { codexServerName } from './codex-server-names.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 
 function tmpDir(): string {
   const dir = join(tmpdir(), `fbeast-init-${randomUUID()}`);
@@ -15,6 +16,10 @@ function tmpDir(): string {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function jsonBackups(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.startsWith('settings.json.invalid-'));
 }
 
 describe('fbeast init', () => {
@@ -54,7 +59,7 @@ describe('fbeast init', () => {
     expect(content).not.toContain('You have access to fbeast MCP tools');
   });
 
-  it('writes Claude MCP server config to project .mcp.json', () => {
+  it('writes Claude MCP server config to project .mcp.json with project-anchored db paths', () => {
     const root = tmpDir();
     dirs.push(root);
 
@@ -70,8 +75,108 @@ describe('fbeast init', () => {
     expect(mcpConfig.mcpServers['fbeast-observer']).toBeDefined();
     expect(mcpConfig.mcpServers['fbeast-governor']).toBeDefined();
     expect(mcpConfig.mcpServers['fbeast-skills']).toBeDefined();
+    expect(mcpConfig.mcpServers['fbeast-memory'].args).toEqual([
+      '--db',
+      '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db',
+    ]);
     const settings = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf-8'));
     expect(settings.mcpServers).toBeUndefined();
+  });
+
+  it('backs up invalid Claude settings.json and initializes without SyntaxError', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, 'settings.json'), '{ invalid json');
+
+    expect(() => runInit({ root, claudeDir, hooks: false, client: 'claude' })).not.toThrow();
+
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers).toBeUndefined();
+    const backups = jsonBackups(claudeDir);
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(claudeDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
+  });
+
+  it('backs up invalid Gemini settings.json and initializes MCP entries', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    writeFileSync(join(geminiDir, 'settings.json'), '{ invalid json');
+
+    expect(() => runInit({ root, claudeDir: geminiDir, hooks: false, client: 'gemini' })).not.toThrow();
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    expect(settings.mcpServers['fbeast-memory']).toBeDefined();
+    const backups = jsonBackups(geminiDir);
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(geminiDir, backups[0]!), 'utf-8')).toBe('{ invalid json');
+  });
+
+  it('throws with a clear error and preserves Claude .mcp.json when mcpServers is an array', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const mcpPath = join(root, '.mcp.json');
+    const original = JSON.stringify({ mcpServers: [] });
+    writeFileSync(mcpPath, original);
+
+    expect(() => runInit({ root, claudeDir, hooks: false, client: 'claude' })).toThrow(
+      '.mcp.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(mcpPath, 'utf-8')).toBe(original);
+  });
+
+  it('throws with a clear error and preserves Claude .mcp.json when mcpServers is primitive', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const mcpPath = join(root, '.mcp.json');
+    const original = JSON.stringify({ mcpServers: 'bad' });
+    writeFileSync(mcpPath, original);
+
+    expect(() => runInit({ root, claudeDir, hooks: false, client: 'claude' })).toThrow(
+      '.mcp.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(mcpPath, 'utf-8')).toBe(original);
+  });
+
+  it('throws with a clear error and preserves Gemini settings.json when mcpServers is an array', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    const settingsPath = join(geminiDir, 'settings.json');
+    const original = JSON.stringify({ mcpServers: [] });
+    writeFileSync(settingsPath, original);
+
+    expect(() => runInit({ root, claudeDir: geminiDir, hooks: false, client: 'gemini' })).toThrow(
+      'settings.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(original);
+  });
+
+  it('throws with a clear error and preserves Gemini settings.json when mcpServers is primitive', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const geminiDir = join(root, '.gemini');
+    mkdirSync(geminiDir, { recursive: true });
+    const settingsPath = join(geminiDir, 'settings.json');
+    const original = JSON.stringify({ mcpServers: 'bad' });
+    writeFileSync(settingsPath, original);
+
+    expect(() => runInit({ root, claudeDir: geminiDir, hooks: false, client: 'gemini' })).toThrow(
+      'settings.json mcpServers must be a JSON object',
+    );
+
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(original);
   });
 
   it('merges with existing Claude .mcp.json comments and trailing commas without overwriting', () => {
@@ -227,6 +332,33 @@ describe('fbeast init', () => {
     expect(afterCmd).toContain('cd "$p"');
     expect(afterCmd).not.toContain('do;');
     expect(afterCmd).toContain('gemini-after-tool.sh');
+  });
+
+  it('quotes Gemini hook commands so hostile project roots cannot inject shell commands', () => {
+    const parent = tmpDir();
+    dirs.push(parent);
+    const marker = join(parent, 'gemini-injection-marker');
+    const root = join(parent, `project with spaces ; $(touch ${marker}) and quote's`);
+    mkdirSync(root, { recursive: true });
+    const geminiDir = join(root, '.gemini');
+
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+
+    const settings = JSON.parse(readFileSync(join(geminiDir, 'settings.json'), 'utf-8'));
+    const beforeCmd = (settings.hooks.BeforeTool[0] as any).hooks[0].command as string;
+    const result = spawnSync(beforeCmd, {
+      cwd: parent,
+      env: { ...process.env, GEMINI_PROJECT_ROOT: root, FBEAST_DISABLE_HOOKS: '1' },
+      shell: true,
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+    expect(beforeCmd).toContain('script=');
+    expect(beforeCmd).toContain('.fbeast/hooks/gemini-before-tool.sh');
+    expect(beforeCmd).toContain('exec "$executable"');
+    expect(beforeCmd).not.toContain(root);
   });
 
   it('merges Gemini hooks without clobbering existing BeforeTool entries', () => {
@@ -395,7 +527,7 @@ describe('fbeast init', () => {
     ).toThrow('failed to remove legacy Codex MCP server fbeast-memory');
   });
 
-  it('uses cwd-relative database paths for Claude .mcp.json across project roots', () => {
+  it('uses project-root placeholders for Claude .mcp.json across project roots', () => {
     const globalConfigDir = tmpDir();
     const rootA = tmpDir();
     const rootB = tmpDir();
@@ -409,11 +541,11 @@ describe('fbeast init', () => {
     const configB = JSON.parse(readFileSync(join(rootB, '.mcp.json'), 'utf-8'));
     expect(configA.mcpServers['fbeast-memory']).toEqual({
       command: 'fbeast-memory',
-      args: ['--db', join('.fbeast', 'beast.db')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'],
     });
     expect(configB.mcpServers['fbeast-memory']).toEqual({
       command: 'fbeast-memory',
-      args: ['--db', join('.fbeast', 'beast.db')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'],
     });
     expect(JSON.stringify(configA.mcpServers)).not.toContain(rootA);
     expect(JSON.stringify(configB.mcpServers)).not.toContain(rootB);
@@ -431,7 +563,7 @@ describe('fbeast init', () => {
     expect(keys).toEqual(['fbeast-proxy']);
     expect(mcpConfig.mcpServers['fbeast-proxy']).toEqual({
       command: 'fbeast-proxy',
-      args: ['--db', join('.fbeast', 'beast.db'), '--config', join('.fbeast', 'config.json')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db', '--config', join('.fbeast', 'config.json')],
     });
     expect(mcpConfig.mcpServers['fbeast-memory']).toBeUndefined();
   });
@@ -458,10 +590,13 @@ describe('fbeast init', () => {
 
     const mcpConfig = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8'));
     expect(Object.keys(mcpConfig.mcpServers).length).toBe(7);
-    expect(mcpConfig.mcpServers['fbeast-memory']).toEqual({ command: 'fbeast-memory', args: ['--db', join('.fbeast', 'beast.db')] });
+    expect(mcpConfig.mcpServers['fbeast-memory']).toEqual({
+      command: 'fbeast-memory',
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db'],
+    });
     expect(mcpConfig.mcpServers['fbeast-firewall']).toEqual({
       command: 'fbeast-firewall',
-      args: ['--db', join('.fbeast', 'beast.db'), '--config', join('.fbeast', 'config.json')],
+      args: ['--db', '${CLAUDE_PROJECT_DIR}/.fbeast/beast.db', '--config', join('.fbeast', 'config.json')],
     });
     expect(mcpConfig.mcpServers['fbeast-proxy']).toBeUndefined();
   });

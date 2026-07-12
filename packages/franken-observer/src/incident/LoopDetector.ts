@@ -33,17 +33,45 @@ export class LoopDetector {
   private history: string[] = []
 
   constructor(options: LoopDetectorOptions = {}) {
-    this.windowSize = options.windowSize ?? 3
-    this.repeatThreshold = options.repeatThreshold ?? 3
-    this.similarityThreshold = options.similarityThreshold ?? 0.85
-    this.maxGapBetweenRepetitions = options.maxGapBetweenRepetitions ?? 1
+    this.windowSize = LoopDetector.validatePositiveInteger('windowSize', options.windowSize ?? 3)
+    this.repeatThreshold = LoopDetector.validatePositiveInteger('repeatThreshold', options.repeatThreshold ?? 3)
+    this.similarityThreshold = LoopDetector.validateThreshold('similarityThreshold', options.similarityThreshold ?? 0.85)
+    this.maxGapBetweenRepetitions = LoopDetector.validateNonNegativeInteger(
+      'maxGapBetweenRepetitions',
+      options.maxGapBetweenRepetitions ?? 1,
+    )
+    const configuredHistoryLimit = LoopDetector.validatePositiveInteger('historyLimit', options.historyLimit ?? 100)
     // Never retain fewer spans than a full detection span needs, otherwise
     // check() would trim history below detectLoop()'s minLength gate and no
     // loop could ever be reported for larger window/threshold configurations.
     const spanNeededForDetection =
       this.windowSize * this.repeatThreshold +
       Math.max(0, this.repeatThreshold - 1) * this.maxGapBetweenRepetitions
-    this.historyLimit = Math.max(options.historyLimit ?? 100, spanNeededForDetection)
+    this.historyLimit = Math.max(configuredHistoryLimit, spanNeededForDetection)
+  }
+
+  private static validatePositiveInteger(optionName: string, value: number): number {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+      throw new RangeError(`${optionName} must be a finite positive integer`)
+    }
+
+    return value
+  }
+
+  private static validateNonNegativeInteger(optionName: string, value: number): number {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+      throw new RangeError(`${optionName} must be a finite non-negative integer`)
+    }
+
+    return value
+  }
+
+  private static validateThreshold(optionName: string, value: number): number {
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new RangeError(`${optionName} must be a finite number between 0 and 1`)
+    }
+
+    return value
   }
 
   check(spanName: string): LoopDetectionResult {
@@ -58,7 +86,11 @@ export class LoopDetector {
     }
 
     for (const handler of this.handlers) {
-      handler(result)
+      try {
+        handler(result)
+      } catch {
+        // Isolate handler failures; other handlers still receive the signal.
+      }
     }
 
     return result

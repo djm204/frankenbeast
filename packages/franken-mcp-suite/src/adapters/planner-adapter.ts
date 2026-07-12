@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { PlanGraph, createTaskId } from '@franken/planner';
 import { createSqliteStore } from '../shared/sqlite-store.js';
+import { randomUUID } from 'node:crypto';
 
 export interface PlannerTask {
   id: string;
@@ -22,9 +21,13 @@ export interface PlannerValidateResult {
   issues: string[];
 }
 
+export type PlannerVisualizeResult =
+  | { kind: 'found'; mermaid: string }
+  | { kind: 'corrupt'; reason: string };
+
 export interface PlannerAdapter {
   decompose(input: { objective: string; constraints?: string }): Promise<PlannerDecomposeResult>;
-  visualize(planId: string): Promise<string | null>;
+  visualize(planId: string): Promise<PlannerVisualizeResult | null>;
   validate(planId: string): Promise<PlannerValidateResult | null>;
 }
 
@@ -44,7 +47,7 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
       // not a planning engine. Real decomposition requires an LLM, and since this
       // MCP tool is called BY an LLM (Claude Code), injecting a second LLM call
       // here would be circular. The caller refines this scaffold as needed.
-      const planId = randomUUID().slice(0, 8);
+      const planId = createUniquePlanId(store);
       const tasks: PlannerTask[] = [
         { id: 't1', title: `Analyze requirements for: ${input.objective}`, deps: [], status: 'pending' },
         { id: 't2', title: 'Design solution architecture', deps: ['t1'], status: 'pending' },
@@ -70,30 +73,31 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
     },
 
     async visualize(planId) {
-      const plan = loadPlan(planId);
-      if (!plan) {
+      const loaded = loadPlan(planId);
+      if (!loaded) {
         return null;
       }
-
-      const graph = buildGraph(plan.tasks);
-      const mermaidLines = ['graph TD'];
-
-      for (const task of graph.getTasks()) {
-        mermaidLines.push(`  ${task.id}["${task.objective}"]`);
-        for (const dep of graph.getDependencies(task.id)) {
-          mermaidLines.push(`  ${dep} --> ${task.id}`);
-        }
+      if (loaded.kind === 'corrupt') {
+        return loaded;
       }
 
-      return mermaidLines.join('\n');
+      const plan = loaded.plan;
+      return { kind: 'found', mermaid: renderMermaid(plan.tasks) };
     },
 
     async validate(planId) {
-      const plan = loadPlan(planId);
-      if (!plan) {
+      const loaded = loadPlan(planId);
+      if (!loaded) {
         return null;
       }
+      if (loaded.kind === 'corrupt') {
+        return {
+          verdict: 'invalid',
+          issues: [`Plan data is invalid/corrupt: ${loaded.reason}`],
+        };
+      }
 
+      const plan = loaded.plan;
       const issues: string[] = [];
       const taskIds = new Set(plan.tasks.map((task) => task.id));
 
@@ -110,8 +114,7 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
       }
 
       if (issues.length === 0) {
-        const graph = buildGraph(plan.tasks);
-        if (graph.hasCycle()) {
+        if (hasCycle(plan.tasks)) {
           issues.push('Cycle detected in task dependencies');
         }
       }
@@ -123,27 +126,134 @@ export function createPlannerAdapter(dbPath: string): PlannerAdapter {
     },
   };
 
-  function loadPlan(planId: string): StoredPlan | null {
+  function loadPlan(planId: string): { kind: 'found'; plan: StoredPlan } | { kind: 'corrupt'; reason: string } | null {
     const row = store.db.prepare('SELECT dag FROM plans WHERE id = ?').get(planId) as { dag: string } | undefined;
     if (!row) {
       return null;
     }
-    return JSON.parse(row.dag) as StoredPlan;
+
+    return decodeStoredPlan(row.dag);
   }
 }
 
-function buildGraph(tasks: PlannerTask[]): PlanGraph {
-  let graph = PlanGraph.empty();
-
-  for (const task of tasks) {
-    graph = graph.addTask({
-      id: createTaskId(task.id),
-      objective: task.title,
-      requiredSkills: [],
-      dependsOn: task.deps.map((dep) => createTaskId(dep)),
-      status: task.status === 'done' ? 'completed' : 'pending',
-    }, task.deps.map((dep) => createTaskId(dep)));
+function createUniquePlanId(store: ReturnType<typeof createSqliteStore>): string {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const planId = randomUUID().slice(0, 8);
+    const existing = store.db.prepare('SELECT 1 FROM plans WHERE id = ?').get(planId);
+    if (!existing) {
+      return planId;
+    }
   }
 
-  return graph;
+  return randomUUID();
+}
+
+function decodeStoredPlan(rawDag: string): { kind: 'found'; plan: StoredPlan } | { kind: 'corrupt'; reason: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawDag);
+  } catch (error) {
+    return { kind: 'corrupt', reason: `stored plan DAG is not valid JSON: ${error instanceof Error ? error.message : String(error)}` };
+  }
+
+  if (!isRecord(parsed)) {
+    return { kind: 'corrupt', reason: 'stored plan DAG must be an object' };
+  }
+
+  if (typeof parsed.objective !== 'string') {
+    return { kind: 'corrupt', reason: 'stored plan DAG objective must be a string' };
+  }
+  if (parsed.constraints !== null && parsed.constraints !== undefined && typeof parsed.constraints !== 'string') {
+    return { kind: 'corrupt', reason: 'stored plan DAG constraints must be a string or null' };
+  }
+  if (!Array.isArray(parsed.tasks)) {
+    return { kind: 'corrupt', reason: 'stored plan DAG tasks must be an array' };
+  }
+
+  const tasks: PlannerTask[] = [];
+  const taskIds = new Set<string>();
+  for (const [index, task] of parsed.tasks.entries()) {
+    if (!isRecord(task)) {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}] must be an object` };
+    }
+    if (typeof task.id !== 'string' || task.id.length === 0) {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].id must be a non-empty string` };
+    }
+    if (taskIds.has(task.id)) {
+      return { kind: 'corrupt', reason: `stored plan DAG contains duplicate task id: ${task.id}` };
+    }
+    if (typeof task.title !== 'string') {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].title must be a string` };
+    }
+    if (!Array.isArray(task.deps) || !task.deps.every((dep) => typeof dep === 'string')) {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].deps must be an array of strings` };
+    }
+    if (task.status !== 'pending' && task.status !== 'done') {
+      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].status must be pending or done` };
+    }
+
+    taskIds.add(task.id);
+    tasks.push({
+      id: task.id,
+      title: task.title,
+      deps: task.deps,
+      status: task.status,
+    });
+  }
+
+  return {
+    kind: 'found',
+    plan: {
+      objective: parsed.objective,
+      constraints: parsed.constraints ?? null,
+      tasks,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function renderMermaid(tasks: PlannerTask[]): string {
+  const mermaidLines = ['graph TD'];
+  for (const task of tasks) {
+    mermaidLines.push(`  ${task.id}["${task.title}"]`);
+    for (const dep of task.deps) {
+      mermaidLines.push(`  ${dep} --> ${task.id}`);
+    }
+  }
+
+  return mermaidLines.join('\n');
+}
+
+function hasCycle(tasks: PlannerTask[]): boolean {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  function visit(taskId: string): boolean {
+    if (visiting.has(taskId)) {
+      return true;
+    }
+    if (visited.has(taskId)) {
+      return false;
+    }
+    const task = byId.get(taskId);
+    if (!task) {
+      return false;
+    }
+
+    visiting.add(taskId);
+    for (const dep of task.deps) {
+      if (visit(dep)) {
+        return true;
+      }
+    }
+    visiting.delete(taskId);
+    visited.add(taskId);
+    return false;
+  }
+
+  return tasks.some((task) => visit(task.id));
 }

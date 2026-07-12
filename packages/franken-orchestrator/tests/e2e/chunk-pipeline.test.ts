@@ -13,6 +13,7 @@ import type { GitBranchIsolator } from '../../src/skills/git-branch-isolator.js'
 import { ChunkFileGraphBuilder } from '../../src/planning/chunk-file-graph-builder.js';
 import { FileCheckpointStore } from '../../src/checkpoint/file-checkpoint-store.js';
 import type { PrCreator } from '../../src/closure/pr-creator.js';
+import { readVitestFlag } from '../../../../scripts/vitest-env.js';
 import {
   InMemoryFirewall,
   InMemorySkills,
@@ -24,7 +25,7 @@ import {
   InMemoryHeartbeat,
 } from '../helpers/in-memory-ports.js';
 
-describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
+describe.skipIf(!readVitestFlag(process.env, 'E2E'))('E2E: Chunk Pipeline', () => {
   let tmpDir: string;
 
   afterEach(() => {

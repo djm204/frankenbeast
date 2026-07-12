@@ -4,9 +4,9 @@ function printLine(...args: unknown[]): void {
   console.info(...args);
 }
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { constants, homedir } from 'node:os';
-import { win32 } from 'node:path';
+import { join, win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolveClientConfigDir, detectMcpClient, parseMcpClient, type McpClient } from './mcp-client-paths.js';
 import { resolveInitOptions } from './init-options.js';
@@ -31,10 +31,12 @@ function getEnvPath(env: NodeJS.ProcessEnv): string {
 }
 
 function windowsCommandCandidates(command: string): string[] {
-  const pathext = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+  const pathext = [...new Set((process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
     .split(';')
-    .map((ext) => ext.trim())
-    .filter(Boolean);
+    .flatMap((ext) => {
+      const trimmed = ext.trim();
+      return trimmed ? [trimmed, trimmed.toLowerCase(), trimmed.toUpperCase()] : [];
+    }))];
   const hasWindowsPathSeparator = command.includes('/') || command.includes('\\');
   const commandHasExt = win32.extname(command) !== '';
 
@@ -102,7 +104,30 @@ function resolveClient(): McpClient {
 
 function resolveUninstallClientConfigDirs(client: McpClient, root: string): string[] {
   const projectDir = resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
-  return [projectDir];
+  if (client === 'codex' || hasProjectFbeastJsonConfig(client, root, projectDir)) {
+    return [projectDir];
+  }
+
+  const homeDir = resolveLegacyHomeConfigDir(client);
+  return homeDir === projectDir ? [projectDir] : [projectDir, homeDir];
+}
+
+function resolveLegacyHomeConfigDir(client: McpClient): string {
+  if (client === 'claude') return `${homedir()}/.claude`;
+  if (client === 'gemini') return `${homedir()}/.gemini`;
+  return `${homedir()}/.codex`;
+}
+
+function hasProjectFbeastJsonConfig(client: McpClient, root: string, projectDir: string): boolean {
+  if (client === 'codex') return true;
+  const paths = client === 'claude'
+    ? [join(root, '.mcp.json'), join(projectDir, 'settings.json')]
+    : [join(projectDir, 'settings.json')];
+  return paths.some((path) => {
+    if (!existsSync(path)) return false;
+    const content = readFileSync(path, 'utf-8');
+    return content.includes('fbeast-') || content.includes('fbeast hook') || content.includes('fbeast-hook');
+  });
 }
 
 function reportMcpInitError(error: unknown): never {

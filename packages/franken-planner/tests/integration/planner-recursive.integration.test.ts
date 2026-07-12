@@ -83,6 +83,27 @@ describe('Integration — RecursivePlanner', () => {
     expect(executor).toHaveBeenCalledTimes(3);
   });
 
+  it('deduplicates expanded tasks by id before building the subgraph', async () => {
+    const sub = makeTask('sub');
+    const duplicateSub = makeTask('sub');
+    const parent = makeTask('parent');
+    const graph = PlanGraph.empty().addTask(parent);
+
+    const executor = vi.fn()
+      .mockResolvedValueOnce(expand('parent', [sub, duplicateSub]))
+      .mockResolvedValueOnce(ok('sub'));
+
+    const result = await buildRecursivePlanner(graph, executor).plan('...');
+
+    expect(result.status).toBe('completed');
+    expect(executor).toHaveBeenCalledTimes(2);
+    if (result.status !== 'completed') throw new Error('unexpected');
+    expect(result.taskResults.map((taskResult) => taskResult.taskId)).toEqual([
+      createTaskId('parent'),
+      createTaskId('sub'),
+    ]);
+  });
+
   it('collects results for parent and all sub-tasks', async () => {
     const sub = makeTask('sub');
     const parent = makeTask('parent');

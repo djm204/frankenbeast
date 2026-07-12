@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { isoNow } from '@franken/types';
 
 export interface PhaseSnapshot {
   readonly runId: string;
@@ -24,7 +25,7 @@ export class StateSnapshotStore {
     const full: PhaseSnapshot = {
       ...snapshot,
       previousPhase: this.previousPhase,
-      timestamp: new Date().toISOString(),
+      timestamp: isoNow(),
     };
     appendFileSync(this.file, `${JSON.stringify(full)}\n`, 'utf8');
     this.previousPhase = snapshot.phase;

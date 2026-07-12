@@ -1,3 +1,4 @@
+import { isoNow, wallClockNow } from '@franken/types';
 /**
  * MartinLoop — the smarter loop.
  *
@@ -441,7 +442,7 @@ export class MartinLoop {
 
     while (iteration < config.maxIterations) {
       iteration++;
-      const startTime = Date.now();
+      const startTime = wallClockNow();
 
       const resolved = this.registry.get(activeProvider);
       let renderedPrompt = config.prompt;
@@ -496,7 +497,7 @@ export class MartinLoop {
               chunkSession = {
                 ...chunkSession,
                 activeProvider,
-                updatedAt: new Date().toISOString(),
+                updatedAt: isoNow(),
               };
               config.sessionStore?.save(chunkSession);
             }
@@ -539,7 +540,7 @@ export class MartinLoop {
               chunkSession = {
                 ...chunkSession,
                 activeProvider,
-                updatedAt: new Date().toISOString(),
+                updatedAt: isoNow(),
               };
               config.sessionStore?.save(chunkSession);
             }
@@ -557,7 +558,7 @@ export class MartinLoop {
         throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
       }
 
-      const durationMs = Date.now() - startTime;
+      const durationMs = wallClockNow() - startTime;
       // For stream-json providers, use the pre-cleaned output from StreamLineBuffer.
       // For non-stream-json providers, normalize the raw stdout via the provider.
       const normalizedStdout = resolved.supportsStreamJson()
@@ -631,7 +632,7 @@ export class MartinLoop {
               usageRatio: usage.usageRatio,
               compactThreshold: usage.threshold,
             },
-            updatedAt: new Date().toISOString(),
+            updatedAt: isoNow(),
           };
         }
 
@@ -670,7 +671,7 @@ export class MartinLoop {
             chunkSession = {
               ...chunkSession,
               activeProvider,
-              updatedAt: new Date().toISOString(),
+              updatedAt: isoNow(),
             };
             config.sessionStore?.save(chunkSession);
           }
@@ -734,7 +735,7 @@ export class MartinLoop {
           chunkSession = {
             ...chunkSession,
             activeProvider,
-            updatedAt: new Date().toISOString(),
+            updatedAt: isoNow(),
           };
           config.sessionStore?.save(chunkSession);
         }
@@ -812,7 +813,7 @@ export class MartinLoop {
       iterations: iteration,
       activeProvider: providerName,
       transcript: [...session.transcript, createChunkTranscriptEntry('assistant', output)],
-      updatedAt: new Date().toISOString(),
+      updatedAt: isoNow(),
     };
   }
 }

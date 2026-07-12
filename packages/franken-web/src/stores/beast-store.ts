@@ -111,11 +111,11 @@ export const useBeastStore = create<BeastStore>()((set, get) => ({
   isEditDirty: false,
 
   setEditSnapshot: (snapshot) =>
-    set((s) => ({
+    set({
       editSnapshot: snapshot,
-      editValues: s.editValues ?? { ...snapshot },
-      isEditDirty: computeDirty(snapshot, s.editValues ?? snapshot),
-    })),
+      editValues: { ...snapshot },
+      isEditDirty: false,
+    }),
 
   setEditValues: (values) =>
     set((s) => ({

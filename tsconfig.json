@@ -34,6 +34,9 @@
       "@franken/types/path-containment": [
         "./packages/franken-types/src/path-containment.ts"
       ],
+      "@franken/types/utils": [
+        "./packages/franken-types/src/utils/index.ts"
+      ],
       "@franken/types": [
         "./packages/franken-types/src/index.ts"
       ],

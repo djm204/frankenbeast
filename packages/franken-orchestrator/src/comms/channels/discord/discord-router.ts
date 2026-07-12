@@ -3,6 +3,7 @@ import { discordSignatureMiddleware } from '../../security/discord-signature.js'
 import { DiscordInteractionSchema, DiscordInteractionType } from './discord-schemas.js';
 import type { ChatGateway } from '../../gateway/chat-gateway.js';
 import type { SessionMapper } from '../../core/session-mapper.js';
+import { isoNow } from '@franken/types';
 
 export interface DiscordRouterOptions {
   gateway: ChatGateway;
@@ -57,18 +58,20 @@ export function discordRouter(options: DiscordRouterOptions) {
 
       const text = commandName === 'franken' ? query : `/${commandName} ${query}`.trim();
 
-      await gateway.handleInbound({
-        channelType: 'discord',
-        externalUserId: userId,
-        externalChannelId: channelId,
-        externalMessageId: interaction.id,
-        text,
-        receivedAt: new Date().toISOString(),
-        rawEvent: body,
-      });
+      runGatewayTaskInBackground('Discord slash command processing', () =>
+        gateway.handleInbound({
+          channelType: 'discord',
+          externalUserId: userId,
+          externalChannelId: channelId,
+          externalMessageId: interaction.id,
+          text,
+          receivedAt: isoNow(),
+          rawEvent: body,
+        }),
+      );
 
-      // Acknowledge the interaction immediately to avoid timeout
-      // In a real scenario, we might use a deferred response
+      // Acknowledge the interaction immediately to avoid timeout.
+      // Gateway processing continues in the background and follows up through the normal channel.
       return c.json({
         type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
         data: { content: 'Processing your request...' },
@@ -86,7 +89,9 @@ export function discordRouter(options: DiscordRouterOptions) {
         externalChannelId: channelId,
       });
 
-      await gateway.handleAction('discord', sessionId, customId);
+      runGatewayTaskInBackground('Discord button action processing', () =>
+        gateway.handleAction('discord', sessionId, customId),
+      );
 
       return c.json({
         type: 4,
@@ -105,4 +110,14 @@ function shouldVerifySignature(verifySignature: DiscordRouterOptions['verifySign
     return verifySignature(c);
   }
   return verifySignature !== false;
+}
+
+function runGatewayTaskInBackground(label: string, task: () => Promise<void>): void {
+  try {
+    void task().catch((error: unknown) => {
+      console.error(`[discord-router] ${label} failed`, error);
+    });
+  } catch (error) {
+    console.error(`[discord-router] ${label} failed`, error);
+  }
 }

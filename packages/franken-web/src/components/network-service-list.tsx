@@ -6,11 +6,13 @@ interface NetworkServiceItem {
   explanation?: string;
   url?: string;
   inProcess?: boolean;
+  hostServiceId?: string;
   channels?: Record<string, boolean>;
 }
 
 interface NetworkServiceListProps {
   services: NetworkServiceItem[];
+  onSelectLogs(serviceId: string): void;
   onStart(serviceId: string): Promise<void> | void;
   onStop(serviceId: string): Promise<void> | void;
   onRestart(serviceId: string): Promise<void> | void;
@@ -29,17 +31,44 @@ const actionLabels: Record<ServiceAction, { present: string; past: string }> = {
   restart: { present: 'Restarting', past: 'Restarted' },
 };
 
+function normalizeServiceStatus(status: string): string {
+  return status.trim().toLowerCase();
+}
+
+function canStartService(service: NetworkServiceItem): boolean {
+  const status = normalizeServiceStatus(service.status);
+  return status === 'stopped' || status === 'failed';
+}
+
+function canStopOrRestartService(service: NetworkServiceItem): boolean {
+  const status = normalizeServiceStatus(service.status);
+  return !service.inProcess && (status === 'running' || status === 'stale');
+}
+
+function canViewServiceLogs(service: NetworkServiceItem): boolean {
+  return !service.inProcess || Boolean(service.hostServiceId);
+}
+
 export function NetworkServiceList({
   services,
+  onSelectLogs,
   onStart,
   onStop,
   onRestart,
 }: NetworkServiceListProps) {
   const [actionStateByService, setActionStateByService] = useState<Record<string, ServiceActionState>>({});
 
-  const runAction = (serviceId: string, action: ServiceAction, callback: (serviceId: string) => Promise<void> | void) => {
+  const runAction = (
+    service: NetworkServiceItem,
+    action: ServiceAction,
+    callback: (serviceId: string) => Promise<void> | void,
+  ) => {
+    const serviceId = service.id;
     const current = actionStateByService[serviceId];
-    if (current?.status === 'pending') {
+    const isAllowed = action === 'start'
+      ? canStartService(service)
+      : canStopOrRestartService(service);
+    if (current?.status === 'pending' || !isAllowed) {
       return;
     }
     setActionStateByService((states) => ({
@@ -80,7 +109,8 @@ export function NetworkServiceList({
         {services.map((service) => {
           const actionState = actionStateByService[service.id];
           const hasPendingAction = actionState?.status === 'pending';
-          const disableInProcessControls = Boolean(service.inProcess) || hasPendingAction;
+          const startDisabled = hasPendingAction || !canStartService(service);
+          const stopOrRestartDisabled = hasPendingAction || !canStopOrRestartService(service);
           return (
           <article key={service.id} className="network-services__item">
             <div>
@@ -100,9 +130,19 @@ export function NetworkServiceList({
               )}
             </div>
             <div className="network-services__actions">
-              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service.id, 'start', onStart)} aria-label={`Start ${service.id}`} disabled={hasPendingAction}>Start</button>
-              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service.id, 'stop', onStop)} aria-label={`Stop ${service.id}`} disabled={disableInProcessControls}>Stop</button>
-              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service.id, 'restart', onRestart)} aria-label={`Restart ${service.id}`} disabled={disableInProcessControls}>Restart</button>
+              {canViewServiceLogs(service) ? (
+                <button
+                  aria-label={`View logs for ${service.id}`}
+                  className="button button--secondary button--small"
+                  onClick={() => onSelectLogs(service.id)}
+                  type="button"
+                >
+                  View logs
+                </button>
+              ) : null}
+              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'start', onStart)} aria-label={`Start ${service.id}`} disabled={startDisabled}>Start</button>
+              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'stop', onStop)} aria-label={`Stop ${service.id}`} disabled={stopOrRestartDisabled}>Stop</button>
+              <button className="button button--secondary button--small" type="button" onClick={() => runAction(service, 'restart', onRestart)} aria-label={`Restart ${service.id}`} disabled={stopOrRestartDisabled}>Restart</button>
             </div>
           </article>
           );

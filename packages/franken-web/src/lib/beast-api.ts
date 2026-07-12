@@ -1,6 +1,7 @@
-import { MODULE_CONFIG_KEYS } from '@franken/types';
+import { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 import type {
   ApiDataEnvelope,
+  ApiErrorEnvelope,
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
   BeastInterviewPrompt,
@@ -22,7 +23,7 @@ import type {
   TrackedAgentSummary,
 } from '@franken/types';
 
-export { MODULE_CONFIG_KEYS } from '@franken/types';
+export { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 export type {
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
@@ -44,6 +45,18 @@ export type {
   TrackedAgentInitAction,
   TrackedAgentSummary,
 } from '@franken/types';
+
+export class BeastApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string,
+    public readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'BeastApiError';
+  }
+}
 
 export class BeastApiClient {
   constructor(private readonly baseUrl: string) {}
@@ -166,13 +179,40 @@ export class BeastApiClient {
     let eventSource: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let lastEventId: string | undefined;
+    let failedEventId: string | undefined;
     const parse = <T>(event: MessageEvent): T => JSON.parse(event.data) as T;
     const parseWithEventId = <T extends object>(event: MessageEvent): T & { eventId?: string } => {
       const parsed = parse<T>(event);
       return event.lastEventId ? { ...parsed, eventId: event.lastEventId } : parsed;
     };
-    const rememberEventId = (event: MessageEvent): void => {
-      if (event.lastEventId) lastEventId = event.lastEventId;
+    const rememberProcessedEventId = (event: MessageEvent): void => {
+      if (!event.lastEventId) return;
+      if (failedEventId && event.lastEventId !== failedEventId) return;
+      lastEventId = event.lastEventId;
+      if (event.lastEventId === failedEventId) failedEventId = undefined;
+    };
+    const rememberFailedEventId = (event: MessageEvent): void => {
+      if (event.lastEventId && !failedEventId) failedEventId = event.lastEventId;
+    };
+    const handleEvent = <T>(
+      event: MessageEvent,
+      parsePayload: (event: MessageEvent) => T,
+      handler: ((payload: T) => void) | undefined,
+    ): void => {
+      if (!handler) {
+        rememberProcessedEventId(event);
+        return;
+      }
+
+      let payload: T;
+      try {
+        payload = parsePayload(event);
+      } catch (error) {
+        rememberFailedEventId(event);
+        throw error;
+      }
+      rememberProcessedEventId(event);
+      handler(payload);
     };
     const scheduleReconnect = () => {
       if (closed || reconnectTimer) return;
@@ -199,28 +239,46 @@ export class BeastApiClient {
       eventSource = nextSource;
 
       nextSource.addEventListener('snapshot', (event) => {
-        rememberEventId(event as MessageEvent);
-        try { handlers.snapshot?.(parse<BeastSseSnapshot>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+        try {
+          handleEvent(event as MessageEvent, parse<BeastSseSnapshot>, handlers.snapshot);
+        } catch (error) {
+          handlers.error?.(toError(error));
+        }
       });
       nextSource.addEventListener('agent.status', (event) => {
-        rememberEventId(event as MessageEvent);
-        try { handlers.agentStatus?.(parse<BeastSseAgentStatusEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+        try {
+          handleEvent(event as MessageEvent, parse<BeastSseAgentStatusEvent>, handlers.agentStatus);
+        } catch (error) {
+          handlers.error?.(toError(error));
+        }
       });
       nextSource.addEventListener('agent.event', (event) => {
-        rememberEventId(event as MessageEvent);
-        try { handlers.agentEvent?.(parse<BeastSseAgentEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+        try {
+          handleEvent(event as MessageEvent, parse<BeastSseAgentEvent>, handlers.agentEvent);
+        } catch (error) {
+          handlers.error?.(toError(error));
+        }
       });
       nextSource.addEventListener('run.status', (event) => {
-        rememberEventId(event as MessageEvent);
-        try { handlers.runStatus?.(parse<BeastSseRunStatusEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+        try {
+          handleEvent(event as MessageEvent, parse<BeastSseRunStatusEvent>, handlers.runStatus);
+        } catch (error) {
+          handlers.error?.(toError(error));
+        }
       });
       nextSource.addEventListener('run.log', (event) => {
-        rememberEventId(event as MessageEvent);
-        try { handlers.runLog?.(parseWithEventId<BeastSseRunLogEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+        try {
+          handleEvent(event as MessageEvent, parseWithEventId<BeastSseRunLogEvent>, handlers.runLog);
+        } catch (error) {
+          handlers.error?.(toError(error));
+        }
       });
       nextSource.addEventListener('run.event', (event) => {
-        rememberEventId(event as MessageEvent);
-        try { handlers.runEvent?.(parse<BeastSseRunEvent>(event as MessageEvent)); } catch (error) { handlers.error?.(toError(error)); }
+        try {
+          handleEvent(event as MessageEvent, parse<BeastSseRunEvent>, handlers.runEvent);
+        } catch (error) {
+          handlers.error?.(toError(error));
+        }
       });
       nextSource.addEventListener('error', () => {
         if (closed) return;
@@ -272,7 +330,7 @@ export class BeastApiClient {
       headers,
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw await this.toError(response);
     }
     return response.json() as Promise<T>;
   }
@@ -285,8 +343,29 @@ export class BeastApiClient {
       headers,
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw await this.toError(response);
     }
+  }
+
+  private async toError(response: Response): Promise<BeastApiError> {
+    const fallbackMessage = `HTTP ${response.status}`;
+    try {
+      const body = await response.json() as ApiErrorEnvelope;
+      const serverMessage = body.error?.message;
+      if (serverMessage) {
+        const code = body.error.code;
+        const codeSuffix = code ? `, ${code}` : '';
+        return new BeastApiError(
+          `${serverMessage} (HTTP ${response.status}${codeSuffix})`,
+          response.status,
+          code,
+          body.error.details,
+        );
+      }
+    } catch {
+      // Fall through with HTTP status message for empty, malformed, or non-JSON bodies.
+    }
+    return new BeastApiError(fallbackMessage, response.status);
   }
 }
 

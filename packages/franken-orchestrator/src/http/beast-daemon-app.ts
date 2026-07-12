@@ -5,6 +5,7 @@ import { beastRoutes } from './routes/beast-routes.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { errorHandler } from './middleware.js';
 import { TransportSecurityService } from './security/transport-security.js';
+import { isoNow } from '@franken/types';
 
 export interface BeastDaemonAppOptions {
   services: BeastServiceBundle;
@@ -22,7 +23,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
   const app = new Hono();
   const security = new TransportSecurityService();
   const rateLimit = options.rateLimit ?? { windowMs: 60_000, max: 20 };
-  const startedAt = options.startedAt ?? new Date().toISOString();
+  const startedAt = options.startedAt ?? isoNow();
   const services = options.services;
 
   app.onError(errorHandler);

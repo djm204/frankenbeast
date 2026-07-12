@@ -120,6 +120,14 @@ describe('PostMortemGenerator', () => {
       const content = gen.generateContent(trace, signal)
       expect(content).toContain('2023-11-14') // ISO date for that Unix ms
     })
+
+    it('uses a safe fallback for out-of-range timestamps', () => {
+      const gen = new PostMortemGenerator({ outputDir })
+      const trace = makeTrace()
+      const content = gen.generateContent(trace, makeSignal(trace.id, { timestamp: Number.MAX_VALUE }))
+
+      expect(content).toContain('**Detected at:** Invalid timestamp')
+    })
   })
 
   describe('generate()', () => {
@@ -285,6 +293,19 @@ describe('PostMortemGenerator', () => {
       expect(filePath).not.toBeNull()
       expect(filePath!).toMatch(/post-mortem-[a-f0-9]{64}-invalid-timestamp\.md$/)
       expect(existsSync(filePath!)).toBe(true)
+    })
+
+    it('does not throw when the interrupt timestamp is out of range', async () => {
+      const gen = new PostMortemGenerator({ outputDir })
+      const trace = makeTraceWithId('trace-with-out-of-range-timestamp')
+      const filePath = await gen.generate(trace, makeSignal(trace.id, { timestamp: Number.MAX_VALUE }))
+
+      expect(filePath).not.toBeNull()
+      expect(filePath!).toMatch(/post-mortem-[a-f0-9]{64}-invalid-timestamp\.md$/)
+      expect(existsSync(filePath!)).toBe(true)
+
+      const content = readFileSync(filePath!, 'utf-8')
+      expect(content).toContain('**Detected at:** Invalid timestamp')
     })
   })
 

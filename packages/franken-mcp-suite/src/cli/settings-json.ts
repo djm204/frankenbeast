@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, fsyncSync, lstatSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, copyFileSync, fsyncSync, lstatSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -14,15 +14,39 @@ export function readSettingsJson(content: string): Record<string, unknown> {
   return parseJsonObjectWithComments(content);
 }
 
+export function recoverInvalidJsonFile(path: string, error: unknown): Record<string, unknown> {
+  const backupPath = join(dirname(path), `${basename(path)}.invalid-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.bak`);
+  copyFileSync(path, backupPath);
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`fbeast: ${path} is not valid JSON (${reason}); backed it up to ${backupPath} and will recreate it.`);
+  return {};
+}
+
+export function readJsonObjectFileOrRecover(path: string, content: string): Record<string, unknown> {
+  try {
+    return parseJsonObjectWithComments(content);
+  } catch (error) {
+    return recoverInvalidJsonFile(path, error);
+  }
+}
+
 export function writeJsonFileAtomic(path: string, value: unknown): void {
   const content = JSON.stringify(value, null, 2) + '\n';
   const targetPath = resolveAtomicWriteTarget(path);
   const existingMode = getExistingFileMode(targetPath);
   const dir = dirname(targetPath);
-  const tempPath = join(dir, `.${basename(targetPath)}.tmp-${process.pid}-${randomUUID()}`);
+  let tempPath = join(dir, `.${basename(targetPath)}.tmp-${randomUUID()}`);
 
   try {
-    writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx', mode: existingMode });
+    for (;;) {
+      try {
+        writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx', mode: existingMode });
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        tempPath = join(dir, `.${basename(targetPath)}.tmp-${randomUUID()}`);
+      }
+    }
     if (existingMode !== undefined) chmodSync(tempPath, existingMode);
     fsyncFile(tempPath);
     renameSync(tempPath, targetPath);

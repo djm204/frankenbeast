@@ -6,7 +6,7 @@ import {
   SignatureVerifier,
 } from '../security/signature-verifier.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
-import { createSessionToken } from '../security/session-token.js';
+import { assertValidSessionTokenTtl, createSessionToken } from '../security/session-token.js';
 import {
   ApprovalTimeoutError,
   SignatureVerificationError,
@@ -44,6 +44,14 @@ export class ApprovalGateway {
   private readonly sessionTokenStore: SessionTokenStore | undefined;
 
   constructor(deps: ApprovalGatewayDeps) {
+    try {
+      assertValidSessionTokenTtl(deps.config.sessionTokenTtlMs);
+    } catch (error) {
+      throw new ApprovalConfigurationError(
+        `Invalid sessionTokenTtlMs: ${(error as Error).message}`,
+      );
+    }
+
     this.channel = deps.channel;
     this.auditRecorder = deps.auditRecorder;
     this.config = deps.config;

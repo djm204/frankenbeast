@@ -56,6 +56,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const [pendingFocusEventId, setPendingFocusEventId] = useState<string | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
   const detailTriggerEventIdRef = useRef<string | null>(null);
+  const activeDetailEventIdRef = useRef<string | null>(null);
   const detailRequestSeqRef = useRef(0);
   const deferDetailFocusUntilEventsLoadRef = useRef(false);
   const sawDeferredEventsLoadRef = useRef(false);
@@ -68,7 +69,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
     void Promise.allSettled([
       client.fetchSummary(filters),
-      client.fetchSessions(filters),
+      client.fetchSessions(filtersForSessionOptions(filters)),
     ]).then(([summaryResult, sessionsResult]) => {
       if (cancelled) return;
       const errors = [summaryResult, sessionsResult]
@@ -80,6 +81,12 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       }
       if (sessionsResult.status === 'fulfilled') {
         setSessions(sessionsResult.value);
+      } else {
+        setSessions((current) => {
+          if (!filters.sessionId) return [];
+          const activeSession = current.find((session) => session.id === filters.sessionId);
+          return [activeSession ?? { id: filters.sessionId, lastActivityAt: '', eventCount: 0, failureCount: 0 }];
+        });
       }
       setOverviewError(errors.length > 0 ? errors.join('; ') : null);
       setIsOverviewLoading(false);
@@ -100,7 +107,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       setEventPage(eventsResult);
     }).catch((error: unknown) => {
       if (cancelled) return;
-      setEventPage((current) => current ? { ...current, events: [] } : null);
+      setEventPage({ events: [], total: 0, page, pageSize });
       setEventsError(error instanceof Error ? error.message : 'Unable to load analytics.');
     }).finally(() => {
       if (!cancelled) {
@@ -117,7 +124,8 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   const totalEvents = eventPage?.total ?? 0;
   const currentPage = page;
   const currentPageSize = eventPage?.pageSize ?? pageSize;
-  const totalPages = Math.max(1, Math.ceil(totalEvents / currentPageSize));
+  const totalPages = Math.max(currentPage, 1, Math.ceil(totalEvents / currentPageSize));
+  const loadedRangeLabel = formatEventRange(currentPage, currentPageSize, totalEvents);
   const canGoPrevious = currentPage > 1 && !isEventsLoading;
   const canGoNext = currentPage < totalPages && !isEventsLoading;
   const loadError = [overviewError, eventsError].filter(Boolean).join('; ') || null;
@@ -166,27 +174,33 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   async function openDetail(event: AnalyticsEvent, trigger?: HTMLElement) {
     detailTriggerRef.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     detailTriggerEventIdRef.current = event.id;
+    activeDetailEventIdRef.current = event.id;
     setSelectedEvent(event);
     setHasFullDetail(false);
     await loadEventDetail(event.id);
   }
 
+  function isCurrentDetailRequest(requestSeq: number, eventId: string) {
+    return detailRequestSeqRef.current === requestSeq && activeDetailEventIdRef.current === eventId;
+  }
+
   async function loadEventDetail(eventId: string) {
     const requestSeq = detailRequestSeqRef.current + 1;
     detailRequestSeqRef.current = requestSeq;
+    activeDetailEventIdRef.current = eventId;
     setIsDetailLoading(true);
     setDetailError(null);
     try {
       const detail = await client.fetchEventDetail(eventId);
-      if (detailRequestSeqRef.current !== requestSeq) return;
+      if (!isCurrentDetailRequest(requestSeq, eventId)) return;
       setSelectedEvent(detail);
       setHasFullDetail(true);
     } catch (error) {
-      if (detailRequestSeqRef.current !== requestSeq) return;
+      if (!isCurrentDetailRequest(requestSeq, eventId)) return;
       setHasFullDetail(false);
       setDetailError(error instanceof Error ? error.message : 'Unable to load event detail.');
     } finally {
-      if (detailRequestSeqRef.current === requestSeq) {
+      if (isCurrentDetailRequest(requestSeq, eventId)) {
         setIsDetailLoading(false);
       }
     }
@@ -208,6 +222,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
   function closeDetail() {
     const triggerEventId = detailTriggerEventIdRef.current;
     detailRequestSeqRef.current += 1;
+    activeDetailEventIdRef.current = null;
     setSelectedEvent(null);
     setIsDetailLoading(false);
     setHasFullDetail(false);
@@ -333,7 +348,7 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
 
       <section className="analytics-pagination" aria-label="Analytics pagination">
         <div>
-          Page {currentPage} of {totalPages} · {totalEvents} events
+          {loadedRangeLabel} · Page {currentPage} of {totalPages}
         </div>
         <div className="analytics-pagination__actions">
           <button
@@ -382,6 +397,19 @@ export function AnalyticsPage({ client }: AnalyticsPageProps) {
       )}
     </main>
   );
+}
+
+function filtersForSessionOptions(filters: AnalyticsFilters): AnalyticsFilters {
+  const sessionFilters = { ...filters };
+  delete sessionFilters.sessionId;
+  return sessionFilters;
+}
+
+function formatEventRange(page: number, pageSize: number, total: number): string {
+  if (total <= 0) return 'Showing 0 of 0 events';
+  const start = Math.min(total, (page - 1) * pageSize + 1);
+  const end = Math.min(total, page * pageSize);
+  return `Showing ${start}–${end} of ${total} events`;
 }
 
 function MetricCard({

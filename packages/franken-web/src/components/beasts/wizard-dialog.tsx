@@ -83,7 +83,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRunt
     }
 
     clearValidationErrors(wizardStep);
-    onLaunch(buildWizardLaunchConfig(stepValues, catalog));
+    onLaunch(buildWizardLaunchConfig(stepValues, catalog, containerRuntime));
   }
 
   function handleNext() {
@@ -238,7 +238,7 @@ export function WizardDialog({ isOpen, onClose, onLaunch, catalog, containerRunt
                   <button
                     type="button"
                     onClick={buildAndLaunch}
-                    disabled={Boolean(launching) || promptFilesLoading}
+                    disabled={Boolean(launching) || promptFilesLoading || !formIsValid}
                     className="px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors
                       bg-beast-accent text-beast-bg hover:bg-beast-accent-strong disabled:opacity-50"
                   >

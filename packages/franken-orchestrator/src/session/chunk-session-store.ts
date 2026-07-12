@@ -4,12 +4,12 @@ import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
 import { atomicWriteFileSync, readJsonFileOrQuarantine } from './atomic-file.js';
 
-const QUARANTINE_SUFFIX = /\.corrupt\.\d+\.\d+$/;
+const QUARANTINE_SUFFIX = /\.corrupt\.\d+\.[0-9a-f-]+$/;
 
 /**
  * Derives a session's storage key from a filename on disk, without parsing
  * JSON — recognizes both live `<key>.json` files and quarantined
- * `<key>.json.corrupt.<ts>.<pid>` files (see readJsonFileOrQuarantine).
+ * `<key>.json.corrupt.<timestamp>.<uuid>` files (see readJsonFileOrQuarantine).
  * Returns undefined for anything else (directories, unrelated files).
  */
 function sessionKeyFromFileName(file: string): string | undefined {

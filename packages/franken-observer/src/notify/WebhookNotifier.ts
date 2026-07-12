@@ -1,5 +1,6 @@
 import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
 
+import { seededRandom } from '@franken/types';
 export interface WebhookRetryOptions {
   /** Maximum number of retry attempts after the initial try. Default: 0 (no retry). */
   maxRetries: number
@@ -57,6 +58,10 @@ export interface WebhookNotifierOptions {
  * })
  * ```
  */
+function isTransientStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599)
+}
+
 export class WebhookNotifier {
   private readonly url: string
   private readonly extraHeaders: Record<string, string>
@@ -87,12 +92,15 @@ export class WebhookNotifier {
       if (attempt > 0 && this.retry) {
         const { baseDelayMs, maxDelayMs, jitter } = this.retry
         const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
-        const delay = jitter ? base + Math.random() * baseDelayMs : base
+        const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
+        // Clamp after adding jitter so maxDelayMs remains a true upper bound.
+        const delay = Math.min(jittered, maxDelayMs)
         await this.sleepFn(delay)
       }
 
+      let response: Awaited<ReturnType<FetchFn>>
       try {
-        const response = await this.fetchFn(this.url, {
+        response = await this.fetchFn(this.url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -100,16 +108,21 @@ export class WebhookNotifier {
           },
           body: JSON.stringify(payload),
         })
-        if (!response.ok) {
-          lastError = new Error(
-            `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
-          )
-          continue
-        }
-        return
       } catch (err) {
         lastError = err
+        continue
       }
+
+      if (!response.ok) {
+        lastError = new Error(
+          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+        )
+        if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
+          throw lastError
+        }
+        continue
+      }
+      return
     }
 
     throw lastError

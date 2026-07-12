@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.2.7](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.6...live-bench-v0.2.7) (2026-07-11)
+
+
+### Tests
+
+* **live-bench:** add CLI smoke coverage ([#1653](https://github.com/djm204/frankenbeast/issues/1653)) ([3442b61](https://github.com/djm204/frankenbeast/commit/3442b61180431d5aebcc49eeaad1b76af836d106))
+
+## [0.2.6](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.5...live-bench-v0.2.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **live-bench:** reject empty benchmark assertions ([aa0e90b](https://github.com/djm204/frankenbeast/commit/aa0e90b9f28de63d5f541af477128ca318c0764f)), closes [#1229](https://github.com/djm204/frankenbeast/issues/1229)
+* replace nondeterministic calls with deterministic utilities ([#1441](https://github.com/djm204/frankenbeast/issues/1441)) ([1585acf](https://github.com/djm204/frankenbeast/commit/1585acf39bb993b06d2b975045641ad662a44459))
+
+
+### Miscellaneous
+
+* **ci:** make workspace lint coverage explicit ([#1596](https://github.com/djm204/frankenbeast/issues/1596)) ([c1674ed](https://github.com/djm204/frankenbeast/commit/c1674ed69e460a9c7c14d8b7af2e4039edf174d8))
+* **package:** normalize workspace metadata ([#1573](https://github.com/djm204/frankenbeast/issues/1573)) ([921c557](https://github.com/djm204/frankenbeast/commit/921c557e9f8392f1202f3fa2cdcc7952ffccd255))
+
+
+### Documentation
+
+* **packages:** add remaining workspace READMEs ([#1576](https://github.com/djm204/frankenbeast/issues/1576)) ([c050151](https://github.com/djm204/frankenbeast/commit/c050151bcda2973825fd13d17751f348c8ce74f6))
+
+
+### Tests
+
+* add deterministic Vitest seed mode ([#1429](https://github.com/djm204/frankenbeast/issues/1429)) ([f12b497](https://github.com/djm204/frankenbeast/commit/f12b497a0662a1b519cbf07d442316c734dcc778))
+* add workspace coverage task ([#1589](https://github.com/djm204/frankenbeast/issues/1589)) ([1934756](https://github.com/djm204/frankenbeast/commit/1934756851e520c033f2a43c5b440c8268662714)), closes [#948](https://github.com/djm204/frankenbeast/issues/948)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.15 to 0.7.16
+    * @franken/types bumped from 0.8.2 to 0.9.0
+
+## [0.2.5](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.4...live-bench-v0.2.5) (2026-07-10)
+
+
+### Bug Fixes
+
+* **mcp:** close Codex hook command quoting issue ([#1382](https://github.com/djm204/frankenbeast/issues/1382)) ([293c730](https://github.com/djm204/frankenbeast/commit/293c7301083883b56bb71e1eca19f1ddc4d23236)), closes [#1047](https://github.com/djm204/frankenbeast/issues/1047)
+* **web:** resolve chat session syntax issue ([4ce15f7](https://github.com/djm204/frankenbeast/commit/4ce15f79ead878e53e9fe9ac10bd1d7943972dfd))
+
+
+### Documentation
+
+* **web:** fix operator token auth header markdown ([#1303](https://github.com/djm204/frankenbeast/issues/1303)) ([1449e26](https://github.com/djm204/frankenbeast/commit/1449e268c54bafb994d5034fec1ccfc312194d9e))
+
+
+### Tests
+
+* **live-bench:** restore live test target ([#1347](https://github.com/djm204/frankenbeast/issues/1347)) ([d85dc55](https://github.com/djm204/frankenbeast/commit/d85dc55652bc0480c0e4fc7126c51371f289e89b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.14 to 0.7.15
+
 ## [0.2.4](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.3...live-bench-v0.2.4) (2026-07-08)
 
 

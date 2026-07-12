@@ -1,13 +1,18 @@
 import { defineConfig } from 'vitest/config';
 import { createFrankenSourceAliases } from '../../scripts/vitest-source-aliases.js';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   resolve: {
     alias: createFrankenSourceAliases(import.meta.url),
   },
   test: {
+    setupFiles: [
+      fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url)),
+    ],
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts'],
+    exclude: ['tests/integration/**/*.integration.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

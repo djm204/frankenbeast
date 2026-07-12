@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { createAuditEvent, AuditTrail, hashContent } from './audit-event.js';
+import { createAuditEvent, AuditTrail, hashContent, type AuditEvent } from './audit-event.js';
+
+function ignoreMutation(mutate: () => void): void {
+  try {
+    mutate();
+  } catch {
+    // Frozen runtime values may throw in strict mode; the invariant under test is
+    // that mutation attempts never alter the trail's stored history.
+  }
+}
 
 describe('createAuditEvent', () => {
   it('generates unique eventId', () => {
@@ -96,6 +105,166 @@ describe('AuditTrail', () => {
     expect(restored.getAll()).toEqual(json);
   });
 
+  it('toJSON normalizes undefined payloads before persistence', () => {
+    const trail = new AuditTrail();
+    trail.append(createAuditEvent('empty.payload', undefined, { phase: 'p', provider: 'pr' }));
+
+    expect(trail.toJSON()[0]!.payload).toBeNull();
+    expect(AuditTrail.fromJSON(trail.toJSON()).getAll()[0]!.payload).toBeNull();
+  });
+
+  it('does not retain mutable aliases to appended events', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('append.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' });
+    trail.append(event);
+
+    event.type = 'tampered';
+    (event.payload as { nested: { count: number } }).nested.count = 99;
+
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'append.alias',
+      payload: { nested: { count: 1 } },
+    });
+  });
+
+  it('returns defensive copies from getAll()', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('get.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' });
+    trail.append(event);
+
+    const returned = trail.getAll() as AuditEvent[];
+    ignoreMutation(() => returned.push(createAuditEvent('extra', {}, { phase: 'p', provider: 'pr' })));
+    ignoreMutation(() => {
+      returned[0]!.type = 'tampered';
+    });
+    ignoreMutation(() => {
+      (returned[0]!.payload as { nested: { count: number } }).nested.count = 99;
+    });
+
+    expect(trail.getAll()).toHaveLength(1);
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'get.alias',
+      payload: { nested: { count: 1 } },
+    });
+  });
+
+  it('returns defensive copies from toJSON()', () => {
+    const trail = new AuditTrail();
+    trail.append(createAuditEvent('json.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' }));
+
+    const json = trail.toJSON();
+    ignoreMutation(() => json.push(createAuditEvent('extra', {}, { phase: 'p', provider: 'pr' })));
+    ignoreMutation(() => {
+      json[0]!.type = 'tampered';
+    });
+    ignoreMutation(() => {
+      (json[0]!.payload as { nested: { count: number } }).nested.count = 99;
+    });
+
+    expect(trail.getAll()).toHaveLength(1);
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'json.alias',
+      payload: { nested: { count: 1 } },
+    });
+  });
+
+  it('fromJSON does not retain aliases to caller-owned JSON data', () => {
+    const json = [createAuditEvent('restore.alias', { nested: { count: 1 } }, { phase: 'p', provider: 'pr' })];
+    const trail = AuditTrail.fromJSON(json);
+
+    json[0]!.type = 'tampered';
+    (json[0]!.payload as { nested: { count: number } }).nested.count = 99;
+    json.push(createAuditEvent('extra', {}, { phase: 'p', provider: 'pr' }));
+
+    expect(trail.getAll()).toHaveLength(1);
+    expect(trail.getAll()[0]).toMatchObject({
+      type: 'restore.alias',
+      payload: { nested: { count: 1 } },
+    });
+  });
+
+  it('freezes function payloads so callable objects cannot mutate stored history', () => {
+    const trail = new AuditTrail();
+    const payload = (): string => 'ok';
+    (payload as { mutable?: { count: number } }).mutable = { count: 1 };
+
+    trail.append(createAuditEvent('function.payload', payload, { phase: 'p', provider: 'pr' }));
+
+    ignoreMutation(() => {
+      (payload as { mutable?: { count: number } }).mutable = { count: 99 };
+    });
+    ignoreMutation(() => {
+      (payload as { mutable?: { count: number } }).mutable!.count = 99;
+    });
+    const returnedPayload = trail.getAll()[0]!.payload as { mutable?: { count: number } };
+    ignoreMutation(() => {
+      returnedPayload.mutable = { count: 42 };
+    });
+
+    expect((trail.getAll()[0]!.payload as { mutable?: { count: number } }).mutable).toEqual({ count: 1 });
+  });
+
+  it('preserves Buffer payloads while isolating mutable aliases', () => {
+    const trail = new AuditTrail();
+    const payload = Buffer.from('audit-bytes');
+    trail.append(createAuditEvent('buffer.payload', payload, { phase: 'p', provider: 'pr' }));
+
+    payload[0] = 0;
+    const returnedPayload = trail.getAll()[0]!.payload as Buffer;
+    expect(Buffer.isBuffer(returnedPayload)).toBe(true);
+    expect(returnedPayload.toString()).toBe('audit-bytes');
+
+    returnedPayload[0] = 0;
+    expect((trail.getAll()[0]!.payload as Buffer).toString()).toBe('audit-bytes');
+  });
+
+  it('copies typed arrays backed by shared memory', () => {
+    const trail = new AuditTrail();
+    const shared = new SharedArrayBuffer(4);
+    const payload = new Uint8Array(shared);
+    payload.set([1, 2, 3, 4]);
+    trail.append(createAuditEvent('shared.payload', payload, { phase: 'p', provider: 'pr' }));
+
+    payload[0] = 99;
+    const returnedPayload = trail.getAll()[0]!.payload as Uint8Array;
+    expect(Array.from(returnedPayload)).toEqual([1, 2, 3, 4]);
+
+    returnedPayload[1] = 88;
+    expect(Array.from(trail.getAll()[0]!.payload as Uint8Array)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('preserves prototype-backed toJSON payload data', () => {
+    const trail = new AuditTrail();
+    const url = new URL('https://example.com/audit?event=1');
+    trail.append(createAuditEvent('url.payload', url, { phase: 'p', provider: 'pr' }));
+
+    expect(trail.getAll()[0]!.payload).toBe('https://example.com/audit?event=1');
+    expect(trail.toJSON()[0]!.payload).toBe('https://example.com/audit?event=1');
+  });
+
+  it('fromJSON rejects non-array input', () => {
+    expect(() => AuditTrail.fromJSON({})).toThrow(/events must be an array/i);
+  });
+
+  it('fromJSON rejects events missing required fields', () => {
+    expect(() => AuditTrail.fromJSON([{}])).toThrow(/events\[0\]: eventId must be a non-empty string/i);
+  });
+
+  it('fromJSON rejects malformed optional hashes', () => {
+    const event = { ...createAuditEvent('a', {}, { phase: 'p', provider: 'pr' }), inputHash: '' };
+    expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: inputHash must be a sha256 hash/i);
+  });
+
+  it('fromJSON rejects malformed timestamps', () => {
+    const event = { ...createAuditEvent('a', {}, { phase: 'p', provider: 'pr' }), timestamp: 'not-a-date' };
+    expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: timestamp must be an ISO timestamp/i);
+  });
+
+  it('fromJSON rejects impossible timestamp dates', () => {
+    const event = { ...createAuditEvent('a', {}, { phase: 'p', provider: 'pr' }), timestamp: '2026-02-31T00:00:00.000Z' };
+    expect(() => AuditTrail.fromJSON([event])).toThrow(/events\[0\]: timestamp must be an ISO timestamp/i);
+  });
+
   it('verify() passes with correct hashes', () => {
     const trail = new AuditTrail();
     const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: 'hello' });
@@ -116,6 +285,47 @@ describe('AuditTrail', () => {
     const result = trail.verify(contentMap);
     expect(result.valid).toBe(false);
     expect(result.mismatches).toHaveLength(1);
+  });
+
+  it('verify() fails when hashed input content is missing', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: 'hello' });
+    trail.append(event);
+
+    expect(trail.verify(new Map())).toEqual({
+      valid: false,
+      mismatches: [`${event.eventId}: input content missing`],
+    });
+  });
+
+  it('verify() fails when hashed output content is missing', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', output: 'result' });
+    trail.append(event);
+
+    expect(trail.verify(new Map())).toEqual({
+      valid: false,
+      mismatches: [`${event.eventId}: output content missing`],
+    });
+  });
+
+  it('verify() reports only the missing side when one hashed content entry is absent', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, {
+      phase: 'p',
+      provider: 'pr',
+      input: 'hello',
+      output: 'result',
+    });
+    trail.append(event);
+
+    const contentMap = new Map<string, string>();
+    contentMap.set(`${event.eventId}:input`, 'hello');
+
+    expect(trail.verify(contentMap)).toEqual({
+      valid: false,
+      mismatches: [`${event.eventId}: output content missing`],
+    });
   });
 
   it('verify() checks empty string content against hash', () => {

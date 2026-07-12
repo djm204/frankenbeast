@@ -534,10 +534,12 @@ describe('Governor Hono Server', () => {
   describe('POST /v1/webhook/slack', () => {
     const SLACK_SECRET = ['slack', 'signing', 'fixture'].join('-');
 
-    function slackHeaders(rawBody: string, secret = SLACK_SECRET, timestamp?: string) {
+    function slackHeaders(rawBody: string | Uint8Array, secret = SLACK_SECRET, timestamp?: string) {
       const ts = timestamp ?? Math.floor(Date.now() / 1000).toString();
-      const base = `v0:${ts}:${rawBody}`;
-      const sig = `v0=${createHmac('sha256', secret).update(base).digest('hex')}`;
+      const sig = `v0=${createHmac('sha256', secret)
+        .update(`v0:${ts}:`, 'utf8')
+        .update(typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody)
+        .digest('hex')}`;
       return {
         'Content-Type': 'application/json',
         'X-Slack-Request-Timestamp': ts,
@@ -580,6 +582,22 @@ describe('Governor Hono Server', () => {
       });
 
       expect(res.status).toBe(401);
+    });
+
+    it('verifies Slack signatures against raw bytes before UTF-8 body parsing', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET, allowUnsignedApprovalsForTests: true });
+      await seedApproval(app, 'req-1');
+
+      const rawPrefix = Buffer.from(JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] }), 'utf8');
+      const rawBody = new Uint8Array([...rawPrefix, 0x80]);
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody) },
+        body: rawBody.buffer.slice(rawBody.byteOffset, rawBody.byteOffset + rawBody.byteLength),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: { message: 'Malformed Slack payload' } });
     });
 
     it('rejects a stale Slack timestamp (replay protection)', async () => {
@@ -702,6 +720,32 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.decision).toBe('ABORT');
+      expect(body.status).toBe('resolved');
+    });
+
+    it('accepts signed Slack form payloads containing emoji text', async () => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET, allowUnsignedApprovalsForTests: true });
+      await seedApproval(app, 'req-emoji');
+
+      const payloadJson = JSON.stringify({
+        actions: [{ action_id: 'approve', value: 'req-emoji' }],
+        message: { text: 'Ship it 🚀' },
+      });
+      const rawBody = `payload=${encodeURIComponent(payloadJson)}`;
+
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: {
+          ...slackHeaders(rawBody),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe('slack');
+      expect(body.decision).toBe('APPROVE');
       expect(body.status).toBe('resolved');
     });
   });

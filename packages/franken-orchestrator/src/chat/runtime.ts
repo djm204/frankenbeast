@@ -5,6 +5,7 @@ import { sanitizeChatOutput } from './output-sanitizer.js';
 import type { BeastDispatchPort } from './beast-daemon-dispatch-adapter.js';
 import type { BeastExecutionMode } from '../beasts/types.js';
 import type { PendingApproval } from '@franken/types';
+import { isoNow } from '@franken/types';
 
 type PendingApprovalContext = Omit<PendingApproval, 'description' | 'requestedAt'>;
 
@@ -398,7 +399,7 @@ function appendTranscript(
   userInput: string,
   assistantMessage: string,
 ): TranscriptMessage[] {
-  const now = new Date().toISOString();
+  const now = isoNow();
   return [
     ...transcript,
     {

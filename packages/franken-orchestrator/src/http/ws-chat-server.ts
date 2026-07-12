@@ -1,5 +1,4 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { approvalRuntimeInput } from '../chat/approval-input.js';
@@ -11,11 +10,7 @@ import {
   ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
-import {
-  ClientSocketEventSchema,
-  type ClientSocketEvent,
-  type ServerSocketEvent,
-} from '@franken/types';
+import { ClientSocketEventSchema, type ClientSocketEvent, type ServerSocketEvent, deterministicUuid, isoNow } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
@@ -118,7 +113,7 @@ class ChatSocketMessageRateLimiter {
 }
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return isoNow();
 }
 
 function splitIntoChunks(content: string, maxLength = 48): string[] {
@@ -135,15 +130,25 @@ function mapTurnEvent(event: TurnEvent): ServerSocketEvent {
     case 'start':
       return { type: 'turn.execution.start', data: event.data as Record<string, unknown> | undefined, timestamp };
     case 'complete':
+      if (isPendingApprovalComplete(event.data)) {
+        return { type: 'turn.execution.progress', data: event.data, timestamp };
+      }
       return { type: 'turn.execution.complete', data: event.data as Record<string, unknown> | undefined, timestamp };
     default:
       return { type: 'turn.execution.progress', data: event.data as Record<string, unknown> | undefined, timestamp };
   }
 }
 
+function isPendingApprovalComplete(data: unknown): data is Record<string, unknown> {
+  return typeof data === 'object'
+    && data !== null
+    && 'status' in data
+    && data.status === 'pending_approval';
+}
+
 function messageIdFromSession(session: ChatSession): string {
   const lastAssistant = [...session.transcript].reverse().find((message) => message.role === 'assistant');
-  return lastAssistant?.id ?? randomUUID();
+  return lastAssistant?.id ?? deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts');
 }
 
 function createPeerState(
@@ -517,7 +522,7 @@ export class ChatSocketController {
       });
       this.emit(peer, {
         type: 'assistant.message.complete',
-        messageId: randomUUID(),
+        messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
         content: 'Rejected.',
         timestamp: nowIso(),
       });
@@ -600,7 +605,7 @@ export class ChatSocketController {
     for (const display of result.displayMessages) {
       this.emit(peer, {
         type: 'assistant.message.complete',
-        messageId: randomUUID(),
+        messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
         content: display.content,
         timestamp: nowIso(),
       });

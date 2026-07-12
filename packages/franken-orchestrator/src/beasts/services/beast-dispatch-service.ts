@@ -5,6 +5,8 @@ import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js'
 import type { BeastExecutor } from '../execution/beast-executor.js';
 import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
+import { wallClockNow } from '@franken/types';
+import { UnknownBeastDefinitionError } from '../errors.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
@@ -64,8 +66,8 @@ export class BeastDispatchService {
       ? { ...config, modules: moduleConfig }
       : config;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
-    const createdAt = new Date().toISOString();
-    const linkedAt = new Date().toISOString();
+    const createdAt = new Date(wallClockNow()).toISOString();
+    const linkedAt = new Date(wallClockNow()).toISOString();
     const run = this.repository.transaction(() => {
       if (request.trackedAgentId) {
         this.repository.requireTrackedAgent(request.trackedAgentId);
@@ -126,8 +128,12 @@ export class BeastDispatchService {
           throw new Error(`Beast run disappeared after start: ${run.id}`);
         }
         if (updated.trackedAgentId) {
-          const agentStatus = updated.status === 'running' ? 'running' : 'dispatching';
-          const updatedAt = new Date().toISOString();
+          const agentStatus = updated.status === 'running'
+            ? 'running'
+            : updated.status === 'pending_approval'
+              ? 'awaiting_approval'
+              : 'dispatching';
+          const updatedAt = new Date(wallClockNow()).toISOString();
           this.repository.updateTrackedAgent(updated.trackedAgentId, {
             status: agentStatus,
             updatedAt,
@@ -139,7 +145,7 @@ export class BeastDispatchService {
         }
         return updated;
       } catch (error) {
-        const failedAt = new Date().toISOString();
+        const failedAt = new Date(wallClockNow()).toISOString();
         const errorMessage = error instanceof Error ? error.message : String(error);
         const failedRun = this.repository.transaction(() => {
           const updatedRun = this.repository.updateRun(run.id, {
@@ -212,7 +218,7 @@ export class BeastDispatchService {
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {
     const definition = this.catalog.getDefinition(definitionId);
     if (!definition) {
-      throw new Error(`Unknown Beast definition: ${definitionId}`);
+      throw new UnknownBeastDefinitionError(definitionId);
     }
     return definition;
   }

@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import type {
   BeastDispatchSource,
@@ -40,13 +40,13 @@ interface CreateAttemptInput {
 interface UpdateRunPatch {
   status?: BeastRunStatus | undefined;
   configSnapshot?: Readonly<Record<string, unknown>> | undefined;
-  startedAt?: string | undefined;
-  finishedAt?: string | undefined;
-  currentAttemptId?: string | undefined;
+  startedAt?: string | null | undefined;
+  finishedAt?: string | null | undefined;
+  currentAttemptId?: string | null | undefined;
   attemptCount?: number | undefined;
   lastHeartbeatAt?: string | undefined;
-  stopReason?: string | undefined;
-  latestExitCode?: number | undefined;
+  stopReason?: string | null | undefined;
+  latestExitCode?: number | null | undefined;
 }
 
 interface UpdateAttemptPatch {
@@ -181,6 +181,24 @@ function prefixedId(prefix: string): string {
   return `${prefix}_${randomUUID()}`;
 }
 
+export interface BeastRepositoryJsonCorruptionContext {
+  readonly table: string;
+  readonly column: string;
+  readonly rowId: string;
+  readonly valueSnippet: string;
+}
+
+export class BeastRepositoryJsonCorruptionError extends Error {
+  constructor(
+    public readonly context: BeastRepositoryJsonCorruptionContext,
+    public override readonly cause: unknown,
+  ) {
+    const causeMessage = cause instanceof Error ? cause.message : String(cause);
+    super(`Corrupt Beast JSON in ${context.table}.${context.column} for row ${context.rowId}: ${causeMessage}`);
+    this.name = 'BeastRepositoryJsonCorruptionError';
+  }
+}
+
 export class SQLiteBeastRepository {
   private readonly db: Database.Database;
 
@@ -283,13 +301,33 @@ export class SQLiteBeastRepository {
       ...current,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.configSnapshot !== undefined ? { configSnapshot: patch.configSnapshot } : {}),
-      ...(patch.startedAt !== undefined ? { startedAt: patch.startedAt } : {}),
-      ...(patch.finishedAt !== undefined ? { finishedAt: patch.finishedAt } : {}),
-      ...(patch.currentAttemptId !== undefined ? { currentAttemptId: patch.currentAttemptId } : {}),
+      ...(patch.startedAt !== undefined
+        ? patch.startedAt === null
+          ? { startedAt: undefined }
+          : { startedAt: patch.startedAt }
+        : {}),
+      ...(patch.finishedAt !== undefined
+        ? patch.finishedAt === null
+          ? { finishedAt: undefined }
+          : { finishedAt: patch.finishedAt }
+        : {}),
+      ...(patch.currentAttemptId !== undefined
+        ? patch.currentAttemptId === null
+          ? { currentAttemptId: undefined }
+          : { currentAttemptId: patch.currentAttemptId }
+        : {}),
       ...(patch.attemptCount !== undefined ? { attemptCount: patch.attemptCount } : {}),
       ...(patch.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: patch.lastHeartbeatAt } : {}),
-      ...(patch.stopReason !== undefined ? { stopReason: patch.stopReason } : {}),
-      ...(patch.latestExitCode !== undefined ? { latestExitCode: patch.latestExitCode } : {}),
+      ...(patch.stopReason !== undefined
+        ? patch.stopReason === null
+          ? { stopReason: undefined }
+          : { stopReason: patch.stopReason }
+        : {}),
+      ...(patch.latestExitCode !== undefined
+        ? patch.latestExitCode === null
+          ? { latestExitCode: undefined }
+          : { latestExitCode: patch.latestExitCode }
+        : {}),
     };
 
     this.db.prepare(
@@ -728,7 +766,11 @@ function mapRun(row: BeastRunRow): BeastRun {
     definitionVersion: row.definition_version,
     status: row.status,
     executionMode: row.execution_mode,
-    configSnapshot: JSON.parse(row.config_snapshot) as Readonly<Record<string, unknown>>,
+    configSnapshot: parseJsonColumn(row.config_snapshot, {
+      table: 'beast_runs',
+      column: 'config_snapshot',
+      rowId: row.id,
+    }) as Readonly<Record<string, unknown>>,
     dispatchedBy: row.dispatched_by,
     dispatchedByUser: row.dispatched_by_user,
     createdAt: row.created_at,
@@ -754,7 +796,13 @@ function mapAttempt(row: BeastAttemptRow): BeastRunAttempt {
     ...(row.exit_code !== null ? { exitCode: row.exit_code } : {}),
     ...(row.stop_reason ? { stopReason: row.stop_reason } : {}),
     ...(row.executor_metadata
-      ? { executorMetadata: JSON.parse(row.executor_metadata) as Readonly<Record<string, unknown>> }
+      ? {
+          executorMetadata: parseJsonColumn(row.executor_metadata, {
+            table: 'beast_run_attempts',
+            column: 'executor_metadata',
+            rowId: row.id,
+          }) as Readonly<Record<string, unknown>>,
+        }
       : {}),
   };
 }
@@ -766,7 +814,11 @@ function mapEvent(row: BeastEventRow): BeastRunEvent {
     ...(row.attempt_id ? { attemptId: row.attempt_id } : {}),
     sequence: row.sequence,
     type: row.type,
-    payload: JSON.parse(row.payload) as Readonly<Record<string, unknown>>,
+    payload: parseJsonColumn(row.payload, {
+      table: 'beast_run_events',
+      column: 'payload',
+      rowId: row.id,
+    }) as Readonly<Record<string, unknown>>,
     createdAt: row.created_at,
   };
 }
@@ -776,14 +828,22 @@ function mapInterviewSession(row: BeastInterviewSessionRow): BeastInterviewSessi
     id: row.id,
     definitionId: row.definition_id,
     status: row.status,
-    answers: JSON.parse(row.answers) as Readonly<Record<string, unknown>>,
+    answers: parseJsonColumn(row.answers, {
+      table: 'beast_interview_sessions',
+      column: 'answers',
+      rowId: row.id,
+    }) as Readonly<Record<string, unknown>>,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 function mapTrackedAgent(row: TrackedAgentRow): TrackedAgent {
-  const initConfig = JSON.parse(row.init_config) as Readonly<Record<string, unknown>>;
+  const initConfig = parseJsonColumn(row.init_config, {
+    table: 'tracked_agents',
+    column: 'init_config',
+    rowId: row.id,
+  }) as Readonly<Record<string, unknown>>;
   return {
     id: row.id,
     ...trackedAgentIdentityPatch(initConfig),
@@ -791,12 +851,24 @@ function mapTrackedAgent(row: TrackedAgentRow): TrackedAgent {
     source: row.source,
     status: row.status,
     createdByUser: row.created_by_user,
-    initAction: JSON.parse(row.init_action) as TrackedAgentInitAction,
+    initAction: parseJsonColumn(row.init_action, {
+      table: 'tracked_agents',
+      column: 'init_action',
+      rowId: row.id,
+    }) as TrackedAgentInitAction,
     initConfig,
     ...(row.chat_session_id ? { chatSessionId: row.chat_session_id } : {}),
     ...(row.dispatch_run_id ? { dispatchRunId: row.dispatch_run_id } : {}),
     ...(row.execution_mode ? { executionMode: row.execution_mode } : {}),
-    ...(row.module_config ? { moduleConfig: JSON.parse(row.module_config) as ModuleConfig } : {}),
+    ...(row.module_config
+      ? {
+          moduleConfig: parseJsonColumn(row.module_config, {
+            table: 'tracked_agents',
+            column: 'module_config',
+            rowId: row.id,
+          }) as ModuleConfig,
+        }
+      : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -812,6 +884,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function parseJsonColumn(
+  value: string,
+  context: Omit<BeastRepositoryJsonCorruptionContext, 'valueSnippet'>,
+): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new BeastRepositoryJsonCorruptionError({
+      ...context,
+      valueSnippet: value.slice(0, 120),
+    }, error);
+  }
+}
+
 function mapTrackedAgentEvent(row: TrackedAgentEventRow): TrackedAgentEvent {
   return {
     id: row.id,
@@ -820,7 +906,11 @@ function mapTrackedAgentEvent(row: TrackedAgentEventRow): TrackedAgentEvent {
     level: row.level,
     type: row.type,
     message: row.message,
-    payload: JSON.parse(row.payload) as Readonly<Record<string, unknown>>,
+    payload: parseJsonColumn(row.payload, {
+      table: 'tracked_agent_events',
+      column: 'payload',
+      rowId: row.id,
+    }) as Readonly<Record<string, unknown>>,
     createdAt: row.created_at,
   };
 }

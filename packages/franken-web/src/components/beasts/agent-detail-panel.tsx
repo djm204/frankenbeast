@@ -6,7 +6,7 @@ import { SlideInPanel } from './slide-in-panel';
 import { StatusLight } from './status-light';
 import { AgentDetailReadonly } from './agent-detail-readonly';
 import { AgentDetailEdit } from './agent-detail-edit';
-import { AgentActionBar } from './agent-action-bar';
+import { AgentActionBar, type AgentLifecycleAction } from './agent-action-bar';
 import { LogViewerModal } from './log-viewer-modal';
 
 type Mode = 'readonly' | 'edit';
@@ -22,12 +22,13 @@ interface AgentDetailPanelProps {
   onResume: () => void;
   onDelete: () => void;
   onKill: () => void;
+  pendingAction?: AgentLifecycleAction | null;
   onSaveConfig: (values: Record<string, unknown>) => Promise<void>;
 }
 
 export function AgentDetailPanel({
   isOpen, detail, logs, onClose,
-  onStart, onStop, onRestart, onResume, onDelete, onKill, onSaveConfig,
+  onStart, onStop, onRestart, onResume, onDelete, onKill, pendingAction = null, onSaveConfig,
 }: AgentDetailPanelProps) {
   const [mode, setMode] = useState<Mode>('readonly');
   const [showLogModal, setShowLogModal] = useState(false);
@@ -64,9 +65,17 @@ export function AgentDetailPanel({
     }
   };
 
+  const handleClose = () => {
+    if (saving) return;
+    setSaveError(null);
+    setMode('readonly');
+    resetEdit();
+    onClose();
+  };
+
   return (
     <>
-      <SlideInPanel isOpen={isOpen} onClose={onClose}>
+      <SlideInPanel isOpen={isOpen} onClose={handleClose}>
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-beast-border shrink-0">
           <StatusLight status={agent.status} />
@@ -96,7 +105,8 @@ export function AgentDetailPanel({
           </ToggleGroup.Root>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
+            disabled={saving}
             aria-label="Close panel"
             className="p-1.5 rounded-lg text-beast-subtle hover:text-beast-text hover:bg-beast-elevated transition-colors"
           >
@@ -126,6 +136,8 @@ export function AgentDetailPanel({
         <AgentActionBar
           status={agent.status}
           hasLinkedRun={!!agent.dispatchRunId}
+          agentLabel={agent.name?.trim() ? agent.name : agent.id}
+          pendingAction={pendingAction}
           onStart={onStart}
           onStop={onStop}
           onRestart={onRestart}

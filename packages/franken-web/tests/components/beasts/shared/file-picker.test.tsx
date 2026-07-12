@@ -102,6 +102,36 @@ describe('FilePicker', () => {
     ]);
   });
 
+  it('shows a read failure and keeps successfully read selected files attached', async () => {
+    const onFilesChange = vi.fn();
+    const unreadableFile = new File(['secret'], 'unreadable.md', { type: 'text/markdown' });
+    Object.defineProperty(unreadableFile, 'text', {
+      value: () => Promise.reject(new Error('permission denied')),
+    });
+
+    render(<FilePicker files={[]} onFilesChange={onFilesChange} onRemoveFile={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Attach files'), {
+      target: {
+        files: [
+          new File(['attached context'], 'context.md', { type: 'text/markdown' }),
+          unreadableFile,
+        ],
+      },
+    });
+
+    await waitFor(() => expect(onFilesChange).toHaveBeenCalledTimes(1));
+    expect(onFilesChange).toHaveBeenCalledWith([
+      {
+        name: 'context.md',
+        content: 'attached context',
+        tokens: 4,
+        health: 'good',
+      },
+    ]);
+    expect((await screen.findByRole('alert')).textContent).toContain('1 file could not be read and were skipped.');
+  });
+
   it('shows critical health indicator for large files', () => {
     const files = [
       { name: 'big.md', content: 'x'.repeat(80000), tokens: 20000, health: 'critical' as const },

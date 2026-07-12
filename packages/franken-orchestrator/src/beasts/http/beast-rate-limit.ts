@@ -1,15 +1,19 @@
 import { createMiddleware } from 'hono/factory';
 import { HttpError } from '../../http/middleware.js';
+import { wallClockNow } from '@franken/types';
 
 export interface BeastRateLimitOptions {
   max: number;
   windowMs: number;
+  cleanupBatchSize?: number;
 }
 
 interface CounterState {
   count: number;
   resetAt: number;
 }
+
+const DEFAULT_CLEANUP_BATCH_SIZE = 128;
 
 export class InMemoryRateLimiter {
   private readonly counters = new Map<string, CounterState>();
@@ -20,7 +24,8 @@ export class InMemoryRateLimiter {
     if (this.options.max <= 0) {
       return { allowed: false, remaining: 0 };
     }
-    const now = Date.now();
+    const now = wallClockNow();
+    this.evictExpiredCounters(now);
     const current = this.counters.get(key);
     if (!current || current.resetAt <= now) {
       this.counters.set(key, {
@@ -36,6 +41,27 @@ export class InMemoryRateLimiter {
 
     current.count += 1;
     return { allowed: true, remaining: this.options.max - current.count };
+  }
+
+  private evictExpiredCounters(now: number): void {
+    const cleanupBatchSize = this.options.cleanupBatchSize ?? DEFAULT_CLEANUP_BATCH_SIZE;
+    if (cleanupBatchSize <= 0) {
+      return;
+    }
+
+    const maxChecks = Math.min(cleanupBatchSize, this.counters.size);
+    let checked = 0;
+    for (const [key, counter] of this.counters) {
+      if (checked >= maxChecks) {
+        break;
+      }
+      checked += 1;
+      this.counters.delete(key);
+      if (counter.resetAt <= now) {
+        continue;
+      }
+      this.counters.set(key, counter);
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@franken/brain",
-  "version": "0.7.3",
+  "version": "0.7.5",
   "description": "MOD-03: Memory Systems for the Frankenbeast AI agent",
   "type": "module",
   "main": "dist/index.js",
@@ -18,8 +18,12 @@
     "lint": "eslint src/ tests/",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "frankenbeast",
+    "memory",
+    "agent-memory",
+    "sqlite"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -30,7 +34,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.8.1",
+    "@franken/types": "0.9.0",
     "better-sqlite3": "^12.6.2"
   },
   "engines": {

@@ -1,6 +1,7 @@
 import type { ApprovalChannel } from '../gateway/approval-channel.js';
 import type { ApprovalRequest, ApprovalResponse, ResponseCode } from '../core/types.js';
 import { ChannelUnavailableError } from '../errors/index.js';
+import { now as deterministicNow } from '@franken/types';
 
 export interface HttpClient {
   post(url: string, body: unknown): Promise<{ ok: boolean; body?: unknown }>;
@@ -40,7 +41,7 @@ export class SlackChannel implements ApprovalChannel {
       requestId: request.requestId,
       decision: callback.decision,
       respondedBy: callback.respondedBy,
-      respondedAt: new Date(),
+      respondedAt: new Date(deterministicNow()),
     };
 
     return callback.feedback !== undefined

@@ -173,13 +173,21 @@ export function DashboardPage({ client }: DashboardPageProps) {
     loadSnapshot();
     let unsub: (() => void) | undefined;
     let streamActive = true;
-    client.subscribeToDashboard((snap) => {
-      if (!mountedRef.current) return;
-      if (!streamActive) return;
-      if (clientGenerationRef.current !== subscriptionGeneration) return;
-      setLoadError(null);
-      applyServerSnapshot(snap);
-    })
+    client.subscribeToDashboard(
+      (snap) => {
+        if (!mountedRef.current) return;
+        if (!streamActive) return;
+        if (clientGenerationRef.current !== subscriptionGeneration) return;
+        setLoadError(null);
+        applyServerSnapshot(snap);
+      },
+      (error) => {
+        if (!mountedRef.current) return;
+        if (!streamActive) return;
+        if (clientGenerationRef.current !== subscriptionGeneration) return;
+        setLoadError(`Unable to process dashboard stream update. ${describeError(error)}`);
+      },
+    )
       .then((nextUnsub) => {
         if (!mountedRef.current || !streamActive || clientGenerationRef.current !== subscriptionGeneration) {
           nextUnsub();

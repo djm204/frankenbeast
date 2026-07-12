@@ -35,6 +35,18 @@ describe('ProviderPanel', () => {
     expect(items[2]!.textContent).toContain('gemini');
   });
 
+  it('does not mutate provider order while sorting for display', () => {
+    const providers = [
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 2 },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1 },
+    ];
+
+    render(<ProviderPanel providers={providers} />);
+
+    expect(providers.map((provider) => provider.name)).toEqual(['gemini', 'claude', 'codex']);
+  });
+
   it('shows empty message when no providers', () => {
     render(<ProviderPanel providers={[]} />);
     expect(screen.getByText('No providers configured.')).toBeDefined();

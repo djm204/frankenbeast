@@ -5,6 +5,7 @@ import {
   type ManagedNetworkServiceState,
   type NetworkOperatorState,
 } from './network-state-store.js';
+import { isoNow } from '@franken/types';
 import { NetworkLogStore } from './network-logs.js';
 
 export interface StartServiceOptions {
@@ -64,7 +65,7 @@ export class NetworkSupervisor {
   private readonly startupDelayMs: number;
 
   constructor(private readonly deps: NetworkSupervisorDeps) {
-    this.now = deps.now ?? (() => new Date().toISOString());
+    this.now = deps.now ?? (() => isoNow());
     this.startupAttemptsExplicit = deps.startupAttempts !== undefined;
     this.startupAttempts = deps.startupAttempts ?? 20;
     this.startupDelayMs = deps.startupDelayMs ?? 250;

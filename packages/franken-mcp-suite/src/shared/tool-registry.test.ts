@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools } from './tool-registry.js';
+import { createAdapterSet, TOOL_STUBS, TOOL_REGISTRY, searchTools, type AdapterSet } from './tool-registry.js';
 
 const EXPECTED_COUNT = 21;
 
@@ -42,6 +42,99 @@ describe('TOOL_REGISTRY', () => {
     const registryNames = new Set(TOOL_REGISTRY.keys());
     expect(stubNames).toEqual(registryNames);
     expect(stubNames.size).toBe(EXPECTED_COUNT);
+  });
+
+  it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {
+    const observer = {
+      log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),
+      logCost: vi.fn(),
+      cost: vi.fn(),
+      trail: vi.fn(),
+      verify: vi.fn(),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_observer_log')!.makeHandler({ observer } as unknown as AdapterSet);
+
+    const invalidCases = [
+      { event: '', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: '   ', metadata: '{"ok":true}', sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '' },
+      { event: 'file_edit', metadata: '{"ok":true}', sessionId: '   ' },
+      { event: 'file_edit', metadata: { ok: true }, sessionId: 'sess-1' },
+      { event: 'file_edit', metadata: ['not', 'json'], sessionId: 'sess-1' },
+    ];
+
+    for (const args of invalidCases) {
+      const result = await handler(args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('Error: fbeast_observer_log');
+      expect(result.content[0]!.text).not.toContain('Logged event');
+    }
+
+    expect(observer.log).not.toHaveBeenCalled();
+
+    const malformedJsonResult = await handler({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+
+    expect(malformedJsonResult.isError).toBeUndefined();
+    expect(observer.log).toHaveBeenCalledWith({
+      event: 'file_edit',
+      metadata: '{not-json',
+      sessionId: 'sess-1',
+    });
+  });
+
+  it('rejects invalid observer log cost arguments before invoking the registry adapter handler', async () => {
+    const observer = {
+      log: vi.fn(),
+      logCost: vi.fn().mockResolvedValue({ costUsd: 0, unknownModel: false }),
+      cost: vi.fn(),
+      trail: vi.fn(),
+      verify: vi.fn(),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_observer_log_cost')!.makeHandler({ observer } as unknown as AdapterSet);
+
+    const invalidCases = [
+      { promptTokens: 'NaN', completionTokens: 0 },
+      { promptTokens: 'Infinity', completionTokens: 0 },
+      { promptTokens: -1, completionTokens: 0 },
+      { promptTokens: 1.5, completionTokens: 0 },
+      { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 },
+      { promptTokens: 0, completionTokens: 'NaN' },
+      { promptTokens: 0, completionTokens: 'Infinity' },
+      { promptTokens: 0, completionTokens: -1 },
+      { promptTokens: 0, completionTokens: 1.5 },
+      { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { promptTokens: 0, completionTokens: 0, costUsd: 'NaN' },
+      { promptTokens: 0, completionTokens: 0, costUsd: 'Infinity' },
+      { promptTokens: 0, completionTokens: 0, costUsd: -0.01 },
+    ];
+
+    for (const args of invalidCases) {
+      const result = await handler({ sessionId: 'sess-1', model: 'gpt-4o', ...args });
+      expect(result.isError).toBe(true);
+    }
+
+    expect(observer.logCost).not.toHaveBeenCalled();
+
+    const zeroResult = await handler({
+      sessionId: 'sess-1',
+      model: 'gpt-4o',
+      promptTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+    });
+
+    expect(zeroResult.isError).toBeUndefined();
+    expect(observer.logCost).toHaveBeenCalledWith({
+      sessionId: 'sess-1',
+      model: 'gpt-4o',
+      promptTokens: 0,
+      completionTokens: 0,
+      costUsd: 0,
+    });
   });
 });
 

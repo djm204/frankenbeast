@@ -10,6 +10,7 @@ import {
   type BeastWorktreeAllocation,
   type GitWorktreeIsolationConfig,
 } from './git-worktree-isolation.js';
+import { wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
@@ -387,7 +388,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         onStdout: (line) => {
           const redactedLine = redactBeastLogLine(line, configuredSecrets);
           if (attemptId) {
-            const createdAt = new Date().toISOString();
+            const createdAt = new Date(wallClockNow()).toISOString();
             void this.logs.append(run.id, attemptId, 'stdout', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
@@ -402,7 +403,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           stderrTail.push(redactedLine);
           if (stderrTail.length > STDERR_BUFFER_SIZE) stderrTail.shift();
           if (attemptId) {
-            const createdAt = new Date().toISOString();
+            const createdAt = new Date(wallClockNow()).toISOString();
             void this.logs.append(run.id, attemptId, 'stderr', redactedLine, createdAt);
             this.options.eventBus?.publish({
               type: 'run.log',
@@ -423,7 +424,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorCode = (error as NodeJS.ErrnoException).code;
-      const failedAt = new Date().toISOString();
+      const failedAt = new Date(wallClockNow()).toISOString();
 
       this.repository.updateRun(run.id, {
         status: 'failed',
@@ -459,28 +460,41 @@ export class ProcessBeastExecutor implements BeastExecutor {
       throw error;
     }
 
-    const startedAt = new Date().toISOString();
-    const attempt = this.repository.createAttempt(run.id, {
-      status: 'running',
-      pid: handle.pid,
-      startedAt,
-      executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
-        backend: 'process',
-        command: processSpec.command,
-        args: [...processSpec.args],
-        ...(worktree
-          ? {
-              worktreeIsolation: true,
-              worktreePath: worktree.worktreePath,
-              worktreeBranch: worktree.branchName,
-              worktreeCreated: worktree.created,
-              worktreeAgentId: worktree.agentId,
-              worktreeExecutionCwd: worktree.executionCwd,
-              worktreeProjectRoot: worktree.projectRoot,
-            }
-          : {}),
-      },
-    });
+    const startedAt = new Date(wallClockNow()).toISOString();
+    let attempt: BeastRunAttempt;
+    try {
+      attempt = this.repository.createAttempt(run.id, {
+        status: 'running',
+        pid: handle.pid,
+        startedAt,
+        executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
+          backend: 'process',
+          command: processSpec.command,
+          args: [...processSpec.args],
+          ...(worktree
+            ? {
+                worktreeIsolation: true,
+                worktreePath: worktree.worktreePath,
+                worktreeBranch: worktree.branchName,
+                worktreeCreated: worktree.created,
+                worktreeAgentId: worktree.agentId,
+                worktreeExecutionCwd: worktree.executionCwd,
+                worktreeProjectRoot: worktree.projectRoot,
+              }
+            : {}),
+        },
+      });
+    } catch (error) {
+      try {
+        await this.supervisor.kill(handle.pid);
+      } catch {
+        // Preserve the original attempt-persistence failure while still
+        // releasing pre-attempt config/worktree resources below.
+      } finally {
+        this.cleanupRunResources(run.id);
+      }
+      throw error;
+    }
 
     // Once an attempt owns the worktree, preserve it for PR/merge or debugging per ADR-028.
     // The pending allocation map is only for pre-attempt spawn failures.
@@ -492,7 +506,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     // Flush early buffered lines to logs and SSE
     for (const line of earlyStdoutLines) {
-      const createdAt = new Date().toISOString();
+      const createdAt = new Date(wallClockNow()).toISOString();
       void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',
@@ -500,7 +514,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       });
     }
     for (const line of earlyStderrLines) {
-      const createdAt = new Date().toISOString();
+      const createdAt = new Date(wallClockNow()).toISOString();
       void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
       this.options.eventBus?.publish({
         type: 'run.log',
@@ -631,7 +645,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
 
     const stopReason = code === 0 ? undefined : signal ? `signal_${signal}` : code != null ? `exit_code_${code}` : 'unknown_exit';
-    const finishedAt = new Date().toISOString();
+    const finishedAtMs = wallClockNow();
+    const finishedAt = new Date(finishedAtMs).toISOString();
 
     this.repository.updateAttempt(attemptId, {
       status,
@@ -649,9 +664,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     const eventType = code === 0 ? 'attempt.finished' : 'attempt.failed';
     const attemptRecord = this.repository.getAttempt(attemptId);
-    const durationMs = attemptRecord?.startedAt
-      ? new Date(finishedAt).getTime() - new Date(attemptRecord.startedAt).getTime()
-      : undefined;
+    const durationMs = attemptRecord?.startedAt ? finishedAtMs - new Date(attemptRecord.startedAt).getTime() : undefined;
     const redactedStderrTail = code !== 0 ? redactFailureStderrTail(stderrTail, configuredSecrets) : [];
     const exitEvent = {
       attemptId,
@@ -730,7 +743,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     status: BeastRunAttempt['status'],
     stopReason: string,
   ): BeastRunAttempt {
-    const finishedAt = new Date().toISOString();
+    const finishedAt = new Date(wallClockNow()).toISOString();
     const updatedAttempt = this.repository.updateAttempt(attempt.id, {
       status,
       finishedAt,
@@ -740,6 +753,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       status,
       finishedAt,
       stopReason,
+      latestExitCode: null,
     });
     const finishEvent = {
       attemptId: attempt.id,

@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChunkSession } from './chunk-session.js';
 import { chunkSessionStorageKey } from './chunk-session.js';
 import { atomicWriteFileSync, readJsonFileOrQuarantine } from './atomic-file.js';
+import { wallClockNow } from '@franken/types';
 
 export class FileChunkSessionSnapshotStore {
   constructor(private readonly rootDir: string) {}
@@ -10,8 +12,9 @@ export class FileChunkSessionSnapshotStore {
   writeSnapshot(session: ChunkSession, reason: string): string {
     const dir = this.snapshotDir(session.planName, session.chunkId, session.taskId);
     mkdirSync(dir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const file = join(dir, `${ts}-gen-${session.compactionGeneration}-${reason}.json`);
+    const ts = new Date(wallClockNow()).toISOString().replace(/[:.]/g, '-');
+    const uniqueSuffix = randomUUID();
+    const file = join(dir, `${ts}-gen-${session.compactionGeneration}-${uniqueSuffix}-${reason}.json`);
     atomicWriteFileSync(file, JSON.stringify(session, null, 2));
     return file;
   }
@@ -32,23 +35,12 @@ export class FileChunkSessionSnapshotStore {
         .sort();
     }
 
-    const planDir = join(this.rootDir, planName);
-    if (!existsSync(planDir)) {
-      return [];
-    }
-
-    return readdirSync(planDir)
-      .map((dirName) => join(planDir, dirName))
-      .filter((dirPath) => existsSync(dirPath) && statSync(dirPath).isDirectory())
-      .flatMap((dirPath) =>
-        readdirSync(dirPath)
-          .filter((file) => file.endsWith('.json'))
-          .map((file) => join(dirPath, file)),
-      )
+    return this.listUnscopedCandidates(planName)
       // Corrupt snapshots are quarantined and skipped instead of aborting the
       // whole listing — one damaged snapshot must not hide the healthy ones.
-      .map((filePath) => ({ filePath, session: readJsonFileOrQuarantine<ChunkSession>(filePath) }))
-      .filter((entry): entry is { filePath: string; session: ChunkSession } => entry.session !== undefined)
+      .filter((entry): entry is { filePath: string; storageKey: string; session: ChunkSession } =>
+        entry.session !== undefined,
+      )
       .filter(({ session }) => session.chunkId === chunkId)
       .map(({ filePath }) => filePath)
       .sort();
@@ -58,14 +50,120 @@ export class FileChunkSessionSnapshotStore {
    * Restores the most recent snapshot, skipping (and quarantining) any
    * corrupt files it encounters along the way so a single damaged snapshot
    * cannot hide older, still-usable ones.
+   *
+   * Unscoped restores intentionally fail closed when multiple task-scoped
+   * sessions share a chunk id. Without a task id, newest-by-filename ordering
+   * cannot tell which task owns the requested restore.
    */
   restoreLatest(planName: string, chunkId: string, taskId?: string): ChunkSession | undefined {
-    const files = this.list(planName, chunkId, taskId);
-    for (let i = files.length - 1; i >= 0; i--) {
-      const session = readJsonFileOrQuarantine<ChunkSession>(files[i]!);
-      if (session) {
-        return session;
+    if (!taskId) {
+      const entries = this.listUnscopedCandidates(planName);
+      const matchingEntries = entries
+        .filter((entry): entry is { filePath: string; storageKey: string; session: ChunkSession } =>
+          entry.session !== undefined,
+        )
+        .filter(({ session }) => session.chunkId === chunkId)
+        .sort((a, b) => a.filePath.localeCompare(b.filePath));
+      const matchingTaskIds = new Set(
+        matchingEntries.map(({ session, storageKey }) => session.taskId ?? this.normalizeStorageKey(storageKey)),
+      );
+
+      // Corrupt snapshots cannot prove their chunk id after quarantine, but
+      // their task-scoped directory is still evidence that another task may
+      // own the requested chunk. Count those directories in the ambiguity set
+      // so an unscoped restore fails closed instead of falling back to a
+      // healthy snapshot from a different task. Only skip a corrupt directory
+      // when its task-style storage key clearly names a different chunk.
+      for (const { session, storageKey } of entries) {
+        if (session === undefined && !this.storageKeyClearlyNamesOtherChunk(storageKey, chunkId)) {
+          matchingTaskIds.add(this.normalizeStorageKey(storageKey));
+        }
       }
+
+      if (matchingTaskIds.size > 1) {
+        return undefined;
+      }
+
+      return matchingEntries.at(-1)?.session;
+    }
+
+    const files = this.list(planName, chunkId, taskId);
+    const sessions = files
+      .map((filePath) => readJsonFileOrQuarantine<ChunkSession>(filePath))
+      .filter((session): session is ChunkSession => session !== undefined);
+
+    return sessions.at(-1);
+  }
+
+  private listUnscopedCandidates(planName: string): Array<{
+    filePath: string;
+    storageKey: string;
+    session: ChunkSession | undefined;
+  }> {
+    const planDir = join(this.rootDir, planName);
+    if (!existsSync(planDir)) {
+      return [];
+    }
+
+    return readdirSync(planDir)
+      .map((storageKey) => ({ storageKey, dirPath: join(planDir, storageKey) }))
+      .filter(({ dirPath }) => existsSync(dirPath) && statSync(dirPath).isDirectory())
+      .flatMap(({ storageKey, dirPath }) =>
+        readdirSync(dirPath)
+          .filter((file) => file.endsWith('.json') || file.includes('.json.corrupt.'))
+          .map((file) => {
+            const filePath = join(dirPath, file);
+            return {
+              filePath,
+              storageKey,
+              session: file.includes('.json.corrupt.') ? undefined : readJsonFileOrQuarantine<ChunkSession>(filePath),
+            };
+          }),
+      );
+  }
+
+  private normalizeStorageKey(storageKey: string): string {
+    try {
+      return decodeURIComponent(storageKey);
+    } catch {
+      return storageKey;
+    }
+  }
+
+  private storageKeyClearlyNamesOtherChunk(storageKey: string, chunkId: string): boolean {
+    const candidate = this.storageKeyChunkCandidate(storageKey);
+    return candidate !== undefined && candidate !== chunkId;
+  }
+
+  private storageKeyMayContainChunk(storageKey: string, chunkId: string): boolean {
+    const candidate = this.storageKeyChunkCandidate(storageKey);
+    if (candidate !== undefined) {
+      return candidate === chunkId;
+    }
+
+    const normalized = this.normalizeStorageKey(storageKey);
+    let index = normalized.indexOf(chunkId);
+    while (index !== -1) {
+      const before = index === 0 ? '' : normalized[index - 1];
+      const after = index + chunkId.length >= normalized.length ? '' : normalized[index + chunkId.length];
+      const hasValidPrefix = before === '' || before === ':' || before === '/';
+      const hasValidSuffix = after === '' || after === ':' || after === '/';
+      if (hasValidPrefix && hasValidSuffix) {
+        return true;
+      }
+      index = normalized.indexOf(chunkId, index + 1);
+    }
+    return false;
+  }
+
+  private storageKeyChunkCandidate(storageKey: string): string | undefined {
+    const normalized = this.normalizeStorageKey(storageKey);
+    for (const prefix of ['fix-harden:', 'fix-impl:', 'harden:', 'impl:', 'cli:'] as const) {
+      if (!normalized.startsWith(prefix)) {
+        continue;
+      }
+      const candidate = normalized.slice(prefix.length).replace(/-attempt-\d+$/u, '');
+      return candidate === '' ? undefined : candidate;
     }
     return undefined;
   }
