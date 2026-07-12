@@ -80,6 +80,14 @@ describe('operator auth', () => {
     })).toBe(false);
     expect(isCookieOperatorAuthAllowed({
       method: 'POST',
+      requestUrl: 'http://internal.local/v1/network/up',
+      origin: 'https://dashboard.example.com',
+      secFetchSite: 'same-origin',
+      forwardedProto: 'https',
+      forwardedHost: 'dashboard.example.com',
+    })).toBe(true);
+    expect(isCookieOperatorAuthAllowed({
+      method: 'POST',
       requestUrl: 'http://localhost/v1/network/up',
       secFetchSite: 'same-origin',
     })).toBe(false);

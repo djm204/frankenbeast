@@ -147,6 +147,23 @@ describe('control-plane operator auth', () => {
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
     });
+    it('accepts proxied HTTPS same-origin cookie mutations with forwarded proto and host', async () => {
+      const app = buildApp();
+      const res = await app.request('http://internal.local/v1/network/start', {
+        method: 'POST',
+        headers: {
+          cookie: `frankenbeast_operator_token=${encodeURIComponent(OPERATOR_TOKEN)}`,
+          origin: 'https://dashboard.example.com',
+          'sec-fetch-site': 'same-origin',
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'dashboard.example.com',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ target: 'dashboard-web' }),
+      });
+
+      expect(res.status).toBe(200);
+    });
   });
 
   describe('authenticated requests pass the auth gate', () => {
