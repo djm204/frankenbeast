@@ -172,20 +172,6 @@ export class LessonRecorder {
         if (cooldownKey) {
           let admittedByAnotherCall = false;
           while (!admittedByAnotherCall) {
-            lesson = this.withCurrentBlockerPatterns(lesson);
-            const hasMinedBlockerPatterns =
-              (lesson.blockerPatterns?.length ?? 0) > 0;
-            const suppression = this.getCooldownSuppression(
-              lesson,
-              cooldownKey,
-            );
-            if (suppression && !hasMinedBlockerPatterns) {
-              this.commitBlockerPatternObservations(lesson);
-              recordingResult.suppressedByCooldown.push(suppression);
-              admittedByAnotherCall = true;
-              break;
-            }
-
             const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
             if (pendingAdmission) {
               await pendingAdmission;
@@ -198,6 +184,28 @@ export class LessonRecorder {
               });
               this.pendingAdmissions.set(cooldownKey, admissionPromise);
             }
+
+            lesson = this.withCurrentBlockerPatterns(lesson);
+            const hasMinedBlockerPatterns =
+              (lesson.blockerPatterns?.length ?? 0) > 0;
+            const suppression = this.getCooldownSuppression(
+              lesson,
+              cooldownKey,
+            );
+            if (suppression && !hasMinedBlockerPatterns) {
+              this.commitBlockerPatternObservations(lesson);
+              recordingResult.suppressedByCooldown.push(suppression);
+              admissionSettled?.(false);
+              if (
+                admissionPromise &&
+                this.pendingAdmissions.get(cooldownKey) === admissionPromise
+              ) {
+                this.pendingAdmissions.delete(cooldownKey);
+              }
+              admittedByAnotherCall = true;
+              break;
+            }
+
             break;
           }
 
