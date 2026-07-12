@@ -877,6 +877,14 @@ function createCliExecutorDeps(
       .filter(([, providerOverride]) => typeof providerOverride.command === 'string' && providerOverride.command.length > 0)
       .map(([providerName, providerOverride]) => [providerName, providerOverride.command as string]),
   );
+  const providerModels = Object.fromEntries(
+    Object.entries(providerCommandOverrides(options))
+      .filter(([, providerOverride]) => typeof providerOverride.model === 'string' && providerOverride.model.length > 0)
+      .map(([providerName, providerOverride]) => [providerName, providerOverride.model as string]),
+  );
+  if (config.model !== undefined) {
+    providerModels[executionProviderName] = config.model;
+  }
   const executorObserverDeps: ObserverDeps = config.enableTracing
     ? observer.observerBridge.observerDeps
     : observer.observerBridge.disabledObserverDeps;
@@ -914,6 +922,7 @@ function createCliExecutorDeps(
       ...(config.model !== undefined ? { model: config.model } : {}),
       ...(override?.command ? { command: override.command } : {}),
       ...(Object.keys(providerCommands).length > 0 ? { providerCommands } : {}),
+      ...(Object.keys(providerModels).length > 0 ? { providerModels } : {}),
     },
   );
 

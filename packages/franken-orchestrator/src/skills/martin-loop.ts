@@ -274,9 +274,11 @@ function spawnIteration(
     const cmd = config.providerCommands?.[provider.name]
       ?? (provider.name === config.provider ? config.command : undefined)
       ?? provider.command;
+    const model = config.providerModels?.[provider.name]
+      ?? (provider.name === config.provider ? config.model : undefined);
     const providerArgs = provider.buildArgs({
       maxTurns: config.maxTurns,
-      model: provider.name === config.provider ? config.model : undefined,
+      model,
       sessionContinue,
     });
     const prompt = (promptOverride ?? config.prompt) + NO_COMMIT_CONSTRAINT;

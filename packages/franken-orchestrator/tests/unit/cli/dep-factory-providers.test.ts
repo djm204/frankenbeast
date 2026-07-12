@@ -620,6 +620,10 @@ describe('dep-factory provider wiring', () => {
     expect(cliExecutorCalls[0]?.[6]).toEqual(expect.objectContaining({
       provider: 'claude',
       providers: ['claude', 'codex'],
+      providerModels: expect.objectContaining({
+        claude: 'sonnet',
+        codex: 'gpt-5.3-codex-spark',
+      }),
     }));
   });
 

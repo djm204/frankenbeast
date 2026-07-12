@@ -34,6 +34,7 @@ export interface MartinLoopConfig {
   readonly model?: string | undefined;
   readonly command?: string | undefined;
   readonly providerCommands?: Readonly<Record<string, string>> | undefined;
+  readonly providerModels?: Readonly<Record<string, string>> | undefined;
   readonly timeoutMs: number;
   readonly workingDir?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
