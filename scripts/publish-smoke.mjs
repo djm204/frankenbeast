@@ -33,11 +33,23 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', ...opts });
 const log = (msg) => console.log(`[publish-smoke] ${msg}`);
 
-let failures = 0;
-const fail = (msg) => {
-  console.error(`[publish-smoke] FAIL: ${msg}`);
-  failures += 1;
-};
+export function cleanupTempDirs(dirs) {
+  for (const d of dirs.filter(Boolean)) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* ignore cleanup failures */
+    }
+  }
+}
+
+export function runWithTempCleanup(getDirs, action) {
+  try {
+    return action();
+  } finally {
+    cleanupTempDirs(getDirs());
+  }
+}
 
 // Packages we install + run. web is a browser SPA (no runtime bin) so it is
 // packed/dist-checked but not installed for execution here.
@@ -76,79 +88,87 @@ function publishablePackages() {
   return out;
 }
 
-// 1. Build
-log('building workspace…');
-run('npx', ['turbo', 'run', 'build'], { cwd: repoRoot, stdio: 'inherit' });
+export function main() {
+  let failures = 0;
+  const fail = (msg) => {
+    console.error(`[publish-smoke] FAIL: ${msg}`);
+    failures += 1;
+  };
+  let stage;
+  let proj;
 
-// 2. Pack + assert dist ships
-const stage = mkdtempSync(join(tmpdir(), 'fbeast-pack-'));
-const pkgs = publishablePackages();
-log(`packing ${pkgs.length} publishable packages → ${stage}`);
-for (const p of pkgs) {
-  run('npm', ['pack', '--pack-destination', stage], { cwd: p.dir });
-  const dry = run('npm', ['pack', '--dry-run', '--json'], { cwd: p.dir });
-  const distCount = JSON.parse(dry)[0].files.filter((f) => f.path.startsWith('dist/')).length;
-  if (distCount === 0) fail(`${p.name} packs 0 dist files — did you forget "files": ["dist"]?`);
-  else log(`  ${p.name}: ${distCount} dist files`);
-}
+  runWithTempCleanup(() => [stage, proj], () => {
+    // 1. Build
+    log('building workspace…');
+    run('npx', ['turbo', 'run', 'build'], { cwd: repoRoot, stdio: 'inherit' });
 
-const tarballFor = (dirName) => {
-  const pj = JSON.parse(readFileSync(join(repoRoot, 'packages', dirName, 'package.json'), 'utf8'));
-  const base = pj.name.replace('@', '').replace('/', '-');
-  const hit = readdirSync(stage).find((f) => f.startsWith(`${base}-`) && f.endsWith('.tgz'));
-  if (!hit) throw new Error(`no tarball for ${pj.name} (${base})`);
-  return join(stage, hit);
-};
+    // 2. Pack + assert dist ships
+    stage = mkdtempSync(join(tmpdir(), 'fbeast-pack-'));
+    const pkgs = publishablePackages();
+    log(`packing ${pkgs.length} publishable packages → ${stage}`);
+    for (const p of pkgs) {
+      run('npm', ['pack', '--pack-destination', stage], { cwd: p.dir });
+      const dry = run('npm', ['pack', '--dry-run', '--json'], { cwd: p.dir });
+      const distCount = JSON.parse(dry)[0].files.filter((f) => f.path.startsWith('dist/')).length;
+      if (distCount === 0) fail(`${p.name} packs 0 dist files — did you forget "files": ["dist"]?`);
+      else log(`  ${p.name}: ${distCount} dist files`);
+    }
 
-// 3. Install into a clean project outside the monorepo, optional deps omitted.
-const proj = mkdtempSync(join(tmpdir(), 'fbeast-install-'));
-writeFileSync(join(proj, 'package.json'), JSON.stringify({ name: 'smoke', private: true }, null, 2));
-log('installing packed packages (optional omitted) into a clean project…');
-run('npm', ['install', '--no-audit', '--no-fund', '--omit=optional', ...RUNTIME_DIRS.map(tarballFor)], {
-  cwd: proj,
-  stdio: 'inherit',
-});
+    const tarballFor = (dirName) => {
+      const pj = JSON.parse(readFileSync(join(repoRoot, 'packages', dirName, 'package.json'), 'utf8'));
+      const base = pj.name.replace('@', '').replace('/', '-');
+      const hit = readdirSync(stage).find((f) => f.startsWith(`${base}-`) && f.endsWith('.tgz'));
+      if (!hit) throw new Error(`no tarball for ${pj.name} (${base})`);
+      return join(stage, hit);
+    };
 
-// 4a. Every declared bin file must exist in the installed package.
-for (const dirName of RUNTIME_DIRS) {
-  const pj = JSON.parse(readFileSync(join(repoRoot, 'packages', dirName, 'package.json'), 'utf8'));
-  for (const [binName, binPath] of Object.entries(pj.bin ?? {})) {
-    const installed = join(proj, 'node_modules', pj.name, binPath);
-    if (!existsSync(installed)) fail(`${pj.name} bin "${binName}" → ${binPath} missing from the installed package`);
+    // 3. Install into a clean project outside the monorepo, optional deps omitted.
+    proj = mkdtempSync(join(tmpdir(), 'fbeast-install-'));
+    writeFileSync(join(proj, 'package.json'), JSON.stringify({ name: 'smoke', private: true }, null, 2));
+    log('installing packed packages (optional omitted) into a clean project…');
+    run('npm', ['install', '--no-audit', '--no-fund', '--omit=optional', ...RUNTIME_DIRS.map(tarballFor)], {
+      cwd: proj,
+      stdio: 'inherit',
+    });
+
+    // 4a. Every declared bin file must exist in the installed package.
+    for (const dirName of RUNTIME_DIRS) {
+      const pj = JSON.parse(readFileSync(join(repoRoot, 'packages', dirName, 'package.json'), 'utf8'));
+      for (const [binName, binPath] of Object.entries(pj.bin ?? {})) {
+        const installed = join(proj, 'node_modules', pj.name, binPath);
+        if (!existsSync(installed)) fail(`${pj.name} bin "${binName}" → ${binPath} missing from the installed package`);
+      }
+    }
+
+    // 4b. Each executable CLI's --help must exit cleanly with non-empty output.
+    // Put the project's node_modules/.bin on PATH so a bin that shells out to a
+    // sibling bin (e.g. `fbeast` forwards non-mcp commands to `frankenbeast`)
+    // resolves it — exactly as a real co-install does, where every package bin
+    // lands in the same PATH-visible directory.
+    const binDir = join(proj, 'node_modules', '.bin');
+    const childEnv = { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` };
+    for (const { bin, mustMatch } of EXECUTABLE_BINS) {
+      const binFile = join(binDir, bin);
+      if (!existsSync(binFile)) {
+        fail(`bin "${bin}" was not linked into node_modules/.bin`);
+        continue;
+      }
+      const res = spawnSync(binFile, ['--help'], { cwd: proj, env: childEnv, encoding: 'utf8', timeout: 30_000 });
+      if (res.error) fail(`${bin} --help failed to run: ${res.error.message}`);
+      else if (res.status !== 0) fail(`${bin} --help exited ${res.status}\n${(res.stderr || '').slice(0, 500)}`);
+      else if (!(res.stdout || '').trim()) fail(`${bin} --help produced no stdout`);
+      else if (mustMatch && !mustMatch.test(res.stdout)) fail(`${bin} --help output did not match ${mustMatch}`);
+      else log(`  ${bin} --help ran and printed output ✓`);
+    }
+  });
+
+  if (failures > 0) {
+    console.error(`[publish-smoke] ${failures} failure(s)`);
+    process.exit(1);
   }
+  log('all publish smoke checks passed ✓');
 }
 
-// 4b. Each executable CLI's --help must exit cleanly with non-empty output.
-// Put the project's node_modules/.bin on PATH so a bin that shells out to a
-// sibling bin (e.g. `fbeast` forwards non-mcp commands to `frankenbeast`)
-// resolves it — exactly as a real co-install does, where every package bin
-// lands in the same PATH-visible directory.
-const binDir = join(proj, 'node_modules', '.bin');
-const childEnv = { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` };
-for (const { bin, mustMatch } of EXECUTABLE_BINS) {
-  const binFile = join(binDir, bin);
-  if (!existsSync(binFile)) {
-    fail(`bin "${bin}" was not linked into node_modules/.bin`);
-    continue;
-  }
-  const res = spawnSync(binFile, ['--help'], { cwd: proj, env: childEnv, encoding: 'utf8', timeout: 30_000 });
-  if (res.error) fail(`${bin} --help failed to run: ${res.error.message}`);
-  else if (res.status !== 0) fail(`${bin} --help exited ${res.status}\n${(res.stderr || '').slice(0, 500)}`);
-  else if (!(res.stdout || '').trim()) fail(`${bin} --help produced no stdout`);
-  else if (mustMatch && !mustMatch.test(res.stdout)) fail(`${bin} --help output did not match ${mustMatch}`);
-  else log(`  ${bin} --help ran and printed output ✓`);
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main();
 }
-
-for (const d of [stage, proj]) {
-  try {
-    rmSync(d, { recursive: true, force: true });
-  } catch {
-    /* ignore */
-  }
-}
-
-if (failures > 0) {
-  console.error(`[publish-smoke] ${failures} failure(s)`);
-  process.exit(1);
-}
-log('all publish smoke checks passed ✓');
