@@ -44,6 +44,40 @@ describe('safe JSON Pointer helpers', () => {
     expect(getJsonPointerValue(target, '/agents/0/moduleConfig/firewall')).toBe(false);
   });
 
+  it('does not traverse inherited array indexes when writing nested paths', () => {
+    const inherited = { polluted: false };
+    Object.defineProperty(Array.prototype, '0', {
+      configurable: true,
+      writable: true,
+      value: inherited,
+    });
+
+    try {
+      const target = new Array(1) as unknown[];
+
+      setJsonPointerValue(target, '/0/enabled', true);
+
+      expect(inherited).toEqual({ polluted: false });
+      expect(Object.prototype.hasOwnProperty.call(target, 0)).toBe(true);
+      expect(target[0]).toEqual({ enabled: true });
+    } finally {
+      delete (Array.prototype as unknown as Record<string, unknown>)['0'];
+    }
+  });
+
+  it('bounds array indexes before creating sparse arrays', () => {
+    const target: Record<string, unknown> = {};
+
+    expect(() => setJsonPointerValue(target, '/agents/4294967294/name', 'agent')).toThrow(/maximum allowed array index/i);
+    expect(target).toEqual({});
+  });
+
+  it('checks segment count before materializing oversized pointer arrays', () => {
+    const oversized = `/${'x/'.repeat(129)}`;
+
+    expect(() => parseJsonPointer(oversized)).toThrow(/too many path segments/i);
+  });
+
   it('requires an explicit override for unsafe compatibility keys and still avoids prototype mutation', () => {
     const target: Record<string, unknown> = {};
 
