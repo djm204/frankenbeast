@@ -31,6 +31,13 @@ binary still matches the root `packageManager` pin before `npm audit` runs:
 npm run audit:security
 ```
 
+Dependency-update automation is fail-closed for first-party packages: Dependabot
+may update external npm and GitHub Actions dependencies, but it must ignore the
+internal `@franken/*` workspace scope and exclude it from broad npm update
+groups. Run `npm run check:dependabot-supply-chain` after editing
+`.github/dependabot.yml` to verify that registry-driven update PRs cannot
+confuse internal workspace packages with public packages.
+
 ## 2. Configure environment
 
 ```bash
