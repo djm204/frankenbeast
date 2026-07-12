@@ -96,6 +96,7 @@ export const ApproveResultSchema = z.object({
   id: z.string(),
   approved: z.boolean(),
   state: z.string(),
+  pendingApproval: PendingApprovalSchema.nullable(),
   outcome: TurnOutcomeSchema.optional(),
   tier: z.string().optional(),
   displayMessages: z.array(z.unknown()).optional(),
