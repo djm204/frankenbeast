@@ -953,7 +953,6 @@ describe('main() execution', () => {
     tempDirs.push(tempDir);
     mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
     writeFileSync(join(tempDir, '.fbeast', 'config.json'), '[]\n', 'utf-8');
-    vi.mocked(loadConfig).mockResolvedValueOnce(defaultConfig());
     mockParseArgs.mockReturnValue({
       ...(mockParseArgs() as Record<string, unknown>),
       subcommand: 'init',
