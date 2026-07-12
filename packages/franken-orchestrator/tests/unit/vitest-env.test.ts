@@ -8,6 +8,7 @@ type VitestConfig = {
   test?: {
     include?: string[];
     exclude?: string[];
+    passWithNoTests?: boolean;
   };
 };
 
@@ -95,6 +96,13 @@ describe('Vitest environment flags', () => {
     expect(config).toContain("arg.includes('test/e2e/')");
     expect(config).toContain("'tests/e2e/**/*.test.ts'");
     expect(config).toContain("'test/e2e/**/*.test.ts'");
+    expect(config).toContain('passWithNoTests: false');
+  });
+
+  it('fails instead of passing when no E2E tests are discovered', async () => {
+    const config = await loadPackageVitestConfig({ E2E: 'true' });
+
+    expect(config.test?.passWithNoTests).toBe(false);
   });
 
   it('treats false-like suite flags as default unit test selection', async () => {
