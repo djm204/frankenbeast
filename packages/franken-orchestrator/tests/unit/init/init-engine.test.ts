@@ -126,18 +126,22 @@ describe('runInteractiveInit', () => {
     expect(result.config.network.secureBackend).toBe('1password');
   });
 
-  it('reports malformed init JSON before repair reloads files', async () => {
+  it('repairs malformed config JSON after quarantine instead of aborting', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
     const configFile = join(tempDir, '.fbeast', 'config.json');
     const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
     const { io } = scriptedIo();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await mkdir(join(tempDir, '.fbeast'), { recursive: true });
     await writeFile(configFile, '{"comms": ', 'utf-8');
     await stateStore.save(createEmptyInitState(configFile));
 
-    await expect(runRepairInit({ configFile, stateStore, io })).rejects.toThrow(
-      /Cannot repair init because required init JSON is malformed:[\s\S]*Config file[\s\S]*could not be parsed/,
-    );
+    const result = await runRepairInit({ configFile, stateStore, io });
+
+    expect(result.state.configPath).toBe(configFile);
+    expect(result.config.chat.enabled).toBe(true);
+    expect(JSON.parse(await readFile(configFile, 'utf-8'))).toMatchObject({ chat: { enabled: true } });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
   });
 
   it('repairs malformed init state by rebuilding it from valid config defaults', async () => {
