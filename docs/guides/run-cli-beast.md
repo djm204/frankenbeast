@@ -212,6 +212,8 @@ A franken-governor pre-deploy hook should be integrated at the dispatch/API laye
 
 Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts.
 
+Verbose and build-log output redacts secret-like environment/config keys such as `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, and `*_API_KEY` by default. The logger exposes an explicit local diagnostic override (`redactSecrets: false`) for trusted development-only callers, but normal CLI/runtime paths keep redaction enabled so environment dumps do not leak provider tokens or credentials.
+
 ---
 
 ## 7. Chat REPL and server
