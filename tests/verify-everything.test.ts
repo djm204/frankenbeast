@@ -9,7 +9,47 @@ const exec = (command: string, args: string[]) =>
   execFileSync(command, args, { cwd: ROOT, encoding: "utf8" }).trim();
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
+type NpmLsPackage = {
+  name?: string;
+  version?: string;
+  dependencies?: Record<string, NpmLsPackage>;
+  problems?: string[];
+  error?: unknown;
+  extraneous?: boolean;
+  invalid?: boolean;
+  missing?: boolean;
+};
+
 const ALL_PACKAGES = getWorkspacePackageDirNames();
+
+const parseNpmLsJson = (stdout: string): NpmLsPackage =>
+  JSON.parse(stdout) as NpmLsPackage;
+
+const findDependency = (
+  tree: NpmLsPackage,
+  packageName: string,
+): NpmLsPackage | undefined => {
+  if (tree.name === packageName) return tree;
+
+  const directDependency = tree.dependencies?.[packageName];
+  if (directDependency) return directDependency;
+
+  for (const dependency of Object.values(tree.dependencies ?? {})) {
+    const match = findDependency(dependency, packageName);
+    if (match) return match;
+  }
+
+  return undefined;
+};
+
+const collectProblems = (tree: NpmLsPackage): string[] => [
+  ...(tree.problems ?? []),
+  ...(tree.error ? [JSON.stringify(tree.error)] : []),
+  ...(tree.extraneous ? [`${tree.name ?? "dependency"} is extraneous`] : []),
+  ...(tree.invalid ? [`${tree.name ?? "dependency"} is invalid`] : []),
+  ...(tree.missing ? [`${tree.name ?? "dependency"} is missing`] : []),
+  ...Object.values(tree.dependencies ?? {}).flatMap(collectProblems),
+];
 
 describe("Chunk 10: full verification pass", () => {
   describe("verification command portability", () => {
@@ -28,16 +68,17 @@ describe("Chunk 10: full verification pass", () => {
 
   describe("workspace resolution", () => {
     it("npm ls @franken/types resolves without errors", () => {
-      const result = spawnSync(npmCommand, ["ls", "@franken/types"], {
+      const result = spawnSync(npmCommand, ["ls", "@franken/types", "--json"], {
         cwd: ROOT,
         encoding: "utf8",
       });
-      const output = `${result.stdout}\n${result.stderr}`;
+      const dependencyTree = parseNpmLsJson(result.stdout);
+      const dependency = findDependency(dependencyTree, "@franken/types");
+      const problems = collectProblems(dependencyTree);
 
-      expect(result.status).toBe(0);
-      expect(output).not.toContain("ERR!");
-      expect(output).not.toContain("WARN");
-      expect(output).toContain("@franken/types");
+      expect(result.status, problems.join("\n")).toBe(0);
+      expect(problems).toEqual([]);
+      expect(dependency?.name).toBe("@franken/types");
     });
   });
 

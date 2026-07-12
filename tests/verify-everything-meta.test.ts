@@ -13,4 +13,13 @@ describe('verify-everything test boundaries', () => {
       expect(source).not.toContain(['npx', 'turbo', 'run', pipeline].join(' '));
     }
   });
+
+  it('uses structured npm ls json for dependency resolution checks', () => {
+    const source = readFileSync(VERIFY_EVERYTHING_TEST, 'utf8');
+
+    expect(source).toContain('["ls", "@franken/types", "--json"]');
+    expect(source).toContain('JSON.parse(stdout)');
+    expect(source).not.toContain('not.toContain("ERR!")');
+    expect(source).not.toContain('not.toContain("WARN")');
+  });
 });
