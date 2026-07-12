@@ -869,6 +869,23 @@ describe('main() execution', () => {
     expect(mockHandleInitCommand).not.toHaveBeenCalled();
   });
 
+  it('does not hide non-file init config errors when the config file is missing', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    const error = new Error('FRANKEN_MAX_TOTAL_TOKENS must be a number');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initRepair: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
   it('lets init verification handle non-object config JSON with fallback defaults', async () => {
     const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
     tempDirs.push(tempDir);

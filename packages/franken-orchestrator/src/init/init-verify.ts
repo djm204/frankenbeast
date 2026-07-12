@@ -1,5 +1,5 @@
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
-import type { FileInitStateStore } from './init-state-store.js';
+import { isInitStateForConfig, type FileInitStateStore } from './init-state-store.js';
 import type { ISecretStore } from '../network/secret-store.js';
 import { readJsonFileOrDefault, warnJsonQuarantined } from './init-json-file.js';
 
@@ -104,6 +104,11 @@ export async function verifyInit(options: {
     issues.push({
       code: 'invalid-init-state-json',
       message: `Init state at ${options.stateStore.filePath} must contain a JSON object.`,
+    });
+  } else if (!isInitStateForConfig(stateRead.value, options.configFile)) {
+    issues.push({
+      code: 'invalid-init-state-json',
+      message: `Init state at ${options.stateStore.filePath} must contain a complete init state for ${options.configFile}.`,
     });
   }
 

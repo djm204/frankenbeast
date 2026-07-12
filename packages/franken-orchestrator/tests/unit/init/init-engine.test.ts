@@ -147,6 +147,7 @@ describe('runInteractiveInit', () => {
     const stateStore = new FileInitStateStore(stateFile);
     const config = defaultConfig();
     config.chat.enabled = true;
+    config.network.mode = 'insecure';
     await mkdir(join(tempDir, '.fbeast'), { recursive: true });
     await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     await writeFile(stateFile, '{"answers": {', 'utf-8');
@@ -174,6 +175,7 @@ describe('runInteractiveInit', () => {
     const stateStore = new FileInitStateStore(stateFile);
     const config = defaultConfig();
     config.chat.enabled = true;
+    config.network.mode = 'insecure';
     await mkdir(join(tempDir, '.fbeast'), { recursive: true });
     await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     await writeFile(stateFile, 'null\n', 'utf-8');
@@ -188,7 +190,9 @@ describe('runInteractiveInit', () => {
     const result = await runRepairInit({ configFile, stateStore, io });
 
     expect(result.config.chat.enabled).toBe(true);
+    expect(result.config.network.mode).toBe('insecure');
     expect(result.state.configPath).toBe(configFile);
+    expect(result.state.securityMode).toBe('insecure');
     expect(result.state.selectedModules).toEqual(['chat', 'dashboard']);
   });
 

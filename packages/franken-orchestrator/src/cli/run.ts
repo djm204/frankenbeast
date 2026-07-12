@@ -318,12 +318,15 @@ async function isInitConfigFileError(configFile: string, error: unknown): Promis
   if (error instanceof TypeError && /config file must contain a json object/i.test(error.message)) {
     return true;
   }
+  if (error instanceof Error && error.message.startsWith('Config file not found:')) {
+    return true;
+  }
   try {
     const raw = await readFile(configFile, 'utf-8');
     const value = JSON.parse(raw) as unknown;
     return value === null || typeof value !== 'object' || Array.isArray(value);
-  } catch (error) {
-    return error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT';
+  } catch (fileError) {
+    return fileError instanceof SyntaxError;
   }
 }
 

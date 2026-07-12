@@ -2,7 +2,7 @@ import type { InitState } from './init-types.js';
 import { createEmptyInitState } from './init-types.js';
 import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from './init-json-file.js';
 
-function isInitStateForConfig(value: unknown, configPath: string): value is InitState {
+export function isInitStateForConfig(value: unknown, configPath: string): value is InitState {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return false;
   }

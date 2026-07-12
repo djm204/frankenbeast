@@ -141,7 +141,9 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
   }
 
   const needsFullWizard = verification.issues.some((issue) =>
-    issue.code === 'missing-config' || issue.code === 'missing-init-state');
+    issue.code === 'missing-config'
+    || issue.code === 'missing-init-state'
+    || issue.code === 'invalid-init-state-json');
   if (needsFullWizard) {
     return runInteractiveInit(options);
   }

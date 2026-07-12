@@ -155,6 +155,29 @@ describe('verifyInit', () => {
     );
   });
 
+  it('reports structurally incomplete init state JSON without passing verification', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const config = defaultConfig();
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateStore.filePath, '{}\n', 'utf-8');
+
+    const result = await verifyInit({
+      configFile,
+      stateStore,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid-init-state-json',
+        message: expect.stringContaining('complete init state'),
+      }),
+    );
+  });
+
   it('checks only enabled comms transports', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
     const configFile = join(tempDir, '.fbeast', 'config.json');
