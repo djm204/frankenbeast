@@ -37,10 +37,10 @@ function createPeer() {
   };
 }
 
-function createTestRuntime(): ChatRuntime {
+function createTestRuntime(complete = vi.fn().mockResolvedValue('Working on it right now.')): ChatRuntime {
   return new ChatRuntime({
     engine: new ConversationEngine({
-      llm: { complete: vi.fn().mockResolvedValue('Working on it right now.') },
+      llm: { complete },
       projectName: 'proj',
     }),
     turnRunner: new TurnRunner({
@@ -471,6 +471,75 @@ describe('ws chat server', () => {
 
     resolveRuntime(createRuntimeResult(session));
     await firstReceive;
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('prevents overlapping turns across multiple connections on same session', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const secret = createSessionTokenSecret();
+    const tokenA = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const tokenB = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    let resolveLlm!: (value: string) => void;
+    const llmPending = new Promise<string>((resolve) => {
+      resolveLlm = resolve;
+    });
+    const llmComplete = vi.fn().mockReturnValue(llmPending);
+    const controller = new ChatSocketController({
+      runtime: createTestRuntime(llmComplete),
+      sessionStore: store,
+      tokenSecret: secret,
+      chatMessageRateLimit: { max: 10, windowMs: 60_000 },
+    });
+    const { peer: peerA } = createPeer();
+    const { peer: peerB, sent: sentB } = createPeer();
+
+    expect(
+      controller.connect(peerA, {
+        origin: null,
+        sessionId: session.id,
+        token: tokenA,
+      }),
+    ).toEqual({ ok: true });
+
+    expect(
+      controller.connect(peerB, {
+        origin: null,
+        sessionId: session.id,
+        token: tokenB,
+      }),
+    ).toEqual({ ok: true });
+
+    const firstReceive = controller.receive(
+      peerA,
+      JSON.stringify({
+        type: 'message.send',
+        clientMessageId: 'client-a',
+        content: 'first message',
+      }),
+    );
+    await vi.waitFor(() => expect(llmComplete).toHaveBeenCalledTimes(1));
+
+    await controller.receive(
+      peerB,
+      JSON.stringify({
+        type: 'message.send',
+        clientMessageId: 'client-b',
+        content: 'second message',
+      }),
+    );
+
+    const events = sentB.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'RATE_LIMITED',
+      message: 'A chat turn is already running for this chat session.',
+    }));
+
+    resolveLlm('Working on it right now.');
+    await firstReceive;
+
     rmSync(TMP, { recursive: true, force: true });
   });
 
