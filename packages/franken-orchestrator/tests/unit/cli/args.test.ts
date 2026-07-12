@@ -241,6 +241,31 @@ describe('parseArgs', () => {
     expect(args.networkAction).toBe('help');
   });
 
+  it('rejects extra positional args for fixed-arity subcommand groups', () => {
+    expect(() => parseArgs(['network', 'start', 'chat-server', 'unexpected'])).toThrow(
+      "Unexpected argument 'unexpected' for network command",
+    );
+    expect(() => parseArgs(['beasts', 'logs', 'run-1', 'unexpected'])).toThrow(
+      "Unexpected argument 'unexpected' for beasts command",
+    );
+    expect(() => parseArgs(['skill', 'enable', 'my-skill', 'unexpected'])).toThrow(
+      "Unexpected argument 'unexpected' for skill command",
+    );
+    expect(() => parseArgs(['security', 'set', 'standard', 'unexpected'])).toThrow(
+      "Unexpected argument 'unexpected' for security command",
+    );
+  });
+
+  it('continues to preserve variadic command args for skill add', () => {
+    const args = parseArgs(['skill', 'add', 'my-skill', 'npx', '-y', '@acme/mcp-server', '--verbose']);
+
+    expect(args.skillAction).toBe('add');
+    expect(args.skillTarget).toBe('my-skill');
+    expect(args.skillCommand).toBe('npx');
+    expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server', '--verbose']);
+    expect(args.verbose).toBe(false);
+  });
+
   it('parses global flags without subcommand', () => {
     const args = parseArgs([
       '--base-dir', '/my/project',

@@ -383,6 +383,13 @@ function parseIntegerOption(name: string, value: string, options: { min?: number
   return parsed;
 }
 
+function assertNoExtraPositionals(commandName: string, positionals: string[], maxPositionals: number): void {
+  const unexpected = positionals[maxPositionals];
+  if (unexpected !== undefined) {
+    throw new TypeError(`Unexpected argument '${unexpected}' for ${commandName} command`);
+  }
+}
+
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   // Extract the first subcommand positional, even when global flags precede it.
   const { subcommand, flagArgs } = extractSubcommand(argv);
@@ -460,6 +467,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let securityTarget: string | undefined;
 
   if (subcommand === 'network') {
+    assertNoExtraPositionals('network', positionals, 2);
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
       if (!VALID_NETWORK_ACTIONS.has(actionCandidate)) {
@@ -469,6 +477,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     }
     networkTarget = positionals[1];
   } else if (subcommand === 'beasts') {
+    assertNoExtraPositionals('beasts', positionals, 2);
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
       if (!VALID_BEAST_ACTIONS.has(actionCandidate)) {
@@ -485,12 +494,14 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       skillAction = actionCandidate as SkillAction;
     }
+    assertNoExtraPositionals('skill', positionals, skillAction === 'add' ? 3 : 2);
     skillTarget = positionals[1];
     skillCommand = positionals[2];
     skillCommandArgs = rawSkillAddCommandArgs !== undefined
       ? rawSkillAddCommandArgs
       : positionals.length > 3 ? positionals.slice(3) : undefined;
   } else if (subcommand === 'security') {
+    assertNoExtraPositionals('security', positionals, 2);
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
       if (!VALID_SECURITY_ACTIONS.has(actionCandidate)) {
