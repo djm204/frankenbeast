@@ -51,7 +51,7 @@ describe('ChatRepl', () => {
     });
     await repl.start();
 
-    expect(mockProcessTurn).toHaveBeenCalledWith('hello', expect.any(Array));
+    expect(mockProcessTurn).toHaveBeenCalledWith('hello', expect.any(Array), { sessionId: 'test' });
     expect(outputs.some(o => o.includes('Hello!'))).toBe(true);
   });
 
