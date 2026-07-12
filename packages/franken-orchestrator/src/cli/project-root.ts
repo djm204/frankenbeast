@@ -52,7 +52,7 @@ function findWorkspaceRoot(start: string): string | undefined {
           : packageJson.workspaces?.packages;
         const rel = relative(current, start);
         const isInsidePackagesDir = rel === 'packages' || rel.startsWith(`packages/`);
-        if (workspaces?.includes('packages/*') && (start === current || isInsidePackagesDir)) {
+        if (workspaces?.some(isPackagesWorkspaceEntry) && (start === current || isInsidePackagesDir)) {
           return current;
         }
       } catch {
@@ -66,6 +66,11 @@ function findWorkspaceRoot(start: string): string | undefined {
     }
     current = parent;
   }
+}
+
+function isPackagesWorkspaceEntry(entry: string): boolean {
+  const normalized = entry.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  return normalized === 'packages/*';
 }
 
 /**
