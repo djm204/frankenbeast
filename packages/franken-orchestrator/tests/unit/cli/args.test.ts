@@ -138,6 +138,7 @@ describe('parseArgs', () => {
   it('rejects invalid beasts execution modes', () => {
     expect(() => parseArgs(['beasts', 'spawn', 'martin-loop', '--mode', 'vm'])).toThrow('Invalid beast execution mode');
     expect(() => parseArgs(['run', '--mode', 'container'])).toThrow('--mode is only supported for beasts commands');
+    expect(() => parseArgs(['beasts', '--mode', 'process'])).toThrow('--mode requires a beasts action: create, spawn, status, or logs');
     expect(() => parseArgs(['beasts', 'kill', 'run-1', '--mode', 'container'])).toThrow('--mode is only supported for beasts create, spawn, status, and logs');
   });
 
