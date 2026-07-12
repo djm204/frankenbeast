@@ -283,11 +283,15 @@ Zero-dependency, in-process store. Good for tests and prototyping.
 ```ts
 import { InMemoryAdapter } from '@franken/observer'
 
-const adapter = new InMemoryAdapter()
+// Retains the most recent 1000 traces by default. Older traces are evicted
+// from queryByTraceId() / listTraceIds(); use maxTraces: Infinity only for
+// legacy test fixtures that intentionally need unbounded retention.
+const adapter = new InMemoryAdapter({ maxTraces: 1000 })
 await adapter.flush(trace)
 
 const retrieved = await adapter.queryByTraceId(trace.id)
 const allIds    = await adapter.listTraceIds()
+adapter.clear() // explicit cleanup hook for long-lived processes/tests
 ```
 
 ### `SQLiteAdapter`
