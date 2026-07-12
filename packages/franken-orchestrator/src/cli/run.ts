@@ -62,6 +62,7 @@ import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } f
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
+import { redactLogData } from '../logging/redaction.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -908,7 +909,7 @@ export async function main(): Promise<void> {
   }
 
   if (args.verbose) {
-    printLine('Config:', JSON.stringify(config, null, 2));
+    printLine('Config:', JSON.stringify(redactLogData(config), null, 2));
   }
 
   if (resumeTarget) {
