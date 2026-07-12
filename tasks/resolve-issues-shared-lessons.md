@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-11 — Approval replay command extraction guardrails
+- Approval replay commands are model-derived state, not fresh operator input. Keep the replay helper narrow: accept only trimmed single-line printable non-slash command descriptions, fail closed on multiline/control-command payloads, preserve the pending approval, and make operators reject/re-submit an explicit `/run` for overrides.
+- Regression coverage should include the low-level replay helper and the HTTP approval route so unsafe payloads do not reach the runtime/LLM and error responses do not echo injected command text.
+
 ## 2026-07-11 — Vitest config env-flag regression tests
 - For Vitest suite-flag fixes, assert false-like env values (`0`, `false`, `no`, blank) preserve the default unit-test include set in package configs, not just helper return values.
 - In Vitest tests, avoid cache-busting variable dynamic imports such as `import(`../vitest.config.ts?case=${...}`)`: Vite cannot statically analyze them. Use a static config import and reset env/argv around each assertion instead.

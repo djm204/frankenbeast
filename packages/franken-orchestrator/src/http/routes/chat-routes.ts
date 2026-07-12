@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { approvalRuntimeInput } from '../../chat/approval-input.js';
+import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../../chat/approval-input.js';
 import type { CorruptChatSessionFile, ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
@@ -259,7 +259,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       if (approved) {
         const pendingApproval = session.pendingApproval ?? null;
         const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
-        const runtimeInput = approvalRuntimeInput(pendingApproval);
+        let runtimeInput: string;
+        try {
+          runtimeInput = approvalRuntimeInput(pendingApproval);
+        } catch (error) {
+          if (error instanceof UnsafeApprovalCommandError) {
+            return c.json({
+              error: {
+                code: 'UNSAFE_APPROVAL_COMMAND',
+                message: error.message,
+              },
+            }, 400);
+          }
+          throw error;
+        }
         const originalState = session.state;
         session.pendingApproval = null;
         session.state = 'approved';
