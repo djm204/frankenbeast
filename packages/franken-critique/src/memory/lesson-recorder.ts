@@ -161,10 +161,6 @@ export class LessonRecorder {
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
       for (const lesson of lessons) {
-        addUniqueBlockerPatterns(
-          recordingResult.minedBlockerPatterns,
-          lesson.blockerPatterns,
-        );
         const hasMinedBlockerPatterns =
           (lesson.blockerPatterns?.length ?? 0) > 0;
         const cooldownKey =
@@ -208,6 +204,10 @@ export class LessonRecorder {
           const admittedLesson = this.withAdmissionTimestamp(lesson);
           await this.memory.recordLesson(admittedLesson);
           recordingResult.recorded += 1;
+          addUniqueBlockerPatterns(
+            recordingResult.minedBlockerPatterns,
+            lesson.blockerPatterns,
+          );
           if (cooldownKey && this.cooldownMs > 0) {
             this.cooldowns.set(
               cooldownKey,
@@ -379,9 +379,13 @@ export class LessonRecorder {
         continue;
       }
 
+      const previousObservationCount = pattern.observations.length;
       pattern.observations.push({ taskId, observedAt });
       pendingObservations.push({ key, taskId });
-      if (pattern.observations.length >= this.blockerPatternThreshold) {
+      if (
+        previousObservationCount < this.blockerPatternThreshold &&
+        pattern.observations.length >= this.blockerPatternThreshold
+      ) {
         minedPatterns.push(
           createCrossTaskBlockerPattern(pattern, this.blockerPatternThreshold),
         );

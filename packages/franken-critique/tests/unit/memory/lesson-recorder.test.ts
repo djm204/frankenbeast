@@ -909,6 +909,44 @@ describe('LessonRecorder', () => {
     );
   });
 
+  it('keeps already-mined blocker repeats subject to cooldown', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      blockerPatternThreshold: 2,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Already-routed blocker pattern should not bypass cooldown forever',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-a');
+    now = new Date('2026-07-12T10:00:10.000Z');
+    const secondSummary = await recorder.record(result, 'task-b');
+    now = new Date('2026-07-12T10:00:20.000Z');
+    const thirdSummary = await recorder.record(result, 'task-c');
+
+    expect(secondSummary.recorded).toBe(1);
+    expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
+    expect(port.recordLesson).toHaveBeenCalledTimes(2);
+    expect(thirdSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [expect.objectContaining({ taskId: 'task-c' })],
+      minedBlockerPatterns: [],
+    });
+  });
+
   it('rolls back blocker observations when lesson persistence fails', async () => {
     const port = createMockMemoryPort();
     (port.recordLesson as ReturnType<typeof vi.fn>)
