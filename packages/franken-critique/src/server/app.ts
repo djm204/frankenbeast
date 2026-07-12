@@ -16,6 +16,10 @@ export interface CritiqueAppOptions {
   pipeline?: CritiquePipeline;
 }
 
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = RATE_LIMIT_WINDOW_MS;
+const RATE_LIMIT_MAX_BUCKETS = 10_000;
+
 export interface RateLimitBucket {
   count: number;
   resetAt: number;
@@ -32,9 +36,28 @@ export function evictExpiredRateLimitBuckets(
   }
 }
 
+export function evictOldestRateLimitBucket(
+  requestCounts: Map<string, RateLimitBucket>,
+): void {
+  let oldestIp: string | undefined;
+  let oldestResetAt = Infinity;
+
+  for (const [ip, bucket] of requestCounts) {
+    if (bucket.resetAt < oldestResetAt) {
+      oldestIp = ip;
+      oldestResetAt = bucket.resetAt;
+    }
+  }
+
+  if (oldestIp !== undefined) {
+    requestCounts.delete(oldestIp);
+  }
+}
+
 export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
   const app = new Hono();
   const requestCounts = new Map<string, RateLimitBucket>();
+  let nextRateLimitCleanupAt = 0;
 
   // Bearer auth middleware
   const bearerToken = options.bearerToken;
@@ -51,15 +74,18 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
     });
   }
 
-  // Rate limiting middleware. Each rate-limited request performs a lightweight
-  // sweep so buckets whose windows expired are not retained indefinitely when
-  // their original clients never return.
+  // Rate limiting middleware. Expired buckets are swept at a fixed cadence and
+  // the active bucket map has a hard cap so high-cardinality forwarded-address
+  // traffic cannot force an O(bucket count) scan on every request.
   if (options.rateLimitPerMinute) {
     const limit = options.rateLimitPerMinute;
     app.use('/v1/*', async (c, next) => {
       const ip = c.req.header('x-forwarded-for') ?? 'unknown';
       const now = wallClockNow();
-      evictExpiredRateLimitBuckets(requestCounts, now);
+      if (now >= nextRateLimitCleanupAt) {
+        evictExpiredRateLimitBuckets(requestCounts, now);
+        nextRateLimitCleanupAt = now + RATE_LIMIT_CLEANUP_INTERVAL_MS;
+      }
       const entry = requestCounts.get(ip);
 
       if (entry && entry.resetAt > now) {
@@ -71,7 +97,13 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
         }
         entry.count++;
       } else {
-        requestCounts.set(ip, { count: 1, resetAt: now + 60_000 });
+        requestCounts.set(ip, {
+          count: 1,
+          resetAt: now + RATE_LIMIT_WINDOW_MS,
+        });
+        if (requestCounts.size > RATE_LIMIT_MAX_BUCKETS) {
+          evictOldestRateLimitBucket(requestCounts);
+        }
       }
 
       return next();

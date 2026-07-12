@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createCritiqueApp,
   evictExpiredRateLimitBuckets,
+  evictOldestRateLimitBucket,
 } from '../../../src/server/app.js';
 import { timingSafeBearerTokenMatches } from '../../../src/server/token-auth.js';
 import { CritiquePipeline } from '../../../src/pipeline/critique-pipeline.js';
@@ -167,6 +168,18 @@ describe('Critique Hono Server', () => {
       evictExpiredRateLimitBuckets(requestCounts, 3_000);
 
       expect([...requestCounts.keys()]).toEqual(['active']);
+    });
+
+    it('evicts the oldest rate-limit bucket when the active bucket cap is exceeded', () => {
+      const requestCounts = new Map([
+        ['oldest', { count: 1, resetAt: 1_000 }],
+        ['newest', { count: 1, resetAt: 3_000 }],
+        ['middle', { count: 1, resetAt: 2_000 }],
+      ]);
+
+      evictOldestRateLimitBucket(requestCounts);
+
+      expect([...requestCounts.keys()]).toEqual(['newest', 'middle']);
     });
 
     it('returns 429 after exceeding limit', async () => {
