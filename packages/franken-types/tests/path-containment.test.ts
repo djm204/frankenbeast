@@ -113,6 +113,23 @@ describe('realpath containment helpers', () => {
     });
   });
 
+  it('rejects lexically safe archive entries whose existing ancestor is a symlink escape', () => {
+    withTempRoot('archive-entry-symlink', root => {
+      const outside = join(root, '..', `outside-${randomUUID()}`);
+      const link = join(root, 'linked-outside');
+      mkdirSync(outside, { recursive: true });
+      symlinkSync(outside, link, 'dir');
+
+      try {
+        expect(() => resolveArchiveEntryPath(root, 'linked-outside/pwned.txt')).toThrow(
+          /archiveEntryPath resolves outside base directory/i,
+        );
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
   it('rejects absolute, Windows drive, UNC, empty, and NUL archive entries by default', () => {
     withTempRoot('archive-entry-denylist', root => {
       expect(() => resolveArchiveEntryPath(root, '/tmp/evil.txt')).toThrow(/absolute path/i);

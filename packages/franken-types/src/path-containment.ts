@@ -62,6 +62,32 @@ function resolveRequestedPath(
   return isAbsolute(requestedPath) ? resolve(requestedPath) : resolve(relativeBase, requestedPath);
 }
 
+function resolveViaNearestExistingAncestor(baseRealPath: string, requestedAbsolutePath: string, fieldName: string): string {
+  const missingSegments: string[] = [];
+  let cursor = requestedAbsolutePath;
+
+  while (!existsSync(cursor)) {
+    missingSegments.unshift(basename(cursor));
+    const parent = dirname(cursor);
+    if (parent === cursor) {
+      throw containmentError(fieldName);
+    }
+    cursor = parent;
+  }
+
+  const ancestorRealPath = realpathSync(cursor);
+  if (!isContainedBy(baseRealPath, ancestorRealPath)) {
+    throw containmentError(fieldName);
+  }
+
+  const targetPath = resolve(ancestorRealPath, ...missingSegments);
+  if (!isContainedBy(baseRealPath, targetPath)) {
+    throw containmentError(fieldName);
+  }
+
+  return targetPath;
+}
+
 export function resolveContainedExistingPath(
   baseDir: string,
   requestedPath: string,
@@ -124,9 +150,5 @@ export function resolveArchiveEntryPath(
     : normalizeArchiveEntryPath(entryPath, fieldName);
   const targetPath = resolve(baseRealPath, safeEntryPath);
 
-  if (!isContainedBy(baseRealPath, targetPath)) {
-    throw containmentError(fieldName);
-  }
-
-  return targetPath;
+  return resolveViaNearestExistingAncestor(baseRealPath, targetPath, fieldName);
 }

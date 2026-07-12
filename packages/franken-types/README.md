@@ -38,7 +38,7 @@ import { createSeededRandom, deterministicUuid } from '@franken/types/utils';
 
 ## Path and archive extraction safety
 
-Use `resolveArchiveEntryPath(extractionRoot, entryName)` before writing files from an untrusted ZIP, tar, or other archive. It denies zip-slip entries by default: parent-directory segments, POSIX/Windows absolute paths, drive/UNC paths, empty names, and NUL bytes all throw explicit errors before a destination is returned.
+Use `resolveArchiveEntryPath(extractionRoot, entryName)` before writing files from an untrusted ZIP, tar, or other archive. It denies zip-slip entries by default: parent-directory segments, POSIX/Windows absolute paths, drive/UNC paths, empty names, and NUL bytes all throw explicit errors before a destination is returned. It also resolves the nearest existing ancestor so a lexically safe member cannot write through an existing symlinked directory outside the extraction root.
 
 Only set `allowUnsafeArchiveEntryPaths: true` for archives from a trusted operator-controlled source that requires legacy non-portable member names. The override still enforces final containment inside the extraction root; extraction code should also refuse archive symlink entries unless the caller has a separate explicit symlink policy.
 
