@@ -133,6 +133,33 @@ describe('InterviewLoop', () => {
       expect(io.ask).toHaveBeenCalledTimes(6);
     });
 
+    it('parses common unnumbered clarifying question formats', async () => {
+      const bulletQuestions = `- What authentication method do you prefer?
+* Q2: Should we support OAuth?
+Question: What database will be used?
+Clarifying question: Should sessions expire automatically?`;
+      const llm = mockLlm(bulletQuestions, designDocResponse);
+      const io = mockIO('JWT', 'Yes', 'PostgreSQL', 'Yes', 'yes');
+      const graphBuilder = mockGraphBuilder();
+      const loop = new InterviewLoop(llm, io, graphBuilder);
+
+      await loop.build(intent);
+
+      expect(io.ask).toHaveBeenCalledTimes(5);
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+        'What authentication method do you prefer?',
+      );
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe(
+        'Should we support OAuth?',
+      );
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[2][0]).toBe(
+        'What database will be used?',
+      );
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[3][0]).toBe(
+        'Should sessions expire automatically?',
+      );
+    });
+
     it('handles LLM returning no questions gracefully', async () => {
       const noQuestions = 'No clarifying questions needed.';
       const llm = mockLlm(noQuestions, designDocResponse);
