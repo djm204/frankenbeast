@@ -23,15 +23,20 @@ const TRAVERSAL_ERROR =
   'Path traversal is not allowed. Use allowParentTraversal only for trusted operator-supplied paths.';
 
 function normalizeForwardSlashPath(path: string): string {
+  const uncRoot = path.startsWith('//');
   const absolute = path.startsWith('/');
   const segments = path.split('/').filter(segment => segment.length > 0 && segment !== '.');
   const normalized = segments.join('/');
+
+  if (uncRoot) {
+    return `//${normalized}`;
+  }
 
   if (absolute) {
     return `/${normalized}`;
   }
 
-  return normalized;
+  return normalized || '.';
 }
 
 function hasParentTraversal(path: string): boolean {

@@ -1,4 +1,5 @@
 import type { BeastCatalogEntry, BeastContainerRuntimeStatus, BeastExecutionMode } from '../../lib/beast-api';
+import { normalizePath, type ServerEnvironment } from '../../lib/path-utils';
 import { findCatalogEntry, getPromptValue, isBlankCatalogValue } from './wizard-catalog';
 
 export const WIZARD_SECTION_KEYS = ['identity', 'workflow', 'llm', 'modules', 'skills', 'prompts', 'git'] as const;
@@ -17,6 +18,15 @@ const MODULE_NUMBER_BOUNDS = {
     reflectionInterval: { min: 10, max: 600 },
   },
 } as const;
+
+const REPO_RELATIVE_PATH_ENV: ServerEnvironment = {
+  os: 'linux',
+  platform: 'linux',
+  isWsl: false,
+  pathSeparator: '/',
+};
+
+const PATH_CONFIG_KEYS = new Set(['outputPath', 'designDocPath', 'outputDir', 'chunkDirectory']);
 
 interface PromptFile {
   name?: unknown;
@@ -89,6 +99,37 @@ function sanitizeModuleConfig(modules: Record<string, unknown> | undefined): Rec
   return nextModules;
 }
 
+function normalizeRepoRelativeLaunchPath(fieldName: string, value: string): string {
+  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:/.test(value)) {
+    throw new Error(`${fieldName} must be a repo-relative path without traversal.`);
+  }
+
+  const normalized = normalizePath(value, REPO_RELATIVE_PATH_ENV);
+  if (!normalized.valid) {
+    throw new Error(`${fieldName}: ${normalized.error ?? 'Invalid path'}`);
+  }
+
+  return normalized.normalized;
+}
+
+function setNormalizedLaunchPath(
+  config: Record<string, unknown>,
+  workflow: Record<string, unknown> | undefined,
+  configKey: string,
+  workflowKeys: string[],
+  value: string,
+): void {
+  const normalized = normalizeRepoRelativeLaunchPath(configKey, value);
+  config[configKey] = normalized;
+  if (workflow) {
+    for (const workflowKey of workflowKeys) {
+      if (typeof workflow[workflowKey] === 'string') {
+        workflow[workflowKey] = normalized;
+      }
+    }
+  }
+}
+
 export function buildWizardLaunchConfig(
   stepValues: WizardStepValues,
   catalog?: readonly BeastCatalogEntry[],
@@ -102,6 +143,9 @@ export function buildWizardLaunchConfig(
     }
   }
 
+  if (config.workflow && typeof config.workflow === 'object' && !Array.isArray(config.workflow)) {
+    config.workflow = { ...(config.workflow as Record<string, unknown>) };
+  }
   const workflow = config.workflow as Record<string, unknown> | undefined;
   config.modules = sanitizeModuleConfig(config.modules as Record<string, unknown> | undefined);
   const selectedWorkflow = typeof workflow?.workflowType === 'string'
@@ -118,7 +162,9 @@ export function buildWizardLaunchConfig(
     for (const prompt of selectedWorkflow.interviewPrompts) {
       const value = getPromptValue(workflow, prompt);
       if (!isBlankCatalogValue(value)) {
-        config[prompt.key] = value;
+        config[prompt.key] = typeof value === 'string' && PATH_CONFIG_KEYS.has(prompt.key)
+          ? normalizeRepoRelativeLaunchPath(prompt.key, value)
+          : value;
       }
     }
   }
@@ -129,17 +175,17 @@ export function buildWizardLaunchConfig(
       config.goal = goal;
     }
     if (typeof workflow.outputPath === 'string') {
-      config.outputPath = workflow.outputPath;
+      setNormalizedLaunchPath(config, workflow, 'outputPath', ['outputPath'], workflow.outputPath);
     }
   }
 
   if (workflow?.workflowType === 'chunk-plan') {
     const designDocPath = typeof workflow.designDocPath === 'string' ? workflow.designDocPath : workflow.docPath;
     if (typeof designDocPath === 'string') {
-      config.designDocPath = designDocPath;
+      setNormalizedLaunchPath(config, workflow, 'designDocPath', ['designDocPath', 'docPath'], designDocPath);
     }
     if (typeof workflow.outputDir === 'string') {
-      config.outputDir = workflow.outputDir;
+      setNormalizedLaunchPath(config, workflow, 'outputDir', ['outputDir'], workflow.outputDir);
     }
   }
 
@@ -152,7 +198,7 @@ export function buildWizardLaunchConfig(
     }
     const chunkDirectory = typeof workflow.chunkDirectory === 'string' ? workflow.chunkDirectory : workflow.chunkDir;
     if (typeof chunkDirectory === 'string') {
-      config.chunkDirectory = chunkDirectory;
+      setNormalizedLaunchPath(config, workflow, 'chunkDirectory', ['chunkDirectory', 'chunkDir'], chunkDirectory);
     }
   }
 

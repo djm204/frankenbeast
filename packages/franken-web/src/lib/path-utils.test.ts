@@ -3,6 +3,7 @@ import { normalizePath, type ServerEnvironment } from './path-utils';
 
 const linuxEnv: ServerEnvironment = { os: 'linux', platform: 'linux', isWsl: false, pathSeparator: '/' };
 const wslEnv: ServerEnvironment = { os: 'linux', platform: 'linux', isWsl: true, pathSeparator: '/' };
+const windowsEnv: ServerEnvironment = { os: 'win32', platform: 'win32', isWsl: false, pathSeparator: '\\' };
 
 describe('normalizePath', () => {
   it('passes through valid linux paths on linux', () => {
@@ -15,11 +16,19 @@ describe('normalizePath', () => {
     expect(normalizePath('/home//user/./file.txt', linuxEnv)).toEqual({
       normalized: '/home/user/file.txt', valid: true,
     });
+    expect(normalizePath('.', linuxEnv)).toEqual({ normalized: '.', valid: true });
+    expect(normalizePath('./', linuxEnv)).toEqual({ normalized: '.', valid: true });
   });
 
   it('converts Windows paths on WSL', () => {
     expect(normalizePath('C:\\Users\\test\\file.txt', wslEnv)).toEqual({
       normalized: '/mnt/c/Users/test/file.txt', valid: true,
+    });
+  });
+
+  it('preserves UNC roots when normalizing Windows server paths', () => {
+    expect(normalizePath('\\\\server\\share\\chunks', windowsEnv)).toEqual({
+      normalized: '//server/share/chunks', valid: true,
     });
   });
 
