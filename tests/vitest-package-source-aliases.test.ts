@@ -13,6 +13,7 @@ const EXPECTED_ALIASES = {
   '@franken/critique': resolve(ROOT, 'packages/franken-critique/src/index.ts'),
   '@franken/governor': resolve(ROOT, 'packages/franken-governor/src/index.ts'),
   '@franken/types/path-containment': resolve(ROOT, 'packages/franken-types/src/path-containment.ts'),
+  '@franken/types/json-pointer': resolve(ROOT, 'packages/franken-types/src/json-pointer.ts'),
   '@franken/types/utils': resolve(ROOT, 'packages/franken-types/src/utils/index.ts'),
   '@franken/types': resolve(ROOT, 'packages/franken-types/src/index.ts'),
   '@franken/orchestrator': resolve(ROOT, 'packages/franken-orchestrator/src/index.ts'),
