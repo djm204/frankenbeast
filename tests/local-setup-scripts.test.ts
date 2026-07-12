@@ -313,8 +313,11 @@ describe('local setup scripts', () => {
     expect(readme).toContain('frankenbeast init --verify');
     expect(readme).toContain('review token prompts carefully');
     expect(readme).toContain('frankenbeast init --non-interactive');
+    expect(readme).toContain('If you omit `network.secureBackend`, the config schema and init flow use `local-encrypted`');
+    expect(readme).toContain('`os-keychain` is never selected automatically');
     expect(readme).toContain('Choose the secret backend before the first init run');
     expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
+    expect(readme).toContain('instead of the default encrypted file');
     expect(readme).toContain('{ "network": { "secureBackend": "1password" } }');
     expect(readme).toContain('{ "network": { "secureBackend": "bitwarden" } }');
     expect(readme).toContain('it applies the same `network.secureBackend` choice');
