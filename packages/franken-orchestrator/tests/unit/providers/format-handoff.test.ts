@@ -166,8 +166,33 @@ describe('assessPmHandoffQuality', () => {
       }),
     );
 
-    expect(assessment.score).toBe(0);
-    expect(assessment.results.every((result) => result.evidence.length === 0)).toBe(true);
+    expect(assessment.score).toBe(0.17);
+    expect(assessment.results.find((result) => result.id === 'state')?.status).toBe('pass');
+    expect(
+      assessment.results
+        .filter((result) => result.id !== 'state')
+        .every((result) => result.evidence.length === 0),
+    ).toBe(true);
+  });
+
+  it('counts checkpoint labels as current-state evidence', () => {
+    const assessment = assessPmHandoffQuality(
+      makeSnapshot({
+        working: {},
+        episodic: [],
+        checkpoint: {
+          runId: 'run-1',
+          phase: 'execution',
+          step: 4,
+          context: {},
+          timestamp: '2026-03-22T00:00:00.000Z',
+        },
+      }),
+    );
+
+    const state = assessment.results.find((result) => result.id === 'state');
+    expect(state?.status).toBe('pass');
+    expect(state?.evidence.join(' ')).toContain('checkpoint: phase=execution');
   });
 
   it('bounds large checkpoint context evidence in the formatted rubric', () => {

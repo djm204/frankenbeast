@@ -225,7 +225,10 @@ function buildHandoffEvidenceCorpus(
   if (snapshot.checkpoint) {
     const searchable = normalizeEvidence(
       [
+        'checkpoint',
+        'phase',
         snapshot.checkpoint.phase,
+        'step',
         String(snapshot.checkpoint.step),
         summarizeUnknown(snapshot.checkpoint.context),
       ].join(' '),
