@@ -80,7 +80,7 @@ describe('formatHandoff', () => {
     const text = formatHandoff(
       makeSnapshot({
         working: {
-          issue: '#1862 add PM handoff quality rubric',
+          issue: '#1862 add PM handoff quality rubric with goal to improve PM handoffs; out-of-scope: unrelated learning changes',
           status: 'completed docs and implementation',
           verification: 'npm test -- --run tests/unit/providers/format-handoff.test.ts passed',
           blocker: 'needs review before merge PR',
@@ -90,10 +90,10 @@ describe('formatHandoff', () => {
       }),
     );
 
-    expect(text).toContain('PM handoff quality rubric: 6/6 (1)');
-    expect(text).toContain('Scope and objective: pass');
-    expect(text).toContain('Verification evidence: pass');
-    expect(text).toContain('PM handoff includes evidence for every rubric criterion.');
+    expect(text).toContain('PM rubric: 6/6 (1)');
+    expect(text).toContain('scope: pass');
+    expect(text).toContain('verification: pass');
+    expect(text).toContain('PM guidance: complete');
   });
 });
 
@@ -102,7 +102,7 @@ describe('assessPmHandoffQuality', () => {
     const assessment = assessPmHandoffQuality(
       makeSnapshot({
         working: {
-          goal: 'Resolve issue #1862 without broadening scope',
+          goal: 'Resolve issue #1862 without broadening scope; out-of-scope: unrelated learning changes',
           status: 'implementation completed with decisions recorded',
           verificationCommand: 'npm test --workspace @franken/orchestrator -- --run tests/unit/providers/format-handoff.test.ts',
           blocker: 'needs review before merge',
@@ -147,6 +147,7 @@ describe('assessPmHandoffQuality', () => {
           pr: undefined,
           issue: '   ',
           handoff: { verification: '', blocker: null, nested: { pr: ' ' } },
+          absentSignals: { verification: false, blocker: false, pr: false },
         },
         episodic: [
           {
@@ -293,6 +294,23 @@ describe('truncateSnapshot', () => {
     truncateSnapshot(snapshot, 500);
 
     expect(snapshot.episodic).toHaveLength(50);
+  });
+
+  it('keeps formatted output within a tight 300-token budget after trimming', () => {
+    const snapshot = makeSnapshot({
+      episodic: Array.from({ length: 50 }, (_, i) => ({
+        type: 'observation' as const,
+        summary: `Step ${i}: ${'x'.repeat(200)}`,
+        createdAt: '2026-03-22T00:00:00.000Z',
+      })),
+      working: {
+        task: 'fix auth',
+        huge: 'x'.repeat(5000),
+      },
+    });
+    const text = formatHandoff(truncateSnapshot(snapshot, 300));
+
+    expect(text.length).toBeLessThanOrEqual(300 * 4);
   });
 
   it('produces valid output that formatHandoff can render', () => {

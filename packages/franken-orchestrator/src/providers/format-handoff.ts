@@ -11,6 +11,7 @@ export interface PmHandoffRubricCriterion {
   readonly label: string;
   readonly guidance: string;
   readonly evidencePatterns: readonly RegExp[];
+  readonly requiredEvidencePatterns?: readonly RegExp[];
 }
 
 export interface PmHandoffRubricResult {
@@ -39,7 +40,12 @@ export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
     id: 'scope',
     label: 'Scope and objective',
     guidance: 'Name the issue/task, business goal, and out-of-scope boundaries so the next PM does not re-discover intent.',
-    evidencePatterns: [/\b(issue|task|goal|objective|scope|out[- ]of[- ]scope)\b/i],
+    evidencePatterns: [/\b(issue|task|goal|objective|scope|out[- ]of[- ]scope|boundary|boundaries)\b/i],
+    requiredEvidencePatterns: [
+      /\b(issue|task|scope)\b/i,
+      /\b(goal|objective)\b/i,
+      /\b(out[- ]of[- ]scope|boundary|boundaries)\b/i,
+    ],
   },
   {
     id: 'state',
@@ -144,7 +150,7 @@ export function assessPmHandoffQuality(
     return {
       id: criterion.id,
       label: criterion.label,
-      status: evidence.length > 0 ? 'pass' : 'needs-attention',
+      status: criterionPasses(criterion, evidenceCorpus) ? 'pass' : 'needs-attention',
       evidence,
       guidance: criterion.guidance,
     } satisfies PmHandoffRubricResult;
@@ -163,6 +169,20 @@ export function assessPmHandoffQuality(
         ? 'PM handoff includes evidence for every rubric criterion.'
         : 'PM handoff is missing one or more rubric criteria; add the missing evidence before promotion or retirement.',
   };
+}
+
+function criterionPasses(
+  criterion: PmHandoffRubricCriterion,
+  evidenceCorpus: readonly HandoffEvidenceEntry[],
+): boolean {
+  if (criterion.requiredEvidencePatterns) {
+    return criterion.requiredEvidencePatterns.every((pattern) =>
+      evidenceCorpus.some((entry) => pattern.test(entry.searchable)),
+    );
+  }
+  return evidenceCorpus.some((entry) =>
+    criterion.evidencePatterns.some((pattern) => pattern.test(entry.searchable)),
+  );
 }
 
 /**
@@ -203,12 +223,12 @@ function formatPmHandoffQualityRubric(
   assessment: PmHandoffQualityAssessment,
 ): string {
   return [
-    `PM handoff quality rubric: ${assessment.passed}/${assessment.total} (${assessment.score})`,
+    `PM rubric: ${assessment.passed}/${assessment.total} (${assessment.score})`,
     ...assessment.results.map((result) => {
-      const evidence = result.evidence.length > 0 ? result.evidence.join('; ') : result.guidance;
-      return `  - ${result.label}: ${result.status} — ${evidence}`;
+      const evidence = result.evidence.length > 0 ? result.evidence.join('; ') : 'missing evidence';
+      return `  - ${result.id}: ${result.status} — ${evidence}`;
     }),
-    `PM guidance: ${assessment.operatorGuidance}`,
+    `PM guidance: ${assessment.passed === assessment.total ? 'complete' : 'add missing evidence before promotion/retirement'}`,
   ].join('\n');
 }
 
@@ -294,6 +314,9 @@ function pruneEmptyEvidence(value: unknown): unknown {
   if (typeof value === 'string') {
     const normalized = normalizeEvidence(value);
     return normalized.length === 0 ? undefined : normalized;
+  }
+  if (typeof value === 'boolean') {
+    return value ? value : undefined;
   }
   if (Array.isArray(value)) {
     const items = value
