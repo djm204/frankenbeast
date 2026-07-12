@@ -105,7 +105,7 @@ export async function verifyInit(options: {
       code: 'invalid-init-state-json',
       message: `Init state at ${options.stateStore.filePath} must contain a JSON object.`,
     });
-  } else if (!isInitStateForConfig(stateRead.value, options.configFile)) {
+  } else if (!isInitStateForConfig(stateRead.value, options.configFile, options.stateStore.filePath)) {
     issues.push({
       code: 'invalid-init-state-json',
       message: `Init state at ${options.stateStore.filePath} must contain a complete init state for ${options.configFile}.`,

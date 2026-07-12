@@ -307,8 +307,7 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
 }
 
 function canInitHandleConfigLoadError(args: CliArgs): boolean {
-  return args.subcommand === 'init'
-    && (args.initVerify || args.initRepair || args.initNonInteractive);
+  return args.subcommand === 'init';
 }
 
 async function isInitConfigFileError(configFile: string, error: unknown): Promise<boolean> {

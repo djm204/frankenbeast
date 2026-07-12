@@ -906,6 +906,27 @@ describe('main() execution', () => {
     }));
   });
 
+  it('lets interactive init handle invalid explicit config JSON with fallback defaults', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    const configPath = join(tempDir, '.fbeast', 'config.json');
+    writeFileSync(configPath, '{not json', 'utf-8');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new SyntaxError('Unexpected token'));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      config: configPath,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ network: expect.any(Object) }),
+    }));
+  });
+
   it('records the implicit active plan name for chained interactive subcommands', async () => {
     await main();
 
