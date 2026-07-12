@@ -74,7 +74,7 @@ export class SlackChannel implements ApprovalChannel {
         {
           type: 'section',
           text: {
-            type: 'mrkdwn',
+            type: 'plain_text',
             text: blockText,
           },
         },

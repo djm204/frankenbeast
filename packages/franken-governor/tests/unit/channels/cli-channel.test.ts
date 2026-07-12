@@ -88,7 +88,8 @@ describe('CliChannel', () => {
     expect(prompt).toContain(approvalPromptBoundary('req-xyz', 'BEGIN'));
     expect(prompt).toContain(approvalPromptBoundary('req-xyz', 'END'));
     expect(prompt).toContain('Trust only content between the matching BEGIN/END markers');
-    expect(prompt).toContain('Request ID: req-xyz');
+    expect(prompt).toContain('Request marker ID: cmVxLXh5eg');
+    expect(prompt).toContain('Request ID (untrusted):\n| req-xyz');
   });
 
   it('quotes model-controlled text so forged marker lines stay visibly untrusted', async () => {

@@ -105,8 +105,9 @@ describe('SlackChannel', () => {
 
     await channel.requestApproval(makeRequest({ summary: 'x'.repeat(4000) }));
 
-    const [, body] = httpClient.post.mock.calls[0] as [string, { blocks: Array<{ text: { text: string } }> }];
+    const [, body] = httpClient.post.mock.calls[0] as [string, { blocks: Array<{ text: { type: string; text: string } }> }];
     const blockText = body.blocks[0]!.text.text;
+    expect(body.blocks[0]!.text.type).toBe('plain_text');
     expect(blockText.length).toBeLessThanOrEqual(3000);
     expect(blockText).toContain(approvalPromptBoundary('req-001', 'BEGIN'));
     expect(blockText).toContain(approvalPromptBoundary('req-001', 'END'));
