@@ -151,13 +151,13 @@ describe('chat runtime parity', () => {
     expect(result.displayMessages[0]?.content).toContain('Approval is pending');
   });
 
-  it('maps comms rejection action text to a rejected approval state', async () => {
+  it('maps /reject to a rejected approval state', async () => {
     const runtime = createChatRuntime({
       chatLlm: { complete: vi.fn().mockResolvedValue('chat ignored') },
       projectName: 'test-project',
     });
 
-    const result = await runtime.runtime.run('Action rejected by user: reject', {
+    const result = await runtime.runtime.run('/reject', {
       sessionId: 'session-1',
       pendingApproval: true,
       pendingApprovalDescription: 'deploy staging',
