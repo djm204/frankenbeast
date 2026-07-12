@@ -909,6 +909,100 @@ describe('LessonRecorder', () => {
     );
   });
 
+  it('counts suppressed repeats and only bypasses cooldown on threshold crossing', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      blockerPatternThreshold: 3,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message:
+              'Suppressed repeat should still count toward blocker threshold',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'task-a');
+    now = new Date('2026-07-12T10:00:10.000Z');
+    const secondSummary = await recorder.record(result, 'task-b');
+    now = new Date('2026-07-12T10:00:20.000Z');
+    const thirdSummary = await recorder.record(result, 'task-c');
+    const thirdLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[1]![0];
+
+    expect(secondSummary).toEqual({
+      recorded: 0,
+      suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
+      minedBlockerPatterns: [],
+    });
+    expect(thirdSummary.recorded).toBe(1);
+    expect(thirdSummary.suppressedByCooldown).toEqual([]);
+    expect(thirdSummary.minedBlockerPatterns).toEqual([
+      expect.objectContaining({
+        occurrences: 3,
+        taskIds: ['task-a', 'task-b', 'task-c'],
+      }),
+    ]);
+    expect(thirdLesson.blockerPatterns).toEqual(
+      thirdSummary.minedBlockerPatterns,
+    );
+  });
+
+  it('deduplicates repeated critical blocker findings within one lesson', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 0,
+      blockerPatternThreshold: 2,
+      now: (): Date => new Date('2026-07-12T10:00:00.000Z'),
+    });
+    const firstResult: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message: 'Duplicate critical blocker should be mined once',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+    const duplicateResult: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'codex-review', [
+          {
+            message: 'Duplicate critical blocker should be mined once',
+            severity: 'critical',
+          },
+          {
+            message: 'Duplicate critical blocker should be mined once',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(firstResult, 'task-a');
+    const secondSummary = await recorder.record(duplicateResult, 'task-b');
+
+    expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
+    expect(secondSummary.minedBlockerPatterns[0]!.taskIds).toEqual([
+      'task-a',
+      'task-b',
+    ]);
+  });
+
   it('keeps already-mined blocker repeats subject to cooldown', async () => {
     const port = createMockMemoryPort();
     let now = new Date('2026-07-12T10:00:00.000Z');

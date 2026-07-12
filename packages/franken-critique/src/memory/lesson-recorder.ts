@@ -47,7 +47,6 @@ interface PendingBlockerPatternObservation {
   readonly evaluatorName: string;
   readonly normalizedFinding: string;
   readonly observedAt: string;
-  readonly shouldBypassCooldown: boolean;
 }
 
 export interface LessonRecorderOptions {
@@ -164,15 +163,8 @@ export class LessonRecorder {
 
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
-      for (const lesson of lessons) {
-        const hasMinedBlockerPatterns =
-          (lesson.blockerPatterns?.length ?? 0) > 0;
-        const shouldBypassCooldownForBlockerPattern =
-          hasMinedBlockerPatterns ||
-          (this.pendingBlockerObservations
-            .get(lesson)
-            ?.some((observation) => observation.shouldBypassCooldown) ??
-            false);
+      for (const extractedLesson of lessons) {
+        let lesson = this.withCurrentBlockerPatterns(extractedLesson);
         const cooldownKey =
           this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
         let admissionSettled: ((admitted: boolean) => void) | undefined;
@@ -180,11 +172,15 @@ export class LessonRecorder {
         if (cooldownKey) {
           let admittedByAnotherCall = false;
           while (!admittedByAnotherCall) {
+            lesson = this.withCurrentBlockerPatterns(lesson);
+            const hasMinedBlockerPatterns =
+              (lesson.blockerPatterns?.length ?? 0) > 0;
             const suppression = this.getCooldownSuppression(
               lesson,
               cooldownKey,
             );
-            if (suppression && !shouldBypassCooldownForBlockerPattern) {
+            if (suppression && !hasMinedBlockerPatterns) {
+              this.commitBlockerPatternObservations(lesson);
               recordingResult.suppressedByCooldown.push(suppression);
               admittedByAnotherCall = true;
               break;
@@ -377,6 +373,10 @@ export class LessonRecorder {
         continue;
       }
 
+      if (pendingObservations.some((observation) => observation.key === key)) {
+        continue;
+      }
+
       const previousObservationCount = observations.length;
       const previewState: BlockerPatternState = {
         key,
@@ -390,8 +390,6 @@ export class LessonRecorder {
         evaluatorName,
         normalizedFinding,
         observedAt,
-        shouldBypassCooldown:
-          previousObservationCount < this.blockerPatternThreshold,
       });
       if (
         previousObservationCount < this.blockerPatternThreshold &&
@@ -435,6 +433,71 @@ export class LessonRecorder {
       }
     }
     this.pendingBlockerObservations.delete(lesson);
+  }
+
+  private withCurrentBlockerPatterns(lesson: CritiqueLesson): CritiqueLesson {
+    const pendingObservations =
+      this.pendingBlockerObservations.get(lesson) ?? [];
+    const patterns: CrossTaskBlockerPattern[] = [];
+    const seenKeys = new Set<string>();
+    for (const observation of pendingObservations) {
+      if (seenKeys.has(observation.key)) {
+        continue;
+      }
+      seenKeys.add(observation.key);
+      const committedPattern = this.blockerPatterns.get(observation.key);
+      const committedObservations = committedPattern?.observations ?? [];
+      if (
+        committedObservations.some(
+          (entry) => entry.taskId === observation.taskId,
+        )
+      ) {
+        continue;
+      }
+
+      const previewState: BlockerPatternState = {
+        key: observation.key,
+        evaluatorName: observation.evaluatorName,
+        normalizedFinding: observation.normalizedFinding,
+        observations: [
+          ...committedObservations,
+          { taskId: observation.taskId, observedAt: observation.observedAt },
+        ],
+      };
+      if (
+        committedObservations.length < this.blockerPatternThreshold &&
+        previewState.observations.length >= this.blockerPatternThreshold
+      ) {
+        patterns.push(
+          createCrossTaskBlockerPattern(
+            previewState,
+            this.blockerPatternThreshold,
+          ),
+        );
+      }
+    }
+
+    if (patterns.length === 0) {
+      if (!lesson.blockerPatterns) {
+        return lesson;
+      }
+      const { blockerPatterns, ...lessonWithoutPatterns } = lesson;
+      void blockerPatterns;
+      this.pendingBlockerObservations.set(
+        lessonWithoutPatterns,
+        pendingObservations,
+      );
+      this.pendingBlockerObservations.delete(lesson);
+      return lessonWithoutPatterns;
+    }
+
+    const lessonWithPatterns = { ...lesson, blockerPatterns: patterns };
+    this.pendingBlockerObservations.set(
+      lessonWithPatterns,
+      pendingObservations,
+    );
+    this.pendingBlockerObservations.delete(lesson);
+    return lessonWithPatterns;
   }
 
   private getCooldownSuppression(
