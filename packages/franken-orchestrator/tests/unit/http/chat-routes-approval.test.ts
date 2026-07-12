@@ -46,8 +46,8 @@ describe('chat approval route persistence', () => {
     });
 
     expect(response.status).toBe(200);
-    const body = await response.json() as { data: { approved: boolean; state: string } };
-    expect(body.data).toMatchObject({ approved: true, state: 'approved' });
+    const body = await response.json() as { data: { approved: boolean; state: string; pendingApproval?: unknown } };
+    expect(body.data).toMatchObject({ approved: true, state: 'approved', pendingApproval: null });
     const stored = sessionStore.get(session.id);
     expect(stored?.state).toBe('approved');
     expect(stored?.pendingApproval).toBeNull();
@@ -69,8 +69,8 @@ describe('chat approval route persistence', () => {
     });
 
     expect(response.status).toBe(200);
-    const body = await response.json() as { data: { approved: boolean; state: string } };
-    expect(body.data).toMatchObject({ approved: false, state: 'rejected' });
+    const body = await response.json() as { data: { approved: boolean; state: string; pendingApproval?: unknown } };
+    expect(body.data).toMatchObject({ approved: false, state: 'rejected', pendingApproval: null });
     const stored = sessionStore.get(session.id);
     expect(stored?.state).toBe('rejected');
     expect(stored?.pendingApproval).toBeNull();

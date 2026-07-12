@@ -310,6 +310,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           id: session.id,
           approved,
           state: session.state,
+          pendingApproval: session.pendingApproval,
           ...(result?.outcome ? { outcome: result.outcome } : {}),
           ...(result?.tier ? { tier: result.tier } : {}),
           ...(result ? { displayMessages: result.displayMessages, events: result.events } : {}),
