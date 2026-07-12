@@ -319,6 +319,68 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.options.stdio).toEqual(['pipe', 'pipe', 'pipe']);
       });
 
+      it('persists and resumes the native Claude session for matching chat session ids', async () => {
+        const firstStdout = '{"type":"result","session_id":"native-a","result":"first"}\n';
+        const { spawnFn, calls } = createMockSpawn({ stdout: firstStdout, exitCode: 0 });
+        const adapter = new CliLlmAdapter(claudeProvider, { ...baseOpts, chatMode: true }, spawnFn);
+
+        await adapter.execute({
+          prompt: 'full prompt',
+          maxTurns: 1,
+          chatMode: true,
+          sessionContinue: false,
+          sessionId: 'app-a',
+        });
+        expect(calls[0]!.args).not.toContain('--no-session-persistence');
+        expect(calls[0]!.args).not.toContain('--continue');
+
+        await adapter.execute({
+          prompt: 'raw followup',
+          maxTurns: 1,
+          chatMode: true,
+          sessionContinue: true,
+          sessionId: 'app-a',
+        });
+        expect(calls[1]!.args).toContain('--resume');
+        expect(calls[1]!.args[calls[1]!.args.indexOf('--resume') + 1]).toBe('native-a');
+        expect(calls[1]!.args).not.toContain('--continue');
+      });
+
+      it('resumes the matching native Claude session after another chat session speaks', async () => {
+        const { spawnFn, calls } = createQueuedSpawn([
+          { stdout: '{"type":"result","session_id":"native-a","result":"first"}\n', exitCode: 0 },
+          { stdout: '{"type":"result","session_id":"native-b","result":"second"}\n', exitCode: 0 },
+          { stdout: '{"type":"result","session_id":"native-a","result":"third"}\n', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(claudeProvider, { ...baseOpts, chatMode: true }, spawnFn);
+
+        await adapter.execute({
+          prompt: 'session a prompt',
+          maxTurns: 1,
+          chatMode: true,
+          sessionContinue: false,
+          sessionId: 'app-a',
+        });
+        await adapter.execute({
+          prompt: 'session b prompt',
+          maxTurns: 1,
+          chatMode: true,
+          sessionContinue: false,
+          sessionId: 'app-b',
+        });
+        await adapter.execute({
+          prompt: 'session a raw followup',
+          maxTurns: 1,
+          chatMode: true,
+          sessionContinue: true,
+          sessionId: 'app-a',
+        });
+
+        expect(calls[2]!.args).toContain('--resume');
+        expect(calls[2]!.args[calls[2]!.args.indexOf('--resume') + 1]).toBe('native-a');
+        expect(calls[2]!.args).not.toContain('native-b');
+      });
+
       it('filters CLAUDE* env vars via provider.filterEnv()', async () => {
         const originalEnv = process.env;
         process.env = {
