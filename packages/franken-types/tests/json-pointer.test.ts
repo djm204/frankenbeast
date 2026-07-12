@@ -84,7 +84,17 @@ describe('safe JSON Pointer helpers', () => {
   it('rejects writes that target built-in prototype objects', () => {
     expect(() => setJsonPointerValue(Object.prototype as Record<string, unknown>, '/polluted', true)).toThrow(/prototype object/i);
     expect(() => setJsonPointerValue({ branch: Object.prototype }, '/branch/polluted', true)).toThrow(/prototype object/i);
+    expect(() => setJsonPointerValue({ dateProto: Date.prototype as Record<string, unknown> }, '/dateProto/polluted', true)).toThrow(/prototype object/i);
     expect(Object.prototype).not.toHaveProperty('polluted');
+    expect(Date.prototype).not.toHaveProperty('polluted');
+  });
+
+  it('preserves own undefined intermediates instead of replacing them', () => {
+    const target: Record<string, unknown> = { limits: undefined };
+
+    expect(() => setJsonPointerValue(target, '/limits/max', 10)).toThrow(/does not resolve to an object or array/i);
+    expect(Object.prototype.hasOwnProperty.call(target, 'limits')).toBe(true);
+    expect(target.limits).toBeUndefined();
   });
 
   it('defines array entries as own properties instead of invoking inherited setters', () => {

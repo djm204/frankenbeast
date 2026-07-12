@@ -102,8 +102,8 @@ export function setJsonPointerValue<T extends JsonContainer>(
   for (let index = 0; index < segments.length - 1; index += 1) {
     const segment = segments[index];
     const nextSegment = segments[index + 1];
-    const existing = readOwnContainerValue(current, segment, options);
-    if (existing !== undefined) {
+    if (hasOwnContainerValue(current, segment, options)) {
+      const existing = readOwnContainerValue(current, segment, options);
       if (!isJsonContainer(existing)) {
         throw new UnsafeJsonPointerError(`JSON Pointer segment '${segment}' does not resolve to an object or array.`);
       }
@@ -165,9 +165,19 @@ function isJsonContainer(value: unknown): value is JsonContainer {
 }
 
 function assertWritableJsonContainer(value: JsonContainer): void {
-  if (value === Object.prototype || value === Array.prototype) {
-    throw new UnsafeJsonPointerError('Refusing to mutate a built-in prototype object through a JSON Pointer.');
+  if (isPrototypeObject(value)) {
+    throw new UnsafeJsonPointerError('Refusing to mutate a prototype object through a JSON Pointer.');
   }
+}
+
+function isPrototypeObject(value: JsonContainer): boolean {
+  if (value === Array.prototype) {
+    return true;
+  }
+  const constructorValue = Object.prototype.hasOwnProperty.call(value, 'constructor')
+    ? (value as Record<string, unknown>).constructor
+    : undefined;
+  return typeof constructorValue === 'function' && constructorValue.prototype === value;
 }
 
 function parseArrayIndex(segment: string, options: JsonPointerOptions): number | undefined {
@@ -195,6 +205,14 @@ function readOwnContainerValue(container: JsonContainer, segment: string, option
     return index === undefined || !Object.prototype.hasOwnProperty.call(container, index) ? undefined : container[index];
   }
   return Object.prototype.hasOwnProperty.call(container, segment) ? container[segment] : undefined;
+}
+
+function hasOwnContainerValue(container: JsonContainer, segment: string, options: JsonPointerOptions): boolean {
+  if (Array.isArray(container)) {
+    const index = parseArrayIndex(segment, options);
+    return index !== undefined && Object.prototype.hasOwnProperty.call(container, index);
+  }
+  return Object.prototype.hasOwnProperty.call(container, segment);
 }
 
 function writeOwnContainerValue(container: JsonContainer, segment: string, value: unknown, options: JsonPointerOptions): void {

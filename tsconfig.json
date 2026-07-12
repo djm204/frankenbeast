@@ -34,6 +34,9 @@
       "@franken/types/path-containment": [
         "./packages/franken-types/src/path-containment.ts"
       ],
+      "@franken/types/json-pointer": [
+        "./packages/franken-types/src/json-pointer.ts"
+      ],
       "@franken/types/utils": [
         "./packages/franken-types/src/utils/index.ts"
       ],
