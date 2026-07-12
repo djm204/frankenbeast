@@ -79,7 +79,11 @@ export {
   mineCrossTaskBlockerPatterns,
   normalizeBlockerDescription,
 } from './memory/blocker-pattern-miner.js';
-export type { LessonRecorderOptions } from './memory/lesson-recorder.js';
+export type {
+  BlockerPatternObservation,
+  BlockerPatternState,
+  LessonRecorderOptions,
+} from './memory/lesson-recorder.js';
 export type {
   BlockerPatternExample,
   BlockerPatternMiningOptions,

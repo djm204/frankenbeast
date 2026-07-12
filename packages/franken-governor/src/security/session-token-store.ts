@@ -24,6 +24,14 @@ export interface SessionTokenStoreOptions {
   readonly persistenceFile?: string;
 }
 
+export interface SweepExpiredSessionTokenOptions {
+  /**
+   * Milliseconds since the Unix epoch. Exposed so tests and callers that already
+   * have a clock reading can sweep deterministically without relying on globals.
+   */
+  readonly nowMs?: number;
+}
+
 interface SerializedSessionToken {
   readonly tokenId: string;
   readonly approvalId: string;
@@ -43,33 +51,39 @@ export class SessionTokenStore {
   }
 
   store(token: SessionToken): void {
+    const nowMs = wallClockNow();
     if (!this.persistenceFile) {
-      this.pruneExpiredTokens();
+      this.pruneExpiredTokens(nowMs);
       this.tokens.set(token.tokenId, token);
       return;
     }
 
     this.withFileLock(() => {
       this.loadPersistedTokens();
-      this.pruneExpiredTokens();
+      this.pruneExpiredTokens(nowMs);
       this.tokens.set(token.tokenId, token);
       this.persist();
     });
   }
 
-  cleanupExpired(): number {
+  sweepExpired(options: SweepExpiredSessionTokenOptions = {}): number {
+    const nowMs = options.nowMs ?? wallClockNow();
     if (!this.persistenceFile) {
-      return this.pruneExpiredTokens();
+      return this.pruneExpiredTokens(nowMs);
     }
 
     return this.withFileLock(() => {
       const expiredPersisted = this.loadPersistedTokens();
-      const pruned = this.pruneExpiredTokens();
+      const pruned = this.pruneExpiredTokens(nowMs);
       if (expiredPersisted + pruned > 0) {
         this.persist();
       }
       return expiredPersisted + pruned;
     });
+  }
+
+  cleanupExpired(): number {
+    return this.sweepExpired();
   }
 
   get(tokenId: string): SessionToken | undefined {
@@ -104,10 +118,10 @@ export class SessionTokenStore {
     return scope === undefined || token.scope === scope;
   }
 
-  private pruneExpiredTokens(): number {
+  private pruneExpiredTokens(nowMs: number = wallClockNow()): number {
     let pruned = 0;
     for (const [tokenId, token] of this.tokens) {
-      if (this.isExpired(token)) {
+      if (this.isExpired(token, nowMs)) {
         this.tokens.delete(tokenId);
         pruned += 1;
       }
@@ -265,8 +279,8 @@ export class SessionTokenStore {
     renameSync(tmpPath, this.persistenceFile);
   }
 
-  private isExpired(token: SessionToken): boolean {
+  private isExpired(token: SessionToken, nowMs: number = wallClockNow()): boolean {
     const expiresAtMs = token.expiresAt.getTime();
-    return !Number.isFinite(expiresAtMs) || wallClockNow() >= expiresAtMs;
+    return !Number.isFinite(expiresAtMs) || nowMs >= expiresAtMs;
   }
 }

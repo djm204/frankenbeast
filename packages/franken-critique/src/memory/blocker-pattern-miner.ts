@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { CritiqueLesson } from '../types/contracts.js';
+import { createTaskId } from '../types/common.js';
 
 export interface BlockerPatternMiningOptions {
   /** Minimum number of distinct task IDs required before a blocker is reported as cross-task. */
@@ -90,7 +91,7 @@ export function mineCrossTaskBlockerPatterns(
     }
 
     normalizedLessons.push({
-      lesson: { ...lesson, evaluatorName, taskId },
+      lesson: { ...lesson, evaluatorName, taskId: createTaskId(taskId) },
       evaluatorName,
       signature,
     });

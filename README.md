@@ -458,7 +458,7 @@ frankenbeast --design-doc docs/my-feature-design.md
 frankenbeast --plan-dir ./my-chunks/
 ```
 
-Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` when a previous run was interrupted and you want to continue from saved checkpoint/chunk-session data. `--resume` requires an existing checkpoint for the selected plan; if that checkpoint is missing, the command fails fast with a missing-checkpoint error instead of silently starting a cold run.
+Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` only when a previous run was interrupted and saved checkpoint state exists; the run resumes from that checkpoint/chunk-session data. If the checkpoint is missing, the resume command fails fast with a missing-checkpoint error instead of silently starting a cold run.
 
 ### Subcommands
 
@@ -634,10 +634,10 @@ Frankenbeast stores secrets outside the config file. The config references secre
 
 | Backend | Key | Best for |
 |---------|-----|----------|
-| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Explicit opt-in for local dev that should use native credential storage |
+| Local encrypted file | `local-encrypted` | Default backend; zero-install local dev, CI/CD, offline, or minimal environments |
+| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Explicit opt-in for single-machine local dev when you want OS-managed storage and no passphrase prompt |
 | 1Password | `1password` | Teams using 1Password vaults |
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
-| Local encrypted file | `local-encrypted` | Default backend; CI/CD, offline, or minimal environments |
 
 Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config.json`, then set `network.secureBackend` there. If you omit `network.secureBackend`, the config schema and init flow use `local-encrypted`; `os-keychain` is never selected automatically. `frankenbeast init` reads and updates `.fbeast/config.json`.
 
@@ -653,7 +653,7 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 ```json
 { "network": { "secureBackend": "os-keychain" } }
 ```
-Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in the native macOS Keychain, GNOME Secret Service, or Windows Credential Manager instead of the default encrypted file. The token is generated and stored in the OS keychain automatically (no passphrase prompt).
+Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in the native macOS Keychain, GNOME Secret Service, or Windows Credential Manager instead of the default encrypted file. The token is generated and stored in the OS keychain automatically (no passphrase prompt). Use `os-keychain` only when you explicitly select it; it is convenient for single-machine local development, but it is not the default backend.
 
 **1Password / Bitwarden:**
 ```json
