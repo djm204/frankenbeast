@@ -33,7 +33,7 @@ function isWindowsAbsolutePath(path: string): boolean {
 
 function isWindowsReservedDeviceSegment(segment: string): boolean {
   const stem = segment.replace(/[ .]+$/u, '').split('.')[0]?.toUpperCase() ?? '';
-  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/u.test(stem);
+  return /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$/u.test(stem);
 }
 
 function normalizeArchiveEntryPath(entryPath: string, fieldName: string): string {
@@ -53,6 +53,9 @@ function normalizeArchiveEntryPath(entryPath: string, fieldName: string): string
   }
   if (segments.some(segment => segment === '..')) {
     throw archiveEntryError(fieldName, 'parent directory segment');
+  }
+  if (segments.some(segment => /[ .]$/u.test(segment))) {
+    throw archiveEntryError(fieldName, 'Windows-trimmed path segment');
   }
   if (segments.some(segment => segment.includes(':'))) {
     throw archiveEntryError(fieldName, 'Windows alternate data stream separator');

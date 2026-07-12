@@ -169,7 +169,15 @@ describe('realpath containment helpers', () => {
       );
       expect(() => resolveArchiveEntryPath(root, 'docs/NUL')).toThrow(/Windows reserved device name/i);
       expect(() => resolveArchiveEntryPath(root, 'docs/con.txt')).toThrow(/Windows reserved device name/i);
-      expect(() => resolveArchiveEntryPath(root, 'docs/LPT1.')).toThrow(/Windows reserved device name/i);
+      expect(() => resolveArchiveEntryPath(root, 'docs/COM¹')).toThrow(/Windows reserved device name/i);
+    });
+  });
+
+  it('rejects Windows-trimmed archive path segments', () => {
+    withTempRoot('archive-entry-windows-trimmed', root => {
+      expect(() => resolveArchiveEntryPath(root, '.. /evil.txt')).toThrow(/Windows-trimmed path segment/i);
+      expect(() => resolveArchiveEntryPath(root, 'docs/name.')).toThrow(/Windows-trimmed path segment/i);
+      expect(() => resolveArchiveEntryPath(root, 'docs/name ')).toThrow(/Windows-trimmed path segment/i);
     });
   });
 
