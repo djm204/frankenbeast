@@ -155,6 +155,24 @@ describe('verifyInit', () => {
     );
   });
 
+  it('accepts init state saved with an equivalent config path spelling', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const equivalentConfigFile = `${tempDir}/.fbeast/../.fbeast/config.json`;
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await stateStore.save({
+      ...createEmptyInitState(equivalentConfigFile),
+      selectedModules: ['chat'],
+      completedSteps: ['module-selection'],
+    });
+
+    const state = await stateStore.load(configFile);
+
+    expect(state.selectedModules).toEqual(['chat']);
+    expect(state.completedSteps).toEqual(['module-selection']);
+  });
+
   it('reports structurally incomplete init state JSON without passing verification', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-init-verify-'));
     const configFile = join(tempDir, '.fbeast', 'config.json');

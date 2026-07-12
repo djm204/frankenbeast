@@ -1,14 +1,22 @@
 import type { InitState } from './init-types.js';
 import { createEmptyInitState } from './init-types.js';
 import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from './init-json-file.js';
+import { resolve } from 'node:path';
+
+function normalizeConfigPathForComparison(configPath: string): string {
+  return resolve(configPath);
+}
 
 export function isInitStateForConfig(value: unknown, configPath: string): value is InitState {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return false;
   }
   const state = value as Partial<InitState>;
+  if (typeof state.configPath !== 'string') {
+    return false;
+  }
   return state.version === 1
-    && state.configPath === configPath
+    && normalizeConfigPathForComparison(state.configPath) === normalizeConfigPathForComparison(configPath)
     && Array.isArray(state.selectedModules)
     && Array.isArray(state.selectedCommsTransports)
     && Array.isArray(state.completedSteps)
