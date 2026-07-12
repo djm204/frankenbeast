@@ -349,7 +349,13 @@ function consolidatedProviderCommandOverrides(
     ))
     .flatMap((provider) => {
       const registryName = resolveProviderCatalogEntry(provider.type).cliRegistryName;
-      return [provider.type, provider.name, registryName]
+      // Command-policy validation is keyed by provider identity. Do not add a
+      // custom dashboard alias (for example "prod-claude") as a policy entry
+      // for a bare trusted command like "claude": the validator would compare
+      // the binary against the alias instead of the provider type. Alias lookups
+      // are handled by resolveProviderCommandOverride(), while the policy map
+      // stays keyed by the concrete provider type / CLI registry name.
+      return [provider.type, registryName]
         .filter((name, index, names): name is string => Boolean(name) && names.indexOf(name) === index)
         .map((name) => [name, {
           ...(provider.cliPath !== undefined ? {
@@ -507,7 +513,7 @@ function createExecutionStack(
   const gitIso = new GitBranchIsolator({
     baseBranch: config.baseBranch,
     branchPrefix: config.branchPattern,
-    directCommit: config.prCreation === 'disabled',
+    directCommit: config.prCreation === 'disabled' && config.branchPattern.trim().length === 0,
     autoCommit: true,
     workingDir: options.paths.root,
     ...(config.mergeStrategy ? { mergeStrategy: config.mergeStrategy as 'merge' | 'squash' | 'rebase' } : {}),
@@ -571,7 +577,7 @@ function createCachedCliLlmClient(
     providerName,
   );
 
-  const effectiveModel = override?.model ?? model ?? options.adapterModel ?? providerName;
+  const effectiveModel = model ?? override?.model ?? options.adapterModel ?? providerName;
   const cachedLlm = new CachedCliLlmClient({
     cacheRootDir: options.paths.llmCacheDir,
     cliAdapter: cliLlmAdapter,

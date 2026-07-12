@@ -515,11 +515,16 @@ describe('dep-factory provider wiring', () => {
       expect.objectContaining({ name: 'claude' }),
       expect.objectContaining({
         model: 'haiku',
-        providerOverrides: expect.objectContaining({
-          'prod-claude': expect.not.objectContaining({ model: 'sonnet' }),
+        providerOverrides: expect.not.objectContaining({
+          'prod-claude': expect.anything(),
         }),
       }),
     );
+    expect(MockCachedCliLlmClient).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'cli-session',
+      provider: 'prod-claude',
+      model: 'haiku',
+    }));
   });
 
   it('preserves model-only consolidated provider defaults when no explicit model is selected', async () => {
@@ -546,10 +551,77 @@ describe('dep-factory provider wiring', () => {
       expect.objectContaining({
         model: 'sonnet',
         providerOverrides: expect.objectContaining({
-          'prod-claude': expect.objectContaining({ model: 'sonnet', extraArgs: ['--verbose'] }),
+          claude: expect.objectContaining({ model: 'sonnet', extraArgs: ['--verbose'] }),
         }),
       }),
     );
+  });
+
+  it('keeps custom provider aliases out of command-policy override maps', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      trustProviderCommandOverrides: true,
+      runConfig: {
+        objective: 'Use aliased custom provider command',
+        provider: 'prod-claude',
+      },
+      orchestratorConfig: parseOrchestratorConfig({
+        consolidatedProviders: [
+          {
+            name: 'prod-claude',
+            type: 'claude-cli',
+            cliPath: 'claude',
+            trustCommandOverride: true,
+          },
+        ],
+      }, { allowTrustedProviderCommandOverrides: true }),
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        commandOverride: 'claude',
+        providerOverrides: expect.not.objectContaining({
+          'prod-claude': expect.anything(),
+        }),
+      }),
+    );
+  }, 10_000);
+
+  it('keeps PR-disabled branch patterns isolated instead of direct-to-base', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { GitBranchIsolator } = await import('../../../src/skills/git-branch-isolator.js');
+
+    await createCliDeps(makeOpts({
+      runConfig: {
+        objective: 'Disable PR creation but keep feature branch isolation',
+        gitConfig: { prCreation: 'disabled', branchPattern: 'feat/' },
+      },
+    }));
+
+    expect(GitBranchIsolator).toHaveBeenCalledWith(expect.objectContaining({
+      branchPrefix: 'feat/',
+      directCommit: false,
+    }));
+  });
+
+  it('allows direct commits only when PR creation is disabled and no branch pattern remains', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { GitBranchIsolator } = await import('../../../src/skills/git-branch-isolator.js');
+
+    await createCliDeps(makeOpts({
+      runConfig: {
+        objective: 'Direct commit yolo run',
+        gitConfig: { prCreation: 'disabled', branchPattern: '' },
+      },
+    }));
+
+    expect(GitBranchIsolator).toHaveBeenCalledWith(expect.objectContaining({
+      branchPrefix: '',
+      directCommit: true,
+    }));
   });
 
   it('rejects command overrides from providersConfig unless explicitly trusted', async () => {

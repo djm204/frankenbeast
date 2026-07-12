@@ -157,7 +157,10 @@ const LLM_OPERATION_ALIASES_BY_WIZARD_ACTION: Record<string, readonly string[]> 
   planning: ['plan-build', 'issue-triage', 'issue-graph'],
   execution: ['issues', 'cli-session'],
   critique: [],
-  reflection: ['chunk-session-compaction'],
+  // Reflection is currently served by the heartbeat/reflection path, not the
+  // chunk session compactor. Until that path accepts per-operation LLM targets,
+  // do not advertise the wizard Reflection target as a routed override.
+  reflection: [],
   chat: ['chat'],
 };
 

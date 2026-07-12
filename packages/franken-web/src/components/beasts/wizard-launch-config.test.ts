@@ -151,6 +151,19 @@ describe('buildWizardLaunchConfig', () => {
     })).not.toHaveProperty('llmConfig.overrides.critique');
   });
 
+  it('does not route reflection LLM targets to chunk-session compaction', () => {
+    const config = buildWizardLaunchConfig({
+      2: {
+        overrides: {
+          reflection: { provider: 'anthropic', model: 'claude-sonnet-4-6', useDefault: false },
+        },
+      },
+    });
+
+    expect(config).not.toHaveProperty('llmConfig.overrides.chunk-session-compaction');
+    expect(config).not.toHaveProperty('llmConfig.overrides.reflection');
+  });
+
   it('expands selected git presets even when only the preset id is stored', () => {
     expect(buildWizardLaunchConfig({
       6: { preset: 'yolo-main' },

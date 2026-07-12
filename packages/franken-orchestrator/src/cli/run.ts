@@ -359,7 +359,7 @@ export function resolveEffectivePreflightProvider(
   runConfig: RunConfig | undefined,
   entryPhase: SessionPhase = 'execute',
 ): string {
-  const phaseOverride = entryPhase === 'plan'
+  const phaseOverride = entryPhase === 'plan' || entryPhase === 'interview'
     ? runConfig?.llmConfig?.overrides?.['plan-build']?.provider
     : runConfig?.llmConfig?.overrides?.['cli-session']?.provider;
   return phaseOverride

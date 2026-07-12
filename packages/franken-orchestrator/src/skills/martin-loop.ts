@@ -274,7 +274,11 @@ function spawnIteration(
     const cmd = config.providerCommands?.[provider.name]
       ?? (provider.name === config.provider ? config.command : undefined)
       ?? provider.command;
-    const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns, model: config.model, sessionContinue });
+    const providerArgs = provider.buildArgs({
+      maxTurns: config.maxTurns,
+      model: provider.name === config.provider ? config.model : undefined,
+      sessionContinue,
+    });
     const prompt = (promptOverride ?? config.prompt) + NO_COMMIT_CONSTRAINT;
     const args = provider.supportsStreamJson()
       ? [...providerArgs, '--', prompt]
