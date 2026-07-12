@@ -31,6 +31,38 @@ describe('parseArgs', () => {
     expect(args.resume).toBe(true);
   });
 
+  it('parses global flags before the run subcommand', () => {
+    const args = parseArgs(['--provider', 'CLAUDE', 'run', '--resume']);
+    expect(args.subcommand).toBe('run');
+    expect(args.provider).toBe('claude');
+    expect(args.providerSpecified).toBe(true);
+    expect(args.resume).toBe(true);
+  });
+
+  it('parses equals-form global flags before subcommands with positionals', () => {
+    const args = parseArgs(['--base-dir=/tmp/beast', 'network', 'up', '-d']);
+    expect(args.subcommand).toBe('network');
+    expect(args.baseDir).toBe('/tmp/beast');
+    expect(args.networkAction).toBe('up');
+    expect(args.networkDetached).toBe(true);
+  });
+
+  it('does not treat a string option value that matches a subcommand as the subcommand', () => {
+    const args = parseArgs(['--provider', 'run']);
+    expect(args.subcommand).toBeUndefined();
+    expect(args.provider).toBe('run');
+  });
+
+  it('preserves skill add command args when global options precede skill', () => {
+    const args = parseArgs(['--base-dir', '/tmp/beast', 'skill', 'add', 'my-skill', 'npx', '-y', '@acme/mcp-server', '--verbose']);
+    expect(args.subcommand).toBe('skill');
+    expect(args.baseDir).toBe('/tmp/beast');
+    expect(args.skillAction).toBe('add');
+    expect(args.skillCommand).toBe('npx');
+    expect(args.skillCommandArgs).toEqual(['-y', '@acme/mcp-server', '--verbose']);
+    expect(args.verbose).toBe(false);
+  });
+
   it('parses init subcommand', () => {
     const args = parseArgs(['init']);
     expect(args.subcommand).toBe('init');
