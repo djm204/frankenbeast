@@ -99,6 +99,8 @@ function hasValidStreamCredential(
     origin: c.req.header('origin'),
     requestUrl: c.req.url,
     secFetchSite: c.req.header('sec-fetch-site'),
+    forwardedProto: c.req.header('x-forwarded-proto'),
+    forwardedHost: c.req.header('x-forwarded-host'),
   })) {
     return false;
   }
