@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.6](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.5...franken-web-v0.2.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **web:** add network service log actions ([#1869](https://github.com/djm204/frankenbeast/issues/1869)) ([22d1682](https://github.com/djm204/frankenbeast/commit/22d168275451beb627af013c1018dd56130ef9c4)), closes [#1017](https://github.com/djm204/frankenbeast/issues/1017)
+* **web:** block invalid create-agent wizard launches ([1ebaa6c](https://github.com/djm204/frankenbeast/commit/1ebaa6c8155ab9f4ecb0d744a76035f9362efae9)), closes [#1012](https://github.com/djm204/frankenbeast/issues/1012)
+* **web:** clear typing indicator on chat turn errors ([#1877](https://github.com/djm204/frankenbeast/issues/1877)) ([7bc4dbf](https://github.com/djm204/frankenbeast/commit/7bc4dbf3c0dff7d6c274f88e05660815655b6000))
+* **web:** guard analytics detail drawer updates ([#1868](https://github.com/djm204/frankenbeast/issues/1868)) ([2eb368c](https://github.com/djm204/frankenbeast/commit/2eb368c8a615ac3857dd4a773bbe82b1c52e1022))
+* **web:** persist tracked-agent detail edits ([e29811c](https://github.com/djm204/frankenbeast/commit/e29811c63de33b7d9e8084d309ec24015dbd38e0)), closes [#1010](https://github.com/djm204/frankenbeast/issues/1010)
+* **web:** preserve transcript code wrapping ([#1884](https://github.com/djm204/frankenbeast/issues/1884)) ([8272465](https://github.com/djm204/frankenbeast/commit/827246506661e2d6935bf812ce19ff8d22b3aa1a)), closes [#1005](https://github.com/djm204/frankenbeast/issues/1005)
+* **web:** refresh network config editor state ([a7a1072](https://github.com/djm204/frankenbeast/commit/a7a1072b237c7ef05b00162b86a08610b0f523f2)), closes [#1018](https://github.com/djm204/frankenbeast/issues/1018)
+
+
+### Documentation
+
+* **web:** clarify Beast API proxy target usage ([b4fff6b](https://github.com/djm204/frankenbeast/commit/b4fff6b5abcb80dcc08de3f4b7efd18acad7b38b)), closes [#1001](https://github.com/djm204/frankenbeast/issues/1001)
+
+
+### Tests
+
+* **web:** cover prompt file attachment flow ([71d6787](https://github.com/djm204/frankenbeast/commit/71d67873b61054065b7c69190c55d0178b95a483)), closes [#1011](https://github.com/djm204/frankenbeast/issues/1011)
+
 ## [0.2.5](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.4...franken-web-v0.2.5) (2026-07-11)
 
 

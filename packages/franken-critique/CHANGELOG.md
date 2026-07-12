@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.16...franken-critique-v0.7.0) (2026-07-11)
+
+
+### Features
+
+* **learning:** add lesson-to-test traceability map ([#1872](https://github.com/djm204/frankenbeast/issues/1872)) ([e9b099e](https://github.com/djm204/frankenbeast/commit/e9b099e2c69bb8b01c39afff5f241b658729f244))
+* **learning:** add post-pr lesson extraction template ([#1889](https://github.com/djm204/frankenbeast/issues/1889)) ([73f17c0](https://github.com/djm204/frankenbeast/commit/73f17c03e9f208d294887d507ce677f987aac36e))
+* **learning:** capture reviewer-feedback lessons ([#1887](https://github.com/djm204/frankenbeast/issues/1887)) ([0c4af52](https://github.com/djm204/frankenbeast/commit/0c4af52c70259714a8426bcbeacfbd556635bb2c))
+* **learning:** sandbox new critique lessons ([#1882](https://github.com/djm204/frankenbeast/issues/1882)) ([7fd71d2](https://github.com/djm204/frankenbeast/commit/7fd71d25aae4cc2d798ddb04c4b198b93cf6c224))
+
 ## [0.6.16](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.15...franken-critique-v0.6.16) (2026-07-11)
 
 

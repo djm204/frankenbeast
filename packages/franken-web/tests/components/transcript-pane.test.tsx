@@ -32,6 +32,20 @@ describe('TranscriptPane', () => {
     expect(screen.getByText('Hi there!')).toBeDefined();
   });
 
+  it('renders multiline and indented transcript text without normalizing the content', () => {
+    const multilineContent = 'run this:\n  npm test -- --runInBand\n\n```ts\nconst value = 1;\n```';
+    const { container } = render(
+      <TranscriptPane
+        messages={[{ id: 'a1', role: 'assistant' as const, content: multilineContent, timestamp: new Date().toISOString() }]}
+        showTypingIndicator={false}
+      />,
+    );
+
+    const content = container.querySelector('.message-card__content');
+    expect(content).toBeTruthy();
+    expect(content?.textContent).toBe(multilineContent);
+  });
+
   it('renders role labels for each message', () => {
     const messages = [
       { id: 'u1', role: 'user' as const, content: 'Test msg', timestamp: new Date().toISOString() },

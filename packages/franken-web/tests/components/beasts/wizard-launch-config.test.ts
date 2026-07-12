@@ -54,4 +54,21 @@ describe('buildWizardLaunchConfig', () => {
       heartbeatConfig: { reflectionInterval: 10 },
     });
   });
+
+  it('includes selected prompt files in the launch prompt frontload text', () => {
+    const config = buildWizardLaunchConfig({
+      5: {
+        promptText: 'Use the attached context.',
+        files: [
+          { name: 'context.md', content: 'Project context' },
+          { name: 'empty.md', content: '' },
+        ],
+      },
+    });
+
+    expect(config.prompts).toBeUndefined();
+    expect(config.promptConfig).toEqual({
+      text: 'Use the attached context.\n\n---\n\nAttached file: context.md\n\nProject context',
+    });
+  });
 });

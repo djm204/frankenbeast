@@ -65,9 +65,17 @@ export function AgentDetailPanel({
     }
   };
 
+  const handleClose = () => {
+    if (saving) return;
+    setSaveError(null);
+    setMode('readonly');
+    resetEdit();
+    onClose();
+  };
+
   return (
     <>
-      <SlideInPanel isOpen={isOpen} onClose={onClose}>
+      <SlideInPanel isOpen={isOpen} onClose={handleClose}>
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-beast-border shrink-0">
           <StatusLight status={agent.status} />
@@ -97,7 +105,8 @@ export function AgentDetailPanel({
           </ToggleGroup.Root>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
+            disabled={saving}
             aria-label="Close panel"
             className="p-1.5 rounded-lg text-beast-subtle hover:text-beast-text hover:bg-beast-elevated transition-colors"
           >
