@@ -51,7 +51,8 @@ function buildMarkdownFence(content: string): string {
 function isMarkdownAttachmentName(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const firstLine = value.split(/[\r\n]/, 1)[0]?.trim() ?? '';
-  return MARKDOWN_FILE_EXTENSION_RE.test(firstLine);
+  const sanitized = sanitizeAttachmentName(value);
+  return MARKDOWN_FILE_EXTENSION_RE.test(firstLine) || MARKDOWN_FILE_EXTENSION_RE.test(sanitized);
 }
 
 function isUntrustedMarkdownAttachment(file: PromptFile): boolean {
