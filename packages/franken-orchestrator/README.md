@@ -68,6 +68,10 @@ npm run test:coverage --workspace=@franken/orchestrator
 
 Integration and E2E scripts enable broader runtime paths with `INTEGRATION=true` or `E2E=true`; use them when the needed local services, credentials, and fixtures are available.
 
+## Security limits
+
+Context snapshot imports are size-limited before JSON parsing to reduce resource-exhaustion risk from untrusted or corrupted resume/import files. `loadContext(filePath)` defaults to a 1 MiB cap, opens snapshots in nonblocking mode, rejects non-regular paths from the opened file descriptor, and enforces the same byte cap while reading so oversized content is rejected even if the file changes after metadata inspection. Trusted tooling that intentionally owns a larger snapshot must opt in per import with `loadContext(filePath, { maxBytes })`; invalid overrides such as `0`, negative, non-finite, or unsafe integer values fail closed.
+
 ## Package areas
 
 | Area | Paths | Responsibility |
