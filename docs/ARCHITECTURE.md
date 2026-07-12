@@ -1002,7 +1002,7 @@ Frankenbeast stores secrets outside the config file. Config references secrets b
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
 | Local encrypted file | `local-encrypted` | Default backend; CI/CD and offline environments |
 
-When `network.secureBackend` is unset, `SecureBackendSchema` defaults to `local-encrypted`; the OS keychain backend is available only when selected explicitly.
+When `network.secureBackend` is unset, the `NetworkOperatorConfigSchema` field default applies `local-encrypted`; the OS keychain backend is available only when selected explicitly.
 
 ### Architecture
 
