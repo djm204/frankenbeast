@@ -590,6 +590,39 @@ describe('dep-factory provider wiring', () => {
     );
   }, 10_000);
 
+  it('normalizes custom fallback provider aliases before wiring CLI adapters and Martin skills', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+    const opts = makeOpts({
+      providers: ['prod-claude', 'spark'],
+      runConfig: {
+        objective: 'Use custom fallback providers',
+        provider: 'prod-claude',
+        llmConfig: {
+          default: { provider: 'prod-claude', model: 'sonnet' },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+          { name: 'spark', type: 'codex-cli', model: 'gpt-5.3-codex-spark' },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({ providers: ['claude', 'codex'] }),
+    );
+    const cliExecutorCalls = (CliSkillExecutor as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(cliExecutorCalls[0]?.[6]).toEqual(expect.objectContaining({
+      provider: 'claude',
+      providers: ['claude', 'codex'],
+    }));
+  });
+
   it('keeps PR-disabled branch patterns isolated instead of direct-to-base', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const { GitBranchIsolator } = await import('../../../src/skills/git-branch-isolator.js');

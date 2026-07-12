@@ -494,12 +494,14 @@ export class Session {
 
     logger.info(`Budget: $${budget} | Provider: ${ANSI.bold}${this.config.provider}${ANSI.reset}`, 'session');
 
+    const runConfig = loadCompatibleRunConfigFromEnv();
     const loopConfig: Partial<OrchestratorConfig> = {};
     if (this.config.maxCritiqueIterations !== undefined) {
       loopConfig.maxCritiqueIterations = this.config.maxCritiqueIterations;
     }
-    if (this.config.maxDurationMs !== undefined) {
-      loopConfig.maxDurationMs = this.config.maxDurationMs;
+    const maxDurationMs = this.config.maxDurationMs ?? runConfig?.maxDurationMs;
+    if (maxDurationMs !== undefined) {
+      loopConfig.maxDurationMs = maxDurationMs;
     }
     if (this.config.enableTracing !== undefined) {
       loopConfig.enableTracing = this.config.enableTracing;
@@ -507,14 +509,16 @@ export class Session {
     if (this.config.enableHeartbeat !== undefined) {
       loopConfig.enableHeartbeat = this.config.enableHeartbeat;
     }
-    if (this.config.enableReflection !== undefined) {
-      loopConfig.enableReflection = this.config.enableReflection;
+    const enableReflection = this.config.enableReflection ?? runConfig?.reflection;
+    if (enableReflection !== undefined) {
+      loopConfig.enableReflection = enableReflection;
     }
     if (this.config.minCritiqueScore !== undefined) {
       loopConfig.minCritiqueScore = this.config.minCritiqueScore;
     }
-    if (this.config.maxTotalTokens !== undefined) {
-      loopConfig.maxTotalTokens = this.config.maxTotalTokens;
+    const maxTotalTokens = this.config.maxTotalTokens ?? runConfig?.maxTotalTokens;
+    if (maxTotalTokens !== undefined) {
+      loopConfig.maxTotalTokens = maxTotalTokens;
     }
     loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
 

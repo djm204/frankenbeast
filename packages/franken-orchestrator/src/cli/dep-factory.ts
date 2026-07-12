@@ -298,6 +298,11 @@ function resolveCliRegistryName(options: CliDepOptions, providerName: string): s
   return catalogEntry.cliRegistryName;
 }
 
+function resolveCliRegistryNames(options: CliDepOptions, providerNames: readonly string[] | undefined): string[] | undefined {
+  if (!providerNames || providerNames.length === 0) return undefined;
+  return [...new Set(providerNames.map((providerName) => resolveCliRegistryName(options, providerName)))];
+}
+
 function resolveProviderCommandOverride(
   options: CliDepOptions,
   providerName: string,
@@ -376,20 +381,32 @@ function providerCommandOverrides(
   activeRegistryProviderName?: string | undefined,
   explicitActiveModel?: string | undefined,
 ): Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> {
-  const overrides: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> = {
-    ...Object.fromEntries(consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders)),
-    ...(options.providersConfig ?? {}),
+  const overrides: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> = {};
+  const addOverride = (providerName: string, override: ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }): void => {
+    const registryName = resolveCliRegistryName(options, providerName);
+    overrides[registryName] = {
+      ...(overrides[registryName] ?? {}),
+      ...override,
+    };
   };
+
+  for (const [providerName, override] of consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders)) {
+    addOverride(providerName, override);
+  }
+  for (const [providerName, override] of Object.entries(options.providersConfig ?? {})) {
+    addOverride(providerName, override);
+  }
 
   if (explicitActiveModel === undefined || activeProviderName === undefined) {
     return overrides;
   }
 
   for (const name of [activeProviderName, activeRegistryProviderName].filter((value): value is string => Boolean(value))) {
-    const override = overrides[name];
+    const registryName = resolveCliRegistryName(options, name);
+    const override = overrides[registryName];
     if (override?.model === undefined) continue;
     const { model: _model, ...withoutModel } = override;
-    overrides[name] = withoutModel;
+    overrides[registryName] = withoutModel;
   }
 
   return overrides;
@@ -566,7 +583,7 @@ function createCachedCliLlmClient(
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
     replayRunId: () => observer.observerBridge.getActiveSessionId() ?? observer.runSessionId,
     replayRecorder: (record) => observer.observerBridge.recordReplay(record),
-    ...(options.providers ? { providers: options.providers } : {}),
+    ...(resolveCliRegistryNames(options, options.providers) ? { providers: resolveCliRegistryNames(options, options.providers) } : {}),
     registry: stack.registry,
     providerOverrides: providerCommandOverrides(options, providerName, registryProviderName, model),
   });
@@ -893,7 +910,7 @@ function createCliExecutorDeps(
           provider,
           maxTokens,
         }),
-      providers: options.providers,
+      providers: resolveCliRegistryNames(options, options.providers),
       ...(config.model !== undefined ? { model: config.model } : {}),
       ...(override?.command ? { command: override.command } : {}),
       ...(Object.keys(providerCommands).length > 0 ? { providerCommands } : {}),

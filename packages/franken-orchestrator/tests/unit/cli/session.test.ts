@@ -221,6 +221,7 @@ describe('Session', () => {
   });
   afterEach(() => {
     console.info = origLog;
+    delete process.env.FRANKENBEAST_RUN_CONFIG;
   });
 
   describe('SessionPhase type', () => {
@@ -265,6 +266,33 @@ describe('Session', () => {
 
       expect(result).toBeDefined();
       expect(result!.status).toBe('completed');
+    });
+
+    it('applies runtime budget fields from FRANKENBEAST_RUN_CONFIG to BeastLoop execution', async () => {
+      const { Session } = await import('../../../src/cli/session.js');
+      const { BeastLoop } = await import('../../../src/beast-loop.js');
+      const root = resolve(tmpdir(), `fb-run-config-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      mkdirSync(root, { recursive: true });
+      const configPath = resolve(root, 'run-config.json');
+      writeFileSync(configPath, JSON.stringify({
+        maxDurationMs: 123_000,
+        maxTotalTokens: 456_000,
+        reflection: true,
+      }));
+      process.env.FRANKENBEAST_RUN_CONFIG = configPath;
+      const config = makeConfig({ entryPhase: 'execute' });
+
+      await new Session(config).start();
+
+      expect(BeastLoop).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          maxDurationMs: 123_000,
+          maxTotalTokens: 456_000,
+          enableReflection: true,
+        }),
+      );
+      rmSync(root, { recursive: true, force: true });
     });
 
     it('does not double-count failed task outcomes in the build summary footer', async () => {
