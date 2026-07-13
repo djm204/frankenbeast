@@ -1795,6 +1795,143 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('uses corrective guidance polarity so failure prose negation alone does not block matching fixes', () => {
+    const current = createLesson({
+      failureDescription: 'Cache did not verify provenance before reuse',
+      correctionApplied: 'Require provenance verification before cache reuse',
+    });
+    const prior = createLesson({
+      failureDescription: 'Cache skipped provenance before reuse',
+      correctionApplied: 'Require provenance verification before cache reuse',
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'clear',
+      contradictions: [],
+    });
+  });
+
+  it('includes reviewer guidance in search queries for lessons with generic correction summaries', async () => {
+    const port = createMockMemoryPort();
+    port.searchLessons = vi.fn().mockResolvedValue([]);
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'factuality', [
+          {
+            message: 'Do not reuse cache responses without provenance checks',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'lesson-task');
+
+    expect(port.searchLessons).toHaveBeenCalledWith(
+      expect.stringContaining('Do not reuse cache responses without provenance checks'),
+      10,
+    );
+  });
+
+  it('includes reviewer guidance in stable legacy fallback ids', () => {
+    const base = {
+      failureDescription: 'Cache reuse guidance regression',
+      correctionApplied: 'Corrected in iteration 1',
+    };
+    const reusePrior = createLesson({
+      ...base,
+      reviewerFeedback: {
+        summary: 'Reuse cache responses when provenance checks are present',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Reuse cache responses when provenance checks are present',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+    const verifyPrior = createLesson({
+      ...base,
+      reviewerFeedback: {
+        summary: 'Require verification before reusing cache responses',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Require verification before reusing cache responses',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+    const current = createLesson({
+      ...base,
+      reviewerFeedback: {
+        summary: 'Do not reuse cache responses without provenance checks',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Do not reuse cache responses without provenance checks',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+
+    const report = detectLessonContradictions(current, [reusePrior, verifyPrior]);
+
+    expect(report.contradictions).toHaveLength(2);
+    const ids = report.contradictions.map(
+      (contradiction) => contradiction.conflictingLessonId,
+    );
+    expect(ids.every((id) => id.startsWith('legacy-lesson-'))).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('treats without as corrective negation when guidance otherwise overlaps strongly', () => {
+    const current = createLesson({
+      correctionApplied: 'Require provenance checks before reusing cache responses',
+    });
+    const prior = createLesson({
+      correctionApplied: 'Reuse cache responses without provenance checks',
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'contradiction_detected',
+      contradictions: [
+        expect.objectContaining({
+          sharedTerms: expect.arrayContaining(['cache', 'provenance', 'responses']),
+        }),
+      ],
+    });
+  });
+
+  it('requires stronger shared terms before blocking same-evaluator lessons', () => {
+    const current = createLesson({
+      failureDescription: 'Cache unauthenticated user profiles',
+      correctionApplied: 'Do not cache unauthenticated user profiles',
+    });
+    const prior = createLesson({
+      failureDescription: 'Cache dependency metadata',
+      correctionApplied: 'Cache dependency metadata after checksum verification',
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'clear',
+      contradictions: [],
+    });
+  });
+
   it('does not flag unrelated evaluators or non-overlapping lessons as contradictions', () => {
     const current = createLesson({
       evaluatorName: 'factuality',

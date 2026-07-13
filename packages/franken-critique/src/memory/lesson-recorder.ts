@@ -741,12 +741,16 @@ export function detectLessonContradictions(
 
   const contradictions = comparablePriorLessons.flatMap((prior) => {
     const sharedTerms = sharedLessonTerms(lesson, prior);
-    const lessonGuidance = createLessonGuidanceText(lesson);
-    const priorGuidance = createLessonGuidanceText(prior);
+    const lessonPolarity = createLessonDirectiveText(lesson);
+    const priorPolarity = createLessonDirectiveText(prior);
     const hasNegationMismatch =
-      containsNegation(lessonGuidance) !== containsNegation(priorGuidance);
+      containsNegation(lessonPolarity) !== containsNegation(priorPolarity);
 
-    if (!sameEvaluator(lesson, prior) || sharedTerms.length === 0 || !hasNegationMismatch) {
+    if (
+      !sameEvaluator(lesson, prior) ||
+      sharedTerms.length < MIN_CONTRADICTION_SHARED_TERMS ||
+      !hasNegationMismatch
+    ) {
       return [];
     }
 
@@ -1090,7 +1094,7 @@ function sanitizeLessonIdPart(value: string): string {
 
 
 function createLessonSearchQuery(lesson: CritiqueLesson): string {
-  return `${lesson.evaluatorName} ${lesson.failureDescription} ${lesson.correctionApplied}`;
+  return `${lesson.evaluatorName} ${createLessonGuidanceText(lesson)}`;
 }
 
 function sameEvaluator(a: CritiqueLesson, b: CritiqueLesson): boolean {
@@ -1104,16 +1108,19 @@ function sharedLessonTerms(a: CritiqueLesson, b: CritiqueLesson): string[] {
 }
 
 function createLessonGuidanceText(lesson: CritiqueLesson): string {
+  return [
+    lesson.failureDescription,
+    createLessonDirectiveText(lesson),
+  ].join(' ');
+}
+
+function createLessonDirectiveText(lesson: CritiqueLesson): string {
   const reviewerGuidance =
     lesson.reviewerFeedback?.findings.flatMap((finding) => [
       finding.message,
       finding.suggestion ?? '',
     ]) ?? [];
-  return [
-    lesson.failureDescription,
-    lesson.correctionApplied,
-    ...reviewerGuidance,
-  ].join(' ');
+  return [lesson.correctionApplied, ...reviewerGuidance].join(' ');
 }
 
 function extractComparableTerms(value: string): string[] {
@@ -1128,7 +1135,7 @@ function normalizeText(value: string): string {
 
 function containsNegation(value: string): boolean {
   const normalized = normalizeText(value);
-  return /\b(no|not|never|avoid|block|reject|forbid|disable|disabled|don t|do not|must not|cannot|can t)\b/i.test(
+  return /\b(no|not|never|avoid|block|reject|forbid|without|disable|disabled|don t|do not|must not|cannot|can t)\b/i.test(
     normalized,
   );
 }
@@ -1137,10 +1144,12 @@ function getLessonId(lesson: CritiqueLesson): string {
   return (
     lesson.testTraceability?.[0]?.lessonId ??
     `legacy-lesson-${stableHash(
-      `${lesson.evaluatorName}\n${lesson.failureDescription}\n${lesson.correctionApplied}`,
+      `${lesson.evaluatorName}\n${lesson.failureDescription}\n${lesson.correctionApplied}\n${createLessonDirectiveText(lesson)}`,
     ).slice(0, 16)}`
   );
 }
+
+const MIN_CONTRADICTION_SHARED_TERMS = 2;
 
 const LESSON_CONTRADICTION_STOP_WORDS = new Set([
   'about',
