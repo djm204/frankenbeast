@@ -475,6 +475,7 @@ On APPROVE, the gateway can issue a scoped, time-limited `SessionToken`. A `Gove
 
 ```typescript
 import {
+  createGovernor,
   ApprovalGateway,
   SessionTokenStore,
   createGovernorApp,
@@ -484,6 +485,12 @@ import {
 const store = new SessionTokenStore({
   // Optional: share tokens across short-lived governor/hook processes.
   persistenceFile: '.frankenbeast/governor-session-tokens.json',
+});
+
+const governor = createGovernor({
+  readline: readlineAdapter,
+  memoryPort,
+  sessionTokenStore: store,
 });
 
 // Tokens are created automatically by ApprovalGateway when sessionTokenStore is provided

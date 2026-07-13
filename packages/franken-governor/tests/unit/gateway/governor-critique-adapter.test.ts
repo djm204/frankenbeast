@@ -380,9 +380,10 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     });
     tokenStore.store(token);
     const channel = makeFakeChannel('ABORT');
+    const auditRecorder = makeFakeAuditRecorder();
     const adapter = new GovernorCritiqueAdapter({
       channel,
-      auditRecorder: makeFakeAuditRecorder(),
+      auditRecorder,
       evaluators: [new SkillTrigger()],
       projectId: 'proj-001',
       skillMetadata: makeSkillMetadataSource({
@@ -398,6 +399,11 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
 
     expect(result).toEqual({ verdict: 'approved' });
     expect(channel.requestApproval).not.toHaveBeenCalled();
+    expect(auditRecorder.record).toHaveBeenCalledOnce();
+    expect(auditRecorder.record).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+      decision: 'APPROVE',
+      respondedBy: 'operator-session-token',
+    }));
   });
 
   it('fails closed to a fresh operator prompt when the risky-action session token is expired', async () => {
@@ -430,7 +436,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
         approvalSessionTokenId: token.tokenId,
       }));
 
-      expect(result).toEqual({ verdict: 'approved' });
+      expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
       expect(channel.requestApproval).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -463,7 +469,92 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       approvalSessionTokenId: token.tokenId,
     }));
 
-    expect(result).toEqual({ verdict: 'approved' });
+    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
     expect(channel.requestApproval).toHaveBeenCalledOnce();
+  });
+
+  it('exposes a newly issued operator session token after a fresh approval', async () => {
+    const tokenStore = new SessionTokenStore();
+    const channel = makeFakeChannel('APPROVE');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+
+    expect(result.verdict).toBe('approved');
+    expect(result.approvalSessionTokenId).toEqual(expect.any(String));
+    expect(tokenStore.isValid(result.approvalSessionTokenId!, 'deploy-prod')).toBe(true);
+  });
+
+  it('fails closed to a fresh operator prompt when token validation storage throws', async () => {
+    const tokenStore = {
+      isValid: vi.fn(() => {
+        throw new Error('corrupt token store');
+      }),
+      store: vi.fn(),
+    } as unknown as SessionTokenStore;
+    const channel = makeFakeChannel('APPROVE');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({
+      selectedTool: 'deploy-prod',
+      approvalSessionTokenId: 'unreadable-token',
+    }));
+
+    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    expect(tokenStore.store).toHaveBeenCalledOnce();
+  });
+
+  it('does not let a skill-scoped session token bypass an unrelated budget trigger', async () => {
+    const tokenStore = new SessionTokenStore();
+    const token = createSessionToken({
+      approvalId: 'prior-approval',
+      scope: 'deploy-prod',
+      grantedBy: 'operator',
+      ttlMs: 60_000,
+    });
+    tokenStore.store(token);
+    const channel = makeFakeChannel('APPROVE');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new BudgetTrigger(), new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+      budgetState: {
+        getBudgetState: () => ({ tripped: true, limitUsd: 100, spendUsd: 125 }),
+      },
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({
+      selectedTool: 'deploy-prod',
+      approvalSessionTokenId: token.tokenId,
+    }));
+
+    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('budget');
   });
 });

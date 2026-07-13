@@ -22,5 +22,5 @@ export interface RationaleBlock {
  * Result of rationale verification by the governor.
  */
 export type VerificationResult =
-  | { verdict: 'approved' }
+  | { verdict: 'approved'; approvalSessionTokenId?: string }
   | { verdict: 'rejected'; reason: string };

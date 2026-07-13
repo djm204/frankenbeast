@@ -62,6 +62,7 @@ const SKIP: TriggerContext = { skip: true };
 
 export class GovernorCritiqueAdapter {
   private readonly gateway: ApprovalGateway;
+  private readonly auditRecorder: AuditRecorder;
   private readonly evaluators: ReadonlyArray<TriggerEvaluator>;
   private readonly projectId: string;
   private readonly skillMetadata: SkillMetadataSource | undefined;
@@ -76,6 +77,7 @@ export class GovernorCritiqueAdapter {
       ...(deps.signatureVerifier ? { signatureVerifier: deps.signatureVerifier } : {}),
       ...(deps.sessionTokenStore ? { sessionTokenStore: deps.sessionTokenStore } : {}),
     });
+    this.auditRecorder = deps.auditRecorder;
     this.evaluators = deps.evaluators;
     this.projectId = deps.projectId;
     this.skillMetadata = deps.skillMetadata;
@@ -104,6 +106,7 @@ export class GovernorCritiqueAdapter {
       : base;
 
     if (this.hasValidOperatorSession(request, rationale)) {
+      await this.recordOperatorSessionReuse(request);
       return { verdict: 'approved' };
     }
 
@@ -111,7 +114,9 @@ export class GovernorCritiqueAdapter {
 
     switch (outcome.decision) {
       case 'APPROVE':
-        return { verdict: 'approved' };
+        return outcome.token !== undefined
+          ? { verdict: 'approved', approvalSessionTokenId: outcome.token.tokenId }
+          : { verdict: 'approved' };
       case 'REGEN':
         return { verdict: 'rejected', reason: outcome.feedback };
       case 'ABORT':
@@ -135,12 +140,26 @@ export class GovernorCritiqueAdapter {
   }
 
   private hasValidOperatorSession(request: ApprovalRequest, rationale: RationaleBlock): boolean {
-    if (!this.sessionTokenStore || !rationale.approvalSessionTokenId) {
+    if (!this.sessionTokenStore || !rationale.approvalSessionTokenId || request.trigger.triggerId !== 'skill') {
       return false;
     }
 
     const scope = request.skillId ?? request.taskId;
-    return this.sessionTokenStore.isValid(rationale.approvalSessionTokenId, scope);
+    try {
+      return this.sessionTokenStore.isValid(rationale.approvalSessionTokenId, scope);
+    } catch {
+      return false;
+    }
+  }
+
+  private async recordOperatorSessionReuse(request: ApprovalRequest): Promise<void> {
+    await this.auditRecorder.record(request, {
+      requestId: request.requestId,
+      decision: 'APPROVE',
+      respondedBy: 'operator-session-token',
+      respondedAt: new Date(deterministicNow()),
+      feedback: 'Approved by scoped operator session token',
+    });
   }
 
   /**
