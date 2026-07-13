@@ -9,6 +9,8 @@ import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { BudgetTrigger, type BudgetTriggerContext } from '../triggers/budget-trigger.js';
 import { evaluateTrigger } from '../triggers/evaluate-trigger.js';
 import { SkillTrigger, type SkillTriggerContext } from '../triggers/skill-trigger.js';
+import { ConfidenceTrigger } from '../triggers/confidence-trigger.js';
+import { AmbiguityTrigger } from '../triggers/ambiguity-trigger.js';
 import type { RationaleBlock, VerificationResult } from '@franken/types';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
 
@@ -93,7 +95,7 @@ export class GovernorCritiqueAdapter {
       return { verdict: 'approved' };
     }
 
-    const triggerResult = this.selectTriggerForPrompt(triggerResults);
+    const triggerResult = this.formatTriggerForPrompt(triggerResults);
 
     const base = {
       requestId: deterministicUuid('packages/franken-governor/src/gateway/governor-critique-adapter.ts'),
@@ -156,7 +158,24 @@ export class GovernorCritiqueAdapter {
     const evaluationFailure = triggerResults.find((result) => this.isTriggerEvaluationFailure(result));
     if (evaluationFailure !== undefined) return evaluationFailure;
 
-    return triggerResults.find((result) => result.triggerId !== 'skill') ?? triggerResults[0]!;
+    return triggerResults.find((result) => result.triggerId === 'skill')
+      ?? triggerResults.find((result) => result.triggerId !== 'skill')
+      ?? triggerResults[0]!;
+  }
+
+  private formatTriggerForPrompt(triggerResults: ReadonlyArray<TriggerResult>): TriggerResult {
+    const selected = this.selectTriggerForPrompt(triggerResults);
+    const additionalResults = triggerResults.filter((result) => result !== selected);
+    if (additionalResults.length === 0) return selected;
+
+    const additionalReasons = additionalResults
+      .map((result) => `${result.triggerId}: ${result.reason ?? 'triggered'}`)
+      .join('; ');
+
+    return {
+      ...selected,
+      reason: `${selected.reason ?? 'Triggered'}; Additional triggered policies: ${additionalReasons}`,
+    };
   }
 
   private canReuseOperatorSessionToken(triggerResults: ReadonlyArray<TriggerResult>): boolean {
@@ -215,6 +234,10 @@ export class GovernorCritiqueAdapter {
     if (evaluator instanceof BudgetTrigger) {
       if (this.budgetState === undefined) return SKIP;
       return { skip: false, context: this.budgetState.getBudgetState() };
+    }
+
+    if (evaluator instanceof ConfidenceTrigger || evaluator instanceof AmbiguityTrigger) {
+      return SKIP;
     }
 
     const rationaleWithoutBearerToken = { ...rationale };

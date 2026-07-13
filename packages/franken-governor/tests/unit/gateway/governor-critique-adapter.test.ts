@@ -6,6 +6,7 @@ import type { ApprovalChannel } from '../../../src/gateway/approval-channel.js';
 import type { TriggerEvaluator } from '../../../src/triggers/trigger-evaluator.js';
 import { BudgetTrigger } from '../../../src/triggers/budget-trigger.js';
 import { SkillTrigger } from '../../../src/triggers/skill-trigger.js';
+import { ConfidenceTrigger } from '../../../src/triggers/confidence-trigger.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
 import { formatApprovalSessionTokenScope, formatSessionTokenScope } from '../../../src/security/session-token-scope.js';
@@ -314,6 +315,27 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     const result = await adapter.verifyRationale(makeRationale());
     expect(result).toEqual({ verdict: 'approved' });
     expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('does not feed rationale context to typed built-in triggers without adapter sources', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger(), new ConfidenceTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+
+    expect(result.verdict).toBe('rejected');
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('skill');
+    expect(request.trigger.reason).not.toContain('confidence');
   });
 
   it('still passes the rationale to custom evaluators', async () => {
@@ -647,7 +669,9 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
     expect(channel.requestApproval).toHaveBeenCalledOnce();
     const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
-    expect(request.trigger.triggerId).toBe('budget');
+    expect(request.trigger.triggerId).toBe('skill');
+    expect(request.trigger.reason).toContain('deploy-prod');
+    expect(request.trigger.reason).toContain('Additional triggered policies: budget: Budget breach');
   });
 
   it('honors a task-scoped session token for a repeated non-skill approval even when a tool is selected', async () => {

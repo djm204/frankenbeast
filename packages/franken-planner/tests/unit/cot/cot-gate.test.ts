@@ -115,6 +115,27 @@ describe('buildCoTExecutor — approved', () => {
       selectedTool: 'deploy-prod',
     }));
   });
+
+  it('does not overwrite a still-remembered tool token with a later token for another scope', async () => {
+    const selfCritique: SelfCritiqueModule = {
+      verifyRationale: vi.fn()
+        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'deploy-token' })
+        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'task-token' })
+        .mockResolvedValue({ verdict: 'approved' }),
+    };
+    const executor = vi.fn().mockResolvedValue(success('t-1'));
+    const enforcer = new RationaleEnforcer();
+    const wrapped = buildCoTExecutor(executor, selfCritique, enforcer);
+
+    await wrapped({ ...makeTask('deploy-task'), metadata: { tool: 'deploy-prod' } });
+    await wrapped(makeTask('budget-task'));
+    await wrapped({ ...makeTask('next-deploy-task'), metadata: { tool: 'deploy-prod' } });
+
+    expect(selfCritique.verifyRationale).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      approvalSessionTokenId: 'deploy-token',
+      selectedTool: 'deploy-prod',
+    }));
+  });
 });
 
 // ─── Rejected path ────────────────────────────────────────────────────────────

@@ -7,7 +7,8 @@ import { now as deterministicNow } from '@franken/types';
  * Here it derives deterministic rationale from the task's objective field.
  */
 export class RationaleEnforcer {
-  private approvalSessionTokenId: string | undefined;
+  private readonly approvalSessionTokenIdsByScope = new Map<string, string[]>();
+  private lastGeneratedScopeKey: string | undefined;
 
   generate(task: Task): RationaleBlock {
     const base = {
@@ -17,11 +18,16 @@ export class RationaleEnforcer {
       timestamp: new Date(deterministicNow()),
     };
 
-    const withSessionToken = this.approvalSessionTokenId !== undefined
-      ? { ...base, approvalSessionTokenId: this.approvalSessionTokenId }
+    const tool = task.metadata?.['tool'];
+    const scopeKey = typeof tool === 'string'
+      ? `skill:${tool}`
+      : `task:${task.id}`;
+    this.lastGeneratedScopeKey = scopeKey;
+    const approvalSessionTokenId = this.approvalSessionTokenIdsByScope.get(scopeKey)?.[0];
+    const withSessionToken = approvalSessionTokenId !== undefined
+      ? { ...base, approvalSessionTokenId }
       : base;
 
-    const tool = task.metadata?.['tool'];
     if (typeof tool === 'string') {
       return { ...withSessionToken, selectedTool: tool };
     }
@@ -29,6 +35,11 @@ export class RationaleEnforcer {
   }
 
   rememberApprovalSessionToken(tokenId: string): void {
-    this.approvalSessionTokenId = tokenId;
+    const scopeKey = this.lastGeneratedScopeKey ?? 'task:unknown';
+    const tokenIds = this.approvalSessionTokenIdsByScope.get(scopeKey) ?? [];
+    if (!tokenIds.includes(tokenId)) {
+      tokenIds.push(tokenId);
+    }
+    this.approvalSessionTokenIdsByScope.set(scopeKey, tokenIds);
   }
 }
