@@ -456,6 +456,7 @@ jobs:
     const releaseLatestRun = String(releaseLatestStep?.run ?? '');
 
     const rootLookupIndex = releaseLatestRun.indexOf('root_tag=$(gh release list');
+    const emptyRootNormalizationIndex = releaseLatestRun.indexOf('.tagName // empty');
     const noRootGuardIndex = releaseLatestRun.indexOf(
       'No root release found; leaving component latest unchanged',
     );
@@ -463,7 +464,8 @@ jobs:
     const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
-    expect(noRootGuardIndex).toBeGreaterThan(rootLookupIndex);
+    expect(emptyRootNormalizationIndex).toBeGreaterThan(rootLookupIndex);
+    expect(noRootGuardIndex).toBeGreaterThan(emptyRootNormalizationIndex);
     expect(demoteIndex).toBeGreaterThan(noRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
     expect(releaseLatestRun).toContain('if [ -z "$root_tag" ]; then');
