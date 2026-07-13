@@ -52,6 +52,17 @@ describe('fetchWithRetry (issue #68)', () => {
     expect(sleep).toHaveBeenCalledTimes(1)
   })
 
+  it('retries 429 responses without rate-limit headers using default backoff', async () => {
+    const sleep = noSleep()
+    const rateLimitedWithoutHeaders = { ok: false, status: 429, statusText: 'Too Many Requests' }
+    const attempt = vi.fn().mockResolvedValueOnce(rateLimitedWithoutHeaders).mockResolvedValueOnce(ok)
+
+    await expect(fetchWithRetry(attempt, { maxRetries: 1, jitter: false, sleep })).resolves.toEqual(ok)
+
+    expect(attempt).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenCalledWith(200)
+  })
+
   it('does NOT retry a 4xx — returns it immediately', async () => {
     const sleep = noSleep()
     const attempt = vi.fn().mockResolvedValue(badRequest)
