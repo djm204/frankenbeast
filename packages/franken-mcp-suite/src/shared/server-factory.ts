@@ -92,6 +92,54 @@ export interface CreateMcpServerOptions {
   audit?: AuditSink;
 }
 
+const DENIED_ARGUMENT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function isObjectLike(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPlainJsonObject(value: Record<string, unknown>): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function validateSafeArgumentShape(
+  value: unknown,
+  path: string,
+): { ok: true } | { ok: false; message: string } {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const child = validateSafeArgumentShape(value[index], `${path}[${index}]`);
+      if (!child.ok) return child;
+    }
+    return { ok: true };
+  }
+  if (!isObjectLike(value)) {
+    return { ok: true };
+  }
+  if (!isPlainJsonObject(value)) {
+    return { ok: false, message: `${path} must be a plain JSON object` };
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') {
+      return { ok: false, message: `${path} contains non-string property keys` };
+    }
+    if (DENIED_ARGUMENT_KEYS.has(key)) {
+      return { ok: false, message: `${path} contains denied property name: ${key}` };
+    }
+    const descriptor = descriptors[key];
+    if (!descriptor) continue;
+    if ('get' in descriptor || 'set' in descriptor) {
+      return { ok: false, message: `${path}.${key} must be a data property` };
+    }
+    const child = validateSafeArgumentShape(descriptor.value, `${path}.${key}`);
+    if (!child.ok) return child;
+  }
+  return { ok: true };
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -100,17 +148,24 @@ export function validateToolArguments(
     return { ok: false, message: `Tool ${tool.name} expects an object argument` };
   }
   const obj = args as Record<string, unknown>;
+  const shape = validateSafeArgumentShape(obj, 'arguments');
+  if (!shape.ok) {
+    return { ok: false, message: `Tool ${tool.name} rejected unsafe argument shape: ${shape.message}` };
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(obj);
   const schema = tool.inputSchema;
   for (const req of schema.required ?? []) {
-    if (!Object.prototype.hasOwnProperty.call(obj, req) || obj[req] === undefined) {
+    const descriptor = descriptors[req];
+    if (!descriptor || descriptor.value === undefined) {
       return { ok: false, message: `Tool ${tool.name} missing required property: ${req}` };
     }
   }
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, descriptor] of Object.entries(descriptors)) {
     const prop = schema.properties[key];
     if (!prop) {
       return { ok: false, message: `Tool ${tool.name} received unknown property: ${key}` };
     }
+    const value = descriptor.value;
     const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
     if (prop.type === 'integer' ? !Number.isInteger(value) : actual !== prop.type) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be ${prop.type}` };

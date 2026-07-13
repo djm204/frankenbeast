@@ -110,6 +110,52 @@ describe('createMcpServer', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('rejects denied argument-shape keys before invoking handlers', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    const res = await srv.callTool('cfg', { args: { safe: 'ok', constructor: { prototype: { polluted: true } } } });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toContain('rejected unsafe argument shape');
+    expect(res.content[0]!.text).toContain('denied property name: constructor');
+    expect(res.content[0]!.text).not.toContain('polluted');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects accessor and non-plain object argument shapes without reading accessor values', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const accessorPayload: Record<string, unknown> = {};
+    Object.defineProperty(accessorPayload, 'secret', {
+      enumerable: true,
+      get() {
+        throw new Error('getter should not run');
+      },
+    });
+
+    const accessorRes = await srv.callTool('cfg', { args: accessorPayload });
+    const dateRes = await srv.callTool('cfg', { args: new Date('2026-07-12T00:00:00Z') });
+
+    expect(accessorRes.isError).toBe(true);
+    expect(accessorRes.content[0]!.text).toContain('must be a data property');
+    expect(dateRes.isError).toBe(true);
+    expect(dateRes.content[0]!.text).toContain('must be a plain JSON object');
+    expect(calls).toHaveLength(0);
+  });
+
   it('rejects non-finite number arguments before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

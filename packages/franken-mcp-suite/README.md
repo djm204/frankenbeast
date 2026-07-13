@@ -154,6 +154,17 @@ fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })
 
 `fbeast-mcp` runs all 21 tools in a single MCP server process.
 
+## Tool argument shape hardening
+
+All MCP server and proxy dispatch paths validate tool arguments before governance
+or handlers run. Arguments must be plain JSON objects and may not contain the
+prototype-pollution key denylist (`__proto__`, `prototype`, or `constructor`) at
+any nested level. Accessor properties and non-plain objects are rejected as
+unsafe shapes instead of being inspected, so operator error messages name the
+invalid shape/key without echoing nested payload values. To intentionally pass
+arbitrary content, encode it as a string value accepted by the target tool schema
+rather than adding dynamic object keys.
+
 ## Testing
 
 ```bash
