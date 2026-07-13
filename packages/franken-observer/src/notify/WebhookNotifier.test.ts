@@ -7,7 +7,12 @@ import { LoopDetector } from '../incident/LoopDetector.js'
 describe('WebhookNotifier', () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
-  const drainAsync = () => Promise.resolve()
+  const drainAlreadyQueuedMicrotasks = async () => {
+    // CircuitBreaker emits limit events synchronously. The below-limit negative
+    // path should only need to drain promise continuations already queued by
+    // the test harness; do not use a zero-delay macrotask sleep.
+    await Promise.resolve()
+  }
   const webhookUrl = 'https://hooks.example.com/signal'
   const allowedTargetOrigins = ['https://hooks.example.com']
 
@@ -176,7 +181,7 @@ describe('WebhookNotifier', () => {
         void notifier.send({ type: 'circuit-breaker', ...result })
       })
       breaker.check(1.0) // below limit
-      await drainAsync()
+      await drainAlreadyQueuedMicrotasks()
       expect(mockFetch).not.toHaveBeenCalled()
     })
   })
