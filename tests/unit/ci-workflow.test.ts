@@ -318,7 +318,14 @@ on:
   });
 });
 
-describe('release-please.yml publishes released npm packages', () => {
+  describe('release-please.yml publishes released npm packages', () => {
+
+  // Added test for required top-level keys
+  it('has required top-level keys', () => {
+    expect(workflow).toHaveProperty('name');
+    expect(workflow).toHaveProperty('on');
+    expect(workflow).toHaveProperty('jobs');
+  });
   let content: string;
   let workflow: Record<string, unknown>;
   let jobs: Record<string, unknown>;
