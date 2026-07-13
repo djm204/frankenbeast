@@ -497,6 +497,92 @@ describe('local setup scripts', () => {
     expect(supportedProviders).not.toContain('ollama');
   });
 
+  it('keeps the CLI Beast guide aligned with documented orchestrator and fbeast flags', () => {
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const orchestratorArgs = read('packages/franken-orchestrator/src/cli/args.ts');
+    const fbeastCli = read('packages/franken-mcp-suite/src/cli/main.ts');
+
+    const documentedFlags = [
+      '--base-dir',
+      '--base-branch',
+      '--budget',
+      '--provider',
+      '--providers',
+      '--trust-provider-command-overrides',
+      '--design-doc',
+      '--plan-dir',
+      '--plan-name',
+      '--output-dir',
+      '--goal',
+      '--output',
+      '--config',
+      '--host',
+      '--port',
+      '--allow-origin',
+      '--no-pr',
+      '--verbose',
+      '--reset',
+      '--resume',
+      '--cleanup',
+      '--verify',
+      '--repair',
+      '--non-interactive',
+      '--backend',
+      '--help',
+      '--label',
+      '--milestone',
+      '--search',
+      '--assignee',
+      '--limit',
+      '--repo',
+      '--target-upstream',
+      '--dry-run',
+      '--mode <mode>',
+      '--no-firewall',
+      '--no-skills',
+      '--no-memory',
+      '--no-planner',
+      '--no-critique',
+      '--no-governor',
+      '--no-heartbeat',
+      '--set',
+      '--client=',
+      '--pick',
+      '--mode=standard|proxy',
+      '--hooks',
+      '--purge',
+      '--provider=<anthropic-api|codex-cli|claude-cli>',
+    ];
+
+    for (const flag of documentedFlags) {
+      expect(runCliBeastGuide).toContain(flag);
+    }
+
+    for (const parserFlag of [
+      'trust-provider-command-overrides',
+      'no-firewall',
+      'no-skills',
+      'no-memory',
+      'no-planner',
+      'no-critique',
+      'no-governor',
+      'no-heartbeat',
+      'target-upstream',
+      'dry-run',
+      'allow-origin',
+    ]) {
+      expect(orchestratorArgs).toContain(parserFlag);
+      expect(runCliBeastGuide).toContain(`--${parserFlag}`);
+    }
+
+    for (const fbeastFlag of ['--hooks', '--pick', '--client', '--mode', '--purge']) {
+      expect(fbeastCli).toContain(fbeastFlag);
+    }
+    expect(runCliBeastGuide).toContain('network config');
+    expect(runCliBeastGuide).toContain('fbeast mcp init');
+    expect(runCliBeastGuide).toContain('fbeast mcp uninstall');
+  });
+
   it('keeps the root README provider-extension guidance on current provider surfaces', () => {
     const readme = read('README.md');
 
