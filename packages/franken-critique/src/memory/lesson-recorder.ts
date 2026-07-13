@@ -1233,12 +1233,17 @@ function findContradictoryGuidanceMatch(
       conflictingGuidance: string;
     }
   | undefined {
-  for (const lessonDirective of createLessonDirectiveClauses(lesson)) {
-    for (const priorDirective of createLessonDirectiveClauses(prior)) {
+  const lessonDirectives = createLessonDirectiveClauses(lesson);
+  const priorDirectives = createLessonDirectiveClauses(prior);
+  for (const lessonDirective of lessonDirectives) {
+    for (const priorDirective of priorDirectives) {
       if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
       if (normalizeText(lessonDirective.sourceText) === normalizeText(priorDirective.sourceText)) {
+        continue;
+      }
+      if (hasCompatibleSiblingDirective(lessonDirectives, lessonDirective, priorDirective)) {
         continue;
       }
       const opposedGuardSharedTerms = opposedConditionalGuardSharedTerms(
@@ -1279,6 +1284,19 @@ function findContradictoryGuidanceMatch(
     }
   }
   return undefined;
+}
+
+function hasCompatibleSiblingDirective(
+  directives: LessonDirectiveClause[],
+  currentDirective: LessonDirectiveClause,
+  priorDirective: LessonDirectiveClause,
+): boolean {
+  return directives.some(
+    (directive) =>
+      directive !== currentDirective &&
+      directive.polarity === priorDirective.polarity &&
+      canonicalComparableText(directive.text) === canonicalComparableText(priorDirective.text),
+  );
 }
 
 function sharedTextTerms(a: string, b: string): string[] {
