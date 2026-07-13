@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-13 — Langfuse docs and env-var DX
+- For docs that include links from published package pages, prefer links to files that are shipped in the package (e.g., README, changelog). In `@franken/observer`, avoid package-relative links to `docs/` if that directory is not published.
+- For local secret setup guidance, recommend `.env`/ignored secret files that match repo policy to reduce accidental staging of keys like `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`.
+- When running Codex review on a refreshed commit, resolve all `chatgpt-codex-connector` inline findings and verify `reviewThreads.isResolved` is true for the relevant threads before treating a second `@codex review` cycle as complete.
+
 ## 2026-07-13 — Operator session-token review hardening
 - Approval-session tokens must be scoped to the policy actually approved: skill triggers can use selected tool scope, but budget/custom/non-skill approvals should stay task-scoped even when a tool is selected so same-tool actions in other tasks do not bypass prompts.
 - Never reuse an approval-session token for fail-closed trigger-evaluation errors; even a valid same-scope token must fall back to a fresh operator prompt when evaluator context/logic throws.
