@@ -370,6 +370,39 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('rejects invalid retry delay bounds during retry configuration validation', () => {
+      const invalidOptions = [
+        { retry: { maxRetries: 1, baseDelayMs: -1 } },
+        { retry: { maxRetries: 1, baseDelayMs: Number.NaN } },
+        { retry: { maxRetries: 1, baseDelayMs: Number.POSITIVE_INFINITY } },
+        { retry: { maxRetries: 1, maxDelayMs: -1 } },
+        { retry: { maxRetries: 1, maxDelayMs: Number.NaN } },
+        { retry: { maxRetries: 1, maxDelayMs: Number.POSITIVE_INFINITY } },
+      ]
+
+      for (const options of invalidOptions) {
+        expect(() => createNotifier(options)).toThrow(/retry\.(baseDelayMs|maxDelayMs) must be a finite non-negative number/)
+      }
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('passes only finite non-negative bounded delays to sleepFn', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const notifier = createNotifier({
+        retry: { maxRetries: 3, baseDelayMs: 100, maxDelayMs: 150, jitter: true },
+        sleep: sleepFn,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow()
+
+      for (const [delay] of sleepFn.mock.calls) {
+        expect(Number.isFinite(delay)).toBe(true)
+        expect(delay).toBeGreaterThanOrEqual(0)
+        expect(delay).toBeLessThanOrEqual(150)
+      }
+    })
+
     it('adds jitter (delay is not exactly baseDelayMs * 2^i)', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
