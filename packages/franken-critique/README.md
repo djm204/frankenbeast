@@ -105,7 +105,7 @@ Infrastructure-only evaluator exceptions and failed iterations without actionabl
 
 ## Failed-test-to-skill candidate detector
 
-When a recovered critique finding looks like a concrete failed test, `LessonRecorder` attaches `failedTestSkillCandidate` to the recorded lesson. The detector requires evidence from the finding message or location, plus a strong failed-test signal such as failed-test wording, `AssertionError` text, or copied test-runner failure output. Supporting signals such as test file paths, test commands, or expected/received assertion details are included in `matchedSignals`, but remediation-only suggestions like "run npm test before handoff" do not create candidates by themselves. The structured object includes:
+When a recovered critique finding looks like a concrete failed test, `LessonRecorder` attaches `failedTestSkillCandidate` to the recorded lesson. The detector requires strong evidence from the finding message or location, such as failed-test wording, `AssertionError` text, copied test-runner failure output, or `FAIL path/to/file.test.ts` runner output. Supporting signals such as test file paths, test commands, or expected/received assertion details are included in `matchedSignals`, but remediation-only suggestions like "run npm test before handoff" do not create candidates by themselves. The structured object includes:
 
 - `detector`: the stable value `failed-test-to-skill-candidate` for PM/liveness filters.
 - `matchedSignals`: the exact detector signals that matched.

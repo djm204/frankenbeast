@@ -150,6 +150,11 @@ const FAILED_TEST_SIGNAL_PATTERNS: readonly {
     strength: 'strong',
   },
   {
+    label: 'fail-prefixed runner output',
+    pattern: /\bFAIL\b[\s\S]{0,240}\b[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?\b/i,
+    strength: 'strong',
+  },
+  {
     label: 'test file path',
     pattern:
       /(?:^|[/\s])(?:tests?\/[^\s]+|[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?)\b/i,
@@ -1257,7 +1262,7 @@ function createFailedTestSkillCandidate(
     const suggestionSignals = collectFailedTestSignals(suggestionText);
     const allSignals = [...primarySignals, ...suggestionSignals];
     const hasPrimarySignal = primarySignals.length > 0;
-    const hasStrongSignal = allSignals.some(
+    const hasStrongSignal = primarySignals.some(
       (signal) => signal.strength === 'strong',
     );
     const distinctSignals = new Set(allSignals.map((signal) => signal.label));

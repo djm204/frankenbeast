@@ -335,6 +335,65 @@ describe('LessonRecorder', () => {
     );
   });
 
+  it('detects fail-prefixed runner output with assertion details', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'FAIL packages/foo.test.ts\nExpected PR body to include evidence\nReceived empty description',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'fail-prefixed-runner-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual(
+      expect.objectContaining({
+        matchedSignals: [
+          'assertion expected-received',
+          'fail-prefixed runner output',
+          'test file path',
+        ],
+      }),
+    );
+  });
+
+  it('does not combine weak primary assertion prose with strong suggestion-only failures', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Expected PR body to include an issue link; received empty description',
+            severity: 'warning',
+            suggestion: 'Run the failed tests before handoff.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'weak-primary-strong-suggestion-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toBeUndefined();
+  });
+
   it('marks reviewer-feedback lessons with missing suggestions for PM follow-up', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
