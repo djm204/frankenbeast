@@ -1724,7 +1724,7 @@ function hasCompatibleGuardedAllowancePair(
   }
 
   const allowanceHasFailingGuardOutcome = new RegExp(
-    '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|not\\s+approved|not\\s+granted|unapproved)\\b',
+    '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|not\\s+(?:approved|granted|allowed|permitted)|unapproved)\\b',
     'i',
   ).test(maybeAllowance.sourceText);
   if (allowanceHasFailingGuardOutcome) {
@@ -1750,8 +1750,8 @@ function hasCompatibleValidityQualifierPair(
     return false;
   }
 
-  const validAllowanceMatch = /\bvalid\s+(\w+)\b/i.exec(maybeAllowance.text);
-  const invalidProhibitionMatch = /\binvalid\s+(\w+)\b/i.exec(maybeProhibition.text);
+  const validAllowanceMatch = /\b(?:valid|validated)\s+(\w+)\b/i.exec(maybeAllowance.text);
+  const invalidProhibitionMatch = /\b(?:invalid|unvalidated)\s+(\w+)\b/i.exec(maybeProhibition.text);
   return (
     validAllowanceMatch?.[1] !== undefined &&
     invalidProhibitionMatch?.[1] !== undefined &&
@@ -1938,7 +1938,7 @@ function startsWithDoubleNegativeDirective(normalized: string): boolean {
 }
 
 function startsWithPositiveDirective(normalized: string): boolean {
-  return startsWithDoubleNegativeDirective(normalized) || /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run|rotate|should|must)\b/.test(
+  return startsWithDoubleNegativeDirective(normalized) || /^(allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\b/.test(
     normalized,
   );
 }
@@ -1955,7 +1955,7 @@ function stripLeadingNegativeDirective(normalized: string): string {
 function stripLeadingPositiveDirective(normalized: string): string {
   return normalized
     .replace(/^(?:do not|don t|must not|should not|cannot|can t)\s+(?:avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny)\s+/, '')
-    .replace(/^(?:allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run|rotate|should|must)\s+/, '')
+    .replace(/^(?:allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\s+/, '')
     .trim();
 }
 
