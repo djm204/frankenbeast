@@ -394,6 +394,12 @@ describe('runNetworkCommand', () => {
       status: 'configured',
     });
     expect(report.credentials).toContainEqual({
+      scope: 'comms.orchestrator',
+      configPath: 'comms.orchestratorTokenRef',
+      ref: 'prod/orchestrator-token',
+      status: 'optional-configured',
+    });
+    expect(report.credentials).toContainEqual({
       scope: 'comms.discord',
       configPath: 'comms.discord.botTokenRef',
       ref: 'prod/discord-bot-token',
@@ -405,6 +411,12 @@ describe('runNetworkCommand', () => {
       ref: 'prod/telegram-bot-token',
       status: 'inactive-configured',
     });
+    expect(report.credentials).not.toContainEqual(expect.objectContaining({
+      configPath: 'comms.discord.publicKeyRef',
+    }));
+    expect(report.credentials).not.toContainEqual(expect.objectContaining({
+      configPath: 'comms.whatsapp.phoneNumberIdRef',
+    }));
     expect(JSON.stringify(report)).not.toContain('super-secret-value');
     expect(JSON.stringify(report)).not.toContain('Bearer');
   });
