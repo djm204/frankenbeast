@@ -128,6 +128,8 @@ fbeast mcp init --hooks
 
 The `fbeast` CLI in this repo exposes MCP operations (`init`, `uninstall`, `beast`) under the `mcp` subcommand; any other command is forwarded to `frankenbeast`. MCP data is stored in `.fbeast/beast.db`.
 
+Runtime skill tools are gated conservatively. Installed `tools.json` entries default to `requiresHitl: true` unless the manifest explicitly marks a reviewed safe tool with `requiresHitl: false`, and MCP skills without a `tools.json` manifest expose their server alias as human-approval-required because the concrete runtime tools are unknown. Review new tool manifests before opting any tool out of HITL.
+
 ## Project structure
 
 ```text

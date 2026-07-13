@@ -115,7 +115,10 @@ describe('SkillManager', () => {
       expect(existsSync(join(skillsDir, 'github', 'tools.json'))).toBe(true);
       const tools = JSON.parse(readFileSync(join(skillsDir, 'github', 'tools.json'), 'utf-8'));
       expect(tools).toHaveLength(1);
-      expect(tools[0].name).toBe('create_issue');
+      expect(tools[0]).toMatchObject({
+        name: 'create_issue',
+        requiresHitl: true,
+      });
     });
   });
 
@@ -262,7 +265,27 @@ describe('SkillManager', () => {
       });
       const tools = manager.readTools('github');
       expect(tools).toHaveLength(1);
-      expect(tools[0]!.name).toBe('create_issue');
+      expect(tools[0]).toMatchObject({
+        name: 'create_issue',
+        requiresHitl: true,
+      });
+    });
+
+    it('preserves explicit safe-tool security review opt-outs', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'list_repos', description: 'List', inputSchema: {}, requiresHitl: false },
+        ],
+      });
+      const tools = manager.readTools('github');
+      expect(tools).toEqual([
+        expect.objectContaining({ name: 'list_repos', requiresHitl: false }),
+      ]);
     });
   });
 
