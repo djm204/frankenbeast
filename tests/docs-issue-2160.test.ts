@@ -17,12 +17,12 @@ describe('issue #2160 dashboard project id docs', () => {
     }
   });
 
-  it('keeps a non-secret project id example in the root env template', () => {
+  it('explains why the root env template omits a runnable Vite project id value', () => {
     const envExample = readDoc('.env.example');
 
-    expect(envExample).toContain('VITE_PROJECT_ID=my-project');
-    expect(envExample).toContain('Defaults to "default" when unset');
-    expect(envExample).toContain('Non-secret');
+    expect(envExample).toContain('VITE_PROJECT_ID is intentionally not listed here as a runnable root .env value');
+    expect(envExample).toContain('packages/franken-web/.env.local');
     expect(envExample).not.toMatch(/^\s*VITE_PROJECT_ID\s*=/m);
+    expect(envExample).not.toContain('VITE_PROJECT_ID=my-project');
   });
 });
