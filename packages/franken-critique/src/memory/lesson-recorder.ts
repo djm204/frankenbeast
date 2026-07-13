@@ -18,7 +18,8 @@ import { createHash } from 'node:crypto';
 
 const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
   'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
-const LESSON_CONTRADICTION_VERIFICATION_COMMAND = LESSON_TRACEABILITY_VERIFICATION_COMMAND;
+const LESSON_CONTRADICTION_VERIFICATION_COMMAND =
+  LESSON_TRACEABILITY_VERIFICATION_COMMAND;
 
 const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_LESSON_COOLDOWN_MS = 100 * 365 * 24 * 60 * 60 * 1000;
@@ -284,7 +285,8 @@ export class LessonRecorder {
       }
 
       try {
-        const contradictionReport = await this.createContradictionReport(lesson);
+        const contradictionReport =
+          await this.createContradictionReport(lesson);
         const admittedLesson = this.withAdmissionTimestamp({
           ...lesson,
           contradictionReport,
@@ -296,7 +298,10 @@ export class LessonRecorder {
           recordingResult.minedBlockerPatterns,
           lesson.blockerPatterns,
         );
-        addLessonBacklogItems(recordingResult.learningBacklogItems, admittedLesson);
+        addLessonBacklogItems(
+          recordingResult.learningBacklogItems,
+          admittedLesson,
+        );
         if (cooldownKey && this.cooldownMs > 0) {
           this.cooldowns.set(
             cooldownKey,
@@ -318,7 +323,6 @@ export class LessonRecorder {
       }
     });
   }
-
 
   private async createContradictionReport(
     lesson: CritiqueLesson,
@@ -729,7 +733,6 @@ export class LessonRecorder {
   }
 }
 
-
 export function detectLessonContradictions(
   lesson: CritiqueLesson,
   priorLessons?: readonly CritiqueLesson[],
@@ -744,7 +747,9 @@ export function detectLessonContradictions(
     };
   }
 
-  const comparablePriorLessons = priorLessons.filter((prior) => prior !== lesson);
+  const comparablePriorLessons = priorLessons.filter(
+    (prior) => prior !== lesson,
+  );
 
   const contradictions = comparablePriorLessons.flatMap((prior) => {
     const contradictionMatch = findContradictoryGuidanceMatch(lesson, prior);
@@ -779,7 +784,8 @@ export function detectLessonContradictions(
 
   return {
     status: 'clear',
-    guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+    guidance:
+      'No deterministic lesson contradiction was detected among comparable prior lessons.',
     verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
     contradictions: [],
   };
@@ -1014,7 +1020,9 @@ function createAgentImprovementScorecard(
         ),
     ),
   );
-  const failingIterations = evaluatorFailures.map((iteration) => iteration.index);
+  const failingIterations = evaluatorFailures.map(
+    (iteration) => iteration.index,
+  );
   const allFindings = evaluatorFailures.flatMap((iteration) =>
     iteration.result.results
       .filter(
@@ -1038,7 +1046,8 @@ function createAgentImprovementScorecard(
     failingIteration.result.overallScore;
   const passingIteration = allIterations.find(
     (iteration) =>
-      iteration.result.verdict === 'pass' || iteration.result.verdict === 'warn',
+      iteration.result.verdict === 'pass' ||
+      iteration.result.verdict === 'warn',
   );
   const finalScore =
     passingIteration?.result.results.find(
@@ -1206,7 +1215,6 @@ function sanitizeLessonIdPart(value: string): string {
   return normalized.replace(/^-+|-+$/g, '') || 'unknown';
 }
 
-
 function createLessonSearchQuery(lesson: CritiqueLesson): string {
   return `${lesson.evaluatorName} ${createLessonGuidanceText(lesson)}`;
 }
@@ -1230,10 +1238,24 @@ function findContradictoryGuidanceMatch(
       if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
+      const opposedGuardSharedTerms = opposedConditionalGuardSharedTerms(
+        lessonDirective,
+        priorDirective,
+      );
+      if (opposedGuardSharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
+        return {
+          sharedTerms: opposedGuardSharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
       if (hasCompatibleConditionalGuard(lessonDirective, priorDirective)) {
         continue;
       }
-      const sharedTerms = sharedTextTerms(lessonDirective.text, priorDirective.text);
+      const sharedTerms = sharedTextTerms(
+        lessonDirective.text,
+        priorDirective.text,
+      );
       if (sharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
         return {
           sharedTerms,
@@ -1253,10 +1275,9 @@ function sharedTextTerms(a: string, b: string): string[] {
 }
 
 function createLessonGuidanceText(lesson: CritiqueLesson): string {
-  return [
-    lesson.failureDescription,
-    createLessonDirectiveText(lesson),
-  ].join(' ');
+  return [lesson.failureDescription, createLessonDirectiveText(lesson)].join(
+    ' ',
+  );
 }
 
 function createLessonDirectiveText(lesson: CritiqueLesson): string {
@@ -1284,7 +1305,9 @@ interface LessonDirectiveClause {
   readonly embeddedNegatedCondition?: string;
 }
 
-function createLessonDirectiveClauses(lesson: CritiqueLesson): LessonDirectiveClause[] {
+function createLessonDirectiveClauses(
+  lesson: CritiqueLesson,
+): LessonDirectiveClause[] {
   return createLessonDirectiveFragments(lesson).flatMap((fragment) =>
     createDirectiveClauses(fragment),
   );
@@ -1298,7 +1321,8 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
 
   const guardCondition = extractGuardCondition(fragment);
   const leadingPolarity = leadingDirectivePolarity(normalized);
-  const conditionalProhibition = leadingPolarity === 'negative' && guardCondition !== undefined;
+  const conditionalProhibition =
+    leadingPolarity === 'negative' && guardCondition !== undefined;
   const embeddedNegatedCondition = extractEmbeddedNegatedCondition(normalized);
   const clauses: LessonDirectiveClause[] = [
     {
@@ -1339,10 +1363,40 @@ function extractGuardCondition(fragment: string): string | undefined {
   return condition.length > 0 ? condition : undefined;
 }
 
-function extractEmbeddedNegatedCondition(normalized: string): string | undefined {
+function extractEmbeddedNegatedCondition(
+  normalized: string,
+): string | undefined {
   const match = /\b(?:do not|don t|does not|not)\s+(.+)$/i.exec(normalized);
   const condition = match?.[1]?.trim() ?? '';
   return condition.length > 0 ? condition : undefined;
+}
+
+function opposedConditionalGuardSharedTerms(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): string[] {
+  const sharedTerms = sharedTextTerms(a.text, b.text);
+  if (sharedTerms.length < MIN_CONTRADICTION_SHARED_TERMS) {
+    return [];
+  }
+
+  if (
+    a.conditionalProhibition &&
+    a.guardCondition &&
+    hasOpposedGuardOutcome(a.guardCondition, b.text)
+  ) {
+    return sharedTerms;
+  }
+
+  if (
+    b.conditionalProhibition &&
+    b.guardCondition &&
+    hasOpposedGuardOutcome(b.guardCondition, a.text)
+  ) {
+    return sharedTerms;
+  }
+
+  return [];
 }
 
 function hasCompatibleConditionalGuard(
@@ -1377,13 +1431,18 @@ function hasCompatibleConditionalGuardPair(
     return false;
   }
 
-  if (hasOpposedGuardOutcome(maybeProhibition.guardCondition, maybeRequirement.text)) {
+  if (
+    hasOpposedGuardOutcome(
+      maybeProhibition.guardCondition,
+      maybeRequirement.text,
+    )
+  ) {
     return false;
   }
 
   return (
-    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text).length >=
-    MIN_CONTRADICTION_SHARED_TERMS
+    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text)
+      .length >= MIN_CONTRADICTION_SHARED_TERMS
   );
 }
 
@@ -1400,8 +1459,10 @@ function hasCompatibleEmbeddedNegationPair(
   }
 
   return (
-    sharedTextTerms(maybeAllowedNegation.embeddedNegatedCondition, maybeProhibition.text)
-      .length >= MIN_CONTRADICTION_SHARED_TERMS
+    sharedTextTerms(
+      maybeAllowedNegation.embeddedNegatedCondition,
+      maybeProhibition.text,
+    ).length >= MIN_CONTRADICTION_SHARED_TERMS
   );
 }
 
@@ -1417,7 +1478,9 @@ function hasCompatibleQualifiedExclusionPair(
   }
 
   const allowanceTerms = extractComparableTerms(maybeAllowance.text);
-  const prohibitedTerms = new Set(extractComparableTerms(maybeProhibition.text));
+  const prohibitedTerms = new Set(
+    extractComparableTerms(maybeProhibition.text),
+  );
   return allowanceTerms.some((term) => {
     if (!term.startsWith('non_')) {
       return false;
@@ -1426,21 +1489,27 @@ function hasCompatibleQualifiedExclusionPair(
   });
 }
 
-function hasOpposedGuardOutcome(guardCondition: string, requirementText: string): boolean {
-  const guardHasPass = /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
-    guardCondition,
-  );
+function hasOpposedGuardOutcome(
+  guardCondition: string,
+  requirementText: string,
+): boolean {
+  const guardHasPass =
+    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
+      guardCondition,
+    );
   const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid)\b/.test(
     guardCondition,
   );
-  const requirementHasPass = /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
-    requirementText,
-  );
-  const requirementHasFail = /\b(fail|fails|failed|failing|failure|invalid)\b/.test(
-    requirementText,
-  );
+  const requirementHasPass =
+    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
+      requirementText,
+    );
+  const requirementHasFail =
+    /\b(fail|fails|failed|failing|failure|invalid)\b/.test(requirementText);
 
-  return (guardHasPass && requirementHasFail) || (guardHasFail && requirementHasPass);
+  return (
+    (guardHasPass && requirementHasFail) || (guardHasFail && requirementHasPass)
+  );
 }
 
 function describesRequiredPrerequisite(text: string): boolean {
@@ -1490,7 +1559,10 @@ function isComparableTerm(term: string): boolean {
 }
 
 function normalizeText(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function getLessonId(lesson: CritiqueLesson): string {
