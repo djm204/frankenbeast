@@ -7,7 +7,11 @@ const ACTION_TYPES = ['planning', 'execution', 'critique', 'reflection', 'chat']
 
 export function StepLlmTargets() {
   const { stepValues, setStepValues } = useBeastStore();
-  const providers = dashboardProvidersToModelOptions(useDashboardStore((state) => state.providers));
+  const dashboardProviders = useDashboardStore((state) => state.providers);
+  const providersLoading = useDashboardStore((state) => state.loading);
+  const providersError = useDashboardStore((state) => state.error);
+  const providers = dashboardProvidersToModelOptions(dashboardProviders);
+  const hasProviderStatus = providersLoading || providersError || providers.length === 0;
   const values = (stepValues[2] ?? {}) as {
     defaultProvider?: string;
     defaultModel?: string;
@@ -34,6 +38,9 @@ export function StepLlmTargets() {
     <div className="p-8 space-y-8">
       <div className="max-w-lg">
         <h3 className="text-sm font-medium text-beast-text mb-3">Default Model</h3>
+        {hasProviderStatus && (
+          <ProviderStatusNotice loading={providersLoading} error={providersError} empty={!providersLoading && !providersError && providers.length === 0} />
+        )}
         <ProviderModelSelect
           providers={providers}
           value={{ provider: values.defaultProvider ?? '', model: values.defaultModel ?? '' }}
@@ -66,4 +73,32 @@ export function StepLlmTargets() {
       </div>
     </div>
   );
+}
+
+function ProviderStatusNotice({ loading, error, empty }: { loading: boolean; error: string | null; empty: boolean }) {
+  if (loading) {
+    return (
+      <p className="mb-3 rounded-lg border border-beast-border bg-beast-panel px-3 py-2 text-xs text-beast-subtle">
+        Loading configured LLM providers…
+      </p>
+    );
+  }
+
+  if (error) {
+    return (
+      <p role="alert" className="mb-3 rounded-lg border border-red-700 bg-red-900/20 px-3 py-2 text-xs text-red-300">
+        Could not load configured LLM providers: {error}
+      </p>
+    );
+  }
+
+  if (empty) {
+    return (
+      <p className="mb-3 rounded-lg border border-beast-border bg-beast-panel px-3 py-2 text-xs text-beast-subtle">
+        No configured LLM providers are available. Check dashboard provider configuration before choosing overrides.
+      </p>
+    );
+  }
+
+  return null;
 }

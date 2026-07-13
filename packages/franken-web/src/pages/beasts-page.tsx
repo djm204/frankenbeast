@@ -66,18 +66,24 @@ export function BeastsPage({
   const [launchError, setLaunchError] = useState<string | null>(null);
   const resetWizard = useBeastStore((s) => s.resetWizard);
   const setSnapshot = useDashboardStore((s) => s.setSnapshot);
+  const setDashboardLoading = useDashboardStore((s) => s.setLoading);
+  const setDashboardError = useDashboardStore((s) => s.setError);
   const createAgentDisabledReason = error ?? 'Beast API is not available. Configure the operator token/API client before creating agents.';
 
   useEffect(() => {
     if (!showWizard) return undefined;
     let cancelled = false;
+    setDashboardLoading(true);
+    setDashboardError(null);
     dashboardClient.fetchSnapshot()
       .then((snapshot) => {
         if (!cancelled) setSnapshot(snapshot);
       })
-      .catch(() => undefined);
+      .catch((err) => {
+        if (!cancelled) setDashboardError(err instanceof Error ? err.message : 'Provider configuration request failed.');
+      });
     return () => { cancelled = true; };
-  }, [dashboardClient, setSnapshot, showWizard]);
+  }, [dashboardClient, setDashboardError, setDashboardLoading, setSnapshot, showWizard]);
 
   function handleOpenWizard() {
     if (disabled) return;
