@@ -367,6 +367,10 @@ describe('proxy server', () => {
         expect(result.isError).toBe(true);
         expect(result.content[0].text).toContain('rejected unsafe argument shape');
         expect(result.content[0].text).toContain('denied property name: __proto__');
+        expect(auditRecord).toHaveBeenCalledTimes(1);
+        const auditedArgs = auditRecord.mock.calls[0]![0].args as { payload: Record<string, unknown> };
+        expect(auditedArgs.payload.ok).toBe(true);
+        expect(auditedArgs.payload['__proto__']).toBe('[denied-property]');
         expect(gateCheck).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'object_tool' }));
         expect(fakeHandler).not.toHaveBeenCalled();
       } finally {

@@ -156,6 +156,49 @@ describe('createMcpServer', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('depth-limits unsafe shape validation before primitive schema checks can overflow the stack', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'scan',
+      description: 'scan',
+      inputSchema: { type: 'object', properties: { input: { type: 'string', description: 'input' } }, required: ['input'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    let nested: Record<string, unknown> = { leaf: 'x' };
+    for (let i = 0; i < 80; i += 1) nested = { child: nested };
+
+    const res = await srv.callTool('scan', { input: nested });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toContain('exceeds maximum nesting depth');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('sanitizes unsafe rejected payloads before audit sinks serialize them', async () => {
+    const recorded: Array<{ tool: string; ok: boolean; decision?: string; args?: unknown }> = [];
+    const audit: AuditSink = { record: async (e) => { recorded.push(e); JSON.stringify(e.args); } };
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+    };
+    const srv = createMcpServer('t', '1', [tool], { audit });
+    const accessorPayload: Record<string, unknown> = {};
+    Object.defineProperty(accessorPayload, 'secret', {
+      enumerable: true,
+      get() {
+        throw new Error('getter should not run');
+      },
+    });
+
+    const res = await srv.callTool('cfg', { args: accessorPayload });
+
+    expect(res.isError).toBe(true);
+    expect(recorded).toEqual([{ tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { secret: '[accessor]' } } }]);
+  });
+
   it('rejects non-finite number arguments before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

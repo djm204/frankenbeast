@@ -93,6 +93,7 @@ export interface CreateMcpServerOptions {
 }
 
 const DENIED_ARGUMENT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const MAX_ARGUMENT_SHAPE_DEPTH = 64;
 
 function isObjectLike(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -106,10 +107,15 @@ function isPlainJsonObject(value: Record<string, unknown>): boolean {
 function validateSafeArgumentShape(
   value: unknown,
   path: string,
+  depth = 0,
+  skipRootChildren: ReadonlySet<string> = new Set(),
 ): { ok: true } | { ok: false; message: string } {
+  if (depth > MAX_ARGUMENT_SHAPE_DEPTH) {
+    return { ok: false, message: `${path} exceeds maximum nesting depth ${MAX_ARGUMENT_SHAPE_DEPTH}` };
+  }
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
-      const child = validateSafeArgumentShape(value[index], `${path}[${index}]`);
+      const child = validateSafeArgumentShape(value[index], `${path}[${index}]`, depth + 1, skipRootChildren);
       if (!child.ok) return child;
     }
     return { ok: true };
@@ -134,10 +140,51 @@ function validateSafeArgumentShape(
     if ('get' in descriptor || 'set' in descriptor) {
       return { ok: false, message: `${path}.${key} must be a data property` };
     }
-    const child = validateSafeArgumentShape(descriptor.value, `${path}.${key}`);
+    if (depth === 0 && skipRootChildren.has(key)) {
+      continue;
+    }
+    const child = validateSafeArgumentShape(descriptor.value, `${path}.${key}`, depth + 1, skipRootChildren);
     if (!child.ok) return child;
   }
   return { ok: true };
+}
+
+function sanitizeForAudit(value: unknown, depth = 0): unknown {
+  if (depth > MAX_ARGUMENT_SHAPE_DEPTH) {
+    return '[max-depth]';
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForAudit(item, depth + 1));
+  }
+  if (!isObjectLike(value)) {
+    return value;
+  }
+  if (!isPlainJsonObject(value)) {
+    const tag = Object.prototype.toString.call(value).slice(8, -1) || 'non-plain-object';
+    return `[${tag}]`;
+  }
+  const sanitized: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') continue;
+    if (DENIED_ARGUMENT_KEYS.has(key)) {
+      sanitized[key] = '[denied-property]';
+      continue;
+    }
+    const descriptor = descriptors[key];
+    if (!descriptor) continue;
+    if ('get' in descriptor || 'set' in descriptor) {
+      sanitized[key] = '[accessor]';
+      continue;
+    }
+    sanitized[key] = sanitizeForAudit(descriptor.value, depth + 1);
+  }
+  return sanitized;
+}
+
+export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unknown> {
+  const value = sanitizeForAudit(args);
+  return isObjectLike(value) && !Array.isArray(value) ? (value as Record<string, unknown>) : { invalid: value };
 }
 
 export function validateToolArguments(
@@ -148,7 +195,10 @@ export function validateToolArguments(
     return { ok: false, message: `Tool ${tool.name} expects an object argument` };
   }
   const obj = args as Record<string, unknown>;
-  const shape = validateSafeArgumentShape(obj, 'arguments');
+  // The proxy wrapper validates only its envelope here. Its nested `args`
+  // payload is validated after target resolution so governance/audit can record
+  // the real target tool instead of the generic execute_tool wrapper.
+  const shape = validateSafeArgumentShape(obj, 'arguments', 0, tool.name === 'execute_tool' ? new Set(['args']) : new Set());
   if (!shape.ok) {
     return { ok: false, message: `Tool ${tool.name} rejected unsafe argument shape: ${shape.message}` };
   }
@@ -206,10 +256,7 @@ async function dispatchTool(
   };
   // Normalize the raw payload to an object so a malformed (null/array/scalar)
   // probe is still captured in the audit record rather than dropped.
-  const rawArgs: Record<string, unknown> =
-    args !== null && typeof args === 'object' && !Array.isArray(args)
-      ? (args as Record<string, unknown>)
-      : { invalid: args };
+  const rawArgs = sanitizeToolArgumentsForAudit(args);
 
   const tool = toolMap.get(toolName);
   if (!tool) {
