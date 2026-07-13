@@ -54,6 +54,14 @@ npm --workspace @franken/web run dev:chat
 
 That proxies same-origin browser requests to `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
+The dashboard scopes chat history by project id. If `VITE_PROJECT_ID` is unset, the frontend uses the shared `default` project. Set a stable, non-secret project id when you run multiple local checkouts or want dashboard chat sessions isolated by project:
+
+```bash
+VITE_PROJECT_ID=my-project npm --workspace @franken/web run dev:chat
+```
+
+`VITE_PROJECT_ID` is bundled into the browser, so use only a plain identifier such as a repo or workspace slug; do not put secrets in it.
+
 If your backend is on a different port, keep browser requests same-origin and set the Vite proxy target. Leave `VITE_API_URL` unset in local Vite development; the current dashboard ignores that legacy value, so it will not change the backend port. Use `VITE_API_PROXY_TARGET` instead so `/v1` and `/api` stay on the Vite origin while the dev server forwards them to the backend.
 
 ```bash
