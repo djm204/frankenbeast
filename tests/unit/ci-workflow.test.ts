@@ -112,6 +112,12 @@ on:
       expect(() => parseWorkflowYaml(content)).not.toThrow();
     });
 
+    it('has required top-level workflow keys', () => {
+      expect(workflow).toHaveProperty('name');
+      expect(workflow).toHaveProperty('on');
+      expect(workflow).toHaveProperty('jobs');
+    });
+
     it('has a workflow name', () => {
       expect(workflow.name).toBe('CI');
     });
