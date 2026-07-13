@@ -56,6 +56,29 @@ describe('local setup scripts', () => {
     expect(read('scripts/verify-setup.ts')).toContain("check('Node.js >=22.13.0 <23 || >=24.0.0 <26'");
   });
 
+  it('keeps root env example aligned with orchestrator runtime config overrides', () => {
+    const envExample = read('.env.example');
+    const readme = read('README.md');
+
+    expect(envExample).toContain('CLI flags > FRANKEN_* env vars > config file > built-in defaults');
+    expect(envExample).toContain('FRANKEN_ENABLE_REFLECTION         -> enableReflection');
+    expect(envExample).toContain('boolean string; only "true" enables it; default false');
+    expect(envExample).toMatch(/^FRANKEN_ENABLE_REFLECTION=false$/m);
+
+    for (const frankenOverride of [
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+    ]) {
+      expect(envExample).toContain(frankenOverride);
+      expect(readme).toContain(frankenOverride);
+    }
+  });
+
   it('verify-setup checks the live Chroma v2 heartbeat and no removed firewall service', () => {
     const source = read('scripts/verify-setup.ts');
 
