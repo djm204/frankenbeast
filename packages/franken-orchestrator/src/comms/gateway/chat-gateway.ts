@@ -92,15 +92,19 @@ export class ChatGateway extends EventEmitter {
     });
 
     const outboundRouteMetadata = {
+      ...this.pickRouteMetadata(result.metadata),
       ...(cachedRouteMetadata ?? {}),
-      ...(result.metadata ?? {}),
     };
     if (Object.keys(outboundRouteMetadata).length > 0) {
       this.rememberRouteMetadata(sessionId, outboundRouteMetadata);
     }
     const outbound: ChannelOutboundMessage = {
       text: result.text,
-      ...(Object.keys(outboundRouteMetadata).length > 0 ? { metadata: outboundRouteMetadata } : {}),
+      ...(
+        Object.keys(outboundRouteMetadata).length > 0 || result.metadata
+          ? { metadata: { ...(result.metadata ?? {}), ...outboundRouteMetadata } }
+          : {}
+      ),
     };
     if (result.status) outbound.status = result.status;
     if (result.sensitivity) outbound.sensitivity = result.sensitivity;
@@ -126,6 +130,23 @@ export class ChatGateway extends EventEmitter {
       ...(message.channelType === 'telegram' ? { chatId: message.externalChannelId } : {}),
       ...(message.channelType === 'whatsapp' ? { phoneNumber: message.externalChannelId } : {}),
     };
+  }
+
+  private pickRouteMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+    if (!metadata) return {};
+    const routeMetadata: Record<string, unknown> = {};
+    for (const key of [
+      'externalChannelId',
+      'externalThreadId',
+      'channelId',
+      'threadId',
+      'threadTs',
+      'chatId',
+      'phoneNumber',
+    ]) {
+      if (metadata[key] !== undefined) routeMetadata[key] = metadata[key];
+    }
+    return routeMetadata;
   }
 
   private rememberRouteMetadata(sessionId: string, routeMetadata: Record<string, unknown>): void {
@@ -204,7 +225,9 @@ export class ChatGateway extends EventEmitter {
   }
 
   private resolveDeliverySensitivity(outbound: ChannelOutboundMessage): DeliverySensitivity {
-    if (outbound.sensitivity) return outbound.sensitivity;
+    const outboundSensitivity: unknown = outbound.sensitivity;
+    if (outboundSensitivity === 'public' || outboundSensitivity === 'internal') return outboundSensitivity;
+    if (outboundSensitivity !== undefined) return 'sensitive';
     const metadataSensitivity = outbound.metadata?.deliverySensitivity ?? outbound.metadata?.sensitivity;
     if (metadataSensitivity === 'public' || metadataSensitivity === 'internal') return metadataSensitivity;
     if (metadataSensitivity !== undefined) return 'sensitive';

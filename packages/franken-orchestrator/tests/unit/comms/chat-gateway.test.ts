@@ -138,6 +138,31 @@ describe('ChatGateway', () => {
     expect(sent.metadata).toEqual(expect.objectContaining({ deliveryDenied: true }));
   });
 
+  it('treats unknown top-level sensitivity values as sensitive and fail-closed', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'plugin-secret',
+      status: 'reply',
+      sensitivity: 'credentialed',
+    } as unknown as CommsInboundResult);
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'ping',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const [, sent] = (slackAdapter.send as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(sent.text).toContain('Sensitive response withheld');
+    expect(sent.text).not.toContain('plugin-secret');
+    expect(sent.metadata).toEqual(expect.objectContaining({ deliveryDenied: true }));
+  });
+
   it('treats unknown sensitivity metadata as sensitive and fail-closed', async () => {
     (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       text: 'do-not-send',
@@ -309,7 +334,7 @@ describe('ChatGateway', () => {
     (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       text: 'action-secret',
       status: 'reply',
-      metadata: { sensitivity: 'sensitive' },
+      metadata: { sensitivity: 'sensitive', channelId: 'wrong-channel' },
     } satisfies CommsInboundResult);
 
     await gateway.handleAction('slack', sessionId, 'approve');
@@ -322,6 +347,16 @@ describe('ChatGateway', () => {
       threadTs: 'T-cached',
       deliveryDenied: true,
     }));
+
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'ordinary follow-up',
+      status: 'reply',
+    } satisfies CommsInboundResult);
+    await gateway.handleAction('slack', sessionId, 'approve');
+
+    const [, followUp] = (slackAdapter.send as ReturnType<typeof vi.fn>).mock.calls[2]!;
+    expect(followUp.text).toBe('ordinary follow-up');
+    expect(followUp.metadata).toEqual(expect.objectContaining({ channelId: 'C-cached' }));
   });
 
   it('handleAction sends /reject for reject action', async () => {
