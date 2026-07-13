@@ -114,7 +114,7 @@ function validateCatalogPrompt(
   }
   if (isDirectoryPathPrompt(prompt) && typeof value === 'string' && (isBrowserFakePath(value) || hasUnsafeRepoPathSegments(value))) {
     errors[errorKey] = isBrowserFakePath(value)
-      ? 'Directory path must be a repo-relative path, not a browser fake path.'
+      ? 'Browser directory pickers cannot provide a server path. Enter a repo-relative path manually.'
       : 'Directory path must be a repo-relative path without traversal.';
   }
 }
