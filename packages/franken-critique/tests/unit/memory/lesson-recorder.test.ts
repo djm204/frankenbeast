@@ -318,6 +318,78 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('attaches a deterministic lesson rollback workflow to recorded lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'lesson overgeneralized a one-off reviewer preference',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'rollback-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.rollbackWorkflow).toEqual({
+      workflowId: 'lesson-rollback-v1',
+      eligibleStates: ['experimental', 'promoted'],
+      steps: [
+        'Quarantine the target lesson so PM/liveness tooling stops promoting it into new handoffs.',
+        'Attach the rollback reason, evidence URLs, and verifier command to the lesson audit trail.',
+        'Either record a replacement lesson with fresh traceability evidence or mark the original lesson retired with no replacement.',
+        'Run the verifier command and include the result in the PM handoff before removing the rollback block.',
+      ],
+      requiredEvidence: [
+        'Stable lesson identifier or traceability entry',
+        'Reason the lesson is incorrect, stale, over-broad, or harmful',
+        'Review comment, failed regression, operator report, or incident link proving rollback is warranted',
+        'Verification command for the replacement lesson or retired state',
+      ],
+      requestSchema: {
+        lessonId: 'string',
+        rollbackReason: 'string',
+        evidenceUrls: 'string[]',
+        replacementLesson: 'string-or-null',
+        verificationCommand: 'string',
+      },
+      insufficientEvidenceGuidance:
+        'Do not roll back a lesson unless the rollback request names the lesson, explains the bad/stale guidance, links review or regression evidence, and includes a verification command for the replacement or retirement decision.',
+    });
+  });
+
+  it('does not attach rollback workflow guidance when no actionable lesson is recorded', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message:
+              'rollback guidance should not attach to evaluator exceptions',
+            severity: 'critical',
+            location: EVALUATOR_EXCEPTION_LOCATION,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'rollback-exception-task');
+
+    expect(port.recordLesson).not.toHaveBeenCalled();
+  });
+
   it('attaches learning cooldown metadata to recorded lessons for PM/liveness tooling', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port, {
@@ -1044,8 +1116,7 @@ describe('LessonRecorder', () => {
       iterations: [
         createIteration(0, 'fail', 'codex-review', [
           {
-            message:
-              'Shared recorder stores must not miss threshold crossing',
+            message: 'Shared recorder stores must not miss threshold crossing',
             severity: 'critical',
           },
         ]),

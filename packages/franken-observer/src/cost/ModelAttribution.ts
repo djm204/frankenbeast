@@ -27,6 +27,8 @@ interface ModelState {
 export class ModelAttribution {
   private readonly calc: CostCalculator
   private readonly state = new Map<string, ModelState>()
+  private totalPromptTokens = 0
+  private totalCompletionTokens = 0
 
   constructor(pricing: PricingTable) {
     this.calc = new CostCalculator(pricing)
@@ -66,12 +68,18 @@ export class ModelAttribution {
     const completionTokens = ModelAttribution.safeAdd(existing.completionTokens, entry.completionTokens)
     ModelAttribution.safeAdd(promptTokens, completionTokens)
 
+    const totalPromptTokens = ModelAttribution.safeAdd(this.totalPromptTokens, entry.promptTokens)
+    const totalCompletionTokens = ModelAttribution.safeAdd(this.totalCompletionTokens, entry.completionTokens)
+    ModelAttribution.safeAdd(totalPromptTokens, totalCompletionTokens)
+
     this.state.set(entry.model, {
       totalCalls: existing.totalCalls + 1,
       successfulCalls: existing.successfulCalls + (entry.success ? 1 : 0),
       promptTokens,
       completionTokens,
     })
+    this.totalPromptTokens = totalPromptTokens
+    this.totalCompletionTokens = totalCompletionTokens
   }
 
   report(): AttributionRow[] {

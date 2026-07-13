@@ -43,8 +43,9 @@ import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
+import { buildCredentialInventoryReport } from '../network/credential-inventory.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { defaultConfig, parseOrchestratorConfig } from '../config/orchestrator-config.js';
+import { defaultConfig, parseOrchestratorConfig, validateCrossProfileStateDir } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -152,6 +153,30 @@ export function shouldShowMissingRunPlanGuidance(
     && !args.planDir
     && !args.planName
     && planNeedsGuidance;
+}
+
+export function validateStateDirBeforeScaffold(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): void {
+  const configuredStateDir = config.stateDir;
+  const stateDir = resolveScaffoldStateDir(config, paths);
+  const issue = validateCrossProfileStateDir({
+    stateDir,
+    allowCrossProfileStateAccess: configuredStateDir
+      ? config.allowCrossProfileStateAccess
+      : false,
+  });
+  if (issue) {
+    throw new Error(issue);
+  }
+}
+
+export function resolveScaffoldStateDir(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): string {
+  return config.stateDir ?? paths.stateDir;
 }
 
 export interface ResumeTarget {
@@ -824,16 +849,19 @@ async function buildChatServerCommsConfig(
         enabled: config.comms.slack.enabled,
         token: slackToken,
         signingSecret: slackSigningSecret,
+        allowSensitiveDelivery: config.comms.slack.allowSensitiveDelivery,
       },
       discord: {
         enabled: config.comms.discord.enabled,
         token: discordToken,
         publicKey: discordPublicKey,
+        allowSensitiveDelivery: config.comms.discord.allowSensitiveDelivery,
       },
       telegram: {
         enabled: config.comms.telegram.enabled,
         botToken: telegramBotToken,
         webhookSecretToken: telegramWebhookSecretToken,
+        allowSensitiveDelivery: config.comms.telegram.allowSensitiveDelivery,
       },
       whatsapp: {
         enabled: config.comms.whatsapp.enabled,
@@ -841,6 +869,7 @@ async function buildChatServerCommsConfig(
         phoneNumberId: whatsappPhoneNumberId,
         appSecret: whatsappAppSecret,
         verifyToken: whatsappVerifyToken,
+        allowSensitiveDelivery: config.comms.whatsapp.allowSensitiveDelivery,
       },
     },
   });
@@ -917,7 +946,8 @@ export async function main(): Promise<void> {
   }
 
   const root = resolveProjectRoot(args.baseDir);
-  if (process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
+  const suppressBanner = args.subcommand === 'network' && args.networkAction === 'credentials';
+  if (!suppressBanner && process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
   }
 
@@ -961,6 +991,11 @@ export async function main(): Promise<void> {
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
 
+  if (suppressBanner) {
+    await runNetworkCommand(args, config, root, paths);
+    return;
+  }
+
   const logger = new BeastLogger({ verbose: args.verbose });
   if (args.config) {
     logger.info(`Loaded config from ${args.config}`, 'config');
@@ -981,7 +1016,9 @@ export async function main(): Promise<void> {
     return;
   }
 
-  scaffoldFrankenbeast(paths);
+  const scaffoldPaths = { ...paths, stateDir: resolveScaffoldStateDir(config, paths) };
+  validateStateDirBeforeScaffold(config, scaffoldPaths);
+  scaffoldFrankenbeast(scaffoldPaths);
 
   if (args.subcommand === 'beasts-daemon') {
     await runBeastDaemonCommand(args, config, root, paths);
@@ -1487,6 +1524,11 @@ export async function runNetworkCommand(
       dashboard: config.dashboard,
       comms: config.comms,
     }, null, 2));
+    return;
+  }
+
+  if (action === 'credentials') {
+    deps.print(JSON.stringify(buildCredentialInventoryReport(config), null, 2));
     return;
   }
 

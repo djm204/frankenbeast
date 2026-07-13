@@ -115,7 +115,53 @@ describe('SkillManager', () => {
       expect(existsSync(join(skillsDir, 'github', 'tools.json'))).toBe(true);
       const tools = JSON.parse(readFileSync(join(skillsDir, 'github', 'tools.json'), 'utf-8'));
       expect(tools).toHaveLength(1);
-      expect(tools[0].name).toBe('create_issue');
+      expect(tools[0]).toMatchObject({
+        name: 'create_issue',
+        requiresHitl: true,
+      });
+    });
+
+    it('rejects invalid catalog tool definitions before writing mcp.json', async () => {
+      await expect(manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'create_issue', inputSchema: {} } as never,
+        ],
+      })).rejects.toThrow();
+
+      expect(existsSync(join(skillsDir, 'github', 'mcp.json'))).toBe(false);
+      expect(manager.exists('github')).toBe(false);
+    });
+
+    it('removes stale tool manifests when reinstalling without tool definitions', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx', args: ['old-server'] },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'list_repos', description: 'List', inputSchema: {}, requiresHitl: false },
+        ],
+      });
+      expect(manager.readTools('github')).toEqual([
+        expect.objectContaining({ name: 'list_repos', requiresHitl: false }),
+      ]);
+
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx', args: ['new-server'] },
+        authFields: [],
+      });
+
+      expect(existsSync(join(skillsDir, 'github', 'tools.json'))).toBe(false);
+      expect(manager.readTools('github')).toEqual([]);
     });
   });
 
@@ -135,6 +181,24 @@ describe('SkillManager', () => {
 
       expect(existsSync(join(skillsDir, 'broken-custom', 'mcp.json'))).toBe(false);
       expect(manager.listInstalled()).toEqual([]);
+    });
+
+    it('removes stale tool manifests when replacing a skill with a custom install', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx', args: ['old-server'] },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'list_repos', description: 'List', inputSchema: {}, requiresHitl: false },
+        ],
+      });
+
+      await manager.installCustom('github', { command: 'node', args: ['server.js'] });
+
+      expect(existsSync(join(skillsDir, 'github', 'tools.json'))).toBe(false);
+      expect(manager.readTools('github')).toEqual([]);
     });
   });
 
@@ -262,7 +326,27 @@ describe('SkillManager', () => {
       });
       const tools = manager.readTools('github');
       expect(tools).toHaveLength(1);
-      expect(tools[0]!.name).toBe('create_issue');
+      expect(tools[0]).toMatchObject({
+        name: 'create_issue',
+        requiresHitl: true,
+      });
+    });
+
+    it('preserves explicit safe-tool security review opt-outs', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'list_repos', description: 'List', inputSchema: {}, requiresHitl: false },
+        ],
+      });
+      const tools = manager.readTools('github');
+      expect(tools).toEqual([
+        expect.objectContaining({ name: 'list_repos', requiresHitl: false }),
+      ]);
     });
   });
 

@@ -167,6 +167,21 @@ describe('OsKeychainStore', () => {
         "$cred = Get-StoredCredential -Target 'frankenbeast/team''s/token'; if ($cred) { $cred.GetNetworkCredential().Password }",
       );
     });
+
+    it('keeps shell metacharacters inside the quoted PowerShell credential target', async () => {
+      mock.responses.set('Get-StoredCredential', { stdout: 'resolved-value\r\n', stderr: '', exitCode: 0 });
+
+      await store.resolve("prod'; Start-Process calc; 'token");
+
+      const resolveCall = mock.calls.find(c => c.command === 'powershell');
+      expect(resolveCall).toBeDefined();
+      expect(resolveCall!.args[0]).toBe('-NoProfile');
+      expect(resolveCall!.args[1]).toBe('-Command');
+      expect(resolveCall!.args[2]).toBe(
+        "$cred = Get-StoredCredential -Target 'frankenbeast/prod''; Start-Process calc; ''token'; if ($cred) { $cred.GetNetworkCredential().Password }",
+      );
+      expect(resolveCall!.args[2]).not.toContain("frankenbeast/prod'; Start-Process calc; 'token");
+    });
   });
 
   describe('unsupported platform', () => {

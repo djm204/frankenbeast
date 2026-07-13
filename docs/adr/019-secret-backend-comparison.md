@@ -46,10 +46,10 @@ Support 4 backends and publish the following recommendation ranking:
 
 #### Local Encrypted (`local-encrypted`)
 
-- Stores encrypted blob at `.frankenbeast/secrets.enc`
+- Stores encrypted blob at `.fbeast/secrets.enc` with key-derivation metadata at `.fbeast/secrets.meta.json`
 - AES-256-GCM encryption with PBKDF2 key derivation from a user-supplied passphrase
 - The `.enc` file is safe to commit to a private repo (encrypted), but the passphrase must be stored separately
-- In CI, supply the passphrase via an environment variable (`FRANKENBEAST_STORE_PASSPHRASE`) which is itself stored in the CI system's secret store
+- In CI/headless runtime flows, mount or persist `.fbeast/config.json`, `.fbeast/secrets.enc`, and `.fbeast/secrets.meta.json` (or the whole `.fbeast` secret-store state), then supply the passphrase via `FRANKENBEAST_PASSPHRASE`, which is itself stored in the CI system's secret store
 - Passphrase loss = permanent secret loss (no key escrow)
 - **Default fallback when no other backend is configured**
 
@@ -62,11 +62,15 @@ Support 4 backends and publish the following recommendation ranking:
 
 ### Backend Selection in Config
 
-```yaml
-# .frankenbeast/config.yaml
-network:
-  secureBackend: "1password"   # or: os-keychain | local-encrypted | bitwarden
+```json
+{
+  "network": {
+    "secureBackend": "1password"
+  }
+}
 ```
+
+The config file lives at `.fbeast/config.json`; valid backend values are `1password`, `os-keychain`, `local-encrypted`, and `bitwarden`.
 
 If `secureBackend` is omitted, the system defaults to `local-encrypted`.
 

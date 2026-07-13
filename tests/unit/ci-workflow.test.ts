@@ -157,9 +157,16 @@ on:
 
       expect(ciTestStep, 'CI should have an explicit root-and-package test step').toBeTruthy();
       expect(ciTestStep?.run).toBe('npm run test:ci');
+      const e2eStep = expectSteps(buildTestLint).find((step) => step.name === 'Run orchestrator E2E smoke CI suite');
+      expect(e2eStep, 'CI should make the orchestrator E2E gate explicit').toBeTruthy();
+      expect(e2eStep?.run).toBe('npm run ci:test:e2e');
       expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
+      expect(packageJson.scripts?.['ci:test:e2e']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts',
+      );
       expect(testCiScript).toContain('npm run ci:test:root');
       expect(testCiScript.indexOf('npm run ci:test:root')).toBeLessThan(testCiScript.indexOf('npm run ci:test:packages'));
+      expect(content.indexOf('npm run test:ci')).toBeLessThan(content.indexOf('npm run ci:test:e2e'));
       expect(content).not.toMatch(/npm run test:root --/);
     });
 
@@ -192,10 +199,14 @@ on:
       expect(packageJson.scripts?.['ci:test:observer-eval']).toBe(
         'node scripts/retry-ci-command.mjs -- npm run test:eval --workspace @franken/observer',
       );
+      expect(packageJson.scripts?.['ci:test:e2e']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts',
+      );
       expect(packageJson.scripts?.['test:ci']).toBe(
         'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval',
       );
       expect(content).toContain('npm run test:ci');
+      expect(content).toContain('run: npm run ci:test:e2e');
       expect(content).not.toContain('run: npm run ci:test:root');
       expect(content).not.toContain('run: npm run ci:test:packages');
       expect(content).not.toContain('run: npm run ci:test:planner-integration');
@@ -208,6 +219,7 @@ on:
       expect(content).toMatch(/name:\s*Run package build and typecheck/);
       expect(content).toMatch(/name:\s*Run workspace lint gate/);
       expect(content).toMatch(/name:\s*Run root and package CI test suite/);
+      expect(content).toMatch(/name:\s*Run orchestrator E2E smoke CI suite/);
     });
 
     it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {

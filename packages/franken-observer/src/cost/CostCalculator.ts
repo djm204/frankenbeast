@@ -18,7 +18,18 @@ export class CostCalculator {
       ((model) => console.warn(`[CostCalculator] Unknown model "${model}" — cost will be 0. Add it to the pricing table.`))
   }
 
+  private static assertValidTokenCount(value: number, label: string): void {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new RangeError(
+        `CostCalculator: ${label} must be a non-negative safe integer, received ${value}`,
+      )
+    }
+  }
+
   calculate(entry: TokenRecord): number {
+    CostCalculator.assertValidTokenCount(entry.promptTokens, 'promptTokens')
+    CostCalculator.assertValidTokenCount(entry.completionTokens, 'completionTokens')
+
     const model = this.pricing[entry.model]
     if (model === undefined) {
       if (!this.warnedModels.has(entry.model)) {

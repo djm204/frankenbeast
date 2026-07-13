@@ -5,6 +5,7 @@
   "enableHeartbeat": false,
   "enableTracing": false,
   "minCritiqueScore": 0.7,
+  "allowCrossProfileStateAccess": false,
 
   "providers": {
     "default": "claude",
@@ -56,18 +57,21 @@
       "enabled": false,
       "appId": "A0123456789",
       "botTokenRef": "frankenbeast/slack-bot-token",
-      "signingSecretRef": "frankenbeast/slack-signing-secret"
+      "signingSecretRef": "frankenbeast/slack-signing-secret",
+      "allowSensitiveDelivery": false
     },
     "discord": {
       "enabled": false,
       "applicationId": "123456789012345678",
       "botTokenRef": "frankenbeast/discord-bot-token",
-      "publicKeyRef": "frankenbeast/discord-public-key"
+      "publicKeyRef": "frankenbeast/discord-public-key",
+      "allowSensitiveDelivery": false
     },
     "telegram": {
       "enabled": false,
       "botTokenRef": "frankenbeast/telegram-bot-token",
-      "webhookSecretTokenRef": "frankenbeast/telegram-webhook-secret-token"
+      "webhookSecretTokenRef": "frankenbeast/telegram-webhook-secret-token",
+      "allowSensitiveDelivery": false
     }
   }
 }

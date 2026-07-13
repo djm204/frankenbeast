@@ -1,6 +1,7 @@
 import type { ApprovalChannel } from '../gateway/approval-channel.js';
 import type { ApprovalRequest, ApprovalResponse, ResponseCode } from '../core/types.js';
 import { now as deterministicNow } from '@franken/types';
+import { formatApprovalPromptWithBoundaries } from '../gateway/approval-prompt-markers.js';
 
 export interface ReadlineAdapter {
   question(prompt: string): Promise<string>;
@@ -57,11 +58,8 @@ export class CliChannel implements ApprovalChannel {
 
   private formatPrompt(request: ApprovalRequest): string {
     const lines = [
-      `\n--- HITL Approval Required ---`,
-      `Task: ${request.taskId}`,
-      `Trigger: [${request.trigger.triggerId}] ${request.trigger.reason ?? 'No reason'}`,
-      `Summary: ${request.summary}`,
-      request.planDiff ? `Plan Diff:\n${request.planDiff}` : '',
+      '',
+      formatApprovalPromptWithBoundaries(request, { includePlanDiff: true }),
       `\n[a]pprove  [r]egenerate  a[x]bort  [d]ebug\n> `,
     ].filter(Boolean);
 

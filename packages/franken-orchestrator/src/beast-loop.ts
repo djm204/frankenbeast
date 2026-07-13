@@ -1,7 +1,7 @@
 import type { BeastLoopDeps } from './deps.js';
 import type { BeastInput, BeastResult } from './types.js';
 import type { OrchestratorConfig } from './config/orchestrator-config.js';
-import { defaultConfig } from './config/orchestrator-config.js';
+import { defaultConfig, validateCrossProfileStateDir } from './config/orchestrator-config.js';
 import { createContext } from './context/context-factory.js';
 import { runIngestion, InjectionDetectedError } from './phases/ingestion.js';
 import { runHydration } from './phases/hydration.js';
@@ -33,6 +33,10 @@ export class BeastLoop {
   constructor(deps: BeastLoopDeps, config?: Partial<OrchestratorConfig>) {
     this.deps = deps;
     this.config = { ...defaultConfig(), ...config };
+    const stateDirIssue = validateCrossProfileStateDir(this.config);
+    if (stateDirIssue) {
+      throw new Error(stateDirIssue);
+    }
   }
 
   async run(input: BeastInput): Promise<BeastResult> {

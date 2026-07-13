@@ -205,7 +205,12 @@ async function main(): Promise<void> {
   if (allOk) {
     printLine(options.dryRun ? 'Dry-run checks passed. Bootstrap prerequisites are valid.' : 'All checks passed! Ready to develop.');
   } else {
-    printLine(options.dryRun ? 'Dry-run checks failed. Fix bootstrap prerequisites before installing.' : 'Some checks failed. Run "docker compose up -d" to start services.');
+    const failedChecks = results.filter((result) => !result.ok).map((result) => result.name).join(', ');
+    printLine(
+      options.dryRun
+        ? `Dry-run checks failed: ${failedChecks}. Fix bootstrap prerequisites before installing.`
+        : `Some checks failed: ${failedChecks}. Run "docker compose up -d" for ChromaDB, Grafana, and Tempo, then retry.`,
+    );
     process.exit(1);
   }
 }

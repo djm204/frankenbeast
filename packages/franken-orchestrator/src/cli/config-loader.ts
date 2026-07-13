@@ -148,6 +148,8 @@ function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig
   const sanitized = JSON.parse(JSON.stringify(fileConfig)) as Partial<OrchestratorConfig>;
   const root = sanitized as Record<string, unknown>;
 
+  delete root['allowCrossProfileStateAccess'];
+
   const providers = root['providers'];
   if (isRecord(providers) && isRecord(providers['overrides'])) {
     for (const override of Object.values(providers['overrides'])) {
