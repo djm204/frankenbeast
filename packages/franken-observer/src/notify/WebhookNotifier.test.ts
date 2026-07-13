@@ -114,6 +114,56 @@ describe('WebhookNotifier', () => {
       )
     })
 
+    it('redacts secret webhook URL components from HTTP error messages', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 410,
+        statusText: 'Gone',
+        text: async () => 'disabled',
+      })
+      const notifier = createNotifier({
+        url: 'https://hooks.example.com/services/XXXXXXXXXXXXXXXXXXXXXXXX?debug=true',
+        allowedTargetOrigins,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 410 Gone for https://hooks.example.com/services/[REDACTED]: disabled',
+      )
+    })
+
+    it('defers reading retryable response bodies until the final attempt', async () => {
+      const text = vi.fn().mockResolvedValue('{"error":"still down"}')
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        text,
+      })
+      const notifier = createNotifier({
+        retry: { maxRetries: 1, jitter: false },
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 503 Service Unavailable for https://hooks.example.com/signal: {"error":"still down"}',
+      )
+      expect(text).toHaveBeenCalledTimes(1)
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('truncates oversized HTTP error bodies', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: async () => 'x'.repeat(3000),
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        `Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/signal: ${'x'.repeat(2048)}…`,
+      )
+    })
+
     it('rethrows if fetch itself rejects (network error)', async () => {
       mockFetch.mockRejectedValue(new Error('ECONNREFUSED'))
       const notifier = createNotifier()

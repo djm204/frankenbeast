@@ -97,6 +97,31 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
   return new Set(origins.map(origin => parseUrlOrigin(origin, 'allowedTargetOrigins entry')))
 }
 
+const MAX_ERROR_BODY_CHARS = 2048
+
+function sanitizeWebhookEndpoint(value: string): string {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+
+    if (url.hostname === 'hooks.slack.com') {
+      url.pathname = '/services/[REDACTED]'
+    } else {
+      url.pathname = url.pathname
+        .split('/')
+        .map(segment => (/^[A-Za-z0-9_-]{16,}$/.test(segment) ? '[REDACTED]' : segment))
+        .join('/')
+    }
+
+    return url.toString()
+  } catch {
+    return '[REDACTED]'
+  }
+}
+
 export class WebhookNotifier {
   private readonly url: string
   private readonly targetOrigin: string
@@ -163,10 +188,11 @@ export class WebhookNotifier {
       }
 
       if (!response.ok) {
-        const responseBody = await this.readResponseBody(response)
+        const shouldReadBody = !this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1
+        const responseBody = shouldReadBody ? await this.readResponseBody(response) : ''
         const bodySuffix = responseBody ? `: ${responseBody}` : ''
         lastError = new Error(
-          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${this.url}${bodySuffix}`,
+          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
         )
         if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
           throw lastError
@@ -182,7 +208,8 @@ export class WebhookNotifier {
   private async readResponseBody(response: Awaited<ReturnType<FetchFn>>): Promise<string> {
     try {
       const readable = response as { text?: () => Promise<string> }
-      return typeof readable.text === 'function' ? (await readable.text()).trim() : ''
+      const body = typeof readable.text === 'function' ? (await readable.text()).trim() : ''
+      return body.length > MAX_ERROR_BODY_CHARS ? `${body.slice(0, MAX_ERROR_BODY_CHARS)}…` : body
     } catch {
       return ''
     }
