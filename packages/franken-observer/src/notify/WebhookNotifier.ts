@@ -104,6 +104,44 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
   return new Set(origins.map(origin => parseUrlOrigin(origin, 'allowedTargetOrigins entry')))
 }
 
+const MAX_ERROR_BODY_CHARS = 2048
+const ERROR_BODY_READ_TIMEOUT_MS = 250
+
+function redactWebhookSecrets(value: string): string {
+  return value
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]]*\]/gi, '$1["[REDACTED]"]')
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]\r\n,;<>}]*$/gim, '$1["[REDACTED]"]')
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
+    .replace(/\bAuthorization:\s*Bearer \*\*\*(?:\s+X-Api-Key=[^\r\n,;<>}]+)?/gi, 'Authorization: ***')
+    .replace(/(^|[\s;{])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)(?!\s*\*\*\*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]')
+    .replace(/https?:\\\/\\\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match.replace(/\\\//g, '/')))
+    .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
+}
+
+function sanitizeWebhookEndpoint(value: string): string {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+
+    if (url.hostname === 'hooks.slack.com') {
+      url.pathname = '/services/[REDACTED]'
+    } else {
+      url.pathname = url.pathname
+        .split('/')
+        .map((segment, index) => (segment && !(index === 1 && segment === 'services') ? '[REDACTED]' : segment))
+        .join('/')
+    }
+
+    return url.toString()
+  } catch {
+    return '[REDACTED]'
+  }
+}
+
 export class WebhookNotifier {
   private readonly url: string
   private readonly targetOrigin: string
@@ -170,8 +208,11 @@ export class WebhookNotifier {
       }
 
       if (!response.ok) {
+        const shouldReadBody = !this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1
+        const responseBody = shouldReadBody ? await this.readResponseBody(response) : ''
+        const bodySuffix = responseBody ? `: ${responseBody}` : ''
         lastError = new Error(
-          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
         )
         if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
           throw lastError
@@ -182,6 +223,80 @@ export class WebhookNotifier {
     }
 
     throw lastError
+  }
+
+  private async readResponseBody(response: Awaited<ReturnType<FetchFn>>): Promise<string> {
+    try {
+      const readable = response as {
+        body?: { getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | null
+        text?: () => Promise<string>
+      }
+      const body = readable.body && typeof readable.body.getReader === 'function'
+        ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
+        : ''
+      const redactedBody = redactWebhookSecrets(body)
+      return redactedBody.length > MAX_ERROR_BODY_CHARS
+        ? `${redactedBody.slice(0, MAX_ERROR_BODY_CHARS)}…`
+        : redactedBody
+    } catch {
+      return ''
+    }
+  }
+
+  private async readBoundedStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+    const reader = stream.getReader()
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+    let timedOut = false
+    let truncated = false
+    const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
+
+    try {
+      while (totalBytes < MAX_ERROR_BODY_CHARS) {
+        const remainingMs = deadlineMs - Date.now()
+        if (remainingMs <= 0) {
+          timedOut = true
+          break
+        }
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<{ done: true; value?: undefined; timedOut: true }>(resolve => {
+          timeoutId = setTimeout(() => resolve({ done: true, timedOut: true }), remainingMs)
+        })
+        const result = await Promise.race([
+          reader.read().then(read => ({ ...read, timedOut: false as const })),
+          timeout,
+        ]).finally(() => {
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+          }
+        })
+        if (result.timedOut) {
+          timedOut = true
+          break
+        }
+        const { value, done } = result
+        if (done || !value) {
+          break
+        }
+        const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
+        truncated = value.byteLength > remainingBytes
+        const boundedChunk = truncated ? value.subarray(0, remainingBytes) : value
+        chunks.push(boundedChunk)
+        totalBytes += boundedChunk.byteLength
+        if (totalBytes >= MAX_ERROR_BODY_CHARS) {
+          truncated = true
+          break
+        }
+      }
+      if (truncated || timedOut) {
+        await reader.cancel()
+      }
+    } finally {
+      reader.releaseLock()
+    }
+
+    const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
+    return truncated || timedOut ? `${decoded}…` : decoded
   }
 
   private assertTargetAllowed(): void {
