@@ -1256,7 +1256,10 @@ function findContradictoryGuidanceMatch(
         lessonDirective.text,
         priorDirective.text,
       );
-      if (hasExplicitOneObjectDirectiveReversal(lessonDirective, priorDirective)) {
+      if (
+        sharedTerms.length >= 1 &&
+        hasExplicitOppositeDirectivePair(lessonDirective, priorDirective)
+      ) {
         return {
           sharedTerms,
           lessonGuidance: lessonDirective.sourceText,
@@ -1321,9 +1324,11 @@ function createLessonDirectiveClauses(
 }
 
 function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
-  const segments = splitDirectiveSegments(fragment);
-  if (segments.length > 1) {
-    return segments.flatMap((segment) => createDirectiveClauses(segment));
+  const directiveFragments = splitDirectiveFragments(fragment);
+  if (directiveFragments.length > 1) {
+    return directiveFragments.flatMap((directiveFragment) =>
+      createDirectiveClauses(directiveFragment),
+    );
   }
 
   const normalized = normalizeText(fragment);
@@ -1369,12 +1374,11 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
   return clauses;
 }
 
-function splitDirectiveSegments(fragment: string): string[] {
-  const segments = fragment
+function splitDirectiveFragments(fragment: string): string[] {
+  return fragment
     .split(/[.;]+/)
-    .map((segment) => segment.trim())
-    .filter((segment) => normalizeText(segment).length > 0);
-  return segments.length > 0 ? segments : [fragment];
+    .map((part) => part.trim())
+    .filter((part) => normalizeText(part).length > 0);
 }
 
 function extractGuardCondition(fragment: string): string | undefined {
@@ -1460,46 +1464,26 @@ function hasCompatibleConditionalGuardPair(
     return false;
   }
 
-  const guardSharedTerms = sharedTextTerms(
-    maybeProhibition.guardCondition,
-    maybeRequirement.text,
-  );
-  if (guardSharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
-    return true;
-  }
-
   return (
-    guardSharedTerms.length >= 1 &&
-    sharedTextTerms(maybeProhibition.text, maybeRequirement.text).length >=
-      MIN_CONTRADICTION_SHARED_TERMS
+    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text)
+      .length >= MIN_CONTRADICTION_SHARED_TERMS ||
+    hasSingleTermGuardMatch(maybeProhibition, maybeRequirement)
   );
 }
 
-function hasExplicitOneObjectDirectiveReversal(
-  a: LessonDirectiveClause,
-  b: LessonDirectiveClause,
+function hasSingleTermGuardMatch(
+  maybeProhibition: LessonDirectiveClause,
+  maybeRequirement: LessonDirectiveClause,
 ): boolean {
-  if (a.polarity === b.polarity) {
+  if (!maybeProhibition.guardCondition) {
     return false;
   }
 
-  const sharedTerms = sharedTextTerms(a.text, b.text);
   return (
-    sharedTerms.length === 1 &&
-    isShortExplicitDirective(a.text) &&
-    isShortExplicitDirective(b.text)
-  );
-}
-
-function isShortExplicitDirective(text: string): boolean {
-  const objectTerms = extractComparableTerms(text).filter(
-    (term) => !DIRECTIVE_ACTION_TERMS.has(term),
-  );
-  return (
-    objectTerms.length === 1 &&
-    /^\s*(?:do not|don t|must not|should not|cannot|can t|no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|enable|enabled|allow|allows|deploy|reuse|cache)\b/.test(
-      text,
-    )
+    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text)
+      .length >= 1 &&
+    sharedTextTerms(maybeProhibition.text, maybeRequirement.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
   );
 }
 
@@ -1587,6 +1571,69 @@ function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
   return 'positive';
 }
 
+function hasExplicitOppositeDirectivePair(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return (
+    hasExplicitOppositeDirectivePairInOrder(a, b) ||
+    hasExplicitOppositeDirectivePairInOrder(b, a)
+  );
+}
+
+function hasExplicitOppositeDirectivePairInOrder(
+  maybeNegative: LessonDirectiveClause,
+  maybePositive: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeNegative.polarity !== 'negative' ||
+    maybePositive.polarity !== 'positive' ||
+    !startsWithNegativeDirective(maybeNegative.text) ||
+    !startsWithPositiveDirective(maybePositive.text)
+  ) {
+    return false;
+  }
+
+  const negativeObject = stripLeadingNegativeDirective(maybeNegative.text);
+  if (negativeObject === maybePositive.text) {
+    return true;
+  }
+
+  const positiveObject = stripLeadingPositiveDirective(maybePositive.text);
+  return (
+    negativeObject.length > 0 &&
+    positiveObject.length > 0 &&
+    negativeObject === positiveObject
+  );
+}
+
+function startsWithNegativeDirective(normalized: string): boolean {
+  return /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|do not|don t|must not|should not|cannot|can t)\b/.test(
+    normalized,
+  );
+}
+
+function startsWithPositiveDirective(normalized: string): boolean {
+  return /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit)\b/.test(
+    normalized,
+  );
+}
+
+function stripLeadingNegativeDirective(normalized: string): string {
+  return normalized
+    .replace(
+      /^(?:no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|do not|don t|must not|should not|cannot|can t)\s+/,
+      '',
+    )
+    .trim();
+}
+
+function stripLeadingPositiveDirective(normalized: string): string {
+  return normalized
+    .replace(/^(?:allow|enable|enabled|reuse|use|cache|log|record|permit)\s+/, '')
+    .trim();
+}
+
 function extractComparableTerms(value: string): string[] {
   const normalizedTerms = normalizeText(value).split(' ').filter(Boolean);
   const comparableTerms: string[] = [];
@@ -1643,20 +1690,6 @@ const LESSON_CONTRADICTION_SHORT_TERMS = new Set([
   'pii',
   'sql',
   'url',
-]);
-
-const DIRECTIVE_ACTION_TERMS = new Set([
-  'allow',
-  'allows',
-  'avoid',
-  'disable',
-  'disabled',
-  'disallow',
-  'enable',
-  'enabled',
-  'forbid',
-  'prohibit',
-  'reject',
 ]);
 
 const LESSON_CONTRADICTION_STOP_WORDS = new Set([

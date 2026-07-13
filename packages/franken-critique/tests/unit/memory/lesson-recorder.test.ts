@@ -2104,7 +2104,7 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
-  it('accepts one-term guards when directive context also overlaps', () => {
+  it('treats single-term guards as compatible when directive terms also overlap', () => {
     expect(
       detectLessonContradictions(
         createLesson({ correctionApplied: 'Do not deploy without approval' }),
