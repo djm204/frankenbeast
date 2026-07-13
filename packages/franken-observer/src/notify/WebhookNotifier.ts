@@ -150,6 +150,7 @@ export class WebhookNotifier {
       try {
         response = await this.fetchFn(this.url, {
           method: 'POST',
+          redirect: 'manual',
           headers: {
             'Content-Type': 'application/json',
             ...this.extraHeaders,

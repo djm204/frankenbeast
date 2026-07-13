@@ -38,6 +38,13 @@ describe('WebhookNotifier', () => {
       expect(init.method).toBe('POST')
     })
 
+    it('does not follow redirects automatically', async () => {
+      const notifier = createNotifier()
+      await notifier.send({ type: 'test' })
+      const [, init] = mockFetch.mock.calls[0]
+      expect(init.redirect).toBe('manual')
+    })
+
     it('sends Content-Type: application/json', async () => {
       const notifier = createNotifier()
       await notifier.send({ type: 'test' })
