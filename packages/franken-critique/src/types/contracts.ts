@@ -80,6 +80,8 @@ export interface LessonContradiction {
   readonly reason: string;
   readonly conflictingFailureDescription: string;
   readonly conflictingCorrectionApplied: string;
+  /** Exact conflicting directive text used for the match when it differs from the summary. */
+  readonly conflictingGuidance?: string;
 }
 
 /** Deterministic contradiction-detector result for a recorded lesson. */
