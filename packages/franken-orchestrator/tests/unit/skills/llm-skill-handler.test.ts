@@ -108,4 +108,73 @@ describe('LlmSkillHandler', () => {
     expect(procedureMemory).toBeGreaterThan(environmentMemory);
     expect(staleObservation === -1 || staleObservation > procedureMemory).toBe(true);
   });
+
+  it('truncates an oversized priority memory instead of replacing it with lower-priority facts', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 180 });
+
+    await handler.execute('Keep top priority memory', {
+      rules: [
+        `User preference: ${'critical preference '.repeat(20)}`,
+        'Stale rule: tiny but outdated.',
+      ],
+      adrs: [],
+      knownErrors: [],
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    const memoryBlock = prompt.slice(prompt.indexOf('Memory Context:'));
+    expect(memoryBlock.length).toBeLessThanOrEqual(180);
+    expect(memoryBlock).toContain('User preference: critical preference');
+    expect(memoryBlock).toContain('…');
+    expect(memoryBlock).toContain('[memory truncated: 1 lower-priority entry omitted]');
+    expect(memoryBlock).not.toContain('Stale rule: tiny but outdated.');
+  });
+
+  it('preserves insertion order for same-priority known errors so newest failures stay first', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 230 });
+
+    await handler.execute('Recover from errors', {
+      adrs: [],
+      rules: [],
+      knownErrors: [
+        'Z newest failure from recentFailures should remain first.',
+        'A older failure sorts alphabetically first but is less recent.',
+        'M oldest failure should be omitted under the budget.',
+      ],
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    expect(prompt.indexOf('Z newest failure')).toBeLessThan(prompt.indexOf('A older failure'));
+  });
+
+  it('demotes stale category-labeled memories before active facts', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 260 });
+
+    await handler.execute('Ignore stale facts', {
+      adrs: ['Project convention: active TypeScript convention.'],
+      rules: [
+        'Stale user preference: outdated verbose status reports.',
+        'User preference: active concise status reports.',
+      ],
+      knownErrors: ['Stale environment memory: retired Node version.'],
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    const activePreference = prompt.indexOf('User preference: active concise status reports.');
+    const activeProject = prompt.indexOf('Project convention: active TypeScript convention.');
+    const stalePreference = prompt.indexOf('Stale user preference: outdated verbose status reports.');
+
+    expect(activePreference).toBeGreaterThan(-1);
+    expect(activeProject).toBeGreaterThan(activePreference);
+    expect(stalePreference === -1 || stalePreference > activeProject).toBe(true);
+  });
 });

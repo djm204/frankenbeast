@@ -63,36 +63,26 @@ export class LlmSkillHandler {
     const selectedLines: string[] = [];
     let omitted = 0;
 
-    for (const entry of entries) {
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index]!;
       const line = this.formatMemoryEntry(entry);
-      const nextLines = [...selectedLines, line];
-      const remainingAfterThis = entries.length - selectedLines.length - 1;
-      const needsMarker = omitted + remainingAfterThis > 0;
-      const candidate = this.renderMemoryContextBlock(nextLines, needsMarker ? omitted + remainingAfterThis : 0);
+      const omittedAfterThis = entries.length - index - 1;
+      const candidate = this.renderMemoryContextBlock([...selectedLines, line], omittedAfterThis);
 
       if (candidate.length <= this.memoryContextBudgetChars) {
         selectedLines.push(line);
-      } else {
-        omitted += 1;
+        continue;
       }
+
+      const truncated = this.fitTruncatedLine(selectedLines, line, omittedAfterThis);
+      if (truncated) {
+        selectedLines.push(truncated);
+      }
+      omitted = entries.length - selectedLines.length;
+      break;
     }
 
-    if (selectedLines.length === 0) {
-      const first = entries[0]!;
-      const marker = this.truncationMarker(entries.length - 1);
-      const budgetForLine = this.memoryContextBudgetChars - MEMORY_CONTEXT_HEADER.length - marker.length - 4;
-      selectedLines.push(this.truncateLine(this.formatMemoryEntry(first), budgetForLine));
-      omitted = entries.length - 1;
-    }
-
-    let block = this.renderMemoryContextBlock(selectedLines, omitted);
-    while (block.length > this.memoryContextBudgetChars && selectedLines.length > 1) {
-      selectedLines.pop();
-      omitted += 1;
-      block = this.renderMemoryContextBlock(selectedLines, omitted);
-    }
-
-    return block;
+    return this.renderMemoryContextBlock(selectedLines, omitted);
   }
 
   private rankMemoryEntries(context: MemoryContext): RankedMemoryEntry[] {
@@ -119,19 +109,18 @@ export class LlmSkillHandler {
     return entries.sort((left, right) =>
       left.priority - right.priority ||
       this.sectionPriority(left.section) - this.sectionPriority(right.section) ||
-      left.text.localeCompare(right.text) ||
       left.originalIndex - right.originalIndex,
     );
   }
 
   private memoryPriority(value: string, section: MemorySection): number {
     const normalized = value.toLowerCase();
+    if (normalized.includes('stale')) return 20;
+    if (normalized.includes('archived')) return 19;
     if (normalized.includes('user preference')) return 0;
     if (normalized.includes('project convention') || normalized.includes('active project')) return 1;
     if (normalized.includes('environment memory')) return 2;
     if (normalized.includes('procedure memory')) return 3;
-    if (normalized.includes('stale')) return 20;
-    if (normalized.includes('archived')) return 19;
 
     switch (section) {
       case 'rules':
@@ -165,6 +154,30 @@ export class LlmSkillHandler {
 
   private truncationMarker(omitted: number): string {
     return `[memory truncated: ${omitted} lower-priority entr${omitted === 1 ? 'y' : 'ies'} omitted]`;
+  }
+
+  private fitTruncatedLine(
+    selectedLines: readonly string[],
+    line: string,
+    omittedAfterThis: number,
+  ): string | undefined {
+    let low = 1;
+    let high = line.length;
+    let best: string | undefined;
+
+    while (low <= high) {
+      const midpoint = Math.floor((low + high) / 2);
+      const truncated = this.truncateLine(line, midpoint);
+      const candidate = this.renderMemoryContextBlock([...selectedLines, truncated], omittedAfterThis);
+      if (candidate.length <= this.memoryContextBudgetChars) {
+        best = truncated;
+        low = midpoint + 1;
+      } else {
+        high = midpoint - 1;
+      }
+    }
+
+    return best;
   }
 
   private truncateLine(line: string, budget: number): string {
