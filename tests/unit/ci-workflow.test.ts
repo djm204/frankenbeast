@@ -56,6 +56,18 @@ function expectCiJob(workflow: Record<string, unknown>): Record<string, unknown>
   return expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
 }
 
+function expectSetupNodeUsesPinnedNvmrc(step: Record<string, unknown>, label: string): void {
+  const setupNodeWith = expectRecord(step.with, `${label}.actions/setup-node.with`);
+  expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+  expect(setupNodeWith['node-version']).toBeUndefined();
+
+  for (const key of Object.keys(setupNodeWith)) {
+    expect(key, `${label} should not configure malformed Node version inputs`).not.toMatch(
+      /^node-version(?:$|-(?!file$))/,
+    );
+  }
+}
+
 function expectStepByRun(
   steps: Array<Record<string, unknown>>,
   run: string,
@@ -131,9 +143,7 @@ on:
     it('uses the repository-pinned minimum supported Node.js version', () => {
       const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v4');
       expect(setupNode).toBeTruthy();
-      const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
-      expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
-      expect(setupNodeWith['node-version']).toBeUndefined();
+      expectSetupNodeUsesPinnedNvmrc(setupNode as Record<string, unknown>, 'build-test-lint');
     });
 
     it('runs npm ci for deterministic installs', () => {
@@ -271,13 +281,12 @@ on:
     it('uses the pinned minimum Node.js version in every CI setup-node step', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const nvmrc = readFileSync(resolve(ROOT, '.nvmrc'), 'utf-8').trim();
+      expect(nvmrc).toMatch(/^\d+\.\d+\.\d+$/);
 
       for (const [jobName, jobConfig] of Object.entries(jobs)) {
         const job = expectRecord(jobConfig, `jobs.${jobName}`);
         for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v4')) {
-          const setupNodeWith = expectRecord(step.with, `${jobName}.actions/setup-node.with`);
-          expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
-          expect(setupNodeWith['node-version']).toBeUndefined();
+          expectSetupNodeUsesPinnedNvmrc(step, jobName);
         }
       }
 
