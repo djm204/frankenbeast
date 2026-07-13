@@ -607,9 +607,10 @@ npm run bootstrap -- --no-docker
 $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and adjust CHROMA_URL if needed
 
 # .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.
-# Override it only when ChromaDB runs at a different local port/host or a remote
-# TLS-terminated endpoint, then export that same endpoint before seed/verify.
-# export CHROMA_URL=https://chromadb.example.com
+# Override it only when ChromaDB runs at a different local port/host, a CI
+# service container, or a remote TLS-terminated endpoint, then export that same
+# endpoint before seed/verify.
+# export CHROMA_URL=http://127.0.0.1:18000
 
 # Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
 # compose file pins image versions and mounts ./tempo.yaml so local tracing
@@ -628,6 +629,41 @@ npm run local:seed
 # plus fixed compose defaults for Grafana (http://localhost:3000/api/health)
 # and Tempo readiness (http://localhost:3200/ready).
 npm run local:verify-setup
+```
+
+### ChromaDB endpoint (`CHROMA_URL`)
+
+`CHROMA_URL` points Frankenbeast's local setup scripts at the ChromaDB HTTP API.
+Both `npm run local:seed` (`scripts/seed.ts`) and `npm run local:verify-setup`
+(`scripts/verify-setup.ts`) read it, falling back to `http://localhost:8000`
+when it is unset. The default matches the root `docker-compose.yml`, which
+publishes ChromaDB on port 8000 for local development.
+
+Use the default for the standard local compose stack:
+
+```bash
+cp .env.example .env
+npm run bootstrap -- --services
+npm run local:seed
+npm run local:verify-setup
+```
+
+Override it when ChromaDB is reachable somewhere else, and keep the same value
+for both seed and verification:
+
+```bash
+# Alternate local port or host
+export CHROMA_URL=http://127.0.0.1:18000
+npm run local:seed
+npm run local:verify-setup
+
+# CI service container named "chroma"
+export CHROMA_URL=http://chroma:8000
+npm run local:verify-setup
+
+# Remote/TLS-terminated ChromaDB endpoint
+export CHROMA_URL=https://chromadb.example.com
+npm run local:seed
 ```
 
 ## Secret Management
