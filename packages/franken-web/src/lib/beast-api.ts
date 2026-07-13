@@ -1,7 +1,6 @@
 import { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 import type {
   ApiDataEnvelope,
-  ApiErrorEnvelope,
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
   BeastInterviewPrompt,
@@ -375,22 +374,47 @@ export class BeastApiClient {
 
   private async toError(response: Response): Promise<BeastApiError> {
     const fallbackMessage = `HTTP ${response.status}`;
+    let responseText = '';
     try {
-      const body = await response.json() as ApiErrorEnvelope;
-      const serverMessage = body.error?.message;
+      responseText = (await response.text()).trim();
+    } catch {
+      return new BeastApiError(fallbackMessage, response.status);
+    }
+
+    if (!responseText) {
+      return new BeastApiError(fallbackMessage, response.status);
+    }
+
+    try {
+      const body = JSON.parse(responseText) as Record<string, unknown>;
+      const nestedError = typeof body.error === 'object' && body.error !== null
+        ? body.error as { code?: unknown; message?: unknown; details?: unknown }
+        : undefined;
+      const serverMessage = typeof nestedError?.message === 'string'
+        ? nestedError.message
+        : typeof body.message === 'string'
+          ? body.message
+          : typeof body.error === 'string'
+            ? body.error
+            : undefined;
       if (serverMessage) {
-        const code = body.error.code;
+        const code = typeof nestedError?.code === 'string'
+          ? nestedError.code
+          : typeof body.code === 'string'
+            ? body.code
+            : undefined;
         const codeSuffix = code ? `, ${code}` : '';
         return new BeastApiError(
           `${serverMessage} (HTTP ${response.status}${codeSuffix})`,
           response.status,
           code,
-          body.error.details,
+          nestedError?.details,
         );
       }
     } catch {
-      // Fall through with HTTP status message for empty, malformed, or non-JSON bodies.
+      return new BeastApiError(`${responseText} (HTTP ${response.status})`, response.status);
     }
+
     return new BeastApiError(fallbackMessage, response.status);
   }
 }
