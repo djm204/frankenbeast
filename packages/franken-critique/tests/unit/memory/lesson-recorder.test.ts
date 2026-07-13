@@ -2,8 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 import { LessonRecorder } from '../../../src/memory/lesson-recorder.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { MemoryPort } from '../../../src/types/contracts.js';
-import type { CritiqueLoopResult, CritiqueIteration } from '../../../src/types/loop.js';
-import type { CritiqueResult, EvaluationFinding } from '../../../src/types/evaluation.js';
+import type {
+  CritiqueLoopResult,
+  CritiqueIteration,
+} from '../../../src/types/loop.js';
+import type {
+  CritiqueResult,
+  EvaluationFinding,
+} from '../../../src/types/evaluation.js';
 
 function createMockMemoryPort(): MemoryPort {
   return {
@@ -64,7 +70,12 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'safety', [{ message: `${unsafeDynamicCallName}() detected`, severity: 'critical' }]),
+        createIteration(0, 'fail', 'safety', [
+          {
+            message: `${unsafeDynamicCallName}() detected`,
+            severity: 'critical',
+          },
+        ]),
         createIteration(1, 'pass'),
       ],
     };
@@ -75,7 +86,9 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).toHaveBeenCalledWith(
       expect.objectContaining({
         evaluatorName: 'safety',
-        failureDescription: expect.stringContaining(`${unsafeDynamicCallName}()`),
+        failureDescription: expect.stringContaining(
+          `${unsafeDynamicCallName}()`,
+        ),
         taskId: 'test-task',
       }),
     );
@@ -97,7 +110,8 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'Task 123');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.testTraceability).toEqual([
       {
         lessonId: 'task-123:safety-gate:iteration-0',
@@ -125,7 +139,8 @@ describe('LessonRecorder', () => {
             message: 'PR summary omits the verification command',
             severity: 'warning',
             location: 'pull-request-body',
-            suggestion: 'Add the exact targeted test command and result to the PR description.',
+            suggestion:
+              'Add the exact targeted test command and result to the PR description.',
           },
         ]),
         createIteration(1, 'pass'),
@@ -134,7 +149,8 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'review-feedback-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.reviewerFeedback).toEqual({
       summary: 'PR summary omits the verification command',
       findings: [
@@ -144,7 +160,8 @@ describe('LessonRecorder', () => {
           message: 'PR summary omits the verification command',
           severity: 'warning',
           location: 'pull-request-body',
-          suggestion: 'Add the exact targeted test command and result to the PR description.',
+          suggestion:
+            'Add the exact targeted test command and result to the PR description.',
         },
       ],
       suggestionsComplete: true,
@@ -160,10 +177,12 @@ describe('LessonRecorder', () => {
       iterations: [
         createIteration(0, 'fail', 'reviewer', [
           {
-            message: 'Failed test tests/unit/handoff.test.ts: expected PR body to include verification evidence',
+            message:
+              'Failed test tests/unit/handoff.test.ts: expected PR body to include verification evidence',
             severity: 'critical',
             location: 'tests/unit/handoff.test.ts',
-            suggestion: 'Run npm run test --workspace @franken/critique before handoff.',
+            suggestion:
+              'Run npm run test --workspace @franken/critique before handoff.',
           },
         ]),
         createIteration(1, 'pass'),
@@ -172,13 +191,14 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'failed-test-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.failedTestSkillCandidate).toEqual({
       detector: 'failed-test-to-skill-candidate',
       candidate: true,
       sourceIteration: 0,
       evaluatorName: 'reviewer',
-      matchedSignals: ['assertion failure', 'failed-test wording', 'test command', 'test file path'],
+      matchedSignals: ['failed-test wording', 'test command', 'test file path'],
       sourceFindingMessages: [
         'Failed test tests/unit/handoff.test.ts: expected PR body to include verification evidence',
       ],
@@ -207,8 +227,99 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'generic-review-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.failedTestSkillCandidate).toBeUndefined();
+  });
+
+  it('does not flag generic review guidance that only suggests running tests', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Expected PR body to include an issue link and verification evidence',
+            severity: 'warning',
+            suggestion:
+              'Run npm run test before handoff and update the PR body.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'generic-test-command-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toBeUndefined();
+  });
+
+  it('flags reversed failed-test wording as a skill candidate signal', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Tests failed in CI after the latest handoff update',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'reversed-failed-test-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual(
+      expect.objectContaining({
+        matchedSignals: ['failed-test wording'],
+        sourceFindingMessages: [
+          'Tests failed in CI after the latest handoff update',
+        ],
+      }),
+    );
+  });
+
+  it('detects copied multiline test-runner failure output', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Review pasted runner output:\nvitest v2.1.0\n\nTests 1 failed | 7 passed',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'multiline-runner-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual(
+      expect.objectContaining({
+        matchedSignals: ['test runner output'],
+        sourceFindingMessages: [
+          'Review pasted runner output:\nvitest v2.1.0\n\nTests 1 failed | 7 passed',
+        ],
+      }),
+    );
   });
 
   it('marks reviewer-feedback lessons with missing suggestions for PM follow-up', async () => {
@@ -219,7 +330,11 @@ describe('LessonRecorder', () => {
       verdict: 'pass',
       iterations: [
         createIteration(0, 'fail', 'reviewer', [
-          { message: 'Review identified a handoff gap without remediation guidance', severity: 'critical' },
+          {
+            message:
+              'Review identified a handoff gap without remediation guidance',
+            severity: 'critical',
+          },
         ]),
         createIteration(1, 'pass'),
       ],
@@ -227,14 +342,16 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'missing-suggestion-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.reviewerFeedback).toEqual({
       summary: 'Review identified a handoff gap without remediation guidance',
       findings: [
         {
           sourceIteration: 0,
           evaluatorName: 'reviewer',
-          message: 'Review identified a handoff gap without remediation guidance',
+          message:
+            'Review identified a handoff gap without remediation guidance',
           severity: 'critical',
         },
       ],
@@ -252,7 +369,10 @@ describe('LessonRecorder', () => {
       verdict: 'pass',
       iterations: [
         createIteration(0, 'fail', 'factuality', [
-          { message: 'handoff cited an unverified file path', severity: 'critical' },
+          {
+            message: 'handoff cited an unverified file path',
+            severity: 'critical',
+          },
         ]),
         createIteration(1, 'pass'),
       ],
@@ -260,7 +380,8 @@ describe('LessonRecorder', () => {
 
     await recorder.record(result, 'sandbox-task');
 
-    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
     expect(lesson.experimentSandbox).toEqual({
       state: 'experimental',
       promotionBlocked: true,
@@ -282,7 +403,10 @@ describe('LessonRecorder', () => {
 
     const result: CritiqueLoopResult = {
       verdict: 'pass',
-      iterations: [createIteration(0, 'fail', 'empty-failure'), createIteration(1, 'pass')],
+      iterations: [
+        createIteration(0, 'fail', 'empty-failure'),
+        createIteration(1, 'pass'),
+      ],
     };
 
     await recorder.record(result, 'sandbox-task');
@@ -320,14 +444,17 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'complexity', [{ message: 'too many params', severity: 'warning' }]),
+        createIteration(0, 'fail', 'complexity', [
+          { message: 'too many params', severity: 'warning' },
+        ]),
         createIteration(1, 'pass'),
       ],
     };
 
     await recorder.record(result, 'task-123');
 
-    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as {
       correctionApplied: string;
       timestamp: string;
     };
@@ -342,14 +469,19 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'warn',
       iterations: [
-        createIteration(0, 'fail', 'complexity', [{ message: 'too many params', severity: 'warning' }]),
-        createIteration(1, 'warn', 'adr-compliance', [{ message: 'review ADR', severity: 'warning' }]),
+        createIteration(0, 'fail', 'complexity', [
+          { message: 'too many params', severity: 'warning' },
+        ]),
+        createIteration(1, 'warn', 'adr-compliance', [
+          { message: 'review ADR', severity: 'warning' },
+        ]),
       ],
     };
 
     await recorder.record(result, 'task-123');
 
-    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+    const call = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as {
       correctionApplied: string;
     };
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
@@ -365,7 +497,8 @@ describe('LessonRecorder', () => {
       iterations: [
         createIteration(0, 'fail', 'adr-compliance', [
           {
-            message: 'Evaluator "adr-compliance" failed because an internal evaluator error occurred.',
+            message:
+              'Evaluator "adr-compliance" failed because an internal evaluator error occurred.',
             severity: 'critical',
             location: EVALUATOR_EXCEPTION_LOCATION,
           },
@@ -386,7 +519,12 @@ describe('LessonRecorder', () => {
     const result: CritiqueLoopResult = {
       verdict: 'fail',
       iterations: [createIteration(0, 'fail')],
-      correction: { summary: 'fix it', findings: [], score: 0.3, iterationCount: 1 },
+      correction: {
+        summary: 'fix it',
+        findings: [],
+        score: 0.3,
+        iterationCount: 1,
+      },
     };
 
     await recorder.record(result, 'test-task');
@@ -411,13 +549,17 @@ describe('LessonRecorder', () => {
 
   it('swallows errors from MemoryPort gracefully', async () => {
     const port = createMockMemoryPort();
-    (port.recordLesson as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('DB down'));
+    (port.recordLesson as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('DB down'),
+    );
     const recorder = new LessonRecorder(port);
 
     const result: CritiqueLoopResult = {
       verdict: 'pass',
       iterations: [
-        createIteration(0, 'fail', 'safety', [{ message: 'issue', severity: 'critical' }]),
+        createIteration(0, 'fail', 'safety', [
+          { message: 'issue', severity: 'critical' },
+        ]),
         createIteration(1, 'pass'),
       ],
     };

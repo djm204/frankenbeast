@@ -21,13 +21,45 @@ const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
 const FAILED_TEST_SKILL_CANDIDATE_GUIDANCE =
   'This recovered critique failure looks like a concrete failed test. PM handoffs should consider creating or updating a skill only after the failure recurs or the regression exposes a reusable workflow gap; keep one-off product bugs in the issue/PR instead of promoting them as durable skill guidance.';
 
-const FAILED_TEST_SIGNAL_PATTERNS: readonly { readonly label: string; readonly pattern: RegExp }[] = [
-  { label: 'failed-test wording', pattern: /\b(?:failed|failing|broken)\s+tests?\b/i },
-  { label: 'test-failure wording', pattern: /\btest\s+fail(?:ure|ed|ing)?\b/i },
-  { label: 'assertion failure', pattern: /\b(?:assertionerror|expected\s+.+\s+(?:to|received|got))\b/i },
-  { label: 'test file path', pattern: /(?:^|[/\s])(?:tests?\/[^\s]+|[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?)\b/i },
-  { label: 'test command', pattern: /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b/i },
-  { label: 'test runner output', pattern: /\b(?:vitest|jest|mocha|playwright)\b.*\b(?:fail|failed|failing)\b/i },
+const FAILED_TEST_SIGNAL_PATTERNS: readonly {
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly strength: 'strong' | 'supporting';
+}[] = [
+  {
+    label: 'failed-test wording',
+    pattern:
+      /\b(?:(?:failed|failing|broken)\s+tests?|tests?\s+(?:failed|failing|broken))\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test-failure wording',
+    pattern: /\btest\s+fail(?:ure|ed|ing)?\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'assertion failure',
+    pattern:
+      /\b(?:assertionerror|expected[\s\S]{0,120}(?:received|got)|(?:received|got)[\s\S]{0,120}expected)\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test runner output',
+    pattern:
+      /\b(?:vitest|jest|mocha|playwright)\b[\s\S]{0,240}\b(?:fail|failed|failing)\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test file path',
+    pattern:
+      /(?:^|[/\s])(?:tests?\/[^\s]+|[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?)\b/i,
+    strength: 'supporting',
+  },
+  {
+    label: 'test command',
+    pattern: /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b/i,
+    strength: 'supporting',
+  },
 ];
 
 export class LessonRecorder {
@@ -39,7 +71,10 @@ export class LessonRecorder {
 
   async record(result: CritiqueLoopResult, taskId: TaskId): Promise<void> {
     // Only record lessons from multi-iteration pass/warn successes.
-    if ((result.verdict !== 'pass' && result.verdict !== 'warn') || result.iterations.length <= 1) {
+    if (
+      (result.verdict !== 'pass' && result.verdict !== 'warn') ||
+      result.iterations.length <= 1
+    ) {
       return;
     }
 
@@ -75,8 +110,13 @@ export class LessonRecorder {
       );
 
       if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
-        const resolvedIteration = passingIteration?.index ?? failingIteration.index;
-        const lessonId = createLessonId(taskId, evalResult.evaluatorName, failingIteration.index);
+        const resolvedIteration =
+          passingIteration?.index ?? failingIteration.index;
+        const lessonId = createLessonId(
+          taskId,
+          evalResult.evaluatorName,
+          failingIteration.index,
+        );
         const findingMessages = critiqueFindings.map((f) => f.message);
 
         const failedTestSkillCandidate = createFailedTestSkillCandidate(
@@ -144,16 +184,22 @@ function createFailedTestSkillCandidate(
   const sourceFindingMessages: string[] = [];
 
   for (const finding of findings) {
-    const haystack = [finding.message, finding.location, finding.suggestion]
+    const primaryText = [finding.message, finding.location]
       .filter((value): value is string => Boolean(value))
       .join('\n');
-    const matchingSignals = FAILED_TEST_SIGNAL_PATTERNS
-      .filter((signal) => signal.pattern.test(haystack))
-      .map((signal) => signal.label);
+    const suggestionText = finding.suggestion ?? '';
+    const primarySignals = collectFailedTestSignals(primaryText);
+    const suggestionSignals = collectFailedTestSignals(suggestionText);
+    const allSignals = [...primarySignals, ...suggestionSignals];
+    const hasPrimarySignal = primarySignals.length > 0;
+    const hasStrongSignal = allSignals.some(
+      (signal) => signal.strength === 'strong',
+    );
+    const distinctSignals = new Set(allSignals.map((signal) => signal.label));
 
-    if (matchingSignals.length > 0) {
+    if (hasPrimarySignal && hasStrongSignal && distinctSignals.size > 0) {
       sourceFindingMessages.push(finding.message);
-      for (const signal of matchingSignals) {
+      for (const signal of distinctSignals) {
         matched.add(signal);
       }
     }
@@ -174,6 +220,17 @@ function createFailedTestSkillCandidate(
   };
 }
 
+function collectFailedTestSignals(
+  text: string,
+): { label: string; strength: 'strong' | 'supporting' }[] {
+  return FAILED_TEST_SIGNAL_PATTERNS.filter((signal) =>
+    signal.pattern.test(text),
+  ).map((signal) => ({
+    label: signal.label,
+    strength: signal.strength,
+  }));
+}
+
 function createReviewerFeedbackCapture(
   sourceIteration: number,
   evaluatorName: string,
@@ -192,23 +249,34 @@ function createReviewerFeedbackCapture(
     ...(finding.location ? { location: finding.location } : {}),
     ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
   }));
-  const suggestionsComplete = capturedFindings.every((finding) => Boolean(finding.suggestion));
+  const suggestionsComplete = capturedFindings.every((finding) =>
+    Boolean(finding.suggestion),
+  );
 
   return {
     summary: capturedFindings.map((finding) => finding.message).join('; '),
     findings: capturedFindings,
     suggestionsComplete,
-    ...(suggestionsComplete ? {} : { missingSuggestionGuidance: MISSING_REVIEWER_SUGGESTION_GUIDANCE }),
+    ...(suggestionsComplete
+      ? {}
+      : { missingSuggestionGuidance: MISSING_REVIEWER_SUGGESTION_GUIDANCE }),
   };
 }
 
-function createLessonId(taskId: TaskId, evaluatorName: string, iterationIndex: number): string {
+function createLessonId(
+  taskId: TaskId,
+  evaluatorName: string,
+  iterationIndex: number,
+): string {
   return [taskId, evaluatorName, `iteration-${iterationIndex}`]
     .map((part) => sanitizeLessonIdPart(part))
     .join(':');
 }
 
 function sanitizeLessonIdPart(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-');
   return normalized.replace(/^-+|-+$/g, '') || 'unknown';
 }
