@@ -282,7 +282,7 @@ on:
     it('uses actions/checkout with full history for root verification tests', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const checkout = expectSteps(buildTestLint).find((step) => step.uses === 'actions/checkout@v4');
+      const checkout = expectSteps(buildTestLint).find((step) => step.uses === 'actions/checkout@v7');
       expect(checkout).toBeTruthy();
       const checkoutWith = expectRecord(checkout?.with, 'actions/checkout.with');
       expect(checkoutWith['fetch-depth']).toBe(0);
