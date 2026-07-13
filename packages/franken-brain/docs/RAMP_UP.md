@@ -5,7 +5,7 @@
 ## Module Overview
 `@franken/brain` provides the current SQLite-backed runtime memory primitive for Frankenbeast. The public package API is `SqliteBrain`, `WorkingMemoryLimitError`, `DEFAULT_WORKING_MEMORY_LIMITS`, and the `WorkingMemoryLimits` type.
 
-Older design notes for a `MemoryOrchestrator`, standalone store classes, ChromaDB-backed semantic memory, and PII-decorator stores are historical only until those APIs are reintroduced in `src/index.ts` and covered by tests.
+Earlier multi-store and semantic-memory design sketches are historical only until any replacement APIs are reintroduced in `src/index.ts` and covered by tests.
 
 ## Current Functionality
 - **Working memory**: `SqliteBrain.working` exposes a bounded in-memory key/value store. Working memory is flushed to SQLite when checkpoints or serialization run.
