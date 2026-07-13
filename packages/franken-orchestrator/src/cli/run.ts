@@ -968,7 +968,6 @@ export async function main(): Promise<void> {
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
 
   if (suppressBanner) {
-    scaffoldFrankenbeast(paths);
     await runNetworkCommand(args, config, root, paths);
     return;
   }

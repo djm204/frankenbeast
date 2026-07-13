@@ -918,6 +918,7 @@ describe('main() execution', () => {
 
     const stdout = info.mock.calls.map((call) => String(call[0]));
     expect(stdout).not.toContain('[BANNER]');
+    expect(scaffoldFrankenbeast).not.toHaveBeenCalled();
     expect(JSON.parse(stdout.at(-1) ?? '{}')).toMatchObject({
       mode: 'secure',
       credentials: expect.any(Array),

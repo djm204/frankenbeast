@@ -355,8 +355,14 @@ describe('runNetworkCommand', () => {
     config.comms.slack.botTokenRef = '   ';
     config.comms.discord.enabled = true;
     config.comms.discord.botTokenRef = 'prod/discord-bot-token';
+    config.comms.discord.publicKeyRef = undefined;
     config.comms.telegram.enabled = false;
     config.comms.telegram.botTokenRef = 'prod/telegram-bot-token';
+    config.comms.whatsapp.enabled = true;
+    config.comms.whatsapp.accessTokenRef = 'prod/whatsapp-access-token';
+    config.comms.whatsapp.phoneNumberIdRef = undefined;
+    config.comms.whatsapp.appSecretRef = 'prod/whatsapp-app-secret';
+    config.comms.whatsapp.verifyTokenRef = 'prod/whatsapp-verify-token';
     const print = vi.fn();
 
     await runNetworkCommand(
@@ -419,14 +425,54 @@ describe('runNetworkCommand', () => {
       ref: 'prod/telegram-bot-token',
       status: 'inactive-configured',
     });
-    expect(report.credentials).not.toContainEqual(expect.objectContaining({
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.discord.public',
       configPath: 'comms.discord.publicKeyRef',
-    }));
-    expect(report.credentials).not.toContainEqual(expect.objectContaining({
+      ref: null,
+      status: 'missing',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.whatsapp.phone-number',
       configPath: 'comms.whatsapp.phoneNumberIdRef',
-    }));
+      ref: null,
+      status: 'missing',
+    });
     expect(JSON.stringify(report)).not.toContain('super-secret-value');
     expect(JSON.stringify(report)).not.toContain('Bearer');
+  });
+
+  it('marks the operator token inactive when no managed service is selected', async () => {
+    const config = defaultConfig();
+    config.beastsDaemon.enabled = false;
+    config.chat.enabled = false;
+    config.dashboard.enabled = false;
+    config.comms.enabled = false;
+
+    const print = vi.fn();
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'credentials' }),
+      config,
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      credentials: Array<{ scope: string; configPath: string; ref: string | null; status: string }>;
+    };
+    expect(report.credentials).toContainEqual({
+      scope: 'network.operator',
+      configPath: 'network.operatorTokenRef',
+      ref: null,
+      status: 'inactive-missing',
+    });
   });
 
   it('start stop and restart target one service or all', async () => {

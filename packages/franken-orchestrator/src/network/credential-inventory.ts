@@ -35,25 +35,41 @@ function entry(scope: string, configPath: string, ref: string | undefined, activ
   };
 }
 
-export function buildCredentialInventoryReport(config: OrchestratorConfig): CredentialInventoryReport {
-  const commsActive = config.comms.enabled
-    || config.comms.slack.enabled
+function anyCommsChannelActive(config: OrchestratorConfig): boolean {
+  return config.comms.slack.enabled
     || config.comms.discord.enabled
     || config.comms.telegram.enabled
     || config.comms.whatsapp.enabled;
+}
+
+function commsActive(config: OrchestratorConfig): boolean {
+  return config.comms.enabled || anyCommsChannelActive(config);
+}
+
+function operatorCredentialActive(config: OrchestratorConfig): boolean {
+  return config.beastsDaemon.enabled
+    || config.chat.enabled
+    || config.dashboard.enabled
+    || commsActive(config);
+}
+
+export function buildCredentialInventoryReport(config: OrchestratorConfig): CredentialInventoryReport {
+  const isCommsActive = commsActive(config);
 
   return {
     mode: config.network.mode,
     secureBackend: config.network.secureBackend,
     credentials: [
-      entry('network.operator', 'network.operatorTokenRef', config.network.operatorTokenRef, true),
-      entry('comms.orchestrator', 'comms.orchestratorTokenRef', config.comms.orchestratorTokenRef, commsActive, false),
+      entry('network.operator', 'network.operatorTokenRef', config.network.operatorTokenRef, operatorCredentialActive(config)),
+      entry('comms.orchestrator', 'comms.orchestratorTokenRef', config.comms.orchestratorTokenRef, isCommsActive, false),
       entry('comms.slack.bot', 'comms.slack.botTokenRef', config.comms.slack.botTokenRef, config.comms.slack.enabled),
       entry('comms.slack.signing', 'comms.slack.signingSecretRef', config.comms.slack.signingSecretRef, config.comms.slack.enabled),
       entry('comms.discord', 'comms.discord.botTokenRef', config.comms.discord.botTokenRef, config.comms.discord.enabled),
+      entry('comms.discord.public', 'comms.discord.publicKeyRef', config.comms.discord.publicKeyRef, config.comms.discord.enabled),
       entry('comms.telegram', 'comms.telegram.botTokenRef', config.comms.telegram.botTokenRef, config.comms.telegram.enabled),
       entry('comms.telegram.webhook', 'comms.telegram.webhookSecretTokenRef', config.comms.telegram.webhookSecretTokenRef, config.comms.telegram.enabled),
       entry('comms.whatsapp.access', 'comms.whatsapp.accessTokenRef', config.comms.whatsapp.accessTokenRef, config.comms.whatsapp.enabled),
+      entry('comms.whatsapp.phone-number', 'comms.whatsapp.phoneNumberIdRef', config.comms.whatsapp.phoneNumberIdRef, config.comms.whatsapp.enabled),
       entry('comms.whatsapp.app', 'comms.whatsapp.appSecretRef', config.comms.whatsapp.appSecretRef, config.comms.whatsapp.enabled),
       entry('comms.whatsapp.verify', 'comms.whatsapp.verifyTokenRef', config.comms.whatsapp.verifyTokenRef, config.comms.whatsapp.enabled),
     ],
