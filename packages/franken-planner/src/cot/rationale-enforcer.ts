@@ -9,7 +9,6 @@ import { now as deterministicNow } from '@franken/types';
 export class RationaleEnforcer {
   private readonly approvalSessionTokenIdsByScope = new Map<string, string[]>();
   private approvalSessionTokenIds: string[] = [];
-  private lastGeneratedScopeKey: string | undefined;
 
   generate(task: Task): RationaleBlock {
     const base = {
@@ -20,10 +19,7 @@ export class RationaleEnforcer {
     };
 
     const tool = task.metadata?.['tool'];
-    const scopeKey = typeof tool === 'string'
-      ? `skill:${tool}`
-      : `task:${task.id}`;
-    this.lastGeneratedScopeKey = scopeKey;
+    const scopeKey = this.scopeKeyForTask(task);
 
     const scopedTokenIds = this.approvalSessionTokenIdsByScope.get(scopeKey) ?? [];
     const approvalSessionTokenIds = [
@@ -41,8 +37,8 @@ export class RationaleEnforcer {
     return withSessionToken;
   }
 
-  rememberApprovalSessionToken(tokenId: string): void {
-    const scopeKey = this.lastGeneratedScopeKey;
+  rememberApprovalSessionToken(tokenId: string, task?: Task, triggerId?: string): void {
+    const scopeKey = task !== undefined ? this.scopeKeyForTask(task, triggerId) : undefined;
     if (scopeKey !== undefined) {
       const scopedTokenIds = this.approvalSessionTokenIdsByScope.get(scopeKey) ?? [];
       this.approvalSessionTokenIdsByScope.set(scopeKey, [
@@ -55,5 +51,16 @@ export class RationaleEnforcer {
       tokenId,
       ...this.approvalSessionTokenIds.filter((rememberedTokenId) => rememberedTokenId !== tokenId),
     ];
+  }
+
+  private scopeKeyForTask(task: Task, triggerId?: string): string {
+    const tool = task.metadata?.['tool'];
+    if (triggerId !== undefined && triggerId !== 'skill') {
+      return `task:${task.id}`;
+    }
+    if (typeof tool === 'string') {
+      return `skill:${tool}`;
+    }
+    return `task:${task.id}`;
   }
 }

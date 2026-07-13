@@ -7,6 +7,8 @@
 - Multi-policy approval prompts must surface every fired policy reason, not just a preferred non-skill trigger, so operators see destructive/HITL skill risk alongside budget or other policy risk.
 - If a CoT rationale can carry reusable approval tokens, keep candidate token IDs per prior approval rather than a single overwrite slot; the governor can validate candidates against the current scope and ignore non-matching tokens.
 - Built-in typed triggers need explicit context construction. Do not feed rationale-shaped objects into typed triggers such as confidence/ambiguity just because they appear later in the evaluator list.
+- Avoid mutable "last generated task" state in CoT approval-token handoff; concurrent planner execution must pass the verified task/rationale scope into token remembrance so tokens are stored under the task that actually produced the approval.
+- When a replacement approval token arrives for an expired token, put the new token before the old one for that scope so future rationales recover token reuse instead of repeatedly presenting the stale token first.
 
 ## 2026-07-12 — Runtime tool manifest security defaults
 - Default new/runtime skill tools to `requiresHitl: true` after schema validation, and preserve explicit `requiresHitl: false` only for reviewed safe tools.

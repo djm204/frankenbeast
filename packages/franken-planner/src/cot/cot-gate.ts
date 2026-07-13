@@ -29,7 +29,11 @@ export function buildCoTExecutor(
     }
 
     if (verification.approvalSessionTokenId !== undefined) {
-      enforcer.rememberApprovalSessionToken(verification.approvalSessionTokenId);
+      enforcer.rememberApprovalSessionToken(
+        verification.approvalSessionTokenId,
+        task,
+        verification.approvalSessionTokenTriggerId
+      );
     }
 
     return executor(task);

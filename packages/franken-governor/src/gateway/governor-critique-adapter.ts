@@ -9,8 +9,8 @@ import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { BudgetTrigger, type BudgetTriggerContext } from '../triggers/budget-trigger.js';
 import { evaluateTrigger } from '../triggers/evaluate-trigger.js';
 import { SkillTrigger, type SkillTriggerContext } from '../triggers/skill-trigger.js';
-import { ConfidenceTrigger } from '../triggers/confidence-trigger.js';
-import { AmbiguityTrigger } from '../triggers/ambiguity-trigger.js';
+import { ConfidenceTrigger, type ConfidenceTriggerContext } from '../triggers/confidence-trigger.js';
+import { AmbiguityTrigger, type AmbiguityTriggerContext } from '../triggers/ambiguity-trigger.js';
 import type { RationaleBlock, VerificationResult } from '@franken/types';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
 
@@ -123,7 +123,11 @@ export class GovernorCritiqueAdapter {
     switch (outcome.decision) {
       case 'APPROVE':
         return outcome.token !== undefined
-          ? { verdict: 'approved', approvalSessionTokenId: outcome.token.tokenId }
+          ? {
+            verdict: 'approved',
+            approvalSessionTokenId: outcome.token.tokenId,
+            approvalSessionTokenTriggerId: request.trigger.triggerId,
+          }
           : { verdict: 'approved' };
       case 'REGEN':
         return { verdict: 'rejected', reason: outcome.feedback };
@@ -247,8 +251,18 @@ export class GovernorCritiqueAdapter {
       return { skip: false, context: this.budgetState.getBudgetState() };
     }
 
-    if (evaluator instanceof ConfidenceTrigger || evaluator instanceof AmbiguityTrigger) {
-      return SKIP;
+    if (evaluator instanceof ConfidenceTrigger) {
+      if (typeof rationale.confidenceScore !== 'number') return SKIP;
+      const context: ConfidenceTriggerContext = { confidenceScore: rationale.confidenceScore };
+      return { skip: false, context };
+    }
+
+    if (evaluator instanceof AmbiguityTrigger) {
+      const hasUnresolvedDependency = rationale.hasUnresolvedDependency;
+      const hasAdrConflict = rationale.hasAdrConflict;
+      if (typeof hasUnresolvedDependency !== 'boolean' || typeof hasAdrConflict !== 'boolean') return SKIP;
+      const context: AmbiguityTriggerContext = { hasUnresolvedDependency, hasAdrConflict };
+      return { skip: false, context };
     }
 
     const rationaleWithoutBearerToken = { ...rationale };

@@ -7,6 +7,7 @@ import type { TriggerEvaluator } from '../../../src/triggers/trigger-evaluator.j
 import { BudgetTrigger } from '../../../src/triggers/budget-trigger.js';
 import { SkillTrigger } from '../../../src/triggers/skill-trigger.js';
 import { ConfidenceTrigger } from '../../../src/triggers/confidence-trigger.js';
+import { AmbiguityTrigger } from '../../../src/triggers/ambiguity-trigger.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
 import { formatApprovalSessionTokenScope, formatSessionTokenScope } from '../../../src/security/session-token-scope.js';
@@ -20,6 +21,9 @@ interface RationaleBlock {
   timestamp: Date;
   approvalSessionTokenId?: string;
   approvalSessionTokenIds?: readonly string[];
+  confidenceScore?: number;
+  hasUnresolvedDependency?: boolean;
+  hasAdrConflict?: boolean;
 }
 
 function makeRationale(overrides: Partial<RationaleBlock> = {}): RationaleBlock {
@@ -423,7 +427,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
 
     const result = await adapter.verifyRationale(makeRationale({ approvalSessionTokenId: token.tokenId }));
 
-    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(result).toEqual(expect.objectContaining({ verdict: 'approved', approvalSessionTokenId: expect.any(String) }));
     expect(channel.requestApproval).toHaveBeenCalledOnce();
     const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
     expect(request.trigger.reason).toContain("Trigger 'stale-trigger' evaluation failed");
@@ -519,7 +523,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
         approvalSessionTokenId: token.tokenId,
       }));
 
-      expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+      expect(result).toEqual(expect.objectContaining({ verdict: 'approved', approvalSessionTokenId: expect.any(String) }));
       expect(channel.requestApproval).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -552,7 +556,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       approvalSessionTokenId: token.tokenId,
     }));
 
-    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(result).toEqual(expect.objectContaining({ verdict: 'approved', approvalSessionTokenId: expect.any(String) }));
     expect(channel.requestApproval).toHaveBeenCalledOnce();
   });
 
@@ -602,7 +606,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       approvalSessionTokenId: 'unreadable-token',
     }));
 
-    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(result).toEqual(expect.objectContaining({ verdict: 'approved', approvalSessionTokenId: expect.any(String) }));
     expect(channel.requestApproval).toHaveBeenCalledOnce();
     expect(tokenStore.store).toHaveBeenCalledOnce();
   });
@@ -667,7 +671,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       approvalSessionTokenId: token.tokenId,
     }));
 
-    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(result).toEqual(expect.objectContaining({ verdict: 'approved', approvalSessionTokenId: expect.any(String) }));
     expect(channel.requestApproval).toHaveBeenCalledOnce();
     const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
     expect(request.trigger.triggerId).toBe('skill');
@@ -693,6 +697,42 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     expect(request.trigger.triggerId).toBe('skill');
     expect(request.trigger.reason).toContain('deploy-prod');
     expect(request.trigger.reason).not.toContain('Low confidence');
+  });
+
+  it('evaluates confidence triggers when rationale carries confidence context', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new ConfidenceTrigger(0.75)],
+      projectId: 'proj-001',
+    });
+
+    await adapter.verifyRationale(makeRationale({ selectedTool: undefined, confidenceScore: 0.25 }));
+
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('confidence');
+    expect(request.trigger.reason).toContain('Low confidence');
+  });
+
+  it('evaluates ambiguity triggers when rationale carries ambiguity context', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new AmbiguityTrigger()],
+      projectId: 'proj-001',
+    });
+
+    await adapter.verifyRationale(makeRationale({
+      selectedTool: undefined,
+      hasUnresolvedDependency: true,
+      hasAdrConflict: false,
+    }));
+
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('ambiguity');
+    expect(request.trigger.reason).toContain('unresolved dependency');
   });
 
   it('tries all candidate session tokens until one matches the current request scope', async () => {
@@ -788,7 +828,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       approvalSessionTokenId: token.tokenId,
     }));
 
-    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(result).toEqual(expect.objectContaining({ verdict: 'approved', approvalSessionTokenId: expect.any(String) }));
     expect(channel.requestApproval).toHaveBeenCalledOnce();
   });
 
@@ -840,7 +880,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       approvalSessionTokenId: token.tokenId,
     }));
 
-    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(result).toEqual(expect.objectContaining({ verdict: 'approved', approvalSessionTokenId: expect.any(String) }));
     expect(channel.requestApproval).toHaveBeenCalledOnce();
   });
 

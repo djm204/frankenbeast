@@ -29,7 +29,7 @@ function approved(): SelfCritiqueModule {
 function approvedWithSessionToken(tokenId: string): SelfCritiqueModule {
   return {
     verifyRationale: vi.fn()
-      .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: tokenId })
+      .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: tokenId, approvalSessionTokenTriggerId: 'skill' })
       .mockResolvedValue({ verdict: 'approved' }),
   };
 }
@@ -119,8 +119,8 @@ describe('buildCoTExecutor — approved', () => {
   it('does not overwrite a still-remembered tool token with a later token for another scope', async () => {
     const selfCritique: SelfCritiqueModule = {
       verifyRationale: vi.fn()
-        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'deploy-token' })
-        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'task-token' })
+        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'deploy-token', approvalSessionTokenTriggerId: 'skill' })
+        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'task-token', approvalSessionTokenTriggerId: 'budget' })
         .mockResolvedValue({ verdict: 'approved' }),
     };
     const executor = vi.fn().mockResolvedValue(success('t-1'));
@@ -133,6 +133,36 @@ describe('buildCoTExecutor — approved', () => {
 
     expect(selfCritique.verifyRationale).toHaveBeenNthCalledWith(3, expect.objectContaining({
       approvalSessionTokenId: 'deploy-token',
+      selectedTool: 'deploy-prod',
+    }));
+  });
+
+  it('records approval tokens against the task that produced their rationale under concurrent execution', async () => {
+    let resolveFirst!: (value: { verdict: 'approved'; approvalSessionTokenId: string; approvalSessionTokenTriggerId: string }) => void;
+    let resolveSecond!: (value: { verdict: 'approved'; approvalSessionTokenId: string; approvalSessionTokenTriggerId: string }) => void;
+    const selfCritique: SelfCritiqueModule = {
+      verifyRationale: vi.fn()
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }))
+        .mockResolvedValue({ verdict: 'approved' }),
+    };
+    const executor = vi.fn().mockResolvedValue(success('done'));
+    const enforcer = new RationaleEnforcer();
+    const wrapped = buildCoTExecutor(executor, selfCritique, enforcer);
+    const deployTask = { ...makeTask('deploy-task'), metadata: { tool: 'deploy-prod' } };
+    const budgetTask = makeTask('budget-task');
+
+    const first = wrapped(deployTask);
+    const second = wrapped(budgetTask);
+    resolveSecond({ verdict: 'approved', approvalSessionTokenId: 'budget-token', approvalSessionTokenTriggerId: 'budget' });
+    await second;
+    resolveFirst({ verdict: 'approved', approvalSessionTokenId: 'deploy-token', approvalSessionTokenTriggerId: 'skill' });
+    await first;
+    await wrapped({ ...makeTask('next-deploy-task'), metadata: { tool: 'deploy-prod' } });
+
+    expect(selfCritique.verifyRationale).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      approvalSessionTokenId: 'deploy-token',
+      approvalSessionTokenIds: ['deploy-token', 'budget-token'],
       selectedTool: 'deploy-prod',
     }));
   });
