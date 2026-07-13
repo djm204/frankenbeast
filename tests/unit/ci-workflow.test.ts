@@ -51,14 +51,37 @@ function expectSteps(job: Record<string, unknown>): Array<Record<string, unknown
   return job.steps as Array<Record<string, unknown>>;
 }
 
-function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
+function expectCiJob(workflow: Record<string, unknown>): Record<string, unknown> {
   const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-  const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-  const step = expectSteps(buildTestLint).find(
-    (candidate) => candidate.run === 'npx turbo run build typecheck',
-  );
-  expect(step, 'CI should explicitly gate build and typecheck through Turbo').toBeTruthy();
+  return expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+}
+
+function expectStepByRun(
+  steps: Array<Record<string, unknown>>,
+  run: string,
+  label: string,
+): Record<string, unknown> {
+  const step = steps.find((candidate) => candidate.run === run);
+  expect(step, `CI should include ${label}`).toBeTruthy();
   return step as Record<string, unknown>;
+}
+
+function expectStepByName(
+  steps: Array<Record<string, unknown>>,
+  name: string,
+  label: string,
+): Record<string, unknown> {
+  const step = steps.find((candidate) => candidate.name === name);
+  expect(step, `CI should include ${label}`).toBeTruthy();
+  return step as Record<string, unknown>;
+}
+
+function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
+  return expectStepByRun(
+    expectSteps(expectCiJob(workflow)),
+    'npx turbo run build typecheck',
+    'a Turbo build/typecheck step',
+  );
 }
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
@@ -106,9 +129,7 @@ on:
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v4');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
@@ -116,9 +137,7 @@ on:
     });
 
     it('runs npm ci for deterministic installs', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      expect(expectSteps(buildTestLint).some((step) => step.run === 'npm ci')).toBe(true);
+      expectStepByRun(expectSteps(expectCiJob(workflow)), 'npm ci', 'a deterministic npm install step');
     });
 
     it('runs the guarded security audit after deterministic installs', () => {
@@ -136,12 +155,16 @@ on:
     });
 
     it('explicitly gates build, typecheck, and the root lint coverage check before running the shared CI test target', () => {
+      const steps = expectSteps(expectCiJob(workflow));
       const buildTypecheckStep = expectBuildTypecheckStep(workflow);
+      const workspaceLintStep = expectStepByRun(steps, 'npm run lint', 'a workspace lint gate step');
+      const ciTestStep = expectStepByRun(steps, 'npm run test:ci', 'the shared root/package CI test target');
+
       expect(buildTypecheckStep.name).toBe('Run package build and typecheck');
-      expect(content).toMatch(/npx turbo run build typecheck[\s\S]*npm run lint[\s\S]*npm run test:ci/);
-      const workspaceLintStep = '\n        run: npm run lint\n';
-      expect(content.indexOf('npx turbo run build typecheck')).toBeLessThan(content.indexOf(workspaceLintStep));
-      expect(content.indexOf(workspaceLintStep)).toBeLessThan(content.indexOf('npm run test:ci'));
+      expect(workspaceLintStep.name).toBe('Run workspace lint gate');
+      expect(ciTestStep.name).toBe('Run root and package CI test suite');
+      expect(steps.indexOf(buildTypecheckStep)).toBeLessThan(steps.indexOf(workspaceLintStep));
+      expect(steps.indexOf(workspaceLintStep)).toBeLessThan(steps.indexOf(ciTestStep));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
       expect(content).not.toContain('npx turbo run build typecheck lint');
     });
@@ -150,16 +173,21 @@ on:
       const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
         scripts?: Record<string, string>;
       };
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const ciTestStep = expectSteps(buildTestLint).find((step) => step.name === 'Run root and package CI test suite');
+      const steps = expectSteps(expectCiJob(workflow));
+      const ciTestStep = expectStepByName(
+        steps,
+        'Run root and package CI test suite',
+        'the shared root/package CI test target',
+      );
       const testCiScript = packageJson.scripts?.['test:ci'] ?? '';
 
-      expect(ciTestStep, 'CI should have an explicit root-and-package test step').toBeTruthy();
-      expect(ciTestStep?.run).toBe('npm run test:ci');
-      const e2eStep = expectSteps(buildTestLint).find((step) => step.name === 'Run orchestrator E2E smoke CI suite');
-      expect(e2eStep, 'CI should make the orchestrator E2E gate explicit').toBeTruthy();
-      expect(e2eStep?.run).toBe('npm run ci:test:e2e');
+      expect(ciTestStep.run).toBe('npm run test:ci');
+      const e2eStep = expectStepByName(
+        steps,
+        'Run orchestrator E2E smoke CI suite',
+        'the orchestrator E2E smoke gate',
+      );
+      expect(e2eStep.run).toBe('npm run ci:test:e2e');
       expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
       expect(packageJson.scripts?.['ci:test:e2e']).toBe(
         'node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts',
@@ -234,9 +262,7 @@ on:
     });
 
     it('uses actions/setup-node with npm cache', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v4');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith.cache).toBe('npm');
@@ -280,18 +306,14 @@ on:
     });
 
     it('uses actions/checkout with full history for root verification tests', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const checkout = expectSteps(buildTestLint).find((step) => step.uses === 'actions/checkout@v4');
+      const checkout = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/checkout@v4');
       expect(checkout).toBeTruthy();
       const checkoutWith = expectRecord(checkout?.with, 'actions/checkout.with');
       expect(checkoutWith['fetch-depth']).toBe(0);
     });
 
     it('runs on ubuntu-latest', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      expect(buildTestLint['runs-on']).toBe('ubuntu-latest');
+      expect(expectCiJob(workflow)['runs-on']).toBe('ubuntu-latest');
     });
   });
 });
