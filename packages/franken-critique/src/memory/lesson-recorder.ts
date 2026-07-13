@@ -5,6 +5,7 @@ import type {
   LessonRecordingResult,
   ReviewerFeedbackLessonCapture,
   PostPrLessonExtractionTemplate,
+  LessonRollbackWorkflow,
   CrossTaskBlockerPattern,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
@@ -68,6 +69,34 @@ export interface LessonRecorderOptions {
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
   'New critique lessons are experimental until their traceability map and regression evidence are independently verified.';
+
+const LESSON_ROLLBACK_INSUFFICIENT_EVIDENCE_GUIDANCE =
+  'Do not roll back a lesson unless the rollback request names the lesson, explains the bad/stale guidance, links review or regression evidence, and includes a verification command for the replacement or retirement decision.';
+
+const LESSON_ROLLBACK_WORKFLOW: LessonRollbackWorkflow = {
+  workflowId: 'lesson-rollback-v1',
+  eligibleStates: ['experimental', 'promoted'],
+  steps: [
+    'Quarantine the target lesson so PM/liveness tooling stops promoting it into new handoffs.',
+    'Attach the rollback reason, evidence URLs, and verifier command to the lesson audit trail.',
+    'Either record a replacement lesson with fresh traceability evidence or mark the original lesson retired with no replacement.',
+    'Run the verifier command and include the result in the PM handoff before removing the rollback block.',
+  ],
+  requiredEvidence: [
+    'Stable lesson identifier or traceability entry',
+    'Reason the lesson is incorrect, stale, over-broad, or harmful',
+    'Review comment, failed regression, operator report, or incident link proving rollback is warranted',
+    'Verification command for the replacement lesson or retired state',
+  ],
+  requestSchema: {
+    lessonId: 'string',
+    rollbackReason: 'string',
+    evidenceUrls: 'string[]',
+    replacementLesson: 'string-or-null',
+    verificationCommand: 'string',
+  },
+  insufficientEvidenceGuidance: LESSON_ROLLBACK_INSUFFICIENT_EVIDENCE_GUIDANCE,
+};
 
 const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
   'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
@@ -185,7 +214,8 @@ export class LessonRecorder {
   ): Promise<void> {
     await this.withBlockerPatternAdmissionLock(extractedLesson, async () => {
       let lesson = this.withCurrentBlockerPatterns(extractedLesson);
-      const cooldownKey = this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
+      const cooldownKey =
+        this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
       let admissionSettled: ((admitted: boolean) => void) | undefined;
       let admissionPromise: Promise<boolean> | undefined;
       if (cooldownKey) {
@@ -321,6 +351,7 @@ export class LessonRecorder {
             ],
             verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
           },
+          rollbackWorkflow: createLessonRollbackWorkflow(),
           testTraceability: [
             {
               lessonId,
@@ -718,6 +749,16 @@ function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate 
     instructions: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.instructions],
     requiredEvidence: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.requiredEvidence],
     outputSchema: { ...POST_PR_LESSON_EXTRACTION_TEMPLATE.outputSchema },
+  };
+}
+
+function createLessonRollbackWorkflow(): LessonRollbackWorkflow {
+  return {
+    ...LESSON_ROLLBACK_WORKFLOW,
+    eligibleStates: [...LESSON_ROLLBACK_WORKFLOW.eligibleStates],
+    steps: [...LESSON_ROLLBACK_WORKFLOW.steps],
+    requiredEvidence: [...LESSON_ROLLBACK_WORKFLOW.requiredEvidence],
+    requestSchema: { ...LESSON_ROLLBACK_WORKFLOW.requestSchema },
   };
 }
 

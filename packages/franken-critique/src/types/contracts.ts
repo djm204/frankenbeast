@@ -69,6 +69,28 @@ export interface LessonExperimentSandbox {
   readonly verificationCommand: string;
 }
 
+/** Structured workflow that tells PM/liveness tooling how to roll back a bad lesson safely. */
+export interface LessonRollbackWorkflow {
+  /** Stable workflow identifier for downstream PM/liveness tooling. */
+  readonly workflowId: 'lesson-rollback-v1';
+  /** Lesson states where rollback is valid. */
+  readonly eligibleStates: readonly ('experimental' | 'promoted')[];
+  /** Deterministic rollback actions in execution order. */
+  readonly steps: readonly string[];
+  /** Evidence required before a rollback can retire or quarantine a lesson. */
+  readonly requiredEvidence: readonly string[];
+  /** JSON object shape expected when an LLM or operator requests rollback. */
+  readonly requestSchema: {
+    readonly lessonId: 'string';
+    readonly rollbackReason: 'string';
+    readonly evidenceUrls: 'string[]';
+    readonly replacementLesson: 'string-or-null';
+    readonly verificationCommand: 'string';
+  };
+  /** Explicit failure guidance when the rollback request lacks enough evidence. */
+  readonly insufficientEvidenceGuidance: string;
+}
+
 /** A normalized reviewer finding captured alongside a learned critique lesson. */
 export interface ReviewerFeedbackLessonEntry {
   /** Iteration where the reviewer feedback was emitted. */
@@ -194,6 +216,8 @@ export interface CritiqueLesson {
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
   /** Present for new lessons that must remain quarantined until independently verified. */
   readonly experimentSandbox?: LessonExperimentSandbox;
+  /** LLM-friendly workflow for rolling back an incorrect, stale, or harmful learned lesson. */
+  readonly rollbackWorkflow?: LessonRollbackWorkflow;
   /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
   readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
   /** Structured template for extracting reusable lessons from post-PR review/merge evidence. */
