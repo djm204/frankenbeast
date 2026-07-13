@@ -471,7 +471,7 @@ When `requireSignedApprovals` is `true`, the gateway throws `SignatureVerificati
 
 ### Session Tokens
 
-On APPROVE, the gateway can issue a scoped, time-limited `SessionToken` — the agent must present this token to invoke the approved skill:
+On APPROVE, the gateway can issue a scoped, time-limited `SessionToken`. A `GovernorCritiqueAdapter` that is wired with the same `SessionTokenStore` accepts `rationale.approvalSessionTokenId` for later risky actions, but only while the token is unexpired and scoped to the selected tool (or task when no tool is selected). Expired, missing, or wrong-scope tokens fail closed to a fresh operator prompt without printing token values:
 
 ```typescript
 import {
@@ -496,9 +496,20 @@ const gateway = new ApprovalGateway({
 
 const outcome = await gateway.requestApproval(request);
 if (outcome.decision === 'APPROVE' && outcome.token) {
-  // Later, verify the token before executing
-  if (store.isValid(outcome.token.tokenId)) {
-    // Proceed — token is valid and not expired
+  // Later, pass only the opaque token id back through the rationale boundary.
+  // The adapter validates scope + expiry before skipping another prompt.
+  const result = await governor.verifyRationale({
+    taskId: 'task-001',
+    reasoning: 'Deploy to production after prior operator approval',
+    selectedTool: 'deploy-prod',
+    expectedOutcome: 'Production deployment succeeds',
+    timestamp: new Date(),
+    approvalSessionTokenId: outcome.token.tokenId,
+  });
+
+  // Direct stores and external hooks can still verify manually.
+  if (store.isValid(outcome.token.tokenId, 'deploy-prod')) {
+    // Proceed — token is valid, scoped, and not expired
   }
 
   // Revoke when done

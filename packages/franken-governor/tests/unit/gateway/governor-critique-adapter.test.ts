@@ -4,21 +4,24 @@ import type { SkillMetadataSource } from '../../../src/gateway/governor-critique
 import type { ApprovalRequest, ApprovalOutcome } from '../../../src/core/types.js';
 import type { ApprovalChannel } from '../../../src/gateway/approval-channel.js';
 import type { TriggerEvaluator } from '../../../src/triggers/trigger-evaluator.js';
-import type { TriggerResult } from '../../../src/core/types.js';
 import { BudgetTrigger } from '../../../src/triggers/budget-trigger.js';
 import { SkillTrigger } from '../../../src/triggers/skill-trigger.js';
+import { SessionTokenStore } from '../../../src/security/session-token-store.js';
+import { createSessionToken } from '../../../src/security/session-token.js';
+import { createTaskId, type TaskId } from '@franken/types';
 
 interface RationaleBlock {
-  taskId: string;
+  taskId: TaskId;
   reasoning: string;
   selectedTool?: string;
   expectedOutcome: string;
   timestamp: Date;
+  approvalSessionTokenId?: string;
 }
 
 function makeRationale(overrides: Partial<RationaleBlock> = {}): RationaleBlock {
   return {
-    taskId: 'task-001',
+    taskId: createTaskId('task-001'),
     reasoning: 'Deploy because staging tests passed',
     selectedTool: 'deploy-prod',
     expectedOutcome: 'Production deployment succeeds',
@@ -365,5 +368,102 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       severity: 'critical',
     });
     expect(laterCalled).toBe(false);
+  });
+
+  it('skips a fresh operator approval prompt for a risky skill when a scoped session token is still valid', async () => {
+    const tokenStore = new SessionTokenStore();
+    const token = createSessionToken({
+      approvalId: 'prior-approval',
+      scope: 'deploy-prod',
+      grantedBy: 'operator',
+      ttlMs: 60_000,
+    });
+    tokenStore.store(token);
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({
+      selectedTool: 'deploy-prod',
+      approvalSessionTokenId: token.tokenId,
+    }));
+
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('fails closed to a fresh operator prompt when the risky-action session token is expired', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const tokenStore = new SessionTokenStore();
+      const token = createSessionToken({
+        approvalId: 'prior-approval',
+        scope: 'deploy-prod',
+        grantedBy: 'operator',
+        ttlMs: 1_000,
+      });
+      tokenStore.store(token);
+      vi.setSystemTime(new Date('2026-01-01T00:00:02Z'));
+      const channel = makeFakeChannel('APPROVE');
+      const adapter = new GovernorCritiqueAdapter({
+        channel,
+        auditRecorder: makeFakeAuditRecorder(),
+        evaluators: [new SkillTrigger()],
+        projectId: 'proj-001',
+        skillMetadata: makeSkillMetadataSource({
+          'deploy-prod': { requiresHitl: true, isDestructive: true },
+        }),
+        sessionTokenStore: tokenStore,
+      });
+
+      const result = await adapter.verifyRationale(makeRationale({
+        selectedTool: 'deploy-prod',
+        approvalSessionTokenId: token.tokenId,
+      }));
+
+      expect(result).toEqual({ verdict: 'approved' });
+      expect(channel.requestApproval).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let a session token scoped to one risky tool approve a different risky tool', async () => {
+    const tokenStore = new SessionTokenStore();
+    const token = createSessionToken({
+      approvalId: 'prior-approval',
+      scope: 'deploy-prod',
+      grantedBy: 'operator',
+      ttlMs: 60_000,
+    });
+    tokenStore.store(token);
+    const channel = makeFakeChannel('APPROVE');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'delete-db': { requiresHitl: true, isDestructive: true },
+      }),
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({
+      selectedTool: 'delete-db',
+      approvalSessionTokenId: token.tokenId,
+    }));
+
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
   });
 });

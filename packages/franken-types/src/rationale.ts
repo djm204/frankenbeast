@@ -10,6 +10,12 @@ export interface RationaleBlock {
   selectedTool?: string;
   expectedOutcome: string;
   timestamp: Date;
+  /**
+   * Optional operator session token id from a prior approval. Governors must
+   * validate the token against the risky action scope and expiry before using
+   * it to bypass a fresh operator prompt.
+   */
+  approvalSessionTokenId?: string;
 }
 
 /**

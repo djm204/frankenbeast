@@ -3,6 +3,7 @@ import { defaultConfig, type GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
 import { ApprovalGateway, type AuditRecorder } from './approval-gateway.js';
 import type { SignatureVerifier } from '../security/signature-verifier.js';
+import type { SessionTokenStore } from '../security/session-token-store.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { BudgetTrigger, type BudgetTriggerContext } from '../triggers/budget-trigger.js';
 import { evaluateTrigger } from '../triggers/evaluate-trigger.js';
@@ -46,6 +47,12 @@ export interface GovernorCritiqueAdapterDeps {
    * BudgetTrigger is skipped (its context cannot be constructed).
    */
   readonly budgetState?: BudgetStateSource;
+  /**
+   * Optional operator-session token store. When supplied, a triggered risky
+   * action may proceed without another prompt only if the rationale presents a
+   * non-expired token scoped to the selected tool or task.
+   */
+  readonly sessionTokenStore?: SessionTokenStore;
 }
 
 /** Sentinel result for an evaluator whose context cannot be constructed. */
@@ -59,6 +66,7 @@ export class GovernorCritiqueAdapter {
   private readonly projectId: string;
   private readonly skillMetadata: SkillMetadataSource | undefined;
   private readonly budgetState: BudgetStateSource | undefined;
+  private readonly sessionTokenStore: SessionTokenStore | undefined;
 
   constructor(deps: GovernorCritiqueAdapterDeps) {
     this.gateway = new ApprovalGateway({
@@ -66,11 +74,13 @@ export class GovernorCritiqueAdapter {
       auditRecorder: deps.auditRecorder,
       config: deps.config ?? defaultConfig(),
       ...(deps.signatureVerifier ? { signatureVerifier: deps.signatureVerifier } : {}),
+      ...(deps.sessionTokenStore ? { sessionTokenStore: deps.sessionTokenStore } : {}),
     });
     this.evaluators = deps.evaluators;
     this.projectId = deps.projectId;
     this.skillMetadata = deps.skillMetadata;
     this.budgetState = deps.budgetState;
+    this.sessionTokenStore = deps.sessionTokenStore;
   }
 
   async verifyRationale(rationale: RationaleBlock): Promise<VerificationResult> {
@@ -92,6 +102,10 @@ export class GovernorCritiqueAdapter {
     const request: ApprovalRequest = rationale.selectedTool !== undefined
       ? { ...base, skillId: rationale.selectedTool }
       : base;
+
+    if (this.hasValidOperatorSession(request, rationale)) {
+      return { verdict: 'approved' };
+    }
 
     const outcome = await this.gateway.requestApproval(request);
 
@@ -118,6 +132,15 @@ export class GovernorCritiqueAdapter {
       if (result.triggered) return result;
     }
     return { triggered: false, triggerId: 'none' };
+  }
+
+  private hasValidOperatorSession(request: ApprovalRequest, rationale: RationaleBlock): boolean {
+    if (!this.sessionTokenStore || !rationale.approvalSessionTokenId) {
+      return false;
+    }
+
+    const scope = request.skillId ?? request.taskId;
+    return this.sessionTokenStore.isValid(rationale.approvalSessionTokenId, scope);
   }
 
   /**
