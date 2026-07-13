@@ -812,14 +812,23 @@ function createAgentImprovementScorecard(
   );
   const findings = allFindings.length > 0 ? allFindings : currentFindings;
   const initialScore =
+    evaluatorFailures[0]?.result.results.find(
+      (result) => result.evaluatorName === evaluatorName,
+    )?.score ??
     failingIteration.result.results.find(
       (result) => result.evaluatorName === evaluatorName,
-    )?.score ?? failingIteration.result.overallScore;
+    )?.score ??
+    failingIteration.result.overallScore;
   const passingIteration = allIterations.find(
     (iteration) =>
       iteration.result.verdict === 'pass' || iteration.result.verdict === 'warn',
   );
-  const finalScore = passingIteration?.result.overallScore ?? initialScore;
+  const finalScore =
+    passingIteration?.result.results.find(
+      (result) => result.evaluatorName === evaluatorName,
+    )?.score ??
+    passingIteration?.result.overallScore ??
+    initialScore;
   const findingCounts = countScorecardFindings(findings);
   const scoreDelta = roundScore(finalScore - initialScore);
   const improvementSignals = [

@@ -38,6 +38,13 @@ function createIteration(
     ],
     shortCircuited: false,
   };
+  return createIterationFromResult(index, result);
+}
+
+function createIterationFromResult(
+  index: number,
+  result: CritiqueResult,
+): CritiqueIteration {
   return {
     index,
     input: { content: `iteration ${index}`, metadata: {} },
@@ -267,6 +274,87 @@ describe('LessonRecorder', () => {
       ],
       guidance:
         'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.',
+    });
+  });
+
+  it('uses the first failed evaluator score and recovered evaluator score in per-agent scorecards', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, { agentId: 'worker-alpha' });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIterationFromResult(0, {
+          verdict: 'fail',
+          overallScore: 0.2,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.1,
+              findings: [{ message: 'missing verifier', severity: 'warning' }],
+            },
+            {
+              evaluatorName: 'style-gate',
+              verdict: 'pass',
+              score: 0.9,
+              findings: [],
+            },
+          ],
+        }),
+        createIterationFromResult(1, {
+          verdict: 'fail',
+          overallScore: 0.4,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.5,
+              findings: [{ message: 'partial verifier', severity: 'warning' }],
+            },
+          ],
+        }),
+        createIterationFromResult(2, {
+          verdict: 'pass',
+          overallScore: 0.6,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'pass',
+              score: 0.95,
+              findings: [],
+            },
+            {
+              evaluatorName: 'style-gate',
+              verdict: 'warn',
+              score: 0.25,
+              findings: [{ message: 'style nit', severity: 'warning' }],
+            },
+          ],
+        }),
+      ],
+    };
+
+    await recorder.record(result, 'scorecard-task');
+
+    const firstLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(firstLesson.agentImprovementScorecard).toMatchObject({
+      evaluatorName: 'quality-gate',
+      initialScore: 0.1,
+      finalScore: 0.95,
+      scoreDelta: 0.85,
+      failingIterations: [0, 1],
+      resolvedIteration: 2,
+      findingCounts: {
+        critical: 0,
+        warning: 2,
+        info: 0,
+        total: 2,
+      },
     });
   });
 
