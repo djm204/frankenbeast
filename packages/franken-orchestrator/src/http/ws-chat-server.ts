@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { approvalRuntimeInput } from '../chat/approval-input.js';
+import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../chat/approval-input.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../chat/runtime.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { ChatSession } from '../chat/types.js';
@@ -426,7 +426,34 @@ export class ChatSocketController {
 
     const pendingApproval = session.pendingApproval ?? null;
     const originalState = session.state;
-    const runtimeInput = approvalRuntimeInput(pendingApproval);
+    let runtimeInput: string;
+    try {
+      runtimeInput = approvalRuntimeInput(pendingApproval);
+    } catch (error) {
+      if (error instanceof UnsafeApprovalCommandError) {
+        const timestamp = nowIso();
+        this.emit(peer, {
+          type: 'turn.error',
+          code: 'UNSAFE_APPROVAL_COMMAND',
+          message: error.message,
+          timestamp,
+        });
+        if (pendingApproval) {
+          this.emit(peer, {
+            type: 'turn.approval.requested',
+            description: pendingApproval.description,
+            timestamp: pendingApproval.requestedAt,
+            ...(pendingApproval.tool ? { tool: pendingApproval.tool } : {}),
+            ...(pendingApproval.command ? { command: pendingApproval.command } : {}),
+            ...(pendingApproval.risk ? { risk: pendingApproval.risk } : {}),
+            ...(pendingApproval.affectedFiles ? { affectedFiles: pendingApproval.affectedFiles } : {}),
+            ...(pendingApproval.sessionId ? { sessionId: pendingApproval.sessionId } : {}),
+          });
+        }
+        return;
+      }
+      throw error;
+    }
     session.pendingApproval = null;
     session.state = 'approved';
     session.updatedAt = nowIso();

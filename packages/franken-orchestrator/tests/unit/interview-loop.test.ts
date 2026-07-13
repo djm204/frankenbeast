@@ -133,6 +133,52 @@ describe('InterviewLoop', () => {
       expect(io.ask).toHaveBeenCalledTimes(6);
     });
 
+    it('parses common unnumbered clarifying question formats', async () => {
+      const bulletQuestions = `- What authentication method do you prefer?
+* Q2: Should we support OAuth?
+Question: What database will be used?
+Clarifying question: Should sessions expire automatically?`;
+      const llm = mockLlm(bulletQuestions, designDocResponse);
+      const io = mockIO('JWT', 'Yes', 'PostgreSQL', 'Yes', 'yes');
+      const graphBuilder = mockGraphBuilder();
+      const loop = new InterviewLoop(llm, io, graphBuilder);
+
+      await loop.build(intent);
+
+      expect(io.ask).toHaveBeenCalledTimes(5);
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+        'What authentication method do you prefer?',
+      );
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe(
+        'Should we support OAuth?',
+      );
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[2][0]).toBe(
+        'What database will be used?',
+      );
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[3][0]).toBe(
+        'Should sessions expire automatically?',
+      );
+    });
+
+    it('does not treat bullet answer options as clarifying questions', async () => {
+      const mixedQuestions = `1. Which authentication method?
+- JWT
+- OAuth
+2. Which database?`;
+      const llm = mockLlm(mixedQuestions, designDocResponse);
+      const io = mockIO('JWT', 'PostgreSQL', 'yes');
+      const graphBuilder = mockGraphBuilder();
+      const loop = new InterviewLoop(llm, io, graphBuilder);
+
+      await loop.build(intent);
+
+      expect(io.ask).toHaveBeenCalledTimes(3);
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+        'Which authentication method?',
+      );
+      expect((io.ask as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe('Which database?');
+    });
+
     it('handles LLM returning no questions gracefully', async () => {
       const noQuestions = 'No clarifying questions needed.';
       const llm = mockLlm(noQuestions, designDocResponse);
@@ -315,7 +361,19 @@ describe('InterviewLoop', () => {
       expect(graphBuilder.build).toHaveBeenCalledOnce();
     });
 
-    it('treats anything other than yes/y as rejection', async () => {
+    it.each(['yeah', 'yea', 'true', '1'])('treats "%s" as approval', async (approval) => {
+      const llm = mockLlm(questionsResponse, designDocResponse);
+      const io = mockIO('JWT', 'Yes', 'PostgreSQL', approval);
+      const graphBuilder = mockGraphBuilder();
+      const loop = new InterviewLoop(llm, io, graphBuilder);
+
+      const graph = await loop.build(intent);
+
+      expect(graph).toBeDefined();
+      expect(graphBuilder.build).toHaveBeenCalledOnce();
+    });
+
+    it('treats negative responses as rejection', async () => {
       const llm = mockLlm(questionsResponse, designDocResponse, revisedDesignDocResponse);
       const io = mockIO('JWT', 'Yes', 'PostgreSQL', 'nah', 'fix it', 'yes');
       const graphBuilder = mockGraphBuilder();

@@ -1,5 +1,14 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-12 — Runtime tool manifest security defaults
+- Default new/runtime skill tools to `requiresHitl: true` after schema validation, and preserve explicit `requiresHitl: false` only for reviewed safe tools.
+- Validate catalog `toolDefinitions` before creating/writing skill install files; otherwise a failed install can leave a partial MCP skill on disk and accidentally expose unknown runtime tools.
+- Regression tests should cover omitted HITL defaulting, explicit safe-tool opt-outs, manifest readback, stale-manifest removal on catalog reinstall and custom install replacement, no-tools MCP alias behavior, and invalid tool manifests leaving no partial install.
+
+## 2026-07-11 — Approval replay command extraction guardrails
+- Approval replay commands are model-derived state, not fresh operator input. Keep the replay helper narrow: accept only trimmed single-line printable non-slash command descriptions, fail closed on multiline/control-command payloads, preserve the pending approval, and make operators reject/re-submit an explicit `/run` for overrides.
+- Regression coverage should include the low-level replay helper and the HTTP approval route so unsafe payloads do not reach the runtime/LLM and error responses do not echo injected command text.
+
 ## 2026-07-11 — Vitest config env-flag regression tests
 - For Vitest suite-flag fixes, assert false-like env values (`0`, `false`, `no`, blank) preserve the default unit-test include set in package configs, not just helper return values.
 - In Vitest tests, avoid cache-busting variable dynamic imports such as `import(`../vitest.config.ts?case=${...}`)`: Vite cannot statically analyze them. Use a static config import and reset env/argv around each assertion instead.
@@ -123,3 +132,11 @@
 ## 2026-07-11 — Session-store corruption diagnostics
 - Atomic session writes for private transcripts should create temp files with the final restrictive mode up front, not chmod only after writing; preserve existing destination mode and default new session files to restrictive permissions.
 - Corrupt-session API diagnostics should expose only operator-useful summaries, not local server paths. When project-filtering diagnostics, keep unknown-project corruptions visible so malformed JSON does not disappear silently after quarantine.
+
+## 2026-07-11 — Chunk snapshot restore corrupt-task ambiguity
+- Unscoped chunk-session snapshot restore must fail closed when corrupt task-scoped snapshots could belong to another task for the requested chunk. Normalize encoded task storage keys, keep already-quarantined `*.json.corrupt.*` entries in ambiguity scans, cover generated recovery task IDs (`fix-harden:<chunk>-attempt-*`), and treat opaque task IDs conservatively unless the task key clearly names a different chunk. Parse known generated prefixes (`impl:`, `harden:`, `fix-*`, `cli:`) and compare the extracted chunk exactly; include hyphenated/slash and single-token chunk IDs such as `impl:issue-1`, `impl:define-types`, `impl:issue-10/chunk-1`, and `impl:auth`, but keep opaque namespaced IDs like `task:2` ambiguous and do not let `auth` match `auth-api`.
+
+## 2026-07-11 — Vite Beast proxy documentation examples
+- For docs with copyable foreground service recipes, split long-running services into clearly labeled terminals, quote placeholder env values so Bash does not parse `<...>` as redirection, and repeat server-side token exports in every process that needs to inject Beast proxy auth (daemon, chat-server, and Vite dev server).
+
+- 2026-07-12 — Web prompt attachment security: when adding restricted wrappers for untrusted markdown, fence both the file content and any user-controlled metadata such as filenames; sanitized names can still contain markdown/instructions and must not be emitted as trusted prompt text. Detect markdown suffixes after control-character normalization as well as on raw first-line names.

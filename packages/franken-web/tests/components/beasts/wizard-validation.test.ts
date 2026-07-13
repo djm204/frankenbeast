@@ -37,6 +37,30 @@ describe('wizard validation', () => {
     expect(errors).toEqual({});
   });
 
+  it('rejects unsafe design-interview output paths before launch', () => {
+    const errors = validateWizardStep(1, {
+      1: { workflowType: 'design-interview', goal: 'Draft billing design', outputPath: '../secret.md' },
+    });
+
+    expect(errors.outputPath).toBe('Path must be a repo-relative path without traversal.');
+  });
+
+  it('rejects unsafe custom catalog file prompts by kind', () => {
+    const errors = validateWizardStep(1, {
+      1: { workflowType: 'custom-beast', artifactFile: '../secret.md' },
+    }, [{
+      id: 'custom-beast',
+      label: 'Custom Beast',
+      description: 'Custom catalog definition',
+      executionModeDefault: 'process',
+      interviewPrompts: [
+        { key: 'artifactFile', prompt: 'Artifact file?', kind: 'file', required: true },
+      ],
+    }]);
+
+    expect(errors.artifactFile).toBe('Path must be a repo-relative path without traversal.');
+  });
+
   it.each([
     '/tmp/design.md',
     'C:\\tmp\\design.md',
@@ -66,7 +90,7 @@ describe('wizard validation', () => {
   ])('rejects browser fakepath values for %s', (_label, workflowValues, errorKey) => {
     const errors = validateWizardStep(1, { 1: workflowValues });
 
-    expect(errors[errorKey]).toBe('Directory path must be a repo-relative path, not a browser fake path.');
+    expect(errors[errorKey]).toBe('Browser directory pickers cannot provide a server path. Enter a repo-relative path manually.');
   });
 
   it('rejects martin-loop when backend-required fields are missing', () => {

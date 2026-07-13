@@ -12,24 +12,26 @@ import { createSecretStore } from '../network/secret-store.js';
 export interface InitCommandOptions {
   args: CliArgs;
   config: OrchestratorConfig;
+  configLoadFallback?: boolean | undefined;
   io: InterviewIO;
   paths: ProjectPaths;
   print: (message: string) => void;
 }
 
 export async function handleInitCommand(options: InitCommandOptions): Promise<void> {
+  const configFile = options.args.config ?? options.paths.configFile;
   const stateStore = new FileInitStateStore(join(options.paths.frankenbeastDir, 'init-state.json'));
 
   // Verify path: no secret store needed — pure file validation
   if (options.args.initVerify) {
     const verification = await verifyInit({
-      configFile: options.paths.configFile,
+      configFile,
       stateStore,
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     options.print(
       verification.ok
-        ? `Init verify passed for ${options.paths.configFile}.`
+        ? `Init verify passed for ${configFile}.`
         : verification.messages.join('\n'),
     );
     return;
@@ -37,7 +39,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
 
   if (options.args.initNonInteractive) {
     const verification = await verifyInit({
-      configFile: options.paths.configFile,
+      configFile,
       stateStore,
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
@@ -50,7 +52,7 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
         ].join('\n'),
       );
     }
-    options.print(`Init config is already complete at ${options.paths.configFile}.`);
+    options.print(`Init config is already complete at ${configFile}.`);
     return;
   }
 
@@ -69,28 +71,30 @@ export async function handleInitCommand(options: InitCommandOptions): Promise<vo
 
   if (options.args.initRepair) {
     const result = await runRepairInit({
-      configFile: options.paths.configFile,
+      configFile,
       stateStore,
       io: options.io,
       initBackend,
+      baseConfig: options.configLoadFallback ? options.config : undefined,
       secretStore,
       allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
     });
     options.print(
-      `Repaired init config at ${options.paths.configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
+      `Repaired init config at ${configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
     );
     return;
   }
   const result = await runInteractiveInit({
-    configFile: options.paths.configFile,
+    configFile,
     stateStore,
     io: options.io,
     initBackend,
+    baseConfig: options.configLoadFallback ? options.config : undefined,
     secretStore,
     allowTrustedProviderCommandOverrides: options.args.trustProviderCommandOverrides,
   });
 
   options.print(
-    `Saved init config to ${options.paths.configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
+    `Saved init config to ${configFile} with modules: ${result.state.selectedModules.join(', ') || 'none'}.`,
   );
 }

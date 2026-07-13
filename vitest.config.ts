@@ -109,6 +109,7 @@ export default defineConfig({
       '@franken/observer': resolve(__dirname, 'packages/franken-observer/src/index.ts'),
       '@franken/critique': resolve(__dirname, 'packages/franken-critique/src/index.ts'),
       '@franken/governor': resolve(__dirname, 'packages/franken-governor/src/index.ts'),
+      '@franken/types/json-pointer': resolve(__dirname, 'packages/franken-types/src/json-pointer.ts'),
       '@franken/types/utils': resolve(__dirname, 'packages/franken-types/src/utils/index.ts'),
       '@franken/types': resolve(__dirname, 'packages/franken-types/src/index.ts'),
       '@franken/orchestrator': resolve(__dirname, 'packages/franken-orchestrator/src/index.ts'),

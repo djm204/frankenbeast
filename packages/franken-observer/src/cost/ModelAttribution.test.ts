@@ -27,6 +27,10 @@ describe('ModelAttribution', () => {
       ['negative completion tokens', { promptTokens: 0, completionTokens: -1 }],
       ['fractional prompt tokens', { promptTokens: 1.5, completionTokens: 0 }],
       ['fractional completion tokens', { promptTokens: 0, completionTokens: 1.5 }],
+      ['NaN prompt tokens', { promptTokens: Number.NaN, completionTokens: 0 }],
+      ['NaN completion tokens', { promptTokens: 0, completionTokens: Number.NaN }],
+      ['infinite prompt tokens', { promptTokens: Number.POSITIVE_INFINITY, completionTokens: 0 }],
+      ['infinite completion tokens', { promptTokens: 0, completionTokens: Number.POSITIVE_INFINITY }],
       ['unsafe prompt tokens', { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 }],
       ['unsafe completion tokens', { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 }],
     ])('rejects %s before mutating state', (_name, tokens) => {
@@ -58,6 +62,23 @@ describe('ModelAttribution', () => {
 
       expect(() =>
         attr.record({ model: 'gpt-4o', promptTokens: 1, completionTokens: 0, success: false }),
+      ).toThrow(RangeError)
+
+      expect(attr.report()).toEqual(before)
+    })
+
+    it('rejects aggregate totals that would overflow across models before mutating state', () => {
+      const attr = new ModelAttribution(DEFAULT_PRICING)
+      attr.record({
+        model: 'gpt-4o',
+        promptTokens: Number.MAX_SAFE_INTEGER,
+        completionTokens: 0,
+        success: true,
+      })
+      const before = attr.report()
+
+      expect(() =>
+        attr.record({ model: 'claude-opus-4-6', promptTokens: 1, completionTokens: 0, success: true }),
       ).toThrow(RangeError)
 
       expect(attr.report()).toEqual(before)

@@ -675,4 +675,33 @@ describe('fbeast init', () => {
     expect(hooks.hooks.PostToolUse[0].hooks[0].command).toBe(shellQuote(postScript));
     expect(readFileSync(preScript, 'utf-8')).toContain('fbeast-hook pre-tool');
   });
+
+  it('single-quotes shell assignment values in generated helper scripts', () => {
+    const root = tmpDir();
+    dirs.push(root);
+    const claudeDir = join(root, '.claude');
+    const geminiDir = join(root, '.gemini');
+    const mockSpawn = () => ({ status: 0 });
+
+    runInit({ root, claudeDir, hooks: true, client: 'claude' });
+    runInit({ root, claudeDir: geminiDir, hooks: true, client: 'gemini' });
+    runInit({ root, claudeDir: join(root, '.codex'), hooks: true, client: 'codex', spawn: mockSpawn });
+
+    const scripts = [
+      join(root, '.fbeast', 'hooks', 'fbeast-claude-pre-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'fbeast-claude-post-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'gemini-before-tool.sh'),
+      join(root, '.fbeast', 'hooks', 'gemini-after-tool.sh'),
+      join(root, '.codex', 'hooks', 'fbeast-codex-pre-tool.sh'),
+      join(root, '.codex', 'hooks', 'fbeast-codex-post-tool.sh'),
+    ];
+
+    for (const script of scripts) {
+      const content = readFileSync(script, 'utf-8');
+      expect(content).toContain(`NODE_BIN=${shellQuote(process.execPath)}`);
+      expect(content).not.toContain(`NODE_BIN=${JSON.stringify(process.execPath)}`);
+      expect(content).not.toMatch(/^DB_PATH="/m);
+      expect(content).not.toMatch(/^NODE_BIN="/m);
+    }
+  });
 });

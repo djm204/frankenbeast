@@ -48,7 +48,23 @@ describe('SessionTokenStore', () => {
     expect(store.get(token.tokenId)).toBeUndefined();
   });
 
-  it('cleanupExpired() prunes expired in-memory tokens that were never queried', () => {
+  it('sweepExpired() prunes multiple expired in-memory tokens without querying their ids', () => {
+    const store = new SessionTokenStore();
+    const expiredA = makeToken(1000);
+    const expiredB = makeToken(1500);
+    const fresh = makeToken(10_000);
+
+    store.store(expiredA);
+    store.store(expiredB);
+    store.store(fresh);
+
+    expect(store.sweepExpired({ nowMs: expiredB.expiresAt.getTime() + 1 })).toBe(2);
+    expect(store.get(expiredA.tokenId)).toBeUndefined();
+    expect(store.get(expiredB.tokenId)).toBeUndefined();
+    expect(store.get(fresh.tokenId)).toEqual(fresh);
+  });
+
+  it('cleanupExpired() remains available as a compatibility alias', () => {
     const store = new SessionTokenStore();
     const expired = makeToken(1000);
     const fresh = makeToken(10_000);
@@ -202,7 +218,7 @@ describe('SessionTokenStore', () => {
     }
   });
 
-  it('cleanupExpired() rewrites persisted stores with unqueried expired tokens', () => {
+  it('sweepExpired() rewrites persisted stores with unqueried expired tokens', () => {
     const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
     const persistenceFile = join(dir, 'tokens.json');
     try {
@@ -212,12 +228,10 @@ describe('SessionTokenStore', () => {
       store.store(expired);
       store.store(fresh);
 
-      vi.advanceTimersByTime(2000);
-
       const beforeCleanup = JSON.parse(readFileSync(persistenceFile, 'utf8'));
       expect(beforeCleanup).toHaveLength(2);
 
-      expect(store.cleanupExpired()).toBe(1);
+      expect(store.sweepExpired({ nowMs: expired.expiresAt.getTime() + 1 })).toBe(1);
 
       const persisted = JSON.parse(readFileSync(persistenceFile, 'utf8'));
       expect(persisted).toHaveLength(1);

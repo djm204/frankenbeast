@@ -7,6 +7,25 @@ import { spawnSync } from 'node:child_process';
 const ROOT = join(import.meta.dirname, '..');
 const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
 
+function composeServices(): string[] {
+  const services = new Set<string>();
+  let inServices = false;
+  for (const line of read('docker-compose.yml').split(/\r?\n/u)) {
+    if (line === 'services:') {
+      inServices = true;
+      continue;
+    }
+    if (inServices && /^\S/u.test(line)) {
+      break;
+    }
+    const match = inServices ? /^  ([a-z][\w-]*):$/u.exec(line) : null;
+    if (match) {
+      services.add(match[1]!);
+    }
+  }
+  return [...services].sort();
+}
+
 describe('local setup scripts', () => {
   it('enforces a coherent Node.js minimum across workspace packages and local tooling', () => {
     const packagePaths = [
@@ -44,6 +63,24 @@ describe('local setup scripts', () => {
     expect(source).not.toContain('/api/v1/heartbeat');
     expect(source).not.toContain('localhost:9090');
     expect(source).not.toContain('Firewall server');
+  });
+
+  it('keeps verify-setup aligned with the quickstart compose service contract', () => {
+    const source = read('scripts/verify-setup.ts');
+    const quickstart = read('docs/guides/quickstart.md');
+
+    expect(composeServices()).toEqual(['chromadb', 'grafana', 'tempo']);
+    expect(quickstart).toContain('This starts the services defined in `docker-compose.yml`');
+    expect(quickstart).toContain('**ChromaDB** (port 8000)');
+    expect(quickstart).toContain('**Grafana** (port 3000)');
+    expect(quickstart).toContain('**Tempo** (ports 3200, 4317, 4318)');
+    expect(quickstart).toContain('There is no `firewall` Docker service in the current compose file.');
+    expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`)");
+    expect(source).toContain("await checkHttp('Grafana', 'http://localhost:3000/api/health')");
+    expect(source).toContain("await checkHttp('Tempo', 'http://localhost:3200/ready')");
+    expect(source).toContain('Some checks failed: ${failedChecks}');
+    expect(source).toContain('for ChromaDB, Grafana, and Tempo');
+    expect(source).not.toMatch(/localhost:9090|Firewall server/u);
   });
 
   it('verify-setup supports a dry-run that validates bootstrap prerequisites without probing services', () => {
@@ -313,8 +350,11 @@ describe('local setup scripts', () => {
     expect(readme).toContain('frankenbeast init --verify');
     expect(readme).toContain('review token prompts carefully');
     expect(readme).toContain('frankenbeast init --non-interactive');
+    expect(readme).toContain('If you omit `network.secureBackend`, the config schema and init flow use `local-encrypted`');
+    expect(readme).toContain('`os-keychain` is never selected automatically');
     expect(readme).toContain('Choose the secret backend before the first init run');
     expect(readme).toContain('{ "network": { "secureBackend": "os-keychain" } }');
+    expect(readme).toContain('instead of the default encrypted file');
     expect(readme).toContain('{ "network": { "secureBackend": "1password" } }');
     expect(readme).toContain('{ "network": { "secureBackend": "bitwarden" } }');
     expect(readme).toContain('it applies the same `network.secureBackend` choice');
@@ -416,15 +456,36 @@ describe('local setup scripts', () => {
   it('keeps the CLI Beast guide aligned with supported Beast activation providers', () => {
     const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
     const beastModeSource = read('packages/franken-mcp-suite/src/cli/beast-mode.ts');
+    const providerConfigSource = read('packages/franken-orchestrator/src/providers/provider-config.ts');
 
     expect(runCliBeastGuide).toContain('`OLLAMA_BASE_URL` is a legacy/forward-looking endpoint variable');
     expect(runCliBeastGuide).toContain('Setting `OLLAMA_BASE_URL` alone will not enable an Ollama-backed run in this build');
     expect(runCliBeastGuide).toContain('http://localhost:11434');
     expect(runCliBeastGuide).toContain('intentionally leaves `OLLAMA_BASE_URL` out');
     expect(runCliBeastGuide).toContain('current provider schema');
+    expect(runCliBeastGuide).toContain('GOOGLE_API_KEY` / `GEMINI_API_KEY` for `gemini-api`');
+    expect(runCliBeastGuide).toContain('anthropic-api');
+    expect(runCliBeastGuide).toContain('openai-api');
+    expect(runCliBeastGuide).toContain('gemini-api');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=anthropic-api');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=codex-cli');
     expect(runCliBeastGuide).toContain('fbeast mcp beast --provider=claude-cli');
+
+    const providerTypesMatch = providerConfigSource.match(/PROVIDER_TYPES = \[([\s\S]*?)\] as const/);
+    expect(providerTypesMatch).not.toBeNull();
+    const providerTypes = providerTypesMatch?.[1] ?? '';
+    for (const providerType of [
+      'claude-cli',
+      'codex-cli',
+      'gemini-cli',
+      'anthropic-api',
+      'openai-api',
+      'gemini-api',
+    ]) {
+      expect(providerTypes).toContain(providerType);
+      expect(runCliBeastGuide).toContain(providerType);
+    }
+    expect(providerTypes).not.toMatch(/ollama/i);
 
     const providersMatch = beastModeSource.match(/SUPPORTED_BEAST_PROVIDERS = new Set\(\[([^\]]+)\]\)/);
     expect(providersMatch).not.toBeNull();

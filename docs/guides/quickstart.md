@@ -31,6 +31,13 @@ binary still matches the root `packageManager` pin before `npm audit` runs:
 npm run audit:security
 ```
 
+Dependency-update automation is fail-closed for first-party packages: Dependabot
+may update external npm and GitHub Actions dependencies, but it must ignore the
+internal `@franken/*` workspace scope for all update types and exclude it from
+every npm update group. Run `npm run check:dependabot-supply-chain` after
+editing `.github/dependabot.yml` to verify that registry-driven update PRs
+cannot confuse internal workspace packages with public packages.
+
 ## 2. Configure environment
 
 ```bash
@@ -69,7 +76,7 @@ npm run typecheck
 npm test
 ```
 
-Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. Use `test:ci` for the same root-plus-package test target that CI runs locally; it first builds the shared `@franken/types` workspace so fresh checkouts can resolve workspace package exports, and it intentionally excludes Docker smoke, security, dependency, lint, and live/e2e gates that remain separate CI steps. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
+Root scripts currently include `build`, `typecheck`, `test`, `test:ci`, `test:e2e`, `test:live:bench`, `test:root`, `test:root:watch`, and `test:coverage`. Older `build:all` / `test:all` commands are not root scripts. Use `test:ci` for the same root-plus-package test target that CI runs locally; it first builds the shared `@franken/types` workspace so fresh checkouts can resolve workspace package exports, and it intentionally excludes Docker smoke, security, dependency, lint, live benchmark, and the broader orchestrator E2E gate that remains a separate CI step. CI runs a deterministic orchestrator E2E smoke subset through the dedicated `ci:test:e2e` retry-wrapped step so the decision is visible outside the aggregate `test:ci` command. `test:live:bench` is an explicit opt-in for the live benchmark suite and delegates to the gated `@franken/live-bench` `test:live` task, which sets `FBEAST_LIVE_BENCH_E2E=1`.
 
 ## 5. Try the orchestrator CLI
 
@@ -120,6 +127,8 @@ fbeast mcp init --hooks
 ```
 
 The `fbeast` CLI in this repo exposes MCP operations (`init`, `uninstall`, `beast`) under the `mcp` subcommand; any other command is forwarded to `frankenbeast`. MCP data is stored in `.fbeast/beast.db`.
+
+Runtime skill tools are gated conservatively. Installed `tools.json` entries default to `requiresHitl: true` unless the manifest explicitly marks a reviewed safe tool with `requiresHitl: false`, and MCP skills without a `tools.json` manifest expose their server alias as human-approval-required because the concrete runtime tools are unknown. Review new tool manifests before opting any tool out of HITL.
 
 ## Project structure
 

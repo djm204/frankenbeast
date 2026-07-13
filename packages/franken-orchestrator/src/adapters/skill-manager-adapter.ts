@@ -28,14 +28,14 @@ export class SkillManagerAdapter implements ISkillsModule {
       const descriptors: SkillDescriptor[] = [];
 
       if (isServerAliasExecutable(name, tools)) {
-        descriptors.push(createDescriptor(name, name, undefined, aliasToolFor(name, tools)?.requiresHitl ?? false));
+        descriptors.push(createDescriptor(name, name, undefined, aliasToolFor(name, tools)?.requiresHitl ?? true));
       }
 
       for (const tool of tools) {
         if (tool.name !== name) {
-          descriptors.push(createDescriptor(tool.name, tool.name, name, tool.requiresHitl ?? false));
+          descriptors.push(createDescriptor(tool.name, tool.name, name, tool.requiresHitl ?? true));
         }
-        descriptors.push(createDescriptor(namespacedToolId(name, tool.name), tool.name, name, tool.requiresHitl ?? false));
+        descriptors.push(createDescriptor(namespacedToolId(name, tool.name), tool.name, name, tool.requiresHitl ?? true));
       }
 
       return descriptors;

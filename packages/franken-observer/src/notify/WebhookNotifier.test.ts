@@ -8,6 +8,16 @@ describe('WebhookNotifier', () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
   const drainAsync = () => Promise.resolve()
+  const webhookUrl = 'https://hooks.example.com/signal'
+  const allowedTargetOrigins = ['https://hooks.example.com']
+
+  const createNotifier = (options: Partial<ConstructorParameters<typeof WebhookNotifier>[0]> = {}) =>
+    new WebhookNotifier({
+      url: webhookUrl,
+      allowedTargetOrigins,
+      fetch: mockFetch,
+      ...options,
+    })
 
   beforeEach(() => {
     mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
@@ -15,28 +25,35 @@ describe('WebhookNotifier', () => {
 
   describe('send()', () => {
     it('POSTs to the configured URL', async () => {
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await notifier.send({ type: 'test' })
       const [url] = mockFetch.mock.calls[0]
       expect(url).toBe('https://hooks.example.com/signal')
     })
 
     it('uses HTTP POST method', async () => {
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await notifier.send({ type: 'test' })
       const [, init] = mockFetch.mock.calls[0]
       expect(init.method).toBe('POST')
     })
 
+    it('does not follow redirects automatically', async () => {
+      const notifier = createNotifier()
+      await notifier.send({ type: 'test' })
+      const [, init] = mockFetch.mock.calls[0]
+      expect(init.redirect).toBe('manual')
+    })
+
     it('sends Content-Type: application/json', async () => {
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await notifier.send({ type: 'test' })
       const [, init] = mockFetch.mock.calls[0]
       expect(init.headers['Content-Type']).toBe('application/json')
     })
 
     it('serialises the payload as a JSON body', async () => {
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await notifier.send({ type: 'circuit-breaker', spendUsd: 1.5, limitUsd: 1.0 })
       const [, init] = mockFetch.mock.calls[0]
       const body = JSON.parse(init.body as string)
@@ -44,7 +61,7 @@ describe('WebhookNotifier', () => {
     })
 
     it('merges custom headers with Content-Type', async () => {
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         headers: { 'X-Api-Key': 'test-api-key', Authorization: 'Bearer test-token' },
         fetch: mockFetch,
@@ -57,7 +74,7 @@ describe('WebhookNotifier', () => {
     })
 
     it('custom headers can override Content-Type', async () => {
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         headers: { 'Content-Type': 'application/vnd.custom+json' },
         fetch: mockFetch,
@@ -69,27 +86,58 @@ describe('WebhookNotifier', () => {
 
     it('throws if the HTTP response is not ok', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 500, statusText: 'Internal Server Error' })
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow('500')
     })
 
     it('error message includes the status text', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden' })
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow('Forbidden')
     })
 
     it('rethrows if fetch itself rejects (network error)', async () => {
       mockFetch.mockRejectedValue(new Error('ECONNREFUSED'))
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow('ECONNREFUSED')
     })
 
     it('accepts any JSON-serialisable payload', async () => {
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await notifier.send(['a', 'b', 'c'])
       const [, init] = mockFetch.mock.calls[0]
       expect(JSON.parse(init.body as string)).toEqual(['a', 'b', 'c'])
+    })
+
+    it('requires an explicit target allowlist by default', () => {
+      expect(() => new WebhookNotifier({ url: webhookUrl, fetch: mockFetch })).toThrow(
+        'Webhook target allowlist is required',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('denies webhook targets outside the configured allowlist before sending', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://evil.example.net/signal',
+        allowedTargetOrigins,
+        fetch: mockFetch,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook target origin https://evil.example.net is not allowed',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('allows explicit unsafe opt-out for legacy deployments', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://legacy.example.net/signal',
+        allowUnlistedTarget: true,
+        fetch: mockFetch,
+      })
+
+      await notifier.send({ type: 'test' })
+      expect(mockFetch).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -103,7 +151,7 @@ describe('WebhookNotifier', () => {
         return { ok: true, status: 200, statusText: 'OK' }
       })
 
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       const breaker = new CircuitBreaker({ limitUsd: 1.0 })
 
       breaker.on('limit-reached', result => {
@@ -122,7 +170,7 @@ describe('WebhookNotifier', () => {
     })
 
     it('does not fire when spend is below the limit', async () => {
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       const breaker = new CircuitBreaker({ limitUsd: 5.0 })
       breaker.on('limit-reached', result => {
         void notifier.send({ type: 'circuit-breaker', ...result })
@@ -135,7 +183,7 @@ describe('WebhookNotifier', () => {
 
   describe('retry with exponential backoff', () => {
     it('succeeds without retrying when first attempt is ok', async () => {
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 2 },
@@ -150,7 +198,7 @@ describe('WebhookNotifier', () => {
         .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
         .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 3 },
@@ -163,7 +211,7 @@ describe('WebhookNotifier', () => {
 
     it('throws after exhausting all retries', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 2 },
@@ -176,7 +224,7 @@ describe('WebhookNotifier', () => {
     it('doubles the delay on each retry (exponential backoff)', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 3, baseDelayMs: 100, jitter: false },
@@ -192,7 +240,7 @@ describe('WebhookNotifier', () => {
     it('caps delay at maxDelayMs', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 4, baseDelayMs: 100, maxDelayMs: 250, jitter: false },
@@ -210,7 +258,7 @@ describe('WebhookNotifier', () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
       const randomSpy = vi.spyOn(seededRandom, 'random').mockReturnValue(0.99)
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 1, baseDelayMs: 200, maxDelayMs: 200, jitter: true },
@@ -229,7 +277,7 @@ describe('WebhookNotifier', () => {
     it('does not retry non-transient 4xx responses', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 3 },
@@ -247,7 +295,7 @@ describe('WebhookNotifier', () => {
         .mockResolvedValueOnce({ ok: false, status: 429, statusText: 'Too Many Requests' })
         .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 2, jitter: false },
@@ -264,7 +312,7 @@ describe('WebhookNotifier', () => {
       mockFetch
         .mockRejectedValueOnce(new Error('ECONNREFUSED'))
         .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 2 },
@@ -276,7 +324,7 @@ describe('WebhookNotifier', () => {
 
     it('throws the last network error after exhausting retries', async () => {
       mockFetch.mockRejectedValue(new Error('ECONNREFUSED'))
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 1 },
@@ -287,15 +335,45 @@ describe('WebhookNotifier', () => {
 
     it('is backwards-compatible: no retry option means single attempt', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 500, statusText: 'Internal Server Error' })
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow('500')
       expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('rejects negative maxRetries during retry configuration validation', () => {
+      expect(
+        () =>
+          createNotifier({
+            retry: { maxRetries: -2 },
+          }),
+      ).toThrow('retry.maxRetries must be a non-negative integer')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects non-finite maxRetries during retry configuration validation', () => {
+      expect(
+        () =>
+          createNotifier({
+            retry: { maxRetries: Number.NaN },
+          }),
+      ).toThrow('retry.maxRetries must be a non-negative integer')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects fractional maxRetries during retry configuration validation', () => {
+      expect(
+        () =>
+          createNotifier({
+            retry: { maxRetries: 1.5 },
+          }),
+      ).toThrow('retry.maxRetries must be a non-negative integer')
+      expect(mockFetch).not.toHaveBeenCalled()
     })
 
     it('adds jitter (delay is not exactly baseDelayMs * 2^i)', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
-      const notifier = new WebhookNotifier({
+      const notifier = createNotifier({
         url: 'https://hooks.example.com/signal',
         fetch: mockFetch,
         retry: { maxRetries: 2, baseDelayMs: 100, jitter: true },
@@ -320,7 +398,7 @@ describe('WebhookNotifier', () => {
         return { ok: true, status: 200, statusText: 'OK' }
       })
 
-      const notifier = new WebhookNotifier({ url: 'https://hooks.example.com/signal', fetch: mockFetch })
+      const notifier = createNotifier()
       const detector = new LoopDetector({ windowSize: 2, repeatThreshold: 2 })
 
       detector.on('loop-detected', result => {

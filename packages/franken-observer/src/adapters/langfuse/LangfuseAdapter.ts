@@ -5,7 +5,7 @@ import { fetchWithRetry, type HttpRetryOptions } from '../../export/httpRetry.js
 
 export type FetchFn = (
   url: string,
-  init?: { method?: string; headers?: Record<string, string>; body?: string },
+  init?: { method?: string; headers?: Record<string, string>; body?: string; redirect?: 'error' | 'follow' | 'manual' },
 ) => Promise<{ ok: boolean; status: number; statusText?: string }>
 
 export interface LangfuseAdapterOptions {

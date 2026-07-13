@@ -19,6 +19,20 @@ export interface GeminiApiOptions {
   maxTokens?: number;
 }
 
+function normalizeApiKey(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveGeminiApiKey(options: GeminiApiOptions): string {
+  return (
+    normalizeApiKey(options.apiKey) ??
+    normalizeApiKey(process.env['GOOGLE_API_KEY']) ??
+    normalizeApiKey(process.env['GEMINI_API_KEY']) ??
+    ''
+  );
+}
+
 export class GeminiApiAdapter implements ILlmProvider {
   readonly name = 'gemini-api';
   readonly type: ProviderType = 'gemini-api';
@@ -33,22 +47,15 @@ export class GeminiApiAdapter implements ILlmProvider {
   };
 
   private client: GoogleGenAI;
+  private readonly apiKey: string;
 
   constructor(private options: GeminiApiOptions = {}) {
-    const apiKey =
-      options.apiKey ??
-      process.env['GOOGLE_API_KEY'] ??
-      process.env['GEMINI_API_KEY'] ??
-      '';
-    this.client = new GoogleGenAI({ apiKey });
+    this.apiKey = resolveGeminiApiKey(options);
+    this.client = new GoogleGenAI({ apiKey: this.apiKey });
   }
 
   async isAvailable(): Promise<boolean> {
-    return !!(
-      this.options.apiKey ||
-      process.env['GOOGLE_API_KEY'] ||
-      process.env['GEMINI_API_KEY']
-    );
+    return this.apiKey.length > 0;
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {

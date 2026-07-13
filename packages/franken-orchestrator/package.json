@@ -1,6 +1,6 @@
 {
   "name": "@franken/orchestrator",
-  "version": "0.42.2",
+  "version": "0.42.3",
   "description": "The Beast Loop — orchestrator wiring all Frankenbeast modules into a unified agent pipeline",
   "type": "module",
   "main": "dist/index.js",
@@ -29,7 +29,7 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "INTEGRATION=true vitest run",
     "test:e2e": "E2E=true vitest run",
-    "lint": "eslint src/ tests/",
+    "lint": "eslint src/ tests/ test/",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "keywords": [
@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
-    "@franken/critique": "0.6.16",
+    "@franken/critique": "0.7.0",
     "@franken/governor": "0.5.14",
     "@franken/types": "0.9.0",
     "@franken/observer": "0.7.16",

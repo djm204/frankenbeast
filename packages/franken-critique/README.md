@@ -92,11 +92,37 @@ When the critique loop recovers from one or more failing iterations and ends in 
 
 Infrastructure-only evaluator exceptions are intentionally excluded from the map so operator dashboards do not promote broken tooling as product lessons. PM handoffs should treat lessons without a matching regression `testId` as unverified learning that is not ready for promotion.
 
+## Reviewer-feedback lesson capture
+
+Recorded critique lessons also carry a `reviewerFeedback` object so worker retrospectives and PM handoff summaries can reuse the reviewer feedback that created the lesson without parsing prose. The capture includes:
+
+- `summary`: a concise concatenation of the reviewer finding messages.
+- `findings`: normalized feedback entries with source iteration, evaluator name, message, severity, and any reviewer-provided source location or suggestion.
+- `suggestionsComplete`: `true` only when every captured feedback item includes a reviewer suggestion.
+- `missingSuggestionGuidance`: present when at least one feedback item lacks a suggestion; PM/liveness tooling should surface the original message and ask for remediation guidance before promotion.
+
+Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create reviewer-feedback captures. This keeps broken tooling noise from being promoted as durable agent-learning guidance.
+
+## Post-PR lesson extraction template
+
+Recorded critique lessons include `postPrLessonExtractionTemplate`, a deterministic prompt/template for the post-PR moment after review or merge evidence exists. PM/liveness tooling can hand the template to an LLM or worker to extract one reusable lesson without inventing missing evidence.
+
+The template requires these evidence inputs before promotion:
+
+- linked issue or task identifier;
+- PR URL or merge/review artifact;
+- reviewer finding or failure mode that motivated the correction;
+- correction applied in the final PR head;
+- regression test, verifier, or explicit reason no code-level regression applies.
+
+Its output schema is intentionally narrow: `issueNumber`, `prUrl`, `sourceFinding`, `correctionApplied`, `reusableLesson`, `regressionEvidence`, and `followUpNeeded`. If any required evidence is missing, tooling should set `followUpNeeded: true` and surface the template's `insufficientEvidenceGuidance` instead of promoting a guessed lesson. Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create the template.
+
 ## Lesson experiment sandbox
 
-New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the contradiction report is clear or reconciled, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.
+New lessons recorded by `LessonRecorder` also include an `experimentSandbox` object. The sandbox marks the lesson as `state: "experimental"`, sets `promotionBlocked: true`, and carries operator-facing exit criteria plus the verification command. PM and liveness tooling should surface these lessons for review, but must not promote or retire them as durable guidance until the traceability entry is present, the listed verification command has been run, and a reviewer confirms the regression covers the source finding.
 
 Failing iterations without actionable findings, and infrastructure-only evaluator exceptions, do not create sandboxed lessons. This keeps broken evaluator/tooling noise from entering the learning pipeline as experimental guidance.
+
 
 ## Lesson contradiction detector
 
@@ -108,6 +134,26 @@ Failing iterations without actionable findings, and infrastructure-only evaluato
 - `verificationCommand` points at the focused unit test that covers success and negative detector cases.
 
 Adapters that want historical contradiction checks should return likely prior critique lessons for the query string without mutating memory.
+
+## Learning cooldown
+
+`LessonRecorder` applies a deterministic cooldown to equivalent critique lessons so repeated reviewer/worker feedback does not churn memory, PM handoffs, or promotion/retirement flows. By default, equivalent lessons are keyed by evaluator name plus the normalized finding messages and suppressed for 24 hours after the first successful record.
+
+Recorded lessons include a `cooldown` object with the key, window, `recordedAt`, `suppressUntil`, and operator guidance. The `record()` call returns a `LessonRecordingResult` containing `recorded` and `suppressedByCooldown`; suppressed entries include the task id, evaluator name, suppression timestamp, remaining milliseconds, and reason so PM/liveness tooling can report the skipped duplicate instead of silently drifting.
+
+Callers that need a different window can construct `new LessonRecorder(memory, { cooldownMs })`; pass `cooldownMs: 0` to disable suppression. The recorder uses an advancing wall-clock by default and only uses the injected `now` callback for tests/replay callers that explicitly pass one. Cooldown state is instance-local unless callers pass a reused `cooldownStore` map in `LessonRecorderOptions`, which lets reviewer rebuilds in the same worker suppress duplicate lessons without leaking state into unrelated tests or pipelines. Recorders that reuse the same store also share in-flight admission reservations, so concurrent rebuilds do not double-persist the same equivalent lesson. Invalid negative or non-finite cooldown windows throw a `RangeError` during construction.
+
+## Cross-task blocker pattern mining
+
+`LessonRecorder` also mines repeated blocker patterns while it records critique lessons. Critical findings are normalized by evaluator name and finding text, then counted across distinct task ids. Once the same blocker reaches the configured distinct-task threshold, `record()` surfaces it in `minedBlockerPatterns` and the associated recorded lesson includes `blockerPatterns` for PM/liveness consumers.
+
+Each mined pattern includes a stable `key`, evaluator name, normalized finding, threshold, occurrence count, ordered distinct task ids, first/last seen timestamps, and operator guidance. Repeated observations from the same task do not increment the pattern, and warning-only findings are ignored so the signal stays focused on true blockers. The default threshold is 3 distinct tasks; tests or replay callers can pass `blockerPatternThreshold` and a shared `blockerPatternStore` in `LessonRecorderOptions` when multiple recorder instances should mine against the same in-process history.
+
+## Per-agent improvement scorecards
+
+Callers that know the worker/agent identity can construct `new LessonRecorder(memory, { agentId })` to attach an `agentImprovementScorecard` to each recorded critique lesson. The recorder trims and validates the id up front; blank ids throw so PM summaries do not group lessons under an ambiguous agent.
+
+Each scorecard is structured for worker retrospectives and PM/liveness handoffs, with schema version, `agentId`, task/evaluator ids, generated timestamp, initial/final score, score delta, failing/resolved iterations, critical/warning/info finding counts, and LLM-friendly improvement signals. Use it to compare an agent's recovered critique loops over time without parsing free-form lesson prose.
 
 ## Package scripts
 

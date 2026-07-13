@@ -14,6 +14,7 @@ type UnifiedRequest = {
   }>;
   max_tokens?: number;
   session_id?: string;
+  sessionContinue?: boolean;
 };
 
 type UnifiedResponse = {
@@ -59,7 +60,7 @@ export class AdapterLlmClient implements ILlmClient {
     this.defaultModel = defaultModel;
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(prompt: string, options?: { sessionContinue?: boolean; sessionId?: string }): Promise<string> {
     const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
     const model = this.defaultModel;
     
@@ -68,6 +69,8 @@ export class AdapterLlmClient implements ILlmClient {
       provider: 'adapter',
       model,
       messages: [{ role: 'user', content: prompt }],
+      ...(options?.sessionId ? { session_id: options.sessionId } : {}),
+      ...(options?.sessionContinue !== undefined ? { sessionContinue: options.sessionContinue } : {}),
     };
 
     let span: any;

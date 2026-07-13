@@ -41,6 +41,25 @@ describe('ConsoleLogger', () => {
     );
   });
 
+  it('redacts secret-like environment data in verbose debug logs', () => {
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const logger = new ConsoleLogger({ verbose: true });
+
+    logger.debug('env dump OPENAI_API_KEY=sk-test-secret', {
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'sk-test-secret',
+      nested: { GITHUB_TOKEN: 'gho_test_secret' },
+    });
+
+    const output = logSpy.mock.calls[0]?.[0] as string;
+    expect(output).toContain('OPENAI_API_KEY=<redacted>');
+    expect(output).toContain('"OPENAI_API_KEY":"<redacted>"');
+    expect(output).toContain('"GITHUB_TOKEN":"<redacted>"');
+    expect(output).toContain('"PATH":"/usr/bin"');
+    expect(output).not.toContain('sk-test-secret');
+    expect(output).not.toContain('gho_test_secret');
+  });
+
   it('logs warn through the shared output path without calling console.warn', () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

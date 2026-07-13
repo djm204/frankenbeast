@@ -92,6 +92,175 @@ export interface LessonContradictionReport {
   readonly contradictions: readonly LessonContradiction[];
 }
 
+/** Structured workflow that tells PM/liveness tooling how to roll back a bad lesson safely. */
+export interface LessonRollbackWorkflow {
+  /** Stable workflow identifier for downstream PM/liveness tooling. */
+  readonly workflowId: 'lesson-rollback-v1';
+  /** Lesson states where rollback is valid. */
+  readonly eligibleStates: readonly ('experimental' | 'promoted')[];
+  /** Deterministic rollback actions in execution order. */
+  readonly steps: readonly string[];
+  /** Evidence required before a rollback can retire or quarantine a lesson. */
+  readonly requiredEvidence: readonly string[];
+  /** JSON object shape expected when an LLM or operator requests rollback. */
+  readonly requestSchema: {
+    readonly lessonId: 'string';
+    readonly rollbackReason: 'string';
+    readonly evidenceUrls: 'string[]';
+    readonly replacementLesson: 'string-or-null';
+    readonly verificationCommand: 'string';
+  };
+  /** Explicit failure guidance when the rollback request lacks enough evidence. */
+  readonly insufficientEvidenceGuidance: string;
+}
+
+/** A normalized reviewer finding captured alongside a learned critique lesson. */
+export interface ReviewerFeedbackLessonEntry {
+  /** Iteration where the reviewer feedback was emitted. */
+  readonly sourceIteration: number;
+  /** Evaluator/reviewer that emitted the feedback. */
+  readonly evaluatorName: string;
+  /** Original reviewer finding message. */
+  readonly message: string;
+  /** Severity assigned by the reviewer. */
+  readonly severity: string;
+  /** Optional source location supplied by the reviewer. */
+  readonly location?: string;
+  /** Optional reviewer suggestion captured for future workers. */
+  readonly suggestion?: string;
+}
+
+/** Structured reviewer feedback attached to a learned critique lesson. */
+export interface ReviewerFeedbackLessonCapture {
+  /** Operator-facing summary of the feedback that produced the lesson. */
+  readonly summary: string;
+  /** Findings from the failed reviewer pass that should guide future workers. */
+  readonly findings: readonly ReviewerFeedbackLessonEntry[];
+  /** Whether every captured feedback item included an actionable suggestion. */
+  readonly suggestionsComplete: boolean;
+  /** Deterministic guidance for PM handoffs when suggestions are missing. */
+  readonly missingSuggestionGuidance?: string;
+}
+
+/** LLM-friendly template PM/worker handoffs can use after a PR closes to extract reusable lessons. */
+export interface PostPrLessonExtractionTemplate {
+  /** Stable template identifier for downstream liveness tooling and prompt selection. */
+  readonly templateId: 'post-pr-lesson-extraction-v1';
+  /** Operator-facing moment when this template should be run. */
+  readonly trigger: 'after-pr-review-or-merge';
+  /** Prompt instructions for the LLM or worker producing the post-PR lesson. */
+  readonly instructions: readonly string[];
+  /** Evidence that must be present before a lesson can be promoted from this template. */
+  readonly requiredEvidence: readonly string[];
+  /** JSON object shape expected from the extraction step. */
+  readonly outputSchema: {
+    readonly issueNumber: 'number-or-null';
+    readonly prUrl: 'string-or-null';
+    readonly sourceFinding: 'string';
+    readonly correctionApplied: 'string';
+    readonly reusableLesson: 'string';
+    readonly regressionEvidence: 'string';
+    readonly followUpNeeded: 'boolean';
+  };
+  /** Explicit failure guidance when the PR lacks enough evidence to extract a lesson. */
+  readonly insufficientEvidenceGuidance: string;
+}
+
+/** Cooldown metadata attached to a recorded lesson so PM/liveness tooling can prevent churn. */
+export interface LessonCooldownMetadata {
+  /** Stable key used to deduplicate equivalent lessons across task ids during the cooldown window. */
+  readonly key: string;
+  /** Cooldown window in milliseconds. */
+  readonly windowMs: number;
+  /** Timestamp when this lesson was admitted to memory. */
+  readonly recordedAt: string;
+  /** Equivalent lessons should be suppressed until this timestamp. */
+  readonly suppressUntil: string;
+  /** Operator-facing guidance for interpreting suppressed lessons. */
+  readonly guidance: string;
+}
+
+/** Structured record of a lesson suppressed by the learning cooldown. */
+export interface LessonCooldownSuppression {
+  /** Stable key that matched an in-cooldown lesson. */
+  readonly key: string;
+  /** Task that attempted to record the duplicate lesson. */
+  readonly taskId: TaskId;
+  /** Evaluator that produced the duplicate lesson. */
+  readonly evaluatorName: string;
+  /** Timestamp when the duplicate was suppressed. */
+  readonly suppressedAt: string;
+  /** Timestamp after which this lesson key may be recorded again. */
+  readonly suppressUntil: string;
+  /** Milliseconds remaining in the cooldown at suppression time. */
+  readonly remainingMs: number;
+  /** Deterministic operator-facing reason for PM/liveness output. */
+  readonly reason: string;
+}
+
+/** A recurring critical finding observed across more than one task. */
+export interface CrossTaskBlockerPattern {
+  /** Stable key that identifies equivalent blocker findings across tasks. */
+  readonly key: string;
+  /** Evaluator that emitted the repeated blocker finding. */
+  readonly evaluatorName: string;
+  /** Normalized blocker finding text used for cross-task equivalence. */
+  readonly normalizedFinding: string;
+  /** Distinct-task threshold required before the pattern is surfaced. */
+  readonly threshold: number;
+  /** Number of distinct tasks observed for this blocker pattern. */
+  readonly occurrences: number;
+  /** Distinct tasks that have observed this blocker, ordered by first observation. */
+  readonly taskIds: readonly TaskId[];
+  /** First time this blocker pattern was observed. */
+  readonly firstSeenAt: string;
+  /** Most recent time this blocker pattern was observed. */
+  readonly lastSeenAt: string;
+  /** Operator-facing guidance for PM/liveness handoffs. */
+  readonly guidance: string;
+}
+
+/** Deterministic per-agent learning summary for worker retrospectives and PM handoffs. */
+export interface AgentImprovementScorecard {
+  /** Stable schema identifier for PM/liveness tooling. */
+  readonly schemaVersion: 'agent-improvement-scorecard-v1';
+  /** Agent or worker identifier supplied by the recorder caller. */
+  readonly agentId: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  /** Timestamp when the scorecard was generated. */
+  readonly generatedAt: string;
+  /** First failing score for this evaluator in the recovered critique loop. */
+  readonly initialScore: number;
+  /** Final recovered overall score from the pass/warn iteration. */
+  readonly finalScore: number;
+  /** Rounded difference between finalScore and initialScore. */
+  readonly scoreDelta: number;
+  /** Failing iteration indexes for this evaluator that contributed feedback. */
+  readonly failingIterations: readonly number[];
+  /** Iteration that recovered to pass/warn. */
+  readonly resolvedIteration: number;
+  /** Finding counts across the agent's failing iterations for this evaluator. */
+  readonly findingCounts: {
+    readonly critical: number;
+    readonly warning: number;
+    readonly info: number;
+    readonly total: number;
+  };
+  /** LLM-friendly bullets that can be copied into retrospectives without parsing prose. */
+  readonly improvementSignals: readonly string[];
+  /** Operator-facing guidance for interpreting the scorecard. */
+  readonly guidance: string;
+}
+
+/** Summary returned by LessonRecorder.record for PM/liveness consumers. */
+export interface LessonRecordingResult {
+  readonly recorded: number;
+  readonly suppressedByCooldown: readonly LessonCooldownSuppression[];
+  /** Cross-task blocker patterns discovered while recording this critique result. */
+  readonly minedBlockerPatterns: readonly CrossTaskBlockerPattern[];
+}
+
 /** A lesson learned from a successful critique cycle. */
 export interface CritiqueLesson {
   readonly evaluatorName: string;
@@ -105,6 +274,18 @@ export interface CritiqueLesson {
   readonly experimentSandbox?: LessonExperimentSandbox;
   /** Present for lessons recorded by LessonRecorder so PM/liveness tooling can detect drift. */
   readonly contradictionReport?: LessonContradictionReport;
+  /** LLM-friendly workflow for rolling back an incorrect, stale, or harmful learned lesson. */
+  readonly rollbackWorkflow?: LessonRollbackWorkflow;
+  /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
+  readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
+  /** Structured template for extracting reusable lessons from post-PR review/merge evidence. */
+  readonly postPrLessonExtractionTemplate?: PostPrLessonExtractionTemplate;
+  /** Cooldown guard that prevents equivalent lessons from being re-recorded until suppressUntil. */
+  readonly cooldown?: LessonCooldownMetadata;
+  /** Cross-task blocker patterns associated with this lesson, if any crossed the threshold. */
+  readonly blockerPatterns?: readonly CrossTaskBlockerPattern[];
+  /** Optional per-agent learning scorecard for worker retrospectives and PM handoffs. */
+  readonly agentImprovementScorecard?: AgentImprovementScorecard;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */
@@ -128,8 +309,11 @@ export interface GuardrailsPort {
 export interface MemoryPort {
   searchADRs(query: string, topK: number): Promise<readonly ADRMatch[]>;
   searchEpisodic(taskId: TaskId): Promise<readonly EpisodicTrace[]>;
-  /** Optional lesson search used by LessonRecorder to compare new guidance against prior lessons. */
-  searchLessons?(query: string, topK: number): Promise<readonly CritiqueLesson[]>;
+  /** Optional adapter hook for comparable prior lessons used by contradiction detection. */
+  searchLessons?(
+    query: string,
+    topK: number,
+  ): Promise<readonly CritiqueLesson[]>;
   recordLesson(lesson: CritiqueLesson): Promise<void>;
 }
 

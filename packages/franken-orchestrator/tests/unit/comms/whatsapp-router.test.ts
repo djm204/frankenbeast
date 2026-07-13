@@ -39,6 +39,14 @@ describe('whatsappRouter', () => {
     expect(await res.text()).toBe('123');
   });
 
+  it('rejects verification challenges with malformed or partial tokens', async () => {
+    const tooShort = await app.request('/webhook?hub.mode=subscribe&hub.verify_token=TEST_WHATSAPP&hub.challenge=123');
+    expect(tooShort.status).toBe(403);
+
+    const wrongScheme = await app.request(`/webhook?hub.mode=unsubscribe&hub.verify_token=${encodeURIComponent(verifyToken)}&hub.challenge=123`);
+    expect(wrongScheme.status).toBe(403);
+  });
+
   it('routes incoming text message to gateway', async () => {
     const body = JSON.stringify({
       object: 'whatsapp_business_account',

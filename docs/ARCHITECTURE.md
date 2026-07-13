@@ -997,10 +997,12 @@ Frankenbeast stores secrets outside the config file. Config references secrets b
 
 | Backend | `secureBackend` value | Best for |
 |---------|----------------------|----------|
-| OS keychain (Keychain / GNOME / DPAPI) | `os-keychain` | Local development |
+| Local encrypted file | `local-encrypted` | Default backend; zero-install local development, CI/CD, and offline environments |
+| OS keychain (Keychain / GNOME / DPAPI) | `os-keychain` | Explicit opt-in for single-machine local development that should use native credential storage |
 | 1Password | `1password` | Teams using 1Password vaults |
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
-| Local encrypted file | `local-encrypted` | CI/CD and offline environments |
+
+When `network.secureBackend` is unset, the `NetworkOperatorConfigSchema` field default applies `local-encrypted`; the OS keychain backend is available only when selected explicitly.
 
 ### Architecture
 
@@ -1022,6 +1024,7 @@ flowchart LR
 - `ISecretStore` — four-method interface: `get(key)`, `set(key, value)`, `delete(key)`, `has(key)`
 - `SecretResolver` — reads `*Ref` fields from `OrchestratorConfig`, resolves each key, returns a typed `ResolvedSecrets` record
 - `frankenbeast init` — interactive wizard: generates operator token, writes to backend
+- `network.secureBackend` — defaults to `local-encrypted` when omitted; select `os-keychain` explicitly for OS-managed single-machine local development without passphrase prompts
 - `FRANKENBEAST_PASSPHRASE` — env var for headless `local-encrypted` decryption (CI/CD)
 - Legacy backend keys (`macos-keychain`, `windows-credential-manager`, `linux-secret-service`) are remapped to `os-keychain` at parse time
 
