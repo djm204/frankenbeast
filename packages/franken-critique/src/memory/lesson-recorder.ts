@@ -740,17 +740,9 @@ export function detectLessonContradictions(
   const comparablePriorLessons = priorLessons.filter((prior) => prior !== lesson);
 
   const contradictions = comparablePriorLessons.flatMap((prior) => {
-    const sharedTerms = sharedLessonTerms(lesson, prior);
-    const lessonPolarity = createLessonDirectiveText(lesson);
-    const priorPolarity = createLessonDirectiveText(prior);
-    const hasNegationMismatch =
-      containsNegation(lessonPolarity) !== containsNegation(priorPolarity);
+    const contradictionMatch = findContradictoryGuidanceMatch(lesson, prior);
 
-    if (
-      !sameEvaluator(lesson, prior) ||
-      sharedTerms.length < MIN_CONTRADICTION_SHARED_TERMS ||
-      !hasNegationMismatch
-    ) {
+    if (!sameEvaluator(lesson, prior) || contradictionMatch === undefined) {
       return [];
     }
 
@@ -758,7 +750,7 @@ export function detectLessonContradictions(
       {
         conflictingLessonId: getLessonId(prior),
         evaluatorName: prior.evaluatorName,
-        sharedTerms,
+        sharedTerms: contradictionMatch.sharedTerms,
         reason:
           'A prior lesson from the same evaluator discusses the same normalized terms but reverses negated guidance; review before promotion.',
         conflictingFailureDescription: prior.failureDescription,
@@ -1101,9 +1093,27 @@ function sameEvaluator(a: CritiqueLesson, b: CritiqueLesson): boolean {
   return normalizeText(a.evaluatorName) === normalizeText(b.evaluatorName);
 }
 
-function sharedLessonTerms(a: CritiqueLesson, b: CritiqueLesson): string[] {
-  const aTerms = new Set(extractComparableTerms(createLessonGuidanceText(a)));
-  const bTerms = new Set(extractComparableTerms(createLessonGuidanceText(b)));
+function findContradictoryGuidanceMatch(
+  lesson: CritiqueLesson,
+  prior: CritiqueLesson,
+): { sharedTerms: string[] } | undefined {
+  for (const lessonFragment of createLessonDirectiveFragments(lesson)) {
+    for (const priorFragment of createLessonDirectiveFragments(prior)) {
+      if (containsNegation(lessonFragment) === containsNegation(priorFragment)) {
+        continue;
+      }
+      const sharedTerms = sharedTextTerms(lessonFragment, priorFragment);
+      if (sharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
+        return { sharedTerms };
+      }
+    }
+  }
+  return undefined;
+}
+
+function sharedTextTerms(a: string, b: string): string[] {
+  const aTerms = new Set(extractComparableTerms(a));
+  const bTerms = new Set(extractComparableTerms(b));
   return [...aTerms].filter((term) => bTerms.has(term)).sort();
 }
 
@@ -1115,18 +1125,28 @@ function createLessonGuidanceText(lesson: CritiqueLesson): string {
 }
 
 function createLessonDirectiveText(lesson: CritiqueLesson): string {
+  return createLessonDirectiveFragments(lesson).join(' ');
+}
+
+function createLessonDirectiveFragments(lesson: CritiqueLesson): string[] {
   const reviewerGuidance =
     lesson.reviewerFeedback?.findings.flatMap((finding) => [
       finding.message,
       finding.suggestion ?? '',
     ]) ?? [];
-  return [lesson.correctionApplied, ...reviewerGuidance].join(' ');
+  return [lesson.correctionApplied, ...reviewerGuidance].filter(
+    (fragment) => normalizeText(fragment).length > 0,
+  );
 }
 
 function extractComparableTerms(value: string): string[] {
   return normalizeText(value)
     .split(' ')
-    .filter((term) => term.length >= 4 && !LESSON_CONTRADICTION_STOP_WORDS.has(term));
+    .filter(
+      (term) =>
+        (term.length >= 4 || LESSON_CONTRADICTION_SHORT_TERMS.has(term)) &&
+        !LESSON_CONTRADICTION_STOP_WORDS.has(term),
+    );
 }
 
 function normalizeText(value: string): string {
@@ -1135,7 +1155,7 @@ function normalizeText(value: string): string {
 
 function containsNegation(value: string): boolean {
   const normalized = normalizeText(value);
-  return /\b(no|not|never|avoid|block|reject|forbid|without|disable|disabled|don t|do not|must not|cannot|can t)\b/i.test(
+  return /\b(no|not|never|avoid|reject|forbid|without|disable|disabled|don t|do not|must not|cannot|can t)\b/i.test(
     normalized,
   );
 }
@@ -1150,6 +1170,18 @@ function getLessonId(lesson: CritiqueLesson): string {
 }
 
 const MIN_CONTRADICTION_SHARED_TERMS = 2;
+
+const LESSON_CONTRADICTION_SHORT_TERMS = new Set([
+  'api',
+  'cli',
+  'env',
+  'id',
+  'jwt',
+  'log',
+  'pii',
+  'sql',
+  'url',
+]);
 
 const LESSON_CONTRADICTION_STOP_WORDS = new Set([
   'about',
