@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { join } from 'node:path';
+import { describe, it, expect, afterEach } from 'vitest';
 import { OrchestratorConfigSchema, defaultConfig } from '../../../src/config/orchestrator-config.js';
 
 describe('OrchestratorConfig', () => {
@@ -11,6 +12,43 @@ describe('OrchestratorConfig', () => {
       expect(config.enableHeartbeat).toBe(false);
       expect(config.enableTracing).toBe(false);
       expect(config.minCritiqueScore).toBe(0.7);
+      expect(config.allowCrossProfileStateAccess).toBe(false);
+    });
+  });
+
+  describe('cross-profile state access', () => {
+    const priorProfile = process.env.HERMES_PROFILE;
+
+    afterEach(() => {
+      if (priorProfile === undefined) {
+        delete process.env.HERMES_PROFILE;
+      } else {
+        process.env.HERMES_PROFILE = priorProfile;
+      }
+    });
+
+    it('rejects stateDir values that target another Hermes profile by default', () => {
+      process.env.HERMES_PROFILE = 'default';
+      const result = OrchestratorConfigSchema.safeParse({
+        stateDir: join('/srv/hermes', '.hermes', 'profiles', 'prod', 'state'),
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['stateDir']);
+        expect(result.error.issues[0]?.message).toContain('Cross-profile state access is denied by default');
+      }
+    });
+
+    it('allows explicit cross-profile state access only when the operator opts in', () => {
+      process.env.HERMES_PROFILE = 'default';
+      const result = OrchestratorConfigSchema.parse({
+        stateDir: join('/srv/hermes', '.hermes', 'profiles', 'prod', 'state'),
+        allowCrossProfileStateAccess: true,
+      });
+
+      expect(result.stateDir).toContain(join('.hermes', 'profiles', 'prod', 'state'));
+      expect(result.allowCrossProfileStateAccess).toBe(true);
     });
   });
 

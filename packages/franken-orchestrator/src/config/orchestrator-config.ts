@@ -1,3 +1,4 @@
+import { resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { NetworkConfigFieldsSchema, validateNetworkConfig } from '../network/network-config.js';
 import { validateProviderCommandOverride } from './provider-command-override-policy.js';
@@ -94,6 +95,21 @@ export const ProvidersConfigSchema = createProvidersConfigSchema();
 const MIN_TOTAL_TOKEN_BUDGET = 10_000;
 const MIN_DURATION_MS_PER_CRITIQUE_ITERATION = 10_000;
 
+function hermesProfileFromPath(path: string): string | undefined {
+  const parts = resolve(path).split(sep);
+  for (let index = 0; index < parts.length - 2; index += 1) {
+    if (parts[index] === '.hermes' && parts[index + 1] === 'profiles') {
+      return parts[index + 2];
+    }
+  }
+  return undefined;
+}
+
+function activeHermesProfile(): string {
+  const profile = process.env.HERMES_PROFILE?.trim();
+  return profile && profile.length > 0 ? profile : 'default';
+}
+
 const BaseOrchestratorConfigSchema = z.object({
   /** Maximum plan-critique iterations before escalation. */
   maxCritiqueIterations: z.number().int().min(1).max(10).default(3),
@@ -140,6 +156,9 @@ const BaseOrchestratorConfigSchema = z.object({
   /** Directory for durable Beast phase state snapshots. */
   stateDir: z.string().optional(),
 
+  /** Whether stateDir may deliberately point at another Hermes profile. Defaults denied. */
+  allowCrossProfileStateAccess: z.boolean().default(false),
+
   /** Consolidation: typed provider list for ProviderRegistry. */
   consolidatedProviders: z.array(ProviderConfigSchema).optional(),
 });
@@ -151,6 +170,22 @@ function createOrchestratorConfigSchema(options: OrchestratorConfigParseOptions 
     NetworkConfigFieldsSchema.shape,
   ).superRefine((config, ctx) => {
     validateNetworkConfig(config, ctx);
+
+    const targetProfile = config.stateDir ? hermesProfileFromPath(config.stateDir) : undefined;
+    const currentProfile = activeHermesProfile();
+    if (
+      targetProfile !== undefined &&
+      targetProfile !== currentProfile &&
+      !config.allowCrossProfileStateAccess
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stateDir'],
+        message:
+          `stateDir points at Hermes profile '${targetProfile}' while the active profile is '${currentProfile}'. ` +
+          'Cross-profile state access is denied by default; set allowCrossProfileStateAccess: true only for deliberate migrations or imports.',
+      });
+    }
 
     config.consolidatedProviders?.forEach((provider, index) => {
       if (!provider.type.endsWith('-cli') || !provider.cliPath) return;

@@ -542,6 +542,8 @@ Execution controls such as `--budget`, `--provider`, `--providers`, and `--no-pr
 
 Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present; set the value to `true` to enable the field, and any other present value disables it.
 
+If `stateDir` is set to a path inside a sibling Hermes profile such as `.hermes/profiles/<profile>/...`, Frankenbeast fails closed by default when `<profile>` does not match the active `HERMES_PROFILE` (or `default` when unset). Set `allowCrossProfileStateAccess: true` in an operator-owned config file only for deliberate migrations/imports that must read or write another profile's state.
+
 ### Operator environment variables
 
 Set `FRANKENBEAST_PLAIN_BANNER=1` to force the CLI startup banner to use the plain ASCII fallback instead of the image-rendered graphic banner. This is useful for CI logs, terminals with limited image rendering support, and log processors that should receive a text-only banner layout. The fallback banner may still include ANSI color codes; leave the variable unset, or set it to any value other than `1`, to keep the normal graphic banner path.
