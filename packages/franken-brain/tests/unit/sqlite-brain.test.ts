@@ -332,6 +332,9 @@ describe('SqliteBrain', () => {
         expect(dryRun.dryRun).toBe(true);
         expect(dryRun.migrated).toBe(true);
         expect(dryRun.operations.map(op => op.table)).toContain('working_memory');
+        expect(dryRun.backupPath).toBeUndefined();
+        const dryRunWithBackupPath = SqliteBrain.migrateMemorySchema(dbPath, { dryRun: true, backupPath });
+        expect(dryRunWithBackupPath.backupPath).toBeUndefined();
         const afterDryRun = new Database(dbPath);
         expect(
           afterDryRun.prepare(`PRAGMA table_info(working_memory)`).all().some(row => (row as { name: string }).name === 'schema_version'),
@@ -415,6 +418,8 @@ describe('SqliteBrain', () => {
             .map(row => (row as { name: string }).name);
           expect(tables).toEqual(['memory_schema_versions']);
           afterRejectedOpen.close();
+          expect(existsSync(`${futureShapePath}-wal`)).toBe(false);
+          expect(existsSync(`${futureShapePath}-shm`)).toBe(false);
         } finally {
           rmSync(futureShapeDir, { recursive: true, force: true });
         }
