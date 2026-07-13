@@ -60,6 +60,15 @@ If your backend is on a different port, keep browser requests same-origin and se
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
 ```
 
+Use this matrix when choosing frontend backend URL variables for local Vite development:
+
+| Workflow | Backend layout | Set | Leave unset |
+| --- | --- | --- | --- |
+| Chat-only dashboard | `chat-server` serves `/api`, `/v1`, and `/v1/chat/ws` on the default `http://127.0.0.1:3737` | Nothing; `dev:chat` already targets the default backend. | `VITE_API_URL`, `VITE_API_PROXY_TARGET`, `VITE_BEAST_API_PROXY_TARGET` |
+| Chat-only dashboard on a custom backend port | `chat-server` serves `/api`, `/v1`, and `/v1/chat/ws` on a custom local URL such as `http://127.0.0.1:4242` | `VITE_API_PROXY_TARGET=http://127.0.0.1:4242` | `VITE_API_URL`, `VITE_BEAST_API_PROXY_TARGET` |
+| Chat + Beast controls through the chat server | `chat-server` handles chat routes and proxies `/v1/beasts/*` to the same backend target. | `VITE_API_PROXY_TARGET` only when `chat-server` is not on `http://127.0.0.1:3737`. | `VITE_API_URL`, `VITE_BEAST_API_PROXY_TARGET` |
+| Chat + Beast controls with a separate Beast daemon | `chat-server` handles chat/API while `beasts-daemon` owns `/v1/beasts/*`. | `VITE_API_PROXY_TARGET=<chat-server-url>` and `VITE_BEAST_API_PROXY_TARGET=<beasts-daemon-url>` | `VITE_API_URL` |
+
 `VITE_BEAST_API_PROXY_TARGET` only affects Beast control routes (`/v1/beasts/*`). It defaults to `VITE_API_PROXY_TARGET`, so leave it unset when chat/API and Beast controls share the same backend. Set it only when Beast controls run on a separate local daemon or backend target.
 
 Use this backend URL matrix when choosing Vite env vars:
