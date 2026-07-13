@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BeastsPage } from './beasts-page';
 import { useBeastStore } from '../stores/beast-store';
@@ -26,7 +27,10 @@ const snapshot: DashboardSnapshot = {
   ],
 };
 
-function renderBeastsPage(dashboardClient: DashboardApiClient) {
+function renderBeastsPage(
+  dashboardClient: DashboardApiClient,
+  overrides: Partial<ComponentProps<typeof BeastsPage>> = {},
+) {
   return render(
     <BeastsPage
       agents={[]}
@@ -48,6 +52,7 @@ function renderBeastsPage(dashboardClient: DashboardApiClient) {
       onSelectAgent={() => undefined}
       onStart={() => undefined}
       onStop={() => undefined}
+      {...overrides}
     />,
   );
 }
@@ -73,5 +78,36 @@ describe('BeastsPage', () => {
     expect(await screen.findByText('openai')).toBeTruthy();
     fireEvent.change(screen.getAllByLabelText('Provider')[0]!, { target: { value: 'openai' } });
     expect(screen.getByText('gpt-4.1')).toBeTruthy();
+  });
+
+  it('displays actionable backend launch errors from Beast API failures', async () => {
+    const dashboardClient = {
+      fetchSnapshot: vi.fn().mockResolvedValue(snapshot),
+    } as unknown as DashboardApiClient;
+    const onLaunch = vi.fn().mockRejectedValue(new Error(
+      'Provider is required before launching an agent. (HTTP 400, VALIDATION_FAILED)',
+    ));
+
+    renderBeastsPage(dashboardClient, { onLaunch });
+    fireEvent.click(screen.getByRole('button', { name: '+ Create Agent' }));
+
+    act(() => {
+      useBeastStore.setState({
+        wizardMode: 'form',
+        wizardStep: 7,
+        highestCompleted: 7,
+        stepValues: {
+          0: { name: 'Validation Agent' },
+          1: { workflowType: 'design-interview', goal: 'Ship a fix', outputPath: 'docs/fix.md' },
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Launch Agent' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Provider is required before launching an agent.');
+    expect(alert.textContent).toContain('HTTP 400, VALIDATION_FAILED');
+    expect(onLaunch).toHaveBeenCalledTimes(1);
   });
 });
