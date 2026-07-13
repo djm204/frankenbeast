@@ -87,11 +87,13 @@ export class GovernorCritiqueAdapter {
   }
 
   async verifyRationale(rationale: RationaleBlock): Promise<VerificationResult> {
-    const triggerResult = this.evaluateTriggers(rationale);
+    const triggerResults = this.evaluateTriggeredResults(rationale);
 
-    if (!triggerResult.triggered) {
+    if (triggerResults.length === 0) {
       return { verdict: 'approved' };
     }
+
+    const triggerResult = this.selectTriggerForPrompt(triggerResults);
 
     const base = {
       requestId: deterministicUuid('packages/franken-governor/src/gateway/governor-critique-adapter.ts'),
@@ -106,7 +108,9 @@ export class GovernorCritiqueAdapter {
       ? { ...base, skillId: rationale.selectedTool }
       : base;
 
-    const operatorSessionToken = this.getValidOperatorSessionToken(request, rationale);
+    const operatorSessionToken = triggerResults.length === 1
+      ? this.getValidOperatorSessionToken(request, rationale)
+      : undefined;
     if (operatorSessionToken) {
       await this.recordOperatorSessionReuse(request, operatorSessionToken);
       return { verdict: 'approved' };
@@ -128,8 +132,8 @@ export class GovernorCritiqueAdapter {
     }
   }
 
-  private evaluateTriggers(rationale: RationaleBlock): TriggerResult {
-    let firstSkillTrigger: TriggerResult | undefined;
+  private evaluateTriggeredResults(rationale: RationaleBlock): TriggerResult[] {
+    const triggeredResults: TriggerResult[] = [];
 
     for (const evaluator of this.evaluators) {
       const triggerContext = this.buildTriggerContext(evaluator, rationale);
@@ -140,15 +144,16 @@ export class GovernorCritiqueAdapter {
       const result = evaluateTrigger(evaluator, triggerContext.context);
       if (!result.triggered) continue;
 
-      if (result.triggerId === 'skill') {
-        firstSkillTrigger ??= result;
-        continue;
+      triggeredResults.push(result);
+      if (result.severity === 'critical' && result.reason?.startsWith(`Trigger '${result.triggerId}' evaluation failed:`)) {
+        return triggeredResults;
       }
-
-      return result;
     }
-    if (firstSkillTrigger) return firstSkillTrigger;
-    return { triggered: false, triggerId: 'none' };
+    return triggeredResults;
+  }
+
+  private selectTriggerForPrompt(triggerResults: ReadonlyArray<TriggerResult>): TriggerResult {
+    return triggerResults.find((result) => result.triggerId !== 'skill') ?? triggerResults[0]!;
   }
 
   private getValidOperatorSessionToken(request: ApprovalRequest, rationale: RationaleBlock): SessionToken | undefined {

@@ -479,6 +479,7 @@ import {
   ApprovalGateway,
   SkillTrigger,
   SessionTokenStore,
+  formatApprovalSessionTokenScope,
   createGovernorApp,
   defaultConfig,
 } from '@franken/governor';
@@ -521,10 +522,14 @@ if (outcome.decision === 'APPROVE' && outcome.token) {
     approvalSessionTokenId: outcome.token.tokenId,
   });
 
-  // Direct stores and external hooks can still verify manually.
-  if (store.isValid(outcome.token.tokenId, 'deploy-prod')) {
+  // Direct stores and external hooks can still verify manually with the
+  // canonical scope attached to the issued token.
+  if (store.isValid(outcome.token.tokenId, outcome.token.scope)) {
     // Proceed — token is valid, scoped, and not expired
   }
+
+  // Or compute the canonical scope from the original approval request.
+  const tokenScope = formatApprovalSessionTokenScope(request);
 
   // Revoke when done
   store.revoke(outcome.token.tokenId);
@@ -537,7 +542,7 @@ const app = createGovernorApp({
 });
 
 // External callers can validate through POST /v1/approval/session/validate
-// with a signed body: { "tokenId": "...", "scope": "deploy-prod" }.
+// with a signed body: { "tokenId": "...", "scope": tokenScope }.
 ```
 
 `SessionToken` fields:
