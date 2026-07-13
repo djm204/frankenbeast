@@ -157,3 +157,4 @@
 
 ## 2026-07-13 — HTTP error-body safety
 - When adding response bodies to thrown/logged HTTP errors, treat the body as untrusted output: redact echoed auth/API-key headers, redact secret-bearing URLs, and cap body reads before buffering or rendering. Include regressions for JSON-style quoted secrets, non-Web stream fallbacks, and exact-at-cap stream bodies before re-triggering Codex.
+- For webhook failure diagnostics, add explicit regressions for truncated/unterminated quoted auth fields, short opaque webhook path segments, non-Web body objects, and stalled streams so Codex follow-up rounds have current-head evidence for security-sensitive fixes.

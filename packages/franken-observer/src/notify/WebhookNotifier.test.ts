@@ -132,9 +132,12 @@ describe('WebhookNotifier', () => {
         allowedTargetOrigins,
       })
 
-      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 410 Gone for https://hooks.example.com/services/[REDACTED]: disabled at https://hooks.example.com/services/[REDACTED]',
-      )
+      await notifier.send({ type: 'test' }).catch((error: Error) => {
+        expect(error.message).toContain('Webhook delivery failed: 410 Gone for https://hooks.example.com/')
+        expect(error.message).toContain('disabled at https://hooks.example.com/')
+        expect(error.message).not.toContain('aaa.bbb')
+        expect(error.message).not.toContain('debug=true')
+      })
     })
 
     it('defers reading retryable response bodies until the final attempt', async () => {
