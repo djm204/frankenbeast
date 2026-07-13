@@ -143,4 +143,18 @@ describe('NetworkApiClient', () => {
       'HTTP 502 Bad Gateway for /v1/network/status: {"Authorization":"[REDACTED]"',
     );
   });
+
+  it('redacts credential-bearing URLs from raw error bodies', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      body: responseBody('upstream https://user:pass@example.test/path?token=secret failed'),
+    });
+
+    const client = new NetworkApiClient(BASE_URL);
+    await expect(client.getStatus()).rejects.toThrow(
+      'HTTP 502 Bad Gateway for /v1/network/status: upstream https://example.test/path failed',
+    );
+  });
 });

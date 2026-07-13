@@ -35,4 +35,36 @@ describe('http error context', () => {
   it('redacts unterminated quoted auth fields in malformed error bodies', () => {
     expect(redactHttpErrorSecrets('{"Authorization":"Bearer leaked-token')).toBe('{"Authorization":"[REDACTED]"');
   });
+
+  it('redacts array-valued auth fields in malformed error bodies', () => {
+    expect(redactHttpErrorSecrets('{"Authorization":["Bearer leaked-token"]}')).toBe('{"Authorization":["[REDACTED]"]}');
+  });
+
+  it('does not mark exact-limit provider bodies as truncated', async () => {
+    const message = await formatHttpErrorMessage('Provider failed', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      body: responseBody('x'.repeat(2048)),
+    } as Response, 'https://discord.example.test/webhook');
+
+    expect(message).toBe(`Provider failed: 502 Bad Gateway for https://discord.example.test/webhook: ${'x'.repeat(2048)}`);
+  });
+
+  it('stops waiting on stalled provider error bodies', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('partial'));
+      },
+    });
+    const startedAt = Date.now();
+
+    const message = await formatHttpErrorMessage('Provider failed', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      body: stream,
+    } as Response, 'https://discord.example.test/webhook');
+
+    expect(Date.now() - startedAt).toBeLessThan(750);
+    expect(message).toBe('Provider failed: 502 Bad Gateway for https://discord.example.test/webhook: partial…');
+  });
 });

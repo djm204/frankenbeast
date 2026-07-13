@@ -3,7 +3,21 @@ import type { ApiDataEnvelope, ApiErrorEnvelope, NetworkConfigResponse, NetworkS
 export type { NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 
 const MAX_ERROR_BODY_CHARS = 2048;
+const MAX_STRUCTURED_ERROR_BODY_CHARS = 65_536;
+const ERROR_BODY_READ_TIMEOUT_MS = 250;
 
+function sanitizeBodyUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '[REDACTED]';
+  }
+}
 
 function redactNetworkErrorSecrets(value: string): string {
   return value
@@ -11,7 +25,8 @@ function redactNetworkErrorSecrets(value: string): string {
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]\r\n,;<>}]*$/gim, '$1["[REDACTED]"]')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
-    .replace(/(^|[\s;])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]');
+    .replace(/(^|[\s;{])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]')
+    .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeBodyUrl(match));
 }
 
 function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
@@ -24,7 +39,22 @@ function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
   return bytes;
 }
 
-async function readBoundedErrorBody(response: Response): Promise<string> {
+async function readWithDeadline(reader: ReadableStreamDefaultReader<Uint8Array>, timeoutMs: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ done: true; value?: undefined; timedOut: true }>(resolve => {
+    timeoutId = setTimeout(() => resolve({ done: true, timedOut: true }), timeoutMs);
+  });
+  return Promise.race([
+    reader.read().then(read => ({ ...read, timedOut: false as const })),
+    timeout,
+  ]).finally(() => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  });
+}
+
+async function readBoundedErrorBody(response: Response, maxChars = MAX_ERROR_BODY_CHARS): Promise<string> {
   if (!response.body || typeof response.body.getReader !== 'function') {
     return '';
   }
@@ -32,19 +62,35 @@ async function readBoundedErrorBody(response: Response): Promise<string> {
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  let truncated = false;
+  const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS;
 
   try {
-    while (totalBytes < MAX_ERROR_BODY_CHARS) {
-      const { value, done } = await reader.read();
+    while (totalBytes < maxChars) {
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        truncated = true;
+        break;
+      }
+      const { value, done, timedOut } = await readWithDeadline(reader, remainingMs);
+      if (timedOut) {
+        truncated = true;
+        break;
+      }
       if (done || !value) {
         break;
       }
-      const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes;
-      const boundedChunk = value.byteLength > remainingBytes ? value.subarray(0, remainingBytes) : value;
-      chunks.push(boundedChunk);
-      totalBytes += boundedChunk.byteLength;
+      const remainingBytes = maxChars - totalBytes;
+      if (value.byteLength > remainingBytes) {
+        chunks.push(value.subarray(0, remainingBytes));
+        totalBytes += remainingBytes;
+        truncated = true;
+        break;
+      }
+      chunks.push(value);
+      totalBytes += value.byteLength;
     }
-    if (totalBytes >= MAX_ERROR_BODY_CHARS) {
+    if (truncated) {
       await reader.cancel();
     }
   } finally {
@@ -52,7 +98,7 @@ async function readBoundedErrorBody(response: Response): Promise<string> {
   }
 
   const decoded = new TextDecoder().decode(concatChunks(chunks, totalBytes)).trim();
-  return totalBytes >= MAX_ERROR_BODY_CHARS ? `${decoded}…` : decoded;
+  return truncated ? `${decoded}…` : decoded;
 }
 
 export class NetworkApiError extends Error {
@@ -177,7 +223,8 @@ export class NetworkApiClient {
       return null;
     }
     try {
-      return await response.clone().json() as ApiErrorEnvelope;
+      const body = await readBoundedErrorBody(response.clone(), MAX_STRUCTURED_ERROR_BODY_CHARS);
+      return body && !body.endsWith('…') ? JSON.parse(body) as ApiErrorEnvelope : null;
     } catch {
       return null;
     }
