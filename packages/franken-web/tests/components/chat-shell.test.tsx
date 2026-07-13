@@ -1539,6 +1539,29 @@ describe('ChatShell', () => {
     });
   });
 
+  it('keeps non-stream Beast errors visible after the SSE connection opens', async () => {
+    window.location.hash = '#/beasts';
+    mockGetAgent.mockRejectedValue(new Error('Agent detail unavailable'));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent detail unavailable')).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.connected?.({});
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent detail unavailable')).toBeDefined();
+    });
+  });
+
   it('keeps create-agent enabled when selected agent detail fails after state loads', async () => {
     window.location.hash = '#/beasts';
     mockGetAgent.mockRejectedValue(new Error('Agent detail unavailable'));
