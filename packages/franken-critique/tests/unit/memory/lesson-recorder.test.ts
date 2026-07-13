@@ -2177,6 +2177,42 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('does not negate positive before prerequisite guidance', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Require approval before deploy' }),
+        [createLesson({ correctionApplied: 'Deploy after approval' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('excludes guard words from shared-term matching', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy without approval' }),
+        [createLesson({ correctionApplied: 'Delete backups without approval' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('treats missing prerequisites as opposed guard outcomes', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Avoid cache reuse unless provenance checks pass' }),
+        [createLesson({ correctionApplied: 'Reuse cache when provenance checks are missing' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('recognizes bypass-style prohibitive directives as negative guidance', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Require authentication before API access' }),
+        [createLesson({ correctionApplied: 'Bypass authentication before API access' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
   it('detects one-object directive reversals', () => {
     expect(
       detectLessonContradictions(

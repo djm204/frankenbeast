@@ -1342,7 +1342,9 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
   const guardCondition = extractGuardCondition(fragment);
   const leadingPolarity = leadingDirectivePolarity(normalized);
   const conditionalProhibition =
-    leadingPolarity === 'negative' && guardCondition !== undefined;
+    leadingPolarity === 'negative' &&
+    guardCondition !== undefined &&
+    !/^(bypass|skip|omit|ignore)\b/.test(normalized);
   const embeddedNegatedCondition = extractEmbeddedNegatedCondition(normalized);
   const clauses: LessonDirectiveClause[] = [
     {
@@ -1355,7 +1357,7 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
     },
   ];
 
-  if (guardCondition) {
+  if (guardCondition && (conditionalProhibition || /\b(?:without|unless)\b/i.test(fragment))) {
     clauses.push({
       text: `${normalized} ${guardCondition}`,
       sourceText: fragment,
@@ -1547,7 +1549,7 @@ function hasOpposedGuardOutcome(
     /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
       guardCondition,
     );
-  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid)\b/.test(
+  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked)\b/.test(
     guardCondition,
   );
   const requirementHasPass =
@@ -1555,7 +1557,7 @@ function hasOpposedGuardOutcome(
       requirementText,
     );
   const requirementHasFail =
-    /\b(fail|fails|failed|failing|failure|invalid)\b/.test(requirementText);
+    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked)\b/.test(requirementText);
 
   return (
     (guardHasPass && requirementHasFail) || (guardHasFail && requirementHasPass)
@@ -1570,7 +1572,7 @@ function describesRequiredPrerequisite(text: string): boolean {
 
 function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
   if (
-    /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled)\b/.test(
+    /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass)\b/.test(
       normalized,
     ) ||
     /^(do not|don t|must not|should not|cannot|can t)\b/.test(normalized)
@@ -1617,7 +1619,7 @@ function hasExplicitOppositeDirectivePairInOrder(
 }
 
 function startsWithNegativeDirective(normalized: string): boolean {
-  return /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|do not|don t|must not|should not|cannot|can t)\b/.test(
+  return /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|do not|don t|must not|should not|cannot|can t)\b/.test(
     normalized,
   );
 }
@@ -1631,7 +1633,7 @@ function startsWithPositiveDirective(normalized: string): boolean {
 function stripLeadingNegativeDirective(normalized: string): string {
   return normalized
     .replace(
-      /^(?:no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|do not|don t|must not|should not|cannot|can t)\s+/,
+      /^(?:no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|do not|don t|must not|should not|cannot|can t)\s+/,
       '',
     )
     .trim();
@@ -1716,6 +1718,7 @@ const LESSON_CONTRADICTION_STOP_WORDS = new Set([
   'needs',
   'should',
   'until',
+  'without',
   'allow',
   'allows',
   'allowed',
