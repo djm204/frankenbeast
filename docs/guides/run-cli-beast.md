@@ -207,7 +207,7 @@ The orchestrator CLI accepts global flags before or after the subcommand unless 
 | `--base-dir <path>` | all orchestrator commands | Project root for CLI-managed files and services; defaults to the current working directory. |
 | `--base-branch <name>` | Beast issue/PR flows | Git base branch for PR creation; defaults to `main`. |
 | `--budget <usd>` | Beast run/session flows | Spend limit in USD; defaults to `10`. |
-| `--provider <name>` | Beast run/session flows | Primary LLM provider name; defaults to `claude`. The provider registry supports `claude-cli`, `codex-cli`, `gemini-cli`, `anthropic-api`, `openai-api`, and `gemini-api`. |
+| `--provider <name>` | Beast run/session flows | Primary CLI provider name; defaults to `claude`. Accepted CLI selector values are `claude`, `codex`, `gemini`, and `aider`; provider types such as `anthropic-api`, `openai-api`, and `gemini-api` are config surfaces, not direct `--provider` values for run/chat paths. |
 | `--providers <list>` | Beast run/session flows | Comma-separated fallback chain, for example `--providers claude,codex,gemini`. Values are trimmed and lowercased. |
 | `--trust-provider-command-overrides` | provider config loading | Explicitly permits trusted repo-configured provider command overrides. Leave unset for the safer default. |
 | `--config <path>` | commands that load CLI config | JSON config file override. Explicit config paths fail closed when missing or invalid. |
@@ -222,9 +222,6 @@ The orchestrator CLI accepts global flags before or after the subcommand unless 
 | `--design-doc <path>` | `plan`, full flow | Start from an existing design document instead of the interview output. |
 | `--plan-dir <path>` | `run`, full flow | Execute chunks from an existing chunk-plan directory. |
 | `--plan-name <name>` | `plan`, full flow | Override the generated plan name. |
-| `--output-dir <path>` | planning/output flows | Override the directory used for generated artifacts. |
-| `--goal <text>` | `interview` | Seed the interview with an initial objective. |
-| `--output <path>` | `interview` | Write the generated design document to a specific path. |
 | `--reset` | `run` | Clear checkpoint and trace state before executing. |
 | `--resume` | `run` | Preserve checkpoint/chunk-session state and resume from the last run. |
 | `--cleanup` | `run` | Remove build logs, checkpoints, and traces without following symlinked cleanup entries. |
@@ -246,7 +243,7 @@ Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use
 |------|------------|----------|
 | `--host <host>` | `chat-server`, `beasts-daemon` | Bind host; defaults to `127.0.0.1`. |
 | `--port <port>` | `chat-server`, `beasts-daemon` | Bind port; defaults to `3737` for `chat-server` and `4050` for `beasts-daemon`. |
-| `--allow-origin <url>` | `chat-server`, Beast websocket/SSE paths | Allow one additional websocket Origin beyond configured dashboard origins. |
+| `--allow-origin <url>` | `chat-server` | Allow one additional websocket Origin beyond configured dashboard origins. The standalone `beasts-daemon` command currently forwards only host and port. |
 
 ### Beast dispatch/module flags
 
