@@ -3,6 +3,7 @@ import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer } fr
 import { createToolDefsForServer } from '../shared/tool-registry.js';
 import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
+import { handleStartupFailure } from '../shared/shutdown.js';
 import { createFirewallAdapter, type FirewallAdapter } from '../adapters/firewall-adapter.js';
 import { parseArgs } from 'node:util';
 import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
@@ -30,7 +31,6 @@ if (isMain(import.meta.url)) {
   const firewall = createFirewallAdapter(dbPath, tier, { root, configPath: values['config'] });
   const server = createFirewallServer({ firewall }, createCentralOptions(dbPath));
   server.start().catch((err) => {
-    console.error('fbeast-firewall failed to start:', err);
-    process.exit(1);
+    handleStartupFailure('fbeast-firewall', err);
   });
 }
