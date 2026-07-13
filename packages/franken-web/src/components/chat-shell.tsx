@@ -609,6 +609,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     const requestBeastRefresh = () => setBeastRefreshNonce((current) => current + 1);
 
     void beastClient.subscribeToEvents({
+      connected: () => {
+        if (!cancelled) {
+          setBeastError(null);
+        }
+      },
       snapshot: (snapshot) => {
         if (cancelled || !snapshot.agents) return;
         const currentAgents = beastAgentsRef.current;

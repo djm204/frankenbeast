@@ -257,6 +257,11 @@ export class BeastApiClient {
       );
       eventSource = nextSource;
 
+      nextSource.addEventListener('open', () => {
+        if (closed || eventSource !== nextSource) return;
+        handlers.connected?.();
+      });
+
       nextSource.addEventListener('snapshot', (event) => {
         if (eventSource !== nextSource) return;
         try {
