@@ -104,12 +104,10 @@ describe('SlackAdapter', () => {
   it('includes endpoint and response body when Slack returns HTTP errors', async () => {
     const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue({
-      ok: false,
+    mockFetch.mockResolvedValue(new Response('temporarily unavailable', {
       status: 503,
       statusText: 'Service Unavailable',
-      text: async () => 'temporarily unavailable',
-    } as Response);
+    }));
 
     await expect(adapter.send('session-123', {
       text: 'result',

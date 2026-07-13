@@ -58,12 +58,10 @@ describe('WhatsAppAdapter', () => {
       phoneNumberId: '123',
     });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue({
-      ok: false,
+    mockFetch.mockResolvedValue(new Response('{"error":"invalid token"}', {
       status: 401,
       statusText: 'Unauthorized',
-      text: async () => '{"error":"invalid token"}',
-    } as Response);
+    }));
 
     await expect(adapter.send('session-123', {
       text: 'hello whatsapp',
