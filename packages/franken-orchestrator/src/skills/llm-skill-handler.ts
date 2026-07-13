@@ -60,6 +60,11 @@ export class LlmSkillHandler {
       return `${MEMORY_CONTEXT_HEADER}\n(none)`;
     }
 
+    const fullBlock = this.renderMemoryContextBlock(entries.map(entry => this.formatMemoryEntry(entry)), 0);
+    if (fullBlock.length <= this.memoryContextBudgetChars) {
+      return fullBlock;
+    }
+
     const selectedLines: string[] = [];
     let omitted = 0;
 
@@ -89,13 +94,14 @@ export class LlmSkillHandler {
     const entries: RankedMemoryEntry[] = [];
     let originalIndex = 0;
 
-    const pushEntries = (section: MemorySection, label: string, values: readonly string[]) => {
+    const pushEntries = (section: MemorySection, label: string, values: readonly unknown[]) => {
       for (const value of values) {
+        const text = String(value);
         entries.push({
           section,
           label,
-          text: value,
-          priority: this.memoryPriority(value, section),
+          text,
+          priority: this.memoryPriority(text, section),
           originalIndex,
         });
         originalIndex += 1;
@@ -114,9 +120,8 @@ export class LlmSkillHandler {
   }
 
   private memoryPriority(value: string, section: MemorySection): number {
-    const normalized = value.toLowerCase();
-    if (normalized.includes('stale')) return 20;
-    if (normalized.includes('archived')) return 19;
+    const normalized = value.toLowerCase().trimStart();
+    if (this.isExplicitlyStaleOrArchived(normalized)) return 20;
     if (normalized.includes('user preference')) return 0;
     if (normalized.includes('project convention') || normalized.includes('active project')) return 1;
     if (normalized.includes('environment memory')) return 2;
@@ -130,6 +135,10 @@ export class LlmSkillHandler {
       case 'knownErrors':
         return 10;
     }
+  }
+
+  private isExplicitlyStaleOrArchived(normalized: string): boolean {
+    return /^(stale|archived)\b/.test(normalized);
   }
 
   private sectionPriority(section: MemorySection): number {

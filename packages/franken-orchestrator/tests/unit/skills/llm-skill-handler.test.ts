@@ -177,4 +177,65 @@ describe('LlmSkillHandler', () => {
     expect(activeProject).toBeGreaterThan(activePreference);
     expect(stalePreference === -1 || stalePreference > activeProject).toBe(true);
   });
+
+  it('does not demote active memories that mention stale resources', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 260 });
+
+    await handler.execute('Keep active stale-branch preference', {
+      adrs: ['ADR-002: generic architecture rule.'],
+      rules: [
+        'Generic rule that should come after preferences.',
+        'User preference: warn before deleting stale branches.',
+      ],
+      knownErrors: [],
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    expect(prompt.indexOf('User preference: warn before deleting stale branches.')).toBeLessThan(
+      prompt.indexOf('Generic rule that should come after preferences.'),
+    );
+  });
+
+  it('coerces restored non-string memory values before ranking', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient);
+    const restoredContext = {
+      adrs: [404],
+      rules: ['User preference: keep recovered facts visible.'],
+      knownErrors: [{ code: 'E_RESTORED' }],
+    } as unknown as MemoryContext;
+
+    await expect(handler.execute('Handle restored context', restoredContext)).resolves.toMatchObject({ output: 'ok' });
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain('404');
+    expect(prompt).toContain('[object Object]');
+  });
+
+  it('does not reserve a truncation marker when all memory entries fit', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 145 });
+
+    await handler.execute('Render fitting memory', {
+      adrs: [],
+      rules: [
+        'User preference: keep this medium-sized preference in context.',
+        'Tiny rule.',
+      ],
+      knownErrors: [],
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    const memoryBlock = prompt.slice(prompt.indexOf('Memory Context:'));
+    expect(memoryBlock.length).toBeLessThanOrEqual(145);
+    expect(memoryBlock).toContain('User preference: keep this medium-sized preference in context.');
+    expect(memoryBlock).toContain('Tiny rule.');
+    expect(memoryBlock).not.toContain('[memory truncated:');
+  });
 });
