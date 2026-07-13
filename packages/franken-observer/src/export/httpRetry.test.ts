@@ -84,14 +84,16 @@ describe('fetchWithRetry (issue #68)', () => {
     }
   })
 
-  it('clamps invalid retry counts to preserve the initial attempt', async () => {
-    for (const maxRetries of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.9]) {
+  it('rejects invalid or excessive retry counts before making an attempt', async () => {
+    for (const maxRetries of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.9, 11]) {
       const sleep = noSleep()
       const attempt = vi.fn().mockResolvedValue(serverError)
-      const res = await fetchWithRetry(attempt, { maxRetries, sleep })
-      expect(res).toEqual(serverError)
-      expect(attempt).toHaveBeenCalledTimes(maxRetries === 1.9 ? 2 : 1)
-      expect(sleep).toHaveBeenCalledTimes(maxRetries === 1.9 ? 1 : 0)
+
+      await expect(fetchWithRetry(attempt, { maxRetries, sleep })).rejects.toThrow(
+        'maxRetries must be an integer between 0 and 10',
+      )
+      expect(attempt).not.toHaveBeenCalled()
+      expect(sleep).not.toHaveBeenCalled()
     }
   })
 
