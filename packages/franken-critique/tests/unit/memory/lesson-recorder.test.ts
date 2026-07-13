@@ -438,6 +438,100 @@ describe('LessonRecorder', () => {
     ).toThrow('LessonRecorder agentId must be a non-empty string when provided.');
   });
 
+  it('returns an LLM-friendly learning backlog prioritization report for PM handoffs', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      agentId: 'worker-alpha',
+      now: (): string => '2026-07-12T00:00:00.000Z',
+    });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'quality-gate', [
+          {
+            message: 'Codex blocker was left unresolved',
+            severity: 'critical',
+            suggestion: 'Resolve the current-head review thread before merge.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const summary = await recorder.record(result, 'learning-backlog-task');
+
+    expect(summary.learningBacklogPrioritizationReport).toEqual({
+      schemaVersion: 'learning-backlog-prioritization-report-v1',
+      generatedAt: '2026-07-12T00:00:00.000Z',
+      guidance:
+        'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.',
+      items: [
+        {
+          id: expect.stringMatching(/^lesson:learning-backlog-task:quality-gate:iteration-0$/),
+          source: 'recorded-lesson',
+          priority: 'high',
+          score: 80,
+          taskId: 'learning-backlog-task',
+          evaluatorName: 'quality-gate',
+          title: 'Codex blocker was left unresolved',
+          rationale:
+            'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.',
+          recommendedAction:
+            'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
+        },
+      ],
+    });
+    expect(JSON.parse(JSON.stringify(summary))).toMatchObject({
+      learningBacklogPrioritizationReport: {
+        schemaVersion: 'learning-backlog-prioritization-report-v1',
+        items: [
+          expect.objectContaining({
+            source: 'recorded-lesson',
+            priority: 'high',
+          }),
+        ],
+      },
+    });
+  });
+
+  it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Repeated PM handoff lesson caused churn',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'first-task');
+    now = new Date('2026-07-12T10:00:30.000Z');
+    const suppressed = await recorder.record(result, 'second-task');
+
+    expect(suppressed.learningBacklogPrioritizationReport.items).toEqual([
+      expect.objectContaining({
+        source: 'cooldown-suppression',
+        priority: 'low',
+        score: 20,
+        taskId: 'second-task',
+        evaluatorName: 'learning-reviewer',
+        recommendedAction:
+          'Reuse the existing in-cooldown lesson until suppression expires; do not create a duplicate backlog item.',
+      }),
+    ]);
+  });
+
   it('attaches an LLM-friendly post-PR lesson extraction template to recorded lessons', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
@@ -645,7 +739,7 @@ describe('LessonRecorder', () => {
 
     const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[0]![0];
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -726,7 +820,7 @@ describe('LessonRecorder', () => {
     const admitted = await recorder.record(result, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(admitted).toEqual({
+    expect(admitted).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -763,7 +857,7 @@ describe('LessonRecorder', () => {
     const suppressed = await secondRecorder.record(result, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(suppressed).toEqual({
+    expect(suppressed).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -822,12 +916,12 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({ taskId: 'second-task' }),
@@ -869,7 +963,7 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(disabledSummary).toEqual({
+    expect(disabledSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -921,7 +1015,7 @@ describe('LessonRecorder', () => {
     expect(firstLesson.cooldown.recordedAt).toBe('2026-07-12T10:00:00.000Z');
     expect(firstLesson.cooldown.suppressUntil).toBe('2026-07-12T10:00:01.000Z');
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -967,12 +1061,12 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -1028,17 +1122,17 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(thirdSummary).toEqual({
+    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -1083,7 +1177,7 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1119,7 +1213,7 @@ describe('LessonRecorder', () => {
     const secondSummary = await recorder.record(policyDash, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1242,7 +1336,7 @@ describe('LessonRecorder', () => {
     const thirdLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[1]![0];
 
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
       minedBlockerPatterns: [],
@@ -1455,7 +1549,7 @@ describe('LessonRecorder', () => {
     expect(secondSummary.recorded).toBe(1);
     expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(thirdSummary).toEqual({
+    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-c' })],
       minedBlockerPatterns: [],
@@ -1489,12 +1583,12 @@ describe('LessonRecorder', () => {
     const failedSummary = await recorder.record(result, 'task-a');
     const secondSummary = await recorder.record(result, 'task-b');
 
-    expect(failedSummary).toEqual({
+    expect(failedSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1737,7 +1831,7 @@ describe('LessonRecorder', () => {
     };
 
     // Should not throw and should report that no lesson was persisted.
-    await expect(recorder.record(result, 'test-task')).resolves.toEqual({
+    await expect(recorder.record(result, 'test-task')).resolves.toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
