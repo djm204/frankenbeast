@@ -79,7 +79,7 @@ await adapter.flush(trace) // throws on non-2xx response
 
 `LANGFUSE_PUBLIC_KEY` identifies the Langfuse project that receives the OTEL payloads. `LANGFUSE_SECRET_KEY` is paired with it and is sent as part of the adapter's HTTP Basic Authorization header (`publicKey:secretKey`). Keep the secret key in a password manager, CI secret store, or local uncommitted `.env` file; never commit it, print it in logs, or expose it to browser bundles.
 
-Local development usually keeps Langfuse export opt-in. Store real keys in an ignored `.env.local` (or equivalent shell profile), use placeholder values only when paired with a mocked `fetch`, and point `baseUrl` at the correct Langfuse region when you are testing live exports:
+Local development usually keeps Langfuse export opt-in. Store real keys in an ignored `.env` file (or equivalent shell profile), use placeholder values only when paired with a mocked `fetch`, and point `baseUrl` at the correct Langfuse region when you are testing live exports:
 
 ```bash
 export LANGFUSE_PUBLIC_KEY="pk-lf-..."
