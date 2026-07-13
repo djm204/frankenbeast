@@ -23,6 +23,15 @@ import { ProviderSkillTranslator } from './provider-skill-translator.js';
 
 const SAFE_NAME = /^[a-zA-Z0-9_-]+$/;
 
+function requireSecurityReviewByDefault(
+  tools: ToolDefinition[],
+): ToolDefinition[] {
+  return tools.map((tool) => ({
+    ...tool,
+    requiresHitl: tool.requiresHitl ?? true,
+  }));
+}
+
 export class SkillManager {
   private readonly enabledSkills: Set<string>;
 
@@ -72,6 +81,11 @@ export class SkillManager {
         [catalogEntry.name]: catalogEntry.installConfig,
       },
     });
+    const tools = catalogEntry.toolDefinitions?.length
+      ? requireSecurityReviewByDefault(
+        SkillToolManifestSchema.parse(catalogEntry.toolDefinitions),
+      )
+      : undefined;
     const skillDir = join(this.skillsDir, catalogEntry.name);
     mkdirSync(skillDir, { recursive: true });
 
@@ -80,11 +94,14 @@ export class SkillManager {
       JSON.stringify(mcpConfig, null, 2),
     );
 
-    if (catalogEntry.toolDefinitions?.length) {
+    const toolsPath = join(skillDir, 'tools.json');
+    if (tools) {
       writeFileSync(
-        join(skillDir, 'tools.json'),
-        JSON.stringify(catalogEntry.toolDefinitions, null, 2),
+        toolsPath,
+        JSON.stringify(tools, null, 2),
       );
+    } else if (existsSync(toolsPath)) {
+      rmSync(toolsPath);
     }
   }
 
@@ -100,6 +117,11 @@ export class SkillManager {
       join(skillDir, 'mcp.json'),
       JSON.stringify(mcpConfig, null, 2),
     );
+
+    const toolsPath = join(skillDir, 'tools.json');
+    if (existsSync(toolsPath)) {
+      rmSync(toolsPath);
+    }
   }
 
   enable(name: string): void {
@@ -154,7 +176,7 @@ export class SkillManager {
     const toolsPath = join(this.skillsDir, name, 'tools.json');
     if (!existsSync(toolsPath)) return [];
     const raw = JSON.parse(readFileSync(toolsPath, 'utf-8'));
-    return SkillToolManifestSchema.parse(raw);
+    return requireSecurityReviewByDefault(SkillToolManifestSchema.parse(raw));
   }
 
   writeContext(name: string, content: string): void {
