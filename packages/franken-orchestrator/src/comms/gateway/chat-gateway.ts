@@ -225,13 +225,21 @@ export class ChatGateway extends EventEmitter {
   }
 
   private resolveDeliverySensitivity(outbound: ChannelOutboundMessage): DeliverySensitivity {
-    const outboundSensitivity: unknown = outbound.sensitivity;
-    if (outboundSensitivity === 'public' || outboundSensitivity === 'internal') return outboundSensitivity;
-    if (outboundSensitivity !== undefined) return 'sensitive';
-    const metadataSensitivity = outbound.metadata?.deliverySensitivity ?? outbound.metadata?.sensitivity;
-    if (metadataSensitivity === 'public' || metadataSensitivity === 'internal') return metadataSensitivity;
-    if (metadataSensitivity !== undefined) return 'sensitive';
+    const signals = [
+      this.normalizeSensitivityValue(outbound.sensitivity),
+      this.normalizeSensitivityValue(outbound.metadata?.deliverySensitivity),
+      this.normalizeSensitivityValue(outbound.metadata?.sensitivity),
+    ];
+    if (signals.includes('sensitive')) return 'sensitive';
+    if (signals.includes('internal')) return 'internal';
+    if (signals.includes('public')) return 'public';
     return 'internal';
+  }
+
+  private normalizeSensitivityValue(value: unknown): DeliverySensitivity | undefined {
+    if (value === undefined) return undefined;
+    if (value === 'public' || value === 'internal' || value === 'sensitive') return value;
+    return 'sensitive';
   }
 
   close(): void {

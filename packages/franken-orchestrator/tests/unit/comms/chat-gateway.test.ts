@@ -188,6 +188,32 @@ describe('ChatGateway', () => {
     expect(sent.metadata).toEqual(expect.objectContaining({ deliveryDenied: true }));
   });
 
+  it('treats sensitive metadata as more restrictive than top-level public sensitivity', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'mixed-signal-secret',
+      status: 'reply',
+      sensitivity: 'public',
+      metadata: { sensitivity: 'sensitive' },
+    } satisfies CommsInboundResult);
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'ping',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const [, sent] = (slackAdapter.send as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(sent.text).toContain('Sensitive response withheld');
+    expect(sent.text).not.toContain('mixed-signal-secret');
+    expect(sent.metadata).toEqual(expect.objectContaining({ deliveryDenied: true }));
+  });
+
   it('relays sensitive responses when a trusted channel opts in', async () => {
     (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       text: 'operator-approved-secret',

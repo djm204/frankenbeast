@@ -64,7 +64,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const allowSensitiveDelivery = (channel: 'slack' | 'discord' | 'telegram' | 'whatsapp'): boolean => {
     return config.channels[channel]?.allowSensitiveDelivery === true
-      || config.security?.deliveryChannels?.[channel].allowSensitiveDelivery === true;
+      || config.security?.deliveryChannels?.[channel]?.allowSensitiveDelivery === true;
   };
 
   const gateway = new ChatGateway(runtime, {
