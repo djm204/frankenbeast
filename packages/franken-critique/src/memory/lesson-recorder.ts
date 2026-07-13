@@ -1097,12 +1097,12 @@ function findContradictoryGuidanceMatch(
   lesson: CritiqueLesson,
   prior: CritiqueLesson,
 ): { sharedTerms: string[] } | undefined {
-  for (const lessonFragment of createLessonDirectiveFragments(lesson)) {
-    for (const priorFragment of createLessonDirectiveFragments(prior)) {
-      if (containsNegation(lessonFragment) === containsNegation(priorFragment)) {
+  for (const lessonDirective of createLessonDirectiveClauses(lesson)) {
+    for (const priorDirective of createLessonDirectiveClauses(prior)) {
+      if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
-      const sharedTerms = sharedTextTerms(lessonFragment, priorFragment);
+      const sharedTerms = sharedTextTerms(lessonDirective.text, priorDirective.text);
       if (sharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
         return { sharedTerms };
       }
@@ -1131,12 +1131,60 @@ function createLessonDirectiveText(lesson: CritiqueLesson): string {
 function createLessonDirectiveFragments(lesson: CritiqueLesson): string[] {
   const reviewerGuidance =
     lesson.reviewerFeedback?.findings.flatMap((finding) => [
-      finding.message,
       finding.suggestion ?? '',
     ]) ?? [];
   return [lesson.correctionApplied, ...reviewerGuidance].filter(
     (fragment) => normalizeText(fragment).length > 0,
   );
+}
+
+type LessonDirectivePolarity = 'positive' | 'negative';
+
+interface LessonDirectiveClause {
+  readonly text: string;
+  readonly polarity: LessonDirectivePolarity;
+}
+
+function createLessonDirectiveClauses(lesson: CritiqueLesson): LessonDirectiveClause[] {
+  return createLessonDirectiveFragments(lesson).flatMap((fragment) =>
+    createDirectiveClauses(fragment),
+  );
+}
+
+function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
+  const normalized = normalizeText(fragment);
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const clauses: LessonDirectiveClause[] = [
+    {
+      text: normalized.replace(/\bwithout\b.*$/i, '').trim() || normalized,
+      polarity: leadingDirectivePolarity(normalized),
+    },
+  ];
+
+  const withoutMatches = normalized.matchAll(/\bwithout\s+([^.;,]+)/gi);
+  for (const match of withoutMatches) {
+    const condition = match[1]?.trim();
+    if (condition) {
+      clauses.push({ text: condition, polarity: 'negative' });
+    }
+  }
+
+  return clauses;
+}
+
+function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
+  if (
+    /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled)\b/.test(
+      normalized,
+    ) ||
+    /^(do not|don t|must not|cannot|can t)\b/.test(normalized)
+  ) {
+    return 'negative';
+  }
+  return 'positive';
 }
 
 function extractComparableTerms(value: string): string[] {
@@ -1151,13 +1199,6 @@ function extractComparableTerms(value: string): string[] {
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function containsNegation(value: string): boolean {
-  const normalized = normalizeText(value);
-  return /\b(no|not|never|avoid|reject|forbid|without|disable|disabled|don t|do not|must not|cannot|can t)\b/i.test(
-    normalized,
-  );
 }
 
 function getLessonId(lesson: CritiqueLesson): string {
