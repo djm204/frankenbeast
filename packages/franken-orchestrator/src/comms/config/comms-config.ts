@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+const DeliveryChannelPolicySchema = z.object({
+  /**
+   * Fail closed by default: channels must explicitly opt in before the gateway
+   * relays messages marked `sensitive` by runtime metadata or outbound fields.
+   */
+  allowSensitiveDelivery: z.boolean().default(false),
+});
+
 export const CommsConfigSchema = z.object({
   orchestrator: z.object({
     /** @deprecated WebSocket bridge removed in Phase 4.5.01 — field kept optional for config compat */
@@ -11,16 +19,19 @@ export const CommsConfigSchema = z.object({
       enabled: z.boolean().default(false),
       token: z.string().optional(),
       signingSecret: z.string().optional(),
+      allowSensitiveDelivery: z.boolean().default(false),
     }).optional(),
     discord: z.object({
       enabled: z.boolean().default(false),
       token: z.string().optional(),
       publicKey: z.string().optional(),
+      allowSensitiveDelivery: z.boolean().default(false),
     }).optional(),
     telegram: z.object({
       enabled: z.boolean().default(false),
       botToken: z.string().optional(),
       webhookSecretToken: z.string().optional(),
+      allowSensitiveDelivery: z.boolean().default(false),
     }).optional(),
     whatsapp: z.object({
       enabled: z.boolean().default(false),
@@ -28,6 +39,7 @@ export const CommsConfigSchema = z.object({
       phoneNumberId: z.string().optional(),
       appSecret: z.string().optional(),
       verifyToken: z.string().optional(),
+      allowSensitiveDelivery: z.boolean().default(false),
     }).optional(),
   }),
   security: z.object({
@@ -35,6 +47,12 @@ export const CommsConfigSchema = z.object({
       windowMs: z.number().default(60000), // 1 minute
       max: z.number().default(100), // 100 requests per window
     }).optional(),
+    deliveryChannels: z.object({
+      slack: DeliveryChannelPolicySchema.default({}),
+      discord: DeliveryChannelPolicySchema.default({}),
+      telegram: DeliveryChannelPolicySchema.default({}),
+      whatsapp: DeliveryChannelPolicySchema.default({}),
+    }).default({}),
   }).optional(),
 });
 
