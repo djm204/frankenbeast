@@ -108,7 +108,7 @@ on:
     it('uses the repository-pinned minimum supported Node.js version', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
+      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v6');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
@@ -216,7 +216,7 @@ on:
     it('uses actions/setup-node with npm cache', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v4');
+      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v6');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith.cache).toBe('npm');
@@ -228,7 +228,7 @@ on:
 
       for (const [jobName, jobConfig] of Object.entries(jobs)) {
         const job = expectRecord(jobConfig, `jobs.${jobName}`);
-        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v4')) {
+        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v6')) {
           const setupNodeWith = expectRecord(step.with, `${jobName}.actions/setup-node.with`);
           expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
           expect(setupNodeWith['node-version']).toBeUndefined();
@@ -352,7 +352,7 @@ jobs:
 
   it('authenticates npm only in the publish step with the NPM_TOKEN secret and registry auth', () => {
     const publishSteps = expectSteps(publishNpm);
-    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v4');
+    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v6');
     expect(setupNode).toBeTruthy();
     expect(expectRecord(setupNode?.with, 'publish setup-node with')['registry-url']).toBe('https://registry.npmjs.org');
 
