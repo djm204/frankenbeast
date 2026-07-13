@@ -13,6 +13,22 @@ function sanitizeBodyUrl(value: string): string {
     url.password = '';
     url.search = '';
     url.hash = '';
+    if (url.hostname === 'hooks.slack.com') {
+      url.pathname = '/services/[REDACTED]';
+    } else {
+      url.pathname = url.pathname
+        .split('/')
+        .map(segment => {
+          if (!segment) {
+            return segment;
+          }
+          if (/^bot.+/i.test(segment)) {
+            return '[REDACTED]';
+          }
+          return segment;
+        })
+        .join('/');
+    }
     return url.toString();
   } catch {
     return '[REDACTED]';
@@ -54,7 +70,11 @@ async function readWithDeadline(reader: ReadableStreamDefaultReader<Uint8Array>,
   });
 }
 
-async function readBoundedErrorBody(response: Response, maxChars = MAX_ERROR_BODY_CHARS): Promise<string> {
+async function readBoundedErrorBody(
+  response: Response,
+  maxChars = MAX_ERROR_BODY_CHARS,
+  options: { cancelOnTruncate?: boolean } = {},
+): Promise<string> {
   if (!response.body || typeof response.body.getReader !== 'function') {
     return '';
   }
@@ -89,8 +109,12 @@ async function readBoundedErrorBody(response: Response, maxChars = MAX_ERROR_BOD
       }
       chunks.push(value);
       totalBytes += value.byteLength;
+      if (totalBytes >= maxChars) {
+        truncated = true;
+        break;
+      }
     }
-    if (truncated) {
+    if (truncated && options.cancelOnTruncate !== false) {
       await reader.cancel();
     }
   } finally {
@@ -231,7 +255,7 @@ export class NetworkApiClient {
       return null;
     }
     try {
-      const body = await readBoundedErrorBody(response.clone(), MAX_STRUCTURED_ERROR_BODY_CHARS);
+      const body = await readBoundedErrorBody(response.clone(), MAX_STRUCTURED_ERROR_BODY_CHARS, { cancelOnTruncate: false });
       return body && !body.endsWith('…') ? JSON.parse(body) as ApiErrorEnvelope : null;
     } catch {
       return null;

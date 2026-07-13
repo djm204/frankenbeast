@@ -108,6 +108,7 @@ function redactWebhookSecrets(value: string): string {
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
     .replace(/\bAuthorization:\s*Bearer \*\*\*(?:\s+X-Api-Key=[^\r\n,;<>}]+)?/gi, 'Authorization: ***')
     .replace(/(^|[\s;{])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)(?!\s*\*\*\*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]')
+    .replace(/https?:\\\/\\\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match.replace(/\\\//g, '/')))
     .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
 }
 

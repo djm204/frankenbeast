@@ -1,13 +1,43 @@
 const MAX_ERROR_BODY_CHARS = 2048;
 const ERROR_BODY_READ_TIMEOUT_MS = 250;
 
+function sanitizeHttpErrorUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    if (url.hostname === 'hooks.slack.com') {
+      url.pathname = '/services/[REDACTED]';
+    } else {
+      url.pathname = url.pathname
+        .split('/')
+        .map(segment => {
+          if (!segment) {
+            return segment;
+          }
+          if (/^bot.+/i.test(segment)) {
+            return '[REDACTED]';
+          }
+          return segment;
+        })
+        .join('/');
+    }
+    return url.toString();
+  } catch {
+    return '[REDACTED]';
+  }
+}
+
 export function redactHttpErrorSecrets(value: string): string {
   return value
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]]*\]/gi, '$1["[REDACTED]"]')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]\r\n,;<>}]*$/gim, '$1["[REDACTED]"]')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
-    .replace(/(^|[\s;{])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]');
+    .replace(/(^|[\s;{])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]')
+    .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeHttpErrorUrl(match));
 }
 
 function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {

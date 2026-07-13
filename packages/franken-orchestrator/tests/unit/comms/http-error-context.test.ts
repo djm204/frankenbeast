@@ -40,6 +40,13 @@ describe('http error context', () => {
     expect(redactHttpErrorSecrets('{"Authorization":["Bearer leaked-token"]}')).toBe('{"Authorization":["[REDACTED]"]}');
   });
 
+  it('redacts credential-bearing URLs in provider error bodies', () => {
+    expect(redactHttpErrorSecrets('proxy echoed https://user:pass@hooks.slack.com/services/T000/B000/secret?token=value'))
+      .toBe('proxy echoed https://hooks.slack.com/services/[REDACTED]');
+    expect(redactHttpErrorSecrets('proxy echoed https://api.telegram.org/bot123456:secret/sendMessage'))
+      .toBe('proxy echoed https://api.telegram.org/[REDACTED]/sendMessage');
+  });
+
   it('does not mark exact-limit provider bodies as truncated', async () => {
     const message = await formatHttpErrorMessage('Provider failed', {
       status: 502,
