@@ -82,6 +82,94 @@ describe('ChatGateway', () => {
     expect(discordAdapter.send).not.toHaveBeenCalled();
   });
 
+  it('withholds sensitive runtime responses unless the delivery channel explicitly opts in', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'secret-token-value',
+      status: 'reply',
+      metadata: { sensitivity: 'sensitive' },
+      actions: [{ id: 'approve', label: 'Approve' }],
+    } satisfies CommsInboundResult);
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'ping',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const [, sent] = (slackAdapter.send as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(sent.text).toContain('Sensitive response withheld');
+    expect(sent.text).not.toContain('secret-token-value');
+    expect(sent.actions).toBeUndefined();
+    expect(sent.metadata).toEqual(expect.objectContaining({
+      channelId: 'C1',
+      deliveryDenied: true,
+      deliveryDeniedReason: 'sensitive-channel-policy',
+    }));
+  });
+
+  it('treats unknown sensitivity metadata as sensitive and fail-closed', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'do-not-send',
+      status: 'reply',
+      metadata: { deliverySensitivity: 'credentialed' },
+    } satisfies CommsInboundResult);
+    const discordAdapter = mockAdapter('discord');
+    gateway.registerAdapter(discordAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'discord',
+      externalUserId: 'U1',
+      externalChannelId: 'D1',
+      externalMessageId: 'M1',
+      text: 'ping',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const [, sent] = (discordAdapter.send as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(sent.text).toContain('Sensitive response withheld');
+    expect(sent.text).not.toContain('do-not-send');
+    expect(sent.metadata).toEqual(expect.objectContaining({ deliveryDenied: true }));
+  });
+
+  it('relays sensitive responses when a trusted channel opts in', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'operator-approved-secret',
+      status: 'reply',
+      metadata: { sensitivity: 'sensitive' },
+    } satisfies CommsInboundResult);
+    gateway = new ChatGateway(runtime, {
+      channelSensitivityPolicy: { telegram: { allowSensitiveDelivery: true } },
+    });
+    const telegramAdapter = mockAdapter('telegram');
+    gateway.registerAdapter(telegramAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'telegram',
+      externalUserId: 'U1',
+      externalChannelId: 'T1',
+      externalMessageId: 'M1',
+      text: 'ping',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    expect(telegramAdapter.send).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        text: 'operator-approved-secret',
+        sensitivity: 'sensitive',
+        metadata: expect.objectContaining({ sensitivity: 'sensitive' }),
+      }),
+    );
+  });
+
   it('works with all four channel types', async () => {
     for (const type of ['slack', 'discord', 'telegram', 'whatsapp'] as const) {
       const adapter = mockAdapter(type);

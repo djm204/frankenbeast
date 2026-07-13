@@ -62,7 +62,30 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
     );
   }
 
-  const gateway = new ChatGateway(runtime);
+  const gateway = new ChatGateway(runtime, {
+    channelSensitivityPolicy: {
+      slack: {
+        allowSensitiveDelivery: config.channels.slack?.allowSensitiveDelivery
+          ?? config.security?.deliveryChannels?.slack.allowSensitiveDelivery
+          ?? false,
+      },
+      discord: {
+        allowSensitiveDelivery: config.channels.discord?.allowSensitiveDelivery
+          ?? config.security?.deliveryChannels?.discord.allowSensitiveDelivery
+          ?? false,
+      },
+      telegram: {
+        allowSensitiveDelivery: config.channels.telegram?.allowSensitiveDelivery
+          ?? config.security?.deliveryChannels?.telegram.allowSensitiveDelivery
+          ?? false,
+      },
+      whatsapp: {
+        allowSensitiveDelivery: config.channels.whatsapp?.allowSensitiveDelivery
+          ?? config.security?.deliveryChannels?.whatsapp.allowSensitiveDelivery
+          ?? false,
+      },
+    },
+  });
   const getWebhookSignaturePolicy = options.getWebhookSignaturePolicy
     ?? (() => options.webhookSignaturePolicy ?? 'required');
   const shouldVerifySignature = (c: Context) => {

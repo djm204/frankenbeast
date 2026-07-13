@@ -824,16 +824,19 @@ async function buildChatServerCommsConfig(
         enabled: config.comms.slack.enabled,
         token: slackToken,
         signingSecret: slackSigningSecret,
+        allowSensitiveDelivery: config.comms.slack.allowSensitiveDelivery,
       },
       discord: {
         enabled: config.comms.discord.enabled,
         token: discordToken,
         publicKey: discordPublicKey,
+        allowSensitiveDelivery: config.comms.discord.allowSensitiveDelivery,
       },
       telegram: {
         enabled: config.comms.telegram.enabled,
         botToken: telegramBotToken,
         webhookSecretToken: telegramWebhookSecretToken,
+        allowSensitiveDelivery: config.comms.telegram.allowSensitiveDelivery,
       },
       whatsapp: {
         enabled: config.comms.whatsapp.enabled,
@@ -841,6 +844,7 @@ async function buildChatServerCommsConfig(
         phoneNumberId: whatsappPhoneNumberId,
         appSecret: whatsappAppSecret,
         verifyToken: whatsappVerifyToken,
+        allowSensitiveDelivery: config.comms.whatsapp.allowSensitiveDelivery,
       },
     },
   });
