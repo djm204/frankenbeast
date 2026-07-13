@@ -162,12 +162,37 @@ adapter.reset() // clear accumulators
 Posts OTEL-formatted trace payloads to a [Grafana Tempo](https://grafana.com/oss/tempo/)
 endpoint (local or Grafana Cloud) over OTLP/HTTP. **Write-only** — `queryByTraceId` returns `null`.
 
+### Grafana Cloud environment variables
+
+`GRAFANA_INSTANCE_ID` and `GRAFANA_API_KEY` are convenience inputs for the
+Grafana Cloud example below; the adapter itself only receives a `basicAuth`
+object. Leave both variables unset for local Tempo or an unauthenticated
+OpenTelemetry Collector.
+
+| Variable | Required for | Purpose | Default behavior |
+|---|---|---|---|
+| `GRAFANA_INSTANCE_ID` | Grafana Cloud Tempo | Numeric Grafana Cloud stack/Tempo instance ID used as the Basic auth username. | No default. Local examples omit `basicAuth`. |
+| `GRAFANA_API_KEY` | Grafana Cloud Tempo | Grafana Cloud access policy token/API key used as the Basic auth password; grant only trace write permissions where possible. | No default. Local examples omit `basicAuth`. |
+
+Security notes:
+
+- Do not commit `GRAFANA_API_KEY`; keep it in `.env`, a shell secret manager, or
+  your CI platform's masked secret store.
+- Fail fast in application/CI wiring when either Grafana Cloud variable is
+  missing so traces are not silently dropped or sent without authentication.
+- Rotate the token immediately if it is printed in logs or committed.
+
 ```ts
 import { TempoAdapter } from '@franken/observer'
 
 // Local Tempo / OpenTelemetry Collector (no auth)
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
 await local.flush(trace)
+
+// CI example: inject these from masked CI secrets.
+if (!process.env.GRAFANA_INSTANCE_ID || !process.env.GRAFANA_API_KEY) {
+  throw new Error('Grafana Cloud export requires GRAFANA_INSTANCE_ID and GRAFANA_API_KEY')
+}
 
 // Grafana Cloud Tempo (Basic auth + cloud OTLP path)
 function requireEnv(name: string): string {
