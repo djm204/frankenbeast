@@ -334,12 +334,15 @@ describe('local setup scripts', () => {
       expect(envExample).toContain(required);
     }
 
-    for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'FIREWALL_PORT']) {
+    for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'CHROMA_HOST', 'CHROMA_PORT', 'FIREWALL_PORT']) {
       expect(envExample).not.toContain(removed);
     }
     expect(envExample).not.toMatch(/^# ── Firewall Server ──$/m);
     expect(envExample).not.toMatch(/^#?\s*FIREWALL_PORT\s*=/m);
     expect(envExample).not.toMatch(/frankenfirewall|firewall proxy|port 9090/i);
+
+    expect(readme).not.toMatch(/`CHROMA_HOST`|`CHROMA_PORT`|`FIREWALL_PORT`/);
+    expect(readme).not.toMatch(/\|\s*`?(?:CHROMA_HOST|CHROMA_PORT|FIREWALL_PORT)`?\s*\|/);
 
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
