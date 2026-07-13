@@ -196,23 +196,97 @@ A franken-governor pre-deploy hook should be integrated at the dispatch/API laye
 
 ---
 
-## 6. Useful flags
+## 6. Supported CLI flags
+
+The parser accepts global flags before or after a subcommand. Use `frankenbeast --help` for the live help text; the reference below calls out the flags that are easy to miss.
+
+### Core run and planning flags
 
 ```bash
---provider claude              # LLM provider (claude, codex, gemini, aider)
---providers claude,gemini      # Fallback chain — tries each on failure
---budget 5                     # Spend limit in USD (default: 10)
---base-branch main             # Git base branch for PRs
---no-pr                        # Skip PR creation
---verbose                      # Debug logs + trace viewer
---reset                        # Clear checkpoint and start fresh
---resume                       # Preserve checkpoint/chunk-session state and resume from the last run
---cleanup                      # Remove build logs, checkpoints, traces without following symlinked entries
+--base-dir /absolute/project     # Project root for CLI-managed paths (default: cwd)
+--base-branch main               # Git base branch for PR creation (default: main)
+--budget 5                       # Spend limit in USD (default: 10)
+--provider claude                # Primary CLI provider (default: claude)
+--providers claude,gemini,aider  # Fallback chain tried on provider failures
+--trust-provider-command-overrides
+                                  # Explicitly approve trusted repo-configured provider command overrides
+--design-doc path/to/design.md   # Design doc for plan/full-flow starts
+--plan-dir .fbeast/plans/x/chunks
+                                  # Chunk directory for run starts
+--plan-name plan-name            # Explicit plan name instead of date-derived default
+--output-dir .fbeast/out         # Output directory for generated artifacts where supported
+--goal "Build feature"           # Seed goal for interview-style runs
+--output design.md               # Interview output path
+--config .fbeast/config.json     # Explicit JSON config file
+--no-pr                          # Skip PR creation
+--verbose                        # Debug logs + trace viewer
+--reset                          # Clear checkpoint and traces
+--resume                         # Preserve checkpoint/chunk-session state and resume from the last run
+--cleanup                        # Remove build logs, checkpoints, traces without following symlinked entries
+--help                           # Show the live CLI help
 ```
+
+`--provider` selects the initial provider, while `--providers` supplies the comma-separated fallback order used by the managed provider flow. `--trust-provider-command-overrides` is intentionally explicit because it allows trusted repository config to override provider commands.
 
 Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts. `--cleanup` refuses to clean a symlinked `.build/` root or symlinked `.fbeast` cleanup component by default and unlinks symlinks found inside `.build/` instead of traversing them, so cleanup cannot delete files outside the project through a symlink. Symlinked workspace parents are allowed; replace symlinked `.fbeast`/`.build` cleanup path components with real disposable directories before cleaning.
 
 Verbose and build-log output redacts secret-like environment/config keys such as `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, and `*_API_KEY` by default. The logger exposes an explicit local diagnostic override (`redactSecrets: false`) for trusted development-only callers, but normal CLI/runtime paths keep redaction enabled so environment dumps do not leak provider tokens or credentials. Redaction helpers also expose provenance-aware variants (`redactSensitiveTextWithProvenance` and `redactLogDataWithProvenance`) for audit paths that need to explain why a value was replaced; provenance records include only the matched key, source, and path, never the secret value itself.
+
+### Init flags
+
+```bash
+frankenbeast init --verify                       # Verify config/readiness without changing setup
+frankenbeast init --repair                       # Re-run only missing or failed init steps
+frankenbeast init --non-interactive              # Disable interactive prompts
+frankenbeast init --backend os-keychain          # Secret backend: local-encrypted, os-keychain, 1password, bitwarden
+```
+
+### Chat and daemon flags
+
+```bash
+frankenbeast chat-server --host 127.0.0.1 --port 3737
+frankenbeast chat-server --allow-origin http://localhost:5173
+frankenbeast beasts-daemon --host 127.0.0.1 --port 4050
+```
+
+`chat-server` defaults to port `3737`; `beasts-daemon` defaults to port `4050`. Both default to `127.0.0.1`. Use `--allow-origin` to allow one additional websocket Origin for local browser or preview tooling.
+
+### Beast dispatch flags
+
+```bash
+frankenbeast beasts spawn martin-loop --mode process
+frankenbeast beasts spawn martin-loop --mode container
+frankenbeast beasts create chunk-plan --no-planner --no-critique
+```
+
+`--mode` is supported only for `beasts create`, `beasts spawn`, `beasts status`, and `beasts logs`. Valid execution modes are `process` and `container`.
+
+Module toggles apply to `beasts create` / `beasts spawn` run configs:
+
+```bash
+--no-firewall    # Disable firewall module
+--no-skills      # Disable skills module
+--no-memory      # Disable memory module
+--no-planner     # Disable planner module
+--no-critique    # Disable critique module
+--no-governor    # Disable governor module
+--no-heartbeat   # Disable heartbeat module
+```
+
+### Issues flags
+
+```bash
+frankenbeast issues --repo owner/repo            # Explicit GitHub repo
+frankenbeast issues --target-upstream            # Derive canonical repo from fork upstream remote
+frankenbeast issues --label bug,critical         # Filter by comma-separated labels
+frankenbeast issues --milestone v1               # Filter by milestone
+frankenbeast issues --search "parser docs"       # Search issue text
+frankenbeast issues --assignee octocat           # Filter by assignee
+frankenbeast issues --limit 10                   # Max issues to fetch (default: 30)
+frankenbeast issues --dry-run                    # Preview without executing
+```
+
+`--repo` and `--target-upstream` are mutually exclusive because `--repo` explicitly selects the canonical repository while `--target-upstream` derives it from git remotes.
 
 ---
 
@@ -282,7 +356,11 @@ frankenbeast network restart all           # restart every managed service
 frankenbeast network down                  # tear down the managed network
 frankenbeast network logs <service|all>    # show service logs
 frankenbeast network config                # inspect operator config
+frankenbeast network config --set chat.model=claude-sonnet-4-6
+                                           # update one operator config value
 ```
+
+Network `up` also accepts `-d` / `--detached` for daemon mode. `network config --set path=value` may be repeated when changing more than one operator config value.
 
 ---
 
