@@ -180,6 +180,12 @@ export class BeastApiClient {
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let lastEventId: string | undefined;
     let failedEventId: string | undefined;
+    class MalformedSsePayloadError extends Error {
+      constructor(readonly originalError: unknown) {
+        super(toError(originalError).message);
+        this.name = 'MalformedSsePayloadError';
+      }
+    }
     const parse = <T>(event: MessageEvent): T => JSON.parse(event.data) as T;
     const parseWithEventId = <T extends object>(event: MessageEvent): T & { eventId?: string } => {
       const parsed = parse<T>(event);
@@ -209,7 +215,7 @@ export class BeastApiClient {
         payload = parsePayload(event);
       } catch (error) {
         rememberFailedEventId(event);
-        throw error;
+        throw new MalformedSsePayloadError(error);
       }
       rememberProcessedEventId(event);
       handler(payload);
@@ -226,6 +232,20 @@ export class BeastApiClient {
         });
       }, 1_000);
     };
+    const reconnectAfterMalformedPayload = (source: EventSource): void => {
+      if (closed || eventSource !== source) return;
+      eventSource = undefined;
+      source.close();
+      scheduleReconnect();
+    };
+    const reportEventError = (error: unknown, source: EventSource): void => {
+      if (error instanceof MalformedSsePayloadError) {
+        handlers.error?.(toError(error.originalError));
+        reconnectAfterMalformedPayload(source);
+        return;
+      }
+      handlers.error?.(toError(error));
+    };
 
     const connect = async () => {
       const body = await this.requestRaw<{ ticket: string }>('/v1/beasts/events/ticket', { method: 'POST' });
@@ -239,49 +259,55 @@ export class BeastApiClient {
       eventSource = nextSource;
 
       nextSource.addEventListener('snapshot', (event) => {
+        if (eventSource !== nextSource) return;
         try {
           handleEvent(event as MessageEvent, parse<BeastSseSnapshot>, handlers.snapshot);
         } catch (error) {
-          handlers.error?.(toError(error));
+          reportEventError(error, nextSource);
         }
       });
       nextSource.addEventListener('agent.status', (event) => {
+        if (eventSource !== nextSource) return;
         try {
           handleEvent(event as MessageEvent, parse<BeastSseAgentStatusEvent>, handlers.agentStatus);
         } catch (error) {
-          handlers.error?.(toError(error));
+          reportEventError(error, nextSource);
         }
       });
       nextSource.addEventListener('agent.event', (event) => {
+        if (eventSource !== nextSource) return;
         try {
           handleEvent(event as MessageEvent, parse<BeastSseAgentEvent>, handlers.agentEvent);
         } catch (error) {
-          handlers.error?.(toError(error));
+          reportEventError(error, nextSource);
         }
       });
       nextSource.addEventListener('run.status', (event) => {
+        if (eventSource !== nextSource) return;
         try {
           handleEvent(event as MessageEvent, parse<BeastSseRunStatusEvent>, handlers.runStatus);
         } catch (error) {
-          handlers.error?.(toError(error));
+          reportEventError(error, nextSource);
         }
       });
       nextSource.addEventListener('run.log', (event) => {
+        if (eventSource !== nextSource) return;
         try {
           handleEvent(event as MessageEvent, parseWithEventId<BeastSseRunLogEvent>, handlers.runLog);
         } catch (error) {
-          handlers.error?.(toError(error));
+          reportEventError(error, nextSource);
         }
       });
       nextSource.addEventListener('run.event', (event) => {
+        if (eventSource !== nextSource) return;
         try {
           handleEvent(event as MessageEvent, parse<BeastSseRunEvent>, handlers.runEvent);
         } catch (error) {
-          handlers.error?.(toError(error));
+          reportEventError(error, nextSource);
         }
       });
       nextSource.addEventListener('error', () => {
-        if (closed) return;
+        if (closed || eventSource !== nextSource) return;
         nextSource.close();
         handlers.error?.(new Error('Beast event stream disconnected; reconnecting'));
         scheduleReconnect();
