@@ -4,6 +4,7 @@ import type { ProviderCritiqueFinding } from '@franken/types';
 import type {
   CritiquePipelineResult,
   CritiqueResult as DeprecatedCritiqueResult,
+  LessonRollbackWorkflow,
   SessionId,
 } from '@franken/critique';
 
@@ -35,7 +36,9 @@ describe('public critique type contracts', () => {
     };
     const compatibilityAlias: DeprecatedCritiqueResult = pipelineResult;
 
-    expect(compatibilityAlias.results[0]?.findings[0]?.message).toBe(providerFinding.message);
+    expect(compatibilityAlias.results[0]?.findings[0]?.message).toBe(
+      providerFinding.message,
+    );
   });
 
   it('uses the branded @franken/types SessionId contract for critique sessions', () => {
@@ -43,5 +46,24 @@ describe('public critique type contracts', () => {
 
     expectTypeOf(sessionId).toMatchTypeOf<SessionId>();
     expect(sessionId).toBe('critique-session-1');
+  });
+
+  it('exports lesson rollback workflow metadata from the public barrel', () => {
+    const workflow: LessonRollbackWorkflow = {
+      workflowId: 'lesson-rollback-v1',
+      eligibleStates: ['experimental'],
+      steps: ['quarantine lesson'],
+      requiredEvidence: ['regression evidence'],
+      requestSchema: {
+        lessonId: 'string',
+        rollbackReason: 'string',
+        evidenceUrls: 'string[]',
+        replacementLesson: 'string-or-null',
+        verificationCommand: 'string',
+      },
+      insufficientEvidenceGuidance: 'keep rollback blocked',
+    };
+
+    expect(workflow.workflowId).toBe('lesson-rollback-v1');
   });
 });

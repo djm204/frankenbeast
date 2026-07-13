@@ -774,6 +774,17 @@ Raw user input is scrubbed for PII and scanned for injection attacks by the fire
 
 The Planner generates a Task DAG. The Critique module audits it with 8 evaluators (deterministic evaluators run first, then heuristic). If critique fails, the orchestrator forces a re-plan (max 3 iterations). After 3 failures, it escalates to a human via MOD-07.
 
+#### Lesson rollback workflow
+
+Critique lessons recorded after a recovered failure include a `rollbackWorkflow` object for PM/liveness consumers. Use it when a lesson is later found to be incorrect, stale, over-broad, or harmful:
+
+1. Quarantine the target lesson so it stops being promoted into new worker handoffs.
+2. Attach the rollback reason, evidence URLs, and verifier command to the lesson audit trail.
+3. Either record a replacement lesson with fresh traceability evidence or retire the original lesson with no replacement.
+4. Run the verifier command and include the result in the PM handoff before removing the rollback block.
+
+Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, PM tooling should keep the lesson blocked instead of silently retiring or replacing it.
+
 ### Phase 3: Validated Execution
 
 **Modules:** MOD-02 (Skills) + MOD-07 (Governor)
