@@ -4,15 +4,16 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { handleStartupFailure } from './shutdown.js';
 
-const serverEntrypoints = [
-  'planner.ts',
-  'memory.ts',
-  'proxy.ts',
-  'critique.ts',
-  'skills.ts',
-  'firewall.ts',
-  'governor.ts',
-  'observer.ts',
+const entrypointPaths = [
+  ['servers', 'planner.ts'],
+  ['servers', 'memory.ts'],
+  ['servers', 'proxy.ts'],
+  ['servers', 'critique.ts'],
+  ['servers', 'skills.ts'],
+  ['servers', 'firewall.ts'],
+  ['servers', 'governor.ts'],
+  ['servers', 'observer.ts'],
+  ['beast.ts'],
 ] as const;
 
 describe('server shutdown handling', () => {
@@ -23,16 +24,19 @@ describe('server shutdown handling', () => {
       process: { exitCode: undefined as number | undefined },
     };
 
-    handleStartupFailure('fbeast-planner', new Error('bind failed'), runtime);
+    const error = new Error('bind failed');
+    handleStartupFailure('fbeast-planner', error, runtime);
 
     expect(runtime.process.exitCode).toBe(1);
-    expect(write).toHaveBeenCalledWith('fbeast-planner failed to start: bind failed\n');
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('fbeast-planner failed to start: Error: bind failed'));
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('at '));
   });
 
-  it('removes direct process.exit calls from standalone server entrypoints', () => {
-    for (const file of serverEntrypoints) {
-      const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'servers', file), 'utf8');
-      expect(source, `${file} should use shared shutdown helper instead of process.exit`).not.toMatch(/\bprocess\.exit\s*\(/);
+  it('removes direct process.exit calls from MCP server entrypoints', () => {
+    for (const pathParts of entrypointPaths) {
+      const filePath = join(dirname(fileURLToPath(import.meta.url)), '..', ...pathParts);
+      const source = readFileSync(filePath, 'utf8');
+      expect(source, `${pathParts.join('/')} should use shared shutdown helper instead of process.exit`).not.toMatch(/\bprocess\.exit\s*\(/);
     }
   });
 });

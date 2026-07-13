@@ -1,13 +1,12 @@
+import { inspect } from 'node:util';
+
 export interface StartupFailureRuntime {
   readonly stderr: Pick<NodeJS.WriteStream, 'write'>;
   readonly process: Pick<NodeJS.Process, 'exitCode'>;
 }
 
 export function describeStartupError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message || error.name;
-  }
-  return String(error);
+  return inspect(error, { depth: 4 });
 }
 
 export function handleStartupFailure(
