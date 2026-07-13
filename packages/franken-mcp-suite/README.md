@@ -30,6 +30,14 @@ fbeast mcp init --pick=memory,firewall,governor
 fbeast mcp init --mode=proxy
 ```
 
+Proxy mode protects file-backed tools when it cannot identify a project root. If
+`fbeast-proxy` is launched with a standalone database path outside
+`<project>/.fbeast/beast.db` and no explicit root, file-backed tools such as
+`fbeast_firewall_scan_file` fail closed in protected mode instead of treating the
+process cwd as trusted. Start the server with `--root /absolute/project/root` or
+use a `.fbeast/beast.db` path under the initialized project to enable those tools
+with project-root containment.
+
 `fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate project-scoped config. For Claude, MCP servers are written to the current project's `.mcp.json` and optional hooks/instructions to `.claude/settings.json` / `.claude/`; for Gemini, MCP servers and optional hooks are written to `.gemini/settings.json`. fbeast does not mutate your user-global Claude/Gemini settings by default, preventing one project's MCP database/root from being reused in another checkout. Override with `--client=claude|gemini|codex`.
 
 ## Uninstall
