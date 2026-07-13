@@ -1256,6 +1256,13 @@ function findContradictoryGuidanceMatch(
         lessonDirective.text,
         priorDirective.text,
       );
+      if (hasExplicitOneObjectDirectiveReversal(lessonDirective, priorDirective)) {
+        return {
+          sharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
       if (sharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
         return {
           sharedTerms,
@@ -1314,6 +1321,11 @@ function createLessonDirectiveClauses(
 }
 
 function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
+  const segments = splitDirectiveSegments(fragment);
+  if (segments.length > 1) {
+    return segments.flatMap((segment) => createDirectiveClauses(segment));
+  }
+
   const normalized = normalizeText(fragment);
   if (normalized.length === 0) {
     return [];
@@ -1355,6 +1367,14 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
   }
 
   return clauses;
+}
+
+function splitDirectiveSegments(fragment: string): string[] {
+  const segments = fragment
+    .split(/[.;]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => normalizeText(segment).length > 0);
+  return segments.length > 0 ? segments : [fragment];
 }
 
 function extractGuardCondition(fragment: string): string | undefined {
@@ -1440,9 +1460,46 @@ function hasCompatibleConditionalGuardPair(
     return false;
   }
 
+  const guardSharedTerms = sharedTextTerms(
+    maybeProhibition.guardCondition,
+    maybeRequirement.text,
+  );
+  if (guardSharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
+    return true;
+  }
+
   return (
-    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text)
-      .length >= MIN_CONTRADICTION_SHARED_TERMS
+    guardSharedTerms.length >= 1 &&
+    sharedTextTerms(maybeProhibition.text, maybeRequirement.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasExplicitOneObjectDirectiveReversal(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  if (a.polarity === b.polarity) {
+    return false;
+  }
+
+  const sharedTerms = sharedTextTerms(a.text, b.text);
+  return (
+    sharedTerms.length === 1 &&
+    isShortExplicitDirective(a.text) &&
+    isShortExplicitDirective(b.text)
+  );
+}
+
+function isShortExplicitDirective(text: string): boolean {
+  const objectTerms = extractComparableTerms(text).filter(
+    (term) => !DIRECTIVE_ACTION_TERMS.has(term),
+  );
+  return (
+    objectTerms.length === 1 &&
+    /^\s*(?:do not|don t|must not|should not|cannot|can t|no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|enable|enabled|allow|allows|deploy|reuse|cache)\b/.test(
+      text,
+    )
   );
 }
 
@@ -1586,6 +1643,20 @@ const LESSON_CONTRADICTION_SHORT_TERMS = new Set([
   'pii',
   'sql',
   'url',
+]);
+
+const DIRECTIVE_ACTION_TERMS = new Set([
+  'allow',
+  'allows',
+  'avoid',
+  'disable',
+  'disabled',
+  'disallow',
+  'enable',
+  'enabled',
+  'forbid',
+  'prohibit',
+  'reject',
 ]);
 
 const LESSON_CONTRADICTION_STOP_WORDS = new Set([

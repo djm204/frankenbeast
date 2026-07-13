@@ -2104,6 +2104,43 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('accepts one-term guards when directive context also overlaps', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy without approval' }),
+        [createLesson({ correctionApplied: 'Deploy after approval' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('splits punctuation-delimited directives before assigning polarity', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({
+          correctionApplied:
+            'Do not cache unauthenticated profiles; cache profile metadata after validation',
+        }),
+        [createLesson({ correctionApplied: 'Cache profile metadata after validation' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('detects one-object directive reversals', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Disable cache' }),
+        [createLesson({ correctionApplied: 'Enable cache' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy' }),
+        [createLesson({ correctionApplied: 'Deploy' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
   it('recognizes disallow and prohibit as negated directive guidance', () => {
     const current = createLesson({
       correctionApplied: 'Disallow cache reuse',
