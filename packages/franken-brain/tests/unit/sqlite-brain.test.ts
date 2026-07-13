@@ -1,12 +1,15 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
 import type { EpisodicEvent, ExecutionState, BrainSnapshot } from '@franken/types';
 import {
   SqliteBrain,
   WorkingMemoryLimitError,
+  UnsupportedMemorySchemaVersionError,
+  CURRENT_MEMORY_SCHEMA_VERSION,
   DEFAULT_WORKING_MEMORY_LIMITS,
 } from '../../src/sqlite-brain.js';
 
@@ -259,6 +262,188 @@ describe('SqliteBrain', () => {
       expect(brain.working.snapshot()).toEqual({ rules: validated });
       expect(brain.working.get('rules')).toEqual(validated);
       expect(brain.working.usage().totalBytes).toBe(accountedBytes);
+    });
+  });
+
+
+  describe('memory schema versioning and migrations', () => {
+    it('exposes store-level and record-level schema version metadata', () => {
+      brain.working.set('goal', 'ship migrations');
+      brain.flush();
+      brain.episodic.record({
+        type: 'decision',
+        summary: 'use explicit schema versions',
+        createdAt: '2026-07-13T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'run-1',
+        phase: 'migration',
+        step: 1,
+        context: {},
+        timestamp: '2026-07-13T00:00:01.000Z',
+      });
+
+      const metadata = brain.getMemorySchemaMetadata();
+      expect(metadata.version).toBe(CURRENT_MEMORY_SCHEMA_VERSION);
+      expect(metadata.stores).toEqual([
+        { store: 'working_memory', version: CURRENT_MEMORY_SCHEMA_VERSION, recordCount: 1 },
+        { store: 'episodic_events', version: CURRENT_MEMORY_SCHEMA_VERSION, recordCount: 1 },
+        { store: 'checkpoints', version: CURRENT_MEMORY_SCHEMA_VERSION, recordCount: 1 },
+      ]);
+
+      const db = (brain as unknown as {
+        db: { prepare: (sql: string) => { get: () => { schema_version: number } | undefined } };
+      }).db;
+      expect(db.prepare('SELECT schema_version FROM working_memory').get()?.schema_version).toBe(
+        CURRENT_MEMORY_SCHEMA_VERSION,
+      );
+      expect(db.prepare('SELECT schema_version FROM episodic_events').get()?.schema_version).toBe(
+        CURRENT_MEMORY_SCHEMA_VERSION,
+      );
+      expect(db.prepare('SELECT schema_version FROM checkpoints').get()?.schema_version).toBe(
+        CURRENT_MEMORY_SCHEMA_VERSION,
+      );
+    });
+
+    it('dry-runs and then migrates an old fixture with a backup before opening', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-migration-'));
+      const dbPath = join(dir, 'brain.db');
+      const backupPath = join(dir, 'brain.backup.db');
+
+      try {
+        const legacy = new Database(dbPath);
+        legacy.exec(`
+          CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+          CREATE TABLE episodic_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            step TEXT,
+            summary TEXT NOT NULL,
+            details TEXT,
+            embedding BLOB,
+            created_at TEXT NOT NULL
+          );
+          CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+          INSERT INTO working_memory (key, value, updated_at) VALUES ('legacy', '"value"', '2026-07-13T00:00:00.000Z');
+        `);
+        legacy.close();
+
+        const dryRun = SqliteBrain.migrateMemorySchema(dbPath, { dryRun: true });
+        expect(dryRun.dryRun).toBe(true);
+        expect(dryRun.migrated).toBe(true);
+        expect(dryRun.operations.map(op => op.table)).toContain('working_memory');
+        expect(dryRun.backupPath).toBeUndefined();
+        const dryRunWithBackupPath = SqliteBrain.migrateMemorySchema(dbPath, { dryRun: true, backupPath });
+        expect(dryRunWithBackupPath.backupPath).toBeUndefined();
+        const afterDryRun = new Database(dbPath);
+        expect(
+          afterDryRun.prepare(`PRAGMA table_info(working_memory)`).all().some(row => (row as { name: string }).name === 'schema_version'),
+        ).toBe(false);
+        afterDryRun.close();
+        expect(existsSync(`${dbPath}-wal`)).toBe(false);
+        expect(existsSync(`${dbPath}-shm`)).toBe(false);
+
+        const migrated = SqliteBrain.migrateMemorySchema(dbPath, { backupBeforeMigrate: true, backupPath });
+        expect(migrated.dryRun).toBe(false);
+        expect(migrated.backupPath).toBe(backupPath);
+        expect(existsSync(backupPath)).toBe(true);
+        const backup = new Database(backupPath, { readonly: true });
+        expect(backup.prepare(`SELECT value FROM working_memory WHERE key = ?`).get('legacy')).toEqual({
+          value: '"value"',
+        });
+        expect(
+          backup.prepare(`PRAGMA table_info(working_memory)`).all().some(row => (row as { name: string }).name === 'schema_version'),
+        ).toBe(false);
+        backup.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('legacy')).toBe('value');
+        expect(reopened.getMemorySchemaMetadata().stores).toEqual([
+          { store: 'working_memory', version: CURRENT_MEMORY_SCHEMA_VERSION, recordCount: 1 },
+          { store: 'episodic_events', version: CURRENT_MEMORY_SCHEMA_VERSION, recordCount: 0 },
+          { store: 'checkpoints', version: CURRENT_MEMORY_SCHEMA_VERSION, recordCount: 0 },
+        ]);
+        reopened.close();
+
+        const staleRegistryDb = new Database(dbPath);
+        staleRegistryDb.prepare(`UPDATE memory_schema_versions SET version = ? WHERE store = ?`).run(
+          CURRENT_MEMORY_SCHEMA_VERSION - 1,
+          'working_memory',
+        );
+        staleRegistryDb.close();
+        const registryMigration = SqliteBrain.migrateMemorySchema(dbPath);
+        expect(registryMigration.migrated).toBe(true);
+        expect(registryMigration.operations.map(op => op.table)).toContain('memory_schema_versions');
+        const afterRegistryMigration = new SqliteBrain(dbPath);
+        expect(afterRegistryMigration.getMemorySchemaMetadata().stores[0]).toEqual({
+          store: 'working_memory',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 1,
+        });
+        afterRegistryMigration.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects unsupported future store and record schema versions', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-future-version-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const created = new SqliteBrain(dbPath);
+        created.working.set('future', 'blocked');
+        created.flush();
+        created.close();
+
+        const db = new Database(dbPath);
+        db.prepare(`UPDATE memory_schema_versions SET version = ? WHERE store = ?`).run(
+          CURRENT_MEMORY_SCHEMA_VERSION + 1,
+          'working_memory',
+        );
+        db.close();
+        expect(() => new SqliteBrain(dbPath)).toThrow(UnsupportedMemorySchemaVersionError);
+
+        const rowFutureDb = new Database(dbPath);
+        rowFutureDb.prepare(`UPDATE memory_schema_versions SET version = ? WHERE store = ?`).run(
+          CURRENT_MEMORY_SCHEMA_VERSION,
+          'working_memory',
+        );
+        rowFutureDb.prepare(`UPDATE working_memory SET schema_version = ? WHERE key = ?`).run(
+          CURRENT_MEMORY_SCHEMA_VERSION + 1,
+          'future',
+        );
+        rowFutureDb.close();
+        expect(() => new SqliteBrain(dbPath)).toThrow(UnsupportedMemorySchemaVersionError);
+
+        const futureShapeDir = mkdtempSync(join(tmpdir(), 'sqlite-brain-future-shape-'));
+        const futureShapePath = join(futureShapeDir, 'brain.db');
+        try {
+          const futureShapeDb = new Database(futureShapePath);
+          futureShapeDb.exec(`
+            CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
+            INSERT INTO memory_schema_versions (store, version, migrated_at)
+            VALUES ('semantic_memory', ${CURRENT_MEMORY_SCHEMA_VERSION + 1}, '2026-07-13T00:00:00.000Z');
+          `);
+          futureShapeDb.close();
+
+          expect(() => new SqliteBrain(futureShapePath)).toThrow(UnsupportedMemorySchemaVersionError);
+          expect(() => SqliteBrain.migrateMemorySchema(futureShapePath)).toThrow(UnsupportedMemorySchemaVersionError);
+          const afterRejectedOpen = new Database(futureShapePath, { readonly: true });
+          const tables = afterRejectedOpen
+            .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC`)
+            .all()
+            .map(row => (row as { name: string }).name);
+          expect(tables).toEqual(['memory_schema_versions']);
+          afterRejectedOpen.close();
+          expect(existsSync(`${futureShapePath}-wal`)).toBe(false);
+          expect(existsSync(`${futureShapePath}-shm`)).toBe(false);
+        } finally {
+          rmSync(futureShapeDir, { recursive: true, force: true });
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
