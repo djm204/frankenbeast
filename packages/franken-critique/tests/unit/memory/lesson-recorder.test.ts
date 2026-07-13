@@ -2263,6 +2263,33 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('treats missing prerequisites as contradictions against required guards', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy without approval' }),
+        [createLesson({ correctionApplied: 'Deploy when approval is missing' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('normalizes common singular and plural comparable terms', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log tokens' }),
+        [createLesson({ correctionApplied: 'Log token' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('splits comma-and mixed directives before assigning polarity', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not cache tokens, and rotate keys' }),
+        [createLesson({ correctionApplied: 'Rotate keys' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('detects one-object directive reversals', () => {
     expect(
       detectLessonContradictions(

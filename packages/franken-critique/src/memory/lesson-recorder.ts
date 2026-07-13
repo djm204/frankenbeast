@@ -1283,8 +1283,10 @@ function findContradictoryGuidanceMatch(
 
 function sharedTextTerms(a: string, b: string): string[] {
   const aTerms = new Set(extractComparableTerms(a));
-  const bTerms = new Set(extractComparableTerms(b));
-  return [...aTerms].filter((term) => bTerms.has(term)).sort();
+  const bTerms = new Set(extractComparableTerms(b).map(canonicalComparableTerm));
+  return [...aTerms]
+    .filter((term) => bTerms.has(canonicalComparableTerm(term)))
+    .sort();
 }
 
 function createLessonGuidanceText(lesson: CritiqueLesson): string {
@@ -1381,7 +1383,7 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
 
 function splitDirectiveFragments(fragment: string): string[] {
   return fragment
-    .split(/[.;\n\r]+|,\s+and\s+/i)
+    .split(/[.;\n\r]+|,\s*(?:and|then)\s+/i)
     .map((part) => part.trim())
     .filter((part) => normalizeText(part).length > 0);
 }
@@ -1442,7 +1444,28 @@ function hasCompatibleConditionalGuard(
     hasCompatibleWithoutWithPair(a, b) ||
     hasCompatibleWithoutWithPair(b, a) ||
     hasCompatibleValidityQualifierPair(a, b) ||
-    hasCompatibleValidityQualifierPair(b, a)
+    hasCompatibleValidityQualifierPair(b, a) ||
+    hasCompatibleValidatedScopePair(a, b) ||
+    hasCompatibleValidatedScopePair(b, a)
+  );
+}
+
+function hasCompatibleValidatedScopePair(
+  maybeScopedProhibition: LessonDirectiveClause,
+  maybeValidatedAllowance: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeScopedProhibition.polarity !== 'negative' ||
+    maybeValidatedAllowance.polarity !== 'positive'
+  ) {
+    return false;
+  }
+
+  return (
+    /\bunauthenticated\b/.test(maybeScopedProhibition.text) &&
+    /\bafter\s+validation\b/.test(maybeValidatedAllowance.text) &&
+    sharedTextTerms(maybeScopedProhibition.text, maybeValidatedAllowance.text)
+      .length >= MIN_CONTRADICTION_SHARED_TERMS
   );
 }
 
@@ -1606,8 +1629,9 @@ function hasOpposedGuardOutcome(
     /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked)\b/.test(requirementText);
 
   return (
-    (guardHasPass && requirementHasFail) || (guardHasFail && requirementHasPass)
-    || (requirementHasFail && sharedTextTerms(guardCondition, requirementText).length >= 1)
+    (guardHasPass && requirementHasFail) ||
+    (guardHasFail && requirementHasPass) ||
+    (requirementHasFail && sharedTextTerms(guardCondition, requirementText).length >= 1)
   );
 }
 
@@ -1670,7 +1694,7 @@ function hasExplicitOppositeDirectivePairInOrder(
   }
 
   const negativeObject = stripLeadingDirective(maybeNegative.text);
-  if (negativeObject === maybePositive.text) {
+  if (canonicalComparableText(negativeObject) === canonicalComparableText(maybePositive.text)) {
     return true;
   }
 
