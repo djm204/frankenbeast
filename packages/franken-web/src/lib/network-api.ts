@@ -4,6 +4,13 @@ export type { NetworkConfigResponse, NetworkStatusResponse } from '@franken/type
 
 const MAX_ERROR_BODY_CHARS = 2048;
 
+function redactNetworkErrorSecrets(value: string): string {
+  return value.replace(
+    /("?(?:authorization|x-api-key|api-key|x-auth-token)"?\s*[:=]\s*)"?(?:bearer\s+|bot\s+)?[^\s,"'<>}]+"?/gi,
+    '$1[REDACTED]',
+  );
+}
+
 function truncateErrorBody(value: string): string {
   return value.length > MAX_ERROR_BODY_CHARS ? `${value.slice(0, MAX_ERROR_BODY_CHARS)}…` : value;
 }
@@ -104,7 +111,7 @@ export class NetworkApiClient {
       }
     }
 
-    const bodySuffix = responseBody ? `: ${truncateErrorBody(responseBody)}` : '';
+    const bodySuffix = responseBody ? `: ${truncateErrorBody(redactNetworkErrorSecrets(responseBody))}` : '';
     return new NetworkApiError(`HTTP ${response.status}${statusText} for ${path}${bodySuffix}`, response.status);
   }
 }

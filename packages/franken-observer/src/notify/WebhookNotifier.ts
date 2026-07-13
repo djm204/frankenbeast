@@ -102,7 +102,7 @@ const MAX_ERROR_BODY_CHARS = 2048
 function redactWebhookSecrets(value: string): string {
   return value
     .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
-    .replace(/\b(authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*(bearer\s+)?[^\s,"'<>]+/gi, '$1: [REDACTED]')
+    .replace(/("?(?:authorization|x-api-key|api-key|x-auth-token)"?\s*[:=]\s*)"?(?:bearer\s+)?[^\s,"'<>}]+"?/gi, '$1[REDACTED]')
 }
 
 function sanitizeWebhookEndpoint(value: string): string {
@@ -214,11 +214,11 @@ export class WebhookNotifier {
   private async readResponseBody(response: Awaited<ReturnType<FetchFn>>): Promise<string> {
     try {
       const readable = response as {
-        body?: ReadableStream<Uint8Array> | null
+        body?: { getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | null
         text?: () => Promise<string>
       }
-      const body = readable.body
-        ? await this.readBoundedStream(readable.body)
+      const body = readable.body && typeof readable.body.getReader === 'function'
+        ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
         : typeof readable.text === 'function'
           ? (await readable.text()).trim()
           : ''

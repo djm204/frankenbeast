@@ -67,4 +67,18 @@ describe('NetworkApiClient', () => {
       `HTTP 502 Bad Gateway for /v1/network/status: ${'x'.repeat(2048)}…`,
     );
   });
+
+  it('redacts echoed auth headers from raw error bodies', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      text: async () => '{"Authorization":"Bearer proxy-token","x-api-key":"proxy-key"}',
+    });
+
+    const client = new NetworkApiClient(BASE_URL);
+    await expect(client.getStatus()).rejects.toThrow(
+      'HTTP 502 Bad Gateway for /v1/network/status: {"Authorization":[REDACTED],"x-api-key":[REDACTED]}',
+    );
+  });
 });

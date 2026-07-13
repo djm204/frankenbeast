@@ -70,4 +70,23 @@ describe('DiscordAdapter', () => {
       'Discord API error: 429 Too Many Requests for https://discord.com/api/v10/channels/C1/messages: {"message":"rate limited"}',
     );
   });
+
+  it('redacts echoed auth headers from Discord error bodies by default', async () => {
+    const adapter = new DiscordAdapter({ token: 'bot-token' });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      text: async () => '{"Authorization":"Bot bot-token","x-api-key":"proxy-key"}',
+    } as Response);
+
+    await expect(adapter.send('session-123', {
+      text: 'hello from discord',
+      status: 'reply',
+      metadata: { channelId: 'C1' },
+    })).rejects.toThrow(
+      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages: {"Authorization":[REDACTED],"x-api-key":[REDACTED]}',
+    );
+  });
 });

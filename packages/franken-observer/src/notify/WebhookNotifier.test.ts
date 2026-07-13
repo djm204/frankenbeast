@@ -182,8 +182,37 @@ describe('WebhookNotifier', () => {
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: Authorization: [REDACTED] X-Api-Key: [REDACTED]',
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: Authorization: [REDACTED] X-Api-Key=[REDACTED]',
       )
+    })
+
+    it('redacts quoted echoed authentication headers from HTTP error bodies', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: async () => '{"Authorization":"Bearer secret-token","x-api-key":"other-secret"}',
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: {"Authorization":[REDACTED],"x-api-key":[REDACTED]}',
+      )
+    })
+
+    it('falls back to text() when response body is not a Web stream', async () => {
+      const text = vi.fn().mockResolvedValue('body from text fallback')
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: { pipe: vi.fn() },
+        text,
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/signal: body from text fallback',
+      )
+      expect(text).toHaveBeenCalledOnce()
     })
 
     it('rethrows if fetch itself rejects (network error)', async () => {
