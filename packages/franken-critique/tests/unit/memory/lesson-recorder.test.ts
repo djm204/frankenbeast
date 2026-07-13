@@ -823,6 +823,25 @@ describe('LessonRecorder', () => {
   });
 
   it('allows manual unquarantine only with review evidence and restores active application', () => {
+    expect(() =>
+      unquarantineLesson(
+        {
+          evaluatorName: 'learning-reviewer',
+          failureDescription: 'fresh candidate should not be activated',
+          correctionApplied: 'Corrected in iteration 1',
+          taskId: 'candidate-task',
+          timestamp: '2026-07-12T09:00:00.000Z',
+          lifecycleStatus: 'candidate' as const,
+        },
+        {
+          reviewedAt: '2026-07-12T12:00:00.000Z',
+          reviewer: 'pm-reviewer',
+          evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/3',
+          reason: 'Candidate cannot skip quarantine review.',
+        },
+      ),
+    ).toThrow('Only quarantined lessons can be unquarantined.');
+
     const quarantined = quarantineLesson(
       {
         evaluatorName: 'learning-reviewer',

@@ -230,6 +230,9 @@ export function unquarantineLesson(
   lesson: CritiqueLesson,
   request: LessonUnquarantineRequest,
 ): CritiqueLesson {
+  if (lesson.lifecycleStatus !== 'quarantined' || lesson.quarantine === undefined) {
+    throw new RangeError('Only quarantined lessons can be unquarantined.');
+  }
   requireNonEmptyString(request.reviewer, 'unquarantine reviewer');
   requireNonEmptyString(request.reason, 'unquarantine reason');
   requireNonEmptyString(request.evidenceUrl, 'unquarantine evidenceUrl');
