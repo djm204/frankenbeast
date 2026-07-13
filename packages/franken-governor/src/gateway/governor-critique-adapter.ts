@@ -187,18 +187,29 @@ export class GovernorCritiqueAdapter {
       && triggerResult.reason?.startsWith(`Trigger '${triggerResult.triggerId}' evaluation failed:`) === true;
   }
 
+
   private getValidOperatorSessionToken(request: ApprovalRequest, rationale: RationaleBlock): SessionToken | undefined {
-    if (!this.sessionTokenStore || !rationale.approvalSessionTokenId) {
+    if (!this.sessionTokenStore) {
       return undefined;
     }
 
     const scope = formatApprovalSessionTokenScope(request);
-    try {
-      const token = this.sessionTokenStore.get(rationale.approvalSessionTokenId);
-      return token?.scope === scope ? token : undefined;
-    } catch {
-      return undefined;
+    for (const tokenId of this.getApprovalSessionTokenCandidates(rationale)) {
+      try {
+        const token = this.sessionTokenStore.get(tokenId);
+        if (token?.scope === scope) return token;
+      } catch {
+        return undefined;
+      }
     }
+    return undefined;
+  }
+
+  private getApprovalSessionTokenCandidates(rationale: RationaleBlock): string[] {
+    return [
+      ...(rationale.approvalSessionTokenIds ?? []),
+      ...(rationale.approvalSessionTokenId !== undefined ? [rationale.approvalSessionTokenId] : []),
+    ].filter((tokenId, index, tokenIds) => tokenIds.indexOf(tokenId) === index);
   }
 
   private async recordOperatorSessionReuse(request: ApprovalRequest, token: SessionToken): Promise<void> {
@@ -242,6 +253,7 @@ export class GovernorCritiqueAdapter {
 
     const rationaleWithoutBearerToken = { ...rationale };
     delete rationaleWithoutBearerToken.approvalSessionTokenId;
+    delete rationaleWithoutBearerToken.approvalSessionTokenIds;
     return { skip: false, context: rationaleWithoutBearerToken };
   }
 }

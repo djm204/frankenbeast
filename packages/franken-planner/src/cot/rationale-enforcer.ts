@@ -8,7 +8,7 @@ import { now as deterministicNow } from '@franken/types';
  */
 export class RationaleEnforcer {
   private readonly approvalSessionTokenIdsByScope = new Map<string, string[]>();
-  private readonly unscopedApprovalSessionTokenIds: string[] = [];
+  private approvalSessionTokenIds: string[] = [];
   private lastGeneratedScopeKey: string | undefined;
 
   generate(task: Task): RationaleBlock {
@@ -24,10 +24,15 @@ export class RationaleEnforcer {
       ? `skill:${tool}`
       : `task:${task.id}`;
     this.lastGeneratedScopeKey = scopeKey;
-    const approvalSessionTokenId = this.approvalSessionTokenIdsByScope.get(scopeKey)?.[0]
-      ?? this.unscopedApprovalSessionTokenIds[0];
+
+    const scopedTokenIds = this.approvalSessionTokenIdsByScope.get(scopeKey) ?? [];
+    const approvalSessionTokenIds = [
+      ...scopedTokenIds,
+      ...this.approvalSessionTokenIds.filter((tokenId) => !scopedTokenIds.includes(tokenId)),
+    ];
+    const approvalSessionTokenId = approvalSessionTokenIds[0];
     const withSessionToken = approvalSessionTokenId !== undefined
-      ? { ...base, approvalSessionTokenId }
+      ? { ...base, approvalSessionTokenId, approvalSessionTokenIds }
       : base;
 
     if (typeof tool === 'string') {
@@ -38,17 +43,17 @@ export class RationaleEnforcer {
 
   rememberApprovalSessionToken(tokenId: string): void {
     const scopeKey = this.lastGeneratedScopeKey;
-    if (scopeKey === undefined) {
-      if (!this.unscopedApprovalSessionTokenIds.includes(tokenId)) {
-        this.unscopedApprovalSessionTokenIds.push(tokenId);
-      }
-      return;
+    if (scopeKey !== undefined) {
+      const scopedTokenIds = this.approvalSessionTokenIdsByScope.get(scopeKey) ?? [];
+      this.approvalSessionTokenIdsByScope.set(scopeKey, [
+        tokenId,
+        ...scopedTokenIds.filter((rememberedTokenId) => rememberedTokenId !== tokenId),
+      ]);
     }
 
-    const tokenIds = this.approvalSessionTokenIdsByScope.get(scopeKey) ?? [];
-    if (!tokenIds.includes(tokenId)) {
-      tokenIds.push(tokenId);
-    }
-    this.approvalSessionTokenIdsByScope.set(scopeKey, tokenIds);
+    this.approvalSessionTokenIds = [
+      tokenId,
+      ...this.approvalSessionTokenIds.filter((rememberedTokenId) => rememberedTokenId !== tokenId),
+    ];
   }
 }

@@ -16,6 +16,12 @@ export interface RationaleBlock {
    * it to bypass a fresh operator prompt.
    */
   approvalSessionTokenId?: string;
+  /**
+   * Candidate operator session token ids from prior approvals. This lets a
+   * planner carry tokens for several scopes at once; governors validate each
+   * candidate against the current request before reuse.
+   */
+  approvalSessionTokenIds?: readonly string[];
 }
 
 /**

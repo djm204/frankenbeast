@@ -72,5 +72,17 @@ describe('RationaleEnforcer', () => {
     enforcer.rememberApprovalSessionToken('session-token-123');
 
     expect(enforcer.generate(makeTask('t-1')).approvalSessionTokenId).toBe('session-token-123');
+    expect(enforcer.generate(makeTask('t-1')).approvalSessionTokenIds).toEqual(['session-token-123']);
+  });
+
+  it('keeps prior approval session token candidates for other scopes', () => {
+    const enforcer = new RationaleEnforcer();
+
+    enforcer.rememberApprovalSessionToken('skill-token');
+    enforcer.rememberApprovalSessionToken('budget-token');
+
+    const rationale = enforcer.generate(makeTask('t-1'));
+    expect(rationale.approvalSessionTokenId).toBe('budget-token');
+    expect(rationale.approvalSessionTokenIds).toEqual(['budget-token', 'skill-token']);
   });
 });

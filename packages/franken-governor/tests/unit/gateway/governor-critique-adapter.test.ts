@@ -19,6 +19,7 @@ interface RationaleBlock {
   expectedOutcome: string;
   timestamp: Date;
   approvalSessionTokenId?: string;
+  approvalSessionTokenIds?: readonly string[];
 }
 
 function makeRationale(overrides: Partial<RationaleBlock> = {}): RationaleBlock {
@@ -674,6 +675,64 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     expect(request.trigger.reason).toContain('Additional triggered policies: budget: Budget breach');
   });
 
+  it('skips unsupported typed built-in triggers instead of feeding them rationale context', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger(), new ConfidenceTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+    });
+
+    await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('skill');
+    expect(request.trigger.reason).toContain('deploy-prod');
+    expect(request.trigger.reason).not.toContain('Low confidence');
+  });
+
+  it('tries all candidate session tokens until one matches the current request scope', async () => {
+    const tokenStore = new SessionTokenStore();
+    const staleToolToken = createSessionToken({
+      approvalId: 'prior-skill-approval',
+      scope: makeScope('skill', 'deploy-prod'),
+      grantedBy: 'operator',
+      ttlMs: 60_000,
+    });
+    const budgetToken = createSessionToken({
+      approvalId: 'prior-budget-approval',
+      scope: makeScope('budget', 'task-001'),
+      grantedBy: 'operator',
+      ttlMs: 60_000,
+    });
+    tokenStore.store(staleToolToken);
+    tokenStore.store(budgetToken);
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new BudgetTrigger()],
+      projectId: 'proj-001',
+      budgetState: {
+        getBudgetState: () => ({ tripped: true, limitUsd: 100, spendUsd: 125 }),
+      },
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({
+      selectedTool: 'deploy-prod',
+      approvalSessionTokenId: staleToolToken.tokenId,
+      approvalSessionTokenIds: [staleToolToken.tokenId, budgetToken.tokenId],
+    }));
+
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
   it('honors a task-scoped session token for a repeated non-skill approval even when a tool is selected', async () => {
     const tokenStore = new SessionTokenStore();
     const token = createSessionToken({
@@ -797,6 +856,9 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     await adapter.verifyRationale(makeRationale({ approvalSessionTokenId: 'secret-token-id' }));
 
     expect(evaluate).toHaveBeenCalledOnce();
-    expect(evaluate.mock.calls[0]![0]).not.toHaveProperty('approvalSessionTokenId');
+    expect(evaluate).toHaveBeenCalledWith(expect.not.objectContaining({
+      approvalSessionTokenId: expect.any(String),
+      approvalSessionTokenIds: expect.any(Array),
+    }));
   });
 });
