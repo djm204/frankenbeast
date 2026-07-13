@@ -621,6 +621,11 @@ npm run bootstrap -- --services
 # .env.example intentionally does not define a TEMPO_ENDPOINT override; pass
 # custom Tempo endpoints through TempoAdapter options instead.
 
+# Optional Grafana Cloud Tempo export uses TempoAdapter basic auth. Leave these
+# unset for the local docker-compose Tempo service.
+# export GRAFANA_INSTANCE_ID=123456
+# export GRAFANA_API_KEY=glc_...
+
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npm run local:seed
 

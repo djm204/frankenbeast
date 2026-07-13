@@ -592,11 +592,28 @@ await adapter.flush(trace)
 
 Posts OTEL payloads to [Grafana Tempo](https://grafana.com/oss/tempo/) over OTLP/HTTP.
 
+`GRAFANA_INSTANCE_ID` and `GRAFANA_API_KEY` are only needed when exporting traces
+to Grafana Cloud Tempo. `GRAFANA_INSTANCE_ID` is the numeric Grafana Cloud stack
+or Tempo instance ID used as the Basic auth username, and `GRAFANA_API_KEY` is a
+Grafana Cloud access policy token/API key with permission to write traces. Local
+Tempo and OpenTelemetry Collector endpoints do not use either variable; omit
+`basicAuth` entirely and the adapter sends unauthenticated OTLP/HTTP requests.
+
+Keep `GRAFANA_API_KEY` out of source control. Store it in a local `.env`, shell
+secret manager, or CI secret store, and mask it in logs. Rotate the key if it is
+printed or committed. A missing value should fail fast in your own wiring before
+constructing a Grafana Cloud adapter.
+
 ```ts
 import { TempoAdapter } from '@franken/observer'
 
 // Local Tempo / OpenTelemetry Collector
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
+
+// CI example: export these from the CI secret store, not from repository files.
+if (!process.env.GRAFANA_INSTANCE_ID || !process.env.GRAFANA_API_KEY) {
+  throw new Error('Grafana Cloud export requires GRAFANA_INSTANCE_ID and GRAFANA_API_KEY')
+}
 
 // Grafana Cloud Tempo
 const cloud = new TempoAdapter({
