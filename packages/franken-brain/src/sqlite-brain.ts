@@ -1,3 +1,4 @@
+import { copyFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import type {
   IBrain,
@@ -27,6 +28,46 @@ export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxValueBytes: 5 * 1024 * 1024,
   maxTotalBytes: 64 * 1024 * 1024,
 };
+
+export const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+
+export interface MemorySchemaStoreMetadata {
+  store: string;
+  version: number;
+  recordCount: number;
+}
+
+export interface MemorySchemaMetadata {
+  version: number;
+  stores: MemorySchemaStoreMetadata[];
+}
+
+export interface MemorySchemaMigrationOperation {
+  table: string;
+  action: string;
+}
+
+export interface MemorySchemaMigrationResult {
+  fromVersion: number;
+  toVersion: number;
+  dryRun: boolean;
+  migrated: boolean;
+  backupPath?: string;
+  operations: MemorySchemaMigrationOperation[];
+}
+
+export interface MemorySchemaMigrationOptions {
+  dryRun?: boolean;
+  backupBeforeMigrate?: boolean;
+  backupPath?: string;
+}
+
+export class UnsupportedMemorySchemaVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedMemorySchemaVersionError';
+  }
+}
 
 export class WorkingMemoryLimitError extends Error {
   constructor(message: string) {
@@ -129,8 +170,8 @@ class SqliteWorkingMemory implements IWorkingMemory {
   flushToDb(): (() => void) | void {
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
     const upsert = this.db.prepare(
-      `INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
        WHERE working_memory.value IS NOT excluded.value`,
     );
     const now = isoNow();
@@ -389,8 +430,8 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   record(event: EpisodicEvent): void {
     this.db
       .prepare(
-        `INSERT INTO episodic_events (type, step, summary, details, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO episodic_events (type, step, summary, details, created_at, schema_version)
+         VALUES (?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
       )
       .run(
         event.type,
@@ -521,7 +562,7 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
     const tx = this.db.transaction(() => {
       finalizeWorkingMemoryFlush.current = this.flushWorkingMemory?.() ?? undefined;
       const result = this.db
-        .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
+        .prepare(`INSERT INTO checkpoints (state, created_at, schema_version) VALUES (?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`)
         .run(JSON.stringify(state), state.timestamp);
       return { id: String(result.lastInsertRowid) };
     });
@@ -577,6 +618,7 @@ export class SqliteBrain implements IBrain {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.initSchema();
+    migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
     this.working = new SqliteWorkingMemory(this.db, {
       ...DEFAULT_WORKING_MEMORY_LIMITS,
       ...workingMemoryLimits,
@@ -587,10 +629,16 @@ export class SqliteBrain implements IBrain {
 
   private initSchema(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_schema_versions (
+        store TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        migrated_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS working_memory (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
       CREATE TABLE IF NOT EXISTS episodic_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -599,14 +647,34 @@ export class SqliteBrain implements IBrain {
         summary TEXT NOT NULL,
         details TEXT,
         embedding BLOB,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
       CREATE TABLE IF NOT EXISTS checkpoints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         state TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
     `);
+  }
+
+  getMemorySchemaMetadata(): MemorySchemaMetadata {
+    return readMemorySchemaMetadata(this.db);
+  }
+
+  static migrateMemorySchema(
+    dbPath: string,
+    options: MemorySchemaMigrationOptions = {},
+  ): MemorySchemaMigrationResult {
+    const db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
+    try {
+      return migrateMemorySchemaDatabase(db, dbPath, options);
+    } finally {
+      db.close();
+    }
   }
 
   /** Flush working memory to SQLite before serialization or checkpoint. */
@@ -643,7 +711,7 @@ export class SqliteBrain implements IBrain {
          VALUES (?, ?, ?, ?, ?, ?)`,
       );
       const insertCheckpoint = brain.db.prepare(
-        `INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`,
+        `INSERT INTO checkpoints (state, created_at, schema_version) VALUES (?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
       );
 
       const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = { current: undefined };
@@ -683,6 +751,127 @@ export class SqliteBrain implements IBrain {
   close(): void {
     this.db.close();
   }
+}
+
+
+function migrateMemorySchemaDatabase(
+  db: Database.Database,
+  dbPath: string,
+  options: MemorySchemaMigrationOptions = {},
+): MemorySchemaMigrationResult {
+  const dryRun = options.dryRun ?? false;
+  const stores = ['working_memory', 'episodic_events', 'checkpoints'];
+  const tableRows = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{
+    name: string;
+  }>;
+  const existingTables = new Set(tableRows.map(row => row.name));
+  const operations: MemorySchemaMigrationOperation[] = [];
+  let fromVersion = CURRENT_MEMORY_SCHEMA_VERSION;
+
+  if (!existingTables.has('memory_schema_versions')) {
+    operations.push({ table: 'memory_schema_versions', action: 'create store schema-version registry' });
+    fromVersion = 0;
+  } else {
+    const rows = db.prepare(`SELECT store, version FROM memory_schema_versions`).all() as Array<{ store: string; version: number }>;
+    for (const row of rows) {
+      if (row.version > CURRENT_MEMORY_SCHEMA_VERSION) {
+        throw new UnsupportedMemorySchemaVersionError(
+          `Memory store ${row.store} uses schema version ${row.version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        );
+      }
+      fromVersion = Math.min(fromVersion, row.version);
+    }
+  }
+
+  for (const store of stores) {
+    if (!existingTables.has(store)) continue;
+    const columnRows = db.prepare(`PRAGMA table_info(${store})`).all() as Array<{ name: string }>;
+    const columns = new Set(columnRows.map(row => row.name));
+    if (!columns.has('schema_version')) {
+      operations.push({ table: store, action: `add schema_version column defaulting to ${CURRENT_MEMORY_SCHEMA_VERSION}` });
+      fromVersion = 0;
+    } else {
+      const future = db
+        .prepare(`SELECT schema_version FROM ${store} WHERE schema_version > ? LIMIT 1`)
+        .get(CURRENT_MEMORY_SCHEMA_VERSION) as { schema_version: number } | undefined;
+      if (future) {
+        throw new UnsupportedMemorySchemaVersionError(
+          `Memory table ${store} contains record schema version ${future.schema_version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        );
+      }
+    }
+  }
+
+  for (const store of stores) {
+    if (existingTables.has(store)) {
+      const hasRegistryRow = existingTables.has('memory_schema_versions')
+        ? db.prepare(`SELECT 1 FROM memory_schema_versions WHERE store = ?`).get(store)
+        : undefined;
+      if (!hasRegistryRow) {
+        operations.push({ table: 'memory_schema_versions', action: `record ${store} store schema version` });
+        fromVersion = 0;
+      }
+    }
+  }
+
+  const migrated = operations.length > 0;
+  let backupPath = options.backupPath;
+  if (!dryRun && migrated && options.backupBeforeMigrate) {
+    if (dbPath === ':memory:') {
+      throw new Error('Cannot create a backup for an in-memory SQLite database');
+    }
+    backupPath ??= `${dbPath}.backup-${Date.now()}`;
+    copyFileSync(dbPath, backupPath);
+  }
+
+  if (!dryRun && migrated) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_schema_versions (
+        store TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        migrated_at TEXT NOT NULL
+      );
+    `);
+    for (const store of stores) {
+      if (!existingTables.has(store)) continue;
+      const columnRows = db.prepare(`PRAGMA table_info(${store})`).all() as Array<{ name: string }>;
+      const columns = new Set(columnRows.map(row => row.name));
+      if (!columns.has('schema_version')) {
+        db.exec(`ALTER TABLE ${store} ADD COLUMN schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}`);
+      }
+      const now = isoNow();
+      db.prepare(
+        `INSERT INTO memory_schema_versions (store, version, migrated_at) VALUES (?, ?, ?)
+         ON CONFLICT(store) DO UPDATE SET version = excluded.version, migrated_at = excluded.migrated_at`,
+      ).run(store, CURRENT_MEMORY_SCHEMA_VERSION, now);
+    }
+  }
+
+  return {
+    fromVersion,
+    toVersion: CURRENT_MEMORY_SCHEMA_VERSION,
+    dryRun,
+    migrated,
+    ...(backupPath ? { backupPath } : {}),
+    operations,
+  };
+}
+
+function readMemorySchemaMetadata(db: Database.Database): MemorySchemaMetadata {
+  const stores = ['working_memory', 'episodic_events', 'checkpoints'];
+  const rows = db.prepare(`SELECT store, version FROM memory_schema_versions ORDER BY store ASC`).all() as Array<{
+    store: string;
+    version: number;
+  }>;
+  const versionByStore = new Map(rows.map(row => [row.store, row.version]));
+  return {
+    version: CURRENT_MEMORY_SCHEMA_VERSION,
+    stores: stores.map(store => ({
+      store,
+      version: versionByStore.get(store) ?? CURRENT_MEMORY_SCHEMA_VERSION,
+      recordCount: (db.prepare(`SELECT COUNT(*) AS count FROM ${store}`).get() as { count: number }).count,
+    })),
+  };
 }
 
 // --- Constants ---

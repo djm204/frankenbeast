@@ -77,6 +77,26 @@ SqliteBrain
 
 The package creates the required SQLite schema in its constructor and enables WAL mode. Use `:memory:` for tests or pass a file path for persistent state.
 
+## Memory schema versioning and migrations
+
+Durable memory stores are explicitly versioned. `working_memory`, `episodic_events`, and `checkpoints` rows include a `schema_version` column, and the `memory_schema_versions` table records the current schema version for each store. `SqliteBrain#getMemorySchemaMetadata()` returns the active store versions and record counts so callers can audit what is on disk.
+
+`SqliteBrain` automatically upgrades version-0/legacy SQLite files that have the old tables but no version metadata. Use the migration helper before opening a database when you want an audit plan or a backup:
+
+```typescript
+import { SqliteBrain } from '@franken/brain';
+
+const plan = SqliteBrain.migrateMemorySchema('.fbeast/beast.db', { dryRun: true });
+// inspect plan.operations
+
+SqliteBrain.migrateMemorySchema('.fbeast/beast.db', {
+  backupBeforeMigrate: true,
+  backupPath: '.fbeast/beast.db.before-memory-schema-v1',
+});
+```
+
+Future schema changes should increment `CURRENT_MEMORY_SCHEMA_VERSION`, add a forward-only migration in `migrateMemorySchemaDatabase`, and add fixtures that prove old databases upgrade and unsupported future versions fail closed with `UnsupportedMemorySchemaVersionError`. Do not silently ignore unknown future store or record versions.
+
 ## Project structure
 
 ```text
