@@ -90,7 +90,7 @@ describe('wizard validation', () => {
   ])('rejects browser fakepath values for %s', (_label, workflowValues, errorKey) => {
     const errors = validateWizardStep(1, { 1: workflowValues });
 
-    expect(errors[errorKey]).toBe('Directory path must be a repo-relative path, not a browser fake path.');
+    expect(errors[errorKey]).toBe('Browser directory pickers cannot provide a server path. Enter a repo-relative path manually.');
   });
 
   it('rejects martin-loop when backend-required fields are missing', () => {
