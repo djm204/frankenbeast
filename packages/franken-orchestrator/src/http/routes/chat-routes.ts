@@ -251,14 +251,18 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const session = getSessionOrThrow(sessionStore, id);
 
     return withChatMutationAdmission(c, session.id, async () => {
-      if (!session.pendingApproval && session.state !== 'pending_approval') {
-        return c.json({ data: { id: session.id, approved, state: session.state, pendingApproval: null } });
+      if (!session.pendingApproval) {
+        return c.json({
+          error: {
+            code: 'APPROVAL_NOT_PENDING',
+            message: 'No pending approval exists for this session.',
+          },
+        }, 409);
       }
 
       let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
       if (approved) {
-        const pendingApproval = session.pendingApproval ?? null;
-        const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
+        const pendingApproval = session.pendingApproval;
         let runtimeInput: string;
         try {
           runtimeInput = approvalRuntimeInput(pendingApproval);
@@ -281,7 +285,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         try {
           result = await runtime.run(runtimeInput, {
             sessionId: session.id,
-            pendingApproval: wasPendingApproval,
+            pendingApproval: true,
             approvalResolved: true,
             projectId: session.projectId,
             transcript: session.transcript,

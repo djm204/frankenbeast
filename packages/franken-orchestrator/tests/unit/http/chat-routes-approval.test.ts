@@ -30,7 +30,7 @@ describe('chat approval route persistence', () => {
     rmSync(sessionStoreDir, { recursive: true, force: true });
   });
 
-  it('reports no pending approval for no-op HTTP approval responses', async () => {
+  it('rejects HTTP approval responses when no approval is pending', async () => {
     const app = createChatApp({
       sessionStore,
       llm: { complete: vi.fn().mockResolvedValue('hello') },
@@ -44,9 +44,40 @@ describe('chat approval route persistence', () => {
       body: JSON.stringify({ approved: true }),
     });
 
-    expect(response.status).toBe(200);
-    const body = await response.json() as { data: { approved: boolean; state: string; pendingApproval?: unknown } };
-    expect(body.data).toMatchObject({ approved: true, state: session.state, pendingApproval: null });
+    expect(response.status).toBe(409);
+    const body = await response.json() as { error: { code: string; message: string } };
+    expect(body.error).toMatchObject({
+      code: 'APPROVAL_NOT_PENDING',
+      message: 'No pending approval exists for this session.',
+    });
+    const stored = sessionStore.get(session.id);
+    expect(stored?.state).toBe(session.state);
+    expect(stored?.pendingApproval).toBeUndefined();
+  });
+
+  it('rejects stale state-only HTTP approval responses without changing session state', async () => {
+    const app = createChatApp({
+      sessionStore,
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'chat-approval-route-test',
+    });
+    const session = sessionStore.create('project-1');
+    session.state = 'pending_approval';
+    session.pendingApproval = null;
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('APPROVAL_NOT_PENDING');
+    const stored = sessionStore.get(session.id);
+    expect(stored?.state).toBe('pending_approval');
+    expect(stored?.pendingApproval).toBeNull();
   });
 
   it('clears pending approval metadata when a session is approved over HTTP', async () => {
@@ -70,6 +101,16 @@ describe('chat approval route persistence', () => {
     const stored = sessionStore.get(session.id);
     expect(stored?.state).toBe('approved');
     expect(stored?.pendingApproval).toBeNull();
+
+    const staleResponse = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(staleResponse.status).toBe(409);
+    const staleBody = await staleResponse.json() as { error: { code: string } };
+    expect(staleBody.error.code).toBe('APPROVAL_NOT_PENDING');
   });
 
   it('clears pending approval metadata when a session is rejected over HTTP', async () => {
