@@ -85,6 +85,7 @@ describe('NetworkApiClient', () => {
     }), {
       status: 422,
       statusText: 'Unprocessable Entity',
+      headers: { 'Content-Type': 'application/json' },
     }));
 
     const client = new NetworkApiClient(BASE_URL);

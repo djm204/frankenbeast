@@ -4,6 +4,7 @@ export type { NetworkConfigResponse, NetworkStatusResponse } from '@franken/type
 
 const MAX_ERROR_BODY_CHARS = 2048;
 
+
 function redactNetworkErrorSecrets(value: string): string {
   return value
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]]*\]/gi, '$1["[REDACTED]"]')
@@ -169,6 +170,10 @@ export class NetworkApiClient {
 
   private async parseStructuredError(response: Response): Promise<ApiErrorEnvelope | null> {
     if (typeof response.clone !== 'function') {
+      return null;
+    }
+    const contentType = response.headers?.get('content-type') ?? '';
+    if (!contentType.toLowerCase().includes('json')) {
       return null;
     }
     try {
