@@ -292,6 +292,42 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 
+    it('rejects negative maxRetries during retry configuration validation', () => {
+      expect(
+        () =>
+          new WebhookNotifier({
+            url: 'https://hooks.example.com/signal',
+            fetch: mockFetch,
+            retry: { maxRetries: -2 },
+          }),
+      ).toThrow('retry.maxRetries must be a non-negative integer')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects non-finite maxRetries during retry configuration validation', () => {
+      expect(
+        () =>
+          new WebhookNotifier({
+            url: 'https://hooks.example.com/signal',
+            fetch: mockFetch,
+            retry: { maxRetries: Number.NaN },
+          }),
+      ).toThrow('retry.maxRetries must be a non-negative integer')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects fractional maxRetries during retry configuration validation', () => {
+      expect(
+        () =>
+          new WebhookNotifier({
+            url: 'https://hooks.example.com/signal',
+            fetch: mockFetch,
+            retry: { maxRetries: 1.5 },
+          }),
+      ).toThrow('retry.maxRetries must be a non-negative integer')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
     it('adds jitter (delay is not exactly baseDelayMs * 2^i)', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const sleepFn = vi.fn().mockResolvedValue(undefined)
