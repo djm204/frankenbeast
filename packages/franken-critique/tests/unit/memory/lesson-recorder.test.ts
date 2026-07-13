@@ -2657,6 +2657,33 @@ describe('LessonRecorder', () => {
     }
   });
 
+  it('treats unless-guarded allowances as compatible with missing-prerequisite prohibitions', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy without approval' }),
+        [createLesson({ correctionApplied: 'Deploy unless approval is missing' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('requires qualifier overlap for access scope permissions', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not allow API write access' }),
+        [createLesson({ correctionApplied: 'Allow API read access' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('does not add embedded negative clauses for double-negative directives', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not skip tests' }),
+        [createLesson({ correctionApplied: 'Run tests' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('treats missing prerequisites as contradictions against required guards', () => {
     expect(
       detectLessonContradictions(

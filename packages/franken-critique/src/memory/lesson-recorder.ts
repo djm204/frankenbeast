@@ -1435,7 +1435,7 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
     });
   }
 
-  if (embeddedNegatedCondition && leadingPolarity === 'positive') {
+  if (embeddedNegatedCondition && leadingPolarity === 'positive' && !startsWithDoubleNegativeDirective(normalized)) {
     clauses.push({
       text: embeddedNegatedCondition,
       sourceText: fragment,
@@ -1742,7 +1742,7 @@ function hasCompatibleGuardedAllowancePair(
   maybeProhibition: LessonDirectiveClause,
 ): boolean {
   const allowanceHasGuardSyntax = new RegExp(
-    '\\b(?:with|if|when|after)\\b',
+    '\\b(?:with|if|when|after|unless)\\b',
     'i',
   ).test(maybeAllowance.sourceText);
   const prohibitionHasGuardSyntax = new RegExp(
@@ -1763,7 +1763,7 @@ function hasCompatibleGuardedAllowancePair(
     '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|not\\s+(?:approved|granted|allowed|permitted)|unapproved)\\b',
     'i',
   ).test(maybeAllowance.sourceText);
-  if (allowanceHasFailingGuardOutcome || /\bunverified\b/i.test(maybeAllowance.sourceText)) {
+  if (/\bunverified\b/i.test(maybeAllowance.sourceText) || (allowanceHasFailingGuardOutcome && !/\bunless\b/i.test(maybeAllowance.sourceText))) {
     return false;
   }
 
@@ -2106,6 +2106,7 @@ const LESSON_CONTRADICTION_SHORT_TERMS = new Set([
 ]);
 
 const LESSON_CONTRADICTION_GENERIC_OBJECT_TERMS = new Set([
+  'access',
   'message',
   'messages',
 ]);
