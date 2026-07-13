@@ -438,6 +438,89 @@ describe('LessonRecorder', () => {
     ).toThrow('LessonRecorder agentId must be a non-empty string when provided.');
   });
 
+  it('returns an LLM-friendly learning backlog prioritization report for PM handoffs', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      agentId: 'worker-alpha',
+      now: (): string => '2026-07-12T00:00:00.000Z',
+    });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'quality-gate', [
+          {
+            message: 'Codex blocker was left unresolved',
+            severity: 'critical',
+            suggestion: 'Resolve the current-head review thread before merge.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const summary = await recorder.record(result, 'learning-backlog-task');
+
+    expect(summary.learningBacklogPrioritizationReport).toEqual({
+      schemaVersion: 'learning-backlog-prioritization-report-v1',
+      generatedAt: '2026-07-12T00:00:00.000Z',
+      guidance:
+        'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.',
+      items: [
+        {
+          id: expect.stringMatching(/^lesson:learning-backlog-task:quality-gate:iteration-0$/),
+          source: 'recorded-lesson',
+          priority: 'high',
+          score: 80,
+          taskId: 'learning-backlog-task',
+          evaluatorName: 'quality-gate',
+          title: 'Codex blocker was left unresolved',
+          rationale:
+            'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.',
+          recommendedAction:
+            'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
+        },
+      ],
+    });
+  });
+
+  it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Repeated PM handoff lesson caused churn',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'first-task');
+    now = new Date('2026-07-12T10:00:30.000Z');
+    const suppressed = await recorder.record(result, 'second-task');
+
+    expect(suppressed.learningBacklogPrioritizationReport.items).toEqual([
+      expect.objectContaining({
+        source: 'cooldown-suppression',
+        priority: 'low',
+        score: 20,
+        taskId: 'second-task',
+        evaluatorName: 'learning-reviewer',
+        recommendedAction:
+          'Reuse the existing in-cooldown lesson until suppression expires; do not create a duplicate backlog item.',
+      }),
+    ]);
+  });
+
   it('attaches an LLM-friendly post-PR lesson extraction template to recorded lessons', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);

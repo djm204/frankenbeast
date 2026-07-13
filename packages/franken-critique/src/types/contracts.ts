@@ -198,6 +198,39 @@ export interface CrossTaskBlockerPattern {
 }
 
 /** Deterministic per-agent learning summary for worker retrospectives and PM handoffs. */
+export type LearningBacklogPriority = 'high' | 'medium' | 'low';
+
+/** A single LLM-friendly backlog item produced from newly observed learning signals. */
+export interface LearningBacklogPrioritizationItem {
+  /** Stable item identifier for PM/liveness consumers. */
+  readonly id: string;
+  /** Source signal that created this backlog item. */
+  readonly source:
+    | 'recorded-lesson'
+    | 'cooldown-suppression'
+    | 'blocker-pattern';
+  /** Coarse priority bucket for operator routing. */
+  readonly priority: LearningBacklogPriority;
+  /** Numeric score used for deterministic sorting inside a priority bucket. */
+  readonly score: number;
+  readonly taskId?: TaskId;
+  readonly evaluatorName?: string;
+  /** Short operator-facing title. */
+  readonly title: string;
+  /** Why this item received its priority. */
+  readonly rationale: string;
+  /** Next action PM/liveness tooling should present. */
+  readonly recommendedAction: string;
+}
+
+/** Structured PM/liveness report for sorting learning backlog follow-up. */
+export interface LearningBacklogPrioritizationReport {
+  readonly schemaVersion: 'learning-backlog-prioritization-report-v1';
+  readonly generatedAt: string;
+  readonly guidance: string;
+  readonly items: readonly LearningBacklogPrioritizationItem[];
+}
+
 export interface AgentImprovementScorecard {
   /** Stable schema identifier for PM/liveness tooling. */
   readonly schemaVersion: 'agent-improvement-scorecard-v1';
@@ -236,6 +269,8 @@ export interface LessonRecordingResult {
   readonly suppressedByCooldown: readonly LessonCooldownSuppression[];
   /** Cross-task blocker patterns discovered while recording this critique result. */
   readonly minedBlockerPatterns: readonly CrossTaskBlockerPattern[];
+  /** Prioritized PM/liveness follow-up generated from this record call's learning signals. */
+  readonly learningBacklogPrioritizationReport: LearningBacklogPrioritizationReport;
 }
 
 /** A lesson learned from a successful critique cycle. */

@@ -7,6 +7,7 @@ import type {
   PostPrLessonExtractionTemplate,
   LessonRollbackWorkflow,
   CrossTaskBlockerPattern,
+  LearningBacklogPrioritizationItem,
   AgentImprovementScorecard,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
@@ -36,6 +37,8 @@ const BLOCKER_PATTERN_GUIDANCE =
   'Equivalent blocker findings have recurred across distinct tasks; PM/liveness handoffs should treat this as a cross-task pattern and route a durable mitigation instead of rediscovering it per task.';
 const AGENT_IMPROVEMENT_SCORECARD_GUIDANCE =
   'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.';
+const LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE =
+  'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.';
 
 export interface BlockerPatternObservation {
   readonly taskId: TaskId;
@@ -199,7 +202,7 @@ export class LessonRecorder {
     result: CritiqueLoopResult,
     taskId: TaskId,
   ): Promise<LessonRecordingResult> {
-    const recordingResult = createMutableLessonRecordingResult();
+    const recordingResult = createMutableLessonRecordingResult(this.now());
 
     // Only record lessons from multi-iteration pass/warn successes.
     if (
@@ -256,6 +259,9 @@ export class LessonRecorder {
           if (suppression && !hasMinedBlockerPatterns) {
             this.commitBlockerPatternObservations(lesson);
             recordingResult.suppressedByCooldown.push(suppression);
+            recordingResult.learningBacklogItems.push(
+              createCooldownSuppressionBacklogItem(suppression),
+            );
             admissionSettled?.(false);
             if (
               admissionPromise &&
@@ -284,6 +290,7 @@ export class LessonRecorder {
           recordingResult.minedBlockerPatterns,
           lesson.blockerPatterns,
         );
+        addLessonBacklogItems(recordingResult.learningBacklogItems, admittedLesson);
         if (cooldownKey && this.cooldownMs > 0) {
           this.cooldowns.set(
             cooldownKey,
@@ -718,18 +725,38 @@ function getPendingBlockerAdmissions(
   return pending;
 }
 
-interface MutableLessonRecordingResult {
+interface MutableLessonRecordingResult extends LessonRecordingResult {
   recorded: number;
   suppressedByCooldown: LessonCooldownSuppression[];
   minedBlockerPatterns: CrossTaskBlockerPattern[];
+  learningBacklogItems: LearningBacklogPrioritizationItem[];
 }
 
-function createMutableLessonRecordingResult(): MutableLessonRecordingResult {
-  return {
+function createMutableLessonRecordingResult(
+  generatedAt: string,
+): MutableLessonRecordingResult {
+  const learningBacklogItems: LearningBacklogPrioritizationItem[] = [];
+  const result = {
     recorded: 0,
     suppressedByCooldown: [],
     minedBlockerPatterns: [],
-  };
+  } as unknown as MutableLessonRecordingResult;
+  Object.defineProperty(result, 'learningBacklogItems', {
+    value: learningBacklogItems,
+    enumerable: false,
+    writable: false,
+  });
+  Object.defineProperty(result, 'learningBacklogPrioritizationReport', {
+    value: {
+      schemaVersion: 'learning-backlog-prioritization-report-v1',
+      generatedAt,
+      guidance: LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE,
+      items: learningBacklogItems,
+    },
+    enumerable: false,
+    writable: false,
+  });
+  return result;
 }
 
 function addUniqueBlockerPatterns(
@@ -741,6 +768,100 @@ function addUniqueBlockerPatterns(
       target.push(pattern);
     }
   }
+}
+
+function addLessonBacklogItems(
+  target: LearningBacklogPrioritizationItem[],
+  lesson: CritiqueLesson,
+): void {
+  target.push(createRecordedLessonBacklogItem(lesson));
+  for (const pattern of lesson.blockerPatterns ?? []) {
+    target.push(createBlockerPatternBacklogItem(pattern));
+  }
+  sortLearningBacklogItems(target);
+}
+
+function createRecordedLessonBacklogItem(
+  lesson: CritiqueLesson,
+): LearningBacklogPrioritizationItem {
+  const hasCriticalFindings =
+    (lesson.agentImprovementScorecard?.findingCounts.critical ?? 0) > 0 ||
+    (lesson.blockerPatterns?.length ?? 0) > 0 ||
+    lesson.reviewerFeedback?.findings.some(
+      (finding) => finding.severity === 'critical',
+    ) === true;
+  const suggestionsIncomplete =
+    lesson.reviewerFeedback?.suggestionsComplete === false;
+  const priority = hasCriticalFindings
+    ? 'high'
+    : suggestionsIncomplete
+      ? 'medium'
+      : 'low';
+  const score = priority === 'high' ? 80 : priority === 'medium' ? 50 : 30;
+  const title = lesson.reviewerFeedback?.summary ?? lesson.failureDescription;
+  const traceabilityId = lesson.testTraceability?.[0]?.lessonId;
+
+  return {
+    id: `lesson:${traceabilityId ?? stableHash(`${lesson.taskId}:${lesson.evaluatorName}:${lesson.failureDescription}`)}`,
+    source: 'recorded-lesson',
+    priority,
+    score,
+    taskId: lesson.taskId,
+    evaluatorName: lesson.evaluatorName,
+    title,
+    rationale: hasCriticalFindings
+      ? 'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.'
+      : suggestionsIncomplete
+        ? 'Recorded lesson is missing reviewer suggestions and needs PM follow-up before promotion.'
+        : 'Recorded lesson is ready for routine learning backlog review once verification evidence is attached.',
+    recommendedAction:
+      'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
+  };
+}
+
+function createCooldownSuppressionBacklogItem(
+  suppression: LessonCooldownSuppression,
+): LearningBacklogPrioritizationItem {
+  return {
+    id: `suppression:${suppression.key}:${sanitizeLessonIdPart(suppression.taskId)}`,
+    source: 'cooldown-suppression',
+    priority: 'low',
+    score: 20,
+    taskId: suppression.taskId,
+    evaluatorName: suppression.evaluatorName,
+    title: `Duplicate learning signal suppressed for ${suppression.evaluatorName}`,
+    rationale:
+      'Equivalent learning feedback is already inside the cooldown window and should not create duplicate backlog churn.',
+    recommendedAction:
+      'Reuse the existing in-cooldown lesson until suppression expires; do not create a duplicate backlog item.',
+  };
+}
+
+function createBlockerPatternBacklogItem(
+  pattern: CrossTaskBlockerPattern,
+): LearningBacklogPrioritizationItem {
+  return {
+    id: `blocker:${pattern.key}`,
+    source: 'blocker-pattern',
+    priority: 'high',
+    score: 100,
+    evaluatorName: pattern.evaluatorName,
+    title: pattern.normalizedFinding,
+    rationale: `Critical learning blocker recurred across ${pattern.occurrences} distinct tasks and crossed the routing threshold of ${pattern.threshold}.`,
+    recommendedAction:
+      'Route a durable mitigation owner before accepting more duplicate worker rediscovery for this blocker pattern.',
+  };
+}
+
+function sortLearningBacklogItems(
+  items: LearningBacklogPrioritizationItem[],
+): void {
+  items.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return left.id.localeCompare(right.id);
+  });
 }
 
 function createCrossTaskBlockerPattern(
