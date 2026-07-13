@@ -29,6 +29,7 @@ export type {
   EpisodicTrace,
   LessonTestTraceabilityEntry,
   LessonExperimentSandbox,
+  LessonRollbackWorkflow,
   LessonCooldownMetadata,
   LessonCooldownSuppression,
   CrossTaskBlockerPattern,
