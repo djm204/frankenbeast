@@ -76,7 +76,7 @@ jobs:
           # Promote the most recent root release back to latest. If no root
           # release exists yet, keep the current latest marker in place rather
           # than demoting the component release and leaving no latest release.
-          root_tag=$(gh release list --json tagName --jq '([.[] | select(.tagName | test("^v[0-9]"))][0].tagName // empty)' 2>/dev/null || echo '')
+          root_tag=$(gh release list --limit 1000 --json tagName --jq '([.[] | select(.tagName | test("^v[0-9]"))][0].tagName // empty)' 2>/dev/null || echo '')
           if [ -z "$root_tag" ]; then
             echo "No root release found; leaving component latest unchanged: $latest_tag"
             exit 0

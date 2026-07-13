@@ -473,6 +473,7 @@ jobs:
     const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(releaseLatestRun).toContain('gh release list --limit 1000 --json tagName');
     expect(emptyRootNormalizationIndex).toBeGreaterThan(rootLookupIndex);
     expect(noRootGuardIndex).toBeGreaterThan(emptyRootNormalizationIndex);
     expect(demoteIndex).toBeGreaterThan(noRootGuardIndex);
@@ -501,6 +502,7 @@ jobs:
     const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(latestRun).toContain('gh release list --limit 1000 --json tagName');
     expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
     expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
