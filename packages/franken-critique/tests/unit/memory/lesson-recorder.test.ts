@@ -2684,6 +2684,62 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('does not strip unrelated positive verbs as directive opposites', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not cache tokens' }),
+        [createLesson({ correctionApplied: 'Rotate cache tokens' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('does not block complementary lessons solely on shared object terms', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not cache auth tokens' }),
+        [createLesson({ correctionApplied: 'Validate auth tokens' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('detects unauthenticated access as conflicting with authentication requirements', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Require authentication before API access' }),
+        [createLesson({ correctionApplied: 'Allow unauthenticated API access' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('does not treat inverse unless guards as compatible', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy without approval' }),
+        [createLesson({ correctionApplied: 'Deploy unless approval is granted' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('ignores failure prose with until or unless when suggestions are missing', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({
+          correctionApplied: 'Require approval before deployment',
+          reviewerFeedback: {
+            findings: [
+              {
+                evaluatorName: 'factuality',
+                message: 'Deployment failed until approval propagated',
+                severity: 'warning',
+              },
+            ],
+          },
+        }),
+        [createLesson({ correctionApplied: 'Do not deploy without approval' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('treats missing prerequisites as contradictions against required guards', () => {
     expect(
       detectLessonContradictions(

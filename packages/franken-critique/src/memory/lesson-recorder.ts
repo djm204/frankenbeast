@@ -1247,6 +1247,17 @@ function findContradictoryGuidanceMatch(
           conflictingGuidance: priorDirective.sourceText,
         };
       }
+      const sharedTerms = sharedTextTerms(
+        lessonDirective.text,
+        priorDirective.text,
+      );
+      if (hasAuthenticationScopeConflict(lessonDirective, priorDirective)) {
+        return {
+          sharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
       if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
@@ -1264,10 +1275,6 @@ function findContradictoryGuidanceMatch(
           conflictingGuidance: priorDirective.sourceText,
         };
       }
-      const sharedTerms = sharedTextTerms(
-        lessonDirective.text,
-        priorDirective.text,
-      );
       if (hasExactTopLevelReversal(lessonDirective, priorDirective)) {
         return {
           sharedTerms:
@@ -1292,6 +1299,9 @@ function findContradictoryGuidanceMatch(
         };
       }
       if (sharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
+        if (hasDifferentLeadingActions(lessonDirective, priorDirective)) {
+          continue;
+        }
         return {
           sharedTerms,
           lessonGuidance: lessonDirective.sourceText,
@@ -1301,6 +1311,29 @@ function findContradictoryGuidanceMatch(
     }
   }
   return undefined;
+}
+
+function hasAuthenticationScopeConflict(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return hasAuthenticationScopeConflictInOrder(a, b) || hasAuthenticationScopeConflictInOrder(b, a);
+}
+
+function hasAuthenticationScopeConflictInOrder(
+  maybeRequirement: LessonDirectiveClause,
+  maybeAllowance: LessonDirectiveClause,
+): boolean {
+  return (
+    maybeRequirement.polarity === 'positive' &&
+    maybeAllowance.polarity === 'positive' &&
+    /\b(?:require|requires|required|verify|validated|validation|authenticate|authentication)\b/.test(
+      maybeRequirement.text,
+    ) &&
+    /\bunauthenticated\b/.test(maybeAllowance.text) &&
+    sharedTextTerms(maybeRequirement.text, maybeAllowance.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
 }
 
 function hasCompatibleSiblingDirective(
@@ -1371,7 +1404,7 @@ function isDirectiveLikeFindingMessage(message: string): boolean {
   return (
     (startsWithPositiveDirective(normalized) && !looksLikeFailureProse) ||
     startsWithNegativeDirective(normalized) ||
-    /\b(?:do not|don t|must not|should not|unless|until)\b/i.test(message)
+    (!looksLikeFailureProse && /\b(?:do not|don t|must not|should not|unless|until)\b/i.test(message))
   );
 }
 
@@ -1763,7 +1796,18 @@ function hasCompatibleGuardedAllowancePair(
     '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|not\\s+(?:approved|granted|allowed|permitted)|unapproved)\\b',
     'i',
   ).test(maybeAllowance.sourceText);
-  if (/\bunverified\b/i.test(maybeAllowance.sourceText) || (allowanceHasFailingGuardOutcome && !/\bunless\b/i.test(maybeAllowance.sourceText))) {
+  const allowanceUsesUnless = /\bunless\b/i.test(maybeAllowance.sourceText);
+  const unlessGuardIsFailing = maybeAllowance.guardCondition
+    ? new RegExp(
+        '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|denied|rejected|not\\s+(?:approved|granted|allowed|permitted)|unapproved)\\b',
+        'i',
+      ).test(maybeAllowance.guardCondition)
+    : false;
+  if (
+    /\bunverified\b/i.test(maybeAllowance.sourceText) ||
+    (allowanceHasFailingGuardOutcome && !allowanceUsesUnless) ||
+    (allowanceUsesUnless && !unlessGuardIsFailing)
+  ) {
     return false;
   }
 
@@ -1876,6 +1920,11 @@ function hasExactTopLevelReversalInOrder(
 
   const negativeObject = stripLeadingPositiveDirective(stripLeadingDirective(maybeNegative.text));
   const positiveObject = stripLeadingDirective(maybePositive.text);
+  const negativeAction = leadingDirectiveAction(maybeNegative.text);
+  const positiveAction = leadingDirectiveAction(maybePositive.text);
+  if (negativeAction && positiveAction && negativeAction !== positiveAction) {
+    return false;
+  }
   return (
     negativeObject.length > 0 &&
     positiveObject.length > 0 &&
@@ -1907,6 +1956,32 @@ function hasDoubleNegativeOppositeDirectivePairInOrder(
     canonicalComparableText(stripLeadingPositiveDirective(maybeDoubleNegative.text)) ===
     canonicalComparableText(stripLeadingDirective(maybeNegative.text))
   );
+}
+
+function hasDifferentLeadingActions(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  if (a.guardCondition || b.guardCondition) {
+    return false;
+  }
+  const aAction = leadingDirectiveAction(a.text);
+  const bAction = leadingDirectiveAction(b.text);
+  return Boolean(aAction && bAction && aAction !== bAction);
+}
+
+function leadingDirectiveAction(text: string): string | undefined {
+  const strippedNegation = text
+    .replace(/^(?:do not|don t|must not|should not|cannot|can t)\s+/, '')
+    .replace(/^(?:should|must)\s+/, '');
+  const action = normalizeText(strippedNegation).split(' ').find(Boolean);
+  if (['disallow', 'prohibit', 'forbid', 'deny', 'reject'].includes(action ?? '')) {
+    return 'allow';
+  }
+  if (action === 'permit') {
+    return 'allow';
+  }
+  return action;
 }
 
 function sharedDirectiveObjectTerms(
