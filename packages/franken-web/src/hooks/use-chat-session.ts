@@ -903,7 +903,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
     setStatus('sending');
 
-    if (!optimisticAdd) {
+    const sendViaHttpFallback = async () => {
       let fallbackRefreshError: Error | null = null;
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
@@ -973,7 +973,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           ? error
           : new Error('The fallback chat request failed before the turn could start.');
         setMessages((current) => [
-          ...current.filter((message) => !isFailedUserDraftForContent(message, content)),
+          ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
           { ...optimisticMessage, receipt: 'failed', error: sendError.message, canRetry: true },
         ]);
         addErrorBanner(makeBanner(
@@ -990,10 +990,15 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       if (fallbackRefreshError) {
         throw fallbackRefreshError;
       }
+    };
+
+    if (!optimisticAdd) {
+      await sendViaHttpFallback();
       return;
     }
 
     const liveSocket = socket as WebSocket;
+    let socketSendError: Error | null = null;
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
@@ -1006,12 +1011,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           content,
         }));
       } catch (error) {
-        failPendingSend(
-          clientMessageId,
-          error instanceof Error ? error : new Error('Message failed to send. Your draft was kept.'),
-        );
+        const pending = pendingSendsRef.current.get(clientMessageId);
+        if (pending) {
+          clearTimeout(pending.timeoutId);
+          pendingSendsRef.current.delete(clientMessageId);
+        }
+        socketSendError = error instanceof Error
+          ? error
+          : new Error('Message failed to send over the live socket.');
+        resolve();
       }
     });
+    if (socketSendError) {
+      await sendViaHttpFallback();
+    }
   }
 
   async function retryMessage(messageId: string): Promise<void> {
