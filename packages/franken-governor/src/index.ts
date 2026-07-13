@@ -58,8 +58,22 @@ export type { GovernorAppOptions } from './server/index.js';
 export type { GovernorMemoryPort, EpisodicTraceRecord } from './audit/index.js';
 export { GovernorAuditRecorder } from './audit/index.js';
 
-export { formatApprovalResponseSignaturePayload, SignatureVerifier } from './security/index.js';
-export type { ApprovalResponseSignaturePayloadFields } from './security/index.js';
+export {
+  createEvaluatorsFromApprovalPolicyManifest,
+  formatApprovalPolicyManifestPayload,
+  formatApprovalResponseSignaturePayload,
+  SignatureVerifier,
+  verifySignedApprovalPolicyManifest,
+} from './security/index.js';
+export type {
+  ApprovalPolicyManifest,
+  ApprovalPolicyManifestPolicy,
+  ApprovalPolicyManifestSignature,
+  ApprovalPolicyManifestTriggerId,
+  ApprovalPolicyManifestVerificationOptions,
+  ApprovalResponseSignaturePayloadFields,
+  VerifiedApprovalPolicyManifest,
+} from './security/index.js';
 export {
   createSessionToken,
   formatApprovalSessionTokenScope,
