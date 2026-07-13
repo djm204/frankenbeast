@@ -346,6 +346,135 @@ describe('runNetworkCommand', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('chat-server: running'));
   });
 
+  it('prints a scoped credential inventory without secret values', async () => {
+    const config = defaultConfig();
+    config.network.operatorTokenRef = ' prod/operator-token ';
+    config.comms.enabled = true;
+    config.comms.orchestratorTokenRef = 'prod/orchestrator-token';
+    config.comms.slack.enabled = true;
+    config.comms.slack.botTokenRef = '   ';
+    config.comms.discord.enabled = true;
+    config.comms.discord.botTokenRef = 'prod/discord-bot-token';
+    config.comms.discord.publicKeyRef = undefined;
+    config.comms.telegram.enabled = false;
+    config.comms.telegram.botTokenRef = 'prod/telegram-bot-token';
+    config.comms.whatsapp.enabled = true;
+    config.comms.whatsapp.accessTokenRef = 'prod/whatsapp-access-token';
+    config.comms.whatsapp.phoneNumberIdRef = undefined;
+    config.comms.whatsapp.appSecretRef = 'prod/whatsapp-app-secret';
+    config.comms.whatsapp.verifyTokenRef = 'prod/whatsapp-verify-token';
+    const print = vi.fn();
+
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'credentials' }),
+      config,
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(() => ({
+          up: vi.fn(),
+          stopAll: vi.fn(),
+          down: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+          logs: vi.fn(),
+        })),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      mode: string;
+      secureBackend: string;
+      credentials: Array<{ scope: string; configPath: string; ref: string | null; status: string }>;
+    };
+
+    expect(report.mode).toBe('secure');
+    expect(report.secureBackend).toBe('local-encrypted');
+    expect(report.credentials).toContainEqual({
+      scope: 'network.operator',
+      configPath: 'network.operatorTokenRef',
+      ref: ' prod/operator-token ',
+      status: 'invalid-whitespace',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.orchestrator',
+      configPath: 'comms.orchestratorTokenRef',
+      ref: 'prod/orchestrator-token',
+      status: 'optional-configured',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.slack.bot',
+      configPath: 'comms.slack.botTokenRef',
+      ref: null,
+      status: 'missing',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.discord',
+      configPath: 'comms.discord.botTokenRef',
+      ref: 'prod/discord-bot-token',
+      status: 'configured',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.telegram',
+      configPath: 'comms.telegram.botTokenRef',
+      ref: 'prod/telegram-bot-token',
+      status: 'inactive-configured',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.discord.public',
+      configPath: 'comms.discord.publicKeyRef',
+      ref: null,
+      status: 'missing',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.whatsapp.phone-number',
+      configPath: 'comms.whatsapp.phoneNumberIdRef',
+      ref: null,
+      status: 'missing',
+    });
+    expect(JSON.stringify(report)).not.toContain('super-secret-value');
+    expect(JSON.stringify(report)).not.toContain('Bearer');
+  });
+
+  it('marks the operator token inactive when no managed service is selected', async () => {
+    const config = defaultConfig();
+    config.beastsDaemon.enabled = false;
+    config.chat.enabled = false;
+    config.dashboard.enabled = false;
+    config.comms.enabled = false;
+
+    const print = vi.fn();
+    await runNetworkCommand(
+      makeArgs({ networkAction: 'credentials' }),
+      config,
+      '/repo/frankenbeast',
+      makePaths(),
+      {
+        resolveServices: vi.fn(() => []),
+        createSupervisor: vi.fn(),
+        print,
+        printError: vi.fn(),
+        renderHelp: () => 'network help',
+        waitForShutdown: vi.fn(async () => undefined),
+      },
+    );
+
+    const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
+      credentials: Array<{ scope: string; configPath: string; ref: string | null; status: string }>;
+    };
+    expect(report.credentials).toContainEqual({
+      scope: 'network.operator',
+      configPath: 'network.operatorTokenRef',
+      ref: null,
+      status: 'inactive-missing',
+    });
+  });
+
   it('start stop and restart target one service or all', async () => {
     const services = [makeService('chat-server'), makeService('dashboard-web')];
     const up = vi.fn(async () => ({

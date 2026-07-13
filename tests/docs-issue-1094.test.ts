@@ -92,7 +92,7 @@ const markdownLinkIssues = (): string[] =>
     return issues;
   });
 
-describe("issue #1094, #1447, and #1791 local docs links", () => {
+describe("issue #1094, #1447, #1791, and #2089 local docs links", () => {
   it("keeps root docs, docs/**, and package READMEs free of broken or unsafe local Markdown links", () => {
     expect(markdownLinkIssues()).toEqual([]);
   });
@@ -125,15 +125,21 @@ describe("issue #1094, #1447, and #1791 local docs links", () => {
     expect(readDoc("docs/plans/consolidation/index.md")).toContain(
       "(residuals-master-plan.md)",
     );
-    expect(readDoc("packages/franken-governor/README.md")).toContain(
-      "(docs/adr/ADR-001-typescript-strict-nodenext.md)",
-    );
-    expect(readDoc("packages/franken-governor/README.md")).toContain(
-      "(docs/adr/ADR-007-session-token-activation.md)",
-    );
+    const governorReadme = readDoc("packages/franken-governor/README.md");
+    for (const adr of [
+      "ADR-001-typescript-strict-nodenext.md",
+      "ADR-002-approval-channel-strategy.md",
+      "ADR-003-composable-trigger-evaluators.md",
+      "ADR-004-audit-trail-episodic-trace.md",
+      "ADR-005-signed-approvals-hmac.md",
+      "ADR-006-custom-error-hierarchy.md",
+      "ADR-007-session-token-activation.md",
+    ]) {
+      expect(governorReadme).toContain(`(docs/adr/${adr})`);
+    }
   });
 
-  it("does not reintroduce the stale internal targets reported in issue #1447", () => {
+  it("does not reintroduce the stale internal targets reported in issue #1447 and #2089", () => {
     expect(readDoc("CLAUDE.md")).not.toContain(
       "(docs/adr/011-monorepo-migration.md)",
     );
@@ -155,5 +161,17 @@ describe("issue #1094, #1447, and #1791 local docs links", () => {
     expect(readDoc("docs/plans/consolidation/index.md")).not.toContain(
       "(../2026-03-18-architecture-consolidation-plan.md)",
     );
+    const governorReadme = readDoc("packages/franken-governor/README.md");
+    for (const adr of [
+      "001-typescript-strict-nodenext.md",
+      "002-approval-channel-strategy.md",
+      "003-composable-trigger-evaluators.md",
+      "004-audit-trail-episodic-trace.md",
+      "005-signed-approvals-hmac.md",
+      "006-custom-error-hierarchy.md",
+      "007-session-token-activation.md",
+    ]) {
+      expect(governorReadme).not.toContain(`(docs/adr/${adr})`);
+    }
   });
 });
