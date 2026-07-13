@@ -520,16 +520,18 @@ export async function resolveDashboardOperatorToken(): Promise<string | undefine
     ?? await readOperatorTokenFromEnvFile(join(process.cwd(), 'packages', 'franken-web', '.env.local'));
 }
 
-async function parseCliArgs(argv: string[]): Promise<DashboardStaticServerOptions> {
+export async function parseCliArgs(argv: string[]): Promise<DashboardStaticServerOptions> {
   const readValue = (flag: string): string | undefined => {
     const index = argv.indexOf(flag);
     return index >= 0 ? argv[index + 1] : undefined;
   };
   const host = readValue('--host') ?? '127.0.0.1';
-  const port = Number.parseInt(readValue('--port') ?? '5173', 10);
+  const portFlagPresent = argv.includes('--port');
+  const rawPort = portFlagPresent ? readValue('--port') : '5173';
   const staticDir = readValue('--static-dir') ?? 'packages/franken-web/dist';
+  const port = rawPort && /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error(`Invalid --port value: ${readValue('--port') ?? ''}`);
+    throw new Error(`Invalid --port value: ${rawPort ?? ''}`);
   }
   const buildArgStart = argv.indexOf('--build-args');
   return {
