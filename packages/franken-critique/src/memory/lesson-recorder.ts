@@ -7,6 +7,7 @@ import type {
   PostPrLessonExtractionTemplate,
   LessonRollbackWorkflow,
   CrossTaskBlockerPattern,
+  AgentImprovementScorecard,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -33,6 +34,8 @@ const DEFAULT_BLOCKER_PATTERN_THRESHOLD = 3;
 const MIN_BLOCKER_PATTERN_THRESHOLD = 2;
 const BLOCKER_PATTERN_GUIDANCE =
   'Equivalent blocker findings have recurred across distinct tasks; PM/liveness handoffs should treat this as a cross-task pattern and route a durable mitigation instead of rediscovering it per task.';
+const AGENT_IMPROVEMENT_SCORECARD_GUIDANCE =
+  'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.';
 
 export interface BlockerPatternObservation {
   readonly taskId: TaskId;
@@ -65,6 +68,8 @@ export interface LessonRecorderOptions {
   readonly blockerPatternThreshold?: number;
   /** Shared blocker-pattern state for mining recurrent blockers across recorder instances. */
   readonly blockerPatternStore?: Map<string, BlockerPatternState>;
+  /** Optional per-agent identifier used to attach deterministic improvement scorecards to learned lessons. */
+  readonly agentId?: string;
 }
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
@@ -138,6 +143,7 @@ export class LessonRecorder {
   private readonly blockerPatternThreshold: number;
   private readonly blockerPatterns: Map<string, BlockerPatternState>;
   private readonly pendingBlockerAdmissions: Map<string, Promise<void>>;
+  private readonly agentId?: string;
   private readonly pendingBlockerObservations = new WeakMap<
     CritiqueLesson,
     PendingBlockerPatternObservation[]
@@ -172,6 +178,15 @@ export class LessonRecorder {
     this.pendingBlockerAdmissions = getPendingBlockerAdmissions(
       this.blockerPatterns,
     );
+    if (options.agentId !== undefined) {
+      const agentId = options.agentId.trim();
+      if (!agentId) {
+        throw new RangeError(
+          'LessonRecorder agentId must be a non-empty string when provided.',
+        );
+      }
+      this.agentId = agentId;
+    }
     const now = options.now ?? ((): Date => new Date());
     this.now = (): string => normalizeTimestamp(now());
     this.cooldowns = options.cooldownStore ?? new Map<string, number>();
@@ -371,6 +386,19 @@ export class LessonRecorder {
           ),
           postPrLessonExtractionTemplate:
             createPostPrLessonExtractionTemplate(),
+          ...(this.agentId
+            ? {
+                agentImprovementScorecard: createAgentImprovementScorecard(
+                  this.agentId,
+                  taskId,
+                  evalResult.evaluatorName,
+                  failingIteration,
+                  allIterations,
+                  critiqueFindings,
+                  recordedAt,
+                ),
+              }
+            : {}),
           cooldown: {
             key: cooldownKey,
             windowMs: this.cooldownMs,
@@ -651,6 +679,14 @@ export class LessonRecorder {
     return {
       ...lesson,
       timestamp: recordedAt,
+      ...(lesson.agentImprovementScorecard
+        ? {
+            agentImprovementScorecard: {
+              ...lesson.agentImprovementScorecard,
+              generatedAt: recordedAt,
+            },
+          }
+        : {}),
       cooldown: {
         ...lesson.cooldown,
         recordedAt,
@@ -741,6 +777,100 @@ function createBlockerPatternKey(
 
 function normalizeBlockerFinding(message: string): string {
   return message.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function createAgentImprovementScorecard(
+  agentId: string,
+  taskId: TaskId,
+  evaluatorName: string,
+  failingIteration: CritiqueIteration,
+  allIterations: readonly CritiqueIteration[],
+  currentFindings: readonly {
+    readonly message: string;
+    readonly severity: string;
+  }[],
+  generatedAt: string,
+): AgentImprovementScorecard {
+  const evaluatorFailures = allIterations.filter((iteration) =>
+    iteration.result.results.some(
+      (result) =>
+        result.evaluatorName === evaluatorName && result.verdict === 'fail',
+    ),
+  );
+  const failingIterations = evaluatorFailures.map((iteration) => iteration.index);
+  const allFindings = evaluatorFailures.flatMap((iteration) =>
+    iteration.result.results
+      .filter(
+        (result) =>
+          result.evaluatorName === evaluatorName && result.verdict === 'fail',
+      )
+      .flatMap((result) =>
+        result.findings.filter(
+          (finding) => finding.location !== EVALUATOR_EXCEPTION_LOCATION,
+        ),
+      ),
+  );
+  const findings = allFindings.length > 0 ? allFindings : currentFindings;
+  const initialScore =
+    failingIteration.result.results.find(
+      (result) => result.evaluatorName === evaluatorName,
+    )?.score ?? failingIteration.result.overallScore;
+  const passingIteration = allIterations.find(
+    (iteration) =>
+      iteration.result.verdict === 'pass' || iteration.result.verdict === 'warn',
+  );
+  const finalScore = passingIteration?.result.overallScore ?? initialScore;
+  const findingCounts = countScorecardFindings(findings);
+  const scoreDelta = roundScore(finalScore - initialScore);
+  const improvementSignals = [
+    `Recovered from ${failingIterations.length} failing critique ${
+      failingIterations.length === 1 ? 'iteration' : 'iterations'
+    } before ${passingIteration?.result.verdict ?? 'recovery'}.`,
+    `Improved ${evaluatorName} score by ${scoreDelta}.`,
+    ...(findingCounts.critical > 0
+      ? [
+          `Resolved ${findingCounts.critical} critical blocker ${
+            findingCounts.critical === 1 ? 'finding' : 'findings'
+          }.`,
+        ]
+      : []),
+  ];
+
+  return {
+    schemaVersion: 'agent-improvement-scorecard-v1',
+    agentId,
+    taskId,
+    evaluatorName,
+    generatedAt,
+    initialScore: roundScore(initialScore),
+    finalScore: roundScore(finalScore),
+    scoreDelta,
+    failingIterations,
+    resolvedIteration: passingIteration?.index ?? failingIteration.index,
+    findingCounts,
+    improvementSignals,
+    guidance: AGENT_IMPROVEMENT_SCORECARD_GUIDANCE,
+  };
+}
+
+function countScorecardFindings(
+  findings: readonly { readonly severity: string }[],
+): AgentImprovementScorecard['findingCounts'] {
+  const counts = { critical: 0, warning: 0, info: 0, total: findings.length };
+  for (const finding of findings) {
+    if (finding.severity === 'critical') {
+      counts.critical += 1;
+    } else if (finding.severity === 'warning') {
+      counts.warning += 1;
+    } else {
+      counts.info += 1;
+    }
+  }
+  return counts;
+}
+
+function roundScore(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {

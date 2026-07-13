@@ -207,6 +207,75 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('attaches a deterministic per-agent improvement scorecard to recorded lessons when an agent id is configured', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      agentId: 'worker-alpha',
+      now: (): string => '2026-07-12T00:00:00.000Z',
+    });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'quality-gate', [
+          {
+            message: 'PR handoff omitted verification evidence',
+            severity: 'warning',
+            suggestion: 'Add the targeted test command and result.',
+          },
+          {
+            message: 'Reviewer blocker was left unresolved',
+            severity: 'critical',
+            suggestion: 'Resolve the review thread before merge.',
+          },
+        ]),
+        createIteration(1, 'fail', 'quality-gate', [
+          {
+            message: 'Verification evidence is present but incomplete',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(2, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'scorecard-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.agentImprovementScorecard).toEqual({
+      schemaVersion: 'agent-improvement-scorecard-v1',
+      agentId: 'worker-alpha',
+      taskId: 'scorecard-task',
+      evaluatorName: 'quality-gate',
+      generatedAt: '2026-07-12T00:00:00.000Z',
+      initialScore: 0.3,
+      finalScore: 1,
+      scoreDelta: 0.7,
+      failingIterations: [0, 1],
+      resolvedIteration: 2,
+      findingCounts: {
+        critical: 1,
+        warning: 2,
+        info: 0,
+        total: 3,
+      },
+      improvementSignals: [
+        'Recovered from 2 failing critique iterations before pass.',
+        'Improved quality-gate score by 0.7.',
+        'Resolved 1 critical blocker finding.',
+      ],
+      guidance:
+        'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.',
+    });
+  });
+
+  it('rejects blank per-agent scorecard ids so PM summaries do not group lessons under an ambiguous agent', () => {
+    expect(
+      () => new LessonRecorder(createMockMemoryPort(), { agentId: '  ' }),
+    ).toThrow('LessonRecorder agentId must be a non-empty string when provided.');
+  });
+
   it('attaches an LLM-friendly post-PR lesson extraction template to recorded lessons', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);

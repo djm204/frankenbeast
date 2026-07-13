@@ -197,6 +197,39 @@ export interface CrossTaskBlockerPattern {
   readonly guidance: string;
 }
 
+/** Deterministic per-agent learning summary for worker retrospectives and PM handoffs. */
+export interface AgentImprovementScorecard {
+  /** Stable schema identifier for PM/liveness tooling. */
+  readonly schemaVersion: 'agent-improvement-scorecard-v1';
+  /** Agent or worker identifier supplied by the recorder caller. */
+  readonly agentId: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  /** Timestamp when the scorecard was generated. */
+  readonly generatedAt: string;
+  /** First failing score for this evaluator in the recovered critique loop. */
+  readonly initialScore: number;
+  /** Final recovered overall score from the pass/warn iteration. */
+  readonly finalScore: number;
+  /** Rounded difference between finalScore and initialScore. */
+  readonly scoreDelta: number;
+  /** Failing iteration indexes for this evaluator that contributed feedback. */
+  readonly failingIterations: readonly number[];
+  /** Iteration that recovered to pass/warn. */
+  readonly resolvedIteration: number;
+  /** Finding counts across the agent's failing iterations for this evaluator. */
+  readonly findingCounts: {
+    readonly critical: number;
+    readonly warning: number;
+    readonly info: number;
+    readonly total: number;
+  };
+  /** LLM-friendly bullets that can be copied into retrospectives without parsing prose. */
+  readonly improvementSignals: readonly string[];
+  /** Operator-facing guidance for interpreting the scorecard. */
+  readonly guidance: string;
+}
+
 /** Summary returned by LessonRecorder.record for PM/liveness consumers. */
 export interface LessonRecordingResult {
   readonly recorded: number;
@@ -226,6 +259,8 @@ export interface CritiqueLesson {
   readonly cooldown?: LessonCooldownMetadata;
   /** Cross-task blocker patterns associated with this lesson, if any crossed the threshold. */
   readonly blockerPatterns?: readonly CrossTaskBlockerPattern[];
+  /** Optional per-agent learning scorecard for worker retrospectives and PM handoffs. */
+  readonly agentImprovementScorecard?: AgentImprovementScorecard;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */
