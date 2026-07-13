@@ -22,9 +22,10 @@ describe('StepPrompts', () => {
     expect(useBeastStore.getState().stepValues[5]?.promptText).toBe('Test prompt');
   });
 
-  it('renders file picker section', () => {
+  it('renders file picker section with restricted markdown guidance', () => {
     render(<StepPrompts />);
     expect(screen.getByText('Files')).toBeTruthy();
+    expect(screen.getByText(/Markdown files use restricted mode by default/i)).toBeTruthy();
   });
 
   it('preserves prompt edits made while selected files are being read', async () => {
