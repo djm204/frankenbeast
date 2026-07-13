@@ -4,12 +4,20 @@ import { isMain } from '../shared/is-main.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
-import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { deriveProjectRootFromDbPath, resolveProjectDbPath } from '../shared/resolve-db-path.js';
 
 export function deriveProxyRoot(dbPath: string, explicitRoot?: string | undefined): string | undefined {
   return deriveProjectRootFromDbPath(dbPath, explicitRoot);
+}
+
+const WORKSPACE_ROOT_REQUIRED_TOOLS = new Set(['fbeast_firewall_scan_file']);
+
+function protectedModeMessage(toolName: string): string {
+  return [
+    `Protected mode: refusing ${toolName} because the workspace root is unknown.`,
+    'Start fbeast-proxy with --root /absolute/project/root or use a database path under <project>/.fbeast/beast.db so file-backed tools can be constrained to that project.',
+  ].join(' ');
 }
 
 export interface ProxyServerDeps {
@@ -27,6 +35,7 @@ export interface ProxyServerDeps {
 export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   const root = deriveProxyRoot(deps.dbPath, deps.root);
   const dbPath = resolveProjectDbPath(deps.dbPath, root);
+  const protectedMode = root === undefined;
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so
   // policy and audit are keyed by the real high-risk action (ADR-035, finding
@@ -90,6 +99,13 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
           await recordAudit({ ok: false, decision: 'unknown_tool' });
           return {
             content: [{ type: 'text', text: `Unknown tool: ${toolName}. Call search_tools to list available tools.` }],
+            isError: true,
+          };
+        }
+        if (protectedMode && WORKSPACE_ROOT_REQUIRED_TOOLS.has(toolName)) {
+          await recordAudit({ ok: false, decision: 'protected_mode' });
+          return {
+            content: [{ type: 'text', text: protectedModeMessage(toolName) }],
             isError: true,
           };
         }
