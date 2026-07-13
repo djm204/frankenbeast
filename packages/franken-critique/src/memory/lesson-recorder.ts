@@ -1461,6 +1461,8 @@ function hasCompatibleConditionalGuard(
     hasCompatibleQualifiedExclusionPair(b, a) ||
     hasCompatibleWithoutWithPair(a, b) ||
     hasCompatibleWithoutWithPair(b, a) ||
+    hasCompatibleGuardedAllowancePair(a, b) ||
+    hasCompatibleGuardedAllowancePair(b, a) ||
     hasCompatibleValidityQualifierPair(a, b) ||
     hasCompatibleValidityQualifierPair(b, a) ||
     hasCompatibleValidatedScopePair(a, b) ||
@@ -1609,6 +1611,32 @@ function hasCompatibleWithoutWithPair(
   );
 }
 
+function hasCompatibleGuardedAllowancePair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative' ||
+    !maybeProhibition.guardCondition ||
+    !/\b(?:with|if)\b/i.test(maybeAllowance.sourceText) ||
+    !/\bwithout\b/i.test(maybeProhibition.sourceText)
+  ) {
+    return false;
+  }
+
+  if (/\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked)\b/i.test(maybeAllowance.sourceText)) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeProhibition.guardCondition, maybeAllowance.text).length >=
+      1 &&
+    sharedTextTerms(maybeProhibition.text, maybeAllowance.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
 function hasCompatibleValidityQualifierPair(
   maybeAllowance: LessonDirectiveClause,
   maybeProhibition: LessonDirectiveClause,
@@ -1661,7 +1689,7 @@ function describesRequiredPrerequisite(text: string): boolean {
 
 function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
   if (
-    /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass)\b/.test(
+    /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny)\b/.test(
       normalized,
     ) ||
     /^(do not|don t|must not|should not|cannot|can t)\b/.test(normalized)
@@ -1729,7 +1757,7 @@ function canonicalComparableText(value: string): string {
 }
 
 function startsWithNegativeDirective(normalized: string): boolean {
-  return /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|do not|don t|must not|should not|cannot|can t)\b/.test(
+  return /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny|do not|don t|must not|should not|cannot|can t)\b/.test(
     normalized,
   );
 }
@@ -1743,7 +1771,7 @@ function startsWithPositiveDirective(normalized: string): boolean {
 function stripLeadingNegativeDirective(normalized: string): string {
   return normalized
     .replace(
-      /^(?:no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|do not|don t|must not|should not|cannot|can t)\s+/,
+      /^(?:no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny|do not|don t|must not|should not|cannot|can t)\s+/,
       '',
     )
     .trim();

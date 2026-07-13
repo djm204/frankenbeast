@@ -1982,6 +1982,26 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('does not contradict with-guarded or if-guarded prerequisite allowances', () => {
+    for (const guardedAllowance of ['Deploy with approval', 'Deploy if approval']) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: 'Do not deploy without approval' }),
+          [createLesson({ correctionApplied: guardedAllowance })],
+        ),
+      ).toMatchObject({ status: 'clear', contradictions: [] });
+    }
+  });
+
+  it('treats deny directives as negative guidance', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Deny API access' }),
+        [createLesson({ correctionApplied: 'Allow API access' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
   it('reports matched reviewer guidance when the correction summary is generic', () => {
     const current = createLesson({
       correctionApplied: 'Corrected in iteration 1',
