@@ -2157,6 +2157,13 @@ describe('LessonRecorder', () => {
         [createLesson({ correctionApplied: 'Log debug metrics' })],
       ),
     ).toMatchObject({ status: 'clear', contradictions: [] });
+
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not cache tokens, and rotate keys' }),
+        [createLesson({ correctionApplied: 'Rotate keys' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
   it('ignores generic directive verbs when testing object overlap', () => {
@@ -2200,6 +2207,13 @@ describe('LessonRecorder', () => {
       detectLessonContradictions(
         createLesson({ correctionApplied: 'Avoid cache reuse unless provenance checks pass' }),
         [createLesson({ correctionApplied: 'Reuse cache when provenance checks are missing' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy without approval' }),
+        [createLesson({ correctionApplied: 'Deploy when approval is missing' })],
       ),
     ).toMatchObject({ status: 'contradiction_detected' });
   });
@@ -2261,6 +2275,13 @@ describe('LessonRecorder', () => {
       detectLessonContradictions(
         createLesson({ correctionApplied: 'Do not deploy' }),
         [createLesson({ correctionApplied: 'Deploy' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log tokens' }),
+        [createLesson({ correctionApplied: 'Log token' })],
       ),
     ).toMatchObject({ status: 'contradiction_detected' });
   });

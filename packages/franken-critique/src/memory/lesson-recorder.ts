@@ -1259,12 +1259,12 @@ function findContradictoryGuidanceMatch(
         lessonDirective.text,
         priorDirective.text,
       );
-      if (
-        sharedTerms.length >= 1 &&
-        hasExplicitOppositeDirectivePair(lessonDirective, priorDirective)
-      ) {
+      if (hasExplicitOppositeDirectivePair(lessonDirective, priorDirective)) {
         return {
-          sharedTerms,
+          sharedTerms:
+            sharedTerms.length > 0
+              ? sharedTerms
+              : sharedDirectiveObjectTerms(lessonDirective, priorDirective),
           lessonGuidance: lessonDirective.sourceText,
           conflictingGuidance: priorDirective.sourceText,
         };
@@ -1381,7 +1381,7 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
 
 function splitDirectiveFragments(fragment: string): string[] {
   return fragment
-    .split(/[.;\n\r]+/)
+    .split(/[.;\n\r]+|,\s+and\s+/i)
     .map((part) => part.trim())
     .filter((part) => normalizeText(part).length > 0);
 }
@@ -1607,6 +1607,7 @@ function hasOpposedGuardOutcome(
 
   return (
     (guardHasPass && requirementHasFail) || (guardHasFail && requirementHasPass)
+    || (requirementHasFail && sharedTextTerms(guardCondition, requirementText).length >= 1)
   );
 }
 
@@ -1638,6 +1639,23 @@ function hasExplicitOppositeDirectivePair(
   );
 }
 
+function sharedDirectiveObjectTerms(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): string[] {
+  const aObjectTerms = extractComparableTerms(stripLeadingDirective(a.text));
+  const bObjectTerms = extractComparableTerms(stripLeadingDirective(b.text));
+  return aObjectTerms.filter((aTerm) =>
+    bObjectTerms.some(
+      (bTerm) => canonicalComparableTerm(aTerm) === canonicalComparableTerm(bTerm),
+    ),
+  );
+}
+
+function stripLeadingDirective(normalized: string): string {
+  return stripLeadingPositiveDirective(stripLeadingNegativeDirective(normalized));
+}
+
 function hasExplicitOppositeDirectivePairInOrder(
   maybeNegative: LessonDirectiveClause,
   maybePositive: LessonDirectiveClause,
@@ -1651,7 +1669,7 @@ function hasExplicitOppositeDirectivePairInOrder(
     return false;
   }
 
-  const negativeObject = stripLeadingNegativeDirective(maybeNegative.text);
+  const negativeObject = stripLeadingDirective(maybeNegative.text);
   if (negativeObject === maybePositive.text) {
     return true;
   }
@@ -1660,8 +1678,12 @@ function hasExplicitOppositeDirectivePairInOrder(
   return (
     negativeObject.length > 0 &&
     positiveObject.length > 0 &&
-    negativeObject === positiveObject
+    canonicalComparableText(negativeObject) === canonicalComparableText(positiveObject)
   );
+}
+
+function canonicalComparableText(value: string): string {
+  return extractComparableTerms(value).map(canonicalComparableTerm).join(' ');
 }
 
 function startsWithNegativeDirective(normalized: string): boolean {
@@ -1710,6 +1732,13 @@ function extractComparableTerms(value: string): string[] {
   }
 
   return comparableTerms;
+}
+
+function canonicalComparableTerm(term: string): string {
+  if (term.length > 4 && term.endsWith('s') && !term.endsWith('ss')) {
+    return term.slice(0, -1);
+  }
+  return term;
 }
 
 function isComparableTerm(term: string): boolean {
