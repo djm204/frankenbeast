@@ -246,10 +246,11 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
+import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import { createInterface } from 'node:readline';
 
 // ── Tests ──
@@ -807,6 +808,54 @@ describe('runDirectCli', () => {
     expect(exit).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith('Fatal:', 'boom');
     errorSpy.mockRestore();
+  });
+});
+
+describe('validateStateDirBeforeScaffold', () => {
+  const priorProfile = process.env.HERMES_PROFILE;
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    if (priorProfile === undefined) {
+      delete process.env.HERMES_PROFILE;
+    } else {
+      process.env.HERMES_PROFILE = priorProfile;
+    }
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function symlinkedCrossProfileState(): string {
+    const root = join(tmpdir(), `franken-pre-scaffold-state-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(root);
+    const target = join(root, '.hermes', 'profiles', 'prod');
+    const link = join(root, 'repo', '.fbeast', 'state-link');
+    mkdirSync(target, { recursive: true });
+    mkdirSync(join(root, 'repo', '.fbeast'), { recursive: true });
+    symlinkSync(target, link, 'dir');
+    return join(link, 'state');
+  }
+
+  it('does not let an opt-in without configured stateDir approve the repo default stateDir', () => {
+    process.env.HERMES_PROFILE = 'default';
+    const stateDir = symlinkedCrossProfileState();
+
+    expect(() => validateStateDirBeforeScaffold({
+      ...defaultConfig(),
+      allowCrossProfileStateAccess: true,
+    }, { stateDir })).toThrow("Hermes profile 'prod'");
+  });
+
+  it('allows an operator opt-in only for the stateDir supplied by the same config', () => {
+    process.env.HERMES_PROFILE = 'default';
+    const stateDir = symlinkedCrossProfileState();
+
+    expect(() => validateStateDirBeforeScaffold({
+      ...defaultConfig(),
+      stateDir,
+      allowCrossProfileStateAccess: true,
+    }, { stateDir: join(tmpdir(), 'unused-default-state') })).not.toThrow();
   });
 });
 

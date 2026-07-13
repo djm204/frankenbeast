@@ -493,10 +493,14 @@ export class Session {
     if (this.config.maxTotalTokens !== undefined) {
       loopConfig.maxTotalTokens = this.config.maxTotalTokens;
     }
-    if (this.config.orchestratorConfig?.allowCrossProfileStateAccess !== undefined) {
+    const configuredStateDir = this.config.orchestratorConfig?.stateDir;
+    if (
+      configuredStateDir !== undefined &&
+      this.config.orchestratorConfig?.allowCrossProfileStateAccess !== undefined
+    ) {
       loopConfig.allowCrossProfileStateAccess = this.config.orchestratorConfig.allowCrossProfileStateAccess;
     }
-    loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
+    loopConfig.stateDir = configuredStateDir ?? paths.stateDir;
 
     try {
       const promptConfig = loadPromptConfigFromEnv();

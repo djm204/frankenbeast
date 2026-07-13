@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { defaultConfig, parseOrchestratorConfig } from '../config/orchestrator-config.js';
+import { defaultConfig, parseOrchestratorConfig, validateCrossProfileStateDir } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -152,6 +152,23 @@ export function shouldShowMissingRunPlanGuidance(
     && !args.planDir
     && !args.planName
     && planNeedsGuidance;
+}
+
+export function validateStateDirBeforeScaffold(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): void {
+  const configuredStateDir = config.stateDir;
+  const stateDir = configuredStateDir ?? paths.stateDir;
+  const issue = validateCrossProfileStateDir({
+    stateDir,
+    allowCrossProfileStateAccess: configuredStateDir
+      ? config.allowCrossProfileStateAccess
+      : false,
+  });
+  if (issue) {
+    throw new Error(issue);
+  }
 }
 
 export interface ResumeTarget {
@@ -985,6 +1002,7 @@ export async function main(): Promise<void> {
     return;
   }
 
+  validateStateDirBeforeScaffold(config, paths);
   scaffoldFrankenbeast(paths);
 
   if (args.subcommand === 'beasts-daemon') {
