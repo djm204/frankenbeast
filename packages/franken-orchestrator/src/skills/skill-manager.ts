@@ -94,11 +94,14 @@ export class SkillManager {
       JSON.stringify(mcpConfig, null, 2),
     );
 
+    const toolsPath = join(skillDir, 'tools.json');
     if (tools) {
       writeFileSync(
-        join(skillDir, 'tools.json'),
+        toolsPath,
         JSON.stringify(tools, null, 2),
       );
+    } else if (existsSync(toolsPath)) {
+      rmSync(toolsPath);
     }
   }
 

@@ -136,6 +136,33 @@ describe('SkillManager', () => {
       expect(existsSync(join(skillsDir, 'github', 'mcp.json'))).toBe(false);
       expect(manager.exists('github')).toBe(false);
     });
+
+    it('removes stale tool manifests when reinstalling without tool definitions', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx', args: ['old-server'] },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'list_repos', description: 'List', inputSchema: {}, requiresHitl: false },
+        ],
+      });
+      expect(manager.readTools('github')).toEqual([
+        expect.objectContaining({ name: 'list_repos', requiresHitl: false }),
+      ]);
+
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx', args: ['new-server'] },
+        authFields: [],
+      });
+
+      expect(existsSync(join(skillsDir, 'github', 'tools.json'))).toBe(false);
+      expect(manager.readTools('github')).toEqual([]);
+    });
   });
 
   describe('installCustom()', () => {
