@@ -337,11 +337,21 @@ describe('SqliteBrain', () => {
           afterDryRun.prepare(`PRAGMA table_info(working_memory)`).all().some(row => (row as { name: string }).name === 'schema_version'),
         ).toBe(false);
         afterDryRun.close();
+        expect(existsSync(`${dbPath}-wal`)).toBe(false);
+        expect(existsSync(`${dbPath}-shm`)).toBe(false);
 
         const migrated = SqliteBrain.migrateMemorySchema(dbPath, { backupBeforeMigrate: true, backupPath });
         expect(migrated.dryRun).toBe(false);
         expect(migrated.backupPath).toBe(backupPath);
         expect(existsSync(backupPath)).toBe(true);
+        const backup = new Database(backupPath, { readonly: true });
+        expect(backup.prepare(`SELECT value FROM working_memory WHERE key = ?`).get('legacy')).toEqual({
+          value: '"value"',
+        });
+        expect(
+          backup.prepare(`PRAGMA table_info(working_memory)`).all().some(row => (row as { name: string }).name === 'schema_version'),
+        ).toBe(false);
+        backup.close();
 
         const reopened = new SqliteBrain(dbPath);
         expect(reopened.working.get('legacy')).toBe('value');
@@ -385,6 +395,29 @@ describe('SqliteBrain', () => {
         );
         rowFutureDb.close();
         expect(() => new SqliteBrain(dbPath)).toThrow(UnsupportedMemorySchemaVersionError);
+
+        const futureShapeDir = mkdtempSync(join(tmpdir(), 'sqlite-brain-future-shape-'));
+        const futureShapePath = join(futureShapeDir, 'brain.db');
+        try {
+          const futureShapeDb = new Database(futureShapePath);
+          futureShapeDb.exec(`
+            CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
+            INSERT INTO memory_schema_versions (store, version, migrated_at)
+            VALUES ('semantic_memory', ${CURRENT_MEMORY_SCHEMA_VERSION + 1}, '2026-07-13T00:00:00.000Z');
+          `);
+          futureShapeDb.close();
+
+          expect(() => new SqliteBrain(futureShapePath)).toThrow(UnsupportedMemorySchemaVersionError);
+          const afterRejectedOpen = new Database(futureShapePath, { readonly: true });
+          const tables = afterRejectedOpen
+            .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC`)
+            .all()
+            .map(row => (row as { name: string }).name);
+          expect(tables).toEqual(['memory_schema_versions']);
+          afterRejectedOpen.close();
+        } finally {
+          rmSync(futureShapeDir, { recursive: true, force: true });
+        }
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

@@ -1,4 +1,3 @@
-import { copyFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import type {
   IBrain,
@@ -617,6 +616,7 @@ export class SqliteBrain implements IBrain {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
+    assertSupportedMemorySchema(this.db);
     this.initSchema();
     migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
     this.working = new SqliteWorkingMemory(this.db, {
@@ -667,9 +667,11 @@ export class SqliteBrain implements IBrain {
     dbPath: string,
     options: MemorySchemaMigrationOptions = {},
   ): MemorySchemaMigrationResult {
-    const db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('busy_timeout = 5000');
+    const db = new Database(dbPath, options.dryRun ? { readonly: true, fileMustExist: true } : {});
+    if (!options.dryRun) {
+      db.pragma('journal_mode = WAL');
+      db.pragma('busy_timeout = 5000');
+    }
     try {
       return migrateMemorySchemaDatabase(db, dbPath, options);
     } finally {
@@ -821,7 +823,7 @@ function migrateMemorySchemaDatabase(
       throw new Error('Cannot create a backup for an in-memory SQLite database');
     }
     backupPath ??= `${dbPath}.backup-${Date.now()}`;
-    copyFileSync(dbPath, backupPath);
+    db.exec(`VACUUM INTO ${sqliteStringLiteral(backupPath)}`);
   }
 
   if (!dryRun && migrated) {
@@ -872,6 +874,44 @@ function readMemorySchemaMetadata(db: Database.Database): MemorySchemaMetadata {
       recordCount: (db.prepare(`SELECT COUNT(*) AS count FROM ${store}`).get() as { count: number }).count,
     })),
   };
+}
+
+function assertSupportedMemorySchema(db: Database.Database): void {
+  const tableRows = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{
+    name: string;
+  }>;
+  const existingTables = new Set(tableRows.map(row => row.name));
+  if (existingTables.has('memory_schema_versions')) {
+    const rows = db.prepare(`SELECT store, version FROM memory_schema_versions`).all() as Array<{
+      store: string;
+      version: number;
+    }>;
+    for (const row of rows) {
+      if (row.version > CURRENT_MEMORY_SCHEMA_VERSION) {
+        throw new UnsupportedMemorySchemaVersionError(
+          `Memory store ${row.store} uses schema version ${row.version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        );
+      }
+    }
+  }
+
+  for (const store of ['working_memory', 'episodic_events', 'checkpoints']) {
+    if (!existingTables.has(store)) continue;
+    const columnRows = db.prepare(`PRAGMA table_info(${store})`).all() as Array<{ name: string }>;
+    if (!columnRows.some(row => row.name === 'schema_version')) continue;
+    const future = db
+      .prepare(`SELECT schema_version FROM ${store} WHERE schema_version > ? LIMIT 1`)
+      .get(CURRENT_MEMORY_SCHEMA_VERSION) as { schema_version: number } | undefined;
+    if (future) {
+      throw new UnsupportedMemorySchemaVersionError(
+        `Memory table ${store} contains record schema version ${future.schema_version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+      );
+    }
+  }
+}
+
+function sqliteStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 // --- Constants ---
