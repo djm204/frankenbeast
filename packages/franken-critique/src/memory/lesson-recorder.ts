@@ -794,7 +794,11 @@ function createAgentImprovementScorecard(
   const evaluatorFailures = allIterations.filter((iteration) =>
     iteration.result.results.some(
       (result) =>
-        result.evaluatorName === evaluatorName && result.verdict === 'fail',
+        result.evaluatorName === evaluatorName &&
+        result.verdict === 'fail' &&
+        result.findings.some(
+          (finding) => finding.location !== EVALUATOR_EXCEPTION_LOCATION,
+        ),
     ),
   );
   const failingIterations = evaluatorFailures.map((iteration) => iteration.index);

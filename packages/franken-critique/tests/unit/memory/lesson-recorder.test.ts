@@ -358,6 +358,80 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('excludes evaluator infrastructure exceptions from per-agent scorecards', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, { agentId: 'worker-alpha' });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIterationFromResult(0, {
+          verdict: 'fail',
+          overallScore: 0.05,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.05,
+              findings: [
+                {
+                  message: 'evaluator crashed',
+                  severity: 'critical',
+                  location: EVALUATOR_EXCEPTION_LOCATION,
+                },
+              ],
+            },
+          ],
+        }),
+        createIterationFromResult(1, {
+          verdict: 'fail',
+          overallScore: 0.4,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.4,
+              findings: [{ message: 'missing verifier', severity: 'warning' }],
+            },
+          ],
+        }),
+        createIterationFromResult(2, {
+          verdict: 'pass',
+          overallScore: 1,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'pass',
+              score: 1,
+              findings: [],
+            },
+          ],
+        }),
+      ],
+    };
+
+    await recorder.record(result, 'scorecard-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(lesson.agentImprovementScorecard).toMatchObject({
+      initialScore: 0.4,
+      finalScore: 1,
+      scoreDelta: 0.6,
+      failingIterations: [1],
+      findingCounts: {
+        critical: 0,
+        warning: 1,
+        info: 0,
+        total: 1,
+      },
+    });
+  });
+
   it('rejects blank per-agent scorecard ids so PM summaries do not group lessons under an ambiguous agent', () => {
     expect(
       () => new LessonRecorder(createMockMemoryPort(), { agentId: '  ' }),
