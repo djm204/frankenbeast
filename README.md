@@ -929,6 +929,8 @@ cd packages/franken-brain && npm test
 All modules follow the same patterns:
 
 - **Vitest** as test runner
+- **Root test entrypoints** — `npm test` runs the default deterministic package suites, `npm run test:root` runs root-only Vitest tests, and `npm run test:integration` runs deterministic workspace integration suites exposed through Turborepo.
+- **Opt-in evals** — `npm run test:eval` is intentionally separate from `npm test` and runs only workspaces with explicit eval/LLM-judge suites.
 - **Dependency injection** — all external deps are constructor-injected
 - **Mock factories** — `vi.fn()` stubs for port interfaces
 - **No I/O in unit tests** — real SQLite only in integration tests (`:memory:` mode)
