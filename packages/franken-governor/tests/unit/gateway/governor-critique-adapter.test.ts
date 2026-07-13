@@ -677,6 +677,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     expect(request.trigger.triggerId).toBe('skill');
     expect(request.trigger.reason).toContain('deploy-prod');
     expect(request.trigger.reason).toContain('Additional triggered policies: budget: Budget breach');
+    expect(request.trigger.severity).toBe('critical');
   });
 
   it('skips unsupported typed built-in triggers instead of feeding them rationale context', async () => {
@@ -733,6 +734,129 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
     expect(request.trigger.triggerId).toBe('ambiguity');
     expect(request.trigger.reason).toContain('unresolved dependency');
+  });
+
+  it('evaluates ambiguity triggers when only one ambiguity signal is present', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new AmbiguityTrigger()],
+      projectId: 'proj-001',
+    });
+
+    await adapter.verifyRationale(makeRationale({
+      selectedTool: undefined,
+      hasUnresolvedDependency: true,
+    }));
+
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('ambiguity');
+    expect(request.trigger.reason).toContain('unresolved dependency');
+  });
+
+  it('preserves critical severity when a high skill trigger combines with a budget breach', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger(), new BudgetTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: false },
+      }),
+      budgetState: {
+        getBudgetState: () => ({ tripped: true, limitUsd: 100, spendUsd: 125 }),
+      },
+    });
+
+    await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('skill');
+    expect(request.trigger.severity).toBe('critical');
+    expect(request.trigger.reason).toContain('Additional triggered policies: budget: Budget breach');
+  });
+
+  it('keeps an earlier promptable trigger when a later context source fails', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger(), new BudgetTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: false },
+      }),
+      budgetState: {
+        getBudgetState: () => { throw new Error('observer unavailable'); },
+      },
+    });
+
+    await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
+
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('skill');
+    expect(request.trigger.severity).toBe('critical');
+    expect(request.trigger.reason).toContain('requires HITL');
+    expect(request.trigger.reason).toContain("Trigger 'budget' context evaluation failed: observer unavailable");
+  });
+
+  it('defaults omitted ambiguity signals to false when another ambiguity signal is present', async () => {
+    const dependencyChannel = makeFakeChannel('ABORT');
+    const dependencyAdapter = new GovernorCritiqueAdapter({
+      channel: dependencyChannel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new AmbiguityTrigger()],
+      projectId: 'proj-001',
+    });
+
+    await dependencyAdapter.verifyRationale(makeRationale({
+      selectedTool: undefined,
+      hasUnresolvedDependency: true,
+    }));
+
+    const dependencyRequest = vi.mocked(dependencyChannel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(dependencyRequest.trigger.triggerId).toBe('ambiguity');
+    expect(dependencyRequest.trigger.reason).toContain('unresolved dependency');
+
+    const adrChannel = makeFakeChannel('ABORT');
+    const adrAdapter = new GovernorCritiqueAdapter({
+      channel: adrChannel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new AmbiguityTrigger()],
+      projectId: 'proj-001',
+    });
+
+    await adrAdapter.verifyRationale(makeRationale({
+      selectedTool: undefined,
+      hasAdrConflict: true,
+    }));
+
+    const adrRequest = vi.mocked(adrChannel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(adrRequest.trigger.triggerId).toBe('ambiguity');
+    expect(adrRequest.trigger.reason).toContain('ADR conflict');
+  });
+
+  it('turns context-construction failures into fail-closed prompts instead of throwing', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new BudgetTrigger()],
+      projectId: 'proj-001',
+      budgetState: {
+        getBudgetState: () => { throw new Error('observer unavailable'); },
+      },
+    });
+
+    await adapter.verifyRationale(makeRationale({ selectedTool: undefined }));
+
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('budget');
+    expect(request.trigger.reason).toContain("Trigger 'budget' context evaluation failed: observer unavailable");
+    expect(request.trigger.severity).toBe('critical');
   });
 
   it('tries all candidate session tokens until one matches the current request scope', async () => {

@@ -12,7 +12,7 @@ import { SkillTrigger, type SkillTriggerContext } from '../triggers/skill-trigge
 import { ConfidenceTrigger, type ConfidenceTriggerContext } from '../triggers/confidence-trigger.js';
 import { AmbiguityTrigger, type AmbiguityTriggerContext } from '../triggers/ambiguity-trigger.js';
 import type { RationaleBlock, VerificationResult } from '@franken/types';
-import { deterministicUuid, now as deterministicNow } from '@franken/types';
+import { deterministicUuid, now as deterministicNow, type TriggerSeverity } from '@franken/types';
 
 /** Governance flags for a skill, looked up by the adapter per rationale. */
 export interface SkillGovernanceMetadata {
@@ -142,7 +142,15 @@ export class GovernorCritiqueAdapter {
     const triggeredResults: TriggerResult[] = [];
 
     for (const evaluator of this.evaluators) {
-      const triggerContext = this.buildTriggerContext(evaluator, rationale);
+      let triggerContext: TriggerContext;
+      try {
+        triggerContext = this.buildTriggerContext(evaluator, rationale);
+      } catch (error) {
+        const result = this.contextEvaluationFailure(evaluator, error);
+        triggeredResults.push(result);
+        if (this.hasPromptableTrigger(triggeredResults)) break;
+        return triggeredResults;
+      }
       // Explicit skip: the evaluator's typed context cannot be constructed
       // from the rationale + injected sources, so it must not be fed a
       // RationaleBlock it was never typed for (see issue #490).
@@ -151,7 +159,7 @@ export class GovernorCritiqueAdapter {
       if (!result.triggered) continue;
 
       triggeredResults.push(result);
-      if (result.severity === 'critical' && result.reason?.startsWith(`Trigger '${result.triggerId}' evaluation failed:`)) {
+      if (this.isTriggerFailure(result)) {
         return triggeredResults;
       }
     }
@@ -162,9 +170,12 @@ export class GovernorCritiqueAdapter {
     const evaluationFailure = triggerResults.find((result) => this.isTriggerEvaluationFailure(result));
     if (evaluationFailure !== undefined) return evaluationFailure;
 
-    return triggerResults.find((result) => result.triggerId === 'skill')
-      ?? triggerResults.find((result) => result.triggerId !== 'skill')
-      ?? triggerResults[0]!;
+    const promptableResults = triggerResults.filter((result) => !this.isTriggerContextFailure(result));
+    const selectableResults = promptableResults.length > 0 ? promptableResults : triggerResults;
+
+    return selectableResults.find((result) => result.triggerId === 'skill')
+      ?? selectableResults.find((result) => result.triggerId !== 'skill')
+      ?? selectableResults[0]!;
   }
 
   private formatTriggerForPrompt(triggerResults: ReadonlyArray<TriggerResult>): TriggerResult {
@@ -176,14 +187,50 @@ export class GovernorCritiqueAdapter {
       .map((result) => `${result.triggerId}: ${result.reason ?? 'triggered'}`)
       .join('; ');
 
+    const severity = this.highestSeverity(triggerResults);
+    const reason = `${selected.reason ?? 'Triggered'}; Additional triggered policies: ${additionalReasons}`;
+    return severity !== undefined
+      ? { ...selected, severity, reason }
+      : { ...selected, reason };
+  }
+
+  private highestSeverity(triggerResults: ReadonlyArray<TriggerResult>): TriggerSeverity | undefined {
+    const severityRank: Record<TriggerSeverity, number> = {
+      low: 0,
+      medium: 1,
+      high: 2,
+      critical: 3,
+    };
+    return triggerResults
+      .map((result) => result.severity)
+      .filter((severity): severity is TriggerSeverity => severity !== undefined)
+      .sort((a, b) => severityRank[b] - severityRank[a])[0];
+  }
+
+  private contextEvaluationFailure(evaluator: TriggerEvaluator, error: unknown): TriggerResult {
+    const reason = error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'unknown error';
     return {
-      ...selected,
-      reason: `${selected.reason ?? 'Triggered'}; Additional triggered policies: ${additionalReasons}`,
+      triggered: true,
+      triggerId: evaluator.triggerId,
+      reason: `Trigger '${evaluator.triggerId}' context evaluation failed: ${reason}`,
+      severity: 'critical',
     };
   }
 
   private canReuseOperatorSessionToken(triggerResults: ReadonlyArray<TriggerResult>): boolean {
-    return triggerResults.length === 1 && !this.isTriggerEvaluationFailure(triggerResults[0]!);
+    return triggerResults.length === 1 && !this.isTriggerFailure(triggerResults[0]!);
+  }
+
+  private hasPromptableTrigger(triggerResults: ReadonlyArray<TriggerResult>): boolean {
+    return triggerResults.some((result) => result.triggered && !this.isTriggerFailure(result));
+  }
+
+  private isTriggerFailure(triggerResult: TriggerResult): boolean {
+    return this.isTriggerEvaluationFailure(triggerResult) || this.isTriggerContextFailure(triggerResult);
   }
 
   private isTriggerEvaluationFailure(triggerResult: TriggerResult): boolean {
@@ -191,6 +238,10 @@ export class GovernorCritiqueAdapter {
       && triggerResult.reason?.startsWith(`Trigger '${triggerResult.triggerId}' evaluation failed:`) === true;
   }
 
+  private isTriggerContextFailure(triggerResult: TriggerResult): boolean {
+    return triggerResult.severity === 'critical'
+      && triggerResult.reason?.startsWith(`Trigger '${triggerResult.triggerId}' context evaluation failed:`) === true;
+  }
 
   private getValidOperatorSessionToken(request: ApprovalRequest, rationale: RationaleBlock): SessionToken | undefined {
     if (!this.sessionTokenStore) {
@@ -260,8 +311,11 @@ export class GovernorCritiqueAdapter {
     if (evaluator instanceof AmbiguityTrigger) {
       const hasUnresolvedDependency = rationale.hasUnresolvedDependency;
       const hasAdrConflict = rationale.hasAdrConflict;
-      if (typeof hasUnresolvedDependency !== 'boolean' || typeof hasAdrConflict !== 'boolean') return SKIP;
-      const context: AmbiguityTriggerContext = { hasUnresolvedDependency, hasAdrConflict };
+      if (typeof hasUnresolvedDependency !== 'boolean' && typeof hasAdrConflict !== 'boolean') return SKIP;
+      const context: AmbiguityTriggerContext = {
+        hasUnresolvedDependency: hasUnresolvedDependency ?? false,
+        hasAdrConflict: hasAdrConflict ?? false,
+      };
       return { skip: false, context };
     }
 
