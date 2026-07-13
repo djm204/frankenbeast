@@ -137,7 +137,7 @@ on:
     it('explicitly limits CI push and pull_request triggers to the main branch', () => {
       const triggers = expectRecord(workflow.on, 'workflow.on');
 
-      expect(Object.keys(triggers)).toEqual(['push', 'pull_request']);
+      expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
       expect(expectRecord(triggers.push, 'workflow.on.push')).toEqual({ branches: ['main'] });
       expect(expectRecord(triggers.pull_request, 'workflow.on.pull_request')).toEqual({ branches: ['main'] });
     });
