@@ -51,10 +51,6 @@ export class IssueFetcher implements IIssueFetcher {
     const stdout = await this.run('gh', args);
     const raw: RawGithubIssue[] = JSON.parse(stdout) as RawGithubIssue[];
 
-    if (raw.length === 0) {
-      throw new Error('No issues found matching the provided filters');
-    }
-
     return raw.map((issue) => ({
       number: issue.number,
       title: issue.title,
