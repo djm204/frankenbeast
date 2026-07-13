@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { streamSSE } from 'hono/streaming';
 import type { Context } from 'hono';
-import type { ISessionStore } from '../chat/session-store.js';
+import { isValidChatSessionId, type ISessionStore } from '../chat/session-store.js';
 import type { TurnRunner, TurnEvent } from '../chat/turn-runner.js';
 import type { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 import { extractOperatorToken, extractOperatorTokenCookie, isCookieOperatorAuthAllowed } from './operator-auth.js';
@@ -21,6 +21,13 @@ export function createSseHandler(deps: SseHandlerDeps) {
     if (!id) {
       return c.json(
         { error: { code: 'BAD_REQUEST', message: 'Missing session id' } },
+        400,
+      );
+    }
+
+    if (!isValidChatSessionId(id)) {
+      return c.json(
+        { error: { code: 'INVALID_SESSION_ID', message: 'Invalid chat session id' } },
         400,
       );
     }

@@ -187,6 +187,7 @@ describe('FileSessionStore', () => {
     writeFileSync(outsidePath, JSON.stringify({ ok: true }), 'utf-8');
 
     expect(nestedStore.get('../config')).toBeUndefined();
+    nestedStore.delete('../config');
 
     expect(existsSync(outsidePath)).toBe(true);
     expect(nestedStore.listCorruptions()).toEqual([]);
