@@ -1,10 +1,9 @@
 const MAX_ERROR_BODY_CHARS = 2048;
 
 export function redactHttpErrorSecrets(value: string): string {
-  return value.replace(
-    /("?(?:authorization|x-api-key|api-key|x-auth-token)"?\s*[:=]\s*)"?(?:bearer\s+|bot\s+)?[^\s,"'<>}]+"?/gi,
-    '$1[REDACTED]',
-  );
+  return value
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
+    .replace(/\b((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1[REDACTED]');
 }
 
 function truncateErrorBody(value: string): string {

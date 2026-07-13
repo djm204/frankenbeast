@@ -101,8 +101,9 @@ const MAX_ERROR_BODY_CHARS = 2048
 
 function redactWebhookSecrets(value: string): string {
   return value
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
+    .replace(/\b((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1[REDACTED]')
     .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
-    .replace(/("?(?:authorization|x-api-key|api-key|x-auth-token)"?\s*[:=]\s*)"?(?:bearer\s+)?[^\s,"'<>}]+"?/gi, '$1[REDACTED]')
 }
 
 function sanitizeWebhookEndpoint(value: string): string {
@@ -237,7 +238,7 @@ export class WebhookNotifier {
     let totalBytes = 0
 
     try {
-      while (totalBytes <= MAX_ERROR_BODY_CHARS) {
+      while (totalBytes < MAX_ERROR_BODY_CHARS) {
         const { value, done } = await reader.read()
         if (done || !value) {
           break

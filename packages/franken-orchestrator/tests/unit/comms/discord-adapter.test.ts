@@ -86,7 +86,7 @@ describe('DiscordAdapter', () => {
       status: 'reply',
       metadata: { channelId: 'C1' },
     })).rejects.toThrow(
-      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages: {"Authorization":[REDACTED],"x-api-key":[REDACTED]}',
+      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
     );
   });
 });

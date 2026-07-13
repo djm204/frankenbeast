@@ -78,7 +78,7 @@ describe('NetworkApiClient', () => {
 
     const client = new NetworkApiClient(BASE_URL);
     await expect(client.getStatus()).rejects.toThrow(
-      'HTTP 502 Bad Gateway for /v1/network/status: {"Authorization":[REDACTED],"x-api-key":[REDACTED]}',
+      'HTTP 502 Bad Gateway for /v1/network/status: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
     );
   });
 });

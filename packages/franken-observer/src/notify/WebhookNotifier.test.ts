@@ -182,7 +182,7 @@ describe('WebhookNotifier', () => {
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: Authorization: [REDACTED] X-Api-Key=[REDACTED]',
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: Authorization: [REDACTED]',
       )
     })
 
@@ -195,7 +195,7 @@ describe('WebhookNotifier', () => {
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: {"Authorization":[REDACTED],"x-api-key":[REDACTED]}',
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
       )
     })
 
