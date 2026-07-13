@@ -4,6 +4,13 @@ import { NetworkApiClient, NetworkApiError } from '../../src/lib/network-api';
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
+const responseBody = (value: string) => new ReadableStream<Uint8Array>({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode(value));
+    controller.close();
+  },
+});
+
 describe('NetworkApiClient', () => {
   const client = new NetworkApiClient('http://localhost:3000');
 
@@ -100,7 +107,7 @@ describe('NetworkApiClient', () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 422,
-      text: () => Promise.resolve(JSON.stringify({
+      body: responseBody(JSON.stringify({
         error: {
           code: 'VALIDATION_ERROR',
           message: 'Request validation failed',
@@ -126,11 +133,40 @@ describe('NetworkApiClient', () => {
       ok: false,
       status: 502,
       statusText: 'Bad Gateway',
-      text: () => Promise.resolve('<html>proxy down</html>'),
+      body: responseBody('<html>proxy down</html>'),
     });
 
     await expect(client.getStatus()).rejects.toThrow(
       'HTTP 502 Bad Gateway for /v1/network/status: <html>proxy down</html>',
+    );
+  });
+
+  it('bounds streamed malformed network error bodies before formatting diagnostics', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(3000)));
+      },
+    });
+    mockFetch.mockResolvedValueOnce(new Response(stream, {
+      status: 502,
+      statusText: 'Bad Gateway',
+    }));
+
+    await expect(client.getStatus()).rejects.toThrow(
+      `HTTP 502 Bad Gateway for /v1/network/status: ${'x'.repeat(2048)}…`,
+    );
+  });
+
+  it('redacts unterminated auth fields from malformed network error bodies', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      body: responseBody('{"Authorization":"Bearer proxy-token'),
+    });
+
+    await expect(client.getStatus()).rejects.toThrow(
+      'HTTP 502 Bad Gateway for /v1/network/status: {"Authorization":"[REDACTED]"',
     );
   });
 });

@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkApiClient } from './network-api';
 
 const BASE_URL = 'http://localhost:3737';
+const responseBody = (value: string) => new ReadableStream<Uint8Array>({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode(value));
+    controller.close();
+  },
+});
 
 describe('NetworkApiClient', () => {
   let originalFetch: typeof globalThis.fetch;
@@ -47,7 +53,7 @@ describe('NetworkApiClient', () => {
       ok: false,
       status: 401,
       statusText: 'Unauthorized',
-      text: async () => 'missing token',
+      body: responseBody('missing token'),
     });
 
     const client = new NetworkApiClient(BASE_URL);
@@ -59,7 +65,7 @@ describe('NetworkApiClient', () => {
       ok: false,
       status: 502,
       statusText: 'Bad Gateway',
-      text: async () => 'x'.repeat(3000),
+      body: responseBody('x'.repeat(3000)),
     });
 
     const client = new NetworkApiClient(BASE_URL);
@@ -73,12 +79,43 @@ describe('NetworkApiClient', () => {
       ok: false,
       status: 502,
       statusText: 'Bad Gateway',
-      text: async () => '{"Authorization":"Bearer proxy-token","x-api-key":"proxy-key"}',
+      body: responseBody('{"Authorization":"Bearer proxy-token","x-api-key":"proxy-key"}'),
     });
 
     const client = new NetworkApiClient(BASE_URL);
     await expect(client.getStatus()).rejects.toThrow(
       'HTTP 502 Bad Gateway for /v1/network/status: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
+    );
+  });
+
+  it('bounds streamed raw error bodies', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(3000)));
+      },
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(stream, {
+      status: 502,
+      statusText: 'Bad Gateway',
+    }));
+
+    const client = new NetworkApiClient(BASE_URL);
+    await expect(client.getStatus()).rejects.toThrow(
+      `HTTP 502 Bad Gateway for /v1/network/status: ${'x'.repeat(2048)}…`,
+    );
+  });
+
+  it('redacts unterminated auth fields from raw error bodies', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      body: responseBody('{"Authorization":"Bearer proxy-token'),
+    });
+
+    const client = new NetworkApiClient(BASE_URL);
+    await expect(client.getStatus()).rejects.toThrow(
+      'HTTP 502 Bad Gateway for /v1/network/status: {"Authorization":"[REDACTED]"',
     );
   });
 });

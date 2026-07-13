@@ -256,8 +256,10 @@ export class WebhookNotifier {
         if (done || !value) {
           break
         }
-        chunks.push(value)
-        totalBytes += value.byteLength
+        const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
+        const boundedChunk = value.byteLength > remainingBytes ? value.subarray(0, remainingBytes) : value
+        chunks.push(boundedChunk)
+        totalBytes += boundedChunk.byteLength
       }
       if (totalBytes >= MAX_ERROR_BODY_CHARS || timedOut) {
         await reader.cancel()
