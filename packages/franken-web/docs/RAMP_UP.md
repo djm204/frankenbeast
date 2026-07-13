@@ -11,12 +11,12 @@ A React-based single-page application (SPA) that provides a browser control plan
 - **Tracked Beast Agents**: Launch, inspect, and control long-running tracked-agent workflows and their linked Beast runs.
 - **Network Controls**: Service status, logs, and editable network configuration.
 - **Analytics**: Observer, governor, security, and cost telemetry surfaces.
-- **Placeholder tabs**: Sessions, costs, safety, and settings routes are present in navigation but are not fully live yet.
+- **Future routes**: Sessions, costs, safety, and settings route ids are defined in code but filtered out of the primary navigation until they become live.
 
 ## Integration Details
 - **Backend**: Communicates with the `@franken/orchestrator` HTTP server (default local port `3737`) through same-origin `/api/*` and `/v1/*` routes.
 - **Authentication**: Beast control routes use the server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` from the repo root `.env` or configured secret backend. Do not expose this as a `VITE_*` browser variable.
-- **Protocol**: Uses REST-style typed clients for dashboard, Beast, network, analytics, and chat session APIs; chat streaming uses the `/v1/chat` WebSocket path behind the same-origin proxy.
+- **Protocol**: Uses REST-style typed clients for dashboard, Beast, network, analytics, and chat session APIs; chat streaming uses the `/v1/chat/ws` WebSocket path behind the same-origin proxy.
 - **Vite proxy**: `vite.config.ts` proxies `/api`, `/v1`, and `/v1/beasts` to local backend targets and injects the operator token from Node-side env only.
 
 ## Current Source Map (src/)
@@ -46,9 +46,10 @@ npm test             # Vitest component/unit tests
 npm run typecheck    # TypeScript check only
 ```
 
-From the repo root, use workspace-prefixed commands when another package needs to run the dashboard checks:
+From the repo root, build the shared type package before running fresh-workspace web checks, then use workspace-prefixed commands:
 
 ```bash
+npm --workspace @franken/types run build
 npm --workspace @franken/web run typecheck
 npm --workspace @franken/web run build
 ```
