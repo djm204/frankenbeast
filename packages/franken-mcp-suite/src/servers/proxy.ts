@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createMcpServer, sanitizeToolArgumentsForAudit, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef, type ToolResult } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
+import { handleStartupFailure } from '../shared/shutdown.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
 import { createGovernanceGate } from '../shared/governance-gate.js';
 import { createAuditSink } from '../shared/central-enforcement.js';
@@ -177,7 +178,6 @@ if (isMain(import.meta.url)) {
   });
   const server = createProxyServer({ dbPath: values['db']!, root: values['root'], configPath: values['config'] });
   server.start().catch((err) => {
-    console.error('fbeast-proxy failed to start:', err);
-    process.exit(1);
+    handleStartupFailure('fbeast-proxy', err);
   });
 }
