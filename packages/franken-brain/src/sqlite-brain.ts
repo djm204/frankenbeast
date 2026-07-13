@@ -614,9 +614,9 @@ export class SqliteBrain implements IBrain {
     options: { hydrateWorkingMemoryFromDb?: boolean } = {},
   ) {
     this.db = new Database(dbPath);
+    assertSupportedMemorySchema(this.db);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
-    assertSupportedMemorySchema(this.db);
     this.initSchema();
     migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
     this.working = new SqliteWorkingMemory(this.db, {
@@ -818,12 +818,14 @@ function migrateMemorySchemaDatabase(
 
   const migrated = operations.length > 0;
   let backupPath = options.backupPath;
+  let createdBackupPath: string | undefined;
   if (!dryRun && migrated && options.backupBeforeMigrate) {
     if (dbPath === ':memory:') {
       throw new Error('Cannot create a backup for an in-memory SQLite database');
     }
     backupPath ??= `${dbPath}.backup-${Date.now()}`;
     db.exec(`VACUUM INTO ${sqliteStringLiteral(backupPath)}`);
+    createdBackupPath = backupPath;
   }
 
   if (!dryRun && migrated) {
@@ -854,7 +856,7 @@ function migrateMemorySchemaDatabase(
     toVersion: CURRENT_MEMORY_SCHEMA_VERSION,
     dryRun,
     migrated,
-    ...(backupPath ? { backupPath } : {}),
+    ...(createdBackupPath ? { backupPath: createdBackupPath } : {}),
     operations,
   };
 }
