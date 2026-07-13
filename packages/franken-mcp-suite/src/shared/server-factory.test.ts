@@ -129,7 +129,7 @@ describe('createMcpServer', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('rejects accessor and non-plain object argument shapes without reading accessor values', async () => {
+  it('rejects accessor, array, and non-plain object argument shapes without reading attacker-controlled values', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {
       name: 'cfg',
@@ -145,14 +145,34 @@ describe('createMcpServer', () => {
         throw new Error('getter should not run');
       },
     });
+    const accessorArray: unknown[] = [];
+    Object.defineProperty(accessorArray, '0', {
+      enumerable: true,
+      get() {
+        throw new Error('array getter should not run');
+      },
+    });
+    Object.defineProperty(accessorArray, 'constructor', { enumerable: true, value: {} });
+    const taggedObject = Object.create(Date.prototype) as Record<PropertyKey, unknown>;
+    Object.defineProperty(taggedObject, Symbol.toStringTag, {
+      get() {
+        throw new Error('toStringTag should not run');
+      },
+    });
 
     const accessorRes = await srv.callTool('cfg', { args: accessorPayload });
+    const arrayRes = await srv.callTool('cfg', { args: { nested: accessorArray } });
     const dateRes = await srv.callTool('cfg', { args: new Date('2026-07-12T00:00:00Z') });
+    const taggedRes = await srv.callTool('cfg', { args: taggedObject });
 
     expect(accessorRes.isError).toBe(true);
     expect(accessorRes.content[0]!.text).toContain('must be a data property');
+    expect(arrayRes.isError).toBe(true);
+    expect(arrayRes.content[0]!.text).toContain('must be a data property');
     expect(dateRes.isError).toBe(true);
     expect(dateRes.content[0]!.text).toContain('must be a plain JSON object');
+    expect(taggedRes.isError).toBe(true);
+    expect(taggedRes.content[0]!.text).toContain('must be a plain JSON object');
     expect(calls).toHaveLength(0);
   });
 
@@ -192,11 +212,17 @@ describe('createMcpServer', () => {
         throw new Error('getter should not run');
       },
     });
+    const nonJsonPayload = { toJSON: () => { throw new Error('toJSON should not run'); } };
 
-    const res = await srv.callTool('cfg', { args: accessorPayload });
+    const accessorRes = await srv.callTool('cfg', { args: accessorPayload });
+    const nonJsonRes = await srv.callTool('cfg', { args: nonJsonPayload });
 
-    expect(res.isError).toBe(true);
-    expect(recorded).toEqual([{ tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { secret: '[accessor]' } } }]);
+    expect(accessorRes.isError).toBe(true);
+    expect(nonJsonRes.isError).toBe(true);
+    expect(recorded).toEqual([
+      { tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { secret: '[accessor]' } } },
+      { tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { toJSON: '[non-json-value]' } } },
+    ]);
   });
 
   it('rejects non-finite number arguments before invoking the handler', async () => {

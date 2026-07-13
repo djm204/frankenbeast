@@ -113,9 +113,28 @@ function validateSafeArgumentShape(
   if (depth > MAX_ARGUMENT_SHAPE_DEPTH) {
     return { ok: false, message: `${path} exceeds maximum nesting depth ${MAX_ARGUMENT_SHAPE_DEPTH}` };
   }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? { ok: true } : { ok: false, message: `${path} must be a finite number` };
+  }
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    return { ok: false, message: `${path} must be a JSON value` };
+  }
   if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const child = validateSafeArgumentShape(value[index], `${path}[${index}]`, depth + 1, skipRootChildren);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (key === 'length') continue;
+      if (typeof key !== 'string') {
+        return { ok: false, message: `${path} contains non-string property keys` };
+      }
+      if (DENIED_ARGUMENT_KEYS.has(key)) {
+        return { ok: false, message: `${path} contains denied property name: ${key}` };
+      }
+      const descriptor = descriptors[key];
+      if (!descriptor) continue;
+      if ('get' in descriptor || 'set' in descriptor) {
+        return { ok: false, message: `${path}[${key}] must be a data property` };
+      }
+      const child = validateSafeArgumentShape(descriptor.value, `${path}[${key}]`, depth + 1, skipRootChildren);
       if (!child.ok) return child;
     }
     return { ok: true };
@@ -153,15 +172,36 @@ function sanitizeForAudit(value: unknown, depth = 0): unknown {
   if (depth > MAX_ARGUMENT_SHAPE_DEPTH) {
     return '[max-depth]';
   }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : '[non-finite-number]';
+  }
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    return '[non-json-value]';
+  }
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeForAudit(item, depth + 1));
+    const sanitized: unknown[] = [];
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (key === 'length' || typeof key !== 'string') continue;
+      if (DENIED_ARGUMENT_KEYS.has(key)) {
+        Object.defineProperty(sanitized, key, { enumerable: true, value: '[denied-property]' });
+        continue;
+      }
+      const descriptor = descriptors[key];
+      if (!descriptor) continue;
+      if ('get' in descriptor || 'set' in descriptor) {
+        Object.defineProperty(sanitized, key, { enumerable: true, value: '[accessor]' });
+        continue;
+      }
+      Object.defineProperty(sanitized, key, { enumerable: descriptor.enumerable ?? true, value: sanitizeForAudit(descriptor.value, depth + 1) });
+    }
+    return sanitized;
   }
   if (!isObjectLike(value)) {
     return value;
   }
   if (!isPlainJsonObject(value)) {
-    const tag = Object.prototype.toString.call(value).slice(8, -1) || 'non-plain-object';
-    return `[${tag}]`;
+    return '[non-plain-object]';
   }
   const sanitized: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   const descriptors = Object.getOwnPropertyDescriptors(value);
