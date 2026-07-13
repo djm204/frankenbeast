@@ -339,6 +339,44 @@ describe('proxy server', () => {
       expect(result.content[0].text).toContain('property key must be string');
       expect(fakeHandler).not.toHaveBeenCalled();
     });
+
+    it('rejects unsafe proxied target argument shapes before governance or handler dispatch', async () => {
+      const fakeHandler = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] });
+      const entry = mockRegistry.get('test_tool')!;
+      vi.mocked(entry.makeHandler).mockReturnValue(fakeHandler);
+      mockRegistry.set('object_tool', {
+        name: 'object_tool',
+        server: 'memory',
+        description: 'Object accepting test tool',
+        inputSchema: { type: 'object', properties: { payload: { type: 'object', description: 'Payload' } }, required: ['payload'] },
+        makeHandler: vi.fn().mockReturnValue(fakeHandler),
+      });
+
+      const unsafePayload: Record<string, unknown> = { ok: true };
+      Object.defineProperty(unsafePayload, '__proto__', {
+        enumerable: true,
+        value: { polluted: true },
+      });
+
+      try {
+        const result = await server.callTool('execute_tool', {
+          tool: 'object_tool',
+          args: { payload: unsafePayload },
+        }) as { isError: boolean; content: Array<{ text: string }> };
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('rejected unsafe argument shape');
+        expect(result.content[0].text).toContain('denied property name: __proto__');
+        expect(auditRecord).toHaveBeenCalledTimes(1);
+        const auditedArgs = auditRecord.mock.calls[0]![0].args as { payload: Record<string, unknown> };
+        expect(auditedArgs.payload.ok).toBe(true);
+        expect(auditedArgs.payload['__proto__']).toBe('[denied-property]');
+        expect(gateCheck).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'object_tool' }));
+        expect(fakeHandler).not.toHaveBeenCalled();
+      } finally {
+        mockRegistry.delete('object_tool');
+      }
+    });
   });
 
   describe('deriveProxyRoot', () => {

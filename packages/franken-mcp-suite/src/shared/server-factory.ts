@@ -92,6 +92,141 @@ export interface CreateMcpServerOptions {
   audit?: AuditSink;
 }
 
+const DENIED_ARGUMENT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const MAX_ARGUMENT_SHAPE_DEPTH = 64;
+
+function isObjectLike(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPlainJsonObject(value: Record<string, unknown>): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function validateSafeArgumentShape(
+  value: unknown,
+  path: string,
+  depth = 0,
+  skipRootChildren: ReadonlySet<string> = new Set(),
+): { ok: true } | { ok: false; message: string } {
+  if (depth > MAX_ARGUMENT_SHAPE_DEPTH) {
+    return { ok: false, message: `${path} exceeds maximum nesting depth ${MAX_ARGUMENT_SHAPE_DEPTH}` };
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? { ok: true } : { ok: false, message: `${path} must be a finite number` };
+  }
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    return { ok: false, message: `${path} must be a JSON value` };
+  }
+  if (Array.isArray(value)) {
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (key === 'length') continue;
+      if (typeof key !== 'string') {
+        return { ok: false, message: `${path} contains non-string property keys` };
+      }
+      if (DENIED_ARGUMENT_KEYS.has(key)) {
+        return { ok: false, message: `${path} contains denied property name: ${key}` };
+      }
+      const descriptor = descriptors[key];
+      if (!descriptor) continue;
+      if ('get' in descriptor || 'set' in descriptor) {
+        return { ok: false, message: `${path}[${key}] must be a data property` };
+      }
+      const child = validateSafeArgumentShape(descriptor.value, `${path}[${key}]`, depth + 1, skipRootChildren);
+      if (!child.ok) return child;
+    }
+    return { ok: true };
+  }
+  if (!isObjectLike(value)) {
+    return { ok: true };
+  }
+  if (!isPlainJsonObject(value)) {
+    return { ok: false, message: `${path} must be a plain JSON object` };
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') {
+      return { ok: false, message: `${path} contains non-string property keys` };
+    }
+    if (DENIED_ARGUMENT_KEYS.has(key)) {
+      return { ok: false, message: `${path} contains denied property name: ${key}` };
+    }
+    const descriptor = descriptors[key];
+    if (!descriptor) continue;
+    if ('get' in descriptor || 'set' in descriptor) {
+      return { ok: false, message: `${path}.${key} must be a data property` };
+    }
+    if (depth === 0 && skipRootChildren.has(key)) {
+      continue;
+    }
+    const child = validateSafeArgumentShape(descriptor.value, `${path}.${key}`, depth + 1, skipRootChildren);
+    if (!child.ok) return child;
+  }
+  return { ok: true };
+}
+
+function sanitizeForAudit(value: unknown, depth = 0): unknown {
+  if (depth > MAX_ARGUMENT_SHAPE_DEPTH) {
+    return '[max-depth]';
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : '[non-finite-number]';
+  }
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    return '[non-json-value]';
+  }
+  if (Array.isArray(value)) {
+    const sanitized: unknown[] = [];
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (key === 'length' || typeof key !== 'string') continue;
+      if (DENIED_ARGUMENT_KEYS.has(key)) {
+        Object.defineProperty(sanitized, key, { enumerable: true, value: '[denied-property]' });
+        continue;
+      }
+      const descriptor = descriptors[key];
+      if (!descriptor) continue;
+      if ('get' in descriptor || 'set' in descriptor) {
+        Object.defineProperty(sanitized, key, { enumerable: true, value: '[accessor]' });
+        continue;
+      }
+      Object.defineProperty(sanitized, key, { enumerable: descriptor.enumerable ?? true, value: sanitizeForAudit(descriptor.value, depth + 1) });
+    }
+    return sanitized;
+  }
+  if (!isObjectLike(value)) {
+    return value;
+  }
+  if (!isPlainJsonObject(value)) {
+    return '[non-plain-object]';
+  }
+  const sanitized: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') continue;
+    if (DENIED_ARGUMENT_KEYS.has(key)) {
+      sanitized[key] = '[denied-property]';
+      continue;
+    }
+    const descriptor = descriptors[key];
+    if (!descriptor) continue;
+    if ('get' in descriptor || 'set' in descriptor) {
+      sanitized[key] = '[accessor]';
+      continue;
+    }
+    sanitized[key] = sanitizeForAudit(descriptor.value, depth + 1);
+  }
+  return sanitized;
+}
+
+export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unknown> {
+  const value = sanitizeForAudit(args);
+  return isObjectLike(value) && !Array.isArray(value) ? (value as Record<string, unknown>) : { invalid: value };
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -100,17 +235,27 @@ export function validateToolArguments(
     return { ok: false, message: `Tool ${tool.name} expects an object argument` };
   }
   const obj = args as Record<string, unknown>;
+  // The proxy wrapper validates only its envelope here. Its nested `args`
+  // payload is validated after target resolution so governance/audit can record
+  // the real target tool instead of the generic execute_tool wrapper.
+  const shape = validateSafeArgumentShape(obj, 'arguments', 0, tool.name === 'execute_tool' ? new Set(['args']) : new Set());
+  if (!shape.ok) {
+    return { ok: false, message: `Tool ${tool.name} rejected unsafe argument shape: ${shape.message}` };
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(obj);
   const schema = tool.inputSchema;
   for (const req of schema.required ?? []) {
-    if (!Object.prototype.hasOwnProperty.call(obj, req) || obj[req] === undefined) {
+    const descriptor = descriptors[req];
+    if (!descriptor || descriptor.value === undefined) {
       return { ok: false, message: `Tool ${tool.name} missing required property: ${req}` };
     }
   }
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, descriptor] of Object.entries(descriptors)) {
     const prop = schema.properties[key];
     if (!prop) {
       return { ok: false, message: `Tool ${tool.name} received unknown property: ${key}` };
     }
+    const value = descriptor.value;
     const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
     if (prop.type === 'integer' ? !Number.isInteger(value) : actual !== prop.type) {
       return { ok: false, message: `Tool ${tool.name} property ${key} must be ${prop.type}` };
@@ -151,10 +296,7 @@ async function dispatchTool(
   };
   // Normalize the raw payload to an object so a malformed (null/array/scalar)
   // probe is still captured in the audit record rather than dropped.
-  const rawArgs: Record<string, unknown> =
-    args !== null && typeof args === 'object' && !Array.isArray(args)
-      ? (args as Record<string, unknown>)
-      : { invalid: args };
+  const rawArgs = sanitizeToolArgumentsForAudit(args);
 
   const tool = toolMap.get(toolName);
   if (!tool) {
