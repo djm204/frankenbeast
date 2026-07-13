@@ -669,13 +669,13 @@ export class SqliteBrain implements IBrain {
     options: MemorySchemaMigrationOptions = {},
   ): MemorySchemaMigrationResult {
     const db = new Database(dbPath, options.dryRun ? { readonly: true, fileMustExist: true } : {});
-    if (!options.dryRun) {
-      db.pragma('busy_timeout = 5000');
-      assertSupportedMemorySchema(db);
-      db.pragma('journal_mode = WAL');
-      db.pragma('busy_timeout = 5000');
-    }
     try {
+      if (!options.dryRun) {
+        db.pragma('busy_timeout = 5000');
+        assertSupportedMemorySchema(db);
+        db.pragma('journal_mode = WAL');
+        db.pragma('busy_timeout = 5000');
+      }
       return migrateMemorySchemaDatabase(db, dbPath, options);
     } finally {
       db.close();
