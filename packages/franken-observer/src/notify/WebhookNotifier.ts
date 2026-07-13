@@ -163,8 +163,10 @@ export class WebhookNotifier {
       }
 
       if (!response.ok) {
+        const responseBody = await this.readResponseBody(response)
+        const bodySuffix = responseBody ? `: ${responseBody}` : ''
         lastError = new Error(
-          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+          `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${this.url}${bodySuffix}`,
         )
         if (!this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1) {
           throw lastError
@@ -175,6 +177,15 @@ export class WebhookNotifier {
     }
 
     throw lastError
+  }
+
+  private async readResponseBody(response: Awaited<ReturnType<FetchFn>>): Promise<string> {
+    try {
+      const readable = response as { text?: () => Promise<string> }
+      return typeof readable.text === 'function' ? (await readable.text()).trim() : ''
+    } catch {
+      return ''
+    }
   }
 
   private assertTargetAllowed(): void {

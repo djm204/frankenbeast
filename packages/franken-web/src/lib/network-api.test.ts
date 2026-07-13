@@ -42,10 +42,15 @@ describe('NetworkApiClient', () => {
     expect(headers.has('authorization')).toBe(false);
   });
 
-  it('throws on non-ok responses', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+  it('throws non-ok responses with endpoint and response body context', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: async () => 'missing token',
+    });
 
     const client = new NetworkApiClient(BASE_URL);
-    await expect(client.getStatus()).rejects.toThrow('HTTP 401');
+    await expect(client.getStatus()).rejects.toThrow('HTTP 401 Unauthorized for /v1/network/status: missing token');
   });
 });

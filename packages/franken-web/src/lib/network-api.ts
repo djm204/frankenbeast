@@ -64,30 +64,41 @@ export class NetworkApiClient {
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
-      throw await this.toError(response);
+      throw await this.toError(path, response);
     }
     const body = await response.json() as ApiDataEnvelope<T>;
     return body.data;
   }
 
-  private async toError(response: Response): Promise<NetworkApiError> {
-    const fallbackMessage = `HTTP ${response.status}`;
+  private async toError(path: string, response: Response): Promise<NetworkApiError> {
+    const statusText = response.statusText ? ` ${response.statusText}` : '';
+    let responseBody = '';
     try {
-      const body = await response.json() as ApiErrorEnvelope;
-      const serverMessage = body.error?.message;
-      if (serverMessage) {
-        const code = body.error.code;
-        const codeSuffix = code ? `, ${code}` : '';
-        return new NetworkApiError(
-          `${serverMessage} (HTTP ${response.status}${codeSuffix})`,
-          response.status,
-          code,
-          body.error.details,
-        );
-      }
+      responseBody = (await response.text()).trim();
     } catch {
-      // Fall through with HTTP status message for empty, malformed, or non-JSON bodies.
+      responseBody = '';
     }
-    return new NetworkApiError(fallbackMessage, response.status);
+
+    if (responseBody) {
+      try {
+        const body = JSON.parse(responseBody) as ApiErrorEnvelope;
+        const serverMessage = body.error?.message;
+        if (serverMessage) {
+          const code = body.error.code;
+          const codeSuffix = code ? `, ${code}` : '';
+          return new NetworkApiError(
+            `${serverMessage} (HTTP ${response.status}${codeSuffix}) for ${path}`,
+            response.status,
+            code,
+            body.error.details,
+          );
+        }
+      } catch {
+        // Fall through with raw response body context for malformed or non-JSON bodies.
+      }
+    }
+
+    const bodySuffix = responseBody ? `: ${responseBody}` : '';
+    return new NetworkApiError(`HTTP ${response.status}${statusText} for ${path}${bodySuffix}`, response.status);
   }
 }

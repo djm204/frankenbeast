@@ -51,4 +51,23 @@ describe('DiscordAdapter', () => {
     expect(body.components[0].components[0].label).toBe('Approve');
     expect(body.components[0].components[0].style).toBe(1); // Primary
   });
+
+  it('includes endpoint and response body when Discord rejects a message', async () => {
+    const adapter = new DiscordAdapter({ token: 'bot-token' });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      text: async () => '{"message":"rate limited"}',
+    } as Response);
+
+    await expect(adapter.send('session-123', {
+      text: 'hello from discord',
+      status: 'reply',
+      metadata: { channelId: 'C1' },
+    })).rejects.toThrow(
+      'Discord API error: 429 Too Many Requests for https://discord.com/api/v10/channels/C1/messages: {"message":"rate limited"}',
+    );
+  });
 });

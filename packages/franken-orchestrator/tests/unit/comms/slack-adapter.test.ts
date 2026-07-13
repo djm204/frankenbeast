@@ -100,4 +100,22 @@ describe('SlackAdapter', () => {
     const body = JSON.parse(mockFetch.mock.calls[0]![1]!.body as string) as { blocks: Array<{ type: string }> };
     expect(body.blocks.find((b) => b.type === 'context')).toBeUndefined();
   });
+
+  it('includes endpoint and response body when Slack returns HTTP errors', async () => {
+    const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      text: async () => 'temporarily unavailable',
+    } as Response);
+
+    await expect(adapter.send('session-123', {
+      text: 'result',
+      metadata: { channelId: 'C1' },
+    })).rejects.toThrow(
+      'Slack API error: 503 Service Unavailable for https://slack.com/api/chat.postMessage: temporarily unavailable',
+    );
+  });
 });

@@ -100,13 +100,13 @@ describe('NetworkApiClient', () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 422,
-      json: () => Promise.resolve({
+      text: () => Promise.resolve(JSON.stringify({
         error: {
           code: 'VALIDATION_ERROR',
           message: 'Request validation failed',
           details: [{ path: ['assignments'], message: 'Expected array' }],
         },
-      }),
+      })),
     });
 
     try {
@@ -114,20 +114,23 @@ describe('NetworkApiClient', () => {
       throw new Error('Expected updateConfig to reject');
     } catch (error) {
       expect(error).toBeInstanceOf(NetworkApiError);
-      expect((error as Error).message).toBe('Request validation failed (HTTP 422, VALIDATION_ERROR)');
+      expect((error as Error).message).toBe('Request validation failed (HTTP 422, VALIDATION_ERROR) for /v1/network/config');
       expect((error as NetworkApiError).status).toBe(422);
       expect((error as NetworkApiError).code).toBe('VALIDATION_ERROR');
       expect((error as NetworkApiError).details).toEqual([{ path: ['assignments'], message: 'Expected array' }]);
     }
   });
 
-  it('falls back to HTTP status for malformed network error bodies', async () => {
+  it('includes endpoint and response body when network error bodies are malformed', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 502,
-      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+      statusText: 'Bad Gateway',
+      text: () => Promise.resolve('<html>proxy down</html>'),
     });
 
-    await expect(client.getStatus()).rejects.toThrow('HTTP 502');
+    await expect(client.getStatus()).rejects.toThrow(
+      'HTTP 502 Bad Gateway for /v1/network/status: <html>proxy down</html>',
+    );
   });
 });

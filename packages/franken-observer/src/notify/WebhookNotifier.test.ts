@@ -101,6 +101,19 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send({ type: 'test' })).rejects.toThrow('Forbidden')
     })
 
+    it('error message includes webhook endpoint and response body', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        text: async () => '{"error":"bad payload"}',
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 422 Unprocessable Entity for https://hooks.example.com/signal: {"error":"bad payload"}',
+      )
+    })
+
     it('rethrows if fetch itself rejects (network error)', async () => {
       mockFetch.mockRejectedValue(new Error('ECONNREFUSED'))
       const notifier = createNotifier()

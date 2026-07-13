@@ -74,4 +74,24 @@ describe('TelegramAdapter', () => {
       metadata: { chatId: '12345' },
     })).rejects.not.toThrow(token);
   });
+
+  it('includes redacted endpoint and response body when Telegram returns HTTP errors', async () => {
+    const token = '123456789:abcdefghijklmnopqrstuvwxyz';
+    const adapter = new TelegramAdapter({ token });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => '{"description":"chat not found"}',
+    } as Response);
+
+    await expect(adapter.send('session-123', {
+      text: 'hello telegram',
+      status: 'reply',
+      metadata: { chatId: '12345' },
+    })).rejects.toThrow(
+      'Telegram API error: 400 Bad Request for https://api.telegram.org/bot[REDACTED]/sendMessage: {"description":"chat not found"}',
+    );
+  });
 });
