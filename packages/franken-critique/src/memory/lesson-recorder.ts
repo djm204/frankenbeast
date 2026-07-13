@@ -1438,7 +1438,11 @@ function hasCompatibleConditionalGuard(
     hasCompatibleEmbeddedNegationPair(a, b) ||
     hasCompatibleEmbeddedNegationPair(b, a) ||
     hasCompatibleQualifiedExclusionPair(a, b) ||
-    hasCompatibleQualifiedExclusionPair(b, a)
+    hasCompatibleQualifiedExclusionPair(b, a) ||
+    hasCompatibleWithoutWithPair(a, b) ||
+    hasCompatibleWithoutWithPair(b, a) ||
+    hasCompatibleValidityQualifierPair(a, b) ||
+    hasCompatibleValidityQualifierPair(b, a)
   );
 }
 
@@ -1541,6 +1545,48 @@ function hasCompatibleQualifiedExclusionPair(
   });
 }
 
+
+function hasCompatibleWithoutWithPair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative' ||
+    !/\bwithout\b/i.test(maybeAllowance.sourceText) ||
+    !/\bwith\b/i.test(maybeProhibition.sourceText) ||
+    !maybeAllowance.guardCondition
+  ) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeAllowance.guardCondition, maybeProhibition.text).length >=
+      1 &&
+    sharedTextTerms(maybeAllowance.text, maybeProhibition.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasCompatibleValidityQualifierPair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative'
+  ) {
+    return false;
+  }
+
+  return (
+    /\bvalid\s+(\w+)\b/i.test(maybeAllowance.text) &&
+    /\binvalid\s+(\w+)\b/i.test(maybeProhibition.text) &&
+    RegExp.$1.length > 0 &&
+    maybeProhibition.text.includes(`invalid ${RegExp.$1}`)
+  );
+}
+
 function hasOpposedGuardOutcome(
   guardCondition: string,
   requirementText: string,
@@ -1625,7 +1671,7 @@ function startsWithNegativeDirective(normalized: string): boolean {
 }
 
 function startsWithPositiveDirective(normalized: string): boolean {
-  return /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit)\b/.test(
+  return /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required)\b/.test(
     normalized,
   );
 }
@@ -1641,7 +1687,7 @@ function stripLeadingNegativeDirective(normalized: string): string {
 
 function stripLeadingPositiveDirective(normalized: string): string {
   return normalized
-    .replace(/^(?:allow|enable|enabled|reuse|use|cache|log|record|permit)\s+/, '')
+    .replace(/^(?:allow|enable|enabled|reuse|use|cache|log|record|permit|require|requires|required)\s+/, '')
     .trim();
 }
 
@@ -1717,6 +1763,7 @@ const LESSON_CONTRADICTION_STOP_WORDS = new Set([
   'lesson',
   'needs',
   'should',
+  'must',
   'until',
   'without',
   'allow',

@@ -2213,6 +2213,42 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'contradiction_detected' });
   });
 
+  it('treats positive without and negative with prohibitions as equivalent', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Run tests without network access' }),
+        [createLesson({ correctionApplied: 'Do not run tests with network access' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('filters must as a modal stop word', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Must not log tokens' }),
+        [createLesson({ correctionApplied: 'Must rotate tokens' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('treats require as a positive one-object directive', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Require authentication' }),
+        [createLesson({ correctionApplied: 'Bypass authentication' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('treats valid and invalid qualified allowances as compatible', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Allow requests with valid tokens' }),
+        [createLesson({ correctionApplied: 'Do not allow requests with invalid tokens' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('detects one-object directive reversals', () => {
     expect(
       detectLessonContradictions(
