@@ -66,12 +66,34 @@ await adapter.flush(trace) // throws on non-2xx response
 
 **Options**
 
-| Option      | Type     | Default                          | Description                      |
-|-------------|----------|----------------------------------|----------------------------------|
-| `publicKey` | `string` | —                                | Langfuse project public key      |
-| `secretKey` | `string` | —                                | Langfuse project secret key      |
-| `baseUrl`   | `string` | `https://cloud.langfuse.com`     | Override for EU region or Phoenix|
-| `fetch`     | `FetchFn`| `globalThis.fetch`               | Injectable for testing           |
+| Option      | Type      | Default                      | Description                       |
+|-------------|-----------|------------------------------|-----------------------------------|
+| `publicKey` | `string`  | —                            | Langfuse project public key       |
+| `secretKey` | `string`  | —                            | Langfuse project secret key       |
+| `baseUrl`   | `string`  | `https://cloud.langfuse.com` | Override for EU region or Phoenix |
+| `fetch`     | `FetchFn` | `globalThis.fetch`           | Injectable for testing            |
+
+**Environment variables**
+
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are the recommended application-level names for the two required Langfuse credentials. The adapter does not read environment variables by itself and does not provide default credential values: callers must pass both keys into `new LangfuseAdapter({ publicKey, secretKey })`. If either variable is missing, fail fast in the application or CI job that enables Langfuse export rather than constructing the adapter with an empty string.
+
+`LANGFUSE_PUBLIC_KEY` identifies the Langfuse project that receives the OTEL payloads. `LANGFUSE_SECRET_KEY` is paired with it and is sent as part of the adapter's HTTP Basic Authorization header (`publicKey:secretKey`). Keep the secret key in a password manager, CI secret store, or local uncommitted `.env` file; never commit it, print it in logs, or expose it to browser bundles.
+
+Local development usually keeps Langfuse export opt-in. Store real keys in an ignored `.env.local` (or equivalent shell profile), use placeholder values only when paired with a mocked `fetch`, and point `baseUrl` at the correct Langfuse region when you are testing live exports:
+
+```bash
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+# Optional: pass baseUrl: 'https://eu.cloud.langfuse.com' in code for EU projects.
+```
+
+CI pipelines should inject masked secrets only into jobs that intentionally exercise Langfuse export wiring. Documentation, unit, and mock-transport tests should not require real Langfuse credentials.
+
+```yaml
+env:
+  LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+  LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+```
 
 **Testing without a real Langfuse instance**
 

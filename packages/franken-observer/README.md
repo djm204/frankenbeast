@@ -588,6 +588,10 @@ const adapter = new LangfuseAdapter({
 await adapter.flush(trace)
 ```
 
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are caller-managed credentials; `LangfuseAdapter` does not read them automatically and has no default key values. `publicKey` identifies the Langfuse project, while `secretKey` is sent with it in the Basic Authorization header. Keep the secret key in local/CI secret stores, never commit it or expose it to browser bundles, and fail fast before constructing the adapter if a live-export job is missing either value. For local development, prefer an ignored `.env.local` or shell profile and use placeholder values only with a mocked `fetch`. CI should inject masked `LANGFUSE_*` secrets only into jobs that intentionally test live Langfuse export wiring; unit and documentation checks should continue to run without real credentials.
+
+See [`docs/adapters.md#langfuseadapter`](./docs/adapters.md#langfuseadapter) for the full environment-variable reference, local development example, and CI snippet.
+
 ### `TempoAdapter`
 
 Posts OTEL payloads to [Grafana Tempo](https://grafana.com/oss/tempo/) over OTLP/HTTP.
