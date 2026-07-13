@@ -327,7 +327,7 @@ export class LessonRecorder {
       );
       return detectLessonContradictions(lesson, priorLessons);
     } catch {
-      return detectLessonContradictions(lesson);
+      return createLessonSearchFailureReport();
     }
   }
 
@@ -739,10 +739,12 @@ export function detectLessonContradictions(
 
   const comparablePriorLessons = priorLessons.filter((prior) => prior !== lesson);
 
-  const contradictions = comparablePriorLessons.flatMap((prior, index) => {
+  const contradictions = comparablePriorLessons.flatMap((prior) => {
     const sharedTerms = sharedLessonTerms(lesson, prior);
+    const lessonGuidance = createLessonGuidanceText(lesson);
+    const priorGuidance = createLessonGuidanceText(prior);
     const hasNegationMismatch =
-      containsNegation(lesson.correctionApplied) !== containsNegation(prior.correctionApplied);
+      containsNegation(lessonGuidance) !== containsNegation(priorGuidance);
 
     if (!sameEvaluator(lesson, prior) || sharedTerms.length === 0 || !hasNegationMismatch) {
       return [];
@@ -750,7 +752,7 @@ export function detectLessonContradictions(
 
     return [
       {
-        conflictingLessonId: getLessonId(prior) ?? `prior-lesson-${index}`,
+        conflictingLessonId: getLessonId(prior),
         evaluatorName: prior.evaluatorName,
         sharedTerms,
         reason:
@@ -774,6 +776,16 @@ export function detectLessonContradictions(
   return {
     status: 'clear',
     guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+    verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
+    contradictions: [],
+  };
+}
+
+function createLessonSearchFailureReport(): LessonContradictionReport {
+  return {
+    status: 'not_checked',
+    guidance:
+      'Lesson search adapter failed, so historical lesson contradictions could not be checked; treat this as an adapter outage rather than a missing hook.',
     verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
     contradictions: [],
   };
@@ -1086,9 +1098,22 @@ function sameEvaluator(a: CritiqueLesson, b: CritiqueLesson): boolean {
 }
 
 function sharedLessonTerms(a: CritiqueLesson, b: CritiqueLesson): string[] {
-  const aTerms = new Set(extractComparableTerms(`${a.failureDescription} ${a.correctionApplied}`));
-  const bTerms = new Set(extractComparableTerms(`${b.failureDescription} ${b.correctionApplied}`));
+  const aTerms = new Set(extractComparableTerms(createLessonGuidanceText(a)));
+  const bTerms = new Set(extractComparableTerms(createLessonGuidanceText(b)));
   return [...aTerms].filter((term) => bTerms.has(term)).sort();
+}
+
+function createLessonGuidanceText(lesson: CritiqueLesson): string {
+  const reviewerGuidance =
+    lesson.reviewerFeedback?.findings.flatMap((finding) => [
+      finding.message,
+      finding.suggestion ?? '',
+    ]) ?? [];
+  return [
+    lesson.failureDescription,
+    lesson.correctionApplied,
+    ...reviewerGuidance,
+  ].join(' ');
 }
 
 function extractComparableTerms(value: string): string[] {
@@ -1103,13 +1128,18 @@ function normalizeText(value: string): string {
 
 function containsNegation(value: string): boolean {
   const normalized = normalizeText(value);
-  return /\b(no|not|never|avoid|block|reject|forbid|without|disable|disabled|don t|do not|must not|cannot|can t)\b/i.test(
+  return /\b(no|not|never|avoid|block|reject|forbid|disable|disabled|don t|do not|must not|cannot|can t)\b/i.test(
     normalized,
   );
 }
 
-function getLessonId(lesson: CritiqueLesson): string | undefined {
-  return lesson.testTraceability?.[0]?.lessonId;
+function getLessonId(lesson: CritiqueLesson): string {
+  return (
+    lesson.testTraceability?.[0]?.lessonId ??
+    `legacy-lesson-${stableHash(
+      `${lesson.evaluatorName}\n${lesson.failureDescription}\n${lesson.correctionApplied}`,
+    ).slice(0, 16)}`
+  );
 }
 
 const LESSON_CONTRADICTION_STOP_WORDS = new Set([

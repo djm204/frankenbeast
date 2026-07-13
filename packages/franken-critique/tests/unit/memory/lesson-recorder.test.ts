@@ -1695,6 +1695,106 @@ describe('LessonRecorder', () => {
     ]);
   });
 
+  it('detects contradictions from recorded reviewer guidance when correction summaries are generic', () => {
+    const current = createLesson({
+      failureDescription: 'Cache reuse guidance regression',
+      correctionApplied: 'Corrected in iteration 1',
+      reviewerFeedback: {
+        summary: 'Do not reuse cache responses without provenance checks',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Do not reuse cache responses without provenance checks',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+    const prior = createLesson({
+      failureDescription: 'Cache reuse guidance regression',
+      correctionApplied: 'Corrected in iteration 1',
+      reviewerFeedback: {
+        summary: 'Reuse cache responses when provenance checks are present',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Reuse cache responses when provenance checks are present',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'contradiction_detected',
+      contradictions: [
+        expect.objectContaining({
+          evaluatorName: 'factuality',
+          sharedTerms: expect.arrayContaining(['cache', 'responses', 'reuse']),
+        }),
+      ],
+    });
+  });
+
+  it('uses stable fallback ids for legacy contradictory lessons', () => {
+    const current = createLesson({
+      correctionApplied: 'Do not reuse cache responses without provenance checks',
+    });
+    const prior = createLesson({
+      correctionApplied: 'Reuse cache responses when provenance checks are present',
+    });
+
+    const unrelated = createLesson({
+      failureDescription: 'Token logging exposed credentials',
+      correctionApplied: 'Redact tokens before logging',
+    });
+
+    const firstReport = detectLessonContradictions(current, [prior]);
+    const secondReport = detectLessonContradictions(current, [unrelated, prior]);
+    const secondPriorContradiction = secondReport.contradictions.find(
+      (contradiction) =>
+        contradiction.conflictingCorrectionApplied === prior.correctionApplied,
+    );
+
+    expect(firstReport.contradictions[0]!.conflictingLessonId).toMatch(
+      /^legacy-lesson-/,
+    );
+    expect(secondPriorContradiction).toBeDefined();
+    expect(firstReport.contradictions[0]!.conflictingLessonId).toBe(
+      secondPriorContradiction!.conflictingLessonId,
+    );
+  });
+
+  it('reports search adapter failures distinctly from missing lesson search', async () => {
+    const port = createMockMemoryPort();
+    port.searchLessons = vi.fn().mockRejectedValue(new Error('memory unavailable'));
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'factuality', [
+          { message: 'Cache guidance allowed unaudited stale responses', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'lesson-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.contradictionReport).toMatchObject({
+      status: 'not_checked',
+      guidance: expect.stringContaining('Lesson search adapter failed'),
+      contradictions: [],
+    });
+  });
+
   it('does not flag unrelated evaluators or non-overlapping lessons as contradictions', () => {
     const current = createLesson({
       evaluatorName: 'factuality',
