@@ -8,6 +8,7 @@ import { now as deterministicNow } from '@franken/types';
  */
 export class RationaleEnforcer {
   private readonly approvalSessionTokenIdsByScope = new Map<string, string[]>();
+  private readonly unscopedApprovalSessionTokenIds: string[] = [];
   private lastGeneratedScopeKey: string | undefined;
 
   generate(task: Task): RationaleBlock {
@@ -23,7 +24,8 @@ export class RationaleEnforcer {
       ? `skill:${tool}`
       : `task:${task.id}`;
     this.lastGeneratedScopeKey = scopeKey;
-    const approvalSessionTokenId = this.approvalSessionTokenIdsByScope.get(scopeKey)?.[0];
+    const approvalSessionTokenId = this.approvalSessionTokenIdsByScope.get(scopeKey)?.[0]
+      ?? this.unscopedApprovalSessionTokenIds[0];
     const withSessionToken = approvalSessionTokenId !== undefined
       ? { ...base, approvalSessionTokenId }
       : base;
@@ -35,7 +37,14 @@ export class RationaleEnforcer {
   }
 
   rememberApprovalSessionToken(tokenId: string): void {
-    const scopeKey = this.lastGeneratedScopeKey ?? 'task:unknown';
+    const scopeKey = this.lastGeneratedScopeKey;
+    if (scopeKey === undefined) {
+      if (!this.unscopedApprovalSessionTokenIds.includes(tokenId)) {
+        this.unscopedApprovalSessionTokenIds.push(tokenId);
+      }
+      return;
+    }
+
     const tokenIds = this.approvalSessionTokenIdsByScope.get(scopeKey) ?? [];
     if (!tokenIds.includes(tokenId)) {
       tokenIds.push(tokenId);
