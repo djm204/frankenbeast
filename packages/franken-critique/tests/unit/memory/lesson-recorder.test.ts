@@ -38,6 +38,13 @@ function createIteration(
     ],
     shortCircuited: false,
   };
+  return createIterationFromResult(index, result);
+}
+
+function createIterationFromResult(
+  index: number,
+  result: CritiqueResult,
+): CritiqueIteration {
   return {
     index,
     input: { content: `iteration ${index}`, metadata: {} },
@@ -205,6 +212,324 @@ describe('LessonRecorder', () => {
       missingSuggestionGuidance:
         'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.',
     });
+  });
+
+  it('attaches a deterministic per-agent improvement scorecard to recorded lessons when an agent id is configured', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      agentId: 'worker-alpha',
+      now: (): string => '2026-07-12T00:00:00.000Z',
+    });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'quality-gate', [
+          {
+            message: 'PR handoff omitted verification evidence',
+            severity: 'warning',
+            suggestion: 'Add the targeted test command and result.',
+          },
+          {
+            message: 'Reviewer blocker was left unresolved',
+            severity: 'critical',
+            suggestion: 'Resolve the review thread before merge.',
+          },
+        ]),
+        createIteration(1, 'fail', 'quality-gate', [
+          {
+            message: 'Verification evidence is present but incomplete',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(2, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'scorecard-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.agentImprovementScorecard).toEqual({
+      schemaVersion: 'agent-improvement-scorecard-v1',
+      agentId: 'worker-alpha',
+      taskId: 'scorecard-task',
+      evaluatorName: 'quality-gate',
+      generatedAt: '2026-07-12T00:00:00.000Z',
+      initialScore: 0.3,
+      finalScore: 1,
+      scoreDelta: 0.7,
+      failingIterations: [0, 1],
+      resolvedIteration: 2,
+      findingCounts: {
+        critical: 1,
+        warning: 2,
+        info: 0,
+        total: 3,
+      },
+      improvementSignals: [
+        'Recovered from 2 failing critique iterations before pass.',
+        'Improved quality-gate score by 0.7.',
+        'Resolved 1 critical blocker finding.',
+      ],
+      guidance:
+        'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.',
+    });
+  });
+
+  it('uses the first failed evaluator score and recovered evaluator score in per-agent scorecards', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, { agentId: 'worker-alpha' });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIterationFromResult(0, {
+          verdict: 'fail',
+          overallScore: 0.2,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.1,
+              findings: [{ message: 'missing verifier', severity: 'warning' }],
+            },
+            {
+              evaluatorName: 'style-gate',
+              verdict: 'pass',
+              score: 0.9,
+              findings: [],
+            },
+          ],
+        }),
+        createIterationFromResult(1, {
+          verdict: 'fail',
+          overallScore: 0.4,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.5,
+              findings: [{ message: 'partial verifier', severity: 'warning' }],
+            },
+          ],
+        }),
+        createIterationFromResult(2, {
+          verdict: 'pass',
+          overallScore: 0.6,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'pass',
+              score: 0.95,
+              findings: [],
+            },
+            {
+              evaluatorName: 'style-gate',
+              verdict: 'warn',
+              score: 0.25,
+              findings: [{ message: 'style nit', severity: 'warning' }],
+            },
+          ],
+        }),
+      ],
+    };
+
+    await recorder.record(result, 'scorecard-task');
+
+    const firstLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(firstLesson.agentImprovementScorecard).toMatchObject({
+      evaluatorName: 'quality-gate',
+      initialScore: 0.1,
+      finalScore: 0.95,
+      scoreDelta: 0.85,
+      failingIterations: [0, 1],
+      resolvedIteration: 2,
+      findingCounts: {
+        critical: 0,
+        warning: 2,
+        info: 0,
+        total: 2,
+      },
+    });
+  });
+
+  it('excludes evaluator infrastructure exceptions from per-agent scorecards', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, { agentId: 'worker-alpha' });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIterationFromResult(0, {
+          verdict: 'fail',
+          overallScore: 0.05,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.05,
+              findings: [
+                {
+                  message: 'evaluator crashed',
+                  severity: 'critical',
+                  location: EVALUATOR_EXCEPTION_LOCATION,
+                },
+              ],
+            },
+          ],
+        }),
+        createIterationFromResult(1, {
+          verdict: 'fail',
+          overallScore: 0.4,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'fail',
+              score: 0.4,
+              findings: [{ message: 'missing verifier', severity: 'warning' }],
+            },
+          ],
+        }),
+        createIterationFromResult(2, {
+          verdict: 'pass',
+          overallScore: 1,
+          shortCircuited: false,
+          results: [
+            {
+              evaluatorName: 'quality-gate',
+              verdict: 'pass',
+              score: 1,
+              findings: [],
+            },
+          ],
+        }),
+      ],
+    };
+
+    await recorder.record(result, 'scorecard-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(port.recordLesson).toHaveBeenCalledTimes(1);
+    expect(lesson.agentImprovementScorecard).toMatchObject({
+      initialScore: 0.4,
+      finalScore: 1,
+      scoreDelta: 0.6,
+      failingIterations: [1],
+      findingCounts: {
+        critical: 0,
+        warning: 1,
+        info: 0,
+        total: 1,
+      },
+    });
+  });
+
+  it('rejects blank per-agent scorecard ids so PM summaries do not group lessons under an ambiguous agent', () => {
+    expect(
+      () => new LessonRecorder(createMockMemoryPort(), { agentId: '  ' }),
+    ).toThrow('LessonRecorder agentId must be a non-empty string when provided.');
+  });
+
+  it('returns an LLM-friendly learning backlog prioritization report for PM handoffs', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      agentId: 'worker-alpha',
+      now: (): string => '2026-07-12T00:00:00.000Z',
+    });
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'quality-gate', [
+          {
+            message: 'Codex blocker was left unresolved',
+            severity: 'critical',
+            suggestion: 'Resolve the current-head review thread before merge.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const summary = await recorder.record(result, 'learning-backlog-task');
+
+    expect(summary.learningBacklogPrioritizationReport).toEqual({
+      schemaVersion: 'learning-backlog-prioritization-report-v1',
+      generatedAt: '2026-07-12T00:00:00.000Z',
+      guidance:
+        'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.',
+      items: [
+        {
+          id: expect.stringMatching(/^lesson:learning-backlog-task:quality-gate:iteration-0$/),
+          source: 'recorded-lesson',
+          priority: 'high',
+          score: 80,
+          taskId: 'learning-backlog-task',
+          evaluatorName: 'quality-gate',
+          title: 'Codex blocker was left unresolved',
+          rationale:
+            'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.',
+          recommendedAction:
+            'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
+        },
+      ],
+    });
+    expect(JSON.parse(JSON.stringify(summary))).toMatchObject({
+      learningBacklogPrioritizationReport: {
+        schemaVersion: 'learning-backlog-prioritization-report-v1',
+        items: [
+          expect.objectContaining({
+            source: 'recorded-lesson',
+            priority: 'high',
+          }),
+        ],
+      },
+    });
+  });
+
+  it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {
+    const port = createMockMemoryPort();
+    let now = new Date('2026-07-12T10:00:00.000Z');
+    const recorder = new LessonRecorder(port, {
+      cooldownMs: 60_000,
+      now: (): Date => now,
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Repeated PM handoff lesson caused churn',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'first-task');
+    now = new Date('2026-07-12T10:00:30.000Z');
+    const suppressed = await recorder.record(result, 'second-task');
+
+    expect(suppressed.learningBacklogPrioritizationReport.items).toEqual([
+      expect.objectContaining({
+        source: 'cooldown-suppression',
+        priority: 'low',
+        score: 20,
+        taskId: 'second-task',
+        evaluatorName: 'learning-reviewer',
+        recommendedAction:
+          'Reuse the existing in-cooldown lesson until suppression expires; do not create a duplicate backlog item.',
+      }),
+    ]);
   });
 
   it('attaches an LLM-friendly post-PR lesson extraction template to recorded lessons', async () => {
@@ -414,7 +739,7 @@ describe('LessonRecorder', () => {
 
     const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[0]![0];
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -495,7 +820,7 @@ describe('LessonRecorder', () => {
     const admitted = await recorder.record(result, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(admitted).toEqual({
+    expect(admitted).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -532,7 +857,7 @@ describe('LessonRecorder', () => {
     const suppressed = await secondRecorder.record(result, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(suppressed).toEqual({
+    expect(suppressed).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -591,12 +916,12 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({ taskId: 'second-task' }),
@@ -638,7 +963,7 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(disabledSummary).toEqual({
+    expect(disabledSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -690,7 +1015,7 @@ describe('LessonRecorder', () => {
     expect(firstLesson.cooldown.recordedAt).toBe('2026-07-12T10:00:00.000Z');
     expect(firstLesson.cooldown.suppressUntil).toBe('2026-07-12T10:00:01.000Z');
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -736,12 +1061,12 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -797,17 +1122,17 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(thirdSummary).toEqual({
+    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -852,7 +1177,7 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -888,7 +1213,7 @@ describe('LessonRecorder', () => {
     const secondSummary = await recorder.record(policyDash, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1011,7 +1336,7 @@ describe('LessonRecorder', () => {
     const thirdLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[1]![0];
 
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
       minedBlockerPatterns: [],
@@ -1224,7 +1549,7 @@ describe('LessonRecorder', () => {
     expect(secondSummary.recorded).toBe(1);
     expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(thirdSummary).toEqual({
+    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-c' })],
       minedBlockerPatterns: [],
@@ -1258,12 +1583,12 @@ describe('LessonRecorder', () => {
     const failedSummary = await recorder.record(result, 'task-a');
     const secondSummary = await recorder.record(result, 'task-b');
 
-    expect(failedSummary).toEqual({
+    expect(failedSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1506,7 +1831,7 @@ describe('LessonRecorder', () => {
     };
 
     // Should not throw and should report that no lesson was persisted.
-    await expect(recorder.record(result, 'test-task')).resolves.toEqual({
+    await expect(recorder.record(result, 'test-task')).resolves.toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],

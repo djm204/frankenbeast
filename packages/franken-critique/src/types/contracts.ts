@@ -197,12 +197,80 @@ export interface CrossTaskBlockerPattern {
   readonly guidance: string;
 }
 
+/** Deterministic per-agent learning summary for worker retrospectives and PM handoffs. */
+export type LearningBacklogPriority = 'high' | 'medium' | 'low';
+
+/** A single LLM-friendly backlog item produced from newly observed learning signals. */
+export interface LearningBacklogPrioritizationItem {
+  /** Stable item identifier for PM/liveness consumers. */
+  readonly id: string;
+  /** Source signal that created this backlog item. */
+  readonly source:
+    | 'recorded-lesson'
+    | 'cooldown-suppression'
+    | 'blocker-pattern';
+  /** Coarse priority bucket for operator routing. */
+  readonly priority: LearningBacklogPriority;
+  /** Numeric score used for deterministic sorting inside a priority bucket. */
+  readonly score: number;
+  readonly taskId?: TaskId;
+  readonly evaluatorName?: string;
+  /** Short operator-facing title. */
+  readonly title: string;
+  /** Why this item received its priority. */
+  readonly rationale: string;
+  /** Next action PM/liveness tooling should present. */
+  readonly recommendedAction: string;
+}
+
+/** Structured PM/liveness report for sorting learning backlog follow-up. */
+export interface LearningBacklogPrioritizationReport {
+  readonly schemaVersion: 'learning-backlog-prioritization-report-v1';
+  readonly generatedAt: string;
+  readonly guidance: string;
+  readonly items: readonly LearningBacklogPrioritizationItem[];
+}
+
+export interface AgentImprovementScorecard {
+  /** Stable schema identifier for PM/liveness tooling. */
+  readonly schemaVersion: 'agent-improvement-scorecard-v1';
+  /** Agent or worker identifier supplied by the recorder caller. */
+  readonly agentId: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  /** Timestamp when the scorecard was generated. */
+  readonly generatedAt: string;
+  /** First failing score for this evaluator in the recovered critique loop. */
+  readonly initialScore: number;
+  /** Final recovered overall score from the pass/warn iteration. */
+  readonly finalScore: number;
+  /** Rounded difference between finalScore and initialScore. */
+  readonly scoreDelta: number;
+  /** Failing iteration indexes for this evaluator that contributed feedback. */
+  readonly failingIterations: readonly number[];
+  /** Iteration that recovered to pass/warn. */
+  readonly resolvedIteration: number;
+  /** Finding counts across the agent's failing iterations for this evaluator. */
+  readonly findingCounts: {
+    readonly critical: number;
+    readonly warning: number;
+    readonly info: number;
+    readonly total: number;
+  };
+  /** LLM-friendly bullets that can be copied into retrospectives without parsing prose. */
+  readonly improvementSignals: readonly string[];
+  /** Operator-facing guidance for interpreting the scorecard. */
+  readonly guidance: string;
+}
+
 /** Summary returned by LessonRecorder.record for PM/liveness consumers. */
 export interface LessonRecordingResult {
   readonly recorded: number;
   readonly suppressedByCooldown: readonly LessonCooldownSuppression[];
   /** Cross-task blocker patterns discovered while recording this critique result. */
   readonly minedBlockerPatterns: readonly CrossTaskBlockerPattern[];
+  /** Prioritized PM/liveness follow-up generated from this record call's learning signals. */
+  readonly learningBacklogPrioritizationReport: LearningBacklogPrioritizationReport;
 }
 
 /** A lesson learned from a successful critique cycle. */
@@ -226,6 +294,8 @@ export interface CritiqueLesson {
   readonly cooldown?: LessonCooldownMetadata;
   /** Cross-task blocker patterns associated with this lesson, if any crossed the threshold. */
   readonly blockerPatterns?: readonly CrossTaskBlockerPattern[];
+  /** Optional per-agent learning scorecard for worker retrospectives and PM handoffs. */
+  readonly agentImprovementScorecard?: AgentImprovementScorecard;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

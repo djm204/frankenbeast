@@ -74,6 +74,16 @@ export { checkInjection } from './breakers/injection-breaker.js';
 export { checkBudget, BudgetExceededError } from './breakers/budget-breaker.js';
 export { checkCritiqueSpiral } from './breakers/critique-spiral-breaker.js';
 
+// Logging redaction
+export {
+  isSensitiveLogKey,
+  redactLogData,
+  redactLogDataWithProvenance,
+  redactSensitiveText,
+  redactSensitiveTextWithProvenance,
+} from './logging/redaction.js';
+export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from './logging/redaction.js';
+
 // LLM helpers
 export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
 export {
