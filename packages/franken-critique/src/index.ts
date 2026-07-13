@@ -33,6 +33,7 @@ export type {
   LessonCooldownMetadata,
   LessonCooldownSuppression,
   CrossTaskBlockerPattern,
+  AgentImprovementScorecard,
   LessonRecordingResult,
   ReviewerFeedbackLessonEntry,
   ReviewerFeedbackLessonCapture,

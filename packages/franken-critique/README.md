@@ -137,6 +137,12 @@ Callers that need a different window can construct `new LessonRecorder(memory, {
 
 Each mined pattern includes a stable `key`, evaluator name, normalized finding, threshold, occurrence count, ordered distinct task ids, first/last seen timestamps, and operator guidance. Repeated observations from the same task do not increment the pattern, and warning-only findings are ignored so the signal stays focused on true blockers. The default threshold is 3 distinct tasks; tests or replay callers can pass `blockerPatternThreshold` and a shared `blockerPatternStore` in `LessonRecorderOptions` when multiple recorder instances should mine against the same in-process history.
 
+## Per-agent improvement scorecards
+
+Callers that know the worker/agent identity can construct `new LessonRecorder(memory, { agentId })` to attach an `agentImprovementScorecard` to each recorded critique lesson. The recorder trims and validates the id up front; blank ids throw so PM summaries do not group lessons under an ambiguous agent.
+
+Each scorecard is structured for worker retrospectives and PM/liveness handoffs, with schema version, `agentId`, task/evaluator ids, generated timestamp, initial/final score, score delta, failing/resolved iterations, critical/warning/info finding counts, and LLM-friendly improvement signals. Use it to compare an agent's recovered critique loops over time without parsing free-form lesson prose.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.
