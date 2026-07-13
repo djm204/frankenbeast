@@ -374,7 +374,7 @@ export class BeastApiClient {
 
   private async toError(response: Response): Promise<BeastApiError> {
     const fallbackMessage = `HTTP ${response.status}`;
-    const text = await response.text().catch(() => '');
+    const text = await readResponseText(response);
     const parsed = parseErrorBody(text);
     const serverError = extractServerError(parsed, text);
 
@@ -399,6 +399,23 @@ function parseErrorBody(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+async function readResponseText(response: Response): Promise<string> {
+  if (typeof response.text === 'function') {
+    return response.text().catch(() => '');
+  }
+
+  const legacyResponse = response as Response & { json?: () => Promise<unknown> };
+  if (typeof legacyResponse.json === 'function') {
+    try {
+      return JSON.stringify(await legacyResponse.json());
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
 }
 
 function extractServerError(parsed: unknown, text: string): { message?: string; code?: string; details?: unknown } {
@@ -430,7 +447,7 @@ function extractServerError(parsed: unknown, text: string): { message?: string; 
   }
 
   const trimmedText = text.trim();
-  return trimmedText ? { message: trimmedText } : {};
+  return parsed === undefined && trimmedText ? { message: trimmedText } : {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
