@@ -1192,11 +1192,20 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
 
   if (guardCondition) {
     clauses.push({
-      text: guardCondition,
+      text: `${normalized} ${guardCondition}`,
       sourceText: fragment,
       polarity: 'negative',
       guardCondition,
       ...(conditionalProhibition ? { conditionalProhibition } : {}),
+    });
+  }
+
+  if (embeddedNegatedCondition && leadingPolarity === 'positive') {
+    clauses.push({
+      text: embeddedNegatedCondition,
+      sourceText: fragment,
+      polarity: 'negative',
+      embeddedNegatedCondition,
     });
   }
 
@@ -1223,7 +1232,9 @@ function hasCompatibleConditionalGuard(
     hasCompatibleConditionalGuardPair(a, b) ||
     hasCompatibleConditionalGuardPair(b, a) ||
     hasCompatibleEmbeddedNegationPair(a, b) ||
-    hasCompatibleEmbeddedNegationPair(b, a)
+    hasCompatibleEmbeddedNegationPair(b, a) ||
+    hasCompatibleQualifiedExclusionPair(a, b) ||
+    hasCompatibleQualifiedExclusionPair(b, a)
   );
 }
 
@@ -1242,6 +1253,10 @@ function hasCompatibleConditionalGuardPair(
   }
 
   if (!describesRequiredPrerequisite(maybeRequirement.text)) {
+    return false;
+  }
+
+  if (hasOpposedGuardOutcome(maybeProhibition.guardCondition, maybeRequirement.text)) {
     return false;
   }
 
@@ -1269,6 +1284,44 @@ function hasCompatibleEmbeddedNegationPair(
   );
 }
 
+function hasCompatibleQualifiedExclusionPair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative'
+  ) {
+    return false;
+  }
+
+  const allowanceTerms = extractComparableTerms(maybeAllowance.text);
+  const prohibitedTerms = new Set(extractComparableTerms(maybeProhibition.text));
+  return allowanceTerms.some((term) => {
+    if (!term.startsWith('non_')) {
+      return false;
+    }
+    return prohibitedTerms.has(term.slice('non_'.length));
+  });
+}
+
+function hasOpposedGuardOutcome(guardCondition: string, requirementText: string): boolean {
+  const guardHasPass = /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
+    guardCondition,
+  );
+  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid)\b/.test(
+    guardCondition,
+  );
+  const requirementHasPass = /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
+    requirementText,
+  );
+  const requirementHasFail = /\b(fail|fails|failed|failing|failure|invalid)\b/.test(
+    requirementText,
+  );
+
+  return (guardHasPass && requirementHasFail) || (guardHasFail && requirementHasPass);
+}
+
 function describesRequiredPrerequisite(text: string): boolean {
   return /\b(require|requires|required|verify|verifies|verified|verification|validate|validates|validated|validation|when|after|before|present|provenance)\b/.test(
     text,
@@ -1288,13 +1341,31 @@ function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
 }
 
 function extractComparableTerms(value: string): string[] {
-  return normalizeText(value)
-    .split(' ')
-    .filter(
-      (term) =>
-        (term.length >= 4 || LESSON_CONTRADICTION_SHORT_TERMS.has(term)) &&
-        !LESSON_CONTRADICTION_STOP_WORDS.has(term),
-    );
+  const normalizedTerms = normalizeText(value).split(' ').filter(Boolean);
+  const comparableTerms: string[] = [];
+
+  for (let index = 0; index < normalizedTerms.length; index += 1) {
+    const term = normalizedTerms[index]!;
+    const nextTerm = normalizedTerms[index + 1];
+    if (term === 'non' && nextTerm && isComparableTerm(nextTerm)) {
+      comparableTerms.push(`non_${nextTerm}`);
+      index += 1;
+      continue;
+    }
+
+    if (isComparableTerm(term)) {
+      comparableTerms.push(term);
+    }
+  }
+
+  return comparableTerms;
+}
+
+function isComparableTerm(term: string): boolean {
+  return (
+    (term.length >= 4 || LESSON_CONTRADICTION_SHORT_TERMS.has(term)) &&
+    !LESSON_CONTRADICTION_STOP_WORDS.has(term)
+  );
 }
 
 function normalizeText(value: string): string {

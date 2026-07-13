@@ -1972,6 +1972,44 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('splits embedded negated directives from positive prefaces', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({
+          correctionApplied: 'Validate provenance and do not reuse cache responses',
+        }),
+        [createLesson({ correctionApplied: 'Reuse cache responses' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('preserves directive context for short without guard clauses', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Require authentication before API access' }),
+        [createLesson({ correctionApplied: 'Allow API access without authentication' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('does not treat opposite conditional outcomes as compatible guards', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Avoid cache reuse unless provenance checks pass' }),
+        [createLesson({ correctionApplied: 'Reuse cache when provenance checks fail' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('keeps non-prefixed short technical terms distinct', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log PII' }),
+        [createLesson({ correctionApplied: 'Log non-PII diagnostics' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('recognizes disallow and prohibit as negated directive guidance', () => {
     const current = createLesson({
       correctionApplied: 'Disallow cache reuse',
