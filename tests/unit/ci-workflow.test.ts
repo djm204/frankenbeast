@@ -134,16 +134,12 @@ on:
       expect(workflow.name).toBe('CI');
     });
 
-    it('triggers on push to main', () => {
+    it('explicitly limits CI push and pull_request triggers to the main branch', () => {
       const triggers = expectRecord(workflow.on, 'workflow.on');
-      const push = expectRecord(triggers.push, 'workflow.on.push');
-      expect(push.branches).toEqual(['main']);
-    });
 
-    it('triggers on pull_request to main', () => {
-      const triggers = expectRecord(workflow.on, 'workflow.on');
-      const pullRequest = expectRecord(triggers.pull_request, 'workflow.on.pull_request');
-      expect(pullRequest.branches).toEqual(['main']);
+      expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
+      expect(expectRecord(triggers.push, 'workflow.on.push')).toEqual({ branches: ['main'] });
+      expect(expectRecord(triggers.pull_request, 'workflow.on.pull_request')).toEqual({ branches: ['main'] });
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
