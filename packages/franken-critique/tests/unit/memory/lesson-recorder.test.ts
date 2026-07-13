@@ -1942,6 +1942,36 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'contradiction_detected' });
   });
 
+  it('treats mid-clause negation as compatible with equivalent prohibitions', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Allow requests that do not include PII' }),
+        [createLesson({ correctionApplied: 'Do not allow requests that include PII' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('keeps punctuation-delimited clauses out of without guards', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({
+          correctionApplied:
+            'Do not reuse cache without provenance checks; rotate cache keys after deploy',
+        }),
+        [createLesson({ correctionApplied: 'Reuse cache after deploy' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('treats unless guards as compatible conditional guidance', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Avoid cache reuse unless provenance checks pass' }),
+        [createLesson({ correctionApplied: 'Reuse cache when provenance checks pass' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('recognizes disallow and prohibit as negated directive guidance', () => {
     const current = createLesson({
       correctionApplied: 'Disallow cache reuse',

@@ -1158,8 +1158,9 @@ interface LessonDirectiveClause {
   readonly text: string;
   readonly sourceText: string;
   readonly polarity: LessonDirectivePolarity;
-  readonly withoutCondition?: string;
+  readonly guardCondition?: string;
   readonly conditionalProhibition?: boolean;
+  readonly embeddedNegatedCondition?: string;
 }
 
 function createLessonDirectiveClauses(lesson: CritiqueLesson): LessonDirectiveClause[] {
@@ -1174,25 +1175,27 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
     return [];
   }
 
-  const withoutCondition = extractWithoutCondition(normalized);
+  const guardCondition = extractGuardCondition(fragment);
   const leadingPolarity = leadingDirectivePolarity(normalized);
-  const conditionalProhibition = leadingPolarity === 'negative' && withoutCondition !== undefined;
+  const conditionalProhibition = leadingPolarity === 'negative' && guardCondition !== undefined;
+  const embeddedNegatedCondition = extractEmbeddedNegatedCondition(normalized);
   const clauses: LessonDirectiveClause[] = [
     {
       text: normalized,
       sourceText: fragment,
       polarity: leadingPolarity,
-      ...(withoutCondition ? { withoutCondition } : {}),
+      ...(guardCondition ? { guardCondition } : {}),
       ...(conditionalProhibition ? { conditionalProhibition } : {}),
+      ...(embeddedNegatedCondition ? { embeddedNegatedCondition } : {}),
     },
   ];
 
-  if (withoutCondition) {
+  if (guardCondition) {
     clauses.push({
-      text: withoutCondition,
+      text: guardCondition,
       sourceText: fragment,
       polarity: 'negative',
-      withoutCondition,
+      guardCondition,
       ...(conditionalProhibition ? { conditionalProhibition } : {}),
     });
   }
@@ -1200,16 +1203,28 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
   return clauses;
 }
 
-function extractWithoutCondition(normalized: string): string | undefined {
-  const match = /\bwithout\s+([^.;,]+)/i.exec(normalized);
-  return match?.[1]?.trim() || undefined;
+function extractGuardCondition(fragment: string): string | undefined {
+  const match = /\b(?:without|unless)\s+([^.;,]+)/i.exec(fragment);
+  const condition = match?.[1] ? normalizeText(match[1]) : '';
+  return condition.length > 0 ? condition : undefined;
+}
+
+function extractEmbeddedNegatedCondition(normalized: string): string | undefined {
+  const match = /\b(?:do not|don t|does not|not)\s+(.+)$/i.exec(normalized);
+  const condition = match?.[1]?.trim() ?? '';
+  return condition.length > 0 ? condition : undefined;
 }
 
 function hasCompatibleConditionalGuard(
   a: LessonDirectiveClause,
   b: LessonDirectiveClause,
 ): boolean {
-  return hasCompatibleConditionalGuardPair(a, b) || hasCompatibleConditionalGuardPair(b, a);
+  return (
+    hasCompatibleConditionalGuardPair(a, b) ||
+    hasCompatibleConditionalGuardPair(b, a) ||
+    hasCompatibleEmbeddedNegationPair(a, b) ||
+    hasCompatibleEmbeddedNegationPair(b, a)
+  );
 }
 
 function hasCompatibleConditionalGuardPair(
@@ -1220,8 +1235,8 @@ function hasCompatibleConditionalGuardPair(
     maybeProhibition.polarity !== 'negative' ||
     maybeRequirement.polarity !== 'positive' ||
     !maybeProhibition.conditionalProhibition ||
-    !maybeProhibition.withoutCondition ||
-    maybeRequirement.withoutCondition
+    !maybeProhibition.guardCondition ||
+    maybeRequirement.guardCondition
   ) {
     return false;
   }
@@ -1231,8 +1246,26 @@ function hasCompatibleConditionalGuardPair(
   }
 
   return (
-    sharedTextTerms(maybeProhibition.withoutCondition, maybeRequirement.text).length >=
+    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text).length >=
     MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasCompatibleEmbeddedNegationPair(
+  maybeAllowedNegation: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowedNegation.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative' ||
+    !maybeAllowedNegation.embeddedNegatedCondition
+  ) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeAllowedNegation.embeddedNegatedCondition, maybeProhibition.text)
+      .length >= MIN_CONTRADICTION_SHARED_TERMS
   );
 }
 
