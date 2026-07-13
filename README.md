@@ -370,13 +370,15 @@ For CLI entrypoints such as `frankenbeast chat-server`, `frankenbeast network`, 
 
 ## Quick Start
 
+For a fresh checkout, follow the same supported first-run path as [ONBOARDING.md](ONBOARDING.md) and [docs/guides/quickstart.md](docs/guides/quickstart.md): use bootstrap so Node.js, npm/Corepack, `.env` defaults, dependency installation, and optional Docker-service checks stay in sync.
+
 ```bash
 # Clone the repository
 git clone <repo-url> frankenbeast
 cd frankenbeast
 
-# Install all dependencies
-npm install
+# Run the canonical local setup path without optional Docker services
+npm run bootstrap -- --no-docker
 
 # Optional: scaffold a standalone quick-start example into ../my-frankenbeast-app
 npm run create:project -- quick-start ../my-frankenbeast-app
@@ -390,6 +392,8 @@ npm test
 # Run root-level Vitest tests only
 npm run test:root
 ```
+
+For CI-style validation without mutating files or installing dependencies, run `./scripts/bootstrap.sh --dry-run`. If you intentionally need a manual dependency install instead of bootstrap, run it from the repository root with the Corepack-activated npm version from `packageManager`, copy or merge `.env.example` into `.env`, and note that you are skipping bootstrap's environment validation and optional Docker-service prompts.
 
 The root Vitest suite also checks local Markdown links in README/docs/package READMEs. Local link targets are treated as untrusted input: keep them simple repository-relative paths and do not add shell metacharacters such as backticks, `$`, `;`, `&`, `|`, `<`, or `>`. External `http(s)` links and same-page anchors are ignored by that local filesystem check.
 
