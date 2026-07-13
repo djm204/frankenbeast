@@ -1449,8 +1449,11 @@ function hasCompatibleConditionalGuardPair(
     maybeRequirement.polarity !== 'positive' ||
     !maybeProhibition.conditionalProhibition ||
     !maybeProhibition.guardCondition ||
-    (maybeRequirement.guardCondition &&
-      !/\bbefore\b/i.test(maybeRequirement.sourceText))
+    (maybeRequirement.guardCondition !== undefined &&
+      !/^(require|requires|required|verify|verifies|verified|validate|validates|validated)\b/.test(
+        maybeRequirement.text,
+      ) &&
+      !(/\bbefore\b/i.test(maybeRequirement.sourceText)))
   ) {
     return false;
   }
