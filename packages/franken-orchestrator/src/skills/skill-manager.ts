@@ -81,6 +81,11 @@ export class SkillManager {
         [catalogEntry.name]: catalogEntry.installConfig,
       },
     });
+    const tools = catalogEntry.toolDefinitions?.length
+      ? requireSecurityReviewByDefault(
+        SkillToolManifestSchema.parse(catalogEntry.toolDefinitions),
+      )
+      : undefined;
     const skillDir = join(this.skillsDir, catalogEntry.name);
     mkdirSync(skillDir, { recursive: true });
 
@@ -89,10 +94,7 @@ export class SkillManager {
       JSON.stringify(mcpConfig, null, 2),
     );
 
-    if (catalogEntry.toolDefinitions?.length) {
-      const tools = requireSecurityReviewByDefault(
-        SkillToolManifestSchema.parse(catalogEntry.toolDefinitions),
-      );
+    if (tools) {
       writeFileSync(
         join(skillDir, 'tools.json'),
         JSON.stringify(tools, null, 2),

@@ -120,6 +120,22 @@ describe('SkillManager', () => {
         requiresHitl: true,
       });
     });
+
+    it('rejects invalid catalog tool definitions before writing mcp.json', async () => {
+      await expect(manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'create_issue', inputSchema: {} } as never,
+        ],
+      })).rejects.toThrow();
+
+      expect(existsSync(join(skillsDir, 'github', 'mcp.json'))).toBe(false);
+      expect(manager.exists('github')).toBe(false);
+    });
   });
 
   describe('installCustom()', () => {
