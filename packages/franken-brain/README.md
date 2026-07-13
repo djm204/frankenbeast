@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `WorkingMemoryLimitError`, `DEFAULT_WORKING_MEMORY_LIMITS`, and the `WorkingMemoryLimits` type.
+Current public API: `SqliteBrain`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `CURRENT_MEMORY_SCHEMA_VERSION`, and the `WorkingMemoryLimits`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, and `MemorySchemaMigrationResult` types.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 

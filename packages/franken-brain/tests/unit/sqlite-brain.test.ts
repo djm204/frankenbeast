@@ -364,6 +364,23 @@ describe('SqliteBrain', () => {
           { store: 'checkpoints', version: CURRENT_MEMORY_SCHEMA_VERSION, recordCount: 0 },
         ]);
         reopened.close();
+
+        const staleRegistryDb = new Database(dbPath);
+        staleRegistryDb.prepare(`UPDATE memory_schema_versions SET version = ? WHERE store = ?`).run(
+          CURRENT_MEMORY_SCHEMA_VERSION - 1,
+          'working_memory',
+        );
+        staleRegistryDb.close();
+        const registryMigration = SqliteBrain.migrateMemorySchema(dbPath);
+        expect(registryMigration.migrated).toBe(true);
+        expect(registryMigration.operations.map(op => op.table)).toContain('memory_schema_versions');
+        const afterRegistryMigration = new SqliteBrain(dbPath);
+        expect(afterRegistryMigration.getMemorySchemaMetadata().stores[0]).toEqual({
+          store: 'working_memory',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 1,
+        });
+        afterRegistryMigration.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -411,6 +428,7 @@ describe('SqliteBrain', () => {
           futureShapeDb.close();
 
           expect(() => new SqliteBrain(futureShapePath)).toThrow(UnsupportedMemorySchemaVersionError);
+          expect(() => SqliteBrain.migrateMemorySchema(futureShapePath)).toThrow(UnsupportedMemorySchemaVersionError);
           const afterRejectedOpen = new Database(futureShapePath, { readonly: true });
           const tables = afterRejectedOpen
             .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC`)

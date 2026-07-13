@@ -670,6 +670,8 @@ export class SqliteBrain implements IBrain {
   ): MemorySchemaMigrationResult {
     const db = new Database(dbPath, options.dryRun ? { readonly: true, fileMustExist: true } : {});
     if (!options.dryRun) {
+      db.pragma('busy_timeout = 5000');
+      assertSupportedMemorySchema(db);
       db.pragma('journal_mode = WAL');
       db.pragma('busy_timeout = 5000');
     }
@@ -781,6 +783,12 @@ function migrateMemorySchemaDatabase(
         throw new UnsupportedMemorySchemaVersionError(
           `Memory store ${row.store} uses schema version ${row.version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
         );
+      }
+      if (row.version < CURRENT_MEMORY_SCHEMA_VERSION) {
+        operations.push({
+          table: 'memory_schema_versions',
+          action: `update ${row.store} registry version from ${row.version} to ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        });
       }
       fromVersion = Math.min(fromVersion, row.version);
     }
