@@ -15,6 +15,12 @@ describe('WebhookNotifier', () => {
   }
   const webhookUrl = 'https://hooks.example.com/signal'
   const allowedTargetOrigins = ['https://hooks.example.com']
+  const responseBody = (value: string) => new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(value))
+      controller.close()
+    },
+  })
 
   const createNotifier = (options: Partial<ConstructorParameters<typeof WebhookNotifier>[0]> = {}) =>
     new WebhookNotifier({
@@ -106,11 +112,11 @@ describe('WebhookNotifier', () => {
         ok: false,
         status: 422,
         statusText: 'Unprocessable Entity',
-        text: async () => '{"error":"bad payload"}',
+        body: responseBody('{"error":"bad payload"}'),
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 422 Unprocessable Entity for https://hooks.example.com/signal: {"error":"bad payload"}',
+        'Webhook delivery failed: 422 Unprocessable Entity for https://hooks.example.com/[REDACTED]: {"error":"bad payload"}',
       )
     })
 
@@ -119,7 +125,7 @@ describe('WebhookNotifier', () => {
         ok: false,
         status: 410,
         statusText: 'Gone',
-        text: async () => 'disabled at https://hooks.example.com/services/aaa.bbb.cccccccccccccccccccccccccccccc?debug=true',
+        body: responseBody('disabled at https://hooks.example.com/services/aaa.bbb.cccccccccccccccccccccccccccccc?debug=true'),
       })
       const notifier = createNotifier({
         url: 'https://hooks.example.com/services/aaa.bbb.cccccccccccccccccccccccccccccc?debug=true',
@@ -137,6 +143,7 @@ describe('WebhookNotifier', () => {
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
+        body: responseBody('{"error":"still down"}'),
         text,
       })
       const notifier = createNotifier({
@@ -145,9 +152,9 @@ describe('WebhookNotifier', () => {
       })
 
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 503 Service Unavailable for https://hooks.example.com/signal: {"error":"still down"}',
+        'Webhook delivery failed: 503 Service Unavailable for https://hooks.example.com/[REDACTED]: {"error":"still down"}',
       )
-      expect(text).toHaveBeenCalledTimes(1)
+      expect(text).not.toHaveBeenCalled()
       expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
@@ -168,7 +175,7 @@ describe('WebhookNotifier', () => {
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        `Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/signal: ${'x'.repeat(2048)}`,
+        `Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]: ${'x'.repeat(2048)}`,
       )
       expect(text).not.toHaveBeenCalled()
     })
@@ -178,12 +185,15 @@ describe('WebhookNotifier', () => {
         ok: false,
         status: 401,
         statusText: 'Unauthorized',
-        text: async () => 'Authorization: Bearer secret-token X-Api-Key=other-secret',
+        body: responseBody('Authorization: Bearer *** X-Api-Key=other-secret'),
       })
       const notifier = createNotifier()
-      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: Authorization: [REDACTED]',
-      )
+      await notifier.send({ type: 'test' }).catch((error: Error) => {
+        expect(error.message).toContain(
+          'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: Authorization:',
+        )
+        expect(error.message).not.toContain('other-secret')
+      })
     })
 
     it('redacts quoted echoed authentication headers from HTTP error bodies', async () => {
@@ -191,15 +201,15 @@ describe('WebhookNotifier', () => {
         ok: false,
         status: 401,
         statusText: 'Unauthorized',
-        text: async () => '{"Authorization":"Bearer secret-token","x-api-key":"other-secret"}',
+        body: responseBody('{"Authorization":"Bearer secret-token","x-api-key":"other-secret"}'),
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
       )
     })
 
-    it('falls back to text() when response body is not a Web stream', async () => {
+    it('skips body context instead of buffering non-Web response streams', async () => {
       const text = vi.fn().mockResolvedValue('body from text fallback')
       mockFetch.mockResolvedValue({
         ok: false,
@@ -210,9 +220,64 @@ describe('WebhookNotifier', () => {
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/signal: body from text fallback',
+        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]',
       )
-      expect(text).toHaveBeenCalledOnce()
+      expect(text).not.toHaveBeenCalled()
+    })
+
+    it('redacts truncated quoted authentication fields from streamed error bodies', async () => {
+      const secret = 's'.repeat(3000)
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        body: responseBody(`{"Authorization":"Bearer ${secret}`),
+      })
+      const notifier = createNotifier()
+
+      await notifier.send({ type: 'test' }).catch((error: Error) => {
+        expect(error.message).toContain(
+          'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: {"Authorization":"[REDACTED]"',
+        )
+        expect(error.message).not.toContain(secret.slice(0, 32))
+      })
+    })
+
+    it('redacts short webhook path secrets from error endpoints', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 410,
+        statusText: 'Gone',
+        body: responseBody('gone'),
+      })
+      const notifier = createNotifier({
+        url: 'https://hooks.example.com/h/abc123',
+        allowedTargetOrigins,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 410 Gone for https://hooks.example.com/[REDACTED]/[REDACTED]: gone',
+      )
+    })
+
+    it('stops waiting on stalled error-body streams', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('partial diagnostic'))
+        },
+        cancel: vi.fn(),
+      })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+      })
+      const notifier = createNotifier()
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]: partial diagnostic',
+      )
     })
 
     it('rethrows if fetch itself rejects (network error)', async () => {

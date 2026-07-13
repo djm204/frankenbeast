@@ -98,11 +98,14 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
 }
 
 const MAX_ERROR_BODY_CHARS = 2048
+const ERROR_BODY_READ_TIMEOUT_MS = 250
 
 function redactWebhookSecrets(value: string): string {
   return value
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
-    .replace(/\b((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1[REDACTED]')
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
+    .replace(/\bAuthorization:\s*Bearer \*\*\*(?:\s+X-Api-Key=[^\r\n,;<>}]+)?/gi, 'Authorization: ***')
+    .replace(/(^|[\s;])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)(?!\s*\*\*\*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]')
     .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
 }
 
@@ -119,7 +122,7 @@ function sanitizeWebhookEndpoint(value: string): string {
     } else {
       url.pathname = url.pathname
         .split('/')
-        .map(segment => (segment.length >= 16 ? '[REDACTED]' : segment))
+        .map((segment, index) => (segment && !(index === 1 && segment === 'services') ? '[REDACTED]' : segment))
         .join('/')
     }
 
@@ -220,9 +223,7 @@ export class WebhookNotifier {
       }
       const body = readable.body && typeof readable.body.getReader === 'function'
         ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
-        : typeof readable.text === 'function'
-          ? (await readable.text()).trim()
-          : ''
+        : ''
       const redactedBody = redactWebhookSecrets(body)
       return redactedBody.length > MAX_ERROR_BODY_CHARS
         ? `${redactedBody.slice(0, MAX_ERROR_BODY_CHARS)}…`
@@ -236,17 +237,29 @@ export class WebhookNotifier {
     const reader = stream.getReader()
     const chunks: Uint8Array[] = []
     let totalBytes = 0
+    let timedOut = false
 
     try {
       while (totalBytes < MAX_ERROR_BODY_CHARS) {
-        const { value, done } = await reader.read()
+        const timeout = new Promise<{ done: true; value?: undefined; timedOut: true }>(resolve => {
+          setTimeout(() => resolve({ done: true, timedOut: true }), ERROR_BODY_READ_TIMEOUT_MS)
+        })
+        const result = await Promise.race([
+          reader.read().then(read => ({ ...read, timedOut: false as const })),
+          timeout,
+        ])
+        if (result.timedOut) {
+          timedOut = true
+          break
+        }
+        const { value, done } = result
         if (done || !value) {
           break
         }
         chunks.push(value)
         totalBytes += value.byteLength
       }
-      if (totalBytes > MAX_ERROR_BODY_CHARS) {
+      if (totalBytes >= MAX_ERROR_BODY_CHARS || timedOut) {
         await reader.cancel()
       }
     } finally {
