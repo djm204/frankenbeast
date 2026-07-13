@@ -212,6 +212,19 @@ describe('WebhookNotifier', () => {
       )
     })
 
+    it('redacts array-valued echoed authentication headers from HTTP error bodies', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        body: responseBody('{"Authorization":["Bearer secret-token"],"x-api-key":["other-secret"]}'),
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: {"Authorization":["[REDACTED]"],"x-api-key":["[REDACTED]"]}',
+      )
+    })
+
     it('skips body context instead of buffering non-Web response streams', async () => {
       const text = vi.fn().mockResolvedValue('body from text fallback')
       mockFetch.mockResolvedValue({
@@ -281,6 +294,29 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
         'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]: partial diagnostic',
       )
+    })
+
+    it('stops waiting on slow-drip error-body streams after the overall body deadline', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+          controller.enqueue(new TextEncoder().encode('x'))
+        },
+        cancel: vi.fn(),
+      })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+      })
+      const notifier = createNotifier()
+      const startedAt = Date.now()
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]:',
+      )
+      expect(Date.now() - startedAt).toBeLessThan(750)
     })
 
     it('rethrows if fetch itself rejects (network error)', async () => {

@@ -102,6 +102,8 @@ const ERROR_BODY_READ_TIMEOUT_MS = 250
 
 function redactWebhookSecrets(value: string): string {
   return value
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]]*\]/gi, '$1["[REDACTED]"]')
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]\r\n,;<>}]*$/gim, '$1["[REDACTED]"]')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
     .replace(/\bAuthorization:\s*Bearer \*\*\*(?:\s+X-Api-Key=[^\r\n,;<>}]+)?/gi, 'Authorization: ***')
@@ -238,16 +240,27 @@ export class WebhookNotifier {
     const chunks: Uint8Array[] = []
     let totalBytes = 0
     let timedOut = false
+    const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
 
     try {
       while (totalBytes < MAX_ERROR_BODY_CHARS) {
+        const remainingMs = deadlineMs - Date.now()
+        if (remainingMs <= 0) {
+          timedOut = true
+          break
+        }
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
         const timeout = new Promise<{ done: true; value?: undefined; timedOut: true }>(resolve => {
-          setTimeout(() => resolve({ done: true, timedOut: true }), ERROR_BODY_READ_TIMEOUT_MS)
+          timeoutId = setTimeout(() => resolve({ done: true, timedOut: true }), remainingMs)
         })
         const result = await Promise.race([
           reader.read().then(read => ({ ...read, timedOut: false as const })),
           timeout,
-        ])
+        ]).finally(() => {
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+          }
+        })
         if (result.timedOut) {
           timedOut = true
           break

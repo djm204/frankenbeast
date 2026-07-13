@@ -6,6 +6,8 @@ const MAX_ERROR_BODY_CHARS = 2048;
 
 function redactNetworkErrorSecrets(value: string): string {
   return value
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]]*\]/gi, '$1["[REDACTED]"]')
+    .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)\[[^\]\r\n,;<>}]*$/gim, '$1["[REDACTED]"]')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
     .replace(/(^|[\s;])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]');
@@ -122,6 +124,19 @@ export class NetworkApiClient {
 
   private async toError(path: string, response: Response): Promise<NetworkApiError> {
     const statusText = response.statusText ? ` ${response.statusText}` : '';
+    const structuredError = await this.parseStructuredError(response);
+    const serverMessage = structuredError?.error?.message;
+    if (serverMessage) {
+      const code = structuredError.error.code;
+      const codeSuffix = code ? `, ${code}` : '';
+      return new NetworkApiError(
+        `${serverMessage} (HTTP ${response.status}${codeSuffix}) for ${path}`,
+        response.status,
+        code,
+        structuredError.error.details,
+      );
+    }
+
     let responseBody = '';
     try {
       responseBody = await readBoundedErrorBody(response);
@@ -150,5 +165,16 @@ export class NetworkApiClient {
 
     const bodySuffix = responseBody ? `: ${redactNetworkErrorSecrets(responseBody)}` : '';
     return new NetworkApiError(`HTTP ${response.status}${statusText} for ${path}${bodySuffix}`, response.status);
+  }
+
+  private async parseStructuredError(response: Response): Promise<ApiErrorEnvelope | null> {
+    if (typeof response.clone !== 'function') {
+      return null;
+    }
+    try {
+      return await response.clone().json() as ApiErrorEnvelope;
+    } catch {
+      return null;
+    }
   }
 }

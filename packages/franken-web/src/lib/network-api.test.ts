@@ -74,6 +74,30 @@ describe('NetworkApiClient', () => {
     );
   });
 
+  it('preserves oversized structured network error envelopes', async () => {
+    const details = Array.from({ length: 200 }, (_, index) => ({ path: ['assignments', index], message: 'Expected valid target assignment' }));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request validation failed',
+        details,
+      },
+    }), {
+      status: 422,
+      statusText: 'Unprocessable Entity',
+    }));
+
+    const client = new NetworkApiClient(BASE_URL);
+    try {
+      await client.updateConfig(['network.mode=insecure']);
+      throw new Error('Expected updateConfig to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('Request validation failed (HTTP 422, VALIDATION_ERROR) for /v1/network/config');
+      expect((error as { details?: unknown }).details).toEqual(details);
+    }
+  });
+
   it('redacts echoed auth headers from raw error bodies', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
