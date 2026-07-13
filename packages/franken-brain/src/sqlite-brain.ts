@@ -614,6 +614,7 @@ export class SqliteBrain implements IBrain {
     options: { hydrateWorkingMemoryFromDb?: boolean } = {},
   ) {
     this.db = new Database(dbPath);
+    this.db.pragma('busy_timeout = 5000');
     assertSupportedMemorySchema(this.db);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
