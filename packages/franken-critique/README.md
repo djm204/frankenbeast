@@ -155,6 +155,12 @@ Callers that know the worker/agent identity can construct `new LessonRecorder(me
 
 Each scorecard is structured for worker retrospectives and PM/liveness handoffs, with schema version, `agentId`, task/evaluator ids, generated timestamp, initial/final score, score delta, failing/resolved iterations, critical/warning/info finding counts, and LLM-friendly improvement signals. Use it to compare an agent's recovered critique loops over time without parsing free-form lesson prose.
 
+## Learning backlog prioritization report
+
+Every `LessonRecorder.record()` result exposes `learningBacklogPrioritizationReport`, a deterministic PM/liveness summary of newly observed learning follow-up. The report uses schema version `learning-backlog-prioritization-report-v1` and sorts items by numeric `score` so recurrent critical blockers appear before routine lesson cleanup.
+
+Report items identify their source as `recorded-lesson`, `blocker-pattern`, or `cooldown-suppression`, include task/evaluator context when available, and carry a concise rationale plus recommended next action. High-priority recorded lessons should go through promotion review with their traceability verifier, blocker patterns should route to a durable mitigation owner, and low-priority cooldown suppressions should reuse the existing in-cooldown lesson instead of creating duplicate backlog churn.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.

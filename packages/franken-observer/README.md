@@ -599,17 +599,37 @@ import { TempoAdapter } from '@franken/observer'
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
 
 // Grafana Cloud Tempo
+function requireEnv(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`${name} is required for Grafana Cloud Tempo exports`)
+  }
+  return value
+}
+
 const cloud = new TempoAdapter({
   endpoint: 'https://tempo-us-central1.grafana.net/tempo',
   otlpPath: '/otlp/v1/traces',
   basicAuth: {
-    user: process.env.GRAFANA_INSTANCE_ID!,
-    password: process.env.GRAFANA_API_KEY!,
+    user: requireEnv('GRAFANA_INSTANCE_ID'),
+    password: requireEnv('GRAFANA_API_KEY'),
   },
 })
 
 await cloud.flush(trace)
 ```
+
+`TempoAdapter` does not read environment variables by itself; the Grafana Cloud example above passes them into `basicAuth` from the caller. `GRAFANA_INSTANCE_ID` is the Grafana Cloud Tempo instance/user ID used as the Basic auth username, and `GRAFANA_API_KEY` is the Grafana Cloud token/API key used as the Basic auth password. Neither variable has a package default: omit `basicAuth` for unauthenticated local Tempo, or fail fast in your application/CI if either value is missing for a Grafana Cloud export.
+
+Keep `GRAFANA_API_KEY` in a secret store, never commit it to `.env` files or logs, and scope/rotate it like any other production credential. Local development and tests should prefer the unauthenticated `http://localhost:4318` endpoint with injectable `fetch` mocks; CI pipelines that exercise Grafana Cloud wiring should inject masked secrets only for those jobs:
+
+```yaml
+env:
+  GRAFANA_INSTANCE_ID: ${{ secrets.GRAFANA_INSTANCE_ID }}
+  GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+```
+
+See the repository copy of [`packages/franken-observer/docs/adapters.md`](https://github.com/djm204/frankenbeast/blob/main/packages/franken-observer/docs/adapters.md#tempoadapter) for the full Grafana Cloud environment-variable reference, local-development example, and CI notes.
 
 ### `PrometheusAdapter`
 

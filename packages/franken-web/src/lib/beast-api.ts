@@ -1,7 +1,6 @@
 import { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 import type {
   ApiDataEnvelope,
-  ApiErrorEnvelope,
   BeastCatalogEntry,
   BeastContainerRuntimeStatus,
   BeastInterviewPrompt,
@@ -375,24 +374,84 @@ export class BeastApiClient {
 
   private async toError(response: Response): Promise<BeastApiError> {
     const fallbackMessage = `HTTP ${response.status}`;
-    try {
-      const body = await response.json() as ApiErrorEnvelope;
-      const serverMessage = body.error?.message;
-      if (serverMessage) {
-        const code = body.error.code;
-        const codeSuffix = code ? `, ${code}` : '';
-        return new BeastApiError(
-          `${serverMessage} (HTTP ${response.status}${codeSuffix})`,
-          response.status,
-          code,
-          body.error.details,
-        );
-      }
-    } catch {
-      // Fall through with HTTP status message for empty, malformed, or non-JSON bodies.
+    const text = await readResponseText(response);
+    const parsed = parseErrorBody(text);
+    const serverError = extractServerError(parsed, text);
+
+    if (!serverError.message) {
+      return new BeastApiError(fallbackMessage, response.status);
     }
-    return new BeastApiError(fallbackMessage, response.status);
+
+    const codeSuffix = serverError.code ? `, ${serverError.code}` : '';
+    return new BeastApiError(
+      `${serverError.message} (HTTP ${response.status}${codeSuffix})`,
+      response.status,
+      serverError.code,
+      serverError.details,
+    );
   }
+}
+
+function parseErrorBody(text: string): unknown {
+  if (!text.trim()) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readResponseText(response: Response): Promise<string> {
+  if (typeof response.text === 'function') {
+    return response.text().catch(() => '');
+  }
+
+  const legacyResponse = response as Response & { json?: () => Promise<unknown> };
+  if (typeof legacyResponse.json === 'function') {
+    try {
+      return JSON.stringify(await legacyResponse.json());
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
+}
+
+function extractServerError(parsed: unknown, text: string): { message?: string; code?: string; details?: unknown } {
+  if (isRecord(parsed)) {
+    if (isRecord(parsed.error) && typeof parsed.error.message === 'string' && parsed.error.message.trim()) {
+      return {
+        message: parsed.error.message,
+        code: typeof parsed.error.code === 'string' ? parsed.error.code : undefined,
+        details: parsed.error.details,
+      };
+    }
+
+    const directMessage = parsed.message;
+    if (typeof directMessage === 'string' && directMessage.trim()) {
+      return {
+        message: directMessage,
+        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        details: parsed.details,
+      };
+    }
+
+    if (typeof parsed.error === 'string' && parsed.error.trim()) {
+      return {
+        message: parsed.error,
+        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        details: parsed.details,
+      };
+    }
+  }
+
+  const trimmedText = text.trim();
+  return parsed === undefined && trimmedText ? { message: trimmedText } : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function normalizeHeaders(headers: HeadersInit | undefined): Record<string, string> {

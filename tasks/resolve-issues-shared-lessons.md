@@ -5,6 +5,16 @@
 - Keep high-signal short technical tokens such as `log`, `PII`, `JWT`, `API`, `CLI`, `SQL`, `URL`, and `env` in overlap matching, but avoid ambiguous negation words such as standalone `block` that also appear in affirmative guidance like code blocks.
 - When detector comparison uses reviewer finding/suggestion text, also include that guidance in `searchLessons` queries and stable fallback IDs; otherwise runtime retrieval and PM handles drift from the detector semantics.
 
+## 2026-07-13 — Operator session-token review hardening
+- Approval-session tokens must be scoped to the policy actually approved: skill triggers can use selected tool scope, but budget/custom/non-skill approvals should stay task-scoped even when a tool is selected so same-tool actions in other tasks do not bypass prompts.
+- Never reuse an approval-session token for fail-closed trigger-evaluation errors; even a valid same-scope token must fall back to a fresh operator prompt when evaluator context/logic throws.
+- When a gateway returns an issued approval token, the planner/CoT path needs an explicit state handoff into later rationales; otherwise adapter-level token issuance is documented but not usable by normal planner executions.
+- Multi-policy approval prompts must surface every fired policy reason, not just a preferred non-skill trigger, so operators see destructive/HITL skill risk alongside budget or other policy risk.
+- If a CoT rationale can carry reusable approval tokens, keep candidate token IDs per prior approval rather than a single overwrite slot; the governor can validate candidates against the current scope and ignore non-matching tokens.
+- Built-in typed triggers need explicit context construction. Do not feed rationale-shaped objects into typed triggers such as confidence/ambiguity just because they appear later in the evaluator list.
+- Avoid mutable "last generated task" state in CoT approval-token handoff; concurrent planner execution must pass the verified task/rationale scope into token remembrance so tokens are stored under the task that actually produced the approval.
+- When a replacement approval token arrives for an expired token, put the new token before the old one for that scope so future rationales recover token reuse instead of repeatedly presenting the stale token first.
+
 ## 2026-07-12 — Runtime tool manifest security defaults
 - Default new/runtime skill tools to `requiresHitl: true` after schema validation, and preserve explicit `requiresHitl: false` only for reviewed safe tools.
 - Validate catalog `toolDefinitions` before creating/writing skill install files; otherwise a failed install can leave a partial MCP skill on disk and accidentally expose unknown runtime tools.
@@ -145,3 +155,7 @@
 - For docs with copyable foreground service recipes, split long-running services into clearly labeled terminals, quote placeholder env values so Bash does not parse `<...>` as redirection, and repeat server-side token exports in every process that needs to inject Beast proxy auth (daemon, chat-server, and Vite dev server).
 
 - 2026-07-12 — Web prompt attachment security: when adding restricted wrappers for untrusted markdown, fence both the file content and any user-controlled metadata such as filenames; sanitized names can still contain markdown/instructions and must not be emitted as trusted prompt text. Detect markdown suffixes after control-character normalization as well as on raw first-line names.
+- 2026-07-12 — Franken-web dashboard provider refresh: when a wizard temporarily reuses global dashboard provider store state, hide cached providers during loading/error refresh states and clear the global loading flag if the wizard closes before the refresh settles. Add regressions for stale cached options and cancelled refreshes before re-triggering Codex.
+
+## 2026-07-13 — Governor multi-trigger review regressions
+- When a typed trigger context source throws after an earlier promptable policy fired, keep the earlier operator prompt, add the context failure as an additional critical policy, and avoid reusing session tokens for mixed/failure batches. Ambiguity trigger context should default omitted optional flags to false only when at least one ambiguity flag is present, and combined trigger prompts must preserve the maximum severity across all fired policies.
