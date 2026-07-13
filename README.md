@@ -5,7 +5,7 @@
 </p>
 
 ![Status](https://img.shields.io/badge/status-beta-blue)
-[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/djm204/frankenbeast?label=release)](https://github.com/djm204/frankenbeast/releases/latest)
 [![Daily security scan](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml/badge.svg)](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml)
 [![Dependabot](https://img.shields.io/badge/dependabot-configured-025E8C?logo=dependabot)](.github/dependabot.yml)
 
