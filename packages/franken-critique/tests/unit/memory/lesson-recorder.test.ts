@@ -1678,7 +1678,7 @@ describe('LessonRecorder', () => {
           verificationCommand: 'npm run test --workspace @franken/critique',
         },
       ],
-      correctionApplied: 'Reuse cache responses when provenance checks are present',
+      correctionApplied: 'Reuse cache responses',
     });
 
     const report = detectLessonContradictions(current, [prior]);
@@ -1690,7 +1690,7 @@ describe('LessonRecorder', () => {
         conflictingLessonId: 'prior-cache-lesson',
         evaluatorName: 'factuality',
         sharedTerms: expect.arrayContaining(['cache', 'responses', 'reuse']),
-        conflictingCorrectionApplied: 'Reuse cache responses when provenance checks are present',
+        conflictingCorrectionApplied: 'Reuse cache responses',
       }),
     ]);
   });
@@ -1717,14 +1717,14 @@ describe('LessonRecorder', () => {
       failureDescription: 'Cache reuse guidance regression',
       correctionApplied: 'Corrected in iteration 1',
       reviewerFeedback: {
-        summary: 'Cache reuse was allowed after provenance checks',
+        summary: 'Cache reuse was allowed without requiring provenance checks',
         findings: [
           {
             sourceIteration: 0,
             evaluatorName: 'factuality',
-            message: 'Cache reuse was allowed after provenance checks',
+            message: 'Cache reuse was allowed without requiring provenance checks',
             severity: 'critical',
-            suggestion: 'Reuse cache responses when provenance checks are present',
+            suggestion: 'Reuse cache responses',
           },
         ],
         suggestionsComplete: true,
@@ -1747,7 +1747,7 @@ describe('LessonRecorder', () => {
       correctionApplied: 'Do not reuse cache responses without provenance checks',
     });
     const prior = createLesson({
-      correctionApplied: 'Reuse cache responses when provenance checks are present',
+      correctionApplied: 'Reuse cache responses',
     });
 
     const unrelated = createLesson({
@@ -1871,6 +1871,77 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('does not contradict compatible conditional provenance guidance', () => {
+    const current = createLesson({
+      correctionApplied: 'Do not reuse cache responses without provenance checks',
+    });
+    const prior = createLesson({
+      correctionApplied: 'Reuse cache responses when provenance checks are present',
+    });
+    const requirePrior = createLesson({
+      correctionApplied: 'Require provenance checks before cache reuse',
+    });
+
+    expect(detectLessonContradictions(current, [prior, requirePrior])).toMatchObject({
+      status: 'clear',
+      contradictions: [],
+    });
+  });
+
+  it('reports matched reviewer guidance when the correction summary is generic', () => {
+    const current = createLesson({
+      correctionApplied: 'Corrected in iteration 1',
+      reviewerFeedback: {
+        summary: 'Cache reuse lacked provenance checks',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Cache reuse lacked provenance checks',
+            severity: 'critical',
+            suggestion: 'Do not reuse cache responses without provenance checks',
+          },
+        ],
+        suggestionsComplete: true,
+      },
+    });
+    const prior = createLesson({
+      correctionApplied: 'Corrected in iteration 1',
+      reviewerFeedback: {
+        summary: 'Cache reuse was allowed without provenance checks',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Cache reuse was allowed without provenance checks',
+            severity: 'critical',
+            suggestion: 'Reuse cache responses without provenance checks',
+          },
+        ],
+        suggestionsComplete: true,
+      },
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'contradiction_detected',
+      contradictions: [
+        expect.objectContaining({
+          conflictingCorrectionApplied: 'Corrected in iteration 1',
+          conflictingGuidance: 'Reuse cache responses without provenance checks',
+        }),
+      ],
+    });
+  });
+
+  it('recognizes should not as negated directive guidance', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Should not log PII' }),
+        [createLesson({ correctionApplied: 'Should log PII' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
   it('recognizes disallow and prohibit as negated directive guidance', () => {
     const current = createLesson({
       correctionApplied: 'Disallow cache reuse',
@@ -1927,30 +1998,30 @@ describe('LessonRecorder', () => {
     const reusePrior = createLesson({
       ...base,
       reviewerFeedback: {
-        summary: 'Reuse cache responses when provenance checks are present',
+        summary: 'Reuse cache responses without constraints',
         findings: [
           {
             sourceIteration: 0,
             evaluatorName: 'factuality',
-            message: 'Cache reuse was allowed after provenance checks',
+            message: 'Cache reuse was allowed without constraints',
             severity: 'critical',
-            suggestion: 'Reuse cache responses when provenance checks are present',
+            suggestion: 'Reuse cache responses',
           },
         ],
         suggestionsComplete: false,
       },
     });
-    const verifyPrior = createLesson({
+    const allowPrior = createLesson({
       ...base,
       reviewerFeedback: {
-        summary: 'Require verification before reusing cache responses',
+        summary: 'Allow cache reuse for matching requests',
         findings: [
           {
             sourceIteration: 0,
             evaluatorName: 'factuality',
-            message: 'Cache verification was missing before reuse',
+            message: 'Cache reuse was allowed for matching requests',
             severity: 'critical',
-            suggestion: 'Require verification before reusing cache responses',
+            suggestion: 'Allow cache reuse',
           },
         ],
         suggestionsComplete: false,
@@ -1973,7 +2044,7 @@ describe('LessonRecorder', () => {
       },
     });
 
-    const report = detectLessonContradictions(current, [reusePrior, verifyPrior]);
+    const report = detectLessonContradictions(current, [reusePrior, allowPrior]);
 
     expect(report.contradictions).toHaveLength(2);
     const ids = report.contradictions.map(

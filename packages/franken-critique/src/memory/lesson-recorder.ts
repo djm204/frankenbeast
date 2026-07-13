@@ -755,6 +755,7 @@ export function detectLessonContradictions(
           'A prior lesson from the same evaluator discusses the same normalized terms but reverses negated guidance; review before promotion.',
         conflictingFailureDescription: prior.failureDescription,
         conflictingCorrectionApplied: prior.correctionApplied,
+        conflictingGuidance: contradictionMatch.conflictingGuidance,
       },
     ];
   });
@@ -1096,15 +1097,28 @@ function sameEvaluator(a: CritiqueLesson, b: CritiqueLesson): boolean {
 function findContradictoryGuidanceMatch(
   lesson: CritiqueLesson,
   prior: CritiqueLesson,
-): { sharedTerms: string[] } | undefined {
+):
+  | {
+      sharedTerms: string[];
+      lessonGuidance: string;
+      conflictingGuidance: string;
+    }
+  | undefined {
   for (const lessonDirective of createLessonDirectiveClauses(lesson)) {
     for (const priorDirective of createLessonDirectiveClauses(prior)) {
       if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
+      if (hasCompatibleConditionalGuard(lessonDirective, priorDirective)) {
+        continue;
+      }
       const sharedTerms = sharedTextTerms(lessonDirective.text, priorDirective.text);
       if (sharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
-        return { sharedTerms };
+        return {
+          sharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
       }
     }
   }
@@ -1142,7 +1156,10 @@ type LessonDirectivePolarity = 'positive' | 'negative';
 
 interface LessonDirectiveClause {
   readonly text: string;
+  readonly sourceText: string;
   readonly polarity: LessonDirectivePolarity;
+  readonly withoutCondition?: string;
+  readonly conditionalProhibition?: boolean;
 }
 
 function createLessonDirectiveClauses(lesson: CritiqueLesson): LessonDirectiveClause[] {
@@ -1157,22 +1174,72 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
     return [];
   }
 
+  const withoutCondition = extractWithoutCondition(normalized);
+  const leadingPolarity = leadingDirectivePolarity(normalized);
+  const conditionalProhibition = leadingPolarity === 'negative' && withoutCondition !== undefined;
   const clauses: LessonDirectiveClause[] = [
     {
-      text: normalized.replace(/\bwithout\b.*$/i, '').trim() || normalized,
-      polarity: leadingDirectivePolarity(normalized),
+      text: normalized,
+      sourceText: fragment,
+      polarity: leadingPolarity,
+      ...(withoutCondition ? { withoutCondition } : {}),
+      ...(conditionalProhibition ? { conditionalProhibition } : {}),
     },
   ];
 
-  const withoutMatches = normalized.matchAll(/\bwithout\s+([^.;,]+)/gi);
-  for (const match of withoutMatches) {
-    const condition = match[1]?.trim();
-    if (condition) {
-      clauses.push({ text: condition, polarity: 'negative' });
-    }
+  if (withoutCondition) {
+    clauses.push({
+      text: withoutCondition,
+      sourceText: fragment,
+      polarity: 'negative',
+      withoutCondition,
+      ...(conditionalProhibition ? { conditionalProhibition } : {}),
+    });
   }
 
   return clauses;
+}
+
+function extractWithoutCondition(normalized: string): string | undefined {
+  const match = /\bwithout\s+([^.;,]+)/i.exec(normalized);
+  return match?.[1]?.trim() || undefined;
+}
+
+function hasCompatibleConditionalGuard(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return hasCompatibleConditionalGuardPair(a, b) || hasCompatibleConditionalGuardPair(b, a);
+}
+
+function hasCompatibleConditionalGuardPair(
+  maybeProhibition: LessonDirectiveClause,
+  maybeRequirement: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeProhibition.polarity !== 'negative' ||
+    maybeRequirement.polarity !== 'positive' ||
+    !maybeProhibition.conditionalProhibition ||
+    !maybeProhibition.withoutCondition ||
+    maybeRequirement.withoutCondition
+  ) {
+    return false;
+  }
+
+  if (!describesRequiredPrerequisite(maybeRequirement.text)) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeProhibition.withoutCondition, maybeRequirement.text).length >=
+    MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function describesRequiredPrerequisite(text: string): boolean {
+  return /\b(require|requires|required|verify|verifies|verified|verification|validate|validates|validated|validation|when|after|before|present|provenance)\b/.test(
+    text,
+  );
 }
 
 function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
@@ -1180,7 +1247,7 @@ function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
     /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled)\b/.test(
       normalized,
     ) ||
-    /^(do not|don t|must not|cannot|can t)\b/.test(normalized)
+    /^(do not|don t|must not|should not|cannot|can t)\b/.test(normalized)
   ) {
     return 'negative';
   }
