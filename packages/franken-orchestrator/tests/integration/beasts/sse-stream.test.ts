@@ -56,16 +56,23 @@ async function readSseEventsUntil(
   app: Hono,
   url: string,
   until: (events: ParsedSseEvent[]) => boolean,
-  options: { headers?: HeadersInit; onConnected?: () => void; timeoutMs?: number } = {},
+  options: {
+    headers?: HeadersInit;
+    onConnected?: () => void;
+    timeoutMs?: number;
+    continueAfterMatchMs?: number;
+  } = {},
 ): Promise<ParsedSseEvent[]> {
   const controller = new AbortController();
   const timeoutSignal = AbortSignal.timeout(options.timeoutMs ?? 1_000);
   let timedOut = false;
   let observedExpectedEvents = false;
+  let settleSignal: AbortSignal | undefined;
   const abortOnTimeout = () => {
     timedOut = true;
     controller.abort(timeoutSignal.reason);
   };
+  const abortAfterSettling = () => controller.abort(settleSignal?.reason);
 
   timeoutSignal.addEventListener('abort', abortOnTimeout, { once: true });
 
@@ -92,6 +99,12 @@ async function readSseEventsUntil(
       text += decoder.decode(value, { stream: true });
       const events = parseSseEvents(text);
       if (until(events)) {
+        if (!observedExpectedEvents && options.continueAfterMatchMs !== undefined) {
+          observedExpectedEvents = true;
+          settleSignal = AbortSignal.timeout(options.continueAfterMatchMs);
+          settleSignal.addEventListener('abort', abortAfterSettling, { once: true });
+          continue;
+        }
         observedExpectedEvents = true;
         controller.abort();
         return events;
@@ -103,6 +116,7 @@ async function readSseEventsUntil(
     }
   } finally {
     timeoutSignal.removeEventListener('abort', abortOnTimeout);
+    settleSignal?.removeEventListener('abort', abortAfterSettling);
     reader.releaseLock();
   }
 
@@ -284,7 +298,7 @@ describe('Beast SSE routes', () => {
         candidateEvents.some((e) => e.id === '2')
         && candidateEvents.some((e) => e.id === '3')
       ),
-      { headers: { 'Last-Event-ID': '1' } },
+      { headers: { 'Last-Event-ID': '1' }, continueAfterMatchMs: 25 },
     );
 
     // Should NOT contain event id=1 (already seen)
@@ -307,13 +321,14 @@ describe('Beast SSE routes', () => {
       ctx.app,
       `http://localhost/v1/beasts/events/stream?ticket=${ticket}&lastEventId=1`,
       (candidateEvents) => candidateEvents.some((e) => e.id === '2'),
+      { continueAfterMatchMs: 25 },
     );
 
     expect(events.find((e) => e.id === '1')).toBeUndefined();
     expect(events.find((e) => e.id === '2')).toBeDefined();
   });
 
-  it.each([
+  it.each<Array<[string, { headers?: HeadersInit; query?: string }]>>([
     ['partial numeric Last-Event-ID header', { headers: { 'Last-Event-ID': '10abc' } }],
     ['non-numeric lastEventId query', { query: 'lastEventId=abc' }],
     ['negative lastEventId query', { query: 'lastEventId=-1' }],
@@ -370,7 +385,7 @@ describe('Beast SSE routes', () => {
       ctx.app,
       'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
       (candidateEvents) => candidateEvents.some((e) => e.id === '1'),
-      { headers: { 'Last-Event-ID': '0' } },
+      { headers: { 'Last-Event-ID': '0' }, continueAfterMatchMs: 25 },
     );
     expect(events.find((e) => e.event === 'snapshot')).toBeUndefined();
   });
