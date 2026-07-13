@@ -1794,8 +1794,81 @@ describe('LessonRecorder', () => {
       status: 'not_checked',
       guidance: expect.stringContaining('Lesson search adapter failed'),
       contradictions: [],
+    });
+  });
 
+  it('uses corrective guidance polarity so failure prose negation alone does not block matching fixes', () => {
+    const current = createLesson({
+      failureDescription: 'Cache did not verify provenance before reuse',
+      correctionApplied: 'Require provenance verification before cache reuse',
+    });
+    const prior = createLesson({
+      failureDescription: 'Cache skipped provenance before reuse',
+      correctionApplied: 'Require provenance verification before cache reuse',
+    });
 
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'clear',
+      contradictions: [],
+    });
+  });
+
+  it('ignores reviewer finding prose when checking corrective guidance polarity', () => {
+    const current = createLesson({
+      failureDescription: 'Cache did not verify provenance before reuse',
+      correctionApplied: 'Require provenance verification before cache reuse',
+      reviewerFeedback: {
+        summary: 'Cache did not verify provenance before reuse',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Cache did not verify provenance before reuse',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+    const prior = createLesson({
+      failureDescription: 'Cache skipped provenance before reuse',
+      correctionApplied: 'Require provenance verification before cache reuse',
+      reviewerFeedback: {
+        summary: 'Cache skipped provenance before reuse',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Cache skipped provenance before reuse',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'clear',
+      contradictions: [],
+    });
+  });
+
+  it('distinguishes leading prohibitions from conditional without clauses', () => {
+    const current = createLesson({
+      correctionApplied: 'Do not reuse cache responses without provenance checks',
+    });
+    const prior = createLesson({
+      correctionApplied: 'Reuse cache responses without provenance checks',
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'contradiction_detected',
+      contradictions: [
+        expect.objectContaining({
+          sharedTerms: expect.arrayContaining(['cache', 'responses', 'reuse']),
+        }),
+      ],
+    });
   });
 
   it('recognizes disallow and prohibit as negated directive guidance', () => {
