@@ -246,7 +246,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, runNetworkCommand } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -856,6 +856,16 @@ describe('validateStateDirBeforeScaffold', () => {
       stateDir,
       allowCrossProfileStateAccess: true,
     }, { stateDir: join(tmpdir(), 'unused-default-state') })).not.toThrow();
+  });
+
+  it('scaffolds the configured stateDir instead of the repo default when present', () => {
+    const defaultStateDir = symlinkedCrossProfileState();
+    const configuredStateDir = join(tmpdir(), 'operator-state-dir');
+
+    expect(resolveScaffoldStateDir({
+      ...defaultConfig(),
+      stateDir: configuredStateDir,
+    }, { stateDir: defaultStateDir })).toBe(configuredStateDir);
   });
 });
 

@@ -159,7 +159,7 @@ export function validateStateDirBeforeScaffold(
   paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
 ): void {
   const configuredStateDir = config.stateDir;
-  const stateDir = configuredStateDir ?? paths.stateDir;
+  const stateDir = resolveScaffoldStateDir(config, paths);
   const issue = validateCrossProfileStateDir({
     stateDir,
     allowCrossProfileStateAccess: configuredStateDir
@@ -169,6 +169,13 @@ export function validateStateDirBeforeScaffold(
   if (issue) {
     throw new Error(issue);
   }
+}
+
+export function resolveScaffoldStateDir(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): string {
+  return config.stateDir ?? paths.stateDir;
 }
 
 export interface ResumeTarget {
@@ -1002,8 +1009,9 @@ export async function main(): Promise<void> {
     return;
   }
 
-  validateStateDirBeforeScaffold(config, paths);
-  scaffoldFrankenbeast(paths);
+  const scaffoldPaths = { ...paths, stateDir: resolveScaffoldStateDir(config, paths) };
+  validateStateDirBeforeScaffold(config, scaffoldPaths);
+  scaffoldFrankenbeast(scaffoldPaths);
 
   if (args.subcommand === 'beasts-daemon') {
     await runBeastDaemonCommand(args, config, root, paths);
