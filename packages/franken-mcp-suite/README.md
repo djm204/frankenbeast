@@ -158,6 +158,21 @@ default central trail from the shared database with:
 fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })
 ```
 
+### Tamper-evident audit chain
+
+`fbeast_observer_log` stores each audit row with a SHA-256 hash that binds the
+session id, event type, exact stored payload bytes, and the previous row's hash.
+The `audit_trail` table is append-only by default: direct `UPDATE` and `DELETE`
+statements are rejected by SQLite triggers, and the only code path that unlocks
+mutation is the internal legacy-hash migration used by `fbeast_observer_verify`.
+There is no operator flag to rewrite history; if a row is corrupted, append a
+new explanatory event and keep the broken row for forensics.
+
+Use `fbeast_observer_verify({ sessionId })` before relying on a trail. A clean
+result means every row in that session still matches the hash chain. A failure
+reports the first invalid index so operators can inspect that row without dumping
+sensitive payloads into logs or issue comments.
+
 ## Combined server
 
 `fbeast-mcp` runs all 21 tools in a single MCP server process.
