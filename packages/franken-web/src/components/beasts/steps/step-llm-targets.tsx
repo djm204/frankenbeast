@@ -10,7 +10,7 @@ export function StepLlmTargets() {
   const dashboardProviders = useDashboardStore((state) => state.providers);
   const providersLoading = useDashboardStore((state) => state.loading);
   const providersError = useDashboardStore((state) => state.error);
-  const providers = dashboardProvidersToModelOptions(dashboardProviders);
+  const providers = providersLoading || providersError ? [] : dashboardProvidersToModelOptions(dashboardProviders);
   const hasProviderStatus = providersLoading || providersError || providers.length === 0;
   const values = (stepValues[2] ?? {}) as {
     defaultProvider?: string;

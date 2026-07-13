@@ -64,6 +64,21 @@ describe('StepLlmTargets', () => {
     expect(screen.queryByText('Claude Sonnet 4.6')).toBeNull();
   });
 
+  it('hides cached provider choices while a fresh provider snapshot is loading', () => {
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'stale-openai', type: 'openai-api', available: true, failoverOrder: 0, model: 'stale-model' }],
+    });
+    useDashboardStore.getState().setLoading(true);
+
+    render(<StepLlmTargets />);
+
+    expect(screen.getByText(/loading configured llm providers/i)).toBeTruthy();
+    expect(screen.queryByText('stale-openai')).toBeNull();
+    expect(screen.queryByText('stale-model')).toBeNull();
+  });
+
   it('clearly shows an empty configured provider list without fallback options', () => {
     useDashboardStore.getState().setSnapshot({ skills: [], security: snapshotSecurity, providers: [] });
 
@@ -74,12 +89,19 @@ describe('StepLlmTargets', () => {
   });
 
   it('clearly shows provider load errors without fallback options', () => {
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'stale-openai', type: 'openai-api', available: true, failoverOrder: 0, model: 'stale-model' }],
+    });
     useDashboardStore.setState({ loading: false, error: 'HTTP 500' } as Partial<ReturnType<typeof useDashboardStore.getState>>);
 
     render(<StepLlmTargets />);
 
     expect(screen.getByText(/could not load configured llm providers/i)).toBeTruthy();
     expect(screen.getByText(/HTTP 500/)).toBeTruthy();
+    expect(screen.queryByText('stale-openai')).toBeNull();
+    expect(screen.queryByText('stale-model')).toBeNull();
     expect(screen.queryByText('Claude Sonnet 4.6')).toBeNull();
   });
 });

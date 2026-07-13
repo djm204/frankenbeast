@@ -73,16 +73,22 @@ export function BeastsPage({
   useEffect(() => {
     if (!showWizard) return undefined;
     let cancelled = false;
+    let settled = false;
     setDashboardLoading(true);
     setDashboardError(null);
     dashboardClient.fetchSnapshot()
       .then((snapshot) => {
+        settled = true;
         if (!cancelled) setSnapshot(snapshot);
       })
       .catch((err) => {
+        settled = true;
         if (!cancelled) setDashboardError(err instanceof Error ? err.message : 'Provider configuration request failed.');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (!settled) setDashboardLoading(false);
+    };
   }, [dashboardClient, setDashboardError, setDashboardLoading, setSnapshot, showWizard]);
 
   function handleOpenWizard() {
