@@ -624,7 +624,9 @@ npm run bootstrap -- --services
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npm run local:seed
 
-# Verify everything is running. This probes the same CHROMA_URL endpoint.
+# Verify everything is running. This probes the same CHROMA_URL endpoint,
+# plus fixed compose defaults for Grafana (http://localhost:3000/api/health)
+# and Tempo readiness (http://localhost:3200/ready).
 npm run local:verify-setup
 ```
 
