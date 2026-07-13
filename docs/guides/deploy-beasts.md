@@ -87,6 +87,16 @@ VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4051 \
   npm --workspace @franken/web run dev
 ```
 
+Use this matrix to align the deploy-beasts setup with the chat dashboard guide:
+
+| Local workflow | Backend topology | Vite env vars to set |
+| --- | --- | --- |
+| Dashboard chat only | Only `chat-server` is needed, typically on `http://127.0.0.1:3737` | Use `npm --workspace @franken/web run dev:chat` on defaults, or set `VITE_API_PROXY_TARGET` to the custom chat-server URL. Leave `VITE_API_URL` unset. |
+| Deploy Beasts through `chat-server` compatibility proxy | `chat-server` serves chat/API routes and proxies `/v1/beasts/*` to its in-process or attached Beast control plane | Set `VITE_API_PROXY_TARGET` to the chat-server URL. Leave `VITE_BEAST_API_PROXY_TARGET` unset unless Beast routes must bypass chat-server. |
+| Deploy Beasts against a separate daemon | `beasts-daemon` owns `/v1/beasts/*` on a different URL from chat/API | Set `VITE_API_PROXY_TARGET` to the chat-server URL and `VITE_BEAST_API_PROXY_TARGET` to the daemon URL. Export the same server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` for the daemon, chat-server, and Vite proxy processes. |
+
+Do not use `VITE_API_URL` to choose the local dashboard backend. Current local Vite development intentionally keeps browser API calls same-origin through the proxy so REST requests and operator-token injection stay server-side.
+
 Open the Vite URL, usually `http://127.0.0.1:5173/`, and navigate to **Beasts**.
 
 ## 3. Choose a Beast and execution boundary
