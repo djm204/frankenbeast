@@ -112,6 +112,12 @@ on:
       expect(() => parseWorkflowYaml(content)).not.toThrow();
     });
 
+    it('has required top-level workflow keys', () => {
+      expect(workflow).toHaveProperty('name');
+      expect(workflow).toHaveProperty('on');
+      expect(workflow).toHaveProperty('jobs');
+    });
+
     it('has a workflow name', () => {
       expect(workflow.name).toBe('CI');
     });
@@ -318,14 +324,7 @@ on:
   });
 });
 
-  describe('release-please.yml publishes released npm packages', () => {
-
-  // Added test for required top-level keys
-  it('has required top-level keys', () => {
-    expect(workflow).toHaveProperty('name');
-    expect(workflow).toHaveProperty('on');
-    expect(workflow).toHaveProperty('jobs');
-  });
+describe('release-please.yml publishes released npm packages', () => {
   let content: string;
   let workflow: Record<string, unknown>;
   let jobs: Record<string, unknown>;
