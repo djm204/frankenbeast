@@ -335,6 +335,24 @@ describe('Session.runIssues()', () => {
     expect(mockFinalize).toHaveBeenCalledTimes(1);
   });
 
+  it('treats empty issue filters as a no-op before triage or review', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    mockFetcher.fetch.mockResolvedValueOnce([]);
+    const config = makeConfig();
+    const session = new Session(config);
+
+    await expect(session.runIssues()).resolves.toBeUndefined();
+
+    expect(mockTriageInstance.triage).not.toHaveBeenCalled();
+    expect(mockReviewInstance.review).not.toHaveBeenCalled();
+    expect(mockRunnerInstance.run).not.toHaveBeenCalled();
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'No issues matched the provided filters; exiting without triage or execution.',
+      'issues',
+    );
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
   it('finalizes issue-mode dependencies when execution throws', async () => {
     const { Session } = await import('../../../src/cli/session.js');
     mockRunnerInstance.run.mockRejectedValueOnce(new Error('runner failed'));

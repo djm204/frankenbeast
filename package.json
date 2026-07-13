@@ -36,6 +36,7 @@
     "ci:test:packages": "node scripts/retry-ci-command.mjs -- npx turbo run test",
     "ci:test:planner-integration": "node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner",
     "ci:test:observer-eval": "node scripts/retry-ci-command.mjs -- npm run test:eval --workspace @franken/observer",
+    "ci:test:e2e": "node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts",
     "test:root": "vitest run",
     "test:docker:sandbox": "node scripts/run-docker-sandbox-smoke.mjs",
     "test:root:watch": "vitest",

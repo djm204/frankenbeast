@@ -28,6 +28,7 @@ export type NetworkAction =
   | 'restart'
   | 'logs'
   | 'config'
+  | 'credentials'
   | 'help'
   | undefined;
 
@@ -102,7 +103,7 @@ export interface CliArgs {
 }
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'skill', 'security']);
-const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
+const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -219,6 +220,7 @@ Network Commands:
   network restart <service|all>       Restart one managed service or all
   network logs <service|all>          Show service logs
   network config [--set a.b.c=value]  Inspect or update operator config
+  network credentials                 Print scoped credential refs inventory (never secret values)
   network help                        Show network command help
 
 Beast Commands:
@@ -383,6 +385,50 @@ function parseIntegerOption(name: string, value: string, options: { min?: number
   return parsed;
 }
 
+function assertNoExtraPositionals(commandName: string, positionals: string[], maxPositionals: number): void {
+  const unexpected = positionals[maxPositionals];
+  if (unexpected !== undefined) {
+    throw new TypeError(`Unexpected argument '${unexpected}' for ${commandName} command`);
+  }
+}
+
+function maxNetworkPositionals(action: NetworkAction): number {
+  if (action === 'start' || action === 'stop' || action === 'restart' || action === 'logs') return 2;
+  if (action === undefined) return 0;
+  return 1;
+}
+
+function maxBeastPositionals(action: BeastAction): number {
+  if (
+    action === 'create'
+    || action === 'spawn'
+    || action === 'status'
+    || action === 'logs'
+    || action === 'stop'
+    || action === 'kill'
+    || action === 'restart'
+    || action === 'resume'
+    || action === 'delete'
+  ) {
+    return 2;
+  }
+  if (action === undefined) return 0;
+  return 1;
+}
+
+function maxSkillPositionals(action: SkillAction): number {
+  if (action === 'add') return 3;
+  if (action === 'scaffold' || action === 'remove' || action === 'enable' || action === 'disable' || action === 'info') return 2;
+  if (action === undefined) return 0;
+  return 1;
+}
+
+function maxSecurityPositionals(action: SecurityAction): number {
+  if (action === 'set') return 2;
+  if (action === undefined) return 0;
+  return 1;
+}
+
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   // Extract the first subcommand positional, even when global flags precede it.
   const { subcommand, flagArgs } = extractSubcommand(argv);
@@ -467,6 +513,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       networkAction = actionCandidate as NetworkAction;
     }
+    assertNoExtraPositionals('network', positionals, maxNetworkPositionals(networkAction));
     networkTarget = positionals[1];
   } else if (subcommand === 'beasts') {
     const actionCandidate = positionals[0];
@@ -476,6 +523,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       beastAction = actionCandidate as BeastAction;
     }
+    assertNoExtraPositionals('beasts', positionals, maxBeastPositionals(beastAction));
     beastTarget = positionals[1];
   } else if (subcommand === 'skill') {
     const actionCandidate = positionals[0];
@@ -485,6 +533,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       skillAction = actionCandidate as SkillAction;
     }
+    assertNoExtraPositionals('skill', positionals, maxSkillPositionals(skillAction));
     skillTarget = positionals[1];
     skillCommand = positionals[2];
     skillCommandArgs = rawSkillAddCommandArgs !== undefined
@@ -498,6 +547,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       }
       securityAction = actionCandidate as SecurityAction;
     }
+    assertNoExtraPositionals('security', positionals, maxSecurityPositionals(securityAction));
     securityTarget = positionals[1];
     if (securityAction === 'set' && securityTarget !== undefined) {
       const validProfiles = new Set(['strict', 'standard', 'permissive']);

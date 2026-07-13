@@ -655,6 +655,8 @@ import { WebhookNotifier, CircuitBreaker, LoopDetector } from '@franken/observer
 
 const notifier = new WebhookNotifier({
   url: process.env.SLACK_WEBHOOK_URL!,
+  // Required allowlist: the configured target URL must resolve to one of these origins.
+  allowedTargetOrigins: ['https://hooks.slack.com'],
   // Optional extra headers (auth, custom content-type, etc.)
   headers: { 'X-Source': 'frankenbeast' },
 })
@@ -675,6 +677,8 @@ detector.on('loop-detected', result => {
 ```
 
 `send()` throws on non-2xx responses and network errors. For fire-and-forget use inside event handlers, handle rejections with `.catch()` or `void`.
+
+Webhook targets are deny-by-default: configure `allowedTargetOrigins` with the trusted webhook origins that may receive HITL payloads. The configured `url` must resolve to one of those origins before any network request is attempted, and redirects are not followed automatically so an allowlisted endpoint cannot forward the POST body to an unlisted origin. Legacy deployments can set `allowUnlistedTarget: true` as an explicit unsafe opt-out while they migrate to an allowlist.
 
 ---
 

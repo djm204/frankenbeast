@@ -817,6 +817,41 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('shows and clears stream reconnect failures reported after subscription setup', async () => {
+    let pushSnapshot!: (nextSnapshot: DashboardSnapshot) => void;
+    let pushError!: (error: Error) => void;
+    const client = mockClient({
+      subscribeToDashboard: vi.fn((
+        onSnapshot: (nextSnapshot: DashboardSnapshot) => void,
+        onError?: (error: Error) => void,
+      ) => {
+        pushSnapshot = onSnapshot;
+        pushError = onError ?? (() => undefined);
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<DashboardPage client={client} />);
+    await screen.findByRole('switch', { name: 'Enable shell' });
+
+    act(() => {
+      pushError(new Error('Dashboard stream reconnect failed. HTTP 503'));
+    });
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Unable to process dashboard stream update. Dashboard stream reconnect failed. HTTP 503',
+    );
+
+    act(() => {
+      pushSnapshot({ ...snapshot, security: { ...snapshot.security, profile: 'strict' } });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Unable to process dashboard stream update/)).toBeNull();
+      expect((screen.getByLabelText('Profile:') as HTMLSelectElement).value).toBe('strict');
+    });
+  });
+
   it('keeps mutation failure alerts when retrying the dashboard stream', async () => {
     const client = mockClient({
       subscribeToDashboard: vi.fn()

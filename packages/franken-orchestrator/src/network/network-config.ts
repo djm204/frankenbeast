@@ -114,6 +114,7 @@ export const SlackChannelConfigSchema = z.object({
   appId: z.string().min(1).optional(),
   botTokenRef: z.string().min(1).optional(),
   signingSecretRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const DiscordChannelConfigSchema = z.object({
@@ -121,12 +122,14 @@ export const DiscordChannelConfigSchema = z.object({
   applicationId: z.string().min(1).optional(),
   botTokenRef: z.string().min(1).optional(),
   publicKeyRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const TelegramChannelConfigSchema = z.object({
   enabled: z.boolean().default(false),
   botTokenRef: z.string().min(1).optional(),
   webhookSecretTokenRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const WhatsAppChannelConfigSchema = z.object({
@@ -135,6 +138,7 @@ export const WhatsAppChannelConfigSchema = z.object({
   phoneNumberIdRef: z.string().min(1).optional(),
   appSecretRef: z.string().min(1).optional(),
   verifyTokenRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const CommsServiceConfigSchema = z.object({

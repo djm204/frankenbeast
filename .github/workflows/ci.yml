@@ -86,6 +86,9 @@ jobs:
       - name: Run root and package CI test suite
         run: npm run test:ci
 
+      - name: Run orchestrator E2E smoke CI suite
+        run: npm run ci:test:e2e
+
       - name: Phantom dependency check (every runtime import is declared)
         run: node scripts/check-phantom-deps.mjs
 

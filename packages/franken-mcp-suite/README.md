@@ -30,6 +30,14 @@ fbeast mcp init --pick=memory,firewall,governor
 fbeast mcp init --mode=proxy
 ```
 
+Proxy mode protects file-backed tools when it cannot identify a project root. If
+`fbeast-proxy` is launched with a standalone database path outside
+`<project>/.fbeast/beast.db` and no explicit root, file-backed tools such as
+`fbeast_firewall_scan_file` fail closed in protected mode instead of treating the
+process cwd as trusted. Start the server with `--root /absolute/project/root` or
+use a `.fbeast/beast.db` path under the initialized project to enable those tools
+with project-root containment.
+
 `fbeast mcp init` auto-detects your client (Claude Code, Gemini CLI, or Codex CLI) and registers MCP servers in the appropriate project-scoped config. For Claude, MCP servers are written to the current project's `.mcp.json` and optional hooks/instructions to `.claude/settings.json` / `.claude/`; for Gemini, MCP servers and optional hooks are written to `.gemini/settings.json`. fbeast does not mutate your user-global Claude/Gemini settings by default, preventing one project's MCP database/root from being reused in another checkout. Override with `--client=claude|gemini|codex`.
 
 ## Uninstall
@@ -150,9 +158,35 @@ default central trail from the shared database with:
 fbeast_observer_trail({ sessionId: 'fbeast-central-dispatch' })
 ```
 
+### Tamper-evident audit chain
+
+`fbeast_observer_log` stores each audit row with a SHA-256 hash that binds the
+session id, event type, exact stored payload bytes, and the previous row's hash.
+The `audit_trail` table is append-only by default: direct `UPDATE` and `DELETE`
+statements are rejected by SQLite triggers, and the only code path that unlocks
+mutation is the internal legacy-hash migration used by `fbeast_observer_verify`.
+There is no operator flag to rewrite history; if a row is corrupted, append a
+new explanatory event and keep the broken row for forensics.
+
+Use `fbeast_observer_verify({ sessionId })` before relying on a trail. A clean
+result means every row in that session still matches the hash chain. A failure
+reports the first invalid index so operators can inspect that row without dumping
+sensitive payloads into logs or issue comments.
+
 ## Combined server
 
 `fbeast-mcp` runs all 21 tools in a single MCP server process.
+
+## Tool argument shape hardening
+
+All MCP server and proxy dispatch paths validate tool arguments before governance
+or handlers run. Arguments must be plain JSON objects and may not contain the
+prototype-pollution key denylist (`__proto__`, `prototype`, or `constructor`) at
+any nested level. Accessor properties and non-plain objects are rejected as
+unsafe shapes instead of being inspected, so operator error messages name the
+invalid shape/key without echoing nested payload values. To intentionally pass
+arbitrary content, encode it as a string value accepted by the target tool schema
+rather than adding dynamic object keys.
 
 ## Testing
 
