@@ -1,0 +1,37 @@
+name: Orchestrator E2E
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly on Sundays at 06:00 UTC (low-traffic time)
+    - cron: '0 6 * * 0'
+
+jobs:
+  orchestrator-e2e:
+    name: Run orchestrator E2E suite
+    runs-on: ubuntu-latest
+    env:
+      CI_TEST_RETRIES: ${{ vars.CI_TEST_RETRIES || '2' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Enable packageManager-pinned npm
+        run: |
+          npm install -g corepack@0.34.4
+          corepack enable npm
+          corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+
+      - run: npm ci
+
+      - name: Run package build and typecheck
+        run: npx turbo run build typecheck
+
+      - name: Run orchestrator E2E suite
+        run: npm run ci:test:e2e
