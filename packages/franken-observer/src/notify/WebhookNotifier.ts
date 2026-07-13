@@ -107,7 +107,7 @@ function redactWebhookSecrets(value: string): string {
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
     .replace(/("(?:authorization|x-api-key|api-key|x-auth-token)"\s*:\s*)"[^"\r\n,;<>}]*$/gim, '$1"[REDACTED]"')
     .replace(/\bAuthorization:\s*Bearer \*\*\*(?:\s+X-Api-Key=[^\r\n,;<>}]+)?/gi, 'Authorization: ***')
-    .replace(/(^|[\s;])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)(?!\s*\*\*\*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]')
+    .replace(/(^|[\s;{])((?:authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*)(?!\s*\*\*\*)[^\r\n,;<>}]+/gi, '$1$2[REDACTED]')
     .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
 }
 
@@ -240,6 +240,7 @@ export class WebhookNotifier {
     const chunks: Uint8Array[] = []
     let totalBytes = 0
     let timedOut = false
+    let truncated = false
     const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
 
     try {
@@ -270,18 +271,24 @@ export class WebhookNotifier {
           break
         }
         const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
-        const boundedChunk = value.byteLength > remainingBytes ? value.subarray(0, remainingBytes) : value
+        truncated = value.byteLength > remainingBytes
+        const boundedChunk = truncated ? value.subarray(0, remainingBytes) : value
         chunks.push(boundedChunk)
         totalBytes += boundedChunk.byteLength
+        if (totalBytes >= MAX_ERROR_BODY_CHARS) {
+          truncated = true
+          break
+        }
       }
-      if (totalBytes >= MAX_ERROR_BODY_CHARS || timedOut) {
+      if (truncated || timedOut) {
         await reader.cancel()
       }
     } finally {
       reader.releaseLock()
     }
 
-    return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
+    const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
+    return truncated || timedOut ? `${decoded}…` : decoded
   }
 
   private assertTargetAllowed(): void {
