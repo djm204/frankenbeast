@@ -216,7 +216,15 @@ export class NetworkApiClient {
 
   private async parseStructuredError(response: Response): Promise<ApiErrorEnvelope | null> {
     if (typeof response.clone !== 'function') {
-      return null;
+      const jsonOnlyResponse = response as { json?: () => Promise<unknown> };
+      if (typeof jsonOnlyResponse.json !== 'function') {
+        return null;
+      }
+      try {
+        return await jsonOnlyResponse.json() as ApiErrorEnvelope;
+      } catch {
+        return null;
+      }
     }
     const contentType = response.headers?.get('content-type') ?? '';
     if (!contentType.toLowerCase().includes('json')) {
