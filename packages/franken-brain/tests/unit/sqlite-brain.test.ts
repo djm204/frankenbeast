@@ -703,6 +703,221 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('encrypts snapshots hydrated with checkpoint payloads', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-hydrate-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const hydrated = SqliteBrain.hydrate(
+          {
+            version: 1,
+            timestamp: '2026-07-13T00:00:00.000Z',
+            working: { snapshotSecret: 'working secret' },
+            episodic: [],
+            checkpoint: {
+              runId: 'run-hydrate',
+              phase: 'restore',
+              step: 1,
+              context: { restoredSecret: 'checkpoint secret' },
+              timestamp: '2026-07-13T00:00:00.000Z',
+            },
+            metadata: { lastProvider: '', switchReason: '' },
+          },
+          dbPath,
+          undefined,
+          { encryption },
+        );
+        hydrated.close();
+
+        const raw = new Database(dbPath, { readonly: true });
+        const checkpointRow = raw
+          .prepare(`SELECT state FROM checkpoints LIMIT 1`)
+          .get() as { state: string };
+        expect(checkpointRow.state).toMatch(/^enc:v1:/);
+        expect(checkpointRow.state).not.toContain('checkpoint secret');
+        raw.close();
+
+        const reopened = new SqliteBrain(dbPath, undefined, { encryption });
+        expect(reopened.recovery.lastCheckpoint()?.context).toEqual({
+          restoredSecret: 'checkpoint secret',
+        });
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('encrypts plaintext values that begin with the ciphertext marker', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-prefix-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+      const markerText = 'enc:v1:this is user text, not ciphertext';
+
+      try {
+        const encrypted = new SqliteBrain(dbPath, undefined, { encryption });
+        encrypted.working.set('marker', markerText);
+        encrypted.episodic.record({
+          type: 'observation',
+          summary: markerText,
+          createdAt: '2026-07-13T00:00:00.000Z',
+        });
+        encrypted.flush();
+        encrypted.close();
+
+        const raw = new Database(dbPath, { readonly: true });
+        const workingRow = raw
+          .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+          .get('marker') as { value: string };
+        const eventRow = raw
+          .prepare(`SELECT summary FROM episodic_events LIMIT 1`)
+          .get() as { summary: string };
+        expect(workingRow.value).toMatch(/^enc:v1:/);
+        expect(workingRow.value).not.toBe(markerText);
+        expect(eventRow.summary).toMatch(/^enc:v1:/);
+        expect(eventRow.summary).not.toBe(markerText);
+        raw.close();
+
+        const reopened = new SqliteBrain(dbPath, undefined, { encryption });
+        expect(reopened.working.get('marker')).toBe(markerText);
+        expect(reopened.episodic.recent(1)[0]?.summary).toBe(markerText);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps dry-run encryption migration read-only for legacy databases', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-legacy-dry-run-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const db = new Database(dbPath);
+        db.exec(`
+          CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+          CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+          CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+          INSERT INTO working_memory (key, value, updated_at) VALUES ('legacy', 'plaintext', '2026-07-13T00:00:00.000Z');
+        `);
+        db.close();
+
+        const dryRun = SqliteBrain.migrateMemoryEncryption(dbPath, {
+          ...encryption,
+          dryRun: true,
+        });
+        expect(dryRun.migrated).toBe(true);
+
+        const after = new Database(dbPath, { readonly: true });
+        const statusTable = after
+          .prepare(
+            `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_encryption_status'`,
+          )
+          .get();
+        expect(statusTable).toBeUndefined();
+        after.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves unencrypted recall scoring when encryption is enabled', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-recall-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const encrypted = new SqliteBrain(dbPath, undefined, { encryption });
+        encrypted.episodic.record({
+          type: 'observation',
+          summary: 'alpha summary',
+          details: { note: 'alpha details' },
+          createdAt: '2026-07-13T00:00:00.000Z',
+        });
+        encrypted.episodic.record({
+          type: 'observation',
+          summary: 'alpha summary',
+          createdAt: '2026-07-13T00:01:00.000Z',
+        });
+        expect(
+          encrypted.episodic.recall('alpha', 2).map((event) => event.createdAt),
+        ).toEqual(['2026-07-13T00:00:00.000Z', '2026-07-13T00:01:00.000Z']);
+        encrypted.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects future schemas before encryption migration mutates them', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-future-schema-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const db = new Database(dbPath);
+        db.exec(`
+          CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
+          CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, schema_version INTEGER NOT NULL);
+          INSERT INTO memory_schema_versions (store, version, migrated_at) VALUES ('working_memory', ${CURRENT_MEMORY_SCHEMA_VERSION + 1}, '2026-07-13T00:00:00.000Z');
+          INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES ('future', 'plaintext', '2026-07-13T00:00:00.000Z', ${CURRENT_MEMORY_SCHEMA_VERSION + 1});
+        `);
+        db.close();
+
+        expect(() =>
+          SqliteBrain.migrateMemoryEncryption(dbPath, encryption),
+        ).toThrow(UnsupportedMemorySchemaVersionError);
+        const after = new Database(dbPath, { readonly: true });
+        expect(
+          (
+            after
+              .prepare(`SELECT value FROM working_memory WHERE key = 'future'`)
+              .get() as { value: string }
+          ).value,
+        ).toBe('plaintext');
+        after.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects plaintext rows in stores already marked encrypted', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-plaintext-row-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const encrypted = new SqliteBrain(dbPath, undefined, { encryption });
+        encrypted.working.set('secret', 'ciphertext');
+        encrypted.flush();
+        encrypted.close();
+
+        const tamper = new Database(dbPath);
+        tamper
+          .prepare(
+            `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ?)`,
+          )
+          .run(
+            'plaintext',
+            'not encrypted',
+            '2026-07-13T00:00:00.000Z',
+            CURRENT_MEMORY_SCHEMA_VERSION,
+          );
+        tamper.close();
+
+        expect(
+          () => new SqliteBrain(dbPath, undefined, { encryption }),
+        ).toThrow(MemoryEncryptionMigrationRequiredError);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('fails closed when key material is missing, omitted, or wrong', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-encryption-key-'));
       const dbPath = join(dir, 'brain.db');

@@ -167,7 +167,6 @@ class MemoryCipher {
   }
 
   encrypt(plaintext: string): string {
-    if (isEncryptedPayload(plaintext)) return plaintext;
     const iv = randomBytes(12);
     const cipher = createCipheriv(MEMORY_ENCRYPTION_ALGORITHM, this.key, iv);
     const ciphertext = Buffer.concat([
@@ -711,10 +710,15 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       .all() as EpisodicRow[];
     const scored = rowsToEvents(rows, -1, this.encryption)
       .map((event) => {
-        const haystack =
-          `${event.summary} ${event.details ? JSON.stringify(event.details) : ''}`.toLowerCase();
+        const summary = event.summary.toLowerCase();
+        const details = event.details
+          ? JSON.stringify(event.details).toLowerCase()
+          : '';
         const score = keywords.reduce(
-          (sum, keyword) => sum + (haystack.includes(keyword) ? 1 : 0),
+          (sum, keyword) =>
+            sum +
+            (summary.includes(keyword) ? 1 : 0) +
+            (details.includes(keyword) ? 1 : 0),
           0,
         );
         return { event, score };
@@ -887,6 +891,7 @@ export class SqliteBrain implements IBrain {
   readonly recovery: SqliteRecoveryMemory;
 
   private db: Database.Database;
+  private readonly encryption: MemoryCipher | undefined;
 
   constructor(
     dbPath: string = ':memory:',
@@ -901,6 +906,7 @@ export class SqliteBrain implements IBrain {
     this.initSchema();
     migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
     const encryption = makeMemoryCipher(options.encryption);
+    this.encryption = encryption;
     assertMemoryEncryptionState(this.db, dbPath, encryption);
     this.working = new SqliteWorkingMemory(
       this.db,
@@ -979,6 +985,7 @@ export class SqliteBrain implements IBrain {
       options.dryRun ? { readonly: true, fileMustExist: true } : {},
     );
     try {
+      assertSupportedMemorySchema(db);
       if (!options.dryRun) {
         db.pragma('busy_timeout = 5000');
         db.pragma('journal_mode = WAL');
@@ -1085,7 +1092,8 @@ export class SqliteBrain implements IBrain {
 
         if (snapshot.checkpoint) {
           insertCheckpoint.run(
-            JSON.stringify(snapshot.checkpoint),
+            brain.encryption?.encrypt(JSON.stringify(snapshot.checkpoint)) ??
+              JSON.stringify(snapshot.checkpoint),
             snapshot.checkpoint.timestamp,
           );
         }
@@ -1250,12 +1258,14 @@ function migrateMemoryEncryptionDatabase(
   cipher: MemoryCipher,
   options: MemoryEncryptionMigrationOptions,
 ): MemoryEncryptionMigrationResult {
-  ensureMemoryEncryptionStatusTable(db);
-  verifyExistingEncryptedStores(db, cipher);
   const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    ensureMemoryEncryptionStatusTable(db);
+  }
+  verifyExistingEncryptedStores(db, cipher);
   const operations: MemorySchemaMigrationOperation[] = [];
   for (const store of MEMORY_STORES) {
-    if (hasPlaintextStoreRows(db, store)) {
+    if (hasPlaintextStoreRows(db, store, cipher)) {
       operations.push({
         table: store,
         action: `encrypt ${store} persisted payloads with ${cipher.algorithm}`,
@@ -1311,6 +1321,15 @@ function assertMemoryEncryptionState(
   const storesWithoutStatus = metadata.stores.filter(
     (store) => !store.encrypted,
   );
+  const plaintextStores = metadata.stores.filter((store) =>
+    hasPlaintextStoreRows(db, store.store as MemoryStoreName, cipher),
+  );
+  if (plaintextStores.length > 0) {
+    throw new MemoryEncryptionMigrationRequiredError(
+      `Memory encryption is enabled but ${plaintextStores.map((store) => store.store).join(', ')} contain plaintext rows; run SqliteBrain.migrateMemoryEncryption() with a backup before opening`,
+    );
+  }
+
   if (storesWithoutStatus.length === 0) return;
 
   const storesWithData = storesWithoutStatus.filter(
@@ -1328,7 +1347,7 @@ function verifyExistingEncryptedStores(
   db: Database.Database,
   cipher: MemoryCipher,
 ): void {
-  ensureMemoryEncryptionStatusTable(db);
+  if (!tableExists(db, 'memory_encryption_status')) return;
   const rows = db
     .prepare(`SELECT store, encrypted, verifier FROM memory_encryption_status`)
     .all() as Array<{
@@ -1346,6 +1365,16 @@ function verifyExistingEncryptedStores(
   }
 }
 
+function tableExists(db: Database.Database, table: string): boolean {
+  return (
+    (db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+      )
+      .get(table) as unknown) !== undefined
+  );
+}
+
 function ensureMemoryEncryptionStatusTable(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS memory_encryption_status (
@@ -1361,7 +1390,12 @@ function ensureMemoryEncryptionStatusTable(db: Database.Database): void {
 function readMemoryEncryptionMetadata(
   db: Database.Database,
 ): MemoryEncryptionMetadata {
-  ensureMemoryEncryptionStatusTable(db);
+  if (!tableExists(db, 'memory_encryption_status')) {
+    return {
+      algorithm: MEMORY_ENCRYPTION_ALGORITHM,
+      stores: MEMORY_STORES.map((store) => ({ store, encrypted: false })),
+    };
+  }
   const rows = db
     .prepare(`SELECT store, encrypted FROM memory_encryption_status`)
     .all() as Array<{ store: string; encrypted: number }>;
@@ -1404,32 +1438,54 @@ function allStoresHaveEncryptionStatus(db: Database.Database): boolean {
 function hasPlaintextStoreRows(
   db: Database.Database,
   store: MemoryStoreName,
+  cipher?: MemoryCipher,
 ): boolean {
+  for (const value of readStorePayloads(db, store)) {
+    if (!isDecryptableEncryptedPayload(value, cipher)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function readStorePayloads(
+  db: Database.Database,
+  store: MemoryStoreName,
+): string[] {
   switch (store) {
     case 'working_memory':
       return (
-        (db
-          .prepare(
-            `SELECT value FROM working_memory WHERE value NOT LIKE 'enc:v1:%' LIMIT 1`,
-          )
-          .get() as unknown) !== undefined
-      );
+        db.prepare(`SELECT value FROM working_memory`).all() as Array<{
+          value: string;
+        }>
+      ).map((row) => row.value);
     case 'episodic_events':
       return (
-        (db
-          .prepare(
-            `SELECT summary FROM episodic_events WHERE summary NOT LIKE 'enc:v1:%' OR (details IS NOT NULL AND details NOT LIKE 'enc:v1:%') LIMIT 1`,
-          )
-          .get() as unknown) !== undefined
+        db
+          .prepare(`SELECT summary, details FROM episodic_events`)
+          .all() as Array<{ summary: string; details: string | null }>
+      ).flatMap((row) =>
+        row.details === null ? [row.summary] : [row.summary, row.details],
       );
     case 'checkpoints':
       return (
-        (db
-          .prepare(
-            `SELECT state FROM checkpoints WHERE state NOT LIKE 'enc:v1:%' LIMIT 1`,
-          )
-          .get() as unknown) !== undefined
-      );
+        db.prepare(`SELECT state FROM checkpoints`).all() as Array<{
+          state: string;
+        }>
+      ).map((row) => row.state);
+  }
+}
+
+function isDecryptableEncryptedPayload(
+  value: string,
+  cipher?: MemoryCipher,
+): boolean {
+  if (!isEncryptedPayload(value) || !cipher) return false;
+  try {
+    cipher.decrypt(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -1448,7 +1504,7 @@ function encryptPlaintextRows(
   for (const row of db
     .prepare(`SELECT key, value FROM working_memory`)
     .all() as Array<{ key: string; value: string }>) {
-    if (!isEncryptedPayload(row.value)) {
+    if (!isDecryptableEncryptedPayload(row.value, cipher)) {
       db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
         cipher.encrypt(row.value),
         row.key,
@@ -1461,10 +1517,10 @@ function encryptPlaintextRows(
     db.prepare(
       `UPDATE episodic_events SET summary = ?, details = ? WHERE id = ?`,
     ).run(
-      isEncryptedPayload(row.summary)
+      isDecryptableEncryptedPayload(row.summary, cipher)
         ? row.summary
         : cipher.encrypt(row.summary),
-      row.details === null || isEncryptedPayload(row.details)
+      row.details === null || isDecryptableEncryptedPayload(row.details, cipher)
         ? row.details
         : cipher.encrypt(row.details),
       row.id,
@@ -1473,7 +1529,7 @@ function encryptPlaintextRows(
   for (const row of db
     .prepare(`SELECT id, state FROM checkpoints`)
     .all() as Array<{ id: number; state: string }>) {
-    if (!isEncryptedPayload(row.state)) {
+    if (!isDecryptableEncryptedPayload(row.state, cipher)) {
       db.prepare(`UPDATE checkpoints SET state = ? WHERE id = ?`).run(
         cipher.encrypt(row.state),
         row.id,
