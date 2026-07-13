@@ -45,6 +45,7 @@ export type {
   LessonRecordingResult,
   ReviewerFeedbackLessonEntry,
   ReviewerFeedbackLessonCapture,
+  FailedTestSkillCandidate,
   PostPrLessonExtractionTemplate,
   CritiqueLesson,
   TokenSpend,
