@@ -1444,16 +1444,18 @@ function hasCompatibleConditionalGuardPair(
   maybeProhibition: LessonDirectiveClause,
   maybeRequirement: LessonDirectiveClause,
 ): boolean {
+  const guardedRequirementAllowed =
+    maybeRequirement.guardCondition === undefined ||
+    /^(require|requires|required|verify|verifies|verified|validate|validates|validated)\b/.test(
+      maybeRequirement.text,
+    );
+
   if (
     maybeProhibition.polarity !== 'negative' ||
     maybeRequirement.polarity !== 'positive' ||
     !maybeProhibition.conditionalProhibition ||
     !maybeProhibition.guardCondition ||
-    (maybeRequirement.guardCondition !== undefined &&
-      !/^(require|requires|required|verify|verifies|verified|validate|validates|validated)\b/.test(
-        maybeRequirement.text,
-      ) &&
-      !(/\bbefore\b/i.test(maybeRequirement.sourceText)))
+    !guardedRequirementAllowed
   ) {
     return false;
   }
