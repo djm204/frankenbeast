@@ -152,15 +152,37 @@ describe('WebhookNotifier', () => {
     })
 
     it('truncates oversized HTTP error bodies', async () => {
+      const text = vi.fn().mockResolvedValue('x'.repeat(3000))
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('x'.repeat(3000)))
+          controller.close()
+        },
+      })
       mockFetch.mockResolvedValue({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
-        text: async () => 'x'.repeat(3000),
+        body: stream,
+        text,
       })
       const notifier = createNotifier()
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        `Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/signal: ${'x'.repeat(2048)}…`,
+        `Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/signal: ${'x'.repeat(2048)}`,
+      )
+      expect(text).not.toHaveBeenCalled()
+    })
+
+    it('redacts echoed authentication headers from HTTP error bodies', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: async () => 'Authorization: Bearer secret-token X-Api-Key=other-secret',
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/signal: Authorization: [REDACTED] X-Api-Key: [REDACTED]',
       )
     })
 

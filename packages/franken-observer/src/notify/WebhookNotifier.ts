@@ -100,7 +100,9 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
 const MAX_ERROR_BODY_CHARS = 2048
 
 function redactWebhookSecrets(value: string): string {
-  return value.replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
+  return value
+    .replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
+    .replace(/\b(authorization|x-api-key|api-key|x-auth-token)\s*[:=]\s*(bearer\s+)?[^\s,"'<>]+/gi, '$1: [REDACTED]')
 }
 
 function sanitizeWebhookEndpoint(value: string): string {
@@ -211,8 +213,15 @@ export class WebhookNotifier {
 
   private async readResponseBody(response: Awaited<ReturnType<FetchFn>>): Promise<string> {
     try {
-      const readable = response as { text?: () => Promise<string> }
-      const body = typeof readable.text === 'function' ? (await readable.text()).trim() : ''
+      const readable = response as {
+        body?: ReadableStream<Uint8Array> | null
+        text?: () => Promise<string>
+      }
+      const body = readable.body
+        ? await this.readBoundedStream(readable.body)
+        : typeof readable.text === 'function'
+          ? (await readable.text()).trim()
+          : ''
       const redactedBody = redactWebhookSecrets(body)
       return redactedBody.length > MAX_ERROR_BODY_CHARS
         ? `${redactedBody.slice(0, MAX_ERROR_BODY_CHARS)}…`
@@ -220,6 +229,30 @@ export class WebhookNotifier {
     } catch {
       return ''
     }
+  }
+
+  private async readBoundedStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+    const reader = stream.getReader()
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+
+    try {
+      while (totalBytes <= MAX_ERROR_BODY_CHARS) {
+        const { value, done } = await reader.read()
+        if (done || !value) {
+          break
+        }
+        chunks.push(value)
+        totalBytes += value.byteLength
+      }
+      if (totalBytes > MAX_ERROR_BODY_CHARS) {
+        await reader.cancel()
+      }
+    } finally {
+      reader.releaseLock()
+    }
+
+    return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
   }
 
   private assertTargetAllowed(): void {
