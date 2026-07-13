@@ -2528,6 +2528,75 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('checks compatible siblings on prior compound lessons', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Cache user avatars after validation' }),
+        [
+          createLesson({
+            correctionApplied:
+              'Do not cache private avatars; cache user avatars after validation',
+          }),
+        ],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('treats modal positive directives as explicit reversals', () => {
+    for (const pair of [
+      ['Should deploy', 'Should not deploy'],
+      ['Must cache tokens', 'Must not cache tokens'],
+    ] as const) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: pair[0] }),
+          [createLesson({ correctionApplied: pair[1] })],
+        ),
+      ).toMatchObject({ status: 'contradiction_detected' });
+    }
+  });
+
+  it('normalizes dropped-e gerund directive verbs', () => {
+    for (const pair of [
+      ['Avoid caching tokens', 'Cache tokens'],
+      ['Avoid reusing cache', 'Reuse cache'],
+    ] as const) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: pair[0] }),
+          [createLesson({ correctionApplied: pair[1] })],
+        ),
+      ).toMatchObject({ status: 'contradiction_detected' });
+    }
+  });
+
+  it('treats negated approval guards as failing outcomes', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy without approval' }),
+        [createLesson({ correctionApplied: 'Deploy if approval is not granted' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('treats validated and unvalidated scopes as compatible qualifiers', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not cache unvalidated responses' }),
+        [createLesson({ correctionApplied: 'Cache validated responses' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('keeps generic object terms available for qualifier checks', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not store error messages in DB' }),
+        [createLesson({ correctionApplied: 'Store debug messages in DB' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('treats missing prerequisites as contradictions against required guards', () => {
     expect(
       detectLessonContradictions(

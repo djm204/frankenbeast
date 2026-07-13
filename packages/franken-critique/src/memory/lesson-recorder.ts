@@ -1250,7 +1250,7 @@ function findContradictoryGuidanceMatch(
       if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
-      if (hasCompatibleSiblingDirective(lessonDirectives, lessonDirective, priorDirective)) {
+      if (hasCompatibleSiblingDirective(lessonDirectives, priorDirectives, lessonDirective, priorDirective)) {
         continue;
       }
       const opposedGuardSharedTerms = opposedConditionalGuardSharedTerms(
@@ -1297,18 +1297,30 @@ function findContradictoryGuidanceMatch(
 }
 
 function hasCompatibleSiblingDirective(
-  directives: LessonDirectiveClause[],
+  lessonDirectives: LessonDirectiveClause[],
+  priorDirectives: LessonDirectiveClause[],
   currentDirective: LessonDirectiveClause,
   priorDirective: LessonDirectiveClause,
 ): boolean {
   if (startsWithDoubleNegativeDirective(currentDirective.text)) {
     return false;
   }
+  return (
+    hasCompatibleSiblingInList(lessonDirectives, currentDirective, priorDirective) ||
+    hasCompatibleSiblingInList(priorDirectives, priorDirective, currentDirective)
+  );
+}
+
+function hasCompatibleSiblingInList(
+  directives: LessonDirectiveClause[],
+  currentDirective: LessonDirectiveClause,
+  comparedDirective: LessonDirectiveClause,
+): boolean {
   return directives.some(
     (directive) =>
       directive !== currentDirective &&
-      directive.polarity === priorDirective.polarity &&
-      canonicalComparableText(directive.text) === canonicalComparableText(priorDirective.text),
+      directive.polarity === comparedDirective.polarity &&
+      canonicalComparableText(directive.text) === canonicalComparableText(comparedDirective.text),
   );
 }
 
@@ -1538,11 +1550,33 @@ function hasCompatibleValidatedScopePair(
   }
 
   return (
-    /\bunauthenticated\b/.test(maybeScopedProhibition.text) &&
-    /\bafter\s+validation\b/.test(maybeValidatedAllowance.text) &&
-    sharedTextTerms(maybeScopedProhibition.text, maybeValidatedAllowance.text)
-      .length >= MIN_CONTRADICTION_SHARED_TERMS
+    (/\bunauthenticated\b/.test(maybeScopedProhibition.text) &&
+      /\bafter\s+validation\b/.test(maybeValidatedAllowance.text) &&
+      sharedTextTerms(maybeScopedProhibition.text, maybeValidatedAllowance.text)
+        .length >= MIN_CONTRADICTION_SHARED_TERMS) ||
+    hasComplementaryValidatedQualifierScope(
+      maybeScopedProhibition,
+      maybeValidatedAllowance,
+    )
   );
+}
+
+function hasComplementaryValidatedQualifierScope(
+  maybeScopedProhibition: LessonDirectiveClause,
+  maybeValidatedAllowance: LessonDirectiveClause,
+): boolean {
+  return (
+    /\bunvalidated\b/.test(maybeScopedProhibition.text) &&
+    /\bvalidated\b/.test(maybeValidatedAllowance.text) &&
+    sharedTextTerms(
+      stripValidationQualifier(maybeScopedProhibition.text),
+      stripValidationQualifier(maybeValidatedAllowance.text),
+    ).length >= MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function stripValidationQualifier(text: string): string {
+  return text.replace(/\b(?:unvalidated|validated)\b/g, '');
 }
 
 function hasCompatibleConditionalGuardPair(
@@ -1689,7 +1723,11 @@ function hasCompatibleGuardedAllowancePair(
     return false;
   }
 
-  if (/\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected)\b/i.test(maybeAllowance.sourceText)) {
+  const allowanceHasFailingGuardOutcome = new RegExp(
+    '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|not\\s+approved|not\\s+granted|unapproved)\\b',
+    'i',
+  ).test(maybeAllowance.sourceText);
+  if (allowanceHasFailingGuardOutcome) {
     return false;
   }
 
@@ -1727,18 +1765,18 @@ function hasOpposedGuardOutcome(
   requirementText: string,
 ): boolean {
   const guardHasPass =
-    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
+    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted)\b/.test(
       guardCondition,
     );
-  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected)\b/.test(
+  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|not\s+approved|not\s+granted)\b/.test(
     guardCondition,
   );
   const requirementHasPass =
-    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
+    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted)\b/.test(
       requirementText,
     );
   const requirementHasFail =
-    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected)\b/.test(requirementText);
+    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|not\s+approved|not\s+granted)\b/.test(requirementText);
 
   return (
     (guardHasPass && requirementHasFail) ||
@@ -1900,7 +1938,7 @@ function startsWithDoubleNegativeDirective(normalized: string): boolean {
 }
 
 function startsWithPositiveDirective(normalized: string): boolean {
-  return startsWithDoubleNegativeDirective(normalized) || /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run|rotate)\b/.test(
+  return startsWithDoubleNegativeDirective(normalized) || /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run|rotate|should|must)\b/.test(
     normalized,
   );
 }
@@ -1917,7 +1955,7 @@ function stripLeadingNegativeDirective(normalized: string): string {
 function stripLeadingPositiveDirective(normalized: string): string {
   return normalized
     .replace(/^(?:do not|don t|must not|should not|cannot|can t)\s+(?:avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny)\s+/, '')
-    .replace(/^(?:allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run|rotate)\s+/, '')
+    .replace(/^(?:allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run|rotate|should|must)\s+/, '')
     .trim();
 }
 
@@ -1944,8 +1982,17 @@ function extractComparableTerms(value: string): string[] {
 
 function canonicalComparableTerm(term: string): string {
   if (term.length > 5 && term.endsWith('ing')) {
-    const stem = term.slice(0, -3);
-    return stem.replace(/([a-z])\1$/, '$1');
+    const stem = term.slice(0, -3).replace(/([a-z])\1$/, '$1');
+    if (stem.endsWith('cach')) {
+      return `${stem}e`;
+    }
+    if (stem.endsWith('reus')) {
+      return `${stem}e`;
+    }
+    if (stem.endsWith('validat')) {
+      return `${stem}e`;
+    }
+    return stem;
   }
   if (term.length > 4 && term.endsWith('s') && !term.endsWith('ss')) {
     return term.slice(0, -1);
@@ -2009,8 +2056,6 @@ const LESSON_CONTRADICTION_STOP_WORDS = new Set([
   'iteration',
   'lesson',
   'needs',
-  'message',
-  'messages',
   'should',
   'must',
   'until',
