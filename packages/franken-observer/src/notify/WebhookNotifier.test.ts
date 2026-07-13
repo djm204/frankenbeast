@@ -119,15 +119,15 @@ describe('WebhookNotifier', () => {
         ok: false,
         status: 410,
         statusText: 'Gone',
-        text: async () => 'disabled',
+        text: async () => 'disabled at https://hooks.example.com/services/aaa.bbb.cccccccccccccccccccccccccccccc?debug=true',
       })
       const notifier = createNotifier({
-        url: 'https://hooks.example.com/services/XXXXXXXXXXXXXXXXXXXXXXXX?debug=true',
+        url: 'https://hooks.example.com/services/aaa.bbb.cccccccccccccccccccccccccccccc?debug=true',
         allowedTargetOrigins,
       })
 
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
-        'Webhook delivery failed: 410 Gone for https://hooks.example.com/services/[REDACTED]: disabled',
+        'Webhook delivery failed: 410 Gone for https://hooks.example.com/services/[REDACTED]: disabled at https://hooks.example.com/services/[REDACTED]',
       )
     })
 

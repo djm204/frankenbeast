@@ -2,6 +2,12 @@ import type { ApiDataEnvelope, ApiErrorEnvelope, NetworkConfigResponse, NetworkS
 
 export type { NetworkConfigResponse, NetworkStatusResponse } from '@franken/types';
 
+const MAX_ERROR_BODY_CHARS = 2048;
+
+function truncateErrorBody(value: string): string {
+  return value.length > MAX_ERROR_BODY_CHARS ? `${value.slice(0, MAX_ERROR_BODY_CHARS)}…` : value;
+}
+
 export class NetworkApiError extends Error {
   constructor(
     message: string,
@@ -98,7 +104,7 @@ export class NetworkApiClient {
       }
     }
 
-    const bodySuffix = responseBody ? `: ${responseBody}` : '';
+    const bodySuffix = responseBody ? `: ${truncateErrorBody(responseBody)}` : '';
     return new NetworkApiError(`HTTP ${response.status}${statusText} for ${path}${bodySuffix}`, response.status);
   }
 }

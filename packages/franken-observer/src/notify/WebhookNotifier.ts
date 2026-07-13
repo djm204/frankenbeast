@@ -99,6 +99,10 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
 
 const MAX_ERROR_BODY_CHARS = 2048
 
+function redactWebhookSecrets(value: string): string {
+  return value.replace(/https?:\/\/[^\s"'<>]+/g, match => sanitizeWebhookEndpoint(match))
+}
+
 function sanitizeWebhookEndpoint(value: string): string {
   try {
     const url = new URL(value)
@@ -112,7 +116,7 @@ function sanitizeWebhookEndpoint(value: string): string {
     } else {
       url.pathname = url.pathname
         .split('/')
-        .map(segment => (/^[A-Za-z0-9_-]{16,}$/.test(segment) ? '[REDACTED]' : segment))
+        .map(segment => (segment.length >= 16 ? '[REDACTED]' : segment))
         .join('/')
     }
 
@@ -209,7 +213,10 @@ export class WebhookNotifier {
     try {
       const readable = response as { text?: () => Promise<string> }
       const body = typeof readable.text === 'function' ? (await readable.text()).trim() : ''
-      return body.length > MAX_ERROR_BODY_CHARS ? `${body.slice(0, MAX_ERROR_BODY_CHARS)}…` : body
+      const redactedBody = redactWebhookSecrets(body)
+      return redactedBody.length > MAX_ERROR_BODY_CHARS
+        ? `${redactedBody.slice(0, MAX_ERROR_BODY_CHARS)}…`
+        : redactedBody
     } catch {
       return ''
     }
