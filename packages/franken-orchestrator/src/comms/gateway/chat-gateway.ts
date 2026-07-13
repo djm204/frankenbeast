@@ -60,6 +60,7 @@ export class ChatGateway extends EventEmitter {
 
     const outbound: ChannelOutboundMessage = { text: result.text, metadata: routeMetadata };
     if (result.status) outbound.status = result.status;
+    if (result.sensitivity) outbound.sensitivity = result.sensitivity;
     if (result.actions) outbound.actions = result.actions;
     if (result.metadata) outbound.metadata = { ...routeMetadata, ...result.metadata };
     if (result.provider) outbound.provider = result.provider;
@@ -90,15 +91,19 @@ export class ChatGateway extends EventEmitter {
       externalUserId: 'system',
     });
 
-    const outboundRouteMetadata = cachedRouteMetadata ?? result.metadata;
-    if (outboundRouteMetadata) {
+    const outboundRouteMetadata = {
+      ...(cachedRouteMetadata ?? {}),
+      ...(result.metadata ?? {}),
+    };
+    if (Object.keys(outboundRouteMetadata).length > 0) {
       this.rememberRouteMetadata(sessionId, outboundRouteMetadata);
     }
     const outbound: ChannelOutboundMessage = {
       text: result.text,
-      ...(outboundRouteMetadata ? { metadata: outboundRouteMetadata } : {}),
+      ...(Object.keys(outboundRouteMetadata).length > 0 ? { metadata: outboundRouteMetadata } : {}),
     };
     if (result.status) outbound.status = result.status;
+    if (result.sensitivity) outbound.sensitivity = result.sensitivity;
     if (result.actions) outbound.actions = result.actions;
     if (result.provider) outbound.provider = result.provider;
     if (result.phase) outbound.phase = result.phase;

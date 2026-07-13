@@ -113,6 +113,31 @@ describe('ChatGateway', () => {
     }));
   });
 
+  it('withholds sensitive runtime responses marked by the top-level result field', async () => {
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'top-level-secret',
+      status: 'reply',
+      sensitivity: 'sensitive',
+    } satisfies CommsInboundResult);
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C1',
+      externalMessageId: 'M1',
+      text: 'ping',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+
+    const [, sent] = (slackAdapter.send as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(sent.text).toContain('Sensitive response withheld');
+    expect(sent.text).not.toContain('top-level-secret');
+    expect(sent.metadata).toEqual(expect.objectContaining({ deliveryDenied: true }));
+  });
+
   it('treats unknown sensitivity metadata as sensitive and fail-closed', async () => {
     (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       text: 'do-not-send',
@@ -264,6 +289,39 @@ describe('ChatGateway', () => {
         metadata: expect.objectContaining({ channelId: 'C-stored', threadTs: '456.789' }),
       }),
     );
+  });
+
+  it('handleAction merges runtime sensitivity metadata with cached route metadata before policy checks', async () => {
+    const slackAdapter = mockAdapter('slack');
+    gateway.registerAdapter(slackAdapter);
+
+    await gateway.handleInbound({
+      channelType: 'slack',
+      externalUserId: 'U1',
+      externalChannelId: 'C-cached',
+      externalThreadId: 'T-cached',
+      externalMessageId: 'M1',
+      text: 'prime route metadata',
+      receivedAt: new Date().toISOString(),
+      rawEvent: {},
+    });
+    const sessionId = (runtime.processInbound as ReturnType<typeof vi.fn>).mock.calls[0]![0].sessionId;
+    (runtime.processInbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: 'action-secret',
+      status: 'reply',
+      metadata: { sensitivity: 'sensitive' },
+    } satisfies CommsInboundResult);
+
+    await gateway.handleAction('slack', sessionId, 'approve');
+
+    const [, sent] = (slackAdapter.send as ReturnType<typeof vi.fn>).mock.calls[1]!;
+    expect(sent.text).toContain('Sensitive response withheld');
+    expect(sent.text).not.toContain('action-secret');
+    expect(sent.metadata).toEqual(expect.objectContaining({
+      channelId: 'C-cached',
+      threadTs: 'T-cached',
+      deliveryDenied: true,
+    }));
   });
 
   it('handleAction sends /reject for reject action', async () => {
