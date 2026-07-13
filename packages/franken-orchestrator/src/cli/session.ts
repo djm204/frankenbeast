@@ -493,6 +493,9 @@ export class Session {
     if (this.config.maxTotalTokens !== undefined) {
       loopConfig.maxTotalTokens = this.config.maxTotalTokens;
     }
+    if (this.config.orchestratorConfig?.allowCrossProfileStateAccess !== undefined) {
+      loopConfig.allowCrossProfileStateAccess = this.config.orchestratorConfig.allowCrossProfileStateAccess;
+    }
     loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
 
     try {
