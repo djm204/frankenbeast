@@ -1,36 +1,83 @@
 # @franken/web Ramp-Up
 
-**Status**: **INTEGRATED (Frontend)** — This is the primary human-facing dashboard for the Frankenbeast framework. It connects to the `@franken/orchestrator` via WebSockets and HTTP.
+**Status**: **INTEGRATED (Frontend)** — This is the primary human-facing dashboard for the Frankenbeast framework. It connects to `@franken/orchestrator` through same-origin HTTP routes and WebSockets.
 
 ## Module Overview
-A React-based single-page application (SPA) that provides a "Control Plane" for the agent. It allows users to chat with the agent, view live execution traces, manage tracked agents, and monitor system costs.
+A React-based single-page application (SPA) that provides a browser control plane for Frankenbeast operators. It allows users to chat with the agent, launch and inspect tracked Beast agents, manage network services, review dashboard/provider/security state, and monitor telemetry and costs.
 
 ## Current Functionality
-- **Beast Dashboard**: Launch and monitor autonomous agent runs.
-- **Live Chat**: Real-time interaction via the orchestrator's `ChatServer`.
-- **Tracked Agents**: Lifecycle management for long-running agent tasks (Design -> Planning -> Execution).
-- **Trace Viewer**: Visual representation of the spans and tokens recorded by the `Observer` module.
-- **Cost Analytics**: View real-time spend across projects and sessions.
+- **Overview Dashboard**: Skills, security profile, and provider controls sourced from the dashboard API.
+- **Live Chat**: Real-time interaction via the orchestrator chat server and chat WebSocket/session APIs.
+- **Tracked Beast Agents**: Launch, inspect, and control long-running tracked-agent workflows and their linked Beast runs.
+- **Network Controls**: Service status, logs, and editable network configuration.
+- **Analytics**: Observer, governor, security, and cost telemetry surfaces.
+- **Placeholder tabs**: Sessions, costs, safety, and settings routes are present in navigation but are not fully live yet.
 
 ## Integration Details
-- **Backend**: Communicates with the `@franken/orchestrator` HTTP server (default port 3737).
-- **Authentication**: Uses a shared `FRANKENBEAST_BEAST_OPERATOR_TOKEN` defined in the root `.env`.
-- **Protocol**: Uses standard REST for agent management and WebSockets for the live chat feed.
+- **Backend**: Communicates with the `@franken/orchestrator` HTTP server (default local port `3737`) through same-origin `/api/*` and `/v1/*` routes.
+- **Authentication**: Beast control routes use the server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` from the repo root `.env` or configured secret backend. Do not expose this as a `VITE_*` browser variable.
+- **Protocol**: Uses REST-style typed clients for dashboard, Beast, network, analytics, and chat session APIs; chat streaming uses the `/v1/chat` WebSocket path behind the same-origin proxy.
+- **Vite proxy**: `vite.config.ts` proxies `/api`, `/v1`, and `/v1/beasts` to local backend targets and injects the operator token from Node-side env only.
 
-## Key Components (src/)
-- `components/BeastControl`: UI for starting/stopping agent runs.
-- `components/Chat`: The live interaction feed.
-- `hooks/useBeastStream`: WebSocket hook for live updates.
-- `services/api-client.ts`: Typed client for the orchestrator's REST API.
+## Current Source Map (src/)
+Start with these files when changing the dashboard:
 
-## Build & Test
+- `app.tsx`: Creates `ChatShell` with the resolved same-origin base URL, project id, and package version.
+- `components/chat-shell.tsx`: Main dashboard shell, route/tab definitions, shared client construction, chat transcript/composer wiring, and page routing.
+- `hooks/use-chat-session.ts`: Chat WebSocket and session state management for the live operator console.
+- `pages/dashboard-page.tsx`: Overview route for skills, security, and providers via `components/skills/*`, `components/security/*`, and `components/providers/*`.
+- `pages/beasts-page.tsx`: Tracked Beast agent list/detail/launch surface; related wizard, panels, logs, and agent controls live under `components/beasts/*`.
+- `pages/network-page.tsx`: Network status, service actions, logs, and network config editor wiring via the network components.
+- `pages/analytics-page.tsx`: Analytics route for observer/governor/security/cost telemetry.
+- `lib/api.ts`: Chat/session API client and chat-related response types.
+- `lib/beast-api.ts`: Typed client and types for `/v1/beasts/*` tracked-agent and Beast run routes.
+- `lib/network-api.ts`: Typed client and types for `/v1/network/*` service and config routes.
+- `lib/analytics-api.ts`: Typed client and types for analytics/telemetry routes.
+- `lib/dashboard-api.ts`: Typed client and types for overview dashboard snapshots and mutations.
+- `lib/resolve-base-url.ts`: Runtime base URL resolver; current browser code should prefer same-origin paths over browser-readable backend URLs.
+
+## Local Development Workflow
 ```bash
-npm run dev          # Start Vite dev server
-npm run build        # Production build (tsc + vite)
-npm test             # Vitest component tests
+npm run dev          # Start Vite dev server (default: http://localhost:5173)
+npm run dev:chat     # Start Vite with API proxy targeting chat-server on :3737
+npm run dev:network  # Start the network-management dashboard dev server
+npm run build        # Production build (tsc + vite build)
+npm test             # Vitest component/unit tests
+npm run typecheck    # TypeScript check only
 ```
 
+From the repo root, use workspace-prefixed commands when another package needs to run the dashboard checks:
+
+```bash
+npm --workspace @franken/web run typecheck
+npm --workspace @franken/web run build
+```
+
+Use `npm run dev:chat` for the normal chat/dashboard path. Start `@franken/orchestrator`'s chat server first when you need live backend data:
+
+```bash
+npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project
+npm --workspace @franken/web run dev:chat
+```
+
+For Beast controls in Vite dev mode, put the operator token generated by `frankenbeast init` in the repo root `.env` as:
+
+```env
+FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token-from-frankenbeast-init>
+```
+
+The Vite server reads that value only for same-origin proxy requests. Browser clients should continue calling same-origin `/api/*` and `/v1/*` paths without receiving a long-lived bearer token.
+
+If the backend uses a non-default local port, leave `VITE_API_URL` unset and set the proxy target instead:
+
+```bash
+VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
+```
+
+Set `VITE_BEAST_API_PROXY_TARGET` only when Beast routes (`/v1/beasts/*`) must target a different local daemon than the chat/API backend.
+
 ## Dependencies
-- **React 19**: Modern UI framework.
-- **Vite**: Fast build tool and dev server.
-- **TailwindCSS**: For rapid, consistent styling.
+- **React 18**: UI framework used by the dashboard package.
+- **Vite**: Dev server, production build, and same-origin proxy/BFF layer for local development.
+- **TailwindCSS**: Shared styling pipeline for dashboard UI.
+- **Zustand**: Lightweight dashboard and Beast client-side stores.
