@@ -125,6 +125,33 @@ describe('BeastEventBus', () => {
     expect(missed[1].id).toBe(3);
   });
 
+  it('hydrates a deterministic replay snapshot for worker event stream fixtures', () => {
+    const source = new BeastEventBus();
+    source.publish({ type: 'worker.started', data: { workerId: 'w1', attempt: 1 } });
+    source.publish({ type: 'worker.output', data: { workerId: 'w1', line: 'ready' } });
+
+    const snapshot = source.exportReplaySnapshot();
+    const replayed = BeastEventBus.fromReplaySnapshot(snapshot);
+
+    expect(replayed.replaySince(0)).toEqual([
+      { id: 1, type: 'worker.started', data: { workerId: 'w1', attempt: 1 } },
+      { id: 2, type: 'worker.output', data: { workerId: 'w1', line: 'ready' } },
+    ]);
+
+    replayed.publish({ type: 'worker.finished', data: { workerId: 'w1', status: 'done' } });
+
+    expect(replayed.replaySince(2)).toEqual([
+      { id: 3, type: 'worker.finished', data: { workerId: 'w1', status: 'done' } },
+    ]);
+  });
+
+  it('rejects malformed deterministic replay snapshots before stream replay', () => {
+    expect(() => BeastEventBus.fromReplaySnapshot([
+      { id: 1, type: 'worker.started', data: { workerId: 'w1' } },
+      { id: 1, type: 'worker.output', data: { workerId: 'w1', line: 'duplicate' } },
+    ])).toThrow('Replay snapshot event ids must be strictly increasing safe integers');
+  });
+
   it('isolates listener mutations from later listeners and replay state', () => {
     const bus = new BeastEventBus();
     const received: BeastSseEvent[] = [];

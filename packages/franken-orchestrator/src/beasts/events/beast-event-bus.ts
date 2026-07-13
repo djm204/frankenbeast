@@ -17,6 +17,8 @@ export interface BeastEventBusOptions {
   onListenerError?: (failure: BeastEventBusListenerError) => void | Promise<void>;
 }
 
+export type BeastEventReplaySnapshot = readonly BeastSseEvent[];
+
 function reportDefaultListenerError({ event, error }: BeastEventBusListenerError): void {
   console.error('[BeastEventBus] Listener failed', {
     eventId: event.id,
@@ -73,6 +75,15 @@ export class BeastEventBus {
     this.onListenerError = options.onListenerError ?? reportDefaultListenerError;
   }
 
+  static fromReplaySnapshot(
+    snapshot: BeastEventReplaySnapshot,
+    maxBufferSizeOrOptions: number | BeastEventBusOptions = 1000,
+  ): BeastEventBus {
+    const bus = new BeastEventBus(maxBufferSizeOrOptions);
+    bus.loadReplaySnapshot(snapshot);
+    return bus;
+  }
+
   publish(event: Omit<BeastSseEvent, 'id'>): void {
     this.sequence += 1;
     const stamped: BeastSseEvent = cloneEvent({ ...event, id: this.sequence });
@@ -104,6 +115,30 @@ export class BeastEventBus {
 
   replaySince(lastEventId: number): BeastSseEvent[] {
     return this.buffer.filter((e) => e.id !== undefined && e.id > lastEventId).map((event) => cloneEvent(event));
+  }
+
+  exportReplaySnapshot(): BeastEventReplaySnapshot {
+    return this.buffer.map((event) => cloneEvent(event));
+  }
+
+  private loadReplaySnapshot(snapshot: BeastEventReplaySnapshot): void {
+    let previousId = 0;
+    for (const event of snapshot) {
+      const eventId = event.id;
+      if (eventId === undefined || !Number.isSafeInteger(eventId) || eventId <= previousId) {
+        throw new Error('Replay snapshot event ids must be strictly increasing safe integers');
+      }
+      if (!event.type) {
+        throw new Error('Replay snapshot events must include a non-empty type');
+      }
+      const cloned = cloneEvent(event);
+      this.buffer.push(cloned);
+      if (this.buffer.length > this.maxBufferSize) {
+        this.buffer.shift();
+      }
+      previousId = eventId;
+    }
+    this.sequence = previousId;
   }
 
   private reportListenerError(event: BeastSseEvent, error: unknown, listener: EventListener): void {
