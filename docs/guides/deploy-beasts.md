@@ -106,6 +106,8 @@ Use this matrix to align the deploy-beasts setup with the chat dashboard guide:
 
 Do not use `VITE_API_URL` to choose the local dashboard backend. Current local Vite development intentionally keeps browser API calls same-origin through the proxy so REST requests and operator-token injection stay server-side.
 
+Set `VITE_PROJECT_ID` when the dashboard should use a named local project for chat session history instead of the built-in `default` project id. The value is non-secret and is sent with dashboard chat session list/resume calls; use a stable per-project value such as `my-project` when multiple checkouts or demos share the same chat backend. Set it inline with the Vite command or in `packages/franken-web/.env.local`; the root `.env.example` intentionally omits a runnable example because the workspace Vite script loads browser env from the web package directory.
+
 Open the Vite URL, usually `http://127.0.0.1:5173/`, and navigate to **Beasts**.
 
 ## 3. Choose a Beast and execution boundary
