@@ -157,16 +157,20 @@ on:
 
       expect(ciTestStep, 'CI should have an explicit root-and-package test step').toBeTruthy();
       expect(ciTestStep?.run).toBe('npm run test:ci');
-      const e2eStep = expectSteps(buildTestLint).find((step) => step.name === 'Run orchestrator E2E smoke CI suite');
-      expect(e2eStep, 'CI should make the orchestrator E2E gate explicit').toBeTruthy();
-      expect(e2eStep?.run).toBe('npm run ci:test:e2e');
+      const e2eStep = expectSteps(buildTestLint).find(
+        (step) => step.name === 'Orchestrator E2E — deliberately skipped in main gate',
+      );
+      expect(e2eStep, 'CI should document why orchestrator E2E is skipped in the main gate').toBeTruthy();
+      expect(e2eStep?.run).toBe(
+        'echo "E2E suite omitted from main CI; run orchestrator-e2e workflow for full suite"',
+      );
       expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
       expect(packageJson.scripts?.['ci:test:e2e']).toBe(
         'node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts',
       );
       expect(testCiScript).toContain('npm run ci:test:root');
       expect(testCiScript.indexOf('npm run ci:test:root')).toBeLessThan(testCiScript.indexOf('npm run ci:test:packages'));
-      expect(content.indexOf('npm run test:ci')).toBeLessThan(content.indexOf('npm run ci:test:e2e'));
+      expect(content.indexOf('npm run test:ci')).toBeLessThan(content.indexOf('E2E suite omitted from main CI'));
       expect(content).not.toMatch(/npm run test:root --/);
     });
 
@@ -206,7 +210,8 @@ on:
         'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval',
       );
       expect(content).toContain('npm run test:ci');
-      expect(content).toContain('run: npm run ci:test:e2e');
+      expect(content).toContain('run: echo "E2E suite omitted from main CI; run orchestrator-e2e workflow for full suite"');
+      expect(content).not.toContain('run: npm run ci:test:e2e');
       expect(content).not.toContain('run: npm run ci:test:root');
       expect(content).not.toContain('run: npm run ci:test:packages');
       expect(content).not.toContain('run: npm run ci:test:planner-integration');

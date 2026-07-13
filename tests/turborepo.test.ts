@@ -172,9 +172,12 @@ describe("Turborepo configuration", () => {
         "utf8",
       );
       expect(ciWorkflow).toContain("run: npm run test:ci");
-      expect(ciWorkflow).toContain("run: npm run ci:test:e2e");
+      expect(ciWorkflow).toContain(
+        'run: echo "E2E suite omitted from main CI; run orchestrator-e2e workflow for full suite"',
+      );
+      expect(ciWorkflow).not.toContain("run: npm run ci:test:e2e");
       expect(ciWorkflow.indexOf("run: npm run test:ci")).toBeLessThan(
-        ciWorkflow.indexOf("run: npm run ci:test:e2e"),
+        ciWorkflow.indexOf("E2E suite omitted from main CI"),
       );
     });
 
