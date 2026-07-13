@@ -108,7 +108,7 @@ export class GovernorCritiqueAdapter {
       ? { ...base, skillId: rationale.selectedTool }
       : base;
 
-    const operatorSessionToken = triggerResults.length === 1
+    const operatorSessionToken = this.canReuseOperatorSessionToken(triggerResults)
       ? this.getValidOperatorSessionToken(request, rationale)
       : undefined;
     if (operatorSessionToken) {
@@ -154,6 +154,15 @@ export class GovernorCritiqueAdapter {
 
   private selectTriggerForPrompt(triggerResults: ReadonlyArray<TriggerResult>): TriggerResult {
     return triggerResults.find((result) => result.triggerId !== 'skill') ?? triggerResults[0]!;
+  }
+
+  private canReuseOperatorSessionToken(triggerResults: ReadonlyArray<TriggerResult>): boolean {
+    return triggerResults.length === 1 && !this.isTriggerEvaluationFailure(triggerResults[0]!);
+  }
+
+  private isTriggerEvaluationFailure(triggerResult: TriggerResult): boolean {
+    return triggerResult.severity === 'critical'
+      && triggerResult.reason?.startsWith(`Trigger '${triggerResult.triggerId}' evaluation failed:`) === true;
   }
 
   private getValidOperatorSessionToken(request: ApprovalRequest, rationale: RationaleBlock): SessionToken | undefined {

@@ -65,4 +65,12 @@ describe('RationaleEnforcer', () => {
     // each call must create a distinct Date — not the same reference
     expect(r1.timestamp).not.toBe(r2.timestamp);
   });
+
+  it('includes a remembered approval session token in generated rationales', () => {
+    const enforcer = new RationaleEnforcer();
+
+    enforcer.rememberApprovalSessionToken('session-token-123');
+
+    expect(enforcer.generate(makeTask('t-1')).approvalSessionTokenId).toBe('session-token-123');
+  });
 });

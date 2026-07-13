@@ -7,6 +7,8 @@ import { now as deterministicNow } from '@franken/types';
  * Here it derives deterministic rationale from the task's objective field.
  */
 export class RationaleEnforcer {
+  private approvalSessionTokenId: string | undefined;
+
   generate(task: Task): RationaleBlock {
     const base = {
       taskId: task.id,
@@ -15,10 +17,18 @@ export class RationaleEnforcer {
       timestamp: new Date(deterministicNow()),
     };
 
+    const withSessionToken = this.approvalSessionTokenId !== undefined
+      ? { ...base, approvalSessionTokenId: this.approvalSessionTokenId }
+      : base;
+
     const tool = task.metadata?.['tool'];
     if (typeof tool === 'string') {
-      return { ...base, selectedTool: tool };
+      return { ...withSessionToken, selectedTool: tool };
     }
-    return base;
+    return withSessionToken;
+  }
+
+  rememberApprovalSessionToken(tokenId: string): void {
+    this.approvalSessionTokenId = tokenId;
   }
 }

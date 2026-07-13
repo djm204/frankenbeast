@@ -26,6 +26,14 @@ function approved(): SelfCritiqueModule {
   return { verifyRationale: vi.fn().mockResolvedValue({ verdict: 'approved' }) };
 }
 
+function approvedWithSessionToken(tokenId: string): SelfCritiqueModule {
+  return {
+    verifyRationale: vi.fn()
+      .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: tokenId })
+      .mockResolvedValue({ verdict: 'approved' }),
+  };
+}
+
 function rejected(reason = 'bad reasoning'): SelfCritiqueModule {
   return {
     verifyRationale: vi.fn().mockResolvedValue({ verdict: 'rejected', reason }),
@@ -91,6 +99,21 @@ describe('buildCoTExecutor — approved', () => {
     await wrapped(makeTask('t-1'));
 
     expect(generateSpy).toHaveBeenCalledOnce();
+  });
+
+  it('feeds an issued approval session token into later rationales', async () => {
+    const selfCritique = approvedWithSessionToken('session-token-123');
+    const executor = vi.fn().mockResolvedValue(success('t-1'));
+    const enforcer = new RationaleEnforcer();
+    const wrapped = buildCoTExecutor(executor, selfCritique, enforcer);
+
+    await wrapped({ ...makeTask('t-1'), metadata: { tool: 'deploy-prod' } });
+    await wrapped({ ...makeTask('t-2'), metadata: { tool: 'deploy-prod' } });
+
+    expect(selfCritique.verifyRationale).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      approvalSessionTokenId: 'session-token-123',
+      selectedTool: 'deploy-prod',
+    }));
   });
 });
 
