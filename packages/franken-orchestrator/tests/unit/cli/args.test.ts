@@ -228,6 +228,12 @@ describe('parseArgs', () => {
     expect(args.networkAction).toBe('config');
   });
 
+  it('parses network credentials inventory', () => {
+    const args = parseArgs(['network', 'credentials']);
+    expect(args.subcommand).toBe('network');
+    expect(args.networkAction).toBe('credentials');
+  });
+
   it('parses network config --set', () => {
     const args = parseArgs(['network', 'config', '--set', 'chat.model=claude-sonnet-4-6']);
     expect(args.subcommand).toBe('network');

@@ -28,6 +28,7 @@ export type NetworkAction =
   | 'restart'
   | 'logs'
   | 'config'
+  | 'credentials'
   | 'help'
   | undefined;
 
@@ -102,7 +103,7 @@ export interface CliArgs {
 }
 
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'skill', 'security']);
-const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'help']);
+const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -219,6 +220,7 @@ Network Commands:
   network restart <service|all>       Restart one managed service or all
   network logs <service|all>          Show service logs
   network config [--set a.b.c=value]  Inspect or update operator config
+  network credentials                 Print scoped credential refs inventory (never secret values)
   network help                        Show network command help
 
 Beast Commands:

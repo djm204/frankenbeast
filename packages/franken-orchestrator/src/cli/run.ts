@@ -43,6 +43,7 @@ import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
+import { buildCredentialInventoryReport } from '../network/credential-inventory.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
 import { defaultConfig, parseOrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
@@ -1491,6 +1492,11 @@ export async function runNetworkCommand(
       dashboard: config.dashboard,
       comms: config.comms,
     }, null, 2));
+    return;
+  }
+
+  if (action === 'credentials') {
+    deps.print(JSON.stringify(buildCredentialInventoryReport(config), null, 2));
     return;
   }
 
