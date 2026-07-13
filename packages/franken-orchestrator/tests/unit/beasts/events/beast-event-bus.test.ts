@@ -153,8 +153,12 @@ describe('BeastEventBus', () => {
     }));
 
     const replayed = BeastEventBus.fromReplaySnapshot(snapshot);
+    const replayedWithListenerOptions = BeastEventBus.fromReplaySnapshot(snapshot, {
+      onListenerError: () => undefined,
+    });
 
     expect(replayed.replaySince(0)).toHaveLength(1001);
+    expect(replayedWithListenerOptions.replaySince(0)).toHaveLength(1001);
     expect(replayed.replaySince(0)[0]).toEqual({
       id: 1,
       type: 'worker.output',
@@ -167,6 +171,10 @@ describe('BeastEventBus', () => {
       { id: 1, type: 'worker.started', data: { workerId: 'w1' } },
       { id: 1, type: 'worker.output', data: { workerId: 'w1', line: 'duplicate' } },
     ])).toThrow('Replay snapshot event ids must be strictly increasing safe integers');
+
+    expect(() => BeastEventBus.fromReplaySnapshot([
+      { id: 1, type: 1, data: { workerId: 'w1' } } as unknown as BeastSseEvent,
+    ])).toThrow('Replay snapshot events must include a non-empty string type');
 
     expect(() => BeastEventBus.fromReplaySnapshot([
       { id: 1, type: 'worker.output' } as BeastSseEvent,

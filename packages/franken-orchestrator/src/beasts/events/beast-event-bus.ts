@@ -83,13 +83,15 @@ export class BeastEventBus {
     snapshot: BeastEventReplaySnapshot,
     maxBufferSizeOrOptions?: number | BeastEventBusOptions,
   ): BeastEventBus {
-    const options = maxBufferSizeOrOptions ?? { maxBufferSize: Math.max(1000, snapshot.length) };
-    const resolvedMaxBufferSize = typeof options === 'number' ? options : (options.maxBufferSize ?? 1000);
+    const defaultReplayBufferSize = Math.max(1000, snapshot.length);
+    const options = maxBufferSizeOrOptions ?? { maxBufferSize: defaultReplayBufferSize };
+    const resolvedMaxBufferSize = typeof options === 'number' ? options : (options.maxBufferSize ?? defaultReplayBufferSize);
     if (resolvedMaxBufferSize < snapshot.length) {
       throw new Error('Replay snapshot length exceeds configured maxBufferSize');
     }
 
-    const bus = new BeastEventBus(options);
+    const busOptions = typeof options === 'number' ? options : { ...options, maxBufferSize: resolvedMaxBufferSize };
+    const bus = new BeastEventBus(busOptions);
     bus.loadReplaySnapshot(snapshot);
     return bus;
   }
@@ -138,8 +140,8 @@ export class BeastEventBus {
       if (eventId === undefined || !Number.isSafeInteger(eventId) || eventId <= previousId) {
         throw new Error('Replay snapshot event ids must be strictly increasing safe integers');
       }
-      if (!event.type) {
-        throw new Error('Replay snapshot events must include a non-empty type');
+      if (typeof event.type !== 'string' || event.type.length === 0) {
+        throw new Error('Replay snapshot events must include a non-empty string type');
       }
       if (!isRecordPayload(event.data)) {
         throw new Error('Replay snapshot events must include an object data payload');
