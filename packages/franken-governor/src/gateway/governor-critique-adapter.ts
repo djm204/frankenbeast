@@ -153,6 +153,9 @@ export class GovernorCritiqueAdapter {
   }
 
   private selectTriggerForPrompt(triggerResults: ReadonlyArray<TriggerResult>): TriggerResult {
+    const evaluationFailure = triggerResults.find((result) => this.isTriggerEvaluationFailure(result));
+    if (evaluationFailure !== undefined) return evaluationFailure;
+
     return triggerResults.find((result) => result.triggerId !== 'skill') ?? triggerResults[0]!;
   }
 

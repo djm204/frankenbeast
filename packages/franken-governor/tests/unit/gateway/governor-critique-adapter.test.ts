@@ -8,7 +8,7 @@ import { BudgetTrigger } from '../../../src/triggers/budget-trigger.js';
 import { SkillTrigger } from '../../../src/triggers/skill-trigger.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
-import { formatSessionTokenScope } from '../../../src/security/session-token-scope.js';
+import { formatApprovalSessionTokenScope, formatSessionTokenScope } from '../../../src/security/session-token-scope.js';
 import { createTaskId, type TaskId } from '@franken/types';
 
 interface RationaleBlock {
@@ -406,6 +406,30 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     expect(request.trigger.reason).toContain("Trigger 'stale-trigger' evaluation failed");
   });
 
+  it('prioritizes evaluator failures over ordinary triggered policies', async () => {
+    const channel = makeFakeChannel('ABORT');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [
+        makeTriggeringEvaluator(),
+        {
+          triggerId: 'stale-trigger',
+          evaluate: () => {
+            throw new Error('missing expected field');
+          },
+        },
+      ],
+      projectId: 'proj-001',
+    });
+
+    await adapter.verifyRationale(makeRationale());
+
+    const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
+    expect(request.trigger.triggerId).toBe('stale-trigger');
+    expect(request.trigger.reason).toContain("Trigger 'stale-trigger' evaluation failed");
+  });
+
   it('skips a fresh operator approval prompt for a risky skill when a scoped session token is still valid', async () => {
     const tokenStore = new SessionTokenStore();
     const token = createSessionToken({
@@ -560,6 +584,37 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     expect(tokenStore.store).toHaveBeenCalledOnce();
   });
 
+  it('approves without issuing a replacement token when token persistence fails after fresh approval', async () => {
+    const tokenStore = {
+      get: vi.fn(() => {
+        throw new Error('corrupt token store');
+      }),
+      store: vi.fn(() => {
+        throw new Error('corrupt token store');
+      }),
+    } as unknown as SessionTokenStore;
+    const channel = makeFakeChannel('APPROVE');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({
+      selectedTool: 'deploy-prod',
+      approvalSessionTokenId: 'unreadable-token',
+    }));
+
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+    expect(tokenStore.store).toHaveBeenCalledOnce();
+  });
+
   it('does not let a skill-scoped session token bypass an unrelated budget trigger', async () => {
     const tokenStore = new SessionTokenStore();
     const token = createSessionToken({
@@ -652,6 +707,28 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
 
     expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
     expect(channel.requestApproval).toHaveBeenCalledOnce();
+  });
+
+  it('uses skill scope for explicit HITL skill approvals without changing budget task scope', () => {
+    expect(formatApprovalSessionTokenScope({
+      requestId: 'req-001',
+      taskId: 'task-001',
+      projectId: 'proj-001',
+      trigger: { triggered: true, triggerId: 'hitl_required' },
+      skillId: 'deploy-prod',
+      summary: 'Approve deploy-prod',
+      timestamp: new Date('2026-01-01T00:00:00Z'),
+    })).toBe(makeScope('hitl_required', 'deploy-prod'));
+
+    expect(formatApprovalSessionTokenScope({
+      requestId: 'req-002',
+      taskId: 'task-001',
+      projectId: 'proj-001',
+      trigger: { triggered: true, triggerId: 'budget' },
+      skillId: 'deploy-prod',
+      summary: 'Approve budget breach while using deploy-prod',
+      timestamp: new Date('2026-01-01T00:00:00Z'),
+    })).toBe(makeScope('budget', 'task-001'));
   });
 
   it('does not let a session token cross project boundaries', async () => {

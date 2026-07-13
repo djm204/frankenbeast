@@ -12,10 +12,14 @@ export function formatApprovalSessionTokenScope(request: ApprovalRequest): strin
   return formatSessionTokenScope({
     projectId: request.projectId,
     triggerId: request.trigger.triggerId,
-    actionScope: request.trigger.triggerId === 'skill' && request.skillId !== undefined
+    actionScope: isSkillApprovalTrigger(request.trigger.triggerId) && request.skillId !== undefined
       ? request.skillId
       : request.taskId,
   });
+}
+
+function isSkillApprovalTrigger(triggerId: string): boolean {
+  return triggerId === 'skill' || triggerId === 'hitl_required';
 }
 
 export interface SessionTokenScopeFields {

@@ -196,7 +196,15 @@ export class ApprovalGateway {
       grantedBy: response.respondedBy,
       ttlMs: this.config.sessionTokenTtlMs,
     });
-    sessionTokenStore.store(token);
+    try {
+      sessionTokenStore.store(token);
+    } catch {
+      // A fresh human approval must remain authoritative even when the optional
+      // session-token cache is corrupt or unavailable. Fail closed for reuse,
+      // but do not reject the currently approved action just because a
+      // replacement token could not be persisted.
+      return undefined;
+    }
     return token;
   }
 }
