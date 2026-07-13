@@ -106,11 +106,15 @@ async function readSseEventsUntil(
     reader.releaseLock();
   }
 
+  const finalEvents = parseSseEvents(text);
   if (timedOut) {
     throw new Error(`Timed out waiting for expected SSE events. Received: ${text}`);
   }
+  if (!until(finalEvents)) {
+    throw new Error(`SSE stream ended before expected events were observed. Received: ${text}`);
+  }
 
-  return parseSseEvents(text);
+  return finalEvents;
 }
 
 describe('Beast SSE routes', () => {
