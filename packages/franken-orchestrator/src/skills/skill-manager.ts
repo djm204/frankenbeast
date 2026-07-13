@@ -117,6 +117,11 @@ export class SkillManager {
       join(skillDir, 'mcp.json'),
       JSON.stringify(mcpConfig, null, 2),
     );
+
+    const toolsPath = join(skillDir, 'tools.json');
+    if (existsSync(toolsPath)) {
+      rmSync(toolsPath);
+    }
   }
 
   enable(name: string): void {

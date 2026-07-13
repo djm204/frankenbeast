@@ -182,6 +182,24 @@ describe('SkillManager', () => {
       expect(existsSync(join(skillsDir, 'broken-custom', 'mcp.json'))).toBe(false);
       expect(manager.listInstalled()).toEqual([]);
     });
+
+    it('removes stale tool manifests when replacing a skill with a custom install', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx', args: ['old-server'] },
+        authFields: [],
+        toolDefinitions: [
+          { name: 'list_repos', description: 'List', inputSchema: {}, requiresHitl: false },
+        ],
+      });
+
+      await manager.installCustom('github', { command: 'node', args: ['server.js'] });
+
+      expect(existsSync(join(skillsDir, 'github', 'tools.json'))).toBe(false);
+      expect(manager.readTools('github')).toEqual([]);
+    });
   });
 
   describe('enable()/disable()', () => {
