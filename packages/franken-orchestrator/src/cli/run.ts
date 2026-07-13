@@ -44,7 +44,7 @@ import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { defaultConfig, parseOrchestratorConfig } from '../config/orchestrator-config.js';
+import { defaultConfig, parseOrchestratorConfig, validateCrossProfileStateDir } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -152,6 +152,30 @@ export function shouldShowMissingRunPlanGuidance(
     && !args.planDir
     && !args.planName
     && planNeedsGuidance;
+}
+
+export function validateStateDirBeforeScaffold(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): void {
+  const configuredStateDir = config.stateDir;
+  const stateDir = resolveScaffoldStateDir(config, paths);
+  const issue = validateCrossProfileStateDir({
+    stateDir,
+    allowCrossProfileStateAccess: configuredStateDir
+      ? config.allowCrossProfileStateAccess
+      : false,
+  });
+  if (issue) {
+    throw new Error(issue);
+  }
+}
+
+export function resolveScaffoldStateDir(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): string {
+  return config.stateDir ?? paths.stateDir;
 }
 
 export interface ResumeTarget {
@@ -985,7 +1009,9 @@ export async function main(): Promise<void> {
     return;
   }
 
-  scaffoldFrankenbeast(paths);
+  const scaffoldPaths = { ...paths, stateDir: resolveScaffoldStateDir(config, paths) };
+  validateStateDirBeforeScaffold(config, scaffoldPaths);
+  scaffoldFrankenbeast(scaffoldPaths);
 
   if (args.subcommand === 'beasts-daemon') {
     await runBeastDaemonCommand(args, config, root, paths);
