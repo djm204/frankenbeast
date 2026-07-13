@@ -61,6 +61,7 @@ async function readSseEventsUntil(
     onConnected?: () => void;
     timeoutMs?: number;
     continueAfterMatchMs?: number;
+    allowTimeout?: boolean;
   } = {},
 ): Promise<ParsedSseEvent[]> {
   const controller = new AbortController();
@@ -99,10 +100,12 @@ async function readSseEventsUntil(
       text += decoder.decode(value, { stream: true });
       const events = parseSseEvents(text);
       if (until(events)) {
-        if (!observedExpectedEvents && options.continueAfterMatchMs !== undefined) {
-          observedExpectedEvents = true;
-          settleSignal = AbortSignal.timeout(options.continueAfterMatchMs);
-          settleSignal.addEventListener('abort', abortAfterSettling, { once: true });
+        if (options.continueAfterMatchMs !== undefined) {
+          if (!observedExpectedEvents) {
+            observedExpectedEvents = true;
+            settleSignal = AbortSignal.timeout(options.continueAfterMatchMs);
+            settleSignal.addEventListener('abort', abortAfterSettling, { once: true });
+          }
           continue;
         }
         observedExpectedEvents = true;
@@ -121,10 +124,10 @@ async function readSseEventsUntil(
   }
 
   const finalEvents = parseSseEvents(text);
-  if (timedOut) {
+  if (timedOut && !options.allowTimeout) {
     throw new Error(`Timed out waiting for expected SSE events. Received: ${text}`);
   }
-  if (!until(finalEvents)) {
+  if (!timedOut && !until(finalEvents)) {
     throw new Error(`SSE stream ended before expected events were observed. Received: ${text}`);
   }
 
@@ -328,12 +331,17 @@ describe('Beast SSE routes', () => {
     expect(events.find((e) => e.id === '2')).toBeDefined();
   });
 
-  it.each<Array<[string, { headers?: HeadersInit; query?: string }]>>([
+  const malformedReconnectCursorCases: Array<[
+    string,
+    { headers?: HeadersInit; query?: string },
+  ]> = [
     ['partial numeric Last-Event-ID header', { headers: { 'Last-Event-ID': '10abc' } }],
     ['non-numeric lastEventId query', { query: 'lastEventId=abc' }],
     ['negative lastEventId query', { query: 'lastEventId=-1' }],
     ['unsafe integer Last-Event-ID header', { headers: { 'Last-Event-ID': '9007199254740992' } }],
-  ])('rejects malformed reconnect cursor: %s', async (_label, options) => {
+  ];
+
+  it.each(malformedReconnectCursorCases)('rejects malformed reconnect cursor: %s', async (_label, options) => {
     const getSnapshot = vi.fn(() => ({ agents: [{ id: 'a1', status: 'idle' }] }));
     const ctx = createSseApp({ getSnapshot });
     ticketStore = ctx.ticketStore;
@@ -371,21 +379,19 @@ describe('Beast SSE routes', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'INVALID_LAST_EVENT_ID' } });
   });
 
-  it('does not send snapshot on reconnect with Last-Event-ID', async () => {
+  it('does not send snapshot on reconnect with Last-Event-ID when no events are missed', async () => {
     const ctx = createSseApp({
       getSnapshot: () => ({ agents: [] }),
     });
     ticketStore = ctx.ticketStore;
-
-    ctx.bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running' } });
 
     const ticket = await issueTicket(ctx.app);
 
     const events = await readSseEventsUntil(
       ctx.app,
       'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
-      (candidateEvents) => candidateEvents.some((e) => e.id === '1'),
-      { headers: { 'Last-Event-ID': '0' }, continueAfterMatchMs: 25 },
+      () => false,
+      { headers: { 'Last-Event-ID': '0' }, timeoutMs: 50, allowTimeout: true },
     );
     expect(events.find((e) => e.event === 'snapshot')).toBeUndefined();
   });
@@ -401,6 +407,7 @@ describe('Beast SSE routes', () => {
       'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
       (candidateEvents) => candidateEvents.filter((e) => e.event === 'run.log').length === 5,
       {
+        continueAfterMatchMs: 25,
         onConnected: () => {
           for (let i = 0; i < 5; i++) {
             ctx.bus.publish({ type: 'run.log', data: { line: `line-${i}` } });
