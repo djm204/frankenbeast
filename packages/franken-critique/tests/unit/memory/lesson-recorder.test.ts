@@ -2125,6 +2125,58 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('recognizes embedded never and cannot prohibitions', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Validate headers and never cache tokens' }),
+        [createLesson({ correctionApplied: 'Cache tokens' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Validate headers and cannot cache tokens' }),
+        [createLesson({ correctionApplied: 'Cache tokens' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('does not self-contradict duplicate positive without guidance', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Reuse cache without provenance checks' }),
+        [createLesson({ correctionApplied: 'Reuse cache without provenance checks' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('splits newline-delimited directive clauses before assigning polarity', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log PII\nLog debug metrics' }),
+        [createLesson({ correctionApplied: 'Log debug metrics' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('ignores generic directive verbs when testing object overlap', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not allow API writes' }),
+        [createLesson({ correctionApplied: 'Allow API reads' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('treats before prerequisites as compatible guards', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy before approval' }),
+        [createLesson({ correctionApplied: 'Deploy after approval' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('detects one-object directive reversals', () => {
     expect(
       detectLessonContradictions(

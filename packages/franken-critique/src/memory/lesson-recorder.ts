@@ -1238,6 +1238,9 @@ function findContradictoryGuidanceMatch(
       if (lessonDirective.polarity === priorDirective.polarity) {
         continue;
       }
+      if (normalizeText(lessonDirective.sourceText) === normalizeText(priorDirective.sourceText)) {
+        continue;
+      }
       const opposedGuardSharedTerms = opposedConditionalGuardSharedTerms(
         lessonDirective,
         priorDirective,
@@ -1376,13 +1379,13 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
 
 function splitDirectiveFragments(fragment: string): string[] {
   return fragment
-    .split(/[.;]+/)
+    .split(/[.;\n\r]+/)
     .map((part) => part.trim())
     .filter((part) => normalizeText(part).length > 0);
 }
 
 function extractGuardCondition(fragment: string): string | undefined {
-  const match = /\b(?:without|unless)\s+([^.;,]+)/i.exec(fragment);
+  const match = /\b(?:without|unless|before)\s+([^.;,\n\r]+)/i.exec(fragment);
   const condition = match?.[1] ? normalizeText(match[1]) : '';
   return condition.length > 0 ? condition : undefined;
 }
@@ -1390,7 +1393,7 @@ function extractGuardCondition(fragment: string): string | undefined {
 function extractEmbeddedNegatedCondition(
   normalized: string,
 ): string | undefined {
-  const match = /\b(?:do not|don t|does not|not)\s+(.+)$/i.exec(normalized);
+  const match = /\b(?:do not|don t|does not|not|never|cannot|can t|must not|should not)\s+(.+)$/i.exec(normalized);
   const condition = match?.[1]?.trim() ?? '';
   return condition.length > 0 ? condition : undefined;
 }
@@ -1446,7 +1449,8 @@ function hasCompatibleConditionalGuardPair(
     maybeRequirement.polarity !== 'positive' ||
     !maybeProhibition.conditionalProhibition ||
     !maybeProhibition.guardCondition ||
-    maybeRequirement.guardCondition
+    (maybeRequirement.guardCondition &&
+      !/\bbefore\b/i.test(maybeRequirement.sourceText))
   ) {
     return false;
   }
@@ -1707,5 +1711,11 @@ const LESSON_CONTRADICTION_STOP_WORDS = new Set([
   'needs',
   'should',
   'until',
+  'allow',
+  'allows',
+  'allowed',
+  'permit',
+  'permits',
+  'permitted',
   'with',
 ]);
