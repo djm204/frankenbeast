@@ -1319,11 +1319,27 @@ function createLessonDirectiveText(lesson: CritiqueLesson): string {
 
 function createLessonDirectiveFragments(lesson: CritiqueLesson): string[] {
   const reviewerGuidance =
-    lesson.reviewerFeedback?.findings.flatMap((finding) => [
-      finding.suggestion ?? '',
-    ]) ?? [];
+    lesson.reviewerFeedback?.findings.flatMap((finding) => {
+      if (finding.suggestion) {
+        return [finding.suggestion];
+      }
+      return isDirectiveLikeFindingMessage(finding.message) ? [finding.message] : [];
+    }) ?? [];
   return [lesson.correctionApplied, ...reviewerGuidance].filter(
     (fragment) => normalizeText(fragment).length > 0,
+  );
+}
+
+function isDirectiveLikeFindingMessage(message: string): boolean {
+  const normalized = normalizeText(message);
+  const looksLikeFailureProse =
+    /\b(?:did not|does not|skipped|failed|failing|failure|lacked|missing)\b/i.test(
+      message,
+    );
+  return (
+    (startsWithPositiveDirective(normalized) && !looksLikeFailureProse) ||
+    startsWithNegativeDirective(normalized) ||
+    /\b(?:do not|don t|must not|should not|without|unless|until)\b/i.test(message)
   );
 }
 
@@ -1401,13 +1417,13 @@ function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
 
 function splitDirectiveFragments(fragment: string): string[] {
   return fragment
-    .split(/[.;\n\r]+|,\s*(?:and|then)\s+/i)
+    .split(/[.;\n\r]+|,?\s+(?:and|then)\s+/i)
     .map((part) => part.trim())
     .filter((part) => normalizeText(part).length > 0);
 }
 
 function extractGuardCondition(fragment: string): string | undefined {
-  const match = /\b(?:without|unless|before)\s+([^.;,\n\r]+)/i.exec(fragment);
+  const match = /\b(?:without|unless|before|until)\s+([^.;,\n\r]+)/i.exec(fragment);
   const condition = match?.[1] ? normalizeText(match[1]) : '';
   return condition.length > 0 ? condition : undefined;
 }
@@ -1619,13 +1635,13 @@ function hasCompatibleGuardedAllowancePair(
     maybeAllowance.polarity !== 'positive' ||
     maybeProhibition.polarity !== 'negative' ||
     !maybeProhibition.guardCondition ||
-    !/\b(?:with|if)\b/i.test(maybeAllowance.sourceText) ||
-    !/\bwithout\b/i.test(maybeProhibition.sourceText)
+    !/\b(?:with|if|after)\b/i.test(maybeAllowance.sourceText) ||
+    !/\b(?:without|until)\b/i.test(maybeProhibition.sourceText)
   ) {
     return false;
   }
 
-  if (/\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked)\b/i.test(maybeAllowance.sourceText)) {
+  if (/\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected)\b/i.test(maybeAllowance.sourceText)) {
     return false;
   }
 
@@ -1664,7 +1680,7 @@ function hasOpposedGuardOutcome(
     /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated)\b/.test(
       guardCondition,
     );
-  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked)\b/.test(
+  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected)\b/.test(
     guardCondition,
   );
   const requirementHasPass =
@@ -1672,7 +1688,7 @@ function hasOpposedGuardOutcome(
       requirementText,
     );
   const requirementHasFail =
-    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked)\b/.test(requirementText);
+    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected)\b/.test(requirementText);
 
   return (
     (guardHasPass && requirementHasFail) ||
@@ -1763,7 +1779,7 @@ function startsWithNegativeDirective(normalized: string): boolean {
 }
 
 function startsWithPositiveDirective(normalized: string): boolean {
-  return /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required)\b/.test(
+  return /^(allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run)\b/.test(
     normalized,
   );
 }
@@ -1779,7 +1795,7 @@ function stripLeadingNegativeDirective(normalized: string): string {
 
 function stripLeadingPositiveDirective(normalized: string): string {
   return normalized
-    .replace(/^(?:allow|enable|enabled|reuse|use|cache|log|record|permit|require|requires|required)\s+/, '')
+    .replace(/^(?:allow|enable|enabled|deploy|reuse|use|cache|log|record|permit|require|requires|required|run)\s+/, '')
     .trim();
 }
 
@@ -1844,6 +1860,7 @@ const LESSON_CONTRADICTION_SHORT_TERMS = new Set([
   'jwt',
   'log',
   'pii',
+  'run',
   'sql',
   'url',
 ]);

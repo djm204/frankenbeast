@@ -2002,6 +2002,81 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'contradiction_detected' });
   });
 
+  it('checks directive-shaped reviewer messages when suggestions are absent', () => {
+    const current = createLesson({
+      correctionApplied: 'Corrected in iteration 1',
+      reviewerFeedback: {
+        summary: 'Cache guidance regression',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Do not reuse cache responses without provenance checks',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+    const prior = createLesson({
+      correctionApplied: 'Corrected in iteration 1',
+      reviewerFeedback: {
+        summary: 'Cache guidance regression',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Reuse cache responses without provenance checks',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+
+    expect(detectLessonContradictions(current, [prior])).toMatchObject({
+      status: 'contradiction_detected',
+    });
+  });
+
+  it('treats run as a positive directive for test guidance reversals', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not run tests' }),
+        [createLesson({ correctionApplied: 'Run tests' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('treats until prerequisites as compatible guards', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy until approval' }),
+        [createLesson({ correctionApplied: 'Deploy after approval' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('splits bare conjunction mixed directives before assigning polarity', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not cache tokens and rotate keys' }),
+        [createLesson({ correctionApplied: 'Rotate keys' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('does not treat denied or rejected guard outcomes as compatible allowances', () => {
+    for (const guardedAllowance of ['Deploy if approval is denied', 'Deploy if approval rejected']) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: 'Do not deploy without approval' }),
+          [createLesson({ correctionApplied: guardedAllowance })],
+        ),
+      ).toMatchObject({ status: 'contradiction_detected' });
+    }
+  });
+
   it('reports matched reviewer guidance when the correction summary is generic', () => {
     const current = createLesson({
       correctionApplied: 'Corrected in iteration 1',
