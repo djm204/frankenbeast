@@ -523,6 +523,27 @@ describe("npm workspaces configuration", () => {
       }
     });
 
+    it("enforces explicit parseInt radix arguments in ESLint configs", () => {
+      const radixRule = "'radix': ['error', 'always']";
+      const rootConfig = readFileSync(
+        join(ROOT, "eslint.workspace.config.js"),
+        "utf8",
+      );
+
+      expect(rootConfig).toContain(radixRule);
+      for (const path of packageJsonPaths) {
+        const packageDir = path.replace(/\/package\.json$/, "");
+        const configPath = join(ROOT, packageDir, "eslint.config.js");
+        const packageConfig = readFileSync(configPath, "utf8");
+
+        expect(
+          packageConfig.includes("eslint.workspace.config.js") ||
+            packageConfig.includes(radixRule),
+          `${packageDir} must inherit or define the radix rule`,
+        ).toBe(true);
+      }
+    });
+
     it("uses filesystem-safe module URL conversion in the lint coverage audit", () => {
       const auditScript = readFileSync(
         join(ROOT, "scripts/check-workspace-lint-coverage.mjs"),
