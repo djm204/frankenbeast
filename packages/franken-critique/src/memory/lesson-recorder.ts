@@ -753,7 +753,7 @@ function createMutableLessonRecordingResult(
       guidance: LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE,
       items: learningBacklogItems,
     },
-    enumerable: false,
+    enumerable: true,
     writable: false,
   });
   return result;

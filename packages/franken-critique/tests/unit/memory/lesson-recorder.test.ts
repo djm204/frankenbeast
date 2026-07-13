@@ -482,6 +482,17 @@ describe('LessonRecorder', () => {
         },
       ],
     });
+    expect(JSON.parse(JSON.stringify(summary))).toMatchObject({
+      learningBacklogPrioritizationReport: {
+        schemaVersion: 'learning-backlog-prioritization-report-v1',
+        items: [
+          expect.objectContaining({
+            source: 'recorded-lesson',
+            priority: 'high',
+          }),
+        ],
+      },
+    });
   });
 
   it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {
@@ -728,7 +739,7 @@ describe('LessonRecorder', () => {
 
     const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[0]![0];
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -809,7 +820,7 @@ describe('LessonRecorder', () => {
     const admitted = await recorder.record(result, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(admitted).toEqual({
+    expect(admitted).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -846,7 +857,7 @@ describe('LessonRecorder', () => {
     const suppressed = await secondRecorder.record(result, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(suppressed).toEqual({
+    expect(suppressed).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -905,12 +916,12 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({ taskId: 'second-task' }),
@@ -952,7 +963,7 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(disabledSummary).toEqual({
+    expect(disabledSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1004,7 +1015,7 @@ describe('LessonRecorder', () => {
     expect(firstLesson.cooldown.recordedAt).toBe('2026-07-12T10:00:00.000Z');
     expect(firstLesson.cooldown.suppressUntil).toBe('2026-07-12T10:00:01.000Z');
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1050,12 +1061,12 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(1);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -1111,17 +1122,17 @@ describe('LessonRecorder', () => {
     ]);
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(firstSummary).toEqual({
+    expect(firstSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(thirdSummary).toEqual({
+    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [
         expect.objectContaining({
@@ -1166,7 +1177,7 @@ describe('LessonRecorder', () => {
     );
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1202,7 +1213,7 @@ describe('LessonRecorder', () => {
     const secondSummary = await recorder.record(policyDash, 'second-task');
 
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1325,7 +1336,7 @@ describe('LessonRecorder', () => {
     const thirdLesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
       .calls[1]![0];
 
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-b' })],
       minedBlockerPatterns: [],
@@ -1538,7 +1549,7 @@ describe('LessonRecorder', () => {
     expect(secondSummary.recorded).toBe(1);
     expect(secondSummary.minedBlockerPatterns).toHaveLength(1);
     expect(port.recordLesson).toHaveBeenCalledTimes(2);
-    expect(thirdSummary).toEqual({
+    expect(thirdSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [expect.objectContaining({ taskId: 'task-c' })],
       minedBlockerPatterns: [],
@@ -1572,12 +1583,12 @@ describe('LessonRecorder', () => {
     const failedSummary = await recorder.record(result, 'task-a');
     const secondSummary = await recorder.record(result, 'task-b');
 
-    expect(failedSummary).toEqual({
+    expect(failedSummary).toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
     });
-    expect(secondSummary).toEqual({
+    expect(secondSummary).toMatchObject({
       recorded: 1,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
@@ -1820,7 +1831,7 @@ describe('LessonRecorder', () => {
     };
 
     // Should not throw and should report that no lesson was persisted.
-    await expect(recorder.record(result, 'test-task')).resolves.toEqual({
+    await expect(recorder.record(result, 'test-task')).resolves.toMatchObject({
       recorded: 0,
       suppressedByCooldown: [],
       minedBlockerPatterns: [],
