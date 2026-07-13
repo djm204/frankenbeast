@@ -26,6 +26,14 @@ function approved(): SelfCritiqueModule {
   return { verifyRationale: vi.fn().mockResolvedValue({ verdict: 'approved' }) };
 }
 
+function approvedWithSessionToken(tokenId: string): SelfCritiqueModule {
+  return {
+    verifyRationale: vi.fn()
+      .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: tokenId, approvalSessionTokenTriggerId: 'skill' })
+      .mockResolvedValue({ verdict: 'approved' }),
+  };
+}
+
 function rejected(reason = 'bad reasoning'): SelfCritiqueModule {
   return {
     verifyRationale: vi.fn().mockResolvedValue({ verdict: 'rejected', reason }),
@@ -91,6 +99,72 @@ describe('buildCoTExecutor — approved', () => {
     await wrapped(makeTask('t-1'));
 
     expect(generateSpy).toHaveBeenCalledOnce();
+  });
+
+  it('feeds an issued approval session token into later rationales', async () => {
+    const selfCritique = approvedWithSessionToken('session-token-123');
+    const executor = vi.fn().mockResolvedValue(success('t-1'));
+    const enforcer = new RationaleEnforcer();
+    const wrapped = buildCoTExecutor(executor, selfCritique, enforcer);
+
+    await wrapped({ ...makeTask('t-1'), metadata: { tool: 'deploy-prod' } });
+    await wrapped({ ...makeTask('t-2'), metadata: { tool: 'deploy-prod' } });
+
+    expect(selfCritique.verifyRationale).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      approvalSessionTokenId: 'session-token-123',
+      selectedTool: 'deploy-prod',
+    }));
+  });
+
+  it('does not overwrite a still-remembered tool token with a later token for another scope', async () => {
+    const selfCritique: SelfCritiqueModule = {
+      verifyRationale: vi.fn()
+        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'deploy-token', approvalSessionTokenTriggerId: 'skill' })
+        .mockResolvedValueOnce({ verdict: 'approved', approvalSessionTokenId: 'task-token', approvalSessionTokenTriggerId: 'budget' })
+        .mockResolvedValue({ verdict: 'approved' }),
+    };
+    const executor = vi.fn().mockResolvedValue(success('t-1'));
+    const enforcer = new RationaleEnforcer();
+    const wrapped = buildCoTExecutor(executor, selfCritique, enforcer);
+
+    await wrapped({ ...makeTask('deploy-task'), metadata: { tool: 'deploy-prod' } });
+    await wrapped(makeTask('budget-task'));
+    await wrapped({ ...makeTask('next-deploy-task'), metadata: { tool: 'deploy-prod' } });
+
+    expect(selfCritique.verifyRationale).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      approvalSessionTokenId: 'deploy-token',
+      selectedTool: 'deploy-prod',
+    }));
+  });
+
+  it('records approval tokens against the task that produced their rationale under concurrent execution', async () => {
+    let resolveFirst!: (value: { verdict: 'approved'; approvalSessionTokenId: string; approvalSessionTokenTriggerId: string }) => void;
+    let resolveSecond!: (value: { verdict: 'approved'; approvalSessionTokenId: string; approvalSessionTokenTriggerId: string }) => void;
+    const selfCritique: SelfCritiqueModule = {
+      verifyRationale: vi.fn()
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }))
+        .mockResolvedValue({ verdict: 'approved' }),
+    };
+    const executor = vi.fn().mockResolvedValue(success('done'));
+    const enforcer = new RationaleEnforcer();
+    const wrapped = buildCoTExecutor(executor, selfCritique, enforcer);
+    const deployTask = { ...makeTask('deploy-task'), metadata: { tool: 'deploy-prod' } };
+    const budgetTask = makeTask('budget-task');
+
+    const first = wrapped(deployTask);
+    const second = wrapped(budgetTask);
+    resolveSecond({ verdict: 'approved', approvalSessionTokenId: 'budget-token', approvalSessionTokenTriggerId: 'budget' });
+    await second;
+    resolveFirst({ verdict: 'approved', approvalSessionTokenId: 'deploy-token', approvalSessionTokenTriggerId: 'skill' });
+    await first;
+    await wrapped({ ...makeTask('next-deploy-task'), metadata: { tool: 'deploy-prod' } });
+
+    expect(selfCritique.verifyRationale).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      approvalSessionTokenId: 'deploy-token',
+      approvalSessionTokenIds: ['deploy-token', 'budget-token'],
+      selectedTool: 'deploy-prod',
+    }));
   });
 });
 

@@ -1,7 +1,6 @@
 import {
   GovernorCritiqueAdapter,
   type BudgetStateSource,
-  type GovernorCritiqueAdapterDeps,
   type SkillMetadataSource,
 } from './governor-critique-adapter.js';
 import { GovernorAuditRecorder } from '../audit/audit-recorder.js';
@@ -9,6 +8,7 @@ import { CliChannel, type ReadlineAdapter } from '../channels/cli-channel.js';
 import type { GovernorMemoryPort } from '../audit/governor-memory-port.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { defaultConfig, type GovernorConfig } from '../core/config.js';
+import type { SessionTokenStore } from '../security/session-token-store.js';
 
 export interface CreateGovernorOptions {
   readonly readline: ReadlineAdapter;
@@ -21,6 +21,8 @@ export interface CreateGovernorOptions {
   readonly skillMetadata?: SkillMetadataSource;
   /** Budget circuit-breaker state for BudgetTrigger contexts (e.g. MOD-05). */
   readonly budgetState?: BudgetStateSource;
+  /** Shared operator-session token store for approval issuance and validation. */
+  readonly sessionTokenStore?: SessionTokenStore;
 }
 
 export function createGovernor(options: CreateGovernorOptions): GovernorCritiqueAdapter {
@@ -44,5 +46,6 @@ export function createGovernor(options: CreateGovernorOptions): GovernorCritique
     config,
     ...(options.skillMetadata ? { skillMetadata: options.skillMetadata } : {}),
     ...(options.budgetState ? { budgetState: options.budgetState } : {}),
+    ...(options.sessionTokenStore ? { sessionTokenStore: options.sessionTokenStore } : {}),
   });
 }
