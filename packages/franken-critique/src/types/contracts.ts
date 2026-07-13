@@ -132,6 +132,8 @@ export interface LessonQuarantineMetadata {
   readonly quarantinedAt: string;
   readonly evidence: readonly LessonQuarantineEvidence[];
   readonly threshold?: number;
+  /** Lifecycle status before quarantine; missing means legacy active. */
+  readonly previousLifecycleStatus?: LessonLifecycleStatus;
   readonly reviewItem: LessonQuarantineReviewItem;
 }
 

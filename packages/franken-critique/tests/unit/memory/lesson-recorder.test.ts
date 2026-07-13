@@ -720,6 +720,15 @@ describe('LessonRecorder', () => {
       .calls[0]![0];
     expect(lesson.lifecycleStatus).toBe('candidate');
     expect(isLessonApplicable(lesson)).toBe(false);
+    expect(
+      isLessonApplicable({
+        evaluatorName: 'legacy-reviewer',
+        failureDescription: 'legacy lesson without lifecycle metadata',
+        correctionApplied: 'legacy correction',
+        taskId: 'legacy-task',
+        timestamp: '2026-07-12T08:00:00.000Z',
+      }),
+    ).toBe(true);
   });
 
   it('quarantines active lessons on explicit user correction and prevents future application', () => {
@@ -745,7 +754,7 @@ describe('LessonRecorder', () => {
     });
 
     expect(quarantined.lifecycleStatus).toBe('quarantined');
-    expect(quarantined.quarantine).toEqual({
+    expect(quarantined.quarantine).toMatchObject({
       trigger: 'explicit-user-correction',
       reason: 'User corrected this as unsafe because verifier output was skipped.',
       quarantinedAt: '2026-07-12T10:05:00.000Z',
@@ -820,6 +829,55 @@ describe('LessonRecorder', () => {
       ],
     });
     expect(isLessonApplicable(quarantined)).toBe(false);
+  });
+
+  it('preserves lifecycle and quarantine audit trail across repeated quarantine and unquarantine', () => {
+    const candidateLesson = {
+      evaluatorName: 'learning-reviewer',
+      failureDescription: 'candidate guidance may be stale',
+      correctionApplied: 'Corrected in iteration 1',
+      taskId: 'candidate-quarantine-task',
+      timestamp: '2026-07-12T10:00:00.000Z',
+      lifecycleStatus: 'candidate' as const,
+    };
+
+    const firstQuarantine = quarantineLesson(candidateLesson, {
+      trigger: 'explicit-user-correction',
+      reason: 'User reported this candidate as harmful.',
+      evidence: [{ kind: 'operator-report', reference: 'discord://first-report' }],
+      quarantinedAt: '2026-07-12T10:05:00.000Z',
+    });
+    const repeatedQuarantine = quarantineLesson(firstQuarantine, {
+      trigger: 'repeated-failure-threshold',
+      reason: 'Regression repeated after initial correction.',
+      evidence: [
+        {
+          kind: 'failed-regression',
+          reference: 'https://github.com/djm204/frankenbeast/pull/4',
+        },
+      ],
+      quarantinedAt: '2026-07-12T11:00:00.000Z',
+      threshold: 2,
+    });
+
+    expect(repeatedQuarantine.quarantine?.previousLifecycleStatus).toBe('candidate');
+    expect(repeatedQuarantine.quarantine?.evidence).toEqual([
+      { kind: 'operator-report', reference: 'discord://first-report' },
+      {
+        kind: 'failed-regression',
+        reference: 'https://github.com/djm204/frankenbeast/pull/4',
+      },
+    ]);
+
+    const unquarantined = unquarantineLesson(repeatedQuarantine, {
+      reviewedAt: '2026-07-12T12:00:00.000Z',
+      reviewer: 'pm-reviewer',
+      evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/5',
+      reason: 'Review complete but candidate still requires promotion.',
+    });
+
+    expect(unquarantined.lifecycleStatus).toBe('candidate');
+    expect(isLessonApplicable(unquarantined)).toBe(false);
   });
 
   it('allows manual unquarantine only with review evidence and restores active application', () => {

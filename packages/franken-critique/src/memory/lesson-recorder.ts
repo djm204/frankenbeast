@@ -166,7 +166,10 @@ export interface RepeatedFailureQuarantineRequest {
 export type LessonUnquarantineRequest = LessonUnquarantineMetadata;
 
 export function isLessonApplicable(lesson: CritiqueLesson): boolean {
-  return lesson.lifecycleStatus === 'active' && lesson.quarantine === undefined;
+  if (lesson.quarantine !== undefined) {
+    return false;
+  }
+  return lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active';
 }
 
 export function quarantineLesson(
@@ -179,18 +182,25 @@ export function quarantineLesson(
     throw new RangeError('Lesson quarantine requires at least one evidence item.');
   }
   const evidence = request.evidence.map(normalizeQuarantineEvidence);
+  const previousQuarantine = lesson.quarantine;
+  const combinedEvidence = [...(previousQuarantine?.evidence ?? []), ...evidence];
   const reviewItem = createLessonQuarantineReviewItem(
     lesson,
     reason,
-    evidence,
+    combinedEvidence,
     quarantinedAt,
   );
+  const previousLifecycleStatus =
+    previousQuarantine?.previousLifecycleStatus ?? lesson.lifecycleStatus;
   const quarantine: LessonQuarantineMetadata = {
     trigger: request.trigger,
-    reason,
+    reason: previousQuarantine
+      ? `${previousQuarantine.reason}; ${reason}`
+      : reason,
     quarantinedAt,
-    evidence,
+    evidence: combinedEvidence,
     ...(request.threshold !== undefined ? { threshold: request.threshold } : {}),
+    ...(previousLifecycleStatus !== undefined ? { previousLifecycleStatus } : {}),
     reviewItem,
   };
   const { unquarantine, ...lessonWithoutUnquarantine } = lesson;
@@ -243,10 +253,10 @@ export function unquarantineLesson(
     reason: request.reason,
   };
   const { quarantine, ...lessonWithoutQuarantine } = lesson;
-  void quarantine;
+  const restoredLifecycleStatus = quarantine.previousLifecycleStatus ?? 'active';
   return {
     ...lessonWithoutQuarantine,
-    lifecycleStatus: 'active',
+    lifecycleStatus: restoredLifecycleStatus,
     unquarantine,
   };
 }
