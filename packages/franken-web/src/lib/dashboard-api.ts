@@ -76,7 +76,9 @@ export class DashboardApiClient {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = undefined;
         void connect().catch((err) => {
-          console.error(err);
+          const error = toError(err);
+          console.error(error);
+          onError?.(new Error(`Dashboard stream reconnect failed. ${error.message}`));
           scheduleReconnect();
         });
       }, 1_000);

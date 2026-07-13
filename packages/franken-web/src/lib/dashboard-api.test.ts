@@ -322,11 +322,14 @@ describe('DashboardApiClient', () => {
 
       try {
         const client = new DashboardApiClient(BASE_URL);
-        const unsub = await client.subscribeToDashboard(vi.fn());
+        const onError = vi.fn();
+        const unsub = await client.subscribeToDashboard(vi.fn(), onError);
 
         listeners[0]!.error!({});
         await vi.advanceTimersByTimeAsync(1_000);
         expect(errorSpy).toHaveBeenCalledWith(expect.any(Error));
+        expect(onError).toHaveBeenCalledWith(expect.any(Error));
+        expect(onError.mock.calls[0]![0].message).toBe('Dashboard stream reconnect failed. HTTP 503');
         expect(MockEventSource).toHaveBeenCalledTimes(1);
 
         await vi.advanceTimersByTimeAsync(1_000);
