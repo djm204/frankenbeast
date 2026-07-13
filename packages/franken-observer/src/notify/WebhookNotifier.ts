@@ -62,6 +62,13 @@ function isTransientStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599)
 }
 
+function validateNonNegativeInteger(value: number, fieldName: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`${fieldName} must be a non-negative integer`)
+  }
+  return value
+}
+
 export class WebhookNotifier {
   private readonly url: string
   private readonly extraHeaders: Record<string, string>
@@ -76,7 +83,7 @@ export class WebhookNotifier {
     this.sleepFn = options.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)))
     this.retry = options.retry
       ? {
-          maxRetries: options.retry.maxRetries,
+          maxRetries: validateNonNegativeInteger(options.retry.maxRetries, 'retry.maxRetries'),
           baseDelayMs: options.retry.baseDelayMs ?? 200,
           maxDelayMs: options.retry.maxDelayMs ?? 30_000,
           jitter: options.retry.jitter ?? true,
