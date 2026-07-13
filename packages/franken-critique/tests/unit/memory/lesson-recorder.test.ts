@@ -2077,6 +2077,88 @@ describe('LessonRecorder', () => {
     }
   });
 
+  it('treats double-negative skip directives as opposites', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not skip tests' }),
+        [createLesson({ correctionApplied: 'Skip tests' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('does not suppress invalid-object contradictions using unrelated valid qualifiers', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Allow invalid tokens with valid signature' }),
+        [createLesson({ correctionApplied: 'Do not allow invalid tokens' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('ignores failure-prose reviewer messages that contain without', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({
+          correctionApplied: 'Corrected in iteration 1',
+          reviewerFeedback: {
+            summary: 'Cache reused without provenance checks',
+            findings: [
+              {
+                sourceIteration: 0,
+                evaluatorName: 'factuality',
+                message: 'Cache reused without provenance checks',
+                severity: 'critical',
+              },
+            ],
+            suggestionsComplete: false,
+          },
+        }),
+        [createLesson({ correctionApplied: 'Do not reuse cache without provenance checks' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('parses if and when prerequisite guards before compatibility matching', () => {
+    for (const guardedProhibition of [
+      'Do not deploy if approval is missing',
+      'Do not deploy when approval is missing',
+    ]) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: guardedProhibition }),
+          [createLesson({ correctionApplied: 'Deploy after approval' })],
+        ),
+      ).toMatchObject({ status: 'clear', contradictions: [] });
+    }
+  });
+
+  it('normalizes gerund directive verbs before comparing objects', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Avoid logging PII' }),
+        [createLesson({ correctionApplied: 'Log PII' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('preserves shared verbs when conjunctions coordinate objects', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log tokens and passwords' }),
+        [createLesson({ correctionApplied: 'Log passwords' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('requires qualifier overlap for generic object matches', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log error messages' }),
+        [createLesson({ correctionApplied: 'Log debug messages' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
   it('reports matched reviewer guidance when the correction summary is generic', () => {
     const current = createLesson({
       correctionApplied: 'Corrected in iteration 1',
@@ -2354,6 +2436,94 @@ describe('LessonRecorder', () => {
       detectLessonContradictions(
         createLesson({ correctionApplied: 'Allow requests with valid tokens' }),
         [createLesson({ correctionApplied: 'Do not allow requests with invalid tokens' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('does not let unrelated valid qualifiers suppress invalid-object contradictions', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Allow invalid tokens with valid signature' }),
+        [createLesson({ correctionApplied: 'Do not allow invalid tokens' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('detects double-negative skip directives as reversals', () => {
+    for (const pair of [
+      ['Do not skip tests', 'Skip tests'],
+      ['Do not bypass authentication', 'Bypass authentication'],
+    ] as const) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: pair[0] }),
+          [createLesson({ correctionApplied: pair[1] })],
+        ),
+      ).toMatchObject({ status: 'contradiction_detected' });
+    }
+  });
+
+  it('ignores failure prose with without when reviewer suggestions are missing', () => {
+    const current = createLesson({
+      correctionApplied: 'Corrected in iteration 1',
+      reviewerFeedback: {
+        summary: 'Cache reused without provenance checks',
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Cache reused without provenance checks',
+            severity: 'critical',
+          },
+        ],
+        suggestionsComplete: false,
+      },
+    });
+
+    expect(
+      detectLessonContradictions(current, [
+        createLesson({ correctionApplied: 'Do not reuse cache without provenance checks' }),
+      ]),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('treats if and when prerequisite guards as compatible with positive allowances', () => {
+    for (const guardedProhibition of [
+      'Do not deploy if approval is missing',
+      'Do not deploy when approval is missing',
+    ]) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: guardedProhibition }),
+          [createLesson({ correctionApplied: 'Deploy after approval' })],
+        ),
+      ).toMatchObject({ status: 'clear', contradictions: [] });
+    }
+  });
+
+  it('normalizes gerund directive verbs before comparing objects', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Avoid logging PII' }),
+        [createLesson({ correctionApplied: 'Log PII' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('preserves shared directive objects when splitting conjunctions', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log tokens and passwords' }),
+        [createLesson({ correctionApplied: 'Log passwords' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('requires qualifier overlap before generic object matches block promotion', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not log error messages' }),
+        [createLesson({ correctionApplied: 'Log debug messages' })],
       ),
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
