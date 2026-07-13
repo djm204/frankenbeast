@@ -95,6 +95,17 @@ describe('DashboardApiClient', () => {
       const client = new DashboardApiClient(BASE_URL);
       await expect(client.toggleSkill('missing', true)).rejects.toThrow('HTTP 404');
     });
+
+    it('prefers flat server error messages over bare HTTP status codes', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'Skill "missing" was not found' }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.toggleSkill('missing', true)).rejects.toThrow('Skill "missing" was not found');
+    });
   });
 
   describe('updateSecurityProfile', () => {
@@ -124,6 +135,30 @@ describe('DashboardApiClient', () => {
 
       const client = new DashboardApiClient(BASE_URL);
       await expect(client.updateSecurityProfile('strict')).rejects.toThrow('HTTP 403');
+    });
+
+    it('surfaces strict-profile server guidance in the thrown error', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'Security profile "strict" requires allowedDomains to be configured' }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.updateSecurityProfile('strict')).rejects.toThrow(
+        'Security profile "strict" requires allowedDomains to be configured',
+      );
+    });
+
+    it('also accepts enveloped server error messages', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: 'Profile update failed' } }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.updateSecurityProfile('strict')).rejects.toThrow('Profile update failed');
     });
   });
 

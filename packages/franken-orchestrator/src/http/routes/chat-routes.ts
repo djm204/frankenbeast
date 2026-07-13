@@ -259,14 +259,22 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     const session = getSessionOrThrow(sessionStore, id);
 
     return withChatMutationAdmission(c, session.id, async () => {
-      if (!session.pendingApproval && session.state !== 'pending_approval') {
+      if (!session.pendingApproval) {
+        if (session.state === 'pending_approval') {
+          return c.json({
+            error: {
+              code: 'APPROVAL_NOT_PENDING',
+              message: 'No pending approval metadata exists for this session. Reject or recreate the stale approval state before responding.',
+            },
+          }, 409);
+        }
         return c.json({ data: { id: session.id, approved, state: session.state, pendingApproval: null } });
       }
 
       let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
       if (approved) {
-        const pendingApproval = session.pendingApproval ?? null;
-        const wasPendingApproval = Boolean(pendingApproval) || session.state === 'pending_approval';
+        const pendingApproval = session.pendingApproval;
+        const wasPendingApproval = true;
         let runtimeInput: string;
         try {
           runtimeInput = approvalRuntimeInput(pendingApproval);

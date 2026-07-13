@@ -3,6 +3,7 @@ import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer } fr
 import { createToolDefsForServer } from '../shared/tool-registry.js';
 import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
+import { handleStartupFailure } from '../shared/shutdown.js';
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import { parseArgs } from 'node:util';
 import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
@@ -24,7 +25,6 @@ if (isMain(import.meta.url)) {
   const governor = createGovernorAdapter(dbPath);
   const server = createGovernorServer({ governor }, createCentralOptions(dbPath));
   server.start().catch((err) => {
-    console.error('fbeast-governor failed to start:', err);
-    process.exit(1);
+    handleStartupFailure('fbeast-governor', err);
   });
 }

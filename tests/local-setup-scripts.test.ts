@@ -41,6 +41,9 @@ describe('local setup scripts', () => {
     expect(read('README.md')).toContain('Node.js** `>=22.13.0 <23 || >=24.0.0 <26`');
     expect(read('README.md')).toContain('local default is pinned in [.nvmrc](.nvmrc)');
     expect(read('README.md')).toContain('**npm** 11.5.1 via the root `packageManager` pin');
+    expect(read('docs/guides/run-cli-beast.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
+    expect(read('docs/guides/run-dashboard-chat.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
+    expect(read('docs/guides/deploy-beasts.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
     expect(read('packages/franken-brain/README.md')).toContain('npm 11.5.1 via the repository `packageManager` setting');
     expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
     expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
@@ -98,6 +101,9 @@ describe('local setup scripts', () => {
     expect(quickstart).toContain('**Grafana** (port 3000)');
     expect(quickstart).toContain('**Tempo** (ports 3200, 4317, 4318)');
     expect(quickstart).toContain('There is no `firewall` Docker service in the current compose file.');
+    expect(read('README.md')).toContain('fixed compose defaults for Grafana (http://localhost:3000/api/health)');
+    expect(read('README.md')).toContain('Tempo readiness (http://localhost:3200/ready)');
+    expect(read('README.md')).toContain('.env.example intentionally does not define a TEMPO_ENDPOINT override');
     expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`)");
     expect(source).toContain("await checkHttp('Grafana', 'http://localhost:3000/api/health')");
     expect(source).toContain("await checkHttp('Tempo', 'http://localhost:3200/ready')");

@@ -3,6 +3,7 @@ import { createMcpServer, type CreateMcpServerOptions, type FbeastMcpServer } fr
 import { createToolDefsForServer } from '../shared/tool-registry.js';
 import { createCentralOptions } from '../shared/central-enforcement.js';
 import { isMain } from '../shared/is-main.js';
+import { handleStartupFailure } from '../shared/shutdown.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseArgs } from 'node:util';
 import { resolveProjectDbPath } from '../shared/resolve-db-path.js';
@@ -24,7 +25,6 @@ if (isMain(import.meta.url)) {
   const skills = createSkillsAdapter(dbPath);
   const server = createSkillsServer({ skills }, createCentralOptions(dbPath));
   server.start().catch((err) => {
-    console.error('fbeast-skills failed to start:', err);
-    process.exit(1);
+    handleStartupFailure('fbeast-skills', err);
   });
 }

@@ -91,6 +91,60 @@ export interface LessonRollbackWorkflow {
   readonly insufficientEvidenceGuidance: string;
 }
 
+/** Lifecycle states for learned critique guidance. */
+export type LessonLifecycleStatus =
+  | 'candidate'
+  | 'active'
+  | 'quarantined'
+  | 'retired'
+  | 'superseded';
+
+/** Evidence attached to lesson quarantine/rollback decisions. */
+export interface LessonQuarantineEvidence {
+  readonly kind:
+    | 'operator-report'
+    | 'failed-regression'
+    | 'review-comment'
+    | 'incident-link';
+  /** Stable URL, issue/PR reference, or operator report handle proving the lesson is harmful/stale. */
+  readonly reference: string;
+  readonly note?: string;
+}
+
+/** PM/liveness review item created whenever a lesson is quarantined. */
+export interface LessonQuarantineReviewItem {
+  readonly id: string;
+  readonly status: 'open';
+  readonly lessonId: string;
+  readonly createdAt: string;
+  readonly reason: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  readonly recommendedAction: string;
+}
+
+/** Metadata proving why a lesson was removed from future prompt/application paths. */
+export interface LessonQuarantineMetadata {
+  readonly trigger:
+    | 'explicit-user-correction'
+    | 'repeated-failure-threshold'
+    | 'manual-review';
+  readonly reason: string;
+  readonly quarantinedAt: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  readonly threshold?: number;
+  /** Lifecycle status before quarantine; missing means legacy active. */
+  readonly previousLifecycleStatus?: LessonLifecycleStatus;
+  readonly reviewItem: LessonQuarantineReviewItem;
+}
+
+/** Evidence that a quarantined lesson was reviewed and may be applied again. */
+export interface LessonUnquarantineMetadata {
+  readonly reviewedAt: string;
+  readonly reviewer: string;
+  readonly evidenceUrl: string;
+  readonly reason: string;
+}
+
 /** A normalized reviewer finding captured alongside a learned critique lesson. */
 export interface ReviewerFeedbackLessonEntry {
   /** Iteration where the reviewer feedback was emitted. */
@@ -280,6 +334,12 @@ export interface CritiqueLesson {
   readonly correctionApplied: string;
   readonly taskId: TaskId;
   readonly timestamp: string;
+  /** Lifecycle status used by memory/frontload consumers before injecting learned guidance. */
+  readonly lifecycleStatus?: LessonLifecycleStatus;
+  /** Present when a bad/stale lesson has been quarantined and must not be applied. */
+  readonly quarantine?: LessonQuarantineMetadata;
+  /** Present after a reviewed manual unquarantine restores the lesson to active status. */
+  readonly unquarantine?: LessonUnquarantineMetadata;
   /** Present for lessons recorded by LessonRecorder; absent legacy lessons are unverified. */
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
   /** Present for new lessons that must remain quarantined until independently verified. */

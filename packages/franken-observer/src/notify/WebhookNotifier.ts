@@ -81,6 +81,13 @@ function validateNonNegativeInteger(value: number, fieldName: string): number {
   return value
 }
 
+function validateFiniteNonNegativeNumber(value: number, fieldName: string): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(`${fieldName} must be a finite non-negative number`)
+  }
+  return value
+}
+
 function parseUrlOrigin(value: string, fieldName: string): string {
   try {
     return new URL(value).origin
@@ -123,8 +130,8 @@ export class WebhookNotifier {
     this.retry = options.retry
       ? {
           maxRetries: validateNonNegativeInteger(options.retry.maxRetries, 'retry.maxRetries'),
-          baseDelayMs: options.retry.baseDelayMs ?? 200,
-          maxDelayMs: options.retry.maxDelayMs ?? 30_000,
+          baseDelayMs: validateFiniteNonNegativeNumber(options.retry.baseDelayMs ?? 200, 'retry.baseDelayMs'),
+          maxDelayMs: validateFiniteNonNegativeNumber(options.retry.maxDelayMs ?? 30_000, 'retry.maxDelayMs'),
           jitter: options.retry.jitter ?? true,
         }
       : null

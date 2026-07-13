@@ -9,6 +9,9 @@ import type {
   CrossTaskBlockerPattern,
   LearningBacklogPrioritizationItem,
   AgentImprovementScorecard,
+  LessonQuarantineEvidence,
+  LessonQuarantineMetadata,
+  LessonUnquarantineMetadata,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -136,6 +139,131 @@ const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
   insufficientEvidenceGuidance:
     'Do not promote a post-PR lesson until the issue/PR, source finding, correction, and verification evidence are all available.',
 };
+
+const LESSON_QUARANTINE_REVIEW_ACTION =
+  'Review rollback evidence, decide whether to retire or supersede the lesson, and keep it out of prompt injection until explicitly unquarantined.';
+
+export interface LessonQuarantineRequest {
+  readonly trigger: LessonQuarantineMetadata['trigger'];
+  readonly reason: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  readonly quarantinedAt: string;
+  readonly threshold?: number;
+}
+
+export interface LessonFailureSignal {
+  readonly taskId: TaskId;
+  readonly reason: string;
+  readonly evidenceUrl: string;
+}
+
+export interface RepeatedFailureQuarantineRequest {
+  readonly threshold: number;
+  readonly observedAt: string;
+  readonly failures: readonly LessonFailureSignal[];
+}
+
+export type LessonUnquarantineRequest = LessonUnquarantineMetadata;
+
+export function isLessonApplicable(lesson: CritiqueLesson): boolean {
+  if (lesson.quarantine !== undefined) {
+    return false;
+  }
+  if (lesson.experimentSandbox?.promotionBlocked === true) {
+    return false;
+  }
+  return lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active';
+}
+
+export function quarantineLesson(
+  lesson: CritiqueLesson,
+  request: LessonQuarantineRequest,
+): CritiqueLesson {
+  const reason = requireNonEmptyString(request.reason, 'quarantine reason');
+  const quarantinedAt = normalizeTimestamp(request.quarantinedAt);
+  if (request.evidence.length === 0) {
+    throw new RangeError('Lesson quarantine requires at least one evidence item.');
+  }
+  const evidence = request.evidence.map(normalizeQuarantineEvidence);
+  const previousQuarantine = lesson.quarantine;
+  const combinedEvidence = [...(previousQuarantine?.evidence ?? []), ...evidence];
+  const reviewItem = createLessonQuarantineReviewItem(
+    lesson,
+    reason,
+    combinedEvidence,
+    quarantinedAt,
+  );
+  const previousLifecycleStatus = previousQuarantine?.previousLifecycleStatus ??
+    (lesson.lifecycleStatus === 'quarantined' ? undefined : lesson.lifecycleStatus);
+  const threshold = request.threshold ?? previousQuarantine?.threshold;
+  const quarantine: LessonQuarantineMetadata = {
+    trigger: request.trigger,
+    reason: previousQuarantine
+      ? `${previousQuarantine.reason}; ${reason}`
+      : reason,
+    quarantinedAt,
+    evidence: combinedEvidence,
+    ...(threshold !== undefined ? { threshold } : {}),
+    ...(previousLifecycleStatus !== undefined ? { previousLifecycleStatus } : {}),
+    reviewItem,
+  };
+  const { unquarantine, ...lessonWithoutUnquarantine } = lesson;
+  void unquarantine;
+  return {
+    ...lessonWithoutUnquarantine,
+    lifecycleStatus: 'quarantined',
+    quarantine,
+  };
+}
+
+export function quarantineLessonForRepeatedFailures(
+  lesson: CritiqueLesson,
+  request: RepeatedFailureQuarantineRequest,
+): CritiqueLesson {
+  if (!Number.isSafeInteger(request.threshold) || request.threshold < 1) {
+    throw new RangeError('Repeated failure quarantine threshold must be a positive integer.');
+  }
+  const distinctFailures = dedupeFailureSignals(request.failures);
+  if (distinctFailures.length < request.threshold) {
+    return lesson;
+  }
+  return quarantineLesson(lesson, {
+    trigger: 'repeated-failure-threshold',
+    reason: `Lesson caused ${distinctFailures.length} distinct failure signals, meeting the quarantine threshold of ${request.threshold}.`,
+    evidence: distinctFailures.map((failure) => ({
+      kind: 'failed-regression',
+      reference: failure.evidenceUrl,
+      note: `${failure.taskId}: ${failure.reason}`,
+    })),
+    quarantinedAt: request.observedAt,
+    threshold: request.threshold,
+  });
+}
+
+export function unquarantineLesson(
+  lesson: CritiqueLesson,
+  request: LessonUnquarantineRequest,
+): CritiqueLesson {
+  if (lesson.lifecycleStatus !== 'quarantined' || lesson.quarantine === undefined) {
+    throw new RangeError('Only quarantined lessons can be unquarantined.');
+  }
+  requireNonEmptyString(request.reviewer, 'unquarantine reviewer');
+  requireNonEmptyString(request.reason, 'unquarantine reason');
+  requireNonEmptyString(request.evidenceUrl, 'unquarantine evidenceUrl');
+  const unquarantine: LessonUnquarantineMetadata = {
+    reviewedAt: normalizeTimestamp(request.reviewedAt),
+    reviewer: request.reviewer,
+    evidenceUrl: request.evidenceUrl,
+    reason: request.reason,
+  };
+  const { quarantine, ...lessonWithoutQuarantine } = lesson;
+  const restoredLifecycleStatus = quarantine.previousLifecycleStatus ?? 'active';
+  return {
+    ...lessonWithoutQuarantine,
+    lifecycleStatus: restoredLifecycleStatus,
+    unquarantine,
+  };
+}
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -362,6 +490,7 @@ export class LessonRecorder {
             : 'Unknown correction',
           taskId,
           timestamp: recordedAt,
+          lifecycleStatus: 'candidate',
           experimentSandbox: {
             state: 'experimental',
             promotionBlocked: true,
@@ -1100,6 +1229,70 @@ function addCooldownWindowMs(baseMs: number, cooldownMs: number): number {
     );
   }
   return suppressUntilMs;
+}
+
+function createLessonQuarantineReviewItem(
+  lesson: CritiqueLesson,
+  reason: string,
+  evidence: readonly LessonQuarantineEvidence[],
+  createdAt: string,
+): LessonQuarantineMetadata['reviewItem'] {
+  const lessonId = lesson.testTraceability?.[0]?.lessonId ??
+    `${sanitizeLessonIdPart(lesson.taskId)}:${sanitizeLessonIdPart(lesson.evaluatorName)}`;
+  return {
+    id: `lesson-quarantine:${stableHash(`${lessonId}:${reason}:${createdAt}`)}`,
+    status: 'open',
+    lessonId,
+    createdAt,
+    reason,
+    evidence,
+    recommendedAction: LESSON_QUARANTINE_REVIEW_ACTION,
+  };
+}
+
+function normalizeQuarantineEvidence(
+  evidence: LessonQuarantineEvidence,
+): LessonQuarantineEvidence {
+  const reference = requireNonEmptyString(
+    evidence.reference,
+    'quarantine evidence reference',
+  );
+  return {
+    kind: evidence.kind,
+    reference,
+    ...(evidence.note ? { note: evidence.note } : {}),
+  };
+}
+
+function requireNonEmptyString(value: string, fieldName: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new RangeError(`Lesson ${fieldName} must be a non-empty string.`);
+  }
+  return normalized;
+}
+
+function dedupeFailureSignals(
+  failures: readonly LessonFailureSignal[],
+): LessonFailureSignal[] {
+  const seenTaskIds = new Set<string>();
+  const uniqueFailures: LessonFailureSignal[] = [];
+  for (const failure of failures) {
+    const taskIdText = requireNonEmptyString(failure.taskId, 'failure taskId');
+    if (seenTaskIds.has(taskIdText)) {
+      continue;
+    }
+    seenTaskIds.add(taskIdText);
+    uniqueFailures.push({
+      taskId: failure.taskId,
+      reason: requireNonEmptyString(failure.reason, 'failure reason'),
+      evidenceUrl: requireNonEmptyString(
+        failure.evidenceUrl,
+        'failure evidenceUrl',
+      ),
+    });
+  }
+  return uniqueFailures;
 }
 
 function stableHash(value: string): string {
