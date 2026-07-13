@@ -450,6 +450,23 @@ jobs:
     expect(tokenCheckIndex).toBeGreaterThan(privateSkipIndex);
     expect(publishRun).toContain('npm publish "$package_path" --access public --provenance');
   });
+
+  it('does not demote a component latest release unless a root release can be promoted', () => {
+    const latestStep = expectSteps(releasePlease).find((step) => step.name === 'Ensure only root release is marked latest');
+    expect(latestStep).toBeTruthy();
+
+    const latestRun = String(latestStep?.run ?? '');
+    const rootLookupIndex = latestRun.indexOf('root_tag=$(gh release list');
+    const missingRootGuardIndex = latestRun.indexOf('No root release found; leaving component latest unchanged');
+    const demoteIndex = latestRun.indexOf('gh release edit "$latest_tag" --latest=false');
+    const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
+
+    expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
+    expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
+    expect(promoteIndex).toBeGreaterThan(demoteIndex);
+    expect(latestRun).toContain('[0].tagName // ""');
+  });
 });
 
 // release-auto-merge.yml was removed during package consolidation
