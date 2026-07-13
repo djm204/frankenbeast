@@ -151,6 +151,19 @@ describe('Config file loading', () => {
     )).rejects.toThrow(/repo-configured command override/);
   });
 
+  it('ignores repository-local cross-profile state access opt-ins', async () => {
+    const defaultConfigPath = join(tmpDir, '.fbeast', 'config.json');
+    mkdirSync(join(tmpDir, '.fbeast'), { recursive: true });
+    writeFileSync(defaultConfigPath, JSON.stringify({
+      allowCrossProfileStateAccess: true,
+      maxDurationMs: 60000,
+    }));
+
+    const config = await loadConfig(baseArgs({ config: defaultConfigPath }), defaultConfigPath);
+
+    expect(config.allowCrossProfileStateAccess).toBe(false);
+  });
+
   it('treats symlink aliases to repository config as repo-local for provider command trust', async () => {
     const defaultConfigPath = join(tmpDir, '.fbeast', 'config.json');
     const aliasedConfigPath = join(tmpDir, '.fbeast', 'trusted.json');
@@ -197,6 +210,19 @@ describe('Config file loading', () => {
     );
 
     expect(config.providers.overrides['claude']?.command).toBe('/tmp/operator-controlled/claude-wrapper');
+  });
+
+  it('allows explicit operator-owned configs outside the repository to opt into cross-profile state access', async () => {
+    const defaultConfigPath = join(tmpDir, 'repo', '.fbeast', 'config.json');
+    const configPath = join(tmpDir, 'operator-config.json');
+    writeFileSync(configPath, JSON.stringify({
+      allowCrossProfileStateAccess: true,
+      maxDurationMs: 60000,
+    }));
+
+    const config = await loadConfig(baseArgs({ config: configPath }), defaultConfigPath);
+
+    expect(config.allowCrossProfileStateAccess).toBe(true);
   });
 
   it('does not derive a repository boundary from non-standard default config paths', async () => {

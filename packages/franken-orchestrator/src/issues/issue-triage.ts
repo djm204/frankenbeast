@@ -91,11 +91,18 @@ Return ONLY the JSON array, no other text.`;
   private toTriageResults(parsed: unknown[]): TriageResult[] {
     const results = parsed.map((entry): TriageResult => {
       const obj = entry as Record<string, unknown>;
+      const issueNumber = obj['issueNumber'];
+      if (typeof issueNumber !== 'number') {
+        throw new Error(`Invalid triage issueNumber: ${JSON.stringify(issueNumber)}`);
+      }
+      if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+        throw new Error(`Invalid triage issueNumber: ${JSON.stringify(issueNumber)}`);
+      }
       const complexity = typeof obj['complexity'] === 'string' && VALID_COMPLEXITIES.has(obj['complexity'])
         ? (obj['complexity'] as IssueComplexity)
         : 'one-shot';
       return {
-        issueNumber: typeof obj['issueNumber'] === 'number' ? obj['issueNumber'] : 0,
+        issueNumber,
         complexity,
         rationale: typeof obj['rationale'] === 'string' ? obj['rationale'] : 'No rationale provided',
         estimatedScope: typeof obj['estimatedScope'] === 'string' ? obj['estimatedScope'] : 'Unknown scope',

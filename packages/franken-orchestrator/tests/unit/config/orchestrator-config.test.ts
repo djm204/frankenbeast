@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it, expect, afterEach } from 'vitest';
 import { OrchestratorConfigSchema, defaultConfig } from '../../../src/config/orchestrator-config.js';
 
 describe('OrchestratorConfig', () => {
@@ -11,6 +14,88 @@ describe('OrchestratorConfig', () => {
       expect(config.enableHeartbeat).toBe(false);
       expect(config.enableTracing).toBe(false);
       expect(config.minCritiqueScore).toBe(0.7);
+      expect(config.allowCrossProfileStateAccess).toBe(false);
+    });
+  });
+
+  describe('cross-profile state access', () => {
+    const priorProfile = process.env.HERMES_PROFILE;
+    const tmpDirs: string[] = [];
+
+    afterEach(() => {
+      if (priorProfile === undefined) {
+        delete process.env.HERMES_PROFILE;
+      } else {
+        process.env.HERMES_PROFILE = priorProfile;
+      }
+      for (const dir of tmpDirs.splice(0)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects stateDir values that target another Hermes profile by default', () => {
+      process.env.HERMES_PROFILE = 'default';
+      const result = OrchestratorConfigSchema.safeParse({
+        stateDir: join('/srv/hermes', '.hermes', 'profiles', 'prod', 'state'),
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['stateDir']);
+        expect(result.error.issues[0]?.message).toContain('Cross-profile state access is denied by default');
+      }
+    });
+
+    it('allows explicit cross-profile state access only when the operator opts in', () => {
+      process.env.HERMES_PROFILE = 'default';
+      const result = OrchestratorConfigSchema.parse({
+        stateDir: join('/srv/hermes', '.hermes', 'profiles', 'prod', 'state'),
+        allowCrossProfileStateAccess: true,
+      });
+
+      expect(result.stateDir).toContain(join('.hermes', 'profiles', 'prod', 'state'));
+      expect(result.allowCrossProfileStateAccess).toBe(true);
+    });
+
+    it('rejects symlinked stateDir values that resolve into another Hermes profile', () => {
+      process.env.HERMES_PROFILE = 'default';
+      const root = join(tmpdir(), `franken-state-symlink-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      tmpDirs.push(root);
+      const target = join(root, '.hermes', 'profiles', 'prod', 'state');
+      const link = join(root, 'repo', '.fbeast', 'state');
+      mkdirSync(target, { recursive: true });
+      mkdirSync(join(root, 'repo', '.fbeast'), { recursive: true });
+      symlinkSync(target, link, 'dir');
+
+      const result = OrchestratorConfigSchema.safeParse({ stateDir: link });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['stateDir']);
+        expect(result.error.issues[0]?.message).toContain("Hermes profile 'prod'");
+      }
+    });
+
+    it('rejects stateDir children under symlinked ancestors that resolve into another profile', () => {
+      process.env.HERMES_PROFILE = 'default';
+      const root = join(
+        tmpdir(),
+        `franken-state-symlink-child-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+      tmpDirs.push(root);
+      const target = join(root, '.hermes', 'profiles', 'prod');
+      const link = join(root, 'repo', '.fbeast', 'state-link');
+      mkdirSync(target, { recursive: true });
+      mkdirSync(join(root, 'repo', '.fbeast'), { recursive: true });
+      symlinkSync(target, link, 'dir');
+
+      const result = OrchestratorConfigSchema.safeParse({ stateDir: join(link, 'state') });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['stateDir']);
+        expect(result.error.issues[0]?.message).toContain("Hermes profile 'prod'");
+      }
     });
   });
 

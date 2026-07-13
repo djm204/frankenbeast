@@ -13,6 +13,10 @@
       "import": "./dist/path-containment.js",
       "types": "./dist/path-containment.d.ts"
     },
+    "./json-pointer": {
+      "import": "./dist/json-pointer.js",
+      "types": "./dist/json-pointer.d.ts"
+    },
     "./utils": {
       "import": "./dist/utils/index.js",
       "types": "./dist/utils/index.d.ts"

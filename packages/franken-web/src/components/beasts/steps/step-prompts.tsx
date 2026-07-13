@@ -29,7 +29,11 @@ export function StepPrompts() {
 
       <div>
         <h3 className="text-sm font-medium text-beast-text mb-1.5">Files</h3>
-        <p className="text-xs text-beast-subtle mb-3">Attach files to include in the agent's initial context.</p>
+        <p className="text-xs text-beast-subtle mb-3">
+          Attach files to include in the agent's initial context. Markdown files use restricted mode by default so
+          links, raw HTML, images, and embedded instructions are treated as quoted reference text unless an operator
+          explicitly marks the file trusted in launch config.
+        </p>
         <FilePicker
           files={values.files ?? []}
           onFilesChange={(files) => updateField('files', files)}

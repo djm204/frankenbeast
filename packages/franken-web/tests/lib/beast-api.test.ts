@@ -529,6 +529,71 @@ describe('BeastApiClient', () => {
     }
   });
 
+  it('reconnects after malformed handled SSE payloads without accepting later stale-source events', async () => {
+    vi.useFakeTimers();
+    const closeFirst = vi.fn();
+    const closeSecond = vi.fn();
+    const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      const instanceListeners: Record<string, (event: { data: string; lastEventId?: string }) => void> = {};
+      listeners.push(instanceListeners);
+      Object.assign(this, {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string; lastEventId?: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: listeners.length === 1 ? closeFirst : closeSecond,
+      });
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+
+    try {
+      const onRunStatus = vi.fn();
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ runStatus: onRunStatus, runLog: vi.fn(), error: onError });
+
+      listeners[0]?.['run.status']?.({
+        data: JSON.stringify({ runId: 'run-1', status: 'running' }),
+        lastEventId: '42',
+      });
+      listeners[0]?.['run.log']?.({
+        data: '{malformed-json',
+        lastEventId: '43',
+      });
+      listeners[0]?.['run.status']?.({
+        data: JSON.stringify({ runId: 'run-1', status: 'completed' }),
+        lastEventId: '44',
+      });
+
+      expect(closeFirst).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.any(SyntaxError));
+      expect(onRunStatus).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(MockEventSource).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:3000/v1/beasts/events/stream?ticket=ticket-2&lastEventId=42',
+      );
+
+      unsubscribe();
+      expect(closeSecond).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
   it('acknowledges unhandled SSE events without parsing their payloads', async () => {
     vi.useFakeTimers();
     const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];

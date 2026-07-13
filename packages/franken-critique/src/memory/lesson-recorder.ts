@@ -5,6 +5,8 @@ import type {
   LessonRecordingResult,
   ReviewerFeedbackLessonCapture,
   PostPrLessonExtractionTemplate,
+  LessonRollbackWorkflow,
+  CrossTaskBlockerPattern,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -20,9 +22,37 @@ const PENDING_ADMISSIONS_BY_COOLDOWN_STORE = new WeakMap<
   Map<string, number>,
   Map<string, Promise<boolean>>
 >();
+const PENDING_BLOCKER_ADMISSIONS_BY_STORE = new WeakMap<
+  Map<string, BlockerPatternState>,
+  Map<string, Promise<void>>
+>();
 
 const LEARNING_COOLDOWN_GUIDANCE =
   'Equivalent critique lessons are suppressed during this cooldown window so PM/liveness tooling does not churn on repeated feedback before promotion or retirement review.';
+const DEFAULT_BLOCKER_PATTERN_THRESHOLD = 3;
+const MIN_BLOCKER_PATTERN_THRESHOLD = 2;
+const BLOCKER_PATTERN_GUIDANCE =
+  'Equivalent blocker findings have recurred across distinct tasks; PM/liveness handoffs should treat this as a cross-task pattern and route a durable mitigation instead of rediscovering it per task.';
+
+export interface BlockerPatternObservation {
+  readonly taskId: TaskId;
+  readonly observedAt: string;
+}
+
+export interface BlockerPatternState {
+  readonly key: string;
+  readonly evaluatorName: string;
+  readonly normalizedFinding: string;
+  readonly observations: BlockerPatternObservation[];
+}
+
+interface PendingBlockerPatternObservation {
+  readonly key: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  readonly normalizedFinding: string;
+  readonly observedAt: string;
+}
 
 export interface LessonRecorderOptions {
   /** Milliseconds to suppress equivalent lessons after one is admitted. Defaults to 24 hours. */
@@ -31,10 +61,42 @@ export interface LessonRecorderOptions {
   readonly now?: () => Date | string;
   /** Shared cooldown state for reviewer rebuilds that happen in the same process. */
   readonly cooldownStore?: Map<string, number>;
+  /** Distinct task count required before a repeated critical finding is surfaced as a blocker pattern. Defaults to 3. */
+  readonly blockerPatternThreshold?: number;
+  /** Shared blocker-pattern state for mining recurrent blockers across recorder instances. */
+  readonly blockerPatternStore?: Map<string, BlockerPatternState>;
 }
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
   'New critique lessons are experimental until their traceability map and regression evidence are independently verified.';
+
+const LESSON_ROLLBACK_INSUFFICIENT_EVIDENCE_GUIDANCE =
+  'Do not roll back a lesson unless the rollback request names the lesson, explains the bad/stale guidance, links review or regression evidence, and includes a verification command for the replacement or retirement decision.';
+
+const LESSON_ROLLBACK_WORKFLOW: LessonRollbackWorkflow = {
+  workflowId: 'lesson-rollback-v1',
+  eligibleStates: ['experimental', 'promoted'],
+  steps: [
+    'Quarantine the target lesson so PM/liveness tooling stops promoting it into new handoffs.',
+    'Attach the rollback reason, evidence URLs, and verifier command to the lesson audit trail.',
+    'Either record a replacement lesson with fresh traceability evidence or mark the original lesson retired with no replacement.',
+    'Run the verifier command and include the result in the PM handoff before removing the rollback block.',
+  ],
+  requiredEvidence: [
+    'Stable lesson identifier or traceability entry',
+    'Reason the lesson is incorrect, stale, over-broad, or harmful',
+    'Review comment, failed regression, operator report, or incident link proving rollback is warranted',
+    'Verification command for the replacement lesson or retired state',
+  ],
+  requestSchema: {
+    lessonId: 'string',
+    rollbackReason: 'string',
+    evidenceUrls: 'string[]',
+    replacementLesson: 'string-or-null',
+    verificationCommand: 'string',
+  },
+  insufficientEvidenceGuidance: LESSON_ROLLBACK_INSUFFICIENT_EVIDENCE_GUIDANCE,
+};
 
 const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
   'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
@@ -73,6 +135,13 @@ export class LessonRecorder {
   private readonly now: () => string;
   private readonly cooldowns: Map<string, number>;
   private readonly pendingAdmissions: Map<string, Promise<boolean>>;
+  private readonly blockerPatternThreshold: number;
+  private readonly blockerPatterns: Map<string, BlockerPatternState>;
+  private readonly pendingBlockerAdmissions: Map<string, Promise<void>>;
+  private readonly pendingBlockerObservations = new WeakMap<
+    CritiqueLesson,
+    PendingBlockerPatternObservation[]
+  >();
 
   constructor(memory: MemoryPort, options: LessonRecorderOptions = {}) {
     const cooldownMs = options.cooldownMs ?? DEFAULT_LESSON_COOLDOWN_MS;
@@ -88,6 +157,21 @@ export class LessonRecorder {
 
     this.memory = memory;
     this.cooldownMs = cooldownMs;
+    const blockerPatternThreshold =
+      options.blockerPatternThreshold ?? DEFAULT_BLOCKER_PATTERN_THRESHOLD;
+    if (
+      !Number.isInteger(blockerPatternThreshold) ||
+      blockerPatternThreshold < MIN_BLOCKER_PATTERN_THRESHOLD
+    ) {
+      throw new RangeError(
+        'LessonRecorder blockerPatternThreshold must be an integer greater than or equal to 2.',
+      );
+    }
+    this.blockerPatternThreshold = blockerPatternThreshold;
+    this.blockerPatterns = options.blockerPatternStore ?? new Map();
+    this.pendingBlockerAdmissions = getPendingBlockerAdmissions(
+      this.blockerPatterns,
+    );
     const now = options.now ?? ((): Date => new Date());
     this.now = (): string => normalizeTimestamp(now());
     this.cooldowns = options.cooldownStore ?? new Map<string, number>();
@@ -100,10 +184,7 @@ export class LessonRecorder {
     result: CritiqueLoopResult,
     taskId: TaskId,
   ): Promise<LessonRecordingResult> {
-    const recordingResult: MutableLessonRecordingResult = {
-      recorded: 0,
-      suppressedByCooldown: [],
-    };
+    const recordingResult = createMutableLessonRecordingResult();
 
     // Only record lessons from multi-iteration pass/warn successes.
     if (
@@ -119,71 +200,95 @@ export class LessonRecorder {
 
     for (const iteration of failingIterations) {
       const lessons = this.extractLessons(iteration, result.iterations, taskId);
-      for (const lesson of lessons) {
-        const cooldownKey =
-          this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
-        let admissionSettled: ((admitted: boolean) => void) | undefined;
-        let admissionPromise: Promise<boolean> | undefined;
-        if (cooldownKey) {
-          let admittedByAnotherCall = false;
-          while (!admittedByAnotherCall) {
-            const suppression = this.getCooldownSuppression(
-              lesson,
-              cooldownKey,
-            );
-            if (suppression) {
-              recordingResult.suppressedByCooldown.push(suppression);
-              admittedByAnotherCall = true;
-              break;
-            }
-
-            const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
-            if (pendingAdmission) {
-              await pendingAdmission;
-              continue;
-            }
-
-            if (this.cooldownMs > 0) {
-              admissionPromise = new Promise<boolean>((resolve) => {
-                admissionSettled = resolve;
-              });
-              this.pendingAdmissions.set(cooldownKey, admissionPromise);
-            }
-            break;
-          }
-
-          if (admittedByAnotherCall) {
-            continue;
-          }
-        }
-
-        try {
-          const admittedLesson = this.withAdmissionTimestamp(lesson);
-          await this.memory.recordLesson(admittedLesson);
-          recordingResult.recorded += 1;
-          if (cooldownKey && this.cooldownMs > 0) {
-            this.cooldowns.set(
-              cooldownKey,
-              Date.parse(admittedLesson.cooldown!.suppressUntil),
-            );
-          }
-          admissionSettled?.(true);
-        } catch {
-          admissionSettled?.(false);
-          // Non-fatal: log failure but don't disrupt the critique flow
-        } finally {
-          if (
-            cooldownKey &&
-            admissionPromise &&
-            this.pendingAdmissions.get(cooldownKey) === admissionPromise
-          ) {
-            this.pendingAdmissions.delete(cooldownKey);
-          }
-        }
+      for (const extractedLesson of lessons) {
+        await this.recordExtractedLesson(extractedLesson, recordingResult);
       }
     }
 
     return recordingResult;
+  }
+
+  private async recordExtractedLesson(
+    extractedLesson: CritiqueLesson,
+    recordingResult: MutableLessonRecordingResult,
+  ): Promise<void> {
+    await this.withBlockerPatternAdmissionLock(extractedLesson, async () => {
+      let lesson = this.withCurrentBlockerPatterns(extractedLesson);
+      const cooldownKey =
+        this.cooldownMs > 0 ? lesson.cooldown?.key : undefined;
+      let admissionSettled: ((admitted: boolean) => void) | undefined;
+      let admissionPromise: Promise<boolean> | undefined;
+      if (cooldownKey) {
+        let admittedByAnotherCall = false;
+        while (!admittedByAnotherCall) {
+          const pendingAdmission = this.pendingAdmissions.get(cooldownKey);
+          if (pendingAdmission) {
+            await pendingAdmission;
+            continue;
+          }
+
+          if (this.cooldownMs > 0) {
+            admissionPromise = new Promise<boolean>((resolve) => {
+              admissionSettled = resolve;
+            });
+            this.pendingAdmissions.set(cooldownKey, admissionPromise);
+          }
+
+          lesson = this.withCurrentBlockerPatterns(lesson);
+          const hasMinedBlockerPatterns =
+            (lesson.blockerPatterns?.length ?? 0) > 0;
+          const suppression = this.getCooldownSuppression(lesson, cooldownKey);
+          if (suppression && !hasMinedBlockerPatterns) {
+            this.commitBlockerPatternObservations(lesson);
+            recordingResult.suppressedByCooldown.push(suppression);
+            admissionSettled?.(false);
+            if (
+              admissionPromise &&
+              this.pendingAdmissions.get(cooldownKey) === admissionPromise
+            ) {
+              this.pendingAdmissions.delete(cooldownKey);
+            }
+            admittedByAnotherCall = true;
+            break;
+          }
+
+          break;
+        }
+
+        if (admittedByAnotherCall) {
+          return;
+        }
+      }
+
+      try {
+        const admittedLesson = this.withAdmissionTimestamp(lesson);
+        await this.memory.recordLesson(admittedLesson);
+        recordingResult.recorded += 1;
+        this.commitBlockerPatternObservations(lesson);
+        addUniqueBlockerPatterns(
+          recordingResult.minedBlockerPatterns,
+          lesson.blockerPatterns,
+        );
+        if (cooldownKey && this.cooldownMs > 0) {
+          this.cooldowns.set(
+            cooldownKey,
+            Date.parse(admittedLesson.cooldown!.suppressUntil),
+          );
+        }
+        admissionSettled?.(true);
+      } catch {
+        admissionSettled?.(false);
+        // Non-fatal: log failure but don't disrupt the critique flow
+      } finally {
+        if (
+          cooldownKey &&
+          admissionPromise &&
+          this.pendingAdmissions.get(cooldownKey) === admissionPromise
+        ) {
+          this.pendingAdmissions.delete(cooldownKey);
+        }
+      }
+    });
   }
 
   private extractLessons(
@@ -220,8 +325,14 @@ export class LessonRecorder {
         const suppressUntil = new Date(
           addCooldownWindowMs(cooldownBaseMs, this.cooldownMs),
         ).toISOString();
+        const blockerPatternUpdate = this.previewBlockerPatterns(
+          taskId,
+          evalResult.evaluatorName,
+          critiqueFindings,
+          recordedAt,
+        );
 
-        lessons.push({
+        const lesson: CritiqueLesson = {
           evaluatorName: evalResult.evaluatorName,
           failureDescription: findingMessages.join('; '),
           correctionApplied: passingIteration
@@ -240,6 +351,7 @@ export class LessonRecorder {
             ],
             verificationCommand: LESSON_TRACEABILITY_VERIFICATION_COMMAND,
           },
+          rollbackWorkflow: createLessonRollbackWorkflow(),
           testTraceability: [
             {
               lessonId,
@@ -266,11 +378,227 @@ export class LessonRecorder {
             suppressUntil,
             guidance: LEARNING_COOLDOWN_GUIDANCE,
           },
-        });
+          ...(blockerPatternUpdate.patterns.length > 0
+            ? { blockerPatterns: blockerPatternUpdate.patterns }
+            : {}),
+        };
+        this.pendingBlockerObservations.set(
+          lesson,
+          blockerPatternUpdate.observations,
+        );
+        lessons.push(lesson);
       }
     }
 
     return lessons;
+  }
+
+  private previewBlockerPatterns(
+    taskId: TaskId,
+    evaluatorName: string,
+    findings: readonly {
+      readonly message: string;
+      readonly severity: string;
+    }[],
+    observedAt: string,
+  ): {
+    patterns: CrossTaskBlockerPattern[];
+    observations: PendingBlockerPatternObservation[];
+  } {
+    const minedPatterns: CrossTaskBlockerPattern[] = [];
+    const pendingObservations: PendingBlockerPatternObservation[] = [];
+    for (const finding of findings) {
+      if (finding.severity !== 'critical') {
+        continue;
+      }
+
+      const normalizedFinding = normalizeBlockerFinding(finding.message);
+      if (!normalizedFinding) {
+        continue;
+      }
+
+      const key = createBlockerPatternKey(evaluatorName, normalizedFinding);
+      const pattern = this.blockerPatterns.get(key);
+      const observations = pattern?.observations ?? [];
+
+      if (observations.some((observation) => observation.taskId === taskId)) {
+        continue;
+      }
+
+      if (pendingObservations.some((observation) => observation.key === key)) {
+        continue;
+      }
+
+      const previousObservationCount = observations.length;
+      const previewState: BlockerPatternState = {
+        key,
+        evaluatorName,
+        normalizedFinding,
+        observations: [...observations, { taskId, observedAt }],
+      };
+      pendingObservations.push({
+        key,
+        taskId,
+        evaluatorName,
+        normalizedFinding,
+        observedAt,
+      });
+      if (
+        previousObservationCount < this.blockerPatternThreshold &&
+        previewState.observations.length >= this.blockerPatternThreshold
+      ) {
+        minedPatterns.push(
+          createCrossTaskBlockerPattern(
+            previewState,
+            this.blockerPatternThreshold,
+          ),
+        );
+      }
+    }
+
+    return { patterns: minedPatterns, observations: pendingObservations };
+  }
+
+  private commitBlockerPatternObservations(lesson: CritiqueLesson): void {
+    const pendingObservations =
+      this.pendingBlockerObservations.get(lesson) ?? [];
+    for (const observation of pendingObservations) {
+      let pattern = this.blockerPatterns.get(observation.key);
+      if (!pattern) {
+        pattern = {
+          key: observation.key,
+          evaluatorName: observation.evaluatorName,
+          normalizedFinding: observation.normalizedFinding,
+          observations: [],
+        };
+        this.blockerPatterns.set(observation.key, pattern);
+      }
+      if (
+        !pattern.observations.some(
+          (entry) => entry.taskId === observation.taskId,
+        )
+      ) {
+        pattern.observations.push({
+          taskId: observation.taskId,
+          observedAt: observation.observedAt,
+        });
+      }
+    }
+    this.pendingBlockerObservations.delete(lesson);
+  }
+
+  private async withBlockerPatternAdmissionLock<T>(
+    lesson: CritiqueLesson,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const keys = this.getPendingBlockerPatternKeys(lesson);
+    if (keys.length === 0) {
+      return operation();
+    }
+
+    while (true) {
+      const pendingLocks = keys
+        .map((key) => this.pendingBlockerAdmissions.get(key))
+        .filter((lock): lock is Promise<void> => lock !== undefined);
+      if (pendingLocks.length === 0) {
+        break;
+      }
+      await Promise.allSettled(pendingLocks);
+    }
+
+    let releaseLock!: () => void;
+    const lock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    for (const key of keys) {
+      this.pendingBlockerAdmissions.set(key, lock);
+    }
+
+    try {
+      return await operation();
+    } finally {
+      for (const key of keys) {
+        if (this.pendingBlockerAdmissions.get(key) === lock) {
+          this.pendingBlockerAdmissions.delete(key);
+        }
+      }
+      releaseLock();
+    }
+  }
+
+  private getPendingBlockerPatternKeys(lesson: CritiqueLesson): string[] {
+    return Array.from(
+      new Set(
+        (this.pendingBlockerObservations.get(lesson) ?? []).map(
+          (observation) => observation.key,
+        ),
+      ),
+    ).sort();
+  }
+
+  private withCurrentBlockerPatterns(lesson: CritiqueLesson): CritiqueLesson {
+    const pendingObservations =
+      this.pendingBlockerObservations.get(lesson) ?? [];
+    const patterns: CrossTaskBlockerPattern[] = [];
+    const seenKeys = new Set<string>();
+    for (const observation of pendingObservations) {
+      if (seenKeys.has(observation.key)) {
+        continue;
+      }
+      seenKeys.add(observation.key);
+      const committedPattern = this.blockerPatterns.get(observation.key);
+      const committedObservations = committedPattern?.observations ?? [];
+      if (
+        committedObservations.some(
+          (entry) => entry.taskId === observation.taskId,
+        )
+      ) {
+        continue;
+      }
+
+      const previewState: BlockerPatternState = {
+        key: observation.key,
+        evaluatorName: observation.evaluatorName,
+        normalizedFinding: observation.normalizedFinding,
+        observations: [
+          ...committedObservations,
+          { taskId: observation.taskId, observedAt: observation.observedAt },
+        ],
+      };
+      if (
+        committedObservations.length < this.blockerPatternThreshold &&
+        previewState.observations.length >= this.blockerPatternThreshold
+      ) {
+        patterns.push(
+          createCrossTaskBlockerPattern(
+            previewState,
+            this.blockerPatternThreshold,
+          ),
+        );
+      }
+    }
+
+    if (patterns.length === 0) {
+      if (!lesson.blockerPatterns) {
+        return lesson;
+      }
+      const { blockerPatterns, ...lessonWithoutPatterns } = lesson;
+      void blockerPatterns;
+      this.pendingBlockerObservations.set(
+        lessonWithoutPatterns,
+        pendingObservations,
+      );
+      this.pendingBlockerObservations.delete(lesson);
+      return lessonWithoutPatterns;
+    }
+
+    const lessonWithPatterns = { ...lesson, blockerPatterns: patterns };
+    this.pendingBlockerObservations.set(
+      lessonWithPatterns,
+      pendingObservations,
+    );
+    this.pendingBlockerObservations.delete(lesson);
+    return lessonWithPatterns;
   }
 
   private getCooldownSuppression(
@@ -330,7 +658,6 @@ export class LessonRecorder {
       },
     };
   }
-
 }
 
 function getPendingAdmissions(
@@ -344,9 +671,76 @@ function getPendingAdmissions(
   return pending;
 }
 
+function getPendingBlockerAdmissions(
+  blockerPatternStore: Map<string, BlockerPatternState>,
+): Map<string, Promise<void>> {
+  let pending = PENDING_BLOCKER_ADMISSIONS_BY_STORE.get(blockerPatternStore);
+  if (!pending) {
+    pending = new Map<string, Promise<void>>();
+    PENDING_BLOCKER_ADMISSIONS_BY_STORE.set(blockerPatternStore, pending);
+  }
+  return pending;
+}
+
 interface MutableLessonRecordingResult {
   recorded: number;
   suppressedByCooldown: LessonCooldownSuppression[];
+  minedBlockerPatterns: CrossTaskBlockerPattern[];
+}
+
+function createMutableLessonRecordingResult(): MutableLessonRecordingResult {
+  return {
+    recorded: 0,
+    suppressedByCooldown: [],
+    minedBlockerPatterns: [],
+  };
+}
+
+function addUniqueBlockerPatterns(
+  target: CrossTaskBlockerPattern[],
+  patterns: readonly CrossTaskBlockerPattern[] | undefined,
+): void {
+  for (const pattern of patterns ?? []) {
+    if (!target.some((existing) => existing.key === pattern.key)) {
+      target.push(pattern);
+    }
+  }
+}
+
+function createCrossTaskBlockerPattern(
+  state: BlockerPatternState,
+  threshold: number,
+): CrossTaskBlockerPattern {
+  return {
+    key: state.key,
+    evaluatorName: state.evaluatorName,
+    normalizedFinding: state.normalizedFinding,
+    threshold,
+    occurrences: state.observations.length,
+    taskIds: state.observations.map((observation) => observation.taskId),
+    firstSeenAt: state.observations[0]!.observedAt,
+    lastSeenAt: state.observations[state.observations.length - 1]!.observedAt,
+    guidance: BLOCKER_PATTERN_GUIDANCE,
+  };
+}
+
+function createBlockerPatternKey(
+  evaluatorName: string,
+  normalizedFinding: string,
+): string {
+  const normalizedPattern = JSON.stringify({
+    evaluatorName,
+    normalizedFinding,
+  });
+  return [
+    'blocker-pattern',
+    sanitizeLessonIdPart(evaluatorName),
+    stableHash(normalizedPattern),
+  ].join(':');
+}
+
+function normalizeBlockerFinding(message: string): string {
+  return message.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {
@@ -355,6 +749,16 @@ function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate 
     instructions: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.instructions],
     requiredEvidence: [...POST_PR_LESSON_EXTRACTION_TEMPLATE.requiredEvidence],
     outputSchema: { ...POST_PR_LESSON_EXTRACTION_TEMPLATE.outputSchema },
+  };
+}
+
+function createLessonRollbackWorkflow(): LessonRollbackWorkflow {
+  return {
+    ...LESSON_ROLLBACK_WORKFLOW,
+    eligibleStates: [...LESSON_ROLLBACK_WORKFLOW.eligibleStates],
+    steps: [...LESSON_ROLLBACK_WORKFLOW.steps],
+    requiredEvidence: [...LESSON_ROLLBACK_WORKFLOW.requiredEvidence],
+    requestSchema: { ...LESSON_ROLLBACK_WORKFLOW.requestSchema },
   };
 }
 

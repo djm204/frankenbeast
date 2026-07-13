@@ -6,14 +6,18 @@ import type {
   ChannelOutboundMessage,
   ChannelAdapter,
   ChannelType,
+  DeliverySensitivity,
 } from '../core/types.js';
 
 export interface ChatGatewayOptions {
   /** Maximum number of session route metadata records kept for action callbacks. */
   routeMetadataMaxEntries?: number;
+  /** Per-channel delivery policy. Sensitive outbound messages are denied unless explicitly allowed. */
+  channelSensitivityPolicy?: Partial<Record<ChannelType, { allowSensitiveDelivery?: boolean }>>;
 }
 
 const DEFAULT_ROUTE_METADATA_MAX_ENTRIES = 10_000;
+const WITHHELD_SENSITIVE_MESSAGE = '[frankenbeast] Sensitive response withheld for this delivery channel. Enable allowSensitiveDelivery only for trusted channels, or view the response in a local/operator-only surface.';
 
 export class ChatGateway extends EventEmitter {
   private readonly adapters = new Map<ChannelType, ChannelAdapter>();
@@ -21,11 +25,13 @@ export class ChatGateway extends EventEmitter {
   private readonly routeMetadataBySession = new Map<string, Record<string, unknown>>();
   private readonly runtime: CommsRuntimePort;
   private readonly routeMetadataMaxEntries: number;
+  private readonly channelSensitivityPolicy: Partial<Record<ChannelType, { allowSensitiveDelivery?: boolean }>>;
 
   constructor(runtime: CommsRuntimePort, options: ChatGatewayOptions = {}) {
     super();
     this.runtime = runtime;
     this.routeMetadataMaxEntries = this.normalizeRouteMetadataLimit(options.routeMetadataMaxEntries);
+    this.channelSensitivityPolicy = options.channelSensitivityPolicy ?? {};
   }
 
   registerAdapter(adapter: ChannelAdapter): void {
@@ -54,10 +60,12 @@ export class ChatGateway extends EventEmitter {
 
     const outbound: ChannelOutboundMessage = { text: result.text, metadata: routeMetadata };
     if (result.status) outbound.status = result.status;
+    if (result.sensitivity) outbound.sensitivity = result.sensitivity;
     if (result.actions) outbound.actions = result.actions;
     if (result.metadata) outbound.metadata = { ...routeMetadata, ...result.metadata };
     if (result.provider) outbound.provider = result.provider;
     if (result.phase) outbound.phase = result.phase;
+    outbound.sensitivity = this.resolveDeliverySensitivity(outbound);
     this.relayToChannel(sessionId, message.channelType, outbound);
   }
 
@@ -83,18 +91,27 @@ export class ChatGateway extends EventEmitter {
       externalUserId: 'system',
     });
 
-    const outboundRouteMetadata = cachedRouteMetadata ?? result.metadata;
-    if (outboundRouteMetadata) {
+    const outboundRouteMetadata = {
+      ...this.pickRouteMetadata(result.metadata),
+      ...(cachedRouteMetadata ?? {}),
+    };
+    if (Object.keys(outboundRouteMetadata).length > 0) {
       this.rememberRouteMetadata(sessionId, outboundRouteMetadata);
     }
     const outbound: ChannelOutboundMessage = {
       text: result.text,
-      ...(outboundRouteMetadata ? { metadata: outboundRouteMetadata } : {}),
+      ...(
+        Object.keys(outboundRouteMetadata).length > 0 || result.metadata
+          ? { metadata: { ...(result.metadata ?? {}), ...outboundRouteMetadata } }
+          : {}
+      ),
     };
     if (result.status) outbound.status = result.status;
+    if (result.sensitivity) outbound.sensitivity = result.sensitivity;
     if (result.actions) outbound.actions = result.actions;
     if (result.provider) outbound.provider = result.provider;
     if (result.phase) outbound.phase = result.phase;
+    outbound.sensitivity = this.resolveDeliverySensitivity(outbound);
     this.relayToChannel(sessionId, channelType, outbound);
   }
 
@@ -113,6 +130,23 @@ export class ChatGateway extends EventEmitter {
       ...(message.channelType === 'telegram' ? { chatId: message.externalChannelId } : {}),
       ...(message.channelType === 'whatsapp' ? { phoneNumber: message.externalChannelId } : {}),
     };
+  }
+
+  private pickRouteMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+    if (!metadata) return {};
+    const routeMetadata: Record<string, unknown> = {};
+    for (const key of [
+      'externalChannelId',
+      'externalThreadId',
+      'channelId',
+      'threadId',
+      'threadTs',
+      'chatId',
+      'phoneNumber',
+    ]) {
+      if (metadata[key] !== undefined) routeMetadata[key] = metadata[key];
+    }
+    return routeMetadata;
   }
 
   private rememberRouteMetadata(sessionId: string, routeMetadata: Record<string, unknown>): void {
@@ -149,7 +183,7 @@ export class ChatGateway extends EventEmitter {
   ): void {
     const adapter = this.adapters.get(channelType);
     if (adapter) {
-      adapter.send(sessionId, outbound).catch((error: Error) => {
+      adapter.send(sessionId, this.applyDeliverySensitivityPolicy(channelType, outbound)).catch((error: Error) => {
         this.emit(
           'error',
           new Error(
@@ -158,6 +192,54 @@ export class ChatGateway extends EventEmitter {
         );
       });
     }
+  }
+
+  private applyDeliverySensitivityPolicy(
+    channelType: ChannelType,
+    outbound: ChannelOutboundMessage,
+  ): ChannelOutboundMessage {
+    const sensitivity = this.resolveDeliverySensitivity(outbound);
+    if (sensitivity !== 'sensitive') {
+      return { ...outbound, sensitivity };
+    }
+    if (this.channelSensitivityPolicy[channelType]?.allowSensitiveDelivery === true) {
+      return { ...outbound, sensitivity };
+    }
+
+    return {
+      text: WITHHELD_SENSITIVE_MESSAGE,
+      status: 'reply',
+      sensitivity,
+      metadata: {
+        externalChannelId: outbound.metadata?.externalChannelId,
+        externalThreadId: outbound.metadata?.externalThreadId,
+        channelId: outbound.metadata?.channelId,
+        threadId: outbound.metadata?.threadId,
+        threadTs: outbound.metadata?.threadTs,
+        chatId: outbound.metadata?.chatId,
+        phoneNumber: outbound.metadata?.phoneNumber,
+        deliveryDenied: true,
+        deliveryDeniedReason: 'sensitive-channel-policy',
+      },
+    };
+  }
+
+  private resolveDeliverySensitivity(outbound: ChannelOutboundMessage): DeliverySensitivity {
+    const signals = [
+      this.normalizeSensitivityValue(outbound.sensitivity),
+      this.normalizeSensitivityValue(outbound.metadata?.deliverySensitivity),
+      this.normalizeSensitivityValue(outbound.metadata?.sensitivity),
+    ];
+    if (signals.includes('sensitive')) return 'sensitive';
+    if (signals.includes('internal')) return 'internal';
+    if (signals.includes('public')) return 'public';
+    return 'internal';
+  }
+
+  private normalizeSensitivityValue(value: unknown): DeliverySensitivity | undefined {
+    if (value === undefined) return undefined;
+    if (value === 'public' || value === 'internal' || value === 'sensitive') return value;
+    return 'sensitive';
   }
 
   close(): void {

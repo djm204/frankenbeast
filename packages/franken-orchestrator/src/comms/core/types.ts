@@ -1,5 +1,7 @@
 export type ChannelType = 'slack' | 'discord' | 'telegram' | 'whatsapp';
 
+export type DeliverySensitivity = 'public' | 'internal' | 'sensitive';
+
 export interface ChannelInboundMessage {
   channelType: ChannelType;
   externalUserId: string;
@@ -31,6 +33,11 @@ export interface ChannelOutboundMessage {
   status?: OutboundMessageStatus;
   actions?: ChannelAction[];
   metadata?: Record<string, unknown>;
+  /**
+   * Optional delivery policy hint. Gateways must fail closed for sensitive
+   * messages unless the destination channel explicitly allows sensitive output.
+   */
+  sensitivity?: DeliverySensitivity;
   delta?: string;
   provider?: ProviderMetadata;
   phase?: string;

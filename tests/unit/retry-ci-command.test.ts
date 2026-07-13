@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -27,13 +27,18 @@ writeFileSync(file, String(count));
 process.exit(count < 2 ? 7 : 0);
 `;
 
-    const result = runRetryCommand([process.execPath, '-e', childScript, counter], { CI_TEST_RETRIES: '2' });
+    try {
+      const result = runRetryCommand([process.execPath, '-e', childScript, counter], { CI_TEST_RETRIES: '2' });
 
-    expect(result.status).toBe(0);
-    expect(readFileSync(counter, 'utf8')).toBe('2');
-    expect(result.stderr).toContain('[ci-retry] attempt 1/3');
-    expect(result.stderr).toContain('[ci-retry] command failed with exit code 7; retrying');
-    expect(result.stderr).toContain('[ci-retry] command succeeded on retry attempt 2');
+      expect(result.status).toBe(0);
+      expect(readFileSync(counter, 'utf8')).toBe('2');
+      expect(result.stderr).toContain('[ci-retry] attempt 1/3');
+      expect(result.stderr).toContain('[ci-retry] command failed with exit code 7; retrying');
+      expect(result.stderr).toContain('[ci-retry] command succeeded on retry attempt 2');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      expect(existsSync(dir)).toBe(false);
+    }
   });
 
   it('preserves the final failure exit code after retries are exhausted', () => {

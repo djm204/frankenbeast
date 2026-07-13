@@ -4,23 +4,31 @@
  * Each stage writes to real SQLite tables and the next stage reads them back.
  * The shared .fbeast/beast.db is the single source of truth for all adapters.
  *
- * Codex CLI is used as the configured provider; its binary is verified
- * accessible and the beast executor is wired through the same db.
+ * Provider execution has a dedicated smoke below; the default test is an
+ * honest DB/state integration that never requires a live provider binary.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { z } from 'zod';
 import Database from 'better-sqlite3';
 
 import { runInit } from '../cli/init.js';
 import { runHook, defaultHookDeps } from '../cli/hook.js';
 import { createBrainAdapter } from '../adapters/brain-adapter.js';
 import { createObserverAdapter } from '../adapters/observer-adapter.js';
-import { SQLiteBeastRepository } from '@franken/orchestrator';
+import {
+  BeastLogStore,
+  ProcessBeastExecutor,
+  ProcessSupervisor,
+  SQLiteBeastRepository,
+  type BeastDefinition,
+  type BeastRunEvent,
+} from '@franken/orchestrator';
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +52,63 @@ function isCodexBinaryReachable(): boolean {
   return result.status === 0 && /codex/i.test(result.stdout);
 }
 
+function writeFakeCodexCli(root: string): { binDir: string; argsLog: string } {
+  const binDir = join(root, 'bin');
+  const argsLog = join(root, 'codex-args.json');
+  const codexPath = join(binDir, 'codex');
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(
+    codexPath,
+    `#!/usr/bin/env node\n`
+      + `const fs = require('node:fs');\n`
+      + `fs.writeFileSync(process.env.FBEAST_CODEX_ARGS_LOG, JSON.stringify(process.argv.slice(2)));\n`
+      + `process.stdout.write(JSON.stringify({type:'message',content:[{type:'output_text',text:'FBEAST_CODEX_SMOKE'}]}) + '\\n');\n`,
+  );
+  chmodSync(codexPath, 0o755);
+  return { binDir, argsLog };
+}
+
+function codexExecutorSmokeDefinition(): BeastDefinition {
+  return {
+    id: 'codex-cli-executor-smoke',
+    version: 1,
+    label: 'Codex CLI executor smoke',
+    description: 'Exercise ProcessBeastExecutor through the Codex CLI argument path.',
+    executionModeDefault: 'process',
+    configSchema: z.object({
+      provider: z.literal('codex-cli'),
+      projectRoot: z.string().min(1),
+      fakeCodexBin: z.string().min(1),
+      argsLog: z.string().min(1),
+    }).strict(),
+    interviewPrompts: [],
+    buildProcessSpec: (config) => ({
+      command: 'codex',
+      args: ['exec', '--full-auto', '--json', '--color', 'never', 'Return exactly FBEAST_CODEX_SMOKE.'],
+      cwd: String(config.projectRoot),
+      env: {
+        PATH: `${String(config.fakeCodexBin)}:${process.env.PATH ?? ''}`,
+        FBEAST_CODEX_ARGS_LOG: String(config.argsLog),
+        FRANKENBEAST_SPAWNED: '1',
+      },
+    }),
+    telemetryLabels: { family: 'codex-cli-executor-smoke' },
+  };
+}
+
+async function waitForRunStatus(
+  repo: SQLiteBeastRepository,
+  runId: string,
+  status: 'completed' | 'failed',
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (repo.getRun(runId)?.status === status) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect(repo.getRun(runId)?.status).toBe(status);
+}
+
 // ─── Suite ───────────────────────────────────────────────────────────────────
 
 describe('full-cycle integration', () => {
@@ -60,7 +125,7 @@ describe('full-cycle integration', () => {
 
   const codexIt = isCodexBinaryReachable() ? it : it.skip;
 
-  codexIt('codex binary is reachable', () => {
+  codexIt('optional live Codex CLI prerequisite is reachable when installed', () => {
     const result = spawnSync('codex', ['--version'], { encoding: 'utf-8' });
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/codex/i);
@@ -68,7 +133,7 @@ describe('full-cycle integration', () => {
 
   // ── Stage 1 → 8 all share one project so state flows forward ─────────────
 
-  it('init → hooks → brain → observer → beast repo all share beast.db', async () => {
+  it('init → hooks → brain → observer → beast repo all share beast.db without provider execution', async () => {
     const root = tmpProject();
     roots.push(root);
     const claudeDir = join(root, '.claude');
@@ -159,7 +224,7 @@ describe('full-cycle integration', () => {
       expect(rows[1].parent_hash).toBe(rows[0].hash);
     }
 
-    // ── 7. SQLiteBeastRepository — creates run on same beast.db ───────────────
+    // ── 7. SQLiteBeastRepository — creates synthetic queued run on same beast.db ─
     const repo = new SQLiteBeastRepository(db);
     const run = repo.createRun({
       definitionId: 'def-codex-test',
@@ -194,5 +259,57 @@ describe('full-cycle integration', () => {
       // Beast repository tables
       expect(tables).toContain('beast_runs');
     }
+  });
+
+  it('init → beast executor → Codex CLI command records completed run in beast.db', async () => {
+    const root = tmpProject();
+    roots.push(root);
+    const db = beastDb(root);
+    const { binDir, argsLog } = writeFakeCodexCli(root);
+
+    runInit({ root, claudeDir: join(root, '.claude'), hooks: false });
+
+    const repo = new SQLiteBeastRepository(db);
+    const logs = new BeastLogStore(join(root, '.fbeast', 'beast-logs'));
+    const supervisor = new ProcessSupervisor({ projectRoot: root });
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, { runConfigRoot: root });
+    const run = repo.createRun({
+      definitionId: 'codex-cli-executor-smoke',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        provider: 'codex-cli',
+        projectRoot: root,
+        fakeCodexBin: binDir,
+        argsLog,
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'test',
+      createdAt: new Date().toISOString(),
+    });
+
+    const attempt = await executor.start(run, codexExecutorSmokeDefinition());
+    await waitForRunStatus(repo, run.id, 'completed');
+
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'completed',
+      configSnapshot: expect.objectContaining({ provider: 'codex-cli' }),
+      attemptCount: 1,
+      currentAttemptId: attempt.id,
+      latestExitCode: 0,
+    });
+    expect(repo.getAttempt(attempt.id)).toMatchObject({ status: 'completed', exitCode: 0 });
+    expect(repo.listEvents(run.id).map((event: BeastRunEvent) => event.type)).toEqual(
+      expect.arrayContaining(['attempt.started', 'attempt.finished']),
+    );
+    const codexArgs = JSON.parse(readFileSync(argsLog, 'utf-8')) as string[];
+    expect(codexArgs).toEqual([
+      'exec',
+      '--full-auto',
+      '--json',
+      '--color',
+      'never',
+      'Return exactly FBEAST_CODEX_SMOKE.',
+    ]);
   });
 });
