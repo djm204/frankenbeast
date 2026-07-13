@@ -477,6 +477,7 @@ On APPROVE, the gateway can issue a scoped, time-limited `SessionToken`. A `Gove
 import {
   createGovernor,
   ApprovalGateway,
+  SkillTrigger,
   SessionTokenStore,
   createGovernorApp,
   defaultConfig,
@@ -490,6 +491,12 @@ const store = new SessionTokenStore({
 const governor = createGovernor({
   readline: readlineAdapter,
   memoryPort,
+  evaluators: [new SkillTrigger()],
+  skillMetadata: {
+    getSkillMetadata: (skillId) => skillId === 'deploy-prod'
+      ? { requiresHitl: true, isDestructive: true }
+      : undefined,
+  },
   sessionTokenStore: store,
 });
 
@@ -539,7 +546,7 @@ const app = createGovernorApp({
 |-------|------|-------------|
 | `tokenId` | `string` | Unique identifier (UUID) |
 | `approvalId` | `string` | The approval request ID that created this token |
-| `scope` | `string` | Skill ID or task ID this token authorizes |
+| `scope` | `string` | Canonical approval scope this token authorizes, including project ID, trigger ID, and selected tool/task scope |
 | `grantedBy` | `string` | Operator who approved |
 | `grantedAt` | `Date` | When the token was issued |
 | `expiresAt` | `Date` | When the token expires |

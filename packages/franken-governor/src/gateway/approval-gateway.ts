@@ -7,6 +7,7 @@ import {
 } from '../security/signature-verifier.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
 import { assertValidSessionTokenTtl, createSessionToken } from '../security/session-token.js';
+import { formatApprovalSessionTokenScope } from '../security/session-token-scope.js';
 import {
   ApprovalTimeoutError,
   SignatureVerificationError,
@@ -191,7 +192,7 @@ export class ApprovalGateway {
   ) {
     const token = createSessionToken({
       approvalId: request.requestId,
-      scope: request.skillId ?? request.taskId,
+      scope: formatApprovalSessionTokenScope(request),
       grantedBy: response.respondedBy,
       ttlMs: this.config.sessionTokenTtlMs,
     });

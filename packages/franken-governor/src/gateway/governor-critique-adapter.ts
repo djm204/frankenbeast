@@ -1,9 +1,10 @@
-import type { ApprovalRequest, TriggerResult } from '../core/types.js';
+import type { ApprovalRequest, SessionToken, TriggerResult } from '../core/types.js';
 import { defaultConfig, type GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
 import { ApprovalGateway, type AuditRecorder } from './approval-gateway.js';
 import type { SignatureVerifier } from '../security/signature-verifier.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
+import { formatApprovalSessionTokenScope } from '../security/session-token-scope.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { BudgetTrigger, type BudgetTriggerContext } from '../triggers/budget-trigger.js';
 import { evaluateTrigger } from '../triggers/evaluate-trigger.js';
@@ -105,8 +106,9 @@ export class GovernorCritiqueAdapter {
       ? { ...base, skillId: rationale.selectedTool }
       : base;
 
-    if (this.hasValidOperatorSession(request, rationale)) {
-      await this.recordOperatorSessionReuse(request);
+    const operatorSessionToken = this.getValidOperatorSessionToken(request, rationale);
+    if (operatorSessionToken) {
+      await this.recordOperatorSessionReuse(request, operatorSessionToken);
       return { verdict: 'approved' };
     }
 
@@ -127,6 +129,8 @@ export class GovernorCritiqueAdapter {
   }
 
   private evaluateTriggers(rationale: RationaleBlock): TriggerResult {
+    let firstSkillTrigger: TriggerResult | undefined;
+
     for (const evaluator of this.evaluators) {
       const triggerContext = this.buildTriggerContext(evaluator, rationale);
       // Explicit skip: the evaluator's typed context cannot be constructed
@@ -134,31 +138,40 @@ export class GovernorCritiqueAdapter {
       // RationaleBlock it was never typed for (see issue #490).
       if (triggerContext.skip) continue;
       const result = evaluateTrigger(evaluator, triggerContext.context);
-      if (result.triggered) return result;
+      if (!result.triggered) continue;
+
+      if (result.triggerId === 'skill') {
+        firstSkillTrigger ??= result;
+        continue;
+      }
+
+      return result;
     }
+    if (firstSkillTrigger) return firstSkillTrigger;
     return { triggered: false, triggerId: 'none' };
   }
 
-  private hasValidOperatorSession(request: ApprovalRequest, rationale: RationaleBlock): boolean {
-    if (!this.sessionTokenStore || !rationale.approvalSessionTokenId || request.trigger.triggerId !== 'skill') {
-      return false;
+  private getValidOperatorSessionToken(request: ApprovalRequest, rationale: RationaleBlock): SessionToken | undefined {
+    if (!this.sessionTokenStore || !rationale.approvalSessionTokenId) {
+      return undefined;
     }
 
-    const scope = request.skillId ?? request.taskId;
+    const scope = formatApprovalSessionTokenScope(request);
     try {
-      return this.sessionTokenStore.isValid(rationale.approvalSessionTokenId, scope);
+      const token = this.sessionTokenStore.get(rationale.approvalSessionTokenId);
+      return token?.scope === scope ? token : undefined;
     } catch {
-      return false;
+      return undefined;
     }
   }
 
-  private async recordOperatorSessionReuse(request: ApprovalRequest): Promise<void> {
+  private async recordOperatorSessionReuse(request: ApprovalRequest, token: SessionToken): Promise<void> {
     await this.auditRecorder.record(request, {
       requestId: request.requestId,
       decision: 'APPROVE',
       respondedBy: 'operator-session-token',
       respondedAt: new Date(deterministicNow()),
-      feedback: 'Approved by scoped operator session token',
+      feedback: `Approved by scoped operator session token from approval ${token.approvalId} granted by ${token.grantedBy}`,
     });
   }
 
@@ -187,6 +200,8 @@ export class GovernorCritiqueAdapter {
       return { skip: false, context: this.budgetState.getBudgetState() };
     }
 
-    return { skip: false, context: rationale };
+    const rationaleWithoutBearerToken = { ...rationale };
+    delete rationaleWithoutBearerToken.approvalSessionTokenId;
+    return { skip: false, context: rationaleWithoutBearerToken };
   }
 }

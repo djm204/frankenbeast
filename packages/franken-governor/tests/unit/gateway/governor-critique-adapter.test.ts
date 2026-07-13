@@ -8,6 +8,7 @@ import { BudgetTrigger } from '../../../src/triggers/budget-trigger.js';
 import { SkillTrigger } from '../../../src/triggers/skill-trigger.js';
 import { SessionTokenStore } from '../../../src/security/session-token-store.js';
 import { createSessionToken } from '../../../src/security/session-token.js';
+import { formatSessionTokenScope } from '../../../src/security/session-token-scope.js';
 import { createTaskId, type TaskId } from '@franken/types';
 
 interface RationaleBlock {
@@ -28,6 +29,10 @@ function makeRationale(overrides: Partial<RationaleBlock> = {}): RationaleBlock 
     timestamp: new Date('2026-01-01'),
     ...overrides,
   };
+}
+
+function makeScope(triggerId: string = 'skill', actionScope: string = 'deploy-prod', projectId: string = 'proj-001'): string {
+  return formatSessionTokenScope({ projectId, triggerId, actionScope });
 }
 
 function makeFakeChannel(decision: ApprovalOutcome['decision'] = 'APPROVE'): ApprovalChannel {
@@ -374,7 +379,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     const tokenStore = new SessionTokenStore();
     const token = createSessionToken({
       approvalId: 'prior-approval',
-      scope: 'deploy-prod',
+      scope: makeScope(),
       grantedBy: 'operator',
       ttlMs: 60_000,
     });
@@ -413,7 +418,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       const tokenStore = new SessionTokenStore();
       const token = createSessionToken({
         approvalId: 'prior-approval',
-        scope: 'deploy-prod',
+        scope: makeScope(),
         grantedBy: 'operator',
         ttlMs: 1_000,
       });
@@ -447,7 +452,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     const tokenStore = new SessionTokenStore();
     const token = createSessionToken({
       approvalId: 'prior-approval',
-      scope: 'deploy-prod',
+      scope: makeScope(),
       grantedBy: 'operator',
       ttlMs: 60_000,
     });
@@ -490,8 +495,9 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     const result = await adapter.verifyRationale(makeRationale({ selectedTool: 'deploy-prod' }));
 
     expect(result.verdict).toBe('approved');
+    if (result.verdict !== 'approved') throw new Error('expected approved result');
     expect(result.approvalSessionTokenId).toEqual(expect.any(String));
-    expect(tokenStore.isValid(result.approvalSessionTokenId!, 'deploy-prod')).toBe(true);
+    expect(tokenStore.isValid(result.approvalSessionTokenId!, makeScope())).toBe(true);
   });
 
   it('fails closed to a fresh operator prompt when token validation storage throws', async () => {
@@ -527,7 +533,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     const tokenStore = new SessionTokenStore();
     const token = createSessionToken({
       approvalId: 'prior-approval',
-      scope: 'deploy-prod',
+      scope: makeScope(),
       grantedBy: 'operator',
       ttlMs: 60_000,
     });
@@ -536,7 +542,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     const adapter = new GovernorCritiqueAdapter({
       channel,
       auditRecorder: makeFakeAuditRecorder(),
-      evaluators: [new BudgetTrigger(), new SkillTrigger()],
+      evaluators: [new SkillTrigger(), new BudgetTrigger()],
       projectId: 'proj-001',
       skillMetadata: makeSkillMetadataSource({
         'deploy-prod': { requiresHitl: true, isDestructive: true },
@@ -556,5 +562,79 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
     expect(channel.requestApproval).toHaveBeenCalledOnce();
     const request = vi.mocked(channel.requestApproval).mock.calls[0]![0] as ApprovalRequest;
     expect(request.trigger.triggerId).toBe('budget');
+  });
+
+  it('honors a task-scoped session token for a repeated task-scoped approval', async () => {
+    const tokenStore = new SessionTokenStore();
+    const token = createSessionToken({
+      approvalId: 'prior-task-approval',
+      scope: makeScope('budget', 'task-001'),
+      grantedBy: 'operator',
+      ttlMs: 60_000,
+    });
+    tokenStore.store(token);
+    const channel = makeFakeChannel('ABORT');
+    const rationale = makeRationale({ approvalSessionTokenId: token.tokenId });
+    delete rationale.selectedTool;
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new BudgetTrigger()],
+      projectId: 'proj-001',
+      budgetState: {
+        getBudgetState: () => ({ tripped: true, limitUsd: 100, spendUsd: 125 }),
+      },
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(rationale);
+
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(channel.requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('does not let a session token cross project boundaries', async () => {
+    const tokenStore = new SessionTokenStore();
+    const token = createSessionToken({
+      approvalId: 'prior-approval',
+      scope: makeScope('skill', 'deploy-prod', 'other-project'),
+      grantedBy: 'operator',
+      ttlMs: 60_000,
+    });
+    tokenStore.store(token);
+    const channel = makeFakeChannel('APPROVE');
+    const adapter = new GovernorCritiqueAdapter({
+      channel,
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [new SkillTrigger()],
+      projectId: 'proj-001',
+      skillMetadata: makeSkillMetadataSource({
+        'deploy-prod': { requiresHitl: true, isDestructive: true },
+      }),
+      sessionTokenStore: tokenStore,
+    });
+
+    const result = await adapter.verifyRationale(makeRationale({
+      selectedTool: 'deploy-prod',
+      approvalSessionTokenId: token.tokenId,
+    }));
+
+    expect(result).toEqual({ verdict: 'approved', approvalSessionTokenId: expect.any(String) });
+    expect(channel.requestApproval).toHaveBeenCalledOnce();
+  });
+
+  it('strips bearer session tokens before invoking custom trigger evaluators', async () => {
+    const evaluate = vi.fn(() => ({ triggered: false, triggerId: 'custom' }));
+    const adapter = new GovernorCritiqueAdapter({
+      channel: makeFakeChannel(),
+      auditRecorder: makeFakeAuditRecorder(),
+      evaluators: [{ triggerId: 'custom', evaluate }],
+      projectId: 'proj-001',
+    });
+
+    await adapter.verifyRationale(makeRationale({ approvalSessionTokenId: 'secret-token-id' }));
+
+    expect(evaluate).toHaveBeenCalledOnce();
+    expect(evaluate.mock.calls[0]![0]).not.toHaveProperty('approvalSessionTokenId');
   });
 });
