@@ -922,7 +922,8 @@ export async function main(): Promise<void> {
   }
 
   const root = resolveProjectRoot(args.baseDir);
-  if (process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
+  const suppressBanner = args.subcommand === 'network' && args.networkAction === 'credentials';
+  if (!suppressBanner && process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
   }
 

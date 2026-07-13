@@ -906,6 +906,24 @@ describe('main() execution', () => {
     expect(mockSessionStart).toHaveBeenCalled();
   });
 
+  it('prints network credentials as parseable JSON without a banner', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'network',
+      networkAction: 'credentials',
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    const stdout = info.mock.calls.map((call) => String(call[0]));
+    expect(stdout).not.toContain('[BANNER]');
+    expect(JSON.parse(stdout.at(-1) ?? '{}')).toMatchObject({
+      mode: 'secure',
+      credentials: expect.any(Array),
+    });
+  });
+
   it('does not hide non-file init config loading errors behind init fallback defaults', async () => {
     const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
     tempDirs.push(tempDir);

@@ -17,16 +17,18 @@ export interface CredentialInventoryReport {
 }
 
 function credentialStatus(ref: string | undefined, active: boolean, required = true): CredentialInventoryStatus {
-  if (!required) return ref ? 'optional-configured' : 'optional-missing';
-  if (active) return ref ? 'configured' : 'missing';
-  return ref ? 'inactive-configured' : 'inactive-missing';
+  const present = Boolean(ref?.trim());
+  if (!required) return present ? 'optional-configured' : 'optional-missing';
+  if (active) return present ? 'configured' : 'missing';
+  return present ? 'inactive-configured' : 'inactive-missing';
 }
 
 function entry(scope: string, configPath: string, ref: string | undefined, active: boolean, required = true): CredentialInventoryEntry {
+  const normalizedRef = ref?.trim();
   return {
     scope,
     configPath,
-    ref: ref ?? null,
+    ref: normalizedRef ? normalizedRef : null,
     status: credentialStatus(ref, active, required),
   };
 }

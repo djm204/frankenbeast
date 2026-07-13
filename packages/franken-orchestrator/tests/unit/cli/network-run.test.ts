@@ -351,6 +351,8 @@ describe('runNetworkCommand', () => {
     config.network.operatorTokenRef = 'prod/operator-token';
     config.comms.enabled = true;
     config.comms.orchestratorTokenRef = 'prod/orchestrator-token';
+    config.comms.slack.enabled = true;
+    config.comms.slack.botTokenRef = '   ';
     config.comms.discord.enabled = true;
     config.comms.discord.botTokenRef = 'prod/discord-bot-token';
     config.comms.telegram.enabled = false;
@@ -398,6 +400,12 @@ describe('runNetworkCommand', () => {
       configPath: 'comms.orchestratorTokenRef',
       ref: 'prod/orchestrator-token',
       status: 'optional-configured',
+    });
+    expect(report.credentials).toContainEqual({
+      scope: 'comms.slack.bot',
+      configPath: 'comms.slack.botTokenRef',
+      ref: null,
+      status: 'missing',
     });
     expect(report.credentials).toContainEqual({
       scope: 'comms.discord',
