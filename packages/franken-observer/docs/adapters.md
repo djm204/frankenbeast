@@ -148,12 +148,20 @@ const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
 await local.flush(trace)
 
 // Grafana Cloud Tempo (Basic auth + cloud OTLP path)
+function requireEnv(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`${name} is required for Grafana Cloud Tempo exports`)
+  }
+  return value
+}
+
 const cloud = new TempoAdapter({
   endpoint: 'https://tempo-us-central1.grafana.net/tempo',
   otlpPath: '/otlp/v1/traces',       // Grafana Cloud uses this path
   basicAuth: {
-    user: process.env.GRAFANA_INSTANCE_ID!,   // numeric instance ID
-    password: process.env.GRAFANA_API_KEY!,
+    user: requireEnv('GRAFANA_INSTANCE_ID'),   // numeric instance ID
+    password: requireEnv('GRAFANA_API_KEY'),
   },
 })
 await cloud.flush(trace)
@@ -168,12 +176,50 @@ await cloud.flush(trace)
 | `basicAuth` | `TempoBasicAuth`| —                | Omit for unauthenticated local Tempo            |
 | `fetch`     | `FetchFn`       | `globalThis.fetch`| Injectable for testing                         |
 
+**Grafana Cloud environment variables**
+
+`TempoAdapter` does not read environment variables directly; pass credentials through the `basicAuth` option when you target Grafana Cloud Tempo. The examples in this package use:
+
+| Variable | Purpose | Default behavior |
+|---|---|---|
+| `GRAFANA_INSTANCE_ID` | Grafana Cloud Tempo instance/user ID used as the Basic auth username. | No default. Omit `basicAuth` for unauthenticated local Tempo, or fail fast in your app/CI if this is unset for Grafana Cloud. |
+| `GRAFANA_API_KEY` | Grafana Cloud token/API key used as the Basic auth password. | No default. Required only for authenticated Grafana Cloud exports. |
+
+For local development, prefer the unauthenticated compose/collector endpoint and do not set cloud secrets:
+
+```ts
+// Local Tempo / OpenTelemetry Collector: no Grafana Cloud credentials needed.
+const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318'
+const local = new TempoAdapter({ endpoint })
+await local.flush(trace)
+```
+
+For Grafana Cloud, export both variables in the shell that starts the observer process and keep them out of source control:
+
+```bash
+export GRAFANA_INSTANCE_ID="123456"
+export GRAFANA_API_KEY="glc_..."
+```
+
+In CI, store both values as masked secrets and inject them only into jobs that need to exercise Grafana Cloud export wiring:
+
+```yaml
+env:
+  GRAFANA_INSTANCE_ID: ${{ secrets.GRAFANA_INSTANCE_ID }}
+  GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+```
+
+Security notes:
+- Treat `GRAFANA_API_KEY` as a secret credential. Do not commit it to `.env`, logs, snapshots, or PR comments.
+- Scope the token to the minimum Grafana Cloud permissions needed to write Tempo traces, and rotate it if it is exposed.
+- Prefer local unauthenticated Tempo for normal development and tests; package tests use injectable `fetch` functions and should not require real Grafana credentials.
+
 **OTLP path quick reference**
 
-| Environment              | `endpoint`                                          | `otlpPath`            |
-|--------------------------|-----------------------------------------------------|-----------------------|
-| Local Tempo / Collector  | `http://localhost:4318`                             | `/v1/traces` (default)|
-| Grafana Cloud            | `https://tempo-{region}.grafana.net/tempo`          | `/otlp/v1/traces`     |
+| Environment              | `endpoint`                                          | `otlpPath`            | Auth |
+|--------------------------|-----------------------------------------------------|-----------------------|------|
+| Local Tempo / Collector  | `http://localhost:4318`                             | `/v1/traces` (default)| none |
+| Grafana Cloud            | `https://tempo-{region}.grafana.net/tempo`          | `/otlp/v1/traces`     | `GRAFANA_INSTANCE_ID` / `GRAFANA_API_KEY` via `basicAuth` |
 
 **Testing without a real Tempo instance**
 

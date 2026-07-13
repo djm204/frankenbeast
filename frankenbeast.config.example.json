@@ -4,5 +4,6 @@
   "maxDurationMs": 300000,
   "enableHeartbeat": false,
   "enableTracing": false,
-  "minCritiqueScore": 0.7
+  "minCritiqueScore": 0.7,
+  "allowCrossProfileStateAccess": false
 }

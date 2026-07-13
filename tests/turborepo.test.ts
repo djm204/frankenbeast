@@ -155,10 +155,16 @@ describe("Turborepo configuration", () => {
 
     it("test:ci script runs the same root-plus-package test target as CI", () => {
       expect(rootPkg.scripts["test:ci"]).toBe(
-        "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration",
+        "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval",
       );
       expect(rootPkg.scripts["ci:test:planner-integration"]).toBe(
         "node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner",
+      );
+      expect(rootPkg.scripts["ci:test:observer-eval"]).toBe(
+        "node scripts/retry-ci-command.mjs -- npm run test:eval --workspace @franken/observer",
+      );
+      expect(rootPkg.scripts["ci:test:e2e"]).toBe(
+        "node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts",
       );
 
       const ciWorkflow = readFileSync(
@@ -166,6 +172,10 @@ describe("Turborepo configuration", () => {
         "utf8",
       );
       expect(ciWorkflow).toContain("run: npm run test:ci");
+      expect(ciWorkflow).toContain("run: npm run ci:test:e2e");
+      expect(ciWorkflow.indexOf("run: npm run test:ci")).toBeLessThan(
+        ciWorkflow.indexOf("run: npm run ci:test:e2e"),
+      );
     });
 
     it("typecheck script uses turbo run typecheck", () => {
@@ -211,6 +221,9 @@ describe("Turborepo configuration", () => {
 
       expect(rootPkg.scripts["test:e2e"]).toBe(
         "npm run test:e2e --workspace @franken/orchestrator --",
+      );
+      expect(rootPkg.scripts["ci:test:e2e"]).toBe(
+        "node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts",
       );
       expect(readme).toContain("npm run test:e2e");
       expect(readme).toContain("E2E=true");

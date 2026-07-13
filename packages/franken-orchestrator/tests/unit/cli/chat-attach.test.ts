@@ -194,6 +194,35 @@ describe('resolveManagedChatAttachment', () => {
     expect(source).not.toContain(directConsoleCall);
   });
 
+  it('sends approval and rejection responses for managed chat slash commands', () => {
+    const send = vi.fn();
+    const socket = { send } as unknown as WebSocket;
+
+    __chatAttachTestHooks.sendManagedChatInput(socket, '/approve');
+    __chatAttachTestHooks.sendManagedChatInput(socket, '/reject');
+
+    expect(send).toHaveBeenNthCalledWith(1, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+    }));
+    expect(send).toHaveBeenNthCalledWith(2, JSON.stringify({
+      type: 'approval.respond',
+      approved: false,
+    }));
+  });
+
+  it('sends non-command input as a managed chat message', () => {
+    const send = vi.fn();
+    const socket = { send } as unknown as WebSocket;
+
+    __chatAttachTestHooks.sendManagedChatInput(socket, 'hello beast');
+
+    expect(JSON.parse(send.mock.calls[0]?.[0] as string)).toMatchObject({
+      type: 'message.send',
+      content: 'hello beast',
+    });
+  });
+
   it('rejects malformed websocket frames while waiting for session readiness', async () => {
     stubRemoteSessionFetch();
     stubManagedChatWebSocket();

@@ -32,7 +32,7 @@ export class DashboardApiClient {
 
   async fetchSnapshot(): Promise<DashboardSnapshot> {
     const res = await fetch(`${this.baseUrl}/api/dashboard`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw await createResponseError(res);
     return (await res.json()) as DashboardSnapshot;
   }
 
@@ -42,7 +42,7 @@ export class DashboardApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw await createResponseError(res);
   }
 
   async updateSecurityProfile(profile: string): Promise<DashboardSecurity> {
@@ -51,7 +51,7 @@ export class DashboardApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw await createResponseError(res);
     return (await res.json()) as DashboardSecurity;
   }
 
@@ -76,7 +76,10 @@ export class DashboardApiClient {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = undefined;
         void connect().catch((err) => {
-          console.error(err);
+          if (closed) return;
+          const error = toError(err);
+          console.error(error);
+          onError?.(new Error(`Dashboard stream reconnect failed. ${error.message}`));
           scheduleReconnect();
         });
       }, 1_000);
@@ -111,6 +114,9 @@ export class DashboardApiClient {
         }
       });
       nextEventSource.addEventListener('error', () => {
+        if (!closed) {
+          onError?.(new Error('Dashboard stream connection lost. Reconnecting.'));
+        }
         closeActiveSource();
         scheduleReconnect();
       });
@@ -128,4 +134,26 @@ export class DashboardApiClient {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+async function createResponseError(res: Response): Promise<Error> {
+  const message = await extractResponseErrorMessage(res);
+  return new Error(message ?? `HTTP ${res.status}`);
+}
+
+async function extractResponseErrorMessage(res: Response): Promise<string | undefined> {
+  try {
+    const body = await res.json() as unknown;
+    if (!body || typeof body !== 'object') return undefined;
+    const error = (body as { error?: unknown }).error;
+    if (typeof error === 'string' && error.trim()) return error;
+    if (error && typeof error === 'object') {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string' && message.trim()) return message;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 }

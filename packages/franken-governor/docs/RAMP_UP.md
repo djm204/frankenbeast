@@ -19,7 +19,7 @@
 ## Current Orchestrator Wiring
 - `packages/franken-orchestrator/src/cli/dep-factory.ts` imports `@franken/governor` lazily when `modules.governor` is enabled.
 - TTY CLI runs use `CliChannel` through `ApprovalGateway` and `GovernorPortAdapter`.
-- Non-TTY CLI runs use the orchestrator adapter's configured default decision path instead of prompting on stdin.
+- Non-TTY CLI runs reject approvals by default through `GovernorPortAdapter` without prompting on stdin, and only auto-approve when `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1` is set.
 - Missing enabled governor packages fail closed by default. Unsafe all-approve fallback requires the explicit `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opt-out documented in the root ramp-up guide.
 
 ## Narrow Integration Notes

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { createSqliteStore, type SqliteStore } from './sqlite-store.js';
+import { createSqliteStore } from './sqlite-store.js';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -36,16 +36,16 @@ describe('SqliteStore', () => {
 
     const tables = store.db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all()
-      .map((r: any) => r.name);
+      .all() as Array<{ name: string }>;
+    const tableNames = tables.map((row) => row.name);
 
-    expect(tables).toContain('memory');
-    expect(tables).toContain('plans');
-    expect(tables).toContain('audit_trail');
-    expect(tables).toContain('cost_ledger');
-    expect(tables).toContain('governor_log');
-    expect(tables).toContain('firewall_log');
-    expect(tables).not.toContain('skill_state');
+    expect(tableNames).toContain('memory');
+    expect(tableNames).toContain('plans');
+    expect(tableNames).toContain('audit_trail');
+    expect(tableNames).toContain('cost_ledger');
+    expect(tableNames).toContain('governor_log');
+    expect(tableNames).toContain('firewall_log');
+    expect(tableNames).not.toContain('skill_state');
 
     const costColumns = store.db.pragma('table_info(cost_ledger)') as Array<{ name: string }>;
     expect(costColumns.map((column) => column.name)).toContain('cost_source');
@@ -128,5 +128,32 @@ describe('SqliteStore', () => {
     });
 
     store.close();
+  });
+
+  it('keeps audit_trail append-only for independent sqlite connections', () => {
+    const dbPath = tracked(tmpDbPath());
+    const store = createSqliteStore(dbPath);
+
+    store.db
+      .prepare('INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash) VALUES (?, ?, ?, ?, ?)')
+      .run('session-external', 'tool_call', 'payload', 'sha256:0', null);
+    store.close();
+
+    const db = new Database(dbPath);
+    try {
+      expect(() => {
+        db.prepare('UPDATE audit_trail SET payload = ? WHERE session_id = ?').run('tampered', 'session-external');
+      }).toThrowError(/append-only|fbeast_can_mutate_audit_trail/i);
+
+      expect(() => {
+        db.prepare('DELETE FROM audit_trail WHERE session_id = ?').run('session-external');
+      }).toThrowError(/append-only|fbeast_can_mutate_audit_trail/i);
+
+      expect(db.prepare('SELECT payload FROM audit_trail WHERE session_id = ?').get('session-external')).toMatchObject({
+        payload: 'payload',
+      });
+    } finally {
+      db.close();
+    }
   });
 });

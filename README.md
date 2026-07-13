@@ -370,13 +370,15 @@ For CLI entrypoints such as `frankenbeast chat-server`, `frankenbeast network`, 
 
 ## Quick Start
 
+For a fresh checkout, follow the same supported first-run path as [ONBOARDING.md](ONBOARDING.md) and [docs/guides/quickstart.md](docs/guides/quickstart.md): use bootstrap so Node.js, npm/Corepack, `.env` defaults, dependency installation, and optional Docker-service checks stay in sync.
+
 ```bash
 # Clone the repository
 git clone <repo-url> frankenbeast
 cd frankenbeast
 
-# Install all dependencies
-npm install
+# Run the canonical local setup path without optional Docker services
+npm run bootstrap -- --no-docker
 
 # Optional: scaffold a standalone quick-start example into ../my-frankenbeast-app
 npm run create:project -- quick-start ../my-frankenbeast-app
@@ -390,6 +392,10 @@ npm test
 # Run root-level Vitest tests only
 npm run test:root
 ```
+
+For CI-style validation without mutating files or installing dependencies, run `./scripts/bootstrap.sh --dry-run`. If you intentionally need a manual dependency install instead of bootstrap, run it from the repository root with the Corepack-activated npm version from `packageManager`, copy or merge `.env.example` into `.env`, and note that you are skipping bootstrap's environment validation and optional Docker-service prompts.
+
+The root Vitest suite also checks local Markdown links in README/docs/package READMEs. Local link targets are treated as untrusted input: keep them simple repository-relative paths and do not add shell metacharacters such as backticks, `$`, `;`, `&`, `|`, `<`, or `>`. External `http(s)` links and same-page anchors are ignored by that local filesystem check.
 
 See [ONBOARDING.md](ONBOARDING.md) for the complete first-time setup checklist, including prerequisites, bootstrap, UI startup, troubleshooting, and secret backends. See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the shorter setup guide including Docker services.
 
@@ -458,7 +464,7 @@ frankenbeast --design-doc docs/my-feature-design.md
 frankenbeast --plan-dir ./my-chunks/
 ```
 
-Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` when a previous run was interrupted and you want to continue from the saved checkpoint/chunk-session data. If the checkpoint is missing, the resume command fails fast with a missing-checkpoint error instead of silently starting a cold run.
+Cold `frankenbeast run` clears checkpoint/chunk-session state before execution. Use `frankenbeast run --resume` only when a previous run was interrupted and saved checkpoint state exists; the run resumes from that checkpoint/chunk-session data. If the checkpoint is missing, the resume command fails fast with a missing-checkpoint error instead of silently starting a cold run.
 
 ### Subcommands
 
@@ -496,6 +502,7 @@ frankenbeast issues --label bug --repo owner/repo
 --no-pr                 Skip PR creation after execution
 --verbose               Debug logs + trace viewer on :4040
 --reset                 Clear checkpoint and traces
+--resume                Resume from an existing checkpoint for the selected plan
 --cleanup               Remove all build artifacts from .fbeast/.build/
 --help                  Show help
 ```
@@ -538,6 +545,8 @@ Execution controls such as `--budget`, `--provider`, `--providers`, and `--no-pr
 | `FRANKEN_MIN_CRITIQUE_SCORE` | `minCritiqueScore` | numeric score | default `0.7`; must be `>= 0` and `< 1` |
 
 Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present; set the value to `true` to enable the field, and any other present value disables it.
+
+If `stateDir` is set to a path inside a sibling Hermes profile such as `.hermes/profiles/<profile>/...`, Frankenbeast fails closed by default when `<profile>` does not match the active `HERMES_PROFILE` (or `default` when unset). Set `allowCrossProfileStateAccess: true` in an operator-owned config file outside the checked-out repository only for deliberate migrations/imports that must read or write another profile's state; repository-local `.fbeast/config.json` cannot self-approve this opt-in.
 
 ### Operator environment variables
 
@@ -615,7 +624,9 @@ npm run bootstrap -- --services
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npm run local:seed
 
-# Verify everything is running. This probes the same CHROMA_URL endpoint.
+# Verify everything is running. This probes the same CHROMA_URL endpoint,
+# plus fixed compose defaults for Grafana (http://localhost:3000/api/health)
+# and Tempo readiness (http://localhost:3200/ready).
 npm run local:verify-setup
 ```
 
@@ -633,12 +644,12 @@ Frankenbeast stores secrets outside the config file. The config references secre
 
 | Backend | Key | Best for |
 |---------|-----|----------|
-| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Local dev on macOS, Linux, Windows |
+| Local encrypted file | `local-encrypted` | Default backend; zero-install local dev, CI/CD, offline, or minimal environments |
+| OS keychain (Keychain/GNOME/DPAPI) | `os-keychain` | Explicit opt-in for single-machine local dev when you want OS-managed storage and no passphrase prompt |
 | 1Password | `1password` | Teams using 1Password vaults |
 | Bitwarden | `bitwarden` | Teams using Bitwarden |
-| Local encrypted file | `local-encrypted` | CI/CD or offline environments |
 
-Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config.json`, then set `network.secureBackend` there. `frankenbeast init` reads and updates `.fbeast/config.json`.
+Copy the relevant settings from `frankenbeast.example.json` into `.fbeast/config.json`, then set `network.secureBackend` there. If you omit `network.secureBackend`, the config schema and init flow use `local-encrypted`; `os-keychain` is never selected automatically. `frankenbeast init` reads and updates `.fbeast/config.json`.
 
 ### Setup per backend
 
@@ -652,7 +663,7 @@ When `network.secureBackend` is unset, init defaults to `local-encrypted`: the p
 ```json
 { "network": { "secureBackend": "os-keychain" } }
 ```
-Set this in `.fbeast/config.json`, then run `frankenbeast init` — the token is generated and stored in the OS keychain automatically (no passphrase prompt).
+Set this in `.fbeast/config.json` before running `frankenbeast init` when you want local secrets in the native macOS Keychain, GNOME Secret Service, or Windows Credential Manager instead of the default encrypted file. The token is generated and stored in the OS keychain automatically (no passphrase prompt). Use `os-keychain` only when you explicitly select it; it is convenient for single-machine local development, but it is not the default backend.
 
 **1Password / Bitwarden:**
 ```json
@@ -771,6 +782,17 @@ Raw user input is scrubbed for PII and scanned for injection attacks by the fire
 
 The Planner generates a Task DAG. The Critique module audits it with 8 evaluators (deterministic evaluators run first, then heuristic). If critique fails, the orchestrator forces a re-plan (max 3 iterations). After 3 failures, it escalates to a human via MOD-07.
 
+#### Lesson rollback workflow
+
+Critique lessons recorded after a recovered failure include a `rollbackWorkflow` object for PM/liveness consumers. Use it when a lesson is later found to be incorrect, stale, over-broad, or harmful:
+
+1. Quarantine the target lesson so it stops being promoted into new worker handoffs.
+2. Attach the rollback reason, evidence URLs, and verifier command to the lesson audit trail.
+3. Either record a replacement lesson with fresh traceability evidence or retire the original lesson with no replacement.
+4. Run the verifier command and include the result in the PM handoff before removing the rollback block.
+
+Rollback requests must provide a stable lesson id, a concrete rollback reason, evidence such as a review comment/regression/operator report, and a verification command. If any of that evidence is missing, PM tooling should keep the lesson blocked instead of silently retiring or replacing it.
+
 ### Phase 3: Validated Execution
 
 **Modules:** MOD-02 (Skills) + MOD-07 (Governor)
@@ -859,6 +881,8 @@ External communications are implemented in `@franken/orchestrator` under `packag
 
 Channels route through the orchestrator comms pipeline. See [ADR-016](docs/adr/016-external-comms-gateway.md) for the original gateway decision and the orchestrator comms source for current implementation details.
 
+Delivery-channel sensitivity defaults fail-closed: runtime replies marked with `sensitivity: "sensitive"` or metadata `deliverySensitivity: "sensitive"` are withheld from Slack, Discord, Telegram, and WhatsApp unless that channel explicitly sets `allowSensitiveDelivery: true`. Unknown sensitivity labels are treated as sensitive. Withheld messages send a generic operator guidance notice and route metadata only, never the sensitive payload or interactive actions.
+
 ## Project Status
 
 | Phase | Description | Status |
@@ -926,7 +950,7 @@ frankenbeast/
 │   ├── RAMP_UP.md               # Concise agent onboarding doc
 │   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
 │   ├── beast-loop-explained.md  # Iteration mechanics deep dive
-│   ├── adr/                     # Architecture Decision Records
+│   ├── adr/                     # Architecture Decision Records (see docs/adr/*.md)
 │   ├── guides/                  # Quickstart, run/deploy, provider, agent, verification, and issue-workflow guides
 │   └── plans/                   # Design docs and implementation plans
 ├── tests/                       # Root-level integration tests

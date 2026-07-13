@@ -10,6 +10,10 @@ function shellSingleQuote(value: string): string {
   return `'${value.split(`'`).join(`'\\''`)}'`;
 }
 
+// Generated hook scripts are executed by POSIX shells. Values written into
+// shell assignments must use single-quote escaping; JSON double-quoted strings
+// still allow command substitution and variable expansion in shell contexts.
+
 export interface HookScriptPaths {
   preTool: string;
   postTool: string;
@@ -73,7 +77,7 @@ if [[ "$DB_PATH" != /* ]]; then
     SEARCH_DIR="$PARENT_DIR"
   done
 fi
-NODE_BIN=${JSON.stringify(process.execPath)}
+NODE_BIN=${shellSingleQuote(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
@@ -140,7 +144,7 @@ if [[ "$DB_PATH" != /* ]]; then
     SEARCH_DIR="$PARENT_DIR"
   done
 fi
-NODE_BIN=${JSON.stringify(process.execPath)}
+NODE_BIN=${shellSingleQuote(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
@@ -199,7 +203,7 @@ if [[ "$DB_PATH" != /* ]]; then
     SEARCH_DIR="$PARENT_DIR"
   done
 fi
-NODE_BIN=${JSON.stringify(process.execPath)}
+NODE_BIN=${shellSingleQuote(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
@@ -265,7 +269,7 @@ if [[ "$DB_PATH" != /* ]]; then
     SEARCH_DIR="$PARENT_DIR"
   done
 fi
-NODE_BIN=${JSON.stringify(process.execPath)}
+NODE_BIN=${shellSingleQuote(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0
@@ -324,7 +328,7 @@ if [[ "$DB_PATH" != /* ]]; then
     SEARCH_DIR="$PARENT_DIR"
   done
 fi
-NODE_BIN=${JSON.stringify(process.execPath)}
+NODE_BIN=${shellSingleQuote(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT=$(cat)
@@ -391,7 +395,7 @@ if [[ "$DB_PATH" != /* ]]; then
     SEARCH_DIR="$PARENT_DIR"
   done
 fi
-NODE_BIN=${JSON.stringify(process.execPath)}
+NODE_BIN=${shellSingleQuote(process.execPath)}
 HOOK_TIMEOUT_SECONDS="\${FBEAST_HOOK_TIMEOUT_SECONDS:-2}"
 
 INPUT_FILE=$(mktemp -t fbeast-hook-input.XXXXXX) || exit 0

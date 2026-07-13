@@ -60,8 +60,18 @@ export { GovernorAuditRecorder } from './audit/index.js';
 
 export { formatApprovalResponseSignaturePayload, SignatureVerifier } from './security/index.js';
 export type { ApprovalResponseSignaturePayloadFields } from './security/index.js';
-export { createSessionToken, SessionTokenStore } from './security/index.js';
-export type { CreateSessionTokenParams, SessionTokenStoreOptions } from './security/index.js';
+export {
+  createSessionToken,
+  formatApprovalSessionTokenScope,
+  formatSessionTokenScope,
+  SessionTokenStore,
+} from './security/index.js';
+export type {
+  CreateSessionTokenParams,
+  SessionTokenScopeFields,
+  SessionTokenStoreOptions,
+  SweepExpiredSessionTokenOptions,
+} from './security/index.js';
 
 export { CliChannel } from './channels/index.js';
 export type { ReadlineAdapter, CliChannelDeps } from './channels/index.js';

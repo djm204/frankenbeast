@@ -33,6 +33,8 @@ const EXPECTED_ALIASES: Record<string, string> = {
   "@franken/governor": "./packages/franken-governor/src/index.ts",
   "@franken/types/path-containment":
     "./packages/franken-types/src/path-containment.ts",
+  "@franken/types/json-pointer":
+    "./packages/franken-types/src/json-pointer.ts",
   "@franken/types/utils": "./packages/franken-types/src/utils/index.ts",
   "@franken/types": "./packages/franken-types/src/index.ts",
   "@franken/orchestrator": "./packages/franken-orchestrator/src/index.ts",

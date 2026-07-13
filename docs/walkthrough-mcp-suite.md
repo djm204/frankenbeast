@@ -348,3 +348,12 @@ All MCP servers, hooks, and beast runs share `.fbeast/beast.db` (WAL mode,
 | `beast_runs` | `SQLiteBeastRepository` (beast mode) |
 | `beast_run_attempts` | `SQLiteBeastRepository` |
 | `beast_run_events` | `SQLiteBeastRepository` |
+
+The observer's `audit_trail` rows are tamper-evident. Each row stores a full
+SHA-256 hash over the session id, event type, exact stored payload, and previous
+row hash; `parent_hash` therefore forms a per-session chain. SQLite triggers
+reject direct `UPDATE`/`DELETE` attempts by default, and only the observer's
+internal legacy migration path temporarily unlocks rows while `verify` rewrites
+old hash formats. Operators should run `fbeast_observer_verify` before relying
+on a trail; failures identify the first invalid row index without printing the
+row payload.

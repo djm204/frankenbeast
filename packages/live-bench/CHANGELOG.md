@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.6...live-bench-v0.2.7) (2026-07-11)
+
+
+### Tests
+
+* **live-bench:** add CLI smoke coverage ([#1653](https://github.com/djm204/frankenbeast/issues/1653)) ([3442b61](https://github.com/djm204/frankenbeast/commit/3442b61180431d5aebcc49eeaad1b76af836d106))
+
 ## [0.2.6](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.5...live-bench-v0.2.6) (2026-07-11)
 
 

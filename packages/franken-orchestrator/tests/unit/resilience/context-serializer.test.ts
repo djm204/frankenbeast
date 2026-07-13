@@ -1,24 +1,36 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { unlink } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { BeastContext } from '../../../src/context/franken-context.js';
 import {
   serializeContext,
   deserializeContext,
   saveContext,
   loadContext,
+  ContextSnapshotSizeError,
+  ContextSnapshotFileTypeError,
 } from '../../../src/resilience/context-serializer.js';
 
+const execFileAsync = promisify(execFile);
+
 describe('ContextSerializer', () => {
-  const tmpFiles: string[] = [];
+  const tmpDirs: string[] = [];
+  const fifoIt = process.platform === 'win32' ? it.skip : it;
 
   afterEach(async () => {
-    for (const f of tmpFiles) {
-      try { await unlink(f); } catch { /* ignore */ }
+    for (const dir of tmpDirs) {
+      await rm(dir, { recursive: true, force: true });
     }
-    tmpFiles.length = 0;
+    tmpDirs.length = 0;
   });
+
+  async function tempFile(name: string): Promise<string> {
+    const dir = await mkdtemp(join(process.cwd(), '.tmp-context-serializer-'));
+    tmpDirs.push(dir);
+    return join(dir, name);
+  }
 
   function makeContext(): BeastContext {
     const ctx = new BeastContext('proj-1', 'sess-1', 'Build a feature');
@@ -75,8 +87,7 @@ describe('ContextSerializer', () => {
 
   it('saves context to file and loads it back', async () => {
     const ctx = makeContext();
-    const filePath = join(tmpdir(), `beast-ctx-test-${Date.now()}.json`);
-    tmpFiles.push(filePath);
+    const filePath = await tempFile('beast-ctx-test.json');
 
     await saveContext(ctx, filePath);
     const restored = await loadContext(filePath);
@@ -85,6 +96,59 @@ describe('ContextSerializer', () => {
     expect(restored.sessionId).toBe(ctx.sessionId);
     expect(restored.phase).toBe(ctx.phase);
     expect(restored.plan?.tasks).toEqual(ctx.plan?.tasks);
+  });
+
+  it('rejects oversized context snapshot imports before parsing the body', async () => {
+    const ctx = makeContext();
+    const filePath = await tempFile('beast-ctx-oversized.json');
+
+    await saveContext(ctx, filePath);
+
+    await expect(loadContext(filePath, { maxBytes: 64 })).rejects.toBeInstanceOf(ContextSnapshotSizeError);
+    await expect(loadContext(filePath, { maxBytes: 64 })).rejects.toMatchObject({
+      name: 'ContextSnapshotSizeError',
+      maxBytes: 64,
+    });
+  });
+
+  it('rejects non-regular context snapshot import paths before reading', async () => {
+    const dir = await mkdtemp(join(process.cwd(), '.tmp-context-serializer-non-file-'));
+    tmpDirs.push(dir);
+
+    await expect(loadContext(dir)).rejects.toBeInstanceOf(ContextSnapshotFileTypeError);
+    await expect(loadContext(dir)).rejects.toMatchObject({
+      name: 'ContextSnapshotFileTypeError',
+      filePath: dir,
+    });
+  });
+
+  fifoIt('rejects FIFO context snapshot import paths without waiting for a writer', async () => {
+    const dir = await mkdtemp(join(process.cwd(), '.tmp-context-serializer-fifo-'));
+    tmpDirs.push(dir);
+    const fifoPath = join(dir, 'snapshot.fifo');
+    await execFileAsync('mkfifo', [fifoPath]);
+
+    await expect(loadContext(fifoPath)).rejects.toBeInstanceOf(ContextSnapshotFileTypeError);
+  });
+
+  it('allows explicit per-import size overrides for trusted large snapshots', async () => {
+    const ctx = makeContext();
+    const filePath = await tempFile('beast-ctx-large-allowed.json');
+
+    await saveContext(ctx, filePath);
+    await expect(loadContext(filePath, { maxBytes: 4096 })).resolves.toMatchObject({
+      projectId: ctx.projectId,
+      sessionId: ctx.sessionId,
+    });
+  });
+
+  it('fails closed for invalid context snapshot maxBytes overrides', async () => {
+    const filePath = await tempFile('beast-ctx-invalid-limit.json');
+
+    await saveContext(makeContext(), filePath);
+
+    await expect(loadContext(filePath, { maxBytes: 0 })).rejects.toThrow(RangeError);
+    await expect(loadContext(filePath, { maxBytes: Number.POSITIVE_INFINITY })).rejects.toThrow(RangeError);
   });
 
   it('round-trips recovery/error-handling fields', () => {

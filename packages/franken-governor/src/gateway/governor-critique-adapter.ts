@@ -1,14 +1,18 @@
-import type { ApprovalRequest, TriggerResult } from '../core/types.js';
+import type { ApprovalRequest, SessionToken, TriggerResult } from '../core/types.js';
 import { defaultConfig, type GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
 import { ApprovalGateway, type AuditRecorder } from './approval-gateway.js';
 import type { SignatureVerifier } from '../security/signature-verifier.js';
+import type { SessionTokenStore } from '../security/session-token-store.js';
+import { formatApprovalSessionTokenScope } from '../security/session-token-scope.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { BudgetTrigger, type BudgetTriggerContext } from '../triggers/budget-trigger.js';
 import { evaluateTrigger } from '../triggers/evaluate-trigger.js';
 import { SkillTrigger, type SkillTriggerContext } from '../triggers/skill-trigger.js';
+import { ConfidenceTrigger, type ConfidenceTriggerContext } from '../triggers/confidence-trigger.js';
+import { AmbiguityTrigger, type AmbiguityTriggerContext } from '../triggers/ambiguity-trigger.js';
 import type { RationaleBlock, VerificationResult } from '@franken/types';
-import { deterministicUuid, now as deterministicNow } from '@franken/types';
+import { deterministicUuid, now as deterministicNow, type TriggerSeverity } from '@franken/types';
 
 /** Governance flags for a skill, looked up by the adapter per rationale. */
 export interface SkillGovernanceMetadata {
@@ -46,6 +50,12 @@ export interface GovernorCritiqueAdapterDeps {
    * BudgetTrigger is skipped (its context cannot be constructed).
    */
   readonly budgetState?: BudgetStateSource;
+  /**
+   * Optional operator-session token store. When supplied, a triggered risky
+   * action may proceed without another prompt only if the rationale presents a
+   * non-expired token scoped to the selected tool or task.
+   */
+  readonly sessionTokenStore?: SessionTokenStore;
 }
 
 /** Sentinel result for an evaluator whose context cannot be constructed. */
@@ -55,10 +65,12 @@ const SKIP: TriggerContext = { skip: true };
 
 export class GovernorCritiqueAdapter {
   private readonly gateway: ApprovalGateway;
+  private readonly auditRecorder: AuditRecorder;
   private readonly evaluators: ReadonlyArray<TriggerEvaluator>;
   private readonly projectId: string;
   private readonly skillMetadata: SkillMetadataSource | undefined;
   private readonly budgetState: BudgetStateSource | undefined;
+  private readonly sessionTokenStore: SessionTokenStore | undefined;
 
   constructor(deps: GovernorCritiqueAdapterDeps) {
     this.gateway = new ApprovalGateway({
@@ -66,19 +78,24 @@ export class GovernorCritiqueAdapter {
       auditRecorder: deps.auditRecorder,
       config: deps.config ?? defaultConfig(),
       ...(deps.signatureVerifier ? { signatureVerifier: deps.signatureVerifier } : {}),
+      ...(deps.sessionTokenStore ? { sessionTokenStore: deps.sessionTokenStore } : {}),
     });
+    this.auditRecorder = deps.auditRecorder;
     this.evaluators = deps.evaluators;
     this.projectId = deps.projectId;
     this.skillMetadata = deps.skillMetadata;
     this.budgetState = deps.budgetState;
+    this.sessionTokenStore = deps.sessionTokenStore;
   }
 
   async verifyRationale(rationale: RationaleBlock): Promise<VerificationResult> {
-    const triggerResult = this.evaluateTriggers(rationale);
+    const triggerResults = this.evaluateTriggeredResults(rationale);
 
-    if (!triggerResult.triggered) {
+    if (triggerResults.length === 0) {
       return { verdict: 'approved' };
     }
+
+    const triggerResult = this.formatTriggerForPrompt(triggerResults);
 
     const base = {
       requestId: deterministicUuid('packages/franken-governor/src/gateway/governor-critique-adapter.ts'),
@@ -93,11 +110,25 @@ export class GovernorCritiqueAdapter {
       ? { ...base, skillId: rationale.selectedTool }
       : base;
 
+    const operatorSessionToken = this.canReuseOperatorSessionToken(triggerResults)
+      ? this.getValidOperatorSessionToken(request, rationale)
+      : undefined;
+    if (operatorSessionToken) {
+      await this.recordOperatorSessionReuse(request, operatorSessionToken);
+      return { verdict: 'approved' };
+    }
+
     const outcome = await this.gateway.requestApproval(request);
 
     switch (outcome.decision) {
       case 'APPROVE':
-        return { verdict: 'approved' };
+        return outcome.token !== undefined
+          ? {
+            verdict: 'approved',
+            approvalSessionTokenId: outcome.token.tokenId,
+            approvalSessionTokenTriggerId: request.trigger.triggerId,
+          }
+          : { verdict: 'approved' };
       case 'REGEN':
         return { verdict: 'rejected', reason: outcome.feedback };
       case 'ABORT':
@@ -107,17 +138,143 @@ export class GovernorCritiqueAdapter {
     }
   }
 
-  private evaluateTriggers(rationale: RationaleBlock): TriggerResult {
+  private evaluateTriggeredResults(rationale: RationaleBlock): TriggerResult[] {
+    const triggeredResults: TriggerResult[] = [];
+
     for (const evaluator of this.evaluators) {
-      const triggerContext = this.buildTriggerContext(evaluator, rationale);
+      let triggerContext: TriggerContext;
+      try {
+        triggerContext = this.buildTriggerContext(evaluator, rationale);
+      } catch (error) {
+        const result = this.contextEvaluationFailure(evaluator, error);
+        triggeredResults.push(result);
+        if (this.hasPromptableTrigger(triggeredResults)) break;
+        return triggeredResults;
+      }
       // Explicit skip: the evaluator's typed context cannot be constructed
       // from the rationale + injected sources, so it must not be fed a
       // RationaleBlock it was never typed for (see issue #490).
       if (triggerContext.skip) continue;
       const result = evaluateTrigger(evaluator, triggerContext.context);
-      if (result.triggered) return result;
+      if (!result.triggered) continue;
+
+      triggeredResults.push(result);
+      if (this.isTriggerFailure(result)) {
+        return triggeredResults;
+      }
     }
-    return { triggered: false, triggerId: 'none' };
+    return triggeredResults;
+  }
+
+  private selectTriggerForPrompt(triggerResults: ReadonlyArray<TriggerResult>): TriggerResult {
+    const evaluationFailure = triggerResults.find((result) => this.isTriggerEvaluationFailure(result));
+    if (evaluationFailure !== undefined) return evaluationFailure;
+
+    const promptableResults = triggerResults.filter((result) => !this.isTriggerContextFailure(result));
+    const selectableResults = promptableResults.length > 0 ? promptableResults : triggerResults;
+
+    return selectableResults.find((result) => result.triggerId === 'skill')
+      ?? selectableResults.find((result) => result.triggerId !== 'skill')
+      ?? selectableResults[0]!;
+  }
+
+  private formatTriggerForPrompt(triggerResults: ReadonlyArray<TriggerResult>): TriggerResult {
+    const selected = this.selectTriggerForPrompt(triggerResults);
+    const additionalResults = triggerResults.filter((result) => result !== selected);
+    if (additionalResults.length === 0) return selected;
+
+    const additionalReasons = additionalResults
+      .map((result) => `${result.triggerId}: ${result.reason ?? 'triggered'}`)
+      .join('; ');
+
+    const severity = this.highestSeverity(triggerResults);
+    const reason = `${selected.reason ?? 'Triggered'}; Additional triggered policies: ${additionalReasons}`;
+    return severity !== undefined
+      ? { ...selected, severity, reason }
+      : { ...selected, reason };
+  }
+
+  private highestSeverity(triggerResults: ReadonlyArray<TriggerResult>): TriggerSeverity | undefined {
+    const severityRank: Record<TriggerSeverity, number> = {
+      low: 0,
+      medium: 1,
+      high: 2,
+      critical: 3,
+    };
+    return triggerResults
+      .map((result) => result.severity)
+      .filter((severity): severity is TriggerSeverity => severity !== undefined)
+      .sort((a, b) => severityRank[b] - severityRank[a])[0];
+  }
+
+  private contextEvaluationFailure(evaluator: TriggerEvaluator, error: unknown): TriggerResult {
+    const reason = error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'unknown error';
+    return {
+      triggered: true,
+      triggerId: evaluator.triggerId,
+      reason: `Trigger '${evaluator.triggerId}' context evaluation failed: ${reason}`,
+      severity: 'critical',
+    };
+  }
+
+  private canReuseOperatorSessionToken(triggerResults: ReadonlyArray<TriggerResult>): boolean {
+    return triggerResults.length === 1 && !this.isTriggerFailure(triggerResults[0]!);
+  }
+
+  private hasPromptableTrigger(triggerResults: ReadonlyArray<TriggerResult>): boolean {
+    return triggerResults.some((result) => result.triggered && !this.isTriggerFailure(result));
+  }
+
+  private isTriggerFailure(triggerResult: TriggerResult): boolean {
+    return this.isTriggerEvaluationFailure(triggerResult) || this.isTriggerContextFailure(triggerResult);
+  }
+
+  private isTriggerEvaluationFailure(triggerResult: TriggerResult): boolean {
+    return triggerResult.severity === 'critical'
+      && triggerResult.reason?.startsWith(`Trigger '${triggerResult.triggerId}' evaluation failed:`) === true;
+  }
+
+  private isTriggerContextFailure(triggerResult: TriggerResult): boolean {
+    return triggerResult.severity === 'critical'
+      && triggerResult.reason?.startsWith(`Trigger '${triggerResult.triggerId}' context evaluation failed:`) === true;
+  }
+
+  private getValidOperatorSessionToken(request: ApprovalRequest, rationale: RationaleBlock): SessionToken | undefined {
+    if (!this.sessionTokenStore) {
+      return undefined;
+    }
+
+    const scope = formatApprovalSessionTokenScope(request);
+    for (const tokenId of this.getApprovalSessionTokenCandidates(rationale)) {
+      try {
+        const token = this.sessionTokenStore.get(tokenId);
+        if (token?.scope === scope) return token;
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  private getApprovalSessionTokenCandidates(rationale: RationaleBlock): string[] {
+    return [
+      ...(rationale.approvalSessionTokenIds ?? []),
+      ...(rationale.approvalSessionTokenId !== undefined ? [rationale.approvalSessionTokenId] : []),
+    ].filter((tokenId, index, tokenIds) => tokenIds.indexOf(tokenId) === index);
+  }
+
+  private async recordOperatorSessionReuse(request: ApprovalRequest, token: SessionToken): Promise<void> {
+    await this.auditRecorder.record(request, {
+      requestId: request.requestId,
+      decision: 'APPROVE',
+      respondedBy: 'operator-session-token',
+      respondedAt: new Date(deterministicNow()),
+      feedback: `Approved by scoped operator session token from approval ${token.approvalId} granted by ${token.grantedBy}`,
+    });
   }
 
   /**
@@ -145,6 +302,26 @@ export class GovernorCritiqueAdapter {
       return { skip: false, context: this.budgetState.getBudgetState() };
     }
 
-    return { skip: false, context: rationale };
+    if (evaluator instanceof ConfidenceTrigger) {
+      if (typeof rationale.confidenceScore !== 'number') return SKIP;
+      const context: ConfidenceTriggerContext = { confidenceScore: rationale.confidenceScore };
+      return { skip: false, context };
+    }
+
+    if (evaluator instanceof AmbiguityTrigger) {
+      const hasUnresolvedDependency = rationale.hasUnresolvedDependency;
+      const hasAdrConflict = rationale.hasAdrConflict;
+      if (typeof hasUnresolvedDependency !== 'boolean' && typeof hasAdrConflict !== 'boolean') return SKIP;
+      const context: AmbiguityTriggerContext = {
+        hasUnresolvedDependency: hasUnresolvedDependency ?? false,
+        hasAdrConflict: hasAdrConflict ?? false,
+      };
+      return { skip: false, context };
+    }
+
+    const rationaleWithoutBearerToken = { ...rationale };
+    delete rationaleWithoutBearerToken.approvalSessionTokenId;
+    delete rationaleWithoutBearerToken.approvalSessionTokenIds;
+    return { skip: false, context: rationaleWithoutBearerToken };
   }
 }

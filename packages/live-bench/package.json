@@ -1,6 +1,6 @@
 {
   "name": "@franken/live-bench",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Live Codex/Gemini CLI benchmark runner for Frankenbeast MCP suite A/B comparisons",
   "type": "module",
   "main": "dist/index.js",

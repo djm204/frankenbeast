@@ -471,12 +471,15 @@ When `requireSignedApprovals` is `true`, the gateway throws `SignatureVerificati
 
 ### Session Tokens
 
-On APPROVE, the gateway can issue a scoped, time-limited `SessionToken` — the agent must present this token to invoke the approved skill:
+On APPROVE, the gateway can issue a scoped, time-limited `SessionToken`. A `GovernorCritiqueAdapter` that is wired with the same `SessionTokenStore` accepts `rationale.approvalSessionTokenId` for later risky actions, but only while the token is unexpired and scoped to the selected tool (or task when no tool is selected). Expired, missing, or wrong-scope tokens fail closed to a fresh operator prompt without printing token values:
 
 ```typescript
 import {
+  createGovernor,
   ApprovalGateway,
+  SkillTrigger,
   SessionTokenStore,
+  formatApprovalSessionTokenScope,
   createGovernorApp,
   defaultConfig,
 } from '@franken/governor';
@@ -484,6 +487,18 @@ import {
 const store = new SessionTokenStore({
   // Optional: share tokens across short-lived governor/hook processes.
   persistenceFile: '.frankenbeast/governor-session-tokens.json',
+});
+
+const governor = createGovernor({
+  readline: readlineAdapter,
+  memoryPort,
+  evaluators: [new SkillTrigger()],
+  skillMetadata: {
+    getSkillMetadata: (skillId) => skillId === 'deploy-prod'
+      ? { requiresHitl: true, isDestructive: true }
+      : undefined,
+  },
+  sessionTokenStore: store,
 });
 
 // Tokens are created automatically by ApprovalGateway when sessionTokenStore is provided
@@ -496,10 +511,25 @@ const gateway = new ApprovalGateway({
 
 const outcome = await gateway.requestApproval(request);
 if (outcome.decision === 'APPROVE' && outcome.token) {
-  // Later, verify the token before executing
-  if (store.isValid(outcome.token.tokenId)) {
-    // Proceed — token is valid and not expired
+  // Later, pass only the opaque token id back through the rationale boundary.
+  // The adapter validates scope + expiry before skipping another prompt.
+  const result = await governor.verifyRationale({
+    taskId: 'task-001',
+    reasoning: 'Deploy to production after prior operator approval',
+    selectedTool: 'deploy-prod',
+    expectedOutcome: 'Production deployment succeeds',
+    timestamp: new Date(),
+    approvalSessionTokenId: outcome.token.tokenId,
+  });
+
+  // Direct stores and external hooks can still verify manually with the
+  // canonical scope attached to the issued token.
+  if (store.isValid(outcome.token.tokenId, outcome.token.scope)) {
+    // Proceed — token is valid, scoped, and not expired
   }
+
+  // Or compute the canonical scope from the original approval request.
+  const tokenScope = formatApprovalSessionTokenScope(request);
 
   // Revoke when done
   store.revoke(outcome.token.tokenId);
@@ -512,7 +542,7 @@ const app = createGovernorApp({
 });
 
 // External callers can validate through POST /v1/approval/session/validate
-// with a signed body: { "tokenId": "...", "scope": "deploy-prod" }.
+// with a signed body: { "tokenId": "...", "scope": tokenScope }.
 ```
 
 `SessionToken` fields:
@@ -521,7 +551,7 @@ const app = createGovernorApp({
 |-------|------|-------------|
 | `tokenId` | `string` | Unique identifier (UUID) |
 | `approvalId` | `string` | The approval request ID that created this token |
-| `scope` | `string` | Skill ID or task ID this token authorizes |
+| `scope` | `string` | Canonical approval scope this token authorizes, including project ID, trigger ID, and selected tool/task scope |
 | `grantedBy` | `string` | Operator who approved |
 | `grantedAt` | `Date` | When the token was issued |
 | `expiresAt` | `Date` | When the token expires |

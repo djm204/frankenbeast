@@ -22,6 +22,16 @@ function makeMockSnapshot(): DashboardSnapshot {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('DashboardApiClient', () => {
   let originalFetch: typeof globalThis.fetch;
 
@@ -85,6 +95,17 @@ describe('DashboardApiClient', () => {
       const client = new DashboardApiClient(BASE_URL);
       await expect(client.toggleSkill('missing', true)).rejects.toThrow('HTTP 404');
     });
+
+    it('prefers flat server error messages over bare HTTP status codes', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'Skill "missing" was not found' }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.toggleSkill('missing', true)).rejects.toThrow('Skill "missing" was not found');
+    });
   });
 
   describe('updateSecurityProfile', () => {
@@ -114,6 +135,30 @@ describe('DashboardApiClient', () => {
 
       const client = new DashboardApiClient(BASE_URL);
       await expect(client.updateSecurityProfile('strict')).rejects.toThrow('HTTP 403');
+    });
+
+    it('surfaces strict-profile server guidance in the thrown error', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'Security profile "strict" requires allowedDomains to be configured' }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.updateSecurityProfile('strict')).rejects.toThrow(
+        'Security profile "strict" requires allowedDomains to be configured',
+      );
+    });
+
+    it('also accepts enveloped server error messages', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: 'Profile update failed' } }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.updateSecurityProfile('strict')).rejects.toThrow('Profile update failed');
     });
   });
 
@@ -322,11 +367,15 @@ describe('DashboardApiClient', () => {
 
       try {
         const client = new DashboardApiClient(BASE_URL);
-        const unsub = await client.subscribeToDashboard(vi.fn());
+        const onError = vi.fn();
+        const unsub = await client.subscribeToDashboard(vi.fn(), onError);
 
         listeners[0]!.error!({});
         await vi.advanceTimersByTimeAsync(1_000);
         expect(errorSpy).toHaveBeenCalledWith(expect.any(Error));
+        expect(onError).toHaveBeenCalledTimes(2);
+        expect(onError.mock.calls[0]![0].message).toBe('Dashboard stream connection lost. Reconnecting.');
+        expect(onError.mock.calls[1]![0].message).toBe('Dashboard stream reconnect failed. HTTP 503');
         expect(MockEventSource).toHaveBeenCalledTimes(1);
 
         await vi.advanceTimersByTimeAsync(1_000);
@@ -335,6 +384,108 @@ describe('DashboardApiClient', () => {
 
         unsub();
         expect(closeFns[1]).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        errorSpy.mockRestore();
+        if (originalEventSource) {
+          globalThis.EventSource = originalEventSource;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (globalThis as any).EventSource;
+        }
+      }
+    });
+
+    it('reports EventSource errors after the stream opens and keeps retrying', async () => {
+      vi.useFakeTimers();
+      const closeFns = [vi.fn(), vi.fn()];
+      const listeners: Array<Record<string, (event: { data?: string }) => void>> = [];
+
+      const MockEventSource = vi.fn(function (this: {
+        addEventListener?: (type: string, handler: (event: { data?: string }) => void) => void;
+        close?: () => void;
+      }) {
+        const index = listeners.length;
+        listeners[index] = {};
+        this.addEventListener = vi.fn((type: string, handler: (event: { data?: string }) => void) => {
+          listeners[index]![type] = handler;
+        });
+        this.close = closeFns[index];
+      });
+
+      const originalEventSource = globalThis.EventSource;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).EventSource = MockEventSource;
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'ticket-1' }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'ticket-2' }) });
+
+      try {
+        const client = new DashboardApiClient(BASE_URL);
+        const onError = vi.fn();
+        const unsub = await client.subscribeToDashboard(vi.fn(), onError);
+
+        listeners[0]!.error!({});
+
+        expect(closeFns[0]).toHaveBeenCalled();
+        expect(onError).toHaveBeenCalledWith(expect.any(Error));
+        expect(onError.mock.calls[0]![0].message).toBe('Dashboard stream connection lost. Reconnecting.');
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(MockEventSource).toHaveBeenNthCalledWith(2, `${BASE_URL}/api/dashboard/events?ticket=ticket-2`);
+
+        unsub();
+      } finally {
+        vi.useRealTimers();
+        if (originalEventSource) {
+          globalThis.EventSource = originalEventSource;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (globalThis as any).EventSource;
+        }
+      }
+    });
+
+    it('does not report reconnect ticket failures after unsubscribe', async () => {
+      vi.useFakeTimers();
+      const closeFn = vi.fn();
+      const listeners: Array<Record<string, (event: { data?: string }) => void>> = [];
+      const reconnectTicket = deferred<{ ok: boolean; status: number }>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const MockEventSource = vi.fn(function (this: {
+        addEventListener?: (type: string, handler: (event: { data?: string }) => void) => void;
+        close?: () => void;
+      }) {
+        const index = listeners.length;
+        listeners[index] = {};
+        this.addEventListener = vi.fn((type: string, handler: (event: { data?: string }) => void) => {
+          listeners[index]![type] = handler;
+        });
+        this.close = closeFn;
+      });
+
+      const originalEventSource = globalThis.EventSource;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).EventSource = MockEventSource;
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ ticket: 'ticket-1' }) })
+        .mockReturnValueOnce(reconnectTicket.promise);
+
+      try {
+        const client = new DashboardApiClient(BASE_URL);
+        const onError = vi.fn();
+        const unsub = await client.subscribeToDashboard(vi.fn(), onError);
+
+        listeners[0]!.error!({});
+        await vi.advanceTimersByTimeAsync(1_000);
+        unsub();
+        reconnectTicket.resolve({ ok: false, status: 503 });
+        await Promise.resolve();
+
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError.mock.calls[0]![0].message).toBe('Dashboard stream connection lost. Reconnecting.');
+        expect(errorSpy).not.toHaveBeenCalledWith(expect.any(Error));
       } finally {
         vi.useRealTimers();
         errorSpy.mockRestore();

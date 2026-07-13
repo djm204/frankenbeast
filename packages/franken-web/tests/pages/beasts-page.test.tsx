@@ -97,6 +97,30 @@ describe('BeastsPage', () => {
     });
   });
 
+  it('clears provider loading state when the wizard closes before provider refresh finishes', async () => {
+    let resolveSnapshot!: (value: Awaited<ReturnType<DashboardApiClient['fetchSnapshot']>>) => void;
+    const dashboardClient = {
+      fetchSnapshot: vi.fn().mockImplementation(() => new Promise((resolve) => {
+        resolveSnapshot = resolve;
+      })),
+    } as unknown as DashboardApiClient;
+
+    render(<BeastsPage {...baseProps} dashboardClient={dashboardClient} />);
+    fireEvent.click(screen.getByRole('button', { name: /create agent/i }));
+
+    await waitFor(() => {
+      expect(useDashboardStore.getState().loading).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /close/i }));
+
+    await waitFor(() => {
+      expect(useDashboardStore.getState().loading).toBe(false);
+    });
+
+    resolveSnapshot({ skills: [], security: snapshotSecurity, providers: [] });
+  });
+
   it('disables every create-agent entry point when the Beast API is unavailable', () => {
     render(
       <BeastsPage
