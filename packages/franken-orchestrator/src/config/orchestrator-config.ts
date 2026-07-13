@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { NetworkConfigFieldsSchema, validateNetworkConfig } from '../network/network-config.js';
 import { validateProviderCommandOverride } from './provider-command-override-policy.js';
@@ -102,7 +102,27 @@ function resolvedPathCandidates(path: string): string[] {
     const real = realpathSync(lexical);
     return real === lexical ? [lexical] : [real, lexical];
   } catch {
-    return [lexical];
+    const ancestorResolved = resolveExistingAncestor(lexical);
+    return ancestorResolved && ancestorResolved !== lexical ? [ancestorResolved, lexical] : [lexical];
+  }
+}
+
+function resolveExistingAncestor(lexical: string): string | undefined {
+  const missingParts: string[] = [];
+  let current = lexical;
+
+  while (true) {
+    try {
+      const resolved = realpathSync(current);
+      return missingParts.length > 0 ? join(resolved, ...missingParts.reverse()) : resolved;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) {
+        return undefined;
+      }
+      missingParts.push(basename(current));
+      current = parent;
+    }
   }
 }
 

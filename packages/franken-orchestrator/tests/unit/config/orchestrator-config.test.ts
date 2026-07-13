@@ -75,6 +75,28 @@ describe('OrchestratorConfig', () => {
         expect(result.error.issues[0]?.message).toContain("Hermes profile 'prod'");
       }
     });
+
+    it('rejects stateDir children under symlinked ancestors that resolve into another profile', () => {
+      process.env.HERMES_PROFILE = 'default';
+      const root = join(
+        tmpdir(),
+        `franken-state-symlink-child-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+      tmpDirs.push(root);
+      const target = join(root, '.hermes', 'profiles', 'prod');
+      const link = join(root, 'repo', '.fbeast', 'state-link');
+      mkdirSync(target, { recursive: true });
+      mkdirSync(join(root, 'repo', '.fbeast'), { recursive: true });
+      symlinkSync(target, link, 'dir');
+
+      const result = OrchestratorConfigSchema.safeParse({ stateDir: join(link, 'state') });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(['stateDir']);
+        expect(result.error.issues[0]?.message).toContain("Hermes profile 'prod'");
+      }
+    });
   });
 
   describe('validation', () => {
