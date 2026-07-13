@@ -2597,6 +2597,66 @@ describe('LessonRecorder', () => {
     ).toMatchObject({ status: 'clear', contradictions: [] });
   });
 
+  it('treats complementary success and failure guards as compatible', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy when approval is missing' }),
+        [createLesson({ correctionApplied: 'Deploy when approval is granted' })],
+      ),
+    ).toMatchObject({ status: 'clear', contradictions: [] });
+  });
+
+  it('detects terse directive reversals outside the positive allowlist', () => {
+    for (const pair of [
+      ['Do not delete', 'Delete'],
+      ['Do not remove cache', 'Remove cache'],
+      ['Do not publish', 'Publish'],
+    ] as const) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: pair[0] }),
+          [createLesson({ correctionApplied: pair[1] })],
+        ),
+      ).toMatchObject({ status: 'contradiction_detected' });
+    }
+  });
+
+  it('does not treat embedded negation as automatic compatibility for direct reversals', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Allow requests that do not validate tokens' }),
+        [
+          createLesson({
+            correctionApplied: 'Do not allow requests that do not validate tokens',
+          }),
+        ],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('classifies unverified guard allowances as failing outcomes', () => {
+    expect(
+      detectLessonContradictions(
+        createLesson({ correctionApplied: 'Do not deploy unless provenance is verified' }),
+        [createLesson({ correctionApplied: 'Deploy with unverified provenance' })],
+      ),
+    ).toMatchObject({ status: 'contradiction_detected' });
+  });
+
+  it('recognizes double-negative prohibition verbs as reversals', () => {
+    for (const pair of [
+      ['Do not disable validation', 'Disable validation'],
+      ['Do not reject retries', 'Reject retries'],
+    ] as const) {
+      expect(
+        detectLessonContradictions(
+          createLesson({ correctionApplied: pair[0] }),
+          [createLesson({ correctionApplied: pair[1] })],
+        ),
+      ).toMatchObject({ status: 'contradiction_detected' });
+    }
+  });
+
   it('treats missing prerequisites as contradictions against required guards', () => {
     expect(
       detectLessonContradictions(

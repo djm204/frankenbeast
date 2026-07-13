@@ -1264,22 +1264,29 @@ function findContradictoryGuidanceMatch(
           conflictingGuidance: priorDirective.sourceText,
         };
       }
-      if (hasCompatibleConditionalGuard(lessonDirective, priorDirective)) {
-        continue;
-      }
       const sharedTerms = sharedTextTerms(
         lessonDirective.text,
         priorDirective.text,
       );
-      if (hasDivergentQualifiedGenericObjectPair(lessonDirective, priorDirective, sharedTerms)) {
-        continue;
-      }
-      if (hasExplicitOppositeDirectivePair(lessonDirective, priorDirective)) {
+      if (hasExactTopLevelReversal(lessonDirective, priorDirective)) {
         return {
           sharedTerms:
             sharedTerms.length > 0
               ? sharedTerms
               : sharedDirectiveObjectTerms(lessonDirective, priorDirective),
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
+      if (hasCompatibleConditionalGuard(lessonDirective, priorDirective)) {
+        continue;
+      }
+      if (hasDivergentQualifiedGenericObjectPair(lessonDirective, priorDirective, sharedTerms)) {
+        continue;
+      }
+      if (hasExplicitOppositeDirectivePair(lessonDirective, priorDirective)) {
+        return {
+          sharedTerms,
           lessonGuidance: lessonDirective.sourceText,
           conflictingGuidance: priorDirective.sourceText,
         };
@@ -1497,6 +1504,10 @@ function opposedConditionalGuardSharedTerms(
     return [];
   }
 
+  if (hasComplementaryConditionalGuardPair(a, b) || hasComplementaryConditionalGuardPair(b, a)) {
+    return [];
+  }
+
   if (
     a.conditionalProhibition &&
     a.guardCondition &&
@@ -1514,6 +1525,31 @@ function opposedConditionalGuardSharedTerms(
   }
 
   return [];
+}
+
+function hasComplementaryConditionalGuardPair(
+  maybeProhibition: LessonDirectiveClause,
+  maybeAllowance: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeProhibition.polarity !== 'negative' ||
+    maybeAllowance.polarity !== 'positive' ||
+    !maybeProhibition.guardCondition ||
+    !maybeAllowance.guardCondition
+  ) {
+    return false;
+  }
+
+  return (
+    hasOpposedGuardOutcome(
+      maybeProhibition.guardCondition,
+      maybeAllowance.guardCondition,
+    ) &&
+    sharedTextTerms(maybeProhibition.guardCondition, maybeAllowance.guardCondition)
+      .length >= 1 &&
+    sharedTextTerms(maybeProhibition.text, maybeAllowance.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
 }
 
 function hasCompatibleConditionalGuard(
@@ -1727,7 +1763,7 @@ function hasCompatibleGuardedAllowancePair(
     '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|not\\s+(?:approved|granted|allowed|permitted)|unapproved)\\b',
     'i',
   ).test(maybeAllowance.sourceText);
-  if (allowanceHasFailingGuardOutcome) {
+  if (allowanceHasFailingGuardOutcome || /\bunverified\b/i.test(maybeAllowance.sourceText)) {
     return false;
   }
 
@@ -1768,7 +1804,7 @@ function hasOpposedGuardOutcome(
     /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted)\b/.test(
       guardCondition,
     );
-  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|not\s+approved|not\s+granted)\b/.test(
+  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(
     guardCondition,
   );
   const requirementHasPass =
@@ -1776,7 +1812,7 @@ function hasOpposedGuardOutcome(
       requirementText,
     );
   const requirementHasFail =
-    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|not\s+approved|not\s+granted)\b/.test(requirementText);
+    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(requirementText);
 
   return (
     (guardHasPass && requirementHasFail) ||
@@ -1813,6 +1849,37 @@ function hasExplicitOppositeDirectivePair(
   return (
     hasExplicitOppositeDirectivePairInOrder(a, b) ||
     hasExplicitOppositeDirectivePairInOrder(b, a)
+  );
+}
+
+function hasExactTopLevelReversal(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return hasExactTopLevelReversalInOrder(a, b) || hasExactTopLevelReversalInOrder(b, a);
+}
+
+function hasExactTopLevelReversalInOrder(
+  maybeNegative: LessonDirectiveClause,
+  maybePositive: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeNegative.polarity !== 'negative' ||
+    maybePositive.polarity !== 'positive' ||
+    maybeNegative.guardCondition ||
+    maybePositive.guardCondition ||
+    !startsWithNegativeDirective(maybeNegative.text) ||
+    startsWithNegativeDirective(maybePositive.text)
+  ) {
+    return false;
+  }
+
+  const negativeObject = stripLeadingPositiveDirective(stripLeadingDirective(maybeNegative.text));
+  const positiveObject = stripLeadingDirective(maybePositive.text);
+  return (
+    negativeObject.length > 0 &&
+    positiveObject.length > 0 &&
+    normalizeText(negativeObject) === normalizeText(positiveObject)
   );
 }
 
@@ -1864,7 +1931,7 @@ function stripLeadingDirective(normalized: string): string {
 function stripLeadingDoubleNegativeDirective(normalized: string): string {
   return normalized
     .replace(
-      /^(?:do not|don t|must not|should not|cannot|can t)\s+(?:skip|omit|ignore|bypass|avoid)\s+/,
+      /^(?:do not|don t|must not|should not|cannot|can t)\s+(?:skip|omit|ignore|bypass|avoid|disable|disabled|prohibit|disallow|reject|forbid|deny)\s+/,
       '',
     )
     .trim();
@@ -1903,7 +1970,7 @@ function hasExplicitOppositeDirectivePairInOrder(
     maybeNegative.polarity !== 'negative' ||
     maybePositive.polarity !== 'positive' ||
     !startsWithNegativeDirective(maybeNegative.text) ||
-    !(startsWithPositiveDirective(maybePositive.text) || startsWithDoubleNegativeDirective(maybePositive.text))
+    startsWithNegativeDirective(maybePositive.text)
   ) {
     return false;
   }
@@ -1932,7 +1999,7 @@ function startsWithNegativeDirective(normalized: string): boolean {
 }
 
 function startsWithDoubleNegativeDirective(normalized: string): boolean {
-  return /^(?:do not|don t|must not|should not|cannot|can t)\s+(?:skip|omit|ignore|bypass|avoid)\b/.test(
+  return /^(?:do not|don t|must not|should not|cannot|can t)\s+(?:skip|omit|ignore|bypass|avoid|disable|disabled|prohibit|disallow|reject|forbid|deny)\b/.test(
     normalized,
   );
 }
