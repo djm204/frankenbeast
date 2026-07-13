@@ -7,6 +7,25 @@ import { spawnSync } from 'node:child_process';
 const ROOT = join(import.meta.dirname, '..');
 const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
 
+function composeServices(): string[] {
+  const services = new Set<string>();
+  let inServices = false;
+  for (const line of read('docker-compose.yml').split(/\r?\n/u)) {
+    if (line === 'services:') {
+      inServices = true;
+      continue;
+    }
+    if (inServices && /^\S/u.test(line)) {
+      break;
+    }
+    const match = inServices ? /^  ([a-z][\w-]*):$/u.exec(line) : null;
+    if (match) {
+      services.add(match[1]!);
+    }
+  }
+  return [...services].sort();
+}
+
 describe('local setup scripts', () => {
   it('enforces a coherent Node.js minimum across workspace packages and local tooling', () => {
     const packagePaths = [
@@ -44,6 +63,24 @@ describe('local setup scripts', () => {
     expect(source).not.toContain('/api/v1/heartbeat');
     expect(source).not.toContain('localhost:9090');
     expect(source).not.toContain('Firewall server');
+  });
+
+  it('keeps verify-setup aligned with the quickstart compose service contract', () => {
+    const source = read('scripts/verify-setup.ts');
+    const quickstart = read('docs/guides/quickstart.md');
+
+    expect(composeServices()).toEqual(['chromadb', 'grafana', 'tempo']);
+    expect(quickstart).toContain('This starts the services defined in `docker-compose.yml`');
+    expect(quickstart).toContain('**ChromaDB** (port 8000)');
+    expect(quickstart).toContain('**Grafana** (port 3000)');
+    expect(quickstart).toContain('**Tempo** (ports 3200, 4317, 4318)');
+    expect(quickstart).toContain('There is no `firewall` Docker service in the current compose file.');
+    expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`)");
+    expect(source).toContain("await checkHttp('Grafana', 'http://localhost:3000/api/health')");
+    expect(source).toContain("await checkHttp('Tempo', 'http://localhost:3200/ready')");
+    expect(source).toContain('Some checks failed: ${failedChecks}');
+    expect(source).toContain('for ChromaDB, Grafana, and Tempo');
+    expect(source).not.toMatch(/localhost:9090|Firewall server/u);
   });
 
   it('verify-setup supports a dry-run that validates bootstrap prerequisites without probing services', () => {
