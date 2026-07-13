@@ -348,7 +348,7 @@ describe('runNetworkCommand', () => {
 
   it('prints a scoped credential inventory without secret values', async () => {
     const config = defaultConfig();
-    config.network.operatorTokenRef = 'prod/operator-token';
+    config.network.operatorTokenRef = ' prod/operator-token ';
     config.comms.enabled = true;
     config.comms.orchestratorTokenRef = 'prod/orchestrator-token';
     config.comms.slack.enabled = true;
@@ -392,8 +392,8 @@ describe('runNetworkCommand', () => {
     expect(report.credentials).toContainEqual({
       scope: 'network.operator',
       configPath: 'network.operatorTokenRef',
-      ref: 'prod/operator-token',
-      status: 'configured',
+      ref: ' prod/operator-token ',
+      status: 'invalid-whitespace',
     });
     expect(report.credentials).toContainEqual({
       scope: 'comms.orchestrator',

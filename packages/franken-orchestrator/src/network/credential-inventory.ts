@@ -1,6 +1,6 @@
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 
-export type CredentialInventoryStatus = 'configured' | 'missing' | 'inactive-configured' | 'inactive-missing' | 'optional-configured' | 'optional-missing';
+export type CredentialInventoryStatus = 'configured' | 'missing' | 'inactive-configured' | 'inactive-missing' | 'optional-configured' | 'optional-missing' | 'invalid-whitespace';
 
 export interface CredentialInventoryEntry {
   readonly scope: string;
@@ -17,18 +17,20 @@ export interface CredentialInventoryReport {
 }
 
 function credentialStatus(ref: string | undefined, active: boolean, required = true): CredentialInventoryStatus {
-  const present = Boolean(ref?.trim());
+  const trimmed = ref?.trim();
+  const present = Boolean(trimmed);
+  if (present && ref !== trimmed) return 'invalid-whitespace';
   if (!required) return present ? 'optional-configured' : 'optional-missing';
   if (active) return present ? 'configured' : 'missing';
   return present ? 'inactive-configured' : 'inactive-missing';
 }
 
 function entry(scope: string, configPath: string, ref: string | undefined, active: boolean, required = true): CredentialInventoryEntry {
-  const normalizedRef = ref?.trim();
+  const trimmed = ref?.trim();
   return {
     scope,
     configPath,
-    ref: normalizedRef ? normalizedRef : null,
+    ref: trimmed ? (ref ?? null) : null,
     status: credentialStatus(ref, active, required),
   };
 }
@@ -55,6 +57,6 @@ export function buildCredentialInventoryReport(config: OrchestratorConfig): Cred
       entry('comms.whatsapp.app', 'comms.whatsapp.appSecretRef', config.comms.whatsapp.appSecretRef, config.comms.whatsapp.enabled),
       entry('comms.whatsapp.verify', 'comms.whatsapp.verifyTokenRef', config.comms.whatsapp.verifyTokenRef, config.comms.whatsapp.enabled),
     ],
-    guidance: 'Inventory reports secret-store reference names only; resolve values through the configured secure backend and never paste credential values into logs, issues, PRs, prompts, or telemetry. Treat missing required entries as setup gaps before exposing services; optional-missing entries are informational.',
+    guidance: 'Inventory reports secret-store reference names only; resolve values through the configured secure backend and never paste credential values into logs, issues, PRs, prompts, or telemetry. Treat missing required entries and invalid-whitespace entries as setup gaps before exposing services; optional-missing entries are informational.',
   };
 }

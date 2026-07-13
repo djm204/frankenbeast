@@ -967,6 +967,12 @@ export async function main(): Promise<void> {
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
 
+  if (suppressBanner) {
+    scaffoldFrankenbeast(paths);
+    await runNetworkCommand(args, config, root, paths);
+    return;
+  }
+
   const logger = new BeastLogger({ verbose: args.verbose });
   if (args.config) {
     logger.info(`Loaded config from ${args.config}`, 'config');
