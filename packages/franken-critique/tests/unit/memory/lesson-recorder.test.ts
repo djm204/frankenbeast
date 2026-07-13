@@ -729,6 +729,22 @@ describe('LessonRecorder', () => {
         timestamp: '2026-07-12T08:00:00.000Z',
       }),
     ).toBe(true);
+    expect(
+      isLessonApplicable({
+        evaluatorName: 'legacy-reviewer',
+        failureDescription: 'legacy sandboxed lesson',
+        correctionApplied: 'legacy correction',
+        taskId: 'legacy-sandbox-task',
+        timestamp: '2026-07-12T08:00:00.000Z',
+        experimentSandbox: {
+          state: 'experimental',
+          promotionBlocked: true,
+          requiredChecks: [],
+          promotionCriteria:
+            'Require independent verification before allowing lesson reuse.',
+        },
+      }),
+    ).toBe(false);
   });
 
   it('quarantines active lessons on explicit user correction and prevents future application', () => {
@@ -861,6 +877,7 @@ describe('LessonRecorder', () => {
     });
 
     expect(repeatedQuarantine.quarantine?.previousLifecycleStatus).toBe('candidate');
+    expect(repeatedQuarantine.quarantine?.threshold).toBe(2);
     expect(repeatedQuarantine.quarantine?.evidence).toEqual([
       { kind: 'operator-report', reference: 'discord://first-report' },
       {

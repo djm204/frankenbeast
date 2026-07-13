@@ -169,6 +169,9 @@ export function isLessonApplicable(lesson: CritiqueLesson): boolean {
   if (lesson.quarantine !== undefined) {
     return false;
   }
+  if (lesson.experimentSandbox?.promotionBlocked === true) {
+    return false;
+  }
   return lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active';
 }
 
@@ -190,8 +193,9 @@ export function quarantineLesson(
     combinedEvidence,
     quarantinedAt,
   );
-  const previousLifecycleStatus =
-    previousQuarantine?.previousLifecycleStatus ?? lesson.lifecycleStatus;
+  const previousLifecycleStatus = previousQuarantine?.previousLifecycleStatus ??
+    (lesson.lifecycleStatus === 'quarantined' ? undefined : lesson.lifecycleStatus);
+  const threshold = request.threshold ?? previousQuarantine?.threshold;
   const quarantine: LessonQuarantineMetadata = {
     trigger: request.trigger,
     reason: previousQuarantine
@@ -199,7 +203,7 @@ export function quarantineLesson(
       : reason,
     quarantinedAt,
     evidence: combinedEvidence,
-    ...(request.threshold !== undefined ? { threshold: request.threshold } : {}),
+    ...(threshold !== undefined ? { threshold } : {}),
     ...(previousLifecycleStatus !== undefined ? { previousLifecycleStatus } : {}),
     reviewItem,
   };
