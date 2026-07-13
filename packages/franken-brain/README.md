@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `CURRENT_MEMORY_SCHEMA_VERSION`, and the `WorkingMemoryLimits`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, and `MemorySchemaMigrationResult` types.
+Current public API: `SqliteBrain`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `DEFAULT_WORKING_MEMORY_LIMITS`, `CURRENT_MEMORY_SCHEMA_VERSION`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, and `MemoryEncryptionMigrationResult` types.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -66,6 +66,50 @@ const restored = SqliteBrain.hydrate(snapshot);
 restored.close();
 ```
 
+## Encryption at rest
+
+`SqliteBrain` can encrypt persisted working memory rows, episodic summaries/details, and recovery checkpoint states with AES-256-GCM. Supply a key directly or point to an environment variable:
+
+```typescript
+import { SqliteBrain } from '@franken/brain';
+
+const brain = new SqliteBrain('.fbeast/beast.db', undefined, {
+  encryption: {
+    enabled: true,
+    keyEnvVar: 'FRANKEN_MEMORY_ENCRYPTION_KEY',
+  },
+});
+```
+
+String keys are SHA-256 derived into a 32-byte AES key. Buffer keys must already be exactly 32 bytes. The database records encrypted-store metadata in `memory_encryption_status`, and `SqliteBrain#getMemoryEncryptionMetadata()` returns whether each durable store is encrypted.
+
+Encryption is fail-closed:
+
+- opening an encrypted database without encryption enabled throws `MemoryEncryptionRequiredError`;
+- opening with missing key material throws `MemoryEncryptionKeyUnavailableError`;
+- opening with the wrong key throws `MemoryEncryptionWrongKeyError`;
+- enabling encryption on an existing plaintext database throws `MemoryEncryptionMigrationRequiredError` until you explicitly migrate it.
+
+Use the migration helper to convert existing plaintext memory with an auditable dry-run and optional SQLite backup:
+
+```typescript
+const plan = SqliteBrain.migrateMemoryEncryption('.fbeast/beast.db', {
+  enabled: true,
+  keyEnvVar: 'FRANKEN_MEMORY_ENCRYPTION_KEY',
+  dryRun: true,
+});
+// inspect plan.operations
+
+SqliteBrain.migrateMemoryEncryption('.fbeast/beast.db', {
+  enabled: true,
+  keyEnvVar: 'FRANKEN_MEMORY_ENCRYPTION_KEY',
+  backupBeforeMigrate: true,
+  backupPath: '.fbeast/beast.db.before-memory-encryption',
+});
+```
+
+Keep the encryption key outside the SQLite database and application logs; losing it makes encrypted memory unrecoverable.
+
 ## Current architecture
 
 ```text
@@ -86,7 +130,9 @@ Durable memory stores are explicitly versioned. `working_memory`, `episodic_even
 ```typescript
 import { SqliteBrain } from '@franken/brain';
 
-const plan = SqliteBrain.migrateMemorySchema('.fbeast/beast.db', { dryRun: true });
+const plan = SqliteBrain.migrateMemorySchema('.fbeast/beast.db', {
+  dryRun: true,
+});
 // inspect plan.operations
 
 SqliteBrain.migrateMemorySchema('.fbeast/beast.db', {
