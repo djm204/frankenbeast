@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-12 — Runtime tool manifest security defaults
+- Default new/runtime skill tools to `requiresHitl: true` after schema validation, and preserve explicit `requiresHitl: false` only for reviewed safe tools.
+- Validate catalog `toolDefinitions` before creating/writing skill install files; otherwise a failed install can leave a partial MCP skill on disk and accidentally expose unknown runtime tools.
+- Regression tests should cover omitted HITL defaulting, explicit safe-tool opt-outs, manifest readback, no-tools MCP alias behavior, and invalid tool manifests leaving no partial install.
+
 ## 2026-07-11 — Approval replay command extraction guardrails
 - Approval replay commands are model-derived state, not fresh operator input. Keep the replay helper narrow: accept only trimmed single-line printable non-slash command descriptions, fail closed on multiline/control-command payloads, preserve the pending approval, and make operators reject/re-submit an explicit `/run` for overrides.
 - Regression coverage should include the low-level replay helper and the HTTP approval route so unsafe payloads do not reach the runtime/LLM and error responses do not echo injected command text.
