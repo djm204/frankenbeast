@@ -19,6 +19,17 @@ export interface WebhookNotifierOptions {
   /** URL to POST the JSON payload to. */
   url: string
   /**
+   * Explicit allowlist of webhook target origins. Defaults to deny-by-default:
+   * callers must either include the configured URL's origin here or set
+   * `allowUnlistedTarget: true` for a deliberate legacy/unsafe opt-out.
+   */
+  allowedTargetOrigins?: readonly string[]
+  /**
+   * Explicit unsafe opt-out for legacy deployments that cannot provide an
+   * allowlist yet. Prefer `allowedTargetOrigins` for normal operation.
+   */
+  allowUnlistedTarget?: boolean
+  /**
    * Additional HTTP headers merged on every request.
    * Content-Type is set to application/json by default and can be
    * overridden here.
@@ -54,6 +65,7 @@ export interface WebhookNotifierOptions {
  * ```ts
  * const notifier = new WebhookNotifier({
  *   url: 'https://hooks.example.com/signal',
+ *   allowedTargetOrigins: ['https://hooks.example.com'],
  *   retry: { maxRetries: 3, baseDelayMs: 200, maxDelayMs: 5000 },
  * })
  * ```
@@ -69,8 +81,27 @@ function validateNonNegativeInteger(value: number, fieldName: string): number {
   return value
 }
 
+function parseUrlOrigin(value: string, fieldName: string): string {
+  try {
+    return new URL(value).origin
+  } catch {
+    throw new TypeError(`${fieldName} must be an absolute URL`)
+  }
+}
+
+function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): ReadonlySet<string> | null {
+  if (!origins || origins.length === 0) {
+    return null
+  }
+
+  return new Set(origins.map(origin => parseUrlOrigin(origin, 'allowedTargetOrigins entry')))
+}
+
 export class WebhookNotifier {
   private readonly url: string
+  private readonly targetOrigin: string
+  private readonly allowedTargetOrigins: ReadonlySet<string> | null
+  private readonly allowUnlistedTarget: boolean
   private readonly extraHeaders: Record<string, string>
   private readonly fetchFn: FetchFn
   private readonly retry: Required<WebhookRetryOptions> | null
@@ -78,6 +109,14 @@ export class WebhookNotifier {
 
   constructor(options: WebhookNotifierOptions) {
     this.url = options.url
+    this.targetOrigin = parseUrlOrigin(options.url, 'url')
+    this.allowedTargetOrigins = normalizeAllowedTargetOrigins(options.allowedTargetOrigins)
+    this.allowUnlistedTarget = options.allowUnlistedTarget ?? false
+    if (!this.allowUnlistedTarget && this.allowedTargetOrigins === null) {
+      throw new Error(
+        'Webhook target allowlist is required; set allowedTargetOrigins or explicitly opt out with allowUnlistedTarget: true',
+      )
+    }
     this.extraHeaders = options.headers ?? {}
     this.fetchFn = options.fetch ?? (globalThis.fetch as unknown as FetchFn)
     this.sleepFn = options.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)))
@@ -92,6 +131,8 @@ export class WebhookNotifier {
   }
 
   async send(payload: unknown): Promise<void> {
+    this.assertTargetAllowed()
+
     const maxAttempts = this.retry ? 1 + this.retry.maxRetries : 1
     let lastError: unknown
 
@@ -133,5 +174,14 @@ export class WebhookNotifier {
     }
 
     throw lastError
+  }
+
+  private assertTargetAllowed(): void {
+    if (this.allowUnlistedTarget) {
+      return
+    }
+    if (!this.allowedTargetOrigins?.has(this.targetOrigin)) {
+      throw new Error(`Webhook target origin ${this.targetOrigin} is not allowed`)
+    }
   }
 }
