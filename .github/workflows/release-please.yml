@@ -73,16 +73,20 @@ jobs:
             exit 0
           fi
 
-          # Demote the component release
+          # Promote the most recent root release back to latest. If no root
+          # release exists yet, leave the component latest untouched instead of
+          # demoting it and leaving the repository with no latest release.
+          root_tag=$(gh release list --json tagName --jq '([.[] | select(.tagName | test("^v[0-9]"))][0].tagName // "")' 2>/dev/null || echo '')
+          if [ -z "$root_tag" ]; then
+            echo "No root release found; leaving component latest unchanged: $latest_tag"
+            exit 0
+          fi
+
           echo "Demoting component release: $latest_tag"
           gh release edit "$latest_tag" --latest=false
 
-          # Promote the most recent root release back to latest
-          root_tag=$(gh release list --json tagName --jq '[.[] | select(.tagName | test("^v[0-9]"))][0].tagName' 2>/dev/null || echo '')
-          if [ -n "$root_tag" ]; then
-            echo "Promoting root release: $root_tag"
-            gh release edit "$root_tag" --latest
-          fi
+          echo "Promoting root release: $root_tag"
+          gh release edit "$root_tag" --latest
 
   publish-npm:
     needs: release-please
