@@ -145,11 +145,32 @@ describe('BeastEventBus', () => {
     ]);
   });
 
+  it('preserves exported snapshots larger than the default replay buffer', () => {
+    const snapshot = Array.from({ length: 1001 }, (_, index) => ({
+      id: index + 1,
+      type: 'worker.output',
+      data: { workerId: 'w1', line: `line-${index + 1}` },
+    }));
+
+    const replayed = BeastEventBus.fromReplaySnapshot(snapshot);
+
+    expect(replayed.replaySince(0)).toHaveLength(1001);
+    expect(replayed.replaySince(0)[0]).toEqual({
+      id: 1,
+      type: 'worker.output',
+      data: { workerId: 'w1', line: 'line-1' },
+    });
+  });
+
   it('rejects malformed deterministic replay snapshots before stream replay', () => {
     expect(() => BeastEventBus.fromReplaySnapshot([
       { id: 1, type: 'worker.started', data: { workerId: 'w1' } },
       { id: 1, type: 'worker.output', data: { workerId: 'w1', line: 'duplicate' } },
     ])).toThrow('Replay snapshot event ids must be strictly increasing safe integers');
+
+    expect(() => BeastEventBus.fromReplaySnapshot([
+      { id: 1, type: 'worker.output' } as BeastSseEvent,
+    ])).toThrow('Replay snapshot events must include an object data payload');
   });
 
   it('isolates listener mutations from later listeners and replay state', () => {

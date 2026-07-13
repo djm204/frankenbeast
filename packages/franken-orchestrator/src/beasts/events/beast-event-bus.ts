@@ -59,6 +59,10 @@ function cloneEvent(event: BeastSseEvent): BeastSseEvent {
   };
 }
 
+function isRecordPayload(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 export class BeastEventBus {
   private sequence = 0;
   private readonly listeners = new Set<EventListener>();
@@ -77,9 +81,15 @@ export class BeastEventBus {
 
   static fromReplaySnapshot(
     snapshot: BeastEventReplaySnapshot,
-    maxBufferSizeOrOptions: number | BeastEventBusOptions = 1000,
+    maxBufferSizeOrOptions?: number | BeastEventBusOptions,
   ): BeastEventBus {
-    const bus = new BeastEventBus(maxBufferSizeOrOptions);
+    const options = maxBufferSizeOrOptions ?? { maxBufferSize: Math.max(1000, snapshot.length) };
+    const resolvedMaxBufferSize = typeof options === 'number' ? options : (options.maxBufferSize ?? 1000);
+    if (resolvedMaxBufferSize < snapshot.length) {
+      throw new Error('Replay snapshot length exceeds configured maxBufferSize');
+    }
+
+    const bus = new BeastEventBus(options);
     bus.loadReplaySnapshot(snapshot);
     return bus;
   }
@@ -130,6 +140,9 @@ export class BeastEventBus {
       }
       if (!event.type) {
         throw new Error('Replay snapshot events must include a non-empty type');
+      }
+      if (!isRecordPayload(event.data)) {
+        throw new Error('Replay snapshot events must include an object data payload');
       }
       const cloned = cloneEvent(event);
       this.buffer.push(cloned);
