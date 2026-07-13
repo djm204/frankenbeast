@@ -133,10 +133,15 @@ const FAILED_TEST_SIGNAL_PATTERNS: readonly {
     strength: 'strong',
   },
   {
-    label: 'assertion failure',
-    pattern:
-      /\b(?:assertionerror|expected[\s\S]{0,120}(?:received|got)|(?:received|got)[\s\S]{0,120}expected)\b/i,
+    label: 'assertion error',
+    pattern: /\bassertionerror\b/i,
     strength: 'strong',
+  },
+  {
+    label: 'assertion expected-received',
+    pattern:
+      /\b(?:expected[\s\S]{0,120}(?:received|got)|(?:received|got)[\s\S]{0,120}expected)\b/i,
+    strength: 'supporting',
   },
   {
     label: 'test runner output',

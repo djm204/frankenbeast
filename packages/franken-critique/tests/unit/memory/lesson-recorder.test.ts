@@ -255,7 +255,7 @@ describe('LessonRecorder', () => {
         createIteration(0, 'fail', 'reviewer', [
           {
             message:
-              'Expected PR body to include an issue link and verification evidence',
+              'Expected PR body to include an issue link and verification evidence; got an empty description',
             severity: 'warning',
             suggestion:
               'Run npm run test before handoff and update the PR body.',
