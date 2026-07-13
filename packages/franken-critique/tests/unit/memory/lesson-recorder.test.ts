@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { LessonRecorder } from '../../../src/memory/lesson-recorder.js';
+import {
+  LessonRecorder,
+  isLessonApplicable,
+  quarantineLesson,
+  quarantineLessonForRepeatedFailures,
+  unquarantineLesson,
+} from '../../../src/memory/lesson-recorder.js';
 import { EVALUATOR_EXCEPTION_LOCATION } from '../../../src/types/evaluation.js';
 import type { MemoryPort } from '../../../src/types/contracts.js';
 import type {
@@ -689,6 +695,261 @@ describe('LessonRecorder', () => {
       insufficientEvidenceGuidance:
         'Do not roll back a lesson unless the rollback request names the lesson, explains the bad/stale guidance, links review or regression evidence, and includes a verification command for the replacement or retirement decision.',
     });
+  });
+
+  it('records new critique lessons with candidate lifecycle status', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'fresh lesson needs review before active injection',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'lifecycle-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.lifecycleStatus).toBe('candidate');
+    expect(isLessonApplicable(lesson)).toBe(false);
+    expect(
+      isLessonApplicable({
+        evaluatorName: 'legacy-reviewer',
+        failureDescription: 'legacy lesson without lifecycle metadata',
+        correctionApplied: 'legacy correction',
+        taskId: 'legacy-task',
+        timestamp: '2026-07-12T08:00:00.000Z',
+      }),
+    ).toBe(true);
+    expect(
+      isLessonApplicable({
+        evaluatorName: 'legacy-reviewer',
+        failureDescription: 'legacy sandboxed lesson',
+        correctionApplied: 'legacy correction',
+        taskId: 'legacy-sandbox-task',
+        timestamp: '2026-07-12T08:00:00.000Z',
+        experimentSandbox: {
+          state: 'experimental',
+          promotionBlocked: true,
+          requiredChecks: [],
+          promotionCriteria:
+            'Require independent verification before allowing lesson reuse.',
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('quarantines active lessons on explicit user correction and prevents future application', () => {
+    const activeLesson = {
+      evaluatorName: 'learning-reviewer',
+      failureDescription: 'prefer short-circuiting verifier output',
+      correctionApplied: 'Corrected in iteration 1',
+      taskId: 'task-with-bad-lesson',
+      timestamp: '2026-07-12T10:00:00.000Z',
+      lifecycleStatus: 'active' as const,
+    };
+
+    const quarantined = quarantineLesson(activeLesson, {
+      trigger: 'explicit-user-correction',
+      reason: 'User corrected this as unsafe because verifier output was skipped.',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1729',
+        },
+      ],
+      quarantinedAt: '2026-07-12T10:05:00.000Z',
+    });
+
+    expect(quarantined.lifecycleStatus).toBe('quarantined');
+    expect(quarantined.quarantine).toMatchObject({
+      trigger: 'explicit-user-correction',
+      reason: 'User corrected this as unsafe because verifier output was skipped.',
+      quarantinedAt: '2026-07-12T10:05:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1729',
+        },
+      ],
+      reviewItem: expect.objectContaining({
+        status: 'open',
+        recommendedAction:
+          'Review rollback evidence, decide whether to retire or supersede the lesson, and keep it out of prompt injection until explicitly unquarantined.',
+      }),
+    });
+    expect(isLessonApplicable(quarantined)).toBe(false);
+  });
+
+  it('quarantines active lessons after repeated failure signals cross the configured threshold', () => {
+    const activeLesson = {
+      evaluatorName: 'learning-reviewer',
+      failureDescription: 'always skip Codex gate after local tests pass',
+      correctionApplied: 'Corrected in iteration 1',
+      taskId: 'original-task',
+      timestamp: '2026-07-12T10:00:00.000Z',
+      lifecycleStatus: 'active' as const,
+    };
+
+    const belowThreshold = quarantineLessonForRepeatedFailures(activeLesson, {
+      threshold: 3,
+      observedAt: '2026-07-12T11:00:00.000Z',
+      failures: [
+        {
+          taskId: 'task-a',
+          reason: 'Codex finding proved the lesson harmful.',
+          evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/1',
+        },
+        {
+          taskId: 'task-b',
+          reason: 'Repeated merge gate failure.',
+          evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/2',
+        },
+      ],
+    });
+
+    expect(belowThreshold).toBe(activeLesson);
+
+    const quarantined = quarantineLessonForRepeatedFailures(activeLesson, {
+      threshold: 2,
+      observedAt: '2026-07-12T11:00:00.000Z',
+      failures: [
+        {
+          taskId: 'task-a',
+          reason: 'Codex finding proved the lesson harmful.',
+          evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/1',
+        },
+        {
+          taskId: 'task-b',
+          reason: 'Repeated merge gate failure.',
+          evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/2',
+        },
+      ],
+    });
+
+    expect(quarantined.lifecycleStatus).toBe('quarantined');
+    expect(quarantined.quarantine).toMatchObject({
+      trigger: 'repeated-failure-threshold',
+      threshold: 2,
+      evidence: [
+        { kind: 'failed-regression', reference: 'https://github.com/djm204/frankenbeast/pull/1' },
+        { kind: 'failed-regression', reference: 'https://github.com/djm204/frankenbeast/pull/2' },
+      ],
+    });
+    expect(isLessonApplicable(quarantined)).toBe(false);
+  });
+
+  it('preserves lifecycle and quarantine audit trail across repeated quarantine and unquarantine', () => {
+    const candidateLesson = {
+      evaluatorName: 'learning-reviewer',
+      failureDescription: 'candidate guidance may be stale',
+      correctionApplied: 'Corrected in iteration 1',
+      taskId: 'candidate-quarantine-task',
+      timestamp: '2026-07-12T10:00:00.000Z',
+      lifecycleStatus: 'candidate' as const,
+    };
+
+    const firstQuarantine = quarantineLesson(candidateLesson, {
+      trigger: 'explicit-user-correction',
+      reason: 'User reported this candidate as harmful.',
+      evidence: [{ kind: 'operator-report', reference: 'discord://first-report' }],
+      quarantinedAt: '2026-07-12T10:05:00.000Z',
+    });
+    const repeatedQuarantine = quarantineLesson(firstQuarantine, {
+      trigger: 'repeated-failure-threshold',
+      reason: 'Regression repeated after initial correction.',
+      evidence: [
+        {
+          kind: 'failed-regression',
+          reference: 'https://github.com/djm204/frankenbeast/pull/4',
+        },
+      ],
+      quarantinedAt: '2026-07-12T11:00:00.000Z',
+      threshold: 2,
+    });
+
+    expect(repeatedQuarantine.quarantine?.previousLifecycleStatus).toBe('candidate');
+    expect(repeatedQuarantine.quarantine?.threshold).toBe(2);
+    expect(repeatedQuarantine.quarantine?.evidence).toEqual([
+      { kind: 'operator-report', reference: 'discord://first-report' },
+      {
+        kind: 'failed-regression',
+        reference: 'https://github.com/djm204/frankenbeast/pull/4',
+      },
+    ]);
+
+    const unquarantined = unquarantineLesson(repeatedQuarantine, {
+      reviewedAt: '2026-07-12T12:00:00.000Z',
+      reviewer: 'pm-reviewer',
+      evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/5',
+      reason: 'Review complete but candidate still requires promotion.',
+    });
+
+    expect(unquarantined.lifecycleStatus).toBe('candidate');
+    expect(isLessonApplicable(unquarantined)).toBe(false);
+  });
+
+  it('allows manual unquarantine only with review evidence and restores active application', () => {
+    expect(() =>
+      unquarantineLesson(
+        {
+          evaluatorName: 'learning-reviewer',
+          failureDescription: 'fresh candidate should not be activated',
+          correctionApplied: 'Corrected in iteration 1',
+          taskId: 'candidate-task',
+          timestamp: '2026-07-12T09:00:00.000Z',
+          lifecycleStatus: 'candidate' as const,
+        },
+        {
+          reviewedAt: '2026-07-12T12:00:00.000Z',
+          reviewer: 'pm-reviewer',
+          evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/3',
+          reason: 'Candidate cannot skip quarantine review.',
+        },
+      ),
+    ).toThrow('Only quarantined lessons can be unquarantined.');
+
+    const quarantined = quarantineLesson(
+      {
+        evaluatorName: 'learning-reviewer',
+        failureDescription: 'require stale workaround',
+        correctionApplied: 'Corrected in iteration 1',
+        taskId: 'rollback-task',
+        timestamp: '2026-07-12T10:00:00.000Z',
+        lifecycleStatus: 'active' as const,
+      },
+      {
+        trigger: 'explicit-user-correction',
+        reason: 'User reported stale workaround.',
+        evidence: [{ kind: 'operator-report', reference: 'discord://operator-report' }],
+        quarantinedAt: '2026-07-12T10:05:00.000Z',
+      },
+    );
+
+    const unquarantined = unquarantineLesson(quarantined, {
+      reviewedAt: '2026-07-12T12:00:00.000Z',
+      reviewer: 'pm-reviewer',
+      evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/3',
+      reason: 'Replacement guidance has regression coverage.',
+    });
+
+    expect(unquarantined.lifecycleStatus).toBe('active');
+    expect(unquarantined.quarantine).toBeUndefined();
+    expect(unquarantined.unquarantine).toEqual({
+      reviewedAt: '2026-07-12T12:00:00.000Z',
+      reviewer: 'pm-reviewer',
+      evidenceUrl: 'https://github.com/djm204/frankenbeast/pull/3',
+      reason: 'Replacement guidance has regression coverage.',
+    });
+    expect(isLessonApplicable(unquarantined)).toBe(true);
   });
 
   it('does not attach rollback workflow guidance when no actionable lesson is recorded', async () => {
