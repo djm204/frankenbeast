@@ -145,7 +145,7 @@ describe('dependency CI guards for issue #1414', () => {
     expect(workflow).toContain('npm run audit:dependencies');
     expect(workflow).toContain('npm run deps:outdated:major');
     expect(workflow).toContain('npm sbom --sbom-format cyclonedx');
-    expect(workflow).toContain('actions/upload-artifact@v4');
+    expect(workflow).toContain('actions/upload-artifact@v7');
     expect(workflow).toContain('dependency-sbom-cyclonedx');
   });
 });
