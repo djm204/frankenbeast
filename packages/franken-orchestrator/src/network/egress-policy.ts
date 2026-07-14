@@ -226,7 +226,16 @@ export function createEgressGuardedFetch(options: {
     const redirectUrl = new URL(location, requestUrl).toString();
     const requestRedirect = input instanceof Request ? input.redirect : undefined;
     if (init?.redirect === 'error' || requestRedirect === 'error') {
-      throw new TypeError(`Egress redirect blocked for lane ${options.lane}: ${redirectUrl}`);
+      const redirectDecision = evaluateEgressPolicy({
+        lane: options.lane,
+        url: redirectUrl,
+        method: requestMethod,
+        policy: options.policy,
+        override: options.override,
+      });
+      throw new TypeError(
+        `Egress redirect blocked for lane ${options.lane}: ${redirectDecision.method} ${redirectDecision.destinationClass}:${redirectDecision.host}`,
+      );
     }
 
     enforceEgressDecision({

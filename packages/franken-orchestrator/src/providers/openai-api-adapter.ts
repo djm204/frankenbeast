@@ -11,13 +11,14 @@ import type {
   BrainSnapshot,
 } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
-import { createEgressGuardedFetch, type EgressPolicyConfig } from '../network/egress-policy.js';
+import { createEgressGuardedFetch, type EgressAuditSink, type EgressPolicyConfig } from '../network/egress-policy.js';
 
 export interface OpenAiApiOptions {
   apiKey?: string;
   model?: string;
   maxTokens?: number;
   egressPolicy?: EgressPolicyConfig;
+  egressAudit?: EgressAuditSink;
 }
 
 export class OpenAiApiAdapter implements ILlmProvider {
@@ -50,7 +51,11 @@ export class OpenAiApiAdapter implements ILlmProvider {
   }
 
   private createProviderFetch(): typeof fetch {
-    return createEgressGuardedFetch({ lane: 'implementation', policy: this.options.egressPolicy });
+    return createEgressGuardedFetch({
+      lane: 'implementation',
+      policy: this.options.egressPolicy,
+      audit: this.options.egressAudit,
+    });
   }
 
   async isAvailable(): Promise<boolean> {

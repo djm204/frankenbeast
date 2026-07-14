@@ -11,13 +11,14 @@ import type {
   BrainSnapshot,
 } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
-import { createEgressGuardedFetch, type EgressPolicyConfig } from '../network/egress-policy.js';
+import { createEgressGuardedFetch, type EgressAuditSink, type EgressPolicyConfig } from '../network/egress-policy.js';
 
 export interface AnthropicApiOptions {
   apiKey?: string;
   model?: string;
   maxTokens?: number;
   egressPolicy?: EgressPolicyConfig;
+  egressAudit?: EgressAuditSink;
 }
 
 export class AnthropicApiAdapter implements ILlmProvider {
@@ -38,7 +39,11 @@ export class AnthropicApiAdapter implements ILlmProvider {
   constructor(private options: AnthropicApiOptions = {}) {
     this.client = new Anthropic({
       apiKey: options.apiKey ?? process.env['ANTHROPIC_API_KEY'],
-      fetch: createEgressGuardedFetch({ lane: 'implementation', policy: options.egressPolicy }),
+      fetch: createEgressGuardedFetch({
+        lane: 'implementation',
+        policy: options.egressPolicy,
+        audit: options.egressAudit,
+      }),
     });
   }
 
