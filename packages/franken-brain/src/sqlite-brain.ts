@@ -468,13 +468,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
     for (const [key, value] of this.store) {
       const { normalized, serialized, size } = this.prepareEntry(key, value);
       try {
-        assertNotDeletionGuarded(this.db, key, serialized);
+        assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
       } catch (error) {
         if (error instanceof MemoryDeletionGuardError) {
           const persisted = this.persistedSerialized.get(key);
           if (persisted !== undefined) {
             try {
-              assertNotDeletionGuarded(this.db, key, persisted);
+              assertNotDeletionGuarded(this.db, key, persisted, this.encryption);
             } catch (persistedError) {
               if (persistedError instanceof MemoryDeletionGuardError) {
                 continue;
@@ -544,7 +544,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   set(key: string, value: unknown): void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
-    assertNotDeletionGuarded(this.db, key, serialized);
+    assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
 
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
@@ -723,7 +723,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const prepared: Array<[string, unknown, string, number]> = [];
     for (const [key, value] of entries) {
       const { normalized, serialized, size } = this.prepareEntry(key, value);
-      assertNotDeletionGuarded(this.db, key, serialized);
+      assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
       total += size;
       prepared.push([key, normalized, serialized, size]);
     }
@@ -785,7 +785,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   ) {}
 
   record(event: EpisodicEvent): void {
-    assertEpisodicNotDeletionGuarded(this.db, event);
+    assertEpisodicNotDeletionGuarded(this.db, event, this.encryption);
     this.insertEvent(event);
   }
 
@@ -839,7 +839,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           learningCooldownMs: cooldownMs,
         },
       };
-      assertEpisodicNotDeletionGuarded(this.db, guardedEvent);
+      assertEpisodicNotDeletionGuarded(this.db, guardedEvent, this.encryption);
       this.insertEvent(guardedEvent);
 
       this.db.exec('COMMIT');
@@ -1115,7 +1115,7 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
-    assertCheckpointNotDeletionGuarded(this.db, state);
+    assertCheckpointNotDeletionGuarded(this.db, state, this.encryption);
     const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = {
       current: undefined,
     };
@@ -1377,7 +1377,9 @@ export class SqliteBrain implements IBrain {
   rightToForget(selector: RightToForgetSelector): RightToForgetReport {
     const normalizedSelector = normalizeRightToForgetSelector(selector);
     const dryRun = normalizedSelector.dryRun ?? false;
-    const selectorHash = hashSelector(this.db, normalizedSelector, { createKey: !dryRun });
+    const selectorHash = hashSelector(this.db, normalizedSelector, this.encryption
+      ? { createKey: !dryRun, encryption: this.encryption }
+      : { createKey: !dryRun });
     const memoryType = normalizedSelector.type ?? 'all';
 
     const workingMatches = memoryType === 'episodic'
@@ -1414,7 +1416,7 @@ export class SqliteBrain implements IBrain {
             deleteCheckpoint.run(id);
           }
         }
-        writeDeletionGuards(this.db, normalizedSelector, selectorHash);
+        writeDeletionGuards(this.db, normalizedSelector, selectorHash, this.encryption);
         const auditSummary = 'Right-to-forget deletion completed';
         const auditDetails = JSON.stringify({
           selectorHash,
@@ -1527,7 +1529,7 @@ export class SqliteBrain implements IBrain {
 
   serialize(): BrainSnapshot {
     this.flush();
-    const deletionGuardHashKey = readDeletionHashKey(this.db);
+    const deletionGuardHashKey = readDeletionHashKey(this.db, this.encryption);
     return {
       version: 1,
       timestamp: isoNow(),
@@ -1566,12 +1568,15 @@ export class SqliteBrain implements IBrain {
       const insertDeletionGuard = brain.db.prepare(
         `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version) VALUES (?, ?, ?, ?, ?)`,
       );
+      if ((snapshot.deletionGuards?.length ?? 0) > 0 && !snapshot.deletionGuardHashKey) {
+        throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with deletion guards but no right-to-forget hash key material');
+      }
+
       if (snapshot.deletionGuardHashKey) {
-        const existingDeletionHashKey = readDeletionHashKey(brain.db);
+        const existingDeletionHashKey = readDeletionHashKey(brain.db, brain.encryption);
         if (existingDeletionHashKey && existingDeletionHashKey !== snapshot.deletionGuardHashKey) {
           throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with deletion guards that use different right-to-forget hash key material');
         }
-        writeDeletionHashKey(brain.db, snapshot.deletionGuardHashKey);
       }
 
       const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } =
@@ -1579,6 +1584,9 @@ export class SqliteBrain implements IBrain {
       const restoreSnapshot = brain.db.transaction(() => {
         brain.db.prepare(`DELETE FROM episodic_events`).run();
         brain.db.prepare(`DELETE FROM checkpoints`).run();
+        if (snapshot.deletionGuardHashKey) {
+          writeDeletionHashKey(brain.db, snapshot.deletionGuardHashKey, brain.encryption);
+        }
         for (const guard of snapshot.deletionGuards ?? []) {
           if (guard.schemaVersion > CURRENT_MEMORY_SCHEMA_VERSION) {
             throw new UnsupportedMemorySchemaVersionError(
@@ -1600,7 +1608,7 @@ export class SqliteBrain implements IBrain {
 
         for (const event of snapshot.episodic) {
           if (!isRightToForgetAuditEvent(event)) {
-            assertEpisodicNotDeletionGuarded(brain.db, event);
+            assertEpisodicNotDeletionGuarded(brain.db, event, brain.encryption);
           }
           insertEvent.run(
             event.id ?? null,
@@ -1623,7 +1631,7 @@ export class SqliteBrain implements IBrain {
         }
 
         if (snapshot.checkpoint) {
-          assertCheckpointNotDeletionGuarded(brain.db, snapshot.checkpoint);
+          assertCheckpointNotDeletionGuarded(brain.db, snapshot.checkpoint, brain.encryption);
           insertCheckpoint.run(
             brain.encryption?.encrypt(JSON.stringify(snapshot.checkpoint)) ??
               JSON.stringify(snapshot.checkpoint),
@@ -2230,43 +2238,43 @@ function normalizeRightToForgetSelector(selector: RightToForgetSelector): Normal
 
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
 
-function readDeletionHashKey(db: Database.Database): string | undefined {
+function readDeletionHashKey(db: Database.Database, encryption?: MemoryCipher): string | undefined {
   const row = db.prepare(`SELECT key_material FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
     .get(DELETION_HASH_KEY_ID) as { key_material: string } | undefined;
-  return row?.key_material;
+  return row ? encryption?.decrypt(row.key_material) ?? row.key_material : undefined;
 }
 
-function writeDeletionHashKey(db: Database.Database, key: string): void {
+function writeDeletionHashKey(db: Database.Database, key: string, encryption?: MemoryCipher): void {
   db.prepare(`INSERT OR IGNORE INTO memory_deletion_hash_keys (id, key_material, created_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`)
-    .run(DELETION_HASH_KEY_ID, key, isoNow());
+    .run(DELETION_HASH_KEY_ID, encryption?.encrypt(key) ?? key, isoNow());
 }
 
-function readOrCreateDeletionHashKey(db: Database.Database): string {
+function readOrCreateDeletionHashKey(db: Database.Database, encryption?: MemoryCipher): string {
   db.exec(`CREATE TABLE IF NOT EXISTS memory_deletion_hash_keys (
     id TEXT PRIMARY KEY,
     key_material TEXT NOT NULL,
     created_at TEXT NOT NULL,
     schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
   )`);
-  const existing = readDeletionHashKey(db);
+  const existing = readDeletionHashKey(db, encryption);
   if (existing) return existing;
   const key = randomBytes(32).toString('base64url');
-  writeDeletionHashKey(db, key);
+  writeDeletionHashKey(db, key, encryption);
   return key;
 }
 
-function keyedDeletionHash(db: Database.Database, value: string): string {
-  return createHmac('sha256', readOrCreateDeletionHashKey(db)).update(value).digest('hex');
+function keyedDeletionHash(db: Database.Database, value: string, encryption?: MemoryCipher): string {
+  return createHmac('sha256', readOrCreateDeletionHashKey(db, encryption)).update(value).digest('hex');
 }
 
 function hashSelector(
   db: Database.Database,
   selector: NormalizedRightToForgetSelector,
-  options: { createKey?: boolean } = {},
+  options: { createKey?: boolean; encryption?: MemoryCipher } = {},
 ): string {
   const key = options.createKey === false
-    ? readDeletionHashKey(db) ?? 'right-to-forget-dry-run-hmac-v1'
-    : readOrCreateDeletionHashKey(db);
+    ? readDeletionHashKey(db, options.encryption) ?? randomBytes(32).toString('base64url')
+    : readOrCreateDeletionHashKey(db, options.encryption);
   return createHmac('sha256', key)
     .update(JSON.stringify({
       key: selector.key,
@@ -2282,13 +2290,13 @@ function legacyHashGuardValue(value: string, normalize = true): string {
   return createHash('sha256').update(normalize ? normalizeForMatch(value) : value).digest('hex');
 }
 
-function hashGuardValue(db: Database.Database, value: string, normalize = true): string {
-  return keyedDeletionHash(db, normalize ? normalizeForMatch(value) : value);
+function hashGuardValue(db: Database.Database, value: string, normalize = true, encryption?: MemoryCipher): string {
+  return keyedDeletionHash(db, normalize ? normalizeForMatch(value) : value, encryption);
 }
 
-function guardHashCandidates(db: Database.Database, value: string, normalize = true): string[] {
+function guardHashCandidates(db: Database.Database, value: string, normalize = true, encryption?: MemoryCipher): string[] {
   return Array.from(new Set([
-    hashGuardValue(db, value, normalize),
+    hashGuardValue(db, value, normalize, encryption),
     legacyHashGuardValue(value, normalize),
   ]));
 }
@@ -2320,9 +2328,9 @@ function* iterateGuardMatchCandidates(value: string | undefined): Iterable<strin
   }
 }
 
-function queryGuardHashValue(db: Database.Database, value: string): string {
+function queryGuardHashValue(db: Database.Database, value: string, encryption?: MemoryCipher): string {
   const normalized = normalizeForMatch(value);
-  return `${normalized.length}:${hashGuardValue(db, normalized)}`;
+  return `${normalized.length}:${hashGuardValue(db, normalized, true, encryption)}`;
 }
 
 function legacyQueryGuardHashValue(value: string): string {
@@ -2330,8 +2338,8 @@ function legacyQueryGuardHashValue(value: string): string {
   return `${normalized.length}:${legacyHashGuardValue(normalized)}`;
 }
 
-function queryGuardHashCandidates(db: Database.Database, value: string): string[] {
-  return Array.from(new Set([queryGuardHashValue(db, value), legacyQueryGuardHashValue(value)]));
+function queryGuardHashCandidates(db: Database.Database, value: string, encryption?: MemoryCipher): string[] {
+  return Array.from(new Set([queryGuardHashValue(db, value, encryption), legacyQueryGuardHashValue(value)]));
 }
 
 function readQueryGuardIndex(db: Database.Database, scope: 'working' | 'episodic' | 'checkpoint'): {
@@ -2485,7 +2493,12 @@ function episodicRowMatchesSelector(step: string, summary: string, details: stri
   return false;
 }
 
-function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToForgetSelector, selectorHash: string): void {
+function writeDeletionGuards(
+  db: Database.Database,
+  selector: NormalizedRightToForgetSelector,
+  selectorHash: string,
+  encryption?: MemoryCipher,
+): void {
   const now = isoNow();
   const insert = db.prepare(
     `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version)
@@ -2508,8 +2521,8 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
       for (const scope of scopes) {
         if (kind === 'key' && scope !== 'working') continue;
         insert.run(selectorHash, `${scope}:${kind}`, kind === 'query'
-          ? queryGuardHashValue(db, guardValue)
-          : hashGuardValue(db, guardValue, kind !== 'key'), now);
+          ? queryGuardHashValue(db, guardValue, encryption)
+          : hashGuardValue(db, guardValue, kind !== 'key', encryption), now);
       }
     }
   }
@@ -2535,7 +2548,7 @@ function keyPrefixCandidates(key: string): string[] {
   return Array.from(candidates);
 }
 
-function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string): void {
+function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string, encryption?: MemoryCipher): void {
   const parsed = safeJsonParse(serializedValue);
   const text = `${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`;
   const keyPrefix = key.includes(':') ? key.split(':', 1)[0] : undefined;
@@ -2556,7 +2569,7 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
     if (!value) continue;
     const guardValues = kind === 'key' ? [value] : Array.from(new Set([value, ...value.split(/\s+/).filter(Boolean)]));
     for (const candidate of guardValues) {
-      if (hasDeletionGuard(db, 'working', kind, candidate)) {
+      if (hasDeletionGuard(db, 'working', kind, candidate, encryption)) {
         throw new MemoryDeletionGuardError(`Refusing to store memory because it matches a prior right-to-forget ${kind} guard`);
       }
     }
@@ -2565,14 +2578,14 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
   if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
     const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
     for (const value of values) {
-      if (hasDeletionGuard(db, 'working', 'query', value)) {
+      if (hasDeletionGuard(db, 'working', 'query', value, encryption)) {
         throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
       }
     }
   }
 }
 
-function assertEpisodicNotDeletionGuarded(db: Database.Database, event: EpisodicEvent): void {
+function assertEpisodicNotDeletionGuarded(db: Database.Database, event: EpisodicEvent, encryption?: MemoryCipher): void {
   const text = `${event.step ?? ''} ${event.summary} ${event.details ? valueToSearchText(event.details) : ''}`;
   const candidates: Array<[string, string | undefined]> = [
     ...objectMetadataStrings(event.details, ['category', 'categories', 'kind']).map(value => ['category', value] as [string, string]),
@@ -2583,7 +2596,7 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
   for (const [kind, value] of candidates) {
     if (!value) continue;
     for (const candidate of Array.from(new Set([value, ...value.split(/\s+/).filter(Boolean)]))) {
-      if (hasDeletionGuard(db, 'episodic', kind, candidate)) {
+      if (hasDeletionGuard(db, 'episodic', kind, candidate, encryption)) {
         throw new MemoryDeletionGuardError(`Refusing to store episodic memory because it matches a prior right-to-forget ${kind} guard`);
       }
     }
@@ -2592,7 +2605,7 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
   if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
     const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
     for (const value of values) {
-      if (hasDeletionGuard(db, 'episodic', 'query', value)) {
+      if (hasDeletionGuard(db, 'episodic', 'query', value, encryption)) {
         throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
       }
     }
@@ -2649,14 +2662,16 @@ function readDeletionGuardSnapshot(db: Database.Database): MemoryDeletionGuardSn
   }));
 }
 
-function hasDeletionGuard(db: Database.Database, scope: string, kind: string, value: string): boolean {
+function hasDeletionGuard(db: Database.Database, scope: string, kind: string, value: string, encryption?: MemoryCipher): boolean {
   const normalize = kind !== 'key';
-  const hashes = kind === 'query' ? queryGuardHashCandidates(db, value) : guardHashCandidates(db, value, normalize);
+  const hashes = kind === 'query'
+    ? queryGuardHashCandidates(db, value, encryption)
+    : guardHashCandidates(db, value, normalize, encryption);
   const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
   return hashes.some(hash => Boolean(stmt.get(`${scope}:${kind}`, hash)));
 }
 
-function assertCheckpointNotDeletionGuarded(db: Database.Database, state: ExecutionState): void {
+function assertCheckpointNotDeletionGuarded(db: Database.Database, state: ExecutionState, encryption?: MemoryCipher): void {
   const context = state.context;
   const candidates: Array<[string, string | undefined]> = [
     ...objectMetadataStrings(context, ['category', 'categories', 'kind']).map(value => ['category', value] as [string, string]),
@@ -2667,7 +2682,7 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
   for (const [kind, value] of candidates) {
     if (!value) continue;
     for (const candidate of Array.from(new Set([value, ...value.split(/\s+/).filter(Boolean)]))) {
-      if (hasDeletionGuard(db, 'checkpoint', kind, candidate)) {
+      if (hasDeletionGuard(db, 'checkpoint', kind, candidate, encryption)) {
         throw new MemoryDeletionGuardError(`Refusing to store checkpoint because it matches a prior right-to-forget ${kind} guard`);
       }
     }
@@ -2677,7 +2692,7 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
     const text = valueToSearchText(state);
     const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
     for (const value of values) {
-      if (hasDeletionGuard(db, 'checkpoint', 'query', value)) {
+      if (hasDeletionGuard(db, 'checkpoint', 'query', value, encryption)) {
         throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
       }
     }

@@ -149,6 +149,16 @@ describe('SqliteBrain', () => {
       expect(snapshotAfter.deletionGuards).toEqual([]);
     });
 
+    it('uses ephemeral non-correlatable selector hashes for dry runs before a deletion key exists', () => {
+      const first = brain.rightToForget({ category: 'pii', dryRun: true });
+      const second = brain.rightToForget({ category: 'pii', dryRun: true });
+
+      expect(first.selectorHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(second.selectorHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(second.selectorHash).not.toBe(first.selectorHash);
+      expect(brain.serialize().deletionGuardHashKey).toBeUndefined();
+    });
+
     it('guards against reintroducing forgotten working memory', () => {
       brain.working.set('pii:ssn', { value: '123-45-6789', category: 'pii' });
       brain.rightToForget({ key: 'pii:ssn', category: 'pii' });
@@ -1399,13 +1409,23 @@ describe('SqliteBrain', () => {
         const auditRow = raw
           .prepare(`SELECT summary, details FROM episodic_events WHERE step = ?`)
           .get('right-to-forget') as { summary: string; details: string };
+        const keyRow = raw
+          .prepare(`SELECT key_material FROM memory_deletion_hash_keys LIMIT 1`)
+          .get() as { key_material: string };
         expect(auditRow.summary).toMatch(/^enc:v1:/);
         expect(auditRow.details).toMatch(/^enc:v1:/);
         expect(auditRow.details).not.toContain('selectorHash');
+        expect(keyRow.key_material).toMatch(/^enc:v1:/);
+        expect(keyRow.key_material).not.toContain('right-to-forget-hmac-v1');
         raw.close();
 
         const reopened = new SqliteBrain(dbPath, undefined, { encryption });
         expect(reopened.episodic.recent(1)[0]?.step).toBe('right-to-forget');
+        expect(() => reopened.episodic.record({
+          type: 'observation',
+          summary: 'sourceScope: import-1 returned',
+          createdAt: '2026-07-13T00:00:00.000Z',
+        })).toThrow(/right-to-forget/);
         reopened.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -2428,6 +2448,42 @@ describe('SqliteBrain', () => {
         existing.close();
 
         expect(() => SqliteBrain.hydrate(snapshot, dbPath)).toThrow(/different right-to-forget hash key material/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('hydrate() rejects deletion guard snapshots without matching hash key material', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('pii:email', 'alice@example.test');
+      source.rightToForget({ query: 'alice@example.test' });
+      const snapshot = source.serialize();
+      delete snapshot.deletionGuardHashKey;
+
+      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/no right-to-forget hash key material/);
+      source.close();
+    });
+
+    it('hydrate() rolls back snapshot hash-key writes when restore fails', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydrate-key-rollback-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const source = new SqliteBrain(':memory:');
+        source.working.set('pii:email', 'alice@example.test');
+        source.rightToForget({ query: 'alice@example.test' });
+        const snapshot = source.serialize();
+        snapshot.working = { 'pii:email': 'alice@example.test' };
+
+        expect(() => SqliteBrain.hydrate(snapshot, dbPath)).toThrow(/right-to-forget/);
+
+        const raw = new Database(dbPath, { readonly: true });
+        const keyCount = raw
+          .prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`)
+          .get() as { count: number };
+        expect(keyCount.count).toBe(0);
+        raw.close();
+        source.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
