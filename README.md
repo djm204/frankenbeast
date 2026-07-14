@@ -539,12 +539,12 @@ Execution controls such as `--budget`, `--provider`, `--providers`, and `--no-pr
 | `FRANKEN_MAX_TOTAL_TOKENS` | `maxTotalTokens` | integer token budget | default `100000`; must be at least `10000` |
 | `FRANKEN_MAX_DURATION_MS` | `maxDurationMs` | integer milliseconds | default `300000`; must be at least `1000` and at least `maxCritiqueIterations * 10000` |
 | `FRANKEN_MAX_CRITIQUE_ITERATIONS` | `maxCritiqueIterations` | integer critique passes | default `3`; valid range `1` through `10` |
-| `FRANKEN_ENABLE_HEARTBEAT` | `enableHeartbeat` | boolean string; only `true` enables it | default `false` |
-| `FRANKEN_ENABLE_TRACING` | `enableTracing` | boolean string; only `true` enables it | default `false`; `--verbose` also enables tracing and wins over env/config |
-| `FRANKEN_ENABLE_REFLECTION` | `enableReflection` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_ENABLE_HEARTBEAT` | `enableHeartbeat` | boolean string; accepted true values: `true`, `1`, `yes`, `on`; false values: `false`, `0`, `no`, `off` | default `false` |
+| `FRANKEN_ENABLE_TRACING` | `enableTracing` | boolean string; accepted true values: `true`, `1`, `yes`, `on`; false values: `false`, `0`, `no`, `off` | default `false`; `--verbose` also enables tracing and wins over env/config |
+| `FRANKEN_ENABLE_REFLECTION` | `enableReflection` | boolean string; accepted true values: `true`, `1`, `yes`, `on`; false values: `false`, `0`, `no`, `off` | default `false` |
 | `FRANKEN_MIN_CRITIQUE_SCORE` | `minCritiqueScore` | numeric score | default `0.7`; must be `>= 0` and `< 1` |
 
-Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present; set the value to `true` to enable the field, and any other present value disables it.
+Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present. Boolean values are parsed strictly: use `true`, `1`, `yes`, or `on` to enable a field and `false`, `0`, `no`, or `off` to disable it. Other values are rejected unless a higher-priority CLI flag, such as `--verbose`, shadows that field.
 
 If `stateDir` is set to a path inside a sibling Hermes profile such as `.hermes/profiles/<profile>/...`, Frankenbeast fails closed by default when `<profile>` does not match the active `HERMES_PROFILE` (or `default` when unset). Set `allowCrossProfileStateAccess: true` in an operator-owned config file outside the checked-out repository only for deliberate migrations/imports that must read or write another profile's state; repository-local `.fbeast/config.json` cannot self-approve this opt-in.
 
