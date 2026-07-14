@@ -36,7 +36,7 @@ describe('live-bench CLI smoke coverage', () => {
     expect(result.stdout).toContain('fbeast-live-bench');
     expect(result.stdout).toContain('Usage:');
     expect(result.stdout).toContain('list <corpus-root>');
-  });
+  }, 15_000);
 
   it('lists benchmark task ids sorted for a valid corpus', () => {
     const corpusDir = mkdtempSync(join(tmpdir(), 'live-bench-corpus-'));

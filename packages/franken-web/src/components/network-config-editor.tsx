@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { NetworkConfigResponse } from '../lib/network-api';
 
 interface NetworkConfigEditorProps {
@@ -142,7 +142,7 @@ export function NetworkConfigEditor({ config, onSave }: NetworkConfigEditorProps
   const validationErrors = validateForm(formState);
   const canSave = assignments.length > 0 && validationErrors.length === 0 && !isSaving;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (shouldAcceptNextConfigRef.current) {
       setFormState(initialState);
       previousInitialStateRef.current = initialState;
