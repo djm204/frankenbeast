@@ -67,6 +67,8 @@ export type {
   IRecoveryMemory,
   EpisodicEventType,
   EpisodicEvent,
+  LearningCooldownOptions,
+  LearningRecordResult,
   ExecutionState,
   BrainSnapshot,
   MemoryDeletionGuardSnapshot,
@@ -76,6 +78,7 @@ export type {
 } from './brain.js';
 export {
   EpisodicEventSchema,
+  LearningCooldownOptionsSchema,
   ExecutionStateSchema,
   MemoryDeletionGuardSnapshotSchema,
   BrainSnapshotSchema,

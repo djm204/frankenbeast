@@ -974,7 +974,7 @@ describe('Chat HTTP Routes', () => {
       id: 'chat-rate-limit-approval',
       projectId: 'proj',
       transcript: [],
-      state: 'active',
+      state: 'rejected',
       pendingApproval: null,
       tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
       costUsd: 0,
@@ -1032,10 +1032,10 @@ describe('Chat HTTP Routes', () => {
     expect(sessionStore.save).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])('POST /v1/chat/sessions/:id/approve rejects state-only pending approvals (approved=%s)', async (approved) => {
+  it('POST /v1/chat/sessions/:id/approve rejects state-only pending approvals when approved', async () => {
     const now = new Date().toISOString();
     const session: ChatSession = {
-      id: `chat-state-only-pending-${approved ? 'approve' : 'reject'}`,
+      id: 'chat-state-only-pending-approve',
       projectId: 'proj',
       transcript: [],
       state: 'pending_approval',
@@ -1068,7 +1068,7 @@ describe('Chat HTTP Routes', () => {
     const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ approved }),
+      body: JSON.stringify({ approved: true }),
     });
 
     expect(res.status).toBe(409);
@@ -1078,6 +1078,57 @@ describe('Chat HTTP Routes', () => {
     expect(runtime.run).not.toHaveBeenCalled();
     expect(sessionStore.save).not.toHaveBeenCalled();
     expect(session.state).toBe('pending_approval');
+    expect(session.pendingApproval).toBeNull();
+  });
+
+  it('POST /v1/chat/sessions/:id/approve rejects state-only pending approvals to recover stale state', async () => {
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: 'chat-state-only-pending-reject',
+      projectId: 'proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: null,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const runtime = {
+      run: vi.fn(),
+    };
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+    });
+
+    const res = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: false }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({
+      approved: false,
+      state: 'rejected',
+      pendingApproval: null,
+    });
+    expect(runtime.run).not.toHaveBeenCalled();
+    expect(sessionStore.save).toHaveBeenCalledOnce();
+    expect(session.state).toBe('rejected');
     expect(session.pendingApproval).toBeNull();
   });
 

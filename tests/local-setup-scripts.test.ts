@@ -170,6 +170,7 @@ describe('local setup scripts', () => {
 
     expect(source).toContain('/api/v2/heartbeat');
     expect(source).toContain('/api/v2/tenants/${tenant}/databases/${database}/collections');
+    expect(source).toContain("envFile.get('CHROMA_URL')");
     expect(source).toContain("default_tenant");
     expect(source).toContain("default_database");
     expect(source).not.toContain('/api/v1/collections');

@@ -19,7 +19,7 @@ import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
-import { chatClientKey } from '../chat-rate-limit.js';
+import { ChatMutationAdmission, chatClientKey } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -43,6 +43,7 @@ export interface ChatRoutesDeps {
   operatorToken?: string | undefined;
   streamTicketStore?: SseConnectionTicketStore | undefined;
   chatRateLimiter: InMemoryRateLimiter;
+  chatMutationAdmission?: ChatMutationAdmission | undefined;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -79,38 +80,31 @@ function requestAddress(c: Context): string {
     || 'unknown';
 }
 
-function chatMutationKey(sessionId: string): string {
-  return `session:${sessionId}`;
-}
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
   const { sessionStore, runtime, turnRunner, issueSocketTicket, operatorToken, streamTicketStore } = deps;
   const app = new Hono();
-  const limiter = deps.chatRateLimiter;
-  const inFlightMutations = new Set<string>();
+  const admission = deps.chatMutationAdmission ?? new ChatMutationAdmission(deps.chatRateLimiter);
 
   async function withChatMutationAdmission<T>(
     c: Context,
     sessionId: string,
     run: () => Promise<T>,
   ): Promise<T> {
-    const mutationKey = chatMutationKey(sessionId);
-    const result = limiter.take(chatClientKey({
+    if (!admission.takeRateLimit(chatClientKey({
       action: 'message',
       operatorToken,
       remoteAddress: requestAddress(c),
-    }));
-    if (!result.allowed) {
+    }))) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
-    if (inFlightMutations.has(mutationKey)) {
+    if (!admission.begin(sessionId)) {
       throw new HttpError(429, 'RATE_LIMITED', 'Chat mutation already in progress');
     }
-    inFlightMutations.add(mutationKey);
     try {
       return await run();
     } finally {
-      inFlightMutations.delete(mutationKey);
+      admission.end(sessionId);
     }
   }
 
@@ -260,21 +254,44 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
     return withChatMutationAdmission(c, session.id, async () => {
       if (!session.pendingApproval) {
-        if (session.state === 'pending_approval') {
+        if (session.state === 'approved' || session.state === 'rejected') {
           return c.json({
-            error: {
-              code: 'APPROVAL_NOT_PENDING',
-              message: 'No pending approval metadata exists for this session. Reject or recreate the stale approval state before responding.',
+            data: {
+              id: session.id,
+              approved: session.state === 'approved',
+              state: session.state,
+              pendingApproval: null,
             },
-          }, 409);
+          } satisfies ApiDataEnvelope<ApproveResult>);
         }
-        return c.json({ data: { id: session.id, approved, state: session.state, pendingApproval: null } });
+
+        if (session.state === 'pending_approval' && !approved) {
+          session.state = 'rejected';
+          session.pendingApproval = null;
+          session.updatedAt = isoNow();
+          sessionStore.save(session);
+
+          return c.json({
+            data: {
+              id: session.id,
+              approved,
+              state: session.state,
+              pendingApproval: session.pendingApproval,
+            },
+          } satisfies ApiDataEnvelope<ApproveResult>);
+        }
+
+        return c.json({
+          error: {
+            code: 'APPROVAL_NOT_PENDING',
+            message: 'No pending approval exists for this session.',
+          },
+        }, 409);
       }
 
       let result: Awaited<ReturnType<ChatRuntime['run']>> | null = null;
       if (approved) {
         const pendingApproval = session.pendingApproval;
-        const wasPendingApproval = true;
         let runtimeInput: string;
         try {
           runtimeInput = approvalRuntimeInput(pendingApproval);
@@ -297,7 +314,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         try {
           result = await runtime.run(runtimeInput, {
             sessionId: session.id,
-            pendingApproval: wasPendingApproval,
+            pendingApproval: true,
             approvalResolved: true,
             projectId: session.projectId,
             transcript: session.transcript,

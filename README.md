@@ -5,7 +5,7 @@
 </p>
 
 ![Status](https://img.shields.io/badge/status-beta-blue)
-[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)
+[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases?q=v*&expanded=true)
 [![Daily security scan](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml/badge.svg)](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml)
 [![Dependabot](https://img.shields.io/badge/dependabot-configured-025E8C?logo=dependabot)](.github/dependabot.yml)
 
@@ -539,12 +539,12 @@ Execution controls such as `--budget`, `--provider`, `--providers`, and `--no-pr
 | `FRANKEN_MAX_TOTAL_TOKENS` | `maxTotalTokens` | integer token budget | default `100000`; must be at least `10000` |
 | `FRANKEN_MAX_DURATION_MS` | `maxDurationMs` | integer milliseconds | default `300000`; must be at least `1000` and at least `maxCritiqueIterations * 10000` |
 | `FRANKEN_MAX_CRITIQUE_ITERATIONS` | `maxCritiqueIterations` | integer critique passes | default `3`; valid range `1` through `10` |
-| `FRANKEN_ENABLE_HEARTBEAT` | `enableHeartbeat` | boolean string; only `true` enables it | default `false` |
-| `FRANKEN_ENABLE_TRACING` | `enableTracing` | boolean string; only `true` enables it | default `false`; `--verbose` also enables tracing and wins over env/config |
-| `FRANKEN_ENABLE_REFLECTION` | `enableReflection` | boolean string; only `true` enables it | default `false` |
+| `FRANKEN_ENABLE_HEARTBEAT` | `enableHeartbeat` | boolean string; accepted true values: `true`, `1`, `yes`, `on`; false values: `false`, `0`, `no`, `off` | default `false` |
+| `FRANKEN_ENABLE_TRACING` | `enableTracing` | boolean string; accepted true values: `true`, `1`, `yes`, `on`; false values: `false`, `0`, `no`, `off` | default `false`; `--verbose` also enables tracing and wins over env/config |
+| `FRANKEN_ENABLE_REFLECTION` | `enableReflection` | boolean string; accepted true values: `true`, `1`, `yes`, `on`; false values: `false`, `0`, `no`, `off` | default `false` |
 | `FRANKEN_MIN_CRITIQUE_SCORE` | `minCritiqueScore` | numeric score | default `0.7`; must be `>= 0` and `< 1` |
 
-Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present; set the value to `true` to enable the field, and any other present value disables it.
+Numeric env values are parsed as numbers and then validated with the same schema as JSON config files. Unset numeric variables leave the lower-priority source in effect. Boolean env overrides apply whenever the variable is present. Boolean values are parsed strictly: use `true`, `1`, `yes`, or `on` to enable a field and `false`, `0`, `no`, or `off` to disable it. Other values are rejected unless a higher-priority CLI flag, such as `--verbose`, shadows that field.
 
 If `stateDir` is set to a path inside a sibling Hermes profile such as `.hermes/profiles/<profile>/...`, Frankenbeast fails closed by default when `<profile>` does not match the active `HERMES_PROFILE` (or `default` when unset). Set `allowCrossProfileStateAccess: true` in an operator-owned config file outside the checked-out repository only for deliberate migrations/imports that must read or write another profile's state; repository-local `.fbeast/config.json` cannot self-approve this opt-in.
 
@@ -608,8 +608,10 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 
 # .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.
 # Override it only when ChromaDB runs at a different local port/host or a remote
-# TLS-terminated endpoint, then export that same endpoint before seed/verify.
-# export CHROMA_URL=https://chromadb.example.com
+# TLS-terminated endpoint, then keep the same endpoint in .env or export it
+# before seed/verify.
+# In CI, point CHROMA_URL at the Chroma service container hostname instead.
+# export CHROMA_URL=http://chroma:8000
 
 # Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
 # compose file pins image versions and mounts ./tempo.yaml so local tracing
@@ -626,13 +628,51 @@ npm run bootstrap -- --services
 # export GRAFANA_INSTANCE_ID=123456
 # export GRAFANA_API_KEY=glc_...
 
-# Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
+# Seed ChromaDB with initial collections. This uses CHROMA_URL from .env or
+# the environment.
 npm run local:seed
 
 # Verify everything is running. This probes the same CHROMA_URL endpoint,
 # plus fixed compose defaults for Grafana (http://localhost:3000/api/health)
 # and Tempo readiness (http://localhost:3200/ready).
 npm run local:verify-setup
+```
+
+### ChromaDB endpoint (`CHROMA_URL`)
+
+`CHROMA_URL` points Frankenbeast's local setup scripts at the ChromaDB HTTP API.
+Both `npm run local:seed` (`scripts/seed.ts`) and `npm run local:verify-setup`
+(`scripts/verify-setup.ts`) read it from the environment or the copied `.env`
+file, falling back to `http://localhost:8000` when it is unset. The default
+matches the root `docker-compose.yml`, which publishes ChromaDB on port 8000
+for local development.
+
+Use the default for the standard local compose stack:
+
+```bash
+cp .env.example .env
+$EDITOR .env  # uncomment GRAFANA_USER=admin and set a unique GRAFANA_PASSWORD
+npm run bootstrap -- --services
+npm run local:seed
+npm run local:verify-setup
+```
+
+Override it when ChromaDB is reachable somewhere else, and set the same value
+in `.env` or export it before seed and verification:
+
+```bash
+# Alternate local port or host
+export CHROMA_URL=http://127.0.0.1:18000
+npm run local:seed
+npm run local:verify-setup
+
+# CI service container named "chroma"
+export CHROMA_URL=http://chroma:8000
+npm run local:verify-setup
+
+# Remote/TLS-terminated ChromaDB endpoint
+export CHROMA_URL=https://chromadb.example.com
+npm run local:seed
 ```
 
 ## Secret Management

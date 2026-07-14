@@ -376,6 +376,55 @@ describe('useChatSession error banners', () => {
     expect(MockWebSocket.instances[0]!.send).toHaveBeenCalledTimes(2);
   });
 
+  it('falls back to HTTP when websocket send throws during a disconnect race', async () => {
+    const fetch = chatFetch({
+      responses: [
+        jsonResponse(sessionResponse()),
+        jsonResponse({ data: { tier: 'cheap' } }),
+        jsonResponse(sessionResponse({
+          transcript: [
+            {
+              id: 'server-user-after-fallback',
+              role: 'user',
+              content: 'launch beast',
+              timestamp: '2026-07-06T00:00:00.000Z',
+            },
+          ],
+        })),
+      ],
+    });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    MockWebSocket.instances[0]!.send.mockImplementationOnce(() => {
+      throw new Error('socket detached');
+    });
+
+    await act(async () => {
+      await result.current.send('launch beast');
+    });
+
+    expect(MockWebSocket.instances[0]!.send).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/v1/chat/sessions/session-1/messages',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(result.current.status).toBe('idle');
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({
+        id: 'server-user-after-fallback',
+        role: 'user',
+        content: 'launch beast',
+      }),
+    ]);
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({ receipt: 'sending' }));
+  });
+
   it('preserves the composer draft but does not retry when fallback HTTP refresh fails', async () => {
     const fetch = chatFetch({
       responses: [

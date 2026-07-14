@@ -16,6 +16,8 @@ import type {
   EpisodicEvent,
   ExecutionState,
   EpisodicEventType,
+  LearningCooldownOptions,
+  LearningRecordResult,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
 
@@ -704,6 +706,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
 const SQLITE_VARIABLE_LIMIT = 999;
 const RECALL_VARIABLES_PER_KEYWORD = 4;
 const CORRUPT_JSON_SCAN_BATCH_SIZE = 100;
+const DEFAULT_LEARNING_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const RECALL_LIMIT_VARIABLES = 1;
 const MAX_RECALL_KEYWORDS_PER_QUERY = Math.floor(
   (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) /
@@ -727,6 +730,69 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
   record(event: EpisodicEvent): void {
     assertEpisodicNotDeletionGuarded(this.db, event);
+    this.insertEvent(event);
+  }
+
+  recordLearning(
+    event: EpisodicEvent,
+    options: LearningCooldownOptions = {},
+  ): LearningRecordResult {
+    const key = normalizeLearningKey(
+      options.key ?? readLearningKey(event) ?? `${event.step ?? ''}:${event.summary}`,
+    );
+    const cooldownMs = options.cooldownMs ?? DEFAULT_LEARNING_COOLDOWN_MS;
+    const eventTimeMs = Date.parse(event.createdAt);
+
+    if (!key) {
+      throw new Error('Learning cooldown key must not be empty');
+    }
+    if (!Number.isInteger(cooldownMs) || cooldownMs < 0) {
+      throw new RangeError('Learning cooldown must be a non-negative integer number of milliseconds');
+    }
+    if (!Number.isFinite(eventTimeMs)) {
+      throw new Error(`Learning event createdAt must be a valid ISO timestamp: ${event.createdAt}`);
+    }
+
+    const normalizedCreatedAt = new Date(eventTimeMs).toISOString();
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (cooldownMs > 0) {
+        const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
+        if (existingEvent) {
+          this.db.exec('COMMIT');
+          return {
+            recorded: false,
+            reason: 'cooldown',
+            key,
+            cooldownMs,
+            existingEvent,
+            cooldownUntil: new Date(
+              Date.parse(existingEvent.createdAt) + (readLearningCooldownMs(existingEvent) ?? cooldownMs),
+            ).toISOString(),
+          };
+        }
+      }
+
+      this.insertEvent({
+        ...event,
+        createdAt: normalizedCreatedAt,
+        details: {
+          ...(event.details ?? {}),
+          learningKey: key,
+          learningCooldownMs: cooldownMs,
+        },
+      });
+
+      this.db.exec('COMMIT');
+      return { recorded: true, key, cooldownMs };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private insertEvent(event: EpisodicEvent): void {
     this.db
       .prepare(
         `INSERT INTO episodic_events (type, step, summary, details, created_at, schema_version)
@@ -739,6 +805,41 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         event.details ? this.encode(JSON.stringify(event.details)) : null,
         event.createdAt,
       );
+  }
+
+  private findLearningCooldownEvent(
+    key: string,
+    eventTimeMs: number,
+    cooldownMs: number,
+  ): EpisodicEvent | null {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM episodic_events
+         WHERE details LIKE ? ESCAPE '\\'
+         ORDER BY id DESC`,
+      )
+      .all(learningKeyDetailsPattern(key)) as EpisodicRow[];
+
+    for (const row of rows) {
+      const existingEvent = rowToEvent(row);
+      if (!existingEvent || normalizeLearningKey(readLearningKey(existingEvent) ?? '') !== key) {
+        continue;
+      }
+
+      const existingTimeMs = Date.parse(existingEvent.createdAt);
+      const existingCooldownMs = readLearningCooldownMs(existingEvent) ?? cooldownMs;
+      if (
+        Number.isFinite(existingTimeMs)
+        && Number.isInteger(existingCooldownMs)
+        && existingCooldownMs > 0
+        && existingTimeMs <= eventTimeMs
+        && eventTimeMs - existingTimeMs < existingCooldownMs
+      ) {
+        return existingEvent;
+      }
+    }
+
+    return null;
   }
 
   recall(query: string, limit = 10): EpisodicEvent[] {
@@ -896,6 +997,40 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       n,
       this.encryption,
     );
+  }
+
+  snapshotForHandoff(n = 100, nowMs = Date.now()): EpisodicEvent[] {
+    const recentEvents = this.recent(n);
+    const eventsById = new Map<number | string, EpisodicEvent>();
+    for (const event of recentEvents) {
+      eventsById.set(event.id ?? `${event.createdAt}:${event.summary}`, event);
+    }
+
+    const activeLearningRows = this.db
+      .prepare(
+        `SELECT * FROM episodic_events
+         WHERE details LIKE ? ESCAPE '\\'
+         ORDER BY id DESC`,
+      )
+      .all(learningKeyDetailsPattern()) as EpisodicRow[];
+
+    for (const row of activeLearningRows) {
+      const event = rowToEvent(row);
+      const eventTimeMs = event ? Date.parse(event.createdAt) : NaN;
+      const eventCooldownMs = event ? readLearningCooldownMs(event) ?? DEFAULT_LEARNING_COOLDOWN_MS : NaN;
+      if (
+        event
+        && readLearningKey(event) !== undefined
+        && Number.isFinite(eventTimeMs)
+        && Number.isInteger(eventCooldownMs)
+        && eventCooldownMs > 0
+        && nowMs - eventTimeMs < eventCooldownMs
+      ) {
+        eventsById.set(event.id ?? `${event.createdAt}:${event.summary}`, event);
+      }
+    }
+
+    return [...eventsById.values()].sort(compareEventsNewestFirst);
   }
 
   count(): number {
@@ -1263,7 +1398,7 @@ export class SqliteBrain implements IBrain {
       version: 1,
       timestamp: isoNow(),
       working: this.working.snapshot(),
-      episodic: this.episodic.recent(100),
+      episodic: this.episodic.snapshotForHandoff(100),
       checkpoint: this.recovery.lastCheckpoint(),
       deletionGuards: readDeletionGuardSnapshot(this.db),
       metadata: {
@@ -2221,6 +2356,30 @@ const STOPWORDS = new Set([
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');
+}
+
+function normalizeLearningKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function readLearningKey(event: EpisodicEvent): string | undefined {
+  const key = event.details?.learningKey;
+  return typeof key === 'string' ? key : undefined;
+}
+
+function readLearningCooldownMs(event: EpisodicEvent): number | undefined {
+  const cooldownMs = event.details?.learningCooldownMs;
+  return typeof cooldownMs === 'number' ? cooldownMs : undefined;
+}
+
+function learningKeyDetailsPattern(key?: string): string {
+  const keyPattern = key === undefined ? '' : JSON.stringify(key);
+  return `%${escapeLike(`"learningKey":${keyPattern}`)}%`;
+}
+
+function compareEventsNewestFirst(a: EpisodicEvent, b: EpisodicEvent): number {
+  return Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    || (b.id ?? 0) - (a.id ?? 0);
 }
 
 function chunkArray<T>(values: T[], size: number): T[][] {
