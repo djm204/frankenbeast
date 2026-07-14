@@ -947,6 +947,21 @@ export async function main(): Promise<void> {
   }
 
   const root = resolveProjectRoot(args.baseDir);
+  if (args.subcommand === 'memory') {
+    try {
+      await handleMemoryCommand({
+        action: args.memoryAction,
+        beforePath: args.memorySnapshotBefore,
+        afterPath: args.memorySnapshotAfter,
+        print: printLine,
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const suppressBanner = args.subcommand === 'network' && args.networkAction === 'credentials';
   if (!suppressBanner && process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
@@ -1028,21 +1043,6 @@ export async function main(): Promise<void> {
 
   if (args.subcommand === 'network') {
     await runNetworkCommand(args, config, root, paths);
-    return;
-  }
-
-  if (args.subcommand === 'memory') {
-    try {
-      await handleMemoryCommand({
-        action: args.memoryAction,
-        beforePath: args.memorySnapshotBefore,
-        afterPath: args.memorySnapshotAfter,
-        print: printLine,
-      });
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exitCode = 1;
-    }
     return;
   }
 

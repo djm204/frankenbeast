@@ -984,6 +984,50 @@ describe('main() execution', () => {
     });
   });
 
+  it('prints memory snapshot diffs as parseable JSON without a banner or config log', async () => {
+    const dir = join(tmpdir(), `franken-memory-diff-${Date.now()}-${Math.random()}`);
+    tempDirs.push(dir);
+    mkdirSync(dir, { recursive: true });
+    const beforePath = join(dir, 'before.json');
+    const afterPath = join(dir, 'after.json');
+    const before = {
+      version: 1,
+      timestamp: '2026-07-11T00:00:00.000Z',
+      working: { keep: true },
+      episodic: [],
+      checkpoint: null,
+      metadata: { lastProvider: 'claude', switchReason: '', totalTokensUsed: 1 },
+    };
+    const after = {
+      ...before,
+      timestamp: '2026-07-11T00:01:00.000Z',
+      working: { keep: true, added: true },
+    };
+    writeFileSync(beforePath, JSON.stringify(before), 'utf-8');
+    writeFileSync(afterPath, JSON.stringify(after), 'utf-8');
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'memory',
+      memoryAction: 'snapshot-diff',
+      memorySnapshotBefore: beforePath,
+      memorySnapshotAfter: afterPath,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    const stdout = info.mock.calls.map((call) => String(call[0]));
+    expect(stdout).toHaveLength(1);
+    expect(stdout[0]).not.toContain('[BANNER]');
+    expect(stdout[0]).not.toContain('Using default config');
+    expect(JSON.parse(stdout[0] ?? '{}')).toMatchObject({
+      ok: true,
+      command: 'memory snapshot-diff',
+      summary: { workingAdded: 1 },
+    });
+    expect(scaffoldFrankenbeast).not.toHaveBeenCalled();
+  });
+
   it('does not hide non-file init config loading errors behind init fallback defaults', async () => {
     const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
     tempDirs.push(tempDir);
