@@ -16,7 +16,7 @@ export interface TempoAdapterOptions {
    * Base URL of the Tempo or OTLP/HTTP collector endpoint.
    *
    * Examples:
-   * - Grafana Cloud:  `'https://tempo-us-central1.grafana.net/tempo'`
+   * - Grafana Cloud:  `'https://otlp-gateway-<REGION>.grafana.net'`
    * - Local Tempo:    `'http://localhost:4318'`
    */
   endpoint: string
@@ -25,7 +25,7 @@ export interface TempoAdapterOptions {
    * OTLP/HTTP traces path appended to `endpoint`.
    * Default: `'/v1/traces'`
    *
-   * For Grafana Cloud you typically need `'/otlp/v1/traces'`.
+   * For Grafana Cloud use the OTLP gateway traces path: `'/otlp/v1/traces'`.
    */
   otlpPath?: string
 

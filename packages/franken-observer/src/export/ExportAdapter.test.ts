@@ -16,6 +16,23 @@ describe('InMemoryAdapter', () => {
     warningSpy.mockRestore()
   })
 
+  describe('constructor()', () => {
+    it.each([NaN, -1, 1.5])('rejects invalid maxTraces: %s', maxTraces => {
+      expect(() => new InMemoryAdapter({ maxTraces })).toThrow(RangeError)
+    })
+
+    it('allows explicit unbounded retention for legacy test fixtures', async () => {
+      const unbounded = new InMemoryAdapter({ maxTraces: Infinity })
+      for (let i = 0; i < 3; i++) {
+        const trace = TraceContext.createTrace(`goal ${i}`)
+        TraceContext.endTrace(trace)
+        await unbounded.flush(trace)
+      }
+
+      expect(await unbounded.listTraceIds()).toHaveLength(3)
+    })
+  })
+
   describe('flush()', () => {
     it('stores a trace so it can be retrieved by id', async () => {
       const trace = TraceContext.createTrace('goal')
@@ -58,6 +75,80 @@ describe('InMemoryAdapter', () => {
 
       const retrieved = await adapter.queryByTraceId(trace.id)
       expect(retrieved!.goal).toBe('updated goal')
+    })
+
+    it('keeps the previous snapshot when an overwrite fails to clone', async () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      SpanLifecycle.setMetadata(span, { safe: true })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      Object.defineProperty(span.metadata, 'unsafe', {
+        enumerable: true,
+        get() {
+          throw new Error('metadata exploded')
+        },
+      })
+
+      await expect(adapter.flush(trace)).rejects.toThrow('metadata exploded')
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      expect(retrieved).not.toBeNull()
+      expect(retrieved!.goal).toBe('goal')
+      expect(retrieved!.spans[0]!.metadata).toEqual({ safe: true })
+      expect(await adapter.listTraceIds()).toEqual([trace.id])
+    })
+
+    it('evicts older traces when flushing more than the configured retention bound', async () => {
+      const bounded = new InMemoryAdapter({ maxTraces: 2 })
+      const t1 = TraceContext.createTrace('first')
+      const t2 = TraceContext.createTrace('second')
+      const t3 = TraceContext.createTrace('third')
+      TraceContext.endTrace(t1)
+      TraceContext.endTrace(t2)
+      TraceContext.endTrace(t3)
+
+      await bounded.flush(t1)
+      await bounded.flush(t2)
+      await bounded.flush(t3)
+
+      expect(await bounded.queryByTraceId(t1.id)).toBeNull()
+      expect((await bounded.queryByTraceId(t2.id))!.goal).toBe('second')
+      expect((await bounded.queryByTraceId(t3.id))!.goal).toBe('third')
+      expect(await bounded.listTraceIds()).toEqual([t2.id, t3.id])
+    })
+
+    it('treats overwrites as the newest retained trace for deterministic eviction', async () => {
+      const bounded = new InMemoryAdapter({ maxTraces: 2 })
+      const t1 = TraceContext.createTrace('first')
+      const t2 = TraceContext.createTrace('second')
+      const t3 = TraceContext.createTrace('third')
+      TraceContext.endTrace(t1)
+      TraceContext.endTrace(t2)
+      TraceContext.endTrace(t3)
+
+      await bounded.flush(t1)
+      await bounded.flush(t2)
+      t1.goal = 'first updated'
+      await bounded.flush(t1)
+      await bounded.flush(t3)
+
+      expect(await bounded.queryByTraceId(t2.id)).toBeNull()
+      expect((await bounded.queryByTraceId(t1.id))!.goal).toBe('first updated')
+      expect(await bounded.listTraceIds()).toEqual([t1.id, t3.id])
+    })
+
+    it('drops flushed traces immediately when maxTraces is zero', async () => {
+      const disabled = new InMemoryAdapter({ maxTraces: 0 })
+      const trace = TraceContext.createTrace('ephemeral')
+      TraceContext.endTrace(trace)
+
+      await disabled.flush(trace)
+
+      expect(await disabled.queryByTraceId(trace.id)).toBeNull()
+      expect(await disabled.listTraceIds()).toEqual([])
     })
 
     it('captures a flush-time snapshot and returns defensive query copies', async () => {
@@ -257,6 +348,19 @@ describe('InMemoryAdapter', () => {
     })
 
     it('returns an empty array when nothing is stored', async () => {
+      expect(await adapter.listTraceIds()).toEqual([])
+    })
+  })
+
+  describe('clear()', () => {
+    it('removes all retained traces', async () => {
+      const trace = TraceContext.createTrace('clear me')
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      adapter.clear()
+
+      expect(await adapter.queryByTraceId(trace.id)).toBeNull()
       expect(await adapter.listTraceIds()).toEqual([])
     })
   })

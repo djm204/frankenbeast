@@ -11,7 +11,7 @@ import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
-import { attachChatWebSocketServer } from './ws-chat-server.js';
+import { attachChatWebSocketServer, type AttachChatWebSocketServerOptions, type ChatSocketMessageRateLimitOptions } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import type { BeastRoutesDeps } from './routes/beast-routes.js';
@@ -27,7 +27,7 @@ import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } fr
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
-import { createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
+import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { isoNow } from '@franken/types';
 
@@ -64,6 +64,7 @@ export interface StartChatServerOptions {
   analyticsDeps?: AnalyticsRouteDeps;
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
   chatRateLimit?: ChatRateLimitOptions;
+  chatMessageRateLimit?: ChatSocketMessageRateLimitOptions;
 }
 
 export interface ChatServerHandle {
@@ -275,6 +276,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   const tokenSecret = createSessionTokenSecret();
   const sessionStore = resolveChatServerSessionStore(options);
   const chatRateLimiter = createChatRateLimiter(options.chatRateLimit ?? options.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+  const chatMutationAdmission = new ChatMutationAdmission(chatRateLimiter);
   const runtime = createChatRuntime({
     chatLlm: options.llm,
     projectName: options.projectName,
@@ -324,22 +326,29 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
     chatRateLimiter,
+    chatMutationAdmission,
   });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
   });
+  const chatMessageRateLimit = options.chatMessageRateLimit
+    ?? options.chatRateLimit
+    ?? options.beastControl?.rateLimit;
 
-  const webSocketServer = attachChatWebSocketServer({
+  const attachOptions: AttachChatWebSocketServerOptions = {
     server,
     path,
     runtime: runtime.runtime,
     sessionStore,
     tokenSecret,
+    chatRateLimiter,
+    chatMutationAdmission,
     ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+    ...(chatMessageRateLimit ? { chatMessageRateLimit } : {}),
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
     ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
-    chatRateLimiter,
-  });
+  };
+  const webSocketServer = attachChatWebSocketServer(attachOptions);
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

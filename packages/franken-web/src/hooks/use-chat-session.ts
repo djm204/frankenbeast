@@ -903,7 +903,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
     setStatus('sending');
 
-    if (!optimisticAdd) {
+    const sendViaHttpFallback = async (): Promise<void> => {
       let fallbackRefreshError: Error | null = null;
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
@@ -973,7 +973,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           ? error
           : new Error('The fallback chat request failed before the turn could start.');
         setMessages((current) => [
-          ...current.filter((message) => !isFailedUserDraftForContent(message, content)),
+          ...current.filter((message) => message.id !== clientMessageId && !isFailedUserDraftForContent(message, content)),
           { ...optimisticMessage, receipt: 'failed', error: sendError.message, canRetry: true },
         ]);
         addErrorBanner(makeBanner(
@@ -990,28 +990,43 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       if (fallbackRefreshError) {
         throw fallbackRefreshError;
       }
+    };
+
+    if (!optimisticAdd) {
+      await sendViaHttpFallback();
       return;
     }
 
     const liveSocket = socket as WebSocket;
-    await new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
-      }, SOCKET_SEND_ACK_TIMEOUT_MS);
-      pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
-      try {
-        liveSocket.send(JSON.stringify({
-          type: 'message.send',
-          clientMessageId,
-          content,
-        }));
-      } catch (error) {
-        failPendingSend(
-          clientMessageId,
-          error instanceof Error ? error : new Error('Message failed to send. Your draft was kept.'),
-        );
+    let immediateSendError: Error | null = null;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
+        }, SOCKET_SEND_ACK_TIMEOUT_MS);
+        pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
+        try {
+          liveSocket.send(JSON.stringify({
+            type: 'message.send',
+            clientMessageId,
+            content,
+          }));
+        } catch (error) {
+          immediateSendError = error instanceof Error
+            ? error
+            : new Error('Message failed to send. Your draft was kept.');
+          clearTimeout(timeoutId);
+          pendingSendsRef.current.delete(clientMessageId);
+          reject(immediateSendError);
+        }
+      });
+    } catch (error) {
+      if (error === immediateSendError) {
+        await sendViaHttpFallback();
+        return;
       }
-    });
+      throw error;
+    }
   }
 
   async function retryMessage(messageId: string): Promise<void> {

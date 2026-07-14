@@ -43,8 +43,9 @@ import { NetworkStateStore } from '../network/network-state-store.js';
 import { NetworkLogStore } from '../network/network-logs.js';
 import { NetworkSupervisor } from '../network/network-supervisor.js';
 import { renderNetworkHelp } from '../network/network-help.js';
+import { buildCredentialInventoryReport } from '../network/credential-inventory.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
-import { parseOrchestratorConfig } from '../config/orchestrator-config.js';
+import { defaultConfig, parseOrchestratorConfig, validateCrossProfileStateDir } from '../config/orchestrator-config.js';
 import { resolveManagedChatAttachment, runManagedChatRepl } from '../network/chat-attach.js';
 import {
   healthcheckNetworkService,
@@ -62,6 +63,7 @@ import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } f
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
 import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
+import { redactLogData } from '../logging/redaction.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -151,6 +153,30 @@ export function shouldShowMissingRunPlanGuidance(
     && !args.planDir
     && !args.planName
     && planNeedsGuidance;
+}
+
+export function validateStateDirBeforeScaffold(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): void {
+  const configuredStateDir = config.stateDir;
+  const stateDir = resolveScaffoldStateDir(config, paths);
+  const issue = validateCrossProfileStateDir({
+    stateDir,
+    allowCrossProfileStateAccess: configuredStateDir
+      ? config.allowCrossProfileStateAccess
+      : false,
+  });
+  if (issue) {
+    throw new Error(issue);
+  }
+}
+
+export function resolveScaffoldStateDir(
+  config: OrchestratorConfig,
+  paths: Pick<ReturnType<typeof getProjectPaths>, 'stateDir'>,
+): string {
+  return config.stateDir ?? paths.stateDir;
 }
 
 export interface ResumeTarget {
@@ -308,6 +334,47 @@ export async function resolveConfig(args: CliArgs, defaultConfigPath?: string): 
   return loadConfig(args, defaultConfigPath);
 }
 
+function canInitHandleConfigLoadError(args: CliArgs): boolean {
+  return args.subcommand === 'init';
+}
+
+async function initConfigFileContainsNonObjectJson(configFile: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(configFile, 'utf-8')) as unknown;
+    return parsed === null || Array.isArray(parsed) || typeof parsed !== 'object';
+  } catch {
+    return false;
+  }
+}
+
+async function isInitConfigFileError(error: unknown, configFile: string): Promise<boolean> {
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  if (error instanceof Error && error.message.startsWith('Config file not found:')) {
+    return true;
+  }
+  if (error instanceof Error && /config(?: file)? (?:must contain|must be).*object/i.test(error.message)) {
+    return true;
+  }
+  if (
+    error instanceof Error
+    && /cannot read properties of null \(reading 'providers'\)|cannot convert undefined or null to object/i.test(error.message)
+    && await initConfigFileContainsNonObjectJson(configFile)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function initFallbackConfig(args: CliArgs): OrchestratorConfig {
+  const config = defaultConfig();
+  if (args.initBackend) {
+    config.network.secureBackend = args.initBackend as OrchestratorConfig['network']['secureBackend'];
+  }
+  return config;
+}
+
 export function resolveDashboardAllowedOrigins(config: OrchestratorConfig): string[] {
   if (!config.dashboard?.enabled) {
     return [];
@@ -372,6 +439,7 @@ export function resolveEffectivePreflightProviders(
   selectedProvider: string,
   runConfig: RunConfig | undefined,
   entryPhase: SessionPhase = 'execute',
+  exitAfter?: SessionPhase | undefined,
 ): string[] {
   const fallback = runConfig?.llmConfig?.default?.provider
     ?? runConfig?.provider
@@ -381,7 +449,7 @@ export function resolveEffectivePreflightProviders(
     : entryPhase === 'interview'
       ? [
           runConfig?.llmConfig?.overrides?.['cli-session']?.provider ?? fallback,
-          runConfig?.llmConfig?.overrides?.['plan-build']?.provider,
+          ...(exitAfter === 'interview' ? [] : [runConfig?.llmConfig?.overrides?.['plan-build']?.provider]),
         ]
       : [runConfig?.llmConfig?.overrides?.['cli-session']?.provider ?? fallback];
   return [...new Set(providers.filter((provider): provider is string => Boolean(provider)))];
@@ -837,16 +905,19 @@ async function buildChatServerCommsConfig(
         enabled: config.comms.slack.enabled,
         token: slackToken,
         signingSecret: slackSigningSecret,
+        allowSensitiveDelivery: config.comms.slack.allowSensitiveDelivery,
       },
       discord: {
         enabled: config.comms.discord.enabled,
         token: discordToken,
         publicKey: discordPublicKey,
+        allowSensitiveDelivery: config.comms.discord.allowSensitiveDelivery,
       },
       telegram: {
         enabled: config.comms.telegram.enabled,
         botToken: telegramBotToken,
         webhookSecretToken: telegramWebhookSecretToken,
+        allowSensitiveDelivery: config.comms.telegram.allowSensitiveDelivery,
       },
       whatsapp: {
         enabled: config.comms.whatsapp.enabled,
@@ -854,6 +925,7 @@ async function buildChatServerCommsConfig(
         phoneNumberId: whatsappPhoneNumberId,
         appSecret: whatsappAppSecret,
         verifyToken: whatsappVerifyToken,
+        allowSensitiveDelivery: config.comms.whatsapp.allowSensitiveDelivery,
       },
     },
   });
@@ -930,7 +1002,8 @@ export async function main(): Promise<void> {
   }
 
   const root = resolveProjectRoot(args.baseDir);
-  if (process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
+  const suppressBanner = args.subcommand === 'network' && args.networkAction === 'credentials';
+  if (!suppressBanner && process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
   }
 
@@ -951,9 +1024,33 @@ export async function main(): Promise<void> {
       ? undefined
       : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
-  const config = await resolveConfig(args, paths.configFile);
+  let config: OrchestratorConfig;
+  let configLoadFallback = false;
+  try {
+    config = await resolveConfig(args, paths.configFile);
+  } catch (error) {
+    if (!canInitHandleConfigLoadError(args) || !await isInitConfigFileError(error, args.config ?? paths.configFile)) {
+      throw error;
+    }
+    config = initFallbackConfig(args);
+    configLoadFallback = true;
+  }
+  if (
+    !configLoadFallback
+    && args.subcommand === 'init'
+    && !args.initNonInteractive
+    && await initConfigFileContainsNonObjectJson(args.config ?? paths.configFile)
+  ) {
+    config = initFallbackConfig(args);
+    configLoadFallback = true;
+  }
   const runPlanDir = planDirOverride ?? paths.plansDir;
   const runPlanNeedsGuidance = defaultRunPlanNeedsGuidance(runPlanDir);
+
+  if (suppressBanner) {
+    await runNetworkCommand(args, config, root, paths);
+    return;
+  }
 
   const logger = new BeastLogger({ verbose: args.verbose });
   if (args.config) {
@@ -963,7 +1060,7 @@ export async function main(): Promise<void> {
   }
 
   if (args.verbose) {
-    printLine('Config:', JSON.stringify(config, null, 2));
+    printLine('Config:', JSON.stringify(redactLogData(config), null, 2));
   }
 
   if (resumeTarget) {
@@ -975,7 +1072,9 @@ export async function main(): Promise<void> {
     return;
   }
 
-  scaffoldFrankenbeast(paths);
+  const scaffoldPaths = { ...paths, stateDir: resolveScaffoldStateDir(config, paths) };
+  validateStateDirBeforeScaffold(config, scaffoldPaths);
+  scaffoldFrankenbeast(scaffoldPaths);
 
   if (args.subcommand === 'beasts-daemon') {
     await runBeastDaemonCommand(args, config, root, paths);
@@ -1008,6 +1107,7 @@ export async function main(): Promise<void> {
       await handleInitCommand({
         args,
         config,
+        configLoadFallback,
         io,
         paths,
         print: printLine,
@@ -1228,7 +1328,7 @@ export async function main(): Promise<void> {
   const { entryPhase, exitAfter } = resolvePhases(args);
   const provider = resolveSelectedProvider(args, config);
   const runConfig = loadRunConfigFromEnv();
-  const preflightProviders = resolveEffectivePreflightProviders(provider, runConfig, entryPhase);
+  const preflightProviders = resolveEffectivePreflightProviders(provider, runConfig, entryPhase, exitAfter);
   for (const preflightProvider of preflightProviders) {
     assertAnyProviderCliAvailable(
       preflightProvider,
@@ -1483,6 +1583,11 @@ export async function runNetworkCommand(
       dashboard: config.dashboard,
       comms: config.comms,
     }, null, 2));
+    return;
+  }
+
+  if (action === 'credentials') {
+    deps.print(JSON.stringify(buildCredentialInventoryReport(config), null, 2));
     return;
   }
 

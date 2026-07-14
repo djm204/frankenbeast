@@ -53,32 +53,73 @@ export function stripHookJson(text: string): string {
   return result.trim();
 }
 
+export interface CleanLlmJsonOptions {
+  readonly parseFastPath?: boolean;
+}
+
 /**
  * Clean raw LLM output so it can be JSON.parse()'d.
  * Uses bracket-depth matching to extract the JSON structure,
  * so it works regardless of markdown wrapping, code fences,
  * leading/trailing prose, or other LLM formatting quirks.
  */
-export function cleanLlmJson(raw: string): string {
+export function cleanLlmJson(raw: string, options: CleanLlmJsonOptions = {}): string {
   let text = stripHookJson(raw.trim());
 
   // Try parsing as-is first (fast path)
-  try { JSON.parse(text); return text; } catch { /* fall through */ }
+  if (options.parseFastPath !== false) {
+    try { JSON.parse(text); return text; } catch { /* fall through */ }
+  }
 
   // Find the first [ or { and extract the matching structure
   // using bracket-depth counting that respects quoted strings.
   const extracted = extractJsonStructure(text);
   if (extracted !== null) {
     // Strip trailing commas before } or ] (common LLM artifact)
-    return extracted.replace(/,\s*([}\]])/g, '$1');
+    return stripTrailingJsonCommas(extracted);
   }
 
   // Last resort: strip fences and trailing commas, hope for the best
   text = text.replace(/^`{3,}\w*\s*\n?/, '');
   text = text.replace(/\n?\s*`{3,}\s*$/, '');
   text = text.trim();
-  text = text.replace(/,\s*([}\]])/g, '$1');
+  text = stripTrailingJsonCommas(text);
   return text;
+}
+
+function stripTrailingJsonCommas(text: string): string {
+  let result = '';
+  let inStr = false;
+  let esc = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (esc) {
+      esc = false;
+      result += ch;
+      continue;
+    }
+    if (ch === '\\' && inStr) {
+      esc = true;
+      result += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      result += ch;
+      continue;
+    }
+    if (!inStr && ch === ',') {
+      let j = i + 1;
+      while (j < text.length && /\s/u.test(text[j]!)) j++;
+      if (text[j] === '}' || text[j] === ']') {
+        continue;
+      }
+    }
+    result += ch;
+  }
+
+  return result;
 }
 
 /**

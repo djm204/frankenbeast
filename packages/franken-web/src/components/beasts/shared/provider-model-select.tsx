@@ -15,6 +15,7 @@ interface ProviderModelSelectProps {
 
 export function ProviderModelSelect({ providers, value, onChange, showUseDefault, useDefault, onUseDefaultChange }: ProviderModelSelectProps) {
   const selectedProvider = providers.find((p) => p.id === value.provider);
+  const hasProviders = providers.length > 0;
 
   if (showUseDefault && useDefault) {
     return (
@@ -50,9 +51,10 @@ export function ProviderModelSelect({ providers, value, onChange, showUseDefault
           value={value.provider}
           onChange={(e) => onChange({ provider: e.target.value, model: '' })}
           aria-label="Provider"
+          disabled={!hasProviders}
           className="flex-1 bg-beast-control border border-beast-border rounded-lg px-3 py-2 text-beast-text text-sm focus:outline-none focus:ring-2 focus:ring-beast-accent"
         >
-          <option value="">Select provider...</option>
+          <option value="">{hasProviders ? 'Select provider...' : 'No configured providers'}</option>
           {providers.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}

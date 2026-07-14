@@ -24,6 +24,7 @@ type CliTransformed = {
   model: string | undefined;
   chatMode: boolean;
   sessionContinue: boolean;
+  sessionId?: string | undefined;
   cacheSession?: CliCacheSessionHint | undefined;
   requestId?: string | undefined;
 };
@@ -96,6 +97,7 @@ export class CliLlmAdapter implements IAdapter {
   private readonly registry: ProviderRegistry;
   private readonly responseProviders = new Map<string, string>();
   private readonly responseSessions = new Map<string, { provider: string; model?: string | undefined; sessionKey: string }>();
+  private readonly chatNativeSessions = new Map<string, string>();
   private chatCallCount = 0;
 
   constructor(
@@ -130,13 +132,15 @@ export class CliLlmAdapter implements IAdapter {
       id?: string;
       messages: Array<{ role: string; content: string }>;
       cacheSession?: CliCacheSessionHint;
+      sessionContinue?: boolean;
+      session_id?: string;
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
     const cacheSession = req.cacheSession;
     const cacheCapabilities = resolveProviderCacheCapabilities(this.provider);
     const sessionContinue = this.opts.chatMode
-      ? this.chatCallCount > 0
+      ? req.sessionContinue ?? this.chatCallCount > 0
       : Boolean(cacheSession?.key && cacheCapabilities.nativeWorkSessions);
     const transformed: CliTransformed = {
       prompt: last?.content ?? '',
@@ -144,6 +148,7 @@ export class CliLlmAdapter implements IAdapter {
       model: this.opts.model,
       chatMode: this.opts.chatMode,
       sessionContinue,
+      ...(req.session_id ? { sessionId: req.session_id } : {}),
       ...(req.id ? { requestId: req.id } : {}),
     };
     if (cacheSession) {
@@ -153,7 +158,7 @@ export class CliLlmAdapter implements IAdapter {
   }
 
   async execute(providerRequest: unknown): Promise<string> {
-    const { prompt, maxTurns, model, chatMode, sessionContinue, requestId, cacheSession } = providerRequest as CliTransformed;
+    const { prompt, maxTurns, model, chatMode, sessionContinue, sessionId, requestId, cacheSession } = providerRequest as CliTransformed;
     if (chatMode) this.chatCallCount++;
     const providers = normalizeProviderChain(this.provider.name, this.opts.providers);
     const exhaustedProviders = new Map<string, CommandFailure>();
@@ -185,6 +190,7 @@ export class CliLlmAdapter implements IAdapter {
             model: activeModel,
             chatMode,
             sessionContinue,
+            ...(sessionId ? { sessionId: this.resolveProviderSessionId(activeProvider, sessionId, sessionContinue) } : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
           }),
           env: provider.filterEnv(this.captureEnv()),
@@ -238,7 +244,13 @@ export class CliLlmAdapter implements IAdapter {
       }
 
       if (result.exitCode === 0) {
-        if (requestId) {
+      if (chatMode && sessionId) {
+        const nativeSessionId = this.extractNativeSessionId(result.stdout);
+        if (nativeSessionId) {
+          this.chatNativeSessions.set(this.chatSessionMapKey(activeProvider, sessionId), nativeSessionId);
+        }
+      }
+      if (requestId) {
           const replayRunId = this.resolveReplayRunId(requestId);
           const normalizedOutput = provider.normalizeOutput(result.stdout);
           this.opts.replayRecorder?.({
@@ -327,6 +339,38 @@ export class CliLlmAdapter implements IAdapter {
     }
     this.responseSessions.delete(requestId);
     return session;
+  }
+
+  private resolveProviderSessionId(provider: string, appSessionId: string, sessionContinue: boolean): string | undefined {
+    if (!sessionContinue) {
+      return appSessionId;
+    }
+    return this.resolveNativeChatSessionId(provider, appSessionId);
+  }
+
+  private resolveNativeChatSessionId(provider: string, appSessionId: string): string | undefined {
+    return this.chatNativeSessions.get(this.chatSessionMapKey(provider, appSessionId));
+  }
+
+  private chatSessionMapKey(provider: string, appSessionId: string): string {
+    return `${provider}:${appSessionId}`;
+  }
+
+  private extractNativeSessionId(stdout: string): string | undefined {
+    for (const line of stdout.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed) as { session_id?: unknown; sessionId?: unknown };
+        const sessionId = event.session_id ?? event.sessionId;
+        if (typeof sessionId === 'string' && sessionId.length > 0) {
+          return sessionId;
+        }
+      } catch {
+        // Non-JSON provider output is normal for non-streaming CLIs.
+      }
+    }
+    return undefined;
   }
 
   private resolveProvider(name: string): ICliProvider {
@@ -449,7 +493,15 @@ export class CliLlmAdapter implements IAdapter {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        try {
+          child.kill('SIGTERM');
+        } catch (error) {
+          console.warn('[CliLlmAdapter] Failed to terminate timed-out CLI process', {
+            signal: 'SIGTERM',
+            pid: child.pid,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         hardKillTimer = setTimeout(() => {
           try {
             child.kill('SIGKILL');

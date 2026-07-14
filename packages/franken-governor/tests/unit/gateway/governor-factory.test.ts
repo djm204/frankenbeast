@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { BudgetTrigger } from '../../../src/triggers/budget-trigger.js';
 import { SkillTrigger } from '../../../src/triggers/skill-trigger.js';
 import { createGovernor } from '../../../src/gateway/governor-factory.js';
+import {
+  formatApprovalPolicyManifestPayload,
+  type ApprovalPolicyManifest,
+} from '../../../src/security/approval-policy-manifest.js';
+import { SignatureVerifier } from '../../../src/security/signature-verifier.js';
 import type { ReadlineAdapter } from '../../../src/channels/cli-channel.js';
 import type { EpisodicTraceRecord, GovernorMemoryPort } from '../../../src/audit/governor-memory-port.js';
 import type { RationaleBlock } from '@franken/types';
@@ -35,6 +40,19 @@ function makeMemoryPort(): GovernorMemoryPort & { records: EpisodicTraceRecord[]
 }
 
 describe('createGovernor', () => {
+  const policyVerifier = new SignatureVerifier('policy-factory-secret');
+
+  function signPolicyManifest(manifest: Omit<ApprovalPolicyManifest, 'signature'>): ApprovalPolicyManifest {
+    const signatureMetadata = { algorithm: 'hmac-sha256' as const, value: '' };
+    return {
+      ...manifest,
+      signature: {
+        ...signatureMetadata,
+        value: policyVerifier.sign(formatApprovalPolicyManifestPayload({ ...manifest, signature: signatureMetadata })),
+      },
+    };
+  }
+
   it('wires readline, memory audit recording, config, and project id into a GovernorCritiqueAdapter', async () => {
     const readline = makeReadline(['a']);
     const memoryPort = makeMemoryPort();
@@ -128,5 +146,53 @@ describe('createGovernor', () => {
     expect(result).toEqual({ verdict: 'approved' });
     expect(readline.question).not.toHaveBeenCalled();
     expect(memoryPort.recordDecision).not.toHaveBeenCalled();
+  });
+
+  it('uses signed approval policy manifests as the evaluator source', async () => {
+    const memoryPort = makeMemoryPort();
+    const governor = createGovernor({
+      readline: makeReadline(['a']),
+      memoryPort,
+      approvalPolicyManifest: signPolicyManifest({
+        schemaVersion: 1,
+        manifestId: 'approval-policy/default',
+        issuedAt: '2026-07-13T00:00:00.000Z',
+        policies: [{ triggerId: 'confidence', config: { threshold: 0.9 } }],
+      }),
+      policyManifestSignatureVerifier: policyVerifier,
+    });
+
+    const result = await governor.verifyRationale(makeRationale({ confidenceScore: 0.5 }));
+
+    expect(result).toEqual({ verdict: 'approved' });
+    expect(memoryPort.records[0]).toMatchObject({
+      input: {
+        triggerId: 'confidence',
+        triggerReason: 'Low confidence: score 0.5 below threshold 0.9',
+      },
+    });
+  });
+
+  it('refuses unsigned approval policy manifests unless explicitly overridden', () => {
+    const unsignedManifest: ApprovalPolicyManifest = {
+      schemaVersion: 1,
+      manifestId: 'approval-policy/unsigned',
+      issuedAt: '2026-07-13T00:00:00.000Z',
+      policies: [{ triggerId: 'budget' }],
+    };
+
+    expect(() => createGovernor({
+      readline: makeReadline(['a']),
+      memoryPort: makeMemoryPort(),
+      approvalPolicyManifest: unsignedManifest,
+      policyManifestSignatureVerifier: policyVerifier,
+    })).toThrow('Approval policy manifest approval-policy/unsigned is unsigned');
+
+    expect(() => createGovernor({
+      readline: makeReadline(['a']),
+      memoryPort: makeMemoryPort(),
+      approvalPolicyManifest: unsignedManifest,
+      allowUnsignedPolicyManifest: true,
+    })).not.toThrow();
   });
 });

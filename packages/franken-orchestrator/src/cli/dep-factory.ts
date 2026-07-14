@@ -250,9 +250,10 @@ function resolveEffectiveConfig(options: CliDepOptions): EffectiveCliConfig {
   const baseProvider = defaultTarget?.provider
     ?? topLevelProvider
     ?? options.provider;
+  const selectedFallbackProvider = topLevelProvider ?? options.provider;
   const baseModel = defaultTarget?.model !== undefined
     ? defaultTarget.model
-    : defaultTarget?.provider !== undefined && defaultTarget.provider !== topLevelProvider
+    : defaultTarget?.provider !== undefined && defaultTarget.provider !== selectedFallbackProvider
       ? undefined
       : options.runConfig?.model;
   const executionProvider = executionOverride?.provider;
@@ -296,6 +297,17 @@ function resolveCliRegistryName(options: CliDepOptions, providerName: string): s
     throw new Error(`Provider "${providerName}" does not support CLI registry execution`);
   }
   return catalogEntry.cliRegistryName;
+}
+
+function tryResolveCliRegistryName(options: CliDepOptions, providerName: string): string | undefined {
+  try {
+    return resolveCliRegistryName(options, providerName);
+  } catch (error) {
+    if (error instanceof Error && /does not support CLI registry execution/.test(error.message)) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 function resolveCliRegistryNames(options: CliDepOptions, providerNames: readonly string[] | undefined): string[] | undefined {
@@ -383,7 +395,8 @@ function providerCommandOverrides(
 ): Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> {
   const overrides: Record<string, ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }> = {};
   const addOverride = (providerName: string, override: ProviderCommandOverridePolicyConfig & { model?: string | undefined; extraArgs?: string[] | undefined }): void => {
-    const registryName = resolveCliRegistryName(options, providerName);
+    const registryName = tryResolveCliRegistryName(options, providerName);
+    if (!registryName) return;
     overrides[registryName] = {
       ...(overrides[registryName] ?? {}),
       ...override,

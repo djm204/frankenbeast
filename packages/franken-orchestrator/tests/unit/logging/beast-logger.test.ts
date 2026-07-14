@@ -311,6 +311,43 @@ describe('BeastLogger', () => {
       expect(entries[0]).toContain('"error": "boom"');
     });
 
+    it('redacts secret-like environment keys from terminal and captured file logs by default', () => {
+      const logger = new BeastLogger({ verbose: true, captureForFile: true });
+
+      logger.info('Environment snapshot GITHUB_TOKEN=gho_test_secret', {
+        PATH: '/usr/bin',
+        OPENAI_API_KEY: 'sk-test-secret',
+        nested: { DATABASE_PASSWORD: 'database-secret' },
+      });
+
+      const terminal = stripAnsi(consoleLogSpy.mock.calls[0]![0] as string);
+      const entries = logger.getLogEntries();
+
+      expect(terminal).toContain('GITHUB_TOKEN=<redacted>');
+      expect(terminal).toContain('OPENAI_API_KEY=<redacted>');
+      expect(terminal).toContain('PATH=/usr/bin');
+      expect(entries[0]).toContain('"OPENAI_API_KEY": "<redacted>"');
+      expect(entries[0]).toContain('"DATABASE_PASSWORD": "<redacted>"');
+      expect(entries[0]).not.toContain('gho_test_secret');
+      expect(entries[0]).not.toContain('sk-test-secret');
+      expect(entries[0]).not.toContain('database-secret');
+    });
+
+    it('allows an explicit unsafe local override for secret redaction', () => {
+      const logger = new BeastLogger({ verbose: true, captureForFile: true, redactSecrets: false });
+
+      logger.warn('Environment snapshot GITHUB_TOKEN=gho_test_secret', {
+        OPENAI_API_KEY: 'sk-test-secret',
+      });
+
+      const terminal = stripAnsi(consoleLogSpy.mock.calls[0]![0] as string);
+      const entries = logger.getLogEntries();
+
+      expect(terminal).toContain('GITHUB_TOKEN=gho_test_secret');
+      expect(terminal).toContain('OPENAI_API_KEY=sk-test-secret');
+      expect(entries[0]).toContain('"OPENAI_API_KEY": "sk-test-secret"');
+    });
+
     it('renders command failures concisely on the terminal but captures full fields in file logs', () => {
       const failure: CommandFailure = {
         kind: 'command_failed',

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
+import ts from "typescript";
 import {
   ROOT,
   getWorkspacePackageManifestPaths,
@@ -9,6 +10,50 @@ import {
 } from "./helpers/workspaces.js";
 
 const readPkg = readJson;
+const SOURCE_EXTENSIONS = new Set([
+  ".cjs",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".mts",
+  ".ts",
+  ".tsx",
+]);
+const SOURCE_IGNORE_DIRS = new Set([
+  ".git",
+  ".turbo",
+  "coverage",
+  "dist",
+  "node_modules",
+]);
+
+const collectSourceFiles = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (SOURCE_IGNORE_DIRS.has(entry.name)) return [];
+
+    const absolute = join(dir, entry.name);
+    if (entry.isDirectory()) return collectSourceFiles(absolute);
+    if (!entry.isFile() || !SOURCE_EXTENSIONS.has(extname(entry.name)))
+      return [];
+
+    return [absolute];
+  });
+
+const scriptKindForPath = (path: string): ts.ScriptKind => {
+  switch (extname(path)) {
+    case ".js":
+    case ".mjs":
+    case ".cjs":
+      return ts.ScriptKind.JS;
+    case ".jsx":
+      return ts.ScriptKind.JSX;
+    case ".tsx":
+      return ts.ScriptKind.TSX;
+    default:
+      return ts.ScriptKind.TS;
+  }
+};
 
 const majorMinorPatch = (version: string) => {
   const match = version.match(/^(?:\^|~)?(\d+)\.(\d+)\.(\d+)$/);
@@ -521,6 +566,65 @@ describe("npm workspaces configuration", () => {
           `${pkg.name} must be documented in docs/lint-coverage.md`,
         ).toContain(`| \`${pkg.name}\` | \`${packageDir}\` |`);
       }
+    });
+
+    it("enforces explicit parseInt radix arguments in ESLint configs", () => {
+      const radixRule = "'radix': ['error', 'always']";
+      const rootConfig = readFileSync(
+        join(ROOT, "eslint.workspace.config.js"),
+        "utf8",
+      );
+
+      expect(rootConfig).toContain(radixRule);
+      for (const path of packageJsonPaths) {
+        const packageDir = path.replace(/\/package\.json$/, "");
+        const configPath = join(ROOT, packageDir, "eslint.config.js");
+        const packageConfig = readFileSync(configPath, "utf8");
+
+        expect(
+          packageConfig.includes("eslint.workspace.config.js") ||
+            packageConfig.includes(radixRule),
+          `${packageDir} must inherit or define the radix rule`,
+        ).toBe(true);
+      }
+    });
+
+    it("keeps every Number.parseInt call explicit about its radix", () => {
+      const missingRadixLocations = collectSourceFiles(ROOT).flatMap((path) => {
+        const source = ts.createSourceFile(
+          path,
+          readFileSync(path, "utf8"),
+          ts.ScriptTarget.Latest,
+          true,
+          scriptKindForPath(path),
+        );
+        const locations: string[] = [];
+
+        const visit = (node: ts.Node) => {
+          if (
+            ts.isCallExpression(node) &&
+            ts.isPropertyAccessExpression(node.expression) &&
+            node.expression.name.text === "parseInt" &&
+            ts.isIdentifier(node.expression.expression) &&
+            node.expression.expression.text === "Number" &&
+            node.arguments.length < 2
+          ) {
+            const position = source.getLineAndCharacterOfPosition(
+              node.getStart(source),
+            );
+            locations.push(
+              `${path}:${position.line + 1}:${position.character + 1}`,
+            );
+          }
+
+          ts.forEachChild(node, visit);
+        };
+
+        visit(source);
+        return locations;
+      });
+
+      expect(missingRadixLocations).toEqual([]);
     });
 
     it("uses filesystem-safe module URL conversion in the lint coverage audit", () => {

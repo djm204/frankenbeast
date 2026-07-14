@@ -15,7 +15,7 @@ The dashboard talks to two local services when run through `frankenbeast network
 
 ## Prerequisites
 
-- Node.js `>=22.13.0 <23 || >=24.0.0 <26` and repo dependencies installed (`npm install`).
+- Node.js `>=22.13.0 <23 || >=24.0.0 <26`, Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`), and repo dependencies installed (`npm install`).
 - At least one supported CLI provider works locally for chat/execution.
 - An operator token is configured so Beast control routes are enabled.
 - For container mode: Docker is installed and the sandbox image exists locally (`fbeast/sandbox:latest` by default). Current main includes the in-repo `Dockerfile`, non-root user policy, resource-limit defaults, `no-new-privileges`, and optional read-only workspace support from #459.
@@ -76,16 +76,42 @@ In a second terminal, either reuse the same repo-root `.env`/secret-store token 
 
 ```bash
 export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
+export VITE_PROJECT_ID=my-project
 npm --workspace @franken/web run dev:chat
 ```
 
+`VITE_PROJECT_ID` is optional; omit it to use the shared `default` project. Use a stable, non-secret value such as a repo or workspace slug to avoid mixing chat history across local projects. Export it before starting Vite, as shown above, or put it in `packages/franken-web/.env.local`; the repo-root `.env` is reserved for server-side values and does not populate browser-bundled Vite env.
+
 If the backend is not on the local dev default `http://127.0.0.1:3737` while you are serving the dashboard with Vite, keep `VITE_API_URL` unset and point the Vite dev proxy at the backend instead. Browser REST calls then stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests. Production deployments should use TLS-terminated `https://`/`wss://` endpoints; plain HTTP is only appropriate for isolated local development.
+
+Use this matrix when choosing frontend backend URL variables for local Vite development:
+
+| Workflow | Backend layout | Set | Leave unset |
+| --- | --- | --- | --- |
+| Chat-only dashboard | `chat-server` serves `/api`, `/v1`, and `/v1/chat/ws` on the default `http://127.0.0.1:3737` | Nothing; `dev:chat` already targets the default backend. | `VITE_API_URL`, `VITE_API_PROXY_TARGET`, `VITE_BEAST_API_PROXY_TARGET` |
+| Chat-only dashboard on a custom backend port | `chat-server` serves `/api`, `/v1`, and `/v1/chat/ws` on a custom local URL such as `http://127.0.0.1:4242` | `VITE_API_PROXY_TARGET=http://127.0.0.1:4242` | `VITE_API_URL`, `VITE_BEAST_API_PROXY_TARGET` |
+| Chat + Beast controls through the chat server | `chat-server` handles chat routes and proxies `/v1/beasts/*` to the same backend target. | `VITE_API_PROXY_TARGET` only when `chat-server` is not on `http://127.0.0.1:3737`. | `VITE_API_URL`, `VITE_BEAST_API_PROXY_TARGET` |
+| Chat + Beast controls with a separate Beast daemon | `chat-server` handles chat/API while `beasts-daemon` owns `/v1/beasts/*`. | `VITE_API_PROXY_TARGET=<chat-server-url>` and `VITE_BEAST_API_PROXY_TARGET=<beasts-daemon-url>` | `VITE_API_URL` |
+
+`VITE_PROJECT_ID` is independent of the backend URL variables above. It only chooses the project id passed to dashboard chat session APIs, and it falls back to `default` when unset.
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 \
 VITE_BEAST_API_PROXY_TARGET=http://127.0.0.1:4051 \
   npm --workspace @franken/web run dev
 ```
+
+Use this matrix to align the deploy-beasts setup with the chat dashboard guide:
+
+| Local workflow | Backend topology | Vite env vars to set |
+| --- | --- | --- |
+| Dashboard chat only | Only `chat-server` is needed, typically on `http://127.0.0.1:3737` | Use `npm --workspace @franken/web run dev:chat` on defaults, or set `VITE_API_PROXY_TARGET` to the custom chat-server URL. Leave `VITE_API_URL` unset. |
+| Deploy Beasts through `chat-server` compatibility proxy | `chat-server` serves chat/API routes and proxies `/v1/beasts/*` to its in-process or attached Beast control plane | Set `VITE_API_PROXY_TARGET` to the chat-server URL. Leave `VITE_BEAST_API_PROXY_TARGET` unset unless Beast routes must bypass chat-server. |
+| Deploy Beasts against a separate daemon | `beasts-daemon` owns `/v1/beasts/*` on a different URL from chat/API | Set `VITE_API_PROXY_TARGET` to the chat-server URL and `VITE_BEAST_API_PROXY_TARGET` to the daemon URL. Export the same server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` for the daemon, chat-server, and Vite proxy processes. |
+
+Do not use `VITE_API_URL` to choose the local dashboard backend. Current local Vite development intentionally keeps browser API calls same-origin through the proxy so REST requests and operator-token injection stay server-side.
+
+Set `VITE_PROJECT_ID` when the dashboard should use a named local project for chat session history instead of the built-in `default` project id. The value is non-secret and is sent with dashboard chat session list/resume calls; use a stable per-project value such as `my-project` when multiple checkouts or demos share the same chat backend. Set it inline with the Vite command or in `packages/franken-web/.env.local`; the root `.env.example` intentionally omits a runnable example because the workspace Vite script loads browser env from the web package directory.
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`, and navigate to **Beasts**.
 

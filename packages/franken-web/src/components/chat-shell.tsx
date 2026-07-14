@@ -304,6 +304,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   const beastAgentsRef = useRef<TrackedAgentSummary[]>([]);
   const beastAgentDetailRef = useRef<(TrackedAgentDetail & { run?: BeastRunDetail | null }) | null>(null);
   const [beastError, setBeastError] = useState<string | null>(null);
+  const beastStreamErrorRef = useRef<string | null>(null);
   const [beastCreationUnavailableReason, setBeastCreationUnavailableReason] = useState<string | null>(null);
   const [beastRefreshNonce, setBeastRefreshNonce] = useState(0);
   const [pendingBeastAgentActions, setPendingBeastAgentActions] = useState<Record<string, AgentLifecycleAction | undefined>>({});
@@ -550,12 +551,14 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          beastStreamErrorRef.current = null;
           setBeastError(message);
           setBeastCreationUnavailableReason(message);
         }
         return;
       }
 
+      beastStreamErrorRef.current = null;
       setBeastError(null);
       setBeastCreationUnavailableReason(null);
       setBeastCatalog(catalog);
@@ -588,6 +591,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : 'Unable to load Beast dispatch state.';
+          beastStreamErrorRef.current = null;
           setBeastError(message);
         }
       }
@@ -610,6 +614,17 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     const requestBeastRefresh = () => setBeastRefreshNonce((current) => current + 1);
 
     void beastClient.subscribeToEvents({
+      connected: () => {
+        if (!cancelled) {
+          setBeastError((current) => {
+            if (current && beastStreamErrorRef.current === current) {
+              beastStreamErrorRef.current = null;
+              return null;
+            }
+            return current;
+          });
+        }
+      },
       snapshot: (snapshot) => {
         if (cancelled || !snapshot.agents) return;
         const currentAgents = beastAgentsRef.current;
@@ -740,6 +755,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       },
       error: (error) => {
         if (!cancelled) {
+          beastStreamErrorRef.current = error.message;
           setBeastError(error.message);
         }
       },
@@ -751,6 +767,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
       }
     }).catch((error: unknown) => {
       if (!cancelled) {
+        beastStreamErrorRef.current = null;
         setBeastError(error instanceof Error ? error.message : 'Unable to subscribe to Beast events.');
       }
     });
@@ -867,6 +884,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
   }) {
     if (!beastClient || pendingBeastAgentActionsRef.current[agentId]) return;
 
+    beastStreamErrorRef.current = null;
     setBeastError(null);
     setPendingBeastAgentAction(agentId, action);
     void request()
@@ -875,6 +893,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
         setBeastRefreshNonce((current) => current + 1);
       })
       .catch((err) => {
+        beastStreamErrorRef.current = null;
         setBeastError(err instanceof Error ? err.message : errorMessage);
       })
       .finally(() => {

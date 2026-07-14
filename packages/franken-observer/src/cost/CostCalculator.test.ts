@@ -41,6 +41,29 @@ describe('CostCalculator', () => {
       expect(cost).toBe(0)
     })
 
+    it.each([
+      ['negative prompt tokens', { promptTokens: -1, completionTokens: 0 }],
+      ['negative completion tokens', { promptTokens: 0, completionTokens: -1 }],
+      ['fractional prompt tokens', { promptTokens: 1.5, completionTokens: 0 }],
+      ['fractional completion tokens', { promptTokens: 0, completionTokens: 1.5 }],
+      ['NaN prompt tokens', { promptTokens: Number.NaN, completionTokens: 0 }],
+      ['NaN completion tokens', { promptTokens: 0, completionTokens: Number.NaN }],
+      ['infinite prompt tokens', { promptTokens: Number.POSITIVE_INFINITY, completionTokens: 0 }],
+      ['infinite completion tokens', { promptTokens: 0, completionTokens: Number.POSITIVE_INFINITY }],
+      ['unsafe prompt tokens', { promptTokens: Number.MAX_SAFE_INTEGER + 1, completionTokens: 0 }],
+      ['unsafe completion tokens', { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 }],
+    ])('rejects %s before cost calculation', (_name, tokens) => {
+      const calc = new CostCalculator(DEFAULT_PRICING)
+
+      expect(() =>
+        calc.calculate({
+          model: 'gpt-4o',
+          promptTokens: tokens.promptTokens,
+          completionTokens: tokens.completionTokens,
+        }),
+      ).toThrow(RangeError)
+    })
+
     it('emits a warning when encountering an unknown model', () => {
       const warnings: string[] = []
       const warnCalc = new CostCalculator(DEFAULT_PRICING, {

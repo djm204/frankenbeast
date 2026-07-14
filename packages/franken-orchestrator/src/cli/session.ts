@@ -187,6 +187,11 @@ export class Session {
       const issues = await fetcher.fetch(fetchOptions);
       logger.info(`Found ${issues.length} issue(s)`, 'issues');
 
+      if (issues.length === 0) {
+        logger.info('No issues matched the provided filters; exiting without triage or execution.', 'issues');
+        return;
+      }
+
       // Triage
       logger.info('Triaging issues...', 'issues');
       const triageResults = await triage.triage(issues);
@@ -520,7 +525,14 @@ export class Session {
     if (maxTotalTokens !== undefined) {
       loopConfig.maxTotalTokens = maxTotalTokens;
     }
-    loopConfig.stateDir = this.config.orchestratorConfig?.stateDir ?? paths.stateDir;
+    const configuredStateDir = this.config.orchestratorConfig?.stateDir;
+    if (
+      configuredStateDir !== undefined &&
+      this.config.orchestratorConfig?.allowCrossProfileStateAccess !== undefined
+    ) {
+      loopConfig.allowCrossProfileStateAccess = this.config.orchestratorConfig.allowCrossProfileStateAccess;
+    }
+    loopConfig.stateDir = configuredStateDir ?? paths.stateDir;
 
     try {
       const promptConfig = loadPromptConfigFromEnv();

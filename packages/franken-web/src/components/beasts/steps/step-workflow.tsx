@@ -199,6 +199,11 @@ function CatalogPromptField({
       {prompt.kind === 'file' && (
         <p className="mt-1 text-xs text-beast-muted">Use a repo-relative Markdown path when required by the selected Beast.</p>
       )}
+      {prompt.kind === 'directory' && (
+        <p className="mt-1 text-xs text-beast-muted">
+          Browser directory pickers cannot provide server paths. Enter a repo-relative directory path manually.
+        </p>
+      )}
     </div>
   );
 }

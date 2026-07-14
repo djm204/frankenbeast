@@ -403,6 +403,27 @@ describe('dep-factory provider wiring', () => {
     );
   });
 
+  it('preserves top-level model fallback when llmConfig.default matches the CLI-selected fallback provider', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        objective: 'Fallback provider inherited from CLI',
+        model: 'claude-sonnet-4-6',
+        llmConfig: {
+          default: { provider: 'claude' },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({ model: 'claude-sonnet-4-6' }),
+    );
+  });
+
   it('routes cli-session overrides into the Martin execution provider without carrying stale default models', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
@@ -625,6 +646,28 @@ describe('dep-factory provider wiring', () => {
         codex: 'gpt-5.3-codex-spark',
       }),
     }));
+  });
+
+  it('ignores unrelated non-CLI provider overrides while building CLI provider maps', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      providersConfig: {
+        openai: { model: 'gpt-5' },
+        claude: { model: 'claude-sonnet-4-6' },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        providerOverrides: expect.objectContaining({
+          claude: expect.objectContaining({ model: 'claude-sonnet-4-6' }),
+        }),
+      }),
+    );
   });
 
   it('keeps PR-disabled branch patterns isolated instead of direct-to-base', async () => {

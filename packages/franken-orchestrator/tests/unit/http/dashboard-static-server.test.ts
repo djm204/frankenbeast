@@ -4,7 +4,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
-import { createDashboardStaticResponse, resolveDashboardOperatorToken, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
+import { createDashboardStaticResponse, parseCliArgs, resolveDashboardOperatorToken, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
 import { createSecretStore } from '../../../src/network/secret-store.js';
 
 import { testCredential } from '../../support/test-credentials.js';
@@ -387,5 +387,23 @@ describe('dashboard static server', () => {
       await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
       await new Promise<void>((resolveClose) => backend.close(() => resolveClose()));
     }
+  });
+
+  it.each([
+    ['5173abc'],
+    ['5173.5'],
+    ['+5173'],
+    ['-1'],
+    [''],
+    ['65536'],
+    [],
+  ])('rejects malformed CLI --port argv %j', async (...values) => {
+    await expect(parseCliArgs(['--port', ...values])).rejects.toThrow(/Invalid --port value/);
+  });
+
+  it('accepts valid integer CLI --port values in range', async () => {
+    await expect(parseCliArgs([])).resolves.toMatchObject({ port: 5173 });
+    await expect(parseCliArgs(['--port', '5173'])).resolves.toMatchObject({ port: 5173 });
+    await expect(parseCliArgs(['--port', '0'])).resolves.toMatchObject({ port: 0 });
   });
 });

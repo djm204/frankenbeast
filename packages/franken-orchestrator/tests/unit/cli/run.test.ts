@@ -246,10 +246,11 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, runNetworkCommand } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
+import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import { createInterface } from 'node:readline';
 
 // ── Tests ──
@@ -436,6 +437,19 @@ describe('provider CLI availability preflight', () => {
         },
       },
     }, 'interview')).toEqual(['gemini', 'prod-claude']);
+  });
+
+  it('does not preflight plan-build providers for interview-only runs', () => {
+    expect(resolveEffectivePreflightProviders('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+          'plan-build': { provider: 'prod-claude' },
+        },
+      },
+    }, 'interview', 'interview')).toEqual(['gemini']);
   });
 
   it('normalizes custom consolidated providers before CLI availability preflight', () => {
@@ -880,6 +894,64 @@ describe('runDirectCli', () => {
   });
 });
 
+describe('validateStateDirBeforeScaffold', () => {
+  const priorProfile = process.env.HERMES_PROFILE;
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    if (priorProfile === undefined) {
+      delete process.env.HERMES_PROFILE;
+    } else {
+      process.env.HERMES_PROFILE = priorProfile;
+    }
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function symlinkedCrossProfileState(): string {
+    const root = join(tmpdir(), `franken-pre-scaffold-state-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(root);
+    const target = join(root, '.hermes', 'profiles', 'prod');
+    const link = join(root, 'repo', '.fbeast', 'state-link');
+    mkdirSync(target, { recursive: true });
+    mkdirSync(join(root, 'repo', '.fbeast'), { recursive: true });
+    symlinkSync(target, link, 'dir');
+    return join(link, 'state');
+  }
+
+  it('does not let an opt-in without configured stateDir approve the repo default stateDir', () => {
+    process.env.HERMES_PROFILE = 'default';
+    const stateDir = symlinkedCrossProfileState();
+
+    expect(() => validateStateDirBeforeScaffold({
+      ...defaultConfig(),
+      allowCrossProfileStateAccess: true,
+    }, { stateDir })).toThrow("Hermes profile 'prod'");
+  });
+
+  it('allows an operator opt-in only for the stateDir supplied by the same config', () => {
+    process.env.HERMES_PROFILE = 'default';
+    const stateDir = symlinkedCrossProfileState();
+
+    expect(() => validateStateDirBeforeScaffold({
+      ...defaultConfig(),
+      stateDir,
+      allowCrossProfileStateAccess: true,
+    }, { stateDir: join(tmpdir(), 'unused-default-state') })).not.toThrow();
+  });
+
+  it('scaffolds the configured stateDir instead of the repo default when present', () => {
+    const defaultStateDir = symlinkedCrossProfileState();
+    const configuredStateDir = join(tmpdir(), 'operator-state-dir');
+
+    expect(resolveScaffoldStateDir({
+      ...defaultConfig(),
+      stateDir: configuredStateDir,
+    }, { stateDir: defaultStateDir })).toBe(configuredStateDir);
+  });
+});
+
 describe('main wiring', () => {
   it('all building blocks are correctly imported and mockable', () => {
     expect(resolveProjectRoot).toBeDefined();
@@ -974,6 +1046,243 @@ describe('main() execution', () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('prints network credentials as parseable JSON without a banner', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'network',
+      networkAction: 'credentials',
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    const stdout = info.mock.calls.map((call) => String(call[0]));
+    expect(stdout).not.toContain('[BANNER]');
+    expect(scaffoldFrankenbeast).not.toHaveBeenCalled();
+    expect(JSON.parse(stdout.at(-1) ?? '{}')).toMatchObject({
+      mode: 'secure',
+      credentials: expect.any(Array),
+    });
+  });
+
+  it('does not hide non-file init config loading errors behind init fallback defaults', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '{"providers":{"default":"claude"}}\n');
+    const error = new Error('FRANKEN_MAX_TOTAL_TOKENS must be a number');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initRepair: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
+  it('does not hide non-file init config errors when the config file is missing', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    const error = new Error('FRANKEN_MAX_TOTAL_TOKENS must be a number');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initRepair: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
+  it('does not hide non-file config errors just because the init config file is malformed', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '{not json', 'utf-8');
+    const error = new Error('FRANKEN_MAX_TOTAL_TOKENS must be a number');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
+  it('lets init verification handle real loader null-config errors with fallback defaults', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), 'null\n', 'utf-8');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new TypeError("Cannot read properties of null (reading 'providers')"));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initVerify: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      configLoadFallback: true,
+      config: expect.objectContaining({ providers: expect.any(Object) }),
+    }));
+  });
+
+  it('lets explicit init config null deep-merge errors fall through to init handling', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    const configFile = join(tempDir, 'explicit-null.json');
+    writeFileSync(configFile, 'null\n', 'utf-8');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new TypeError('Cannot convert undefined or null to object'));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      config: configFile,
+      initRepair: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      configLoadFallback: true,
+      config: expect.objectContaining({ providers: expect.any(Object) }),
+    }));
+  });
+
+  it('falls back for interactive init when config JSON is syntactically valid but not an object', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '[]\n', 'utf-8');
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      configLoadFallback: true,
+      config: expect.objectContaining({ providers: expect.any(Object) }),
+    }));
+  });
+
+  it('does not fallback for nested object-shape config validation errors', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '{"providers":[]}\n', 'utf-8');
+    const error = new Error('Expected object, received array');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
+  it('lets init verification handle non-object config JSON with fallback defaults', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), 'null\n');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new Error('config must contain an object'));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initVerify: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ network: expect.any(Object) }),
+    }));
+  });
+
+  it.each([
+    'Cannot read properties of null (reading \'providers\')',
+    'Cannot convert undefined or null to object',
+  ])('lets init verification handle literal null config loader errors: %s', async (message) => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), 'null\n');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new TypeError(message));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initVerify: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ network: expect.any(Object) }),
+    }));
+  });
+
+  it('does not hide generic null loader errors when init config is malformed JSON', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    writeFileSync(join(tempDir, '.fbeast', 'config.json'), '{not json', 'utf-8');
+    const error = new TypeError('Cannot read properties of null (reading \'providers\')');
+    vi.mocked(loadConfig).mockRejectedValueOnce(error);
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      initVerify: true,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await expect(main()).rejects.toThrow(error.message);
+
+    expect(mockHandleInitCommand).not.toHaveBeenCalled();
+  });
+
+  it('lets interactive init handle invalid explicit config JSON with fallback defaults', async () => {
+    const tempDir = join(tmpdir(), `franken-run-init-${Date.now()}-${Math.random()}`);
+    tempDirs.push(tempDir);
+    mkdirSync(join(tempDir, '.fbeast'), { recursive: true });
+    const configPath = join(tempDir, '.fbeast', 'config.json');
+    writeFileSync(configPath, '{not json', 'utf-8');
+    vi.mocked(loadConfig).mockRejectedValueOnce(new SyntaxError('Unexpected token'));
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'init',
+      baseDir: tempDir,
+      config: configPath,
+    } as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ network: expect.any(Object) }),
+    }));
   });
 
   it('records the implicit active plan name for chained interactive subcommands', async () => {
@@ -2143,6 +2452,168 @@ describe('main() execution', () => {
         subcommand: 'init',
         initVerify: true,
         initNonInteractive: true,
+      }),
+    }));
+    expect(MockSession).not.toHaveBeenCalled();
+  });
+
+  it('lets init verify handle malformed config JSON instead of failing during eager config load', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'init',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: true,
+      initRepair: false,
+      initNonInteractive: false,
+    });
+    vi.mocked(loadConfig).mockRejectedValueOnce(new SyntaxError('Unexpected token } in JSON'));
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      args: expect.objectContaining({ subcommand: 'init', initVerify: true }),
+    }));
+    expect(MockSession).not.toHaveBeenCalled();
+  });
+
+  it('lets init verify handle valid non-object config JSON instead of failing during eager config validation', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'init',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: true,
+      initRepair: false,
+      initNonInteractive: false,
+    });
+    vi.mocked(loadConfig).mockRejectedValueOnce(new TypeError('Config file must contain a JSON object'));
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      args: expect.objectContaining({ subcommand: 'init', initVerify: true }),
+    }));
+    expect(MockSession).not.toHaveBeenCalled();
+  });
+
+  it('lets init repair report malformed config JSON through verification instead of eager config load', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'init',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: undefined,
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: true,
+      initNonInteractive: false,
+    });
+    vi.mocked(loadConfig).mockRejectedValueOnce(new SyntaxError('Unexpected token } in JSON'));
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      args: expect.objectContaining({ subcommand: 'init', initRepair: true }),
+    }));
+    expect(MockSession).not.toHaveBeenCalled();
+  });
+
+  it('preserves --backend on fallback config when init repair handles config load errors', async () => {
+    mockParseArgs.mockReturnValue({
+      subcommand: 'init',
+      networkAction: undefined,
+      networkTarget: undefined,
+      networkDetached: false,
+      networkSet: undefined,
+      baseDir: '/mock/project',
+      baseBranch: undefined,
+      budget: 10,
+      provider: 'claude',
+      providerSpecified: false,
+      providers: undefined,
+      designDoc: undefined,
+      planDir: undefined,
+      planName: undefined,
+      config: '/mock/project/missing-config.json',
+      host: undefined,
+      port: undefined,
+      allowOrigin: undefined,
+      noPr: false,
+      verbose: false,
+      reset: false,
+      resume: false,
+      cleanup: false,
+      help: false,
+      initVerify: false,
+      initRepair: true,
+      initNonInteractive: false,
+      initBackend: '1password',
+    });
+
+    await main();
+
+    expect(mockHandleInitCommand).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({
+        network: expect.objectContaining({ secureBackend: '1password' }),
       }),
     }));
     expect(MockSession).not.toHaveBeenCalled();

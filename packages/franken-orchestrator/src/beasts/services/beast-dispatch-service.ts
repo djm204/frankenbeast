@@ -7,6 +7,7 @@ import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
 import { UnknownBeastDefinitionError } from '../errors.js';
+import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
@@ -62,15 +63,24 @@ function normalizeGitConfig(value: unknown): Record<string, unknown> | undefined
   return Object.keys(gitConfig).length > 0 ? gitConfig : undefined;
 }
 
+function parseOptionalSharedConfig<T>(
+  schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } },
+  value: unknown,
+): T | undefined {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
 function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown | undefined {
   switch (key) {
     case 'skills':
       return Array.isArray(value) && value.every((skill) => typeof skill === 'string') ? value : undefined;
     case 'gitConfig':
-      return normalizeGitConfig(value);
+      return parseOptionalSharedConfig(GitConfigSchema, normalizeGitConfig(value));
     case 'llmConfig':
+      return parseOptionalSharedConfig(LlmConfigSchema, value);
     case 'promptConfig':
-      return isRecord(value) ? value : undefined;
+      return parseOptionalSharedConfig(PromptConfigSchema, value);
     case 'provider':
     case 'model':
       return typeof value === 'string' ? value : undefined;
