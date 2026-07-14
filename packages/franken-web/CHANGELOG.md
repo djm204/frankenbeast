@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.10](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.9...franken-web-v0.2.10) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.1 to 0.11.0
+
 ## [0.2.9](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.8...franken-web-v0.2.9) (2026-07-14)
 
 

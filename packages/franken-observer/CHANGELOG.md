@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.8.0...franken-observer-v0.8.1) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.1 to 0.11.0
+
 ## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.18...franken-observer-v0.8.0) (2026-07-14)
 
 

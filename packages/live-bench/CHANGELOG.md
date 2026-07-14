@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.11](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.10...live-bench-v0.2.11) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.8.0 to 0.8.1
+    * @franken/types bumped from 0.10.1 to 0.11.0
+
 ## [0.2.10](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.9...live-bench-v0.2.10) (2026-07-14)
 
 
