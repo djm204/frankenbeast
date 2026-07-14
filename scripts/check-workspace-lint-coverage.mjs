@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -27,58 +27,135 @@ const normalizePathToken = (token) => token
   .replace(/^\.\//u, '')
   .replace(/:\d+(?::\d+)?$/u, '');
 
-const lintPathTargets = (lintScript) => {
+const shellCommandSeparators = new Set(['&&', '||', ';']);
+
+const joinRelativePath = (baseDir, target) => {
+  const normalizedTarget = normalizePathToken(target);
+  if (baseDir === '' && normalizedTarget === '.') return '.';
+  if (normalizedTarget === '') return baseDir;
+  if (normalizedTarget.startsWith('/')) return normalizedTarget.slice(1);
+  return posix.normalize(posix.join(baseDir, normalizedTarget)).replace(/^\.\/?/u, '');
+};
+
+const lintPathConfig = (lintScript) => {
   const tokens = lintScript.match(/(?:[^\s'"]+|"[^"]*"|'[^']*')+/gu) ?? [];
   const targets = [];
+  const ignorePatterns = [];
+  let currentDir = '';
   let seenEslint = false;
   let skipNext = false;
+  let optionAwaitingValue = null;
+  let awaitingCdTarget = false;
 
   for (const rawToken of tokens) {
     const token = normalizePathToken(rawToken);
+
+    if (awaitingCdTarget) {
+      currentDir = joinRelativePath(currentDir, token);
+      awaitingCdTarget = false;
+      continue;
+    }
+
+    if (optionAwaitingValue !== null) {
+      if (optionAwaitingValue === '--ignore-pattern') {
+        ignorePatterns.push(joinRelativePath(currentDir, token));
+      }
+
+      optionAwaitingValue = null;
+      continue;
+    }
 
     if (skipNext) {
       skipNext = false;
       continue;
     }
 
-    if (token === '&&' || token === '||' || token === ';') {
+    if (shellCommandSeparators.has(token)) {
       seenEslint = false;
       continue;
     }
 
     if (!seenEslint) {
+      if (token === 'cd') {
+        awaitingCdTarget = true;
+        continue;
+      }
+
       seenEslint = token === 'eslint' || token.endsWith('/eslint');
       continue;
     }
 
     if (token.startsWith('-')) {
       const optionName = token.includes('=') ? token.slice(0, token.indexOf('=')) : token;
+      if (optionName === '--ignore-pattern') {
+        if (token.includes('=')) {
+          ignorePatterns.push(joinRelativePath(currentDir, token.slice(token.indexOf('=') + 1)));
+        } else {
+          optionAwaitingValue = optionName;
+        }
+        continue;
+      }
+
       skipNext = lintOptionNamesWithValues.has(optionName) && !token.includes('=');
       continue;
     }
 
-    targets.push(token);
+    targets.push(joinRelativePath(currentDir, token));
   }
 
-  return targets;
+  return { targets, ignorePatterns };
 };
 
-const pathPrefixBeforeGlob = (target) => {
-  const globIndex = target.search(/[?*[{]/u);
-  if (globIndex === -1) return target;
+const globToRegExp = (glob) => {
+  let source = '^';
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index];
+    const next = glob[index + 1];
 
-  const prefix = target.slice(0, globIndex);
-  const lastSlash = prefix.lastIndexOf('/');
-  return lastSlash === -1 ? '' : prefix.slice(0, lastSlash + 1);
+    if (char === '*' && next === '*') {
+      const afterGlobstar = glob[index + 2];
+      if (afterGlobstar === '/') {
+        source += '(?:.*/)?';
+        index += 2;
+      } else {
+        source += '.*';
+        index += 1;
+      }
+      continue;
+    }
+
+    if (char === '*') {
+      source += '[^/]*';
+      continue;
+    }
+
+    if (char === '?') {
+      source += '[^/]';
+      continue;
+    }
+
+    source += char.replace(/[|\\{}()[\]^$+?.]/gu, '\\$&');
+  }
+
+  source += '$';
+  return new RegExp(source, 'u');
+};
+
+const pathMatchesGlob = (pattern, testFile) => {
+  if (!/[?*[{]/u.test(pattern)) return false;
+  return globToRegExp(pattern).test(testFile);
 };
 
 const lintTargetCoversTestFile = (target, testFile) => {
   const normalizedTarget = normalizePathToken(target);
   if (normalizedTarget === '.' || normalizedTarget === '') return normalizedTarget === '.';
 
-  const prefix = pathPrefixBeforeGlob(normalizedTarget);
-  if (prefix !== normalizedTarget) {
-    return prefix === '' || testFile.startsWith(prefix);
+  if (pathMatchesGlob(normalizedTarget, testFile)) {
+    return true;
+  }
+
+  if (/[?*[{]/u.test(normalizedTarget)) {
+    return false;
   }
 
   if (normalizedTarget.endsWith('/')) {
@@ -88,9 +165,14 @@ const lintTargetCoversTestFile = (target, testFile) => {
   return testFile === normalizedTarget || testFile.startsWith(`${normalizedTarget}/`);
 };
 
-const lintScriptCoversTestFile = (lintScript, testFile) => (
-  lintPathTargets(lintScript).some((target) => lintTargetCoversTestFile(target, testFile))
-);
+const lintScriptCoversTestFile = (lintScript, testFile) => {
+  const { targets, ignorePatterns } = lintPathConfig(lintScript);
+  if (ignorePatterns.some((pattern) => pathMatchesGlob(pattern, testFile) || lintTargetCoversTestFile(pattern, testFile))) {
+    return false;
+  }
+
+  return targets.some((target) => lintTargetCoversTestFile(target, testFile));
+};
 
 const collectTestFiles = (dir, relativeDir = '') => {
   if (!existsSync(dir)) return [];

@@ -235,6 +235,121 @@ describe("Turborepo configuration", () => {
       );
     });
 
+    it("requires lint globs to match nested test files", () => {
+      const fixtureRoot = mkdtempSync(join(tmpdir(), "franken-lint-coverage-"));
+      mkdirSync(join(fixtureRoot, "docs"));
+      mkdirSync(join(fixtureRoot, "packages", "example", "tests", "unit"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(fixtureRoot, "docs", "lint-coverage.md"),
+        "The root gate is `npm run lint`.\n\n| Workspace | Path | Lint posture |\n| --- | --- | --- |\n| `@franken/example` | `packages/example` | fixture |\n",
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "package.json"),
+        JSON.stringify({
+          name: "@franken/example",
+          scripts: { lint: "eslint tests/*.test.ts" },
+        }),
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "eslint.config.js"),
+        "export default [];\n",
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "tests", "unit", "example.test.ts"),
+        "export {};\n",
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        [join(ROOT, "scripts", "check-workspace-lint-coverage.mjs"), fixtureRoot],
+        { encoding: "utf8" },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "packages/example (@franken/example) lint script does not cover test file tests/unit/example.test.ts",
+      );
+    });
+
+    it("does not count ESLint targets that are excluded by ignore patterns", () => {
+      const fixtureRoot = mkdtempSync(join(tmpdir(), "franken-lint-coverage-"));
+      mkdirSync(join(fixtureRoot, "docs"));
+      mkdirSync(join(fixtureRoot, "packages", "example", "tests"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(fixtureRoot, "docs", "lint-coverage.md"),
+        "The root gate is `npm run lint`.\n\n| Workspace | Path | Lint posture |\n| --- | --- | --- |\n| `@franken/example` | `packages/example` | fixture |\n",
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "package.json"),
+        JSON.stringify({
+          name: "@franken/example",
+          scripts: { lint: "eslint tests/ --ignore-pattern 'tests/**'" },
+        }),
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "eslint.config.js"),
+        "export default [];\n",
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "tests", "example.test.ts"),
+        "export {};\n",
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        [join(ROOT, "scripts", "check-workspace-lint-coverage.mjs"), fixtureRoot],
+        { encoding: "utf8" },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "packages/example (@franken/example) lint script does not cover test file tests/example.test.ts",
+      );
+    });
+
+    it("resolves lint targets from the script cwd after cd commands", () => {
+      const fixtureRoot = mkdtempSync(join(tmpdir(), "franken-lint-coverage-"));
+      mkdirSync(join(fixtureRoot, "docs"));
+      mkdirSync(join(fixtureRoot, "packages", "example", "src"), {
+        recursive: true,
+      });
+      mkdirSync(join(fixtureRoot, "packages", "example", "tests"));
+      writeFileSync(
+        join(fixtureRoot, "docs", "lint-coverage.md"),
+        "The root gate is `npm run lint`.\n\n| Workspace | Path | Lint posture |\n| --- | --- | --- |\n| `@franken/example` | `packages/example` | fixture |\n",
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "package.json"),
+        JSON.stringify({
+          name: "@franken/example",
+          scripts: { lint: "cd src && eslint ." },
+        }),
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "eslint.config.js"),
+        "export default [];\n",
+      );
+      writeFileSync(
+        join(fixtureRoot, "packages", "example", "tests", "example.test.ts"),
+        "export {};\n",
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        [join(ROOT, "scripts", "check-workspace-lint-coverage.mjs"), fixtureRoot],
+        { encoding: "utf8" },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "packages/example (@franken/example) lint script does not cover test file tests/example.test.ts",
+      );
+    });
+
     it("CI runs the root typecheck Turbo task explicitly", () => {
       const ciWorkflow = readFileSync(
         join(ROOT, ".github/workflows/ci.yml"),
