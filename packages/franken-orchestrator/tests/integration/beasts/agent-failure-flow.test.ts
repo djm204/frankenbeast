@@ -94,28 +94,59 @@ describe('Agent Failure Flow (integration)', () => {
     // Start the process -- it will crash immediately
     await executor.start(run, definition);
 
-    // Wait for the process to exit and events to propagate
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    let updatedRun: ReturnType<typeof repo.getRun> | undefined;
+    let events: ReturnType<typeof repo.listEvents> = [];
+    let logLines: Awaited<ReturnType<typeof logs.read>> = [];
+    let agentEvents: ReturnType<typeof repo.listTrackedAgentEvents> = [];
+
+    // Wait for the concrete failure state and events this test asserts, rather than
+    // paying a fixed delay that can still race on loaded CI.
+    await vi.waitFor(async () => {
+      updatedRun = repo.getRun(run.id);
+      events = repo.listEvents(run.id);
+      const attempt = repo.listAttempts(run.id)[0];
+      logLines = attempt ? await logs.read(run.id, attempt.id) : [];
+      agentEvents = repo.listTrackedAgentEvents(agent.id);
+
+      const failEvent = events.find((e) => e.type === 'attempt.failed');
+      const stderrLines = (failEvent?.payload.lastStderrLines ?? []) as string[];
+      const agentFailEvent = agentEvents.find((e) => e.type === 'agent.run.failed');
+      const hasFailureState = updatedRun?.status === 'failed' && updatedRun.latestExitCode === 1;
+      const hasAttemptFailure = stderrLines.some((line) => line.includes('boom'));
+      const hasLogCapture = logLines.some((line) => line.includes('boom'));
+      const hasAgentFailure = agentFailEvent?.level === 'error'
+        && agentFailEvent.payload.runId === run.id
+        && agentFailEvent.payload.exitCode === 1;
+
+      if (!hasFailureState || !hasAttemptFailure || !hasLogCapture || !hasAgentFailure) {
+        throw new Error(`Waiting for failure propagation: ${JSON.stringify({
+          runStatus: updatedRun?.status,
+          latestExitCode: updatedRun?.latestExitCode,
+          runEvents: events.map((event) => event.type),
+          logLines,
+          agentEvents: agentEvents.map((event) => ({
+            type: event.type,
+            level: event.level,
+            payload: event.payload,
+          })),
+        })}`);
+      }
+    }, { timeout: 5000, interval: 25 });
 
     // Verify: run status is failed
-    const updatedRun = repo.getRun(run.id);
     expect(updatedRun!.status).toBe('failed');
     expect(updatedRun!.latestExitCode).toBe(1);
 
     // Verify: attempt.failed event exists with lastStderrLines containing 'boom'
-    const events = repo.listEvents(run.id);
     const failEvent = events.find((e) => e.type === 'attempt.failed');
     expect(failEvent).toBeDefined();
     const stderrLines = failEvent!.payload.lastStderrLines as string[];
     expect(stderrLines.some((line) => line.includes('boom'))).toBe(true);
 
     // Verify: logs contain stderr lines
-    const attempt = repo.listAttempts(run.id)[0];
-    const logLines = await logs.read(run.id, attempt.id);
     expect(logLines.some((line) => line.includes('boom'))).toBe(true);
 
     // Verify: agent-level event was appended
-    const agentEvents = repo.listTrackedAgentEvents(agent.id);
     const agentFailEvent = agentEvents.find((e) => e.type === 'agent.run.failed');
     expect(agentFailEvent).toBeDefined();
     expect(agentFailEvent!.level).toBe('error');

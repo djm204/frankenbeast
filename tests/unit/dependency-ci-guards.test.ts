@@ -306,7 +306,7 @@ updates:
     expect(workflow).toContain('npm run deps:outdated:major');
     expect(workflow).toContain('npm run check:dependabot-supply-chain');
     expect(workflow).toContain('npm sbom --sbom-format cyclonedx');
-    expect(workflow).toContain('actions/upload-artifact@v4');
+    expect(workflow).toContain('actions/upload-artifact@v7');
     expect(workflow).toContain('dependency-sbom-cyclonedx');
   });
 });

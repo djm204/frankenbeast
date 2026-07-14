@@ -227,7 +227,7 @@ export function registerDashboardCommand(program: Command): void {
     .option('--no-open', 'Don\'t open browser')
     .action(async (opts) => {
       const { startDashboard } = await import('@franken/web');
-      const url = await startDashboard({ port: parseInt(opts.port) });
+      const url = await startDashboard({ port: parseInt(opts.port, 10) });
       process.stdout.write(`Dashboard running at ${url}`);
       if (opts.open !== false) {
         const open = await import('open');

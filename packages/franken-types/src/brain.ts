@@ -22,6 +22,7 @@ export interface IWorkingMemory {
 
 export interface IEpisodicMemory {
   record(event: EpisodicEvent): void;
+  recordLearning(event: EpisodicEvent, options?: LearningCooldownOptions): LearningRecordResult;
   recall(query: string, limit?: number): EpisodicEvent[];
   recentFailures(n?: number): EpisodicEvent[];
   recent(n?: number): EpisodicEvent[];
@@ -47,6 +48,24 @@ export interface EpisodicEvent {
   details?: Record<string, unknown>;
   createdAt: string;
 }
+
+export interface LearningCooldownOptions {
+  /** Stable identity for the lesson. Defaults to details.learningKey or a normalized step+summary key. */
+  key?: string;
+  /** Cooldown window in milliseconds. Defaults to 24 hours. */
+  cooldownMs?: number;
+}
+
+export type LearningRecordResult =
+  | { recorded: true; key: string; cooldownMs: number }
+  | {
+      recorded: false;
+      reason: 'cooldown';
+      key: string;
+      cooldownMs: number;
+      existingEvent: EpisodicEvent;
+      cooldownUntil: string;
+    };
 
 export interface ExecutionState {
   runId: string;
@@ -80,6 +99,11 @@ export const EpisodicEventSchema = z.object({
   summary: z.string().min(1),
   details: z.record(z.unknown()).optional(),
   createdAt: z.string().datetime(),
+});
+
+export const LearningCooldownOptionsSchema = z.object({
+  key: z.string().trim().min(1).optional(),
+  cooldownMs: z.number().int().nonnegative().optional(),
 });
 
 export const ExecutionStateSchema = z.object({

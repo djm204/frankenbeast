@@ -91,6 +91,54 @@ export interface LessonRollbackWorkflow {
   readonly insufficientEvidenceGuidance: string;
 }
 
+/** Lifecycle states for learned critique guidance. */
+export type LessonLifecycleStatus =
+  'candidate' | 'active' | 'quarantined' | 'retired' | 'superseded';
+
+/** Evidence attached to lesson quarantine/rollback decisions. */
+export interface LessonQuarantineEvidence {
+  readonly kind:
+    | 'operator-report'
+    | 'failed-regression'
+    | 'review-comment'
+    | 'incident-link';
+  /** Stable URL, issue/PR reference, or operator report handle proving the lesson is harmful/stale. */
+  readonly reference: string;
+  readonly note?: string;
+}
+
+/** PM/liveness review item created whenever a lesson is quarantined. */
+export interface LessonQuarantineReviewItem {
+  readonly id: string;
+  readonly status: 'open';
+  readonly lessonId: string;
+  readonly createdAt: string;
+  readonly reason: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  readonly recommendedAction: string;
+}
+
+/** Metadata proving why a lesson was removed from future prompt/application paths. */
+export interface LessonQuarantineMetadata {
+  readonly trigger:
+    'explicit-user-correction' | 'repeated-failure-threshold' | 'manual-review';
+  readonly reason: string;
+  readonly quarantinedAt: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  readonly threshold?: number;
+  /** Lifecycle status before quarantine; missing means legacy active. */
+  readonly previousLifecycleStatus?: LessonLifecycleStatus;
+  readonly reviewItem: LessonQuarantineReviewItem;
+}
+
+/** Evidence that a quarantined lesson was reviewed and may be applied again. */
+export interface LessonUnquarantineMetadata {
+  readonly reviewedAt: string;
+  readonly reviewer: string;
+  readonly evidenceUrl: string;
+  readonly reason: string;
+}
+
 /** A normalized reviewer finding captured alongside a learned critique lesson. */
 export interface ReviewerFeedbackLessonEntry {
   /** Iteration where the reviewer feedback was emitted. */
@@ -117,6 +165,24 @@ export interface ReviewerFeedbackLessonCapture {
   readonly suggestionsComplete: boolean;
   /** Deterministic guidance for PM handoffs when suggestions are missing. */
   readonly missingSuggestionGuidance?: string;
+}
+
+/** Candidate signal that a recovered failed test may deserve durable skill guidance. */
+export interface FailedTestSkillCandidate {
+  /** Stable detector identifier for PM/liveness tooling. */
+  readonly detector: 'failed-test-to-skill-candidate';
+  /** Whether the failed critique finding looks like a concrete test failure. */
+  readonly candidate: true;
+  /** Iteration where the failed-test signal was observed. */
+  readonly sourceIteration: number;
+  /** Evaluator/reviewer that emitted the failed-test signal. */
+  readonly evaluatorName: string;
+  /** Matching signals that caused the lesson to be flagged. */
+  readonly matchedSignals: readonly string[];
+  /** Original finding messages that should be reviewed before creating or updating a skill. */
+  readonly sourceFindingMessages: readonly string[];
+  /** Deterministic operator guidance for PM handoffs and worker retrospectives. */
+  readonly operatorGuidance: string;
 }
 
 /** LLM-friendly template PM/worker handoffs can use after a PR closes to extract reusable lessons. */
@@ -197,12 +263,78 @@ export interface CrossTaskBlockerPattern {
   readonly guidance: string;
 }
 
+/** Deterministic per-agent learning summary for worker retrospectives and PM handoffs. */
+export type LearningBacklogPriority = 'high' | 'medium' | 'low';
+
+/** A single LLM-friendly backlog item produced from newly observed learning signals. */
+export interface LearningBacklogPrioritizationItem {
+  /** Stable item identifier for PM/liveness consumers. */
+  readonly id: string;
+  /** Source signal that created this backlog item. */
+  readonly source:
+    'recorded-lesson' | 'cooldown-suppression' | 'blocker-pattern';
+  /** Coarse priority bucket for operator routing. */
+  readonly priority: LearningBacklogPriority;
+  /** Numeric score used for deterministic sorting inside a priority bucket. */
+  readonly score: number;
+  readonly taskId?: TaskId;
+  readonly evaluatorName?: string;
+  /** Short operator-facing title. */
+  readonly title: string;
+  /** Why this item received its priority. */
+  readonly rationale: string;
+  /** Next action PM/liveness tooling should present. */
+  readonly recommendedAction: string;
+}
+
+/** Structured PM/liveness report for sorting learning backlog follow-up. */
+export interface LearningBacklogPrioritizationReport {
+  readonly schemaVersion: 'learning-backlog-prioritization-report-v1';
+  readonly generatedAt: string;
+  readonly guidance: string;
+  readonly items: readonly LearningBacklogPrioritizationItem[];
+}
+
+export interface AgentImprovementScorecard {
+  /** Stable schema identifier for PM/liveness tooling. */
+  readonly schemaVersion: 'agent-improvement-scorecard-v1';
+  /** Agent or worker identifier supplied by the recorder caller. */
+  readonly agentId: string;
+  readonly taskId: TaskId;
+  readonly evaluatorName: string;
+  /** Timestamp when the scorecard was generated. */
+  readonly generatedAt: string;
+  /** First failing score for this evaluator in the recovered critique loop. */
+  readonly initialScore: number;
+  /** Final recovered overall score from the pass/warn iteration. */
+  readonly finalScore: number;
+  /** Rounded difference between finalScore and initialScore. */
+  readonly scoreDelta: number;
+  /** Failing iteration indexes for this evaluator that contributed feedback. */
+  readonly failingIterations: readonly number[];
+  /** Iteration that recovered to pass/warn. */
+  readonly resolvedIteration: number;
+  /** Finding counts across the agent's failing iterations for this evaluator. */
+  readonly findingCounts: {
+    readonly critical: number;
+    readonly warning: number;
+    readonly info: number;
+    readonly total: number;
+  };
+  /** LLM-friendly bullets that can be copied into retrospectives without parsing prose. */
+  readonly improvementSignals: readonly string[];
+  /** Operator-facing guidance for interpreting the scorecard. */
+  readonly guidance: string;
+}
+
 /** Summary returned by LessonRecorder.record for PM/liveness consumers. */
 export interface LessonRecordingResult {
   readonly recorded: number;
   readonly suppressedByCooldown: readonly LessonCooldownSuppression[];
   /** Cross-task blocker patterns discovered while recording this critique result. */
   readonly minedBlockerPatterns: readonly CrossTaskBlockerPattern[];
+  /** Prioritized PM/liveness follow-up generated from this record call's learning signals. */
+  readonly learningBacklogPrioritizationReport: LearningBacklogPrioritizationReport;
 }
 
 /** A lesson learned from a successful critique cycle. */
@@ -212,6 +344,12 @@ export interface CritiqueLesson {
   readonly correctionApplied: string;
   readonly taskId: TaskId;
   readonly timestamp: string;
+  /** Lifecycle status used by memory/frontload consumers before injecting learned guidance. */
+  readonly lifecycleStatus?: LessonLifecycleStatus;
+  /** Present when a bad/stale lesson has been quarantined and must not be applied. */
+  readonly quarantine?: LessonQuarantineMetadata;
+  /** Present after a reviewed manual unquarantine restores the lesson to active status. */
+  readonly unquarantine?: LessonUnquarantineMetadata;
   /** Present for lessons recorded by LessonRecorder; absent legacy lessons are unverified. */
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
   /** Present for new lessons that must remain quarantined until independently verified. */
@@ -220,12 +358,16 @@ export interface CritiqueLesson {
   readonly rollbackWorkflow?: LessonRollbackWorkflow;
   /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
   readonly reviewerFeedback?: ReviewerFeedbackLessonCapture;
+  /** Present when a recovered failed test is a candidate for future skill creation/update. */
+  readonly failedTestSkillCandidate?: FailedTestSkillCandidate;
   /** Structured template for extracting reusable lessons from post-PR review/merge evidence. */
   readonly postPrLessonExtractionTemplate?: PostPrLessonExtractionTemplate;
   /** Cooldown guard that prevents equivalent lessons from being re-recorded until suppressUntil. */
   readonly cooldown?: LessonCooldownMetadata;
   /** Cross-task blocker patterns associated with this lesson, if any crossed the threshold. */
   readonly blockerPatterns?: readonly CrossTaskBlockerPattern[];
+  /** Optional per-agent learning scorecard for worker retrospectives and PM handoffs. */
+  readonly agentImprovementScorecard?: AgentImprovementScorecard;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

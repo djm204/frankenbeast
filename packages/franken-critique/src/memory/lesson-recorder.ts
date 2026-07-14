@@ -1,12 +1,18 @@
 import type {
   MemoryPort,
   CritiqueLesson,
+  FailedTestSkillCandidate,
   LessonCooldownSuppression,
   LessonRecordingResult,
   ReviewerFeedbackLessonCapture,
   PostPrLessonExtractionTemplate,
   LessonRollbackWorkflow,
   CrossTaskBlockerPattern,
+  LearningBacklogPrioritizationItem,
+  AgentImprovementScorecard,
+  LessonQuarantineEvidence,
+  LessonQuarantineMetadata,
+  LessonUnquarantineMetadata,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -33,6 +39,10 @@ const DEFAULT_BLOCKER_PATTERN_THRESHOLD = 3;
 const MIN_BLOCKER_PATTERN_THRESHOLD = 2;
 const BLOCKER_PATTERN_GUIDANCE =
   'Equivalent blocker findings have recurred across distinct tasks; PM/liveness handoffs should treat this as a cross-task pattern and route a durable mitigation instead of rediscovering it per task.';
+const AGENT_IMPROVEMENT_SCORECARD_GUIDANCE =
+  'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.';
+const LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE =
+  'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.';
 
 export interface BlockerPatternObservation {
   readonly taskId: TaskId;
@@ -65,6 +75,8 @@ export interface LessonRecorderOptions {
   readonly blockerPatternThreshold?: number;
   /** Shared blocker-pattern state for mining recurrent blockers across recorder instances. */
   readonly blockerPatternStore?: Map<string, BlockerPatternState>;
+  /** Optional per-agent identifier used to attach deterministic improvement scorecards to learned lessons. */
+  readonly agentId?: string;
 }
 
 const LESSON_EXPERIMENT_SANDBOX_REASON =
@@ -101,6 +113,60 @@ const LESSON_ROLLBACK_WORKFLOW: LessonRollbackWorkflow = {
 const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
   'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
 
+const FAILED_TEST_SKILL_CANDIDATE_GUIDANCE =
+  'This recovered critique failure looks like a concrete failed test. PM handoffs should consider creating or updating a skill only after the failure recurs or the regression exposes a reusable workflow gap; keep one-off product bugs in the issue/PR instead of promoting them as durable skill guidance.';
+
+const FAILED_TEST_SIGNAL_PATTERNS: readonly {
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly strength: 'strong' | 'supporting';
+}[] = [
+  {
+    label: 'failed-test wording',
+    pattern:
+      /\b(?:(?:failed|failing|broken)\s+tests?|tests?\s+(?:failed|failing|broken))\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test-failure wording',
+    pattern: /\btest\s+fail(?:ure|ed|ing)?\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'assertion error',
+    pattern: /\bassertionerror\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'assertion expected-received',
+    pattern:
+      /\b(?:expected[\s\S]{0,120}(?:received|got)|(?:received|got)[\s\S]{0,120}expected)\b/i,
+    strength: 'supporting',
+  },
+  {
+    label: 'test runner output',
+    pattern:
+      /\b(?:vitest|jest|mocha|playwright)\b[\s\S]{0,240}\b(?:fail|failed|failing)\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'fail-prefixed runner output',
+    pattern: /\bFAIL\b[\s\S]{0,240}\b[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test file path',
+    pattern:
+      /(?:^|[/\s])(?:tests?\/[^\s]+|[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?)\b/i,
+    strength: 'supporting',
+  },
+  {
+    label: 'test command',
+    pattern: /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b/i,
+    strength: 'supporting',
+  },
+];
+
 const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
   templateId: 'post-pr-lesson-extraction-v1',
   trigger: 'after-pr-review-or-merge',
@@ -129,6 +195,149 @@ const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
     'Do not promote a post-PR lesson until the issue/PR, source finding, correction, and verification evidence are all available.',
 };
 
+const LESSON_QUARANTINE_REVIEW_ACTION =
+  'Review rollback evidence, decide whether to retire or supersede the lesson, and keep it out of prompt injection until explicitly unquarantined.';
+
+export interface LessonQuarantineRequest {
+  readonly trigger: LessonQuarantineMetadata['trigger'];
+  readonly reason: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  readonly quarantinedAt: string;
+  readonly threshold?: number;
+}
+
+export interface LessonFailureSignal {
+  readonly taskId: TaskId;
+  readonly reason: string;
+  readonly evidenceUrl: string;
+}
+
+export interface RepeatedFailureQuarantineRequest {
+  readonly threshold: number;
+  readonly observedAt: string;
+  readonly failures: readonly LessonFailureSignal[];
+}
+
+export type LessonUnquarantineRequest = LessonUnquarantineMetadata;
+
+export function isLessonApplicable(lesson: CritiqueLesson): boolean {
+  if (lesson.quarantine !== undefined) {
+    return false;
+  }
+  if (lesson.experimentSandbox?.promotionBlocked === true) {
+    return false;
+  }
+  return (
+    lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active'
+  );
+}
+
+export function quarantineLesson(
+  lesson: CritiqueLesson,
+  request: LessonQuarantineRequest,
+): CritiqueLesson {
+  const reason = requireNonEmptyString(request.reason, 'quarantine reason');
+  const quarantinedAt = normalizeTimestamp(request.quarantinedAt);
+  if (request.evidence.length === 0) {
+    throw new RangeError(
+      'Lesson quarantine requires at least one evidence item.',
+    );
+  }
+  const evidence = request.evidence.map(normalizeQuarantineEvidence);
+  const previousQuarantine = lesson.quarantine;
+  const combinedEvidence = [
+    ...(previousQuarantine?.evidence ?? []),
+    ...evidence,
+  ];
+  const reviewItem = createLessonQuarantineReviewItem(
+    lesson,
+    reason,
+    combinedEvidence,
+    quarantinedAt,
+  );
+  const previousLifecycleStatus =
+    previousQuarantine?.previousLifecycleStatus ??
+    (lesson.lifecycleStatus === 'quarantined'
+      ? undefined
+      : lesson.lifecycleStatus);
+  const threshold = request.threshold ?? previousQuarantine?.threshold;
+  const quarantine: LessonQuarantineMetadata = {
+    trigger: request.trigger,
+    reason: previousQuarantine
+      ? `${previousQuarantine.reason}; ${reason}`
+      : reason,
+    quarantinedAt,
+    evidence: combinedEvidence,
+    ...(threshold !== undefined ? { threshold } : {}),
+    ...(previousLifecycleStatus !== undefined
+      ? { previousLifecycleStatus }
+      : {}),
+    reviewItem,
+  };
+  const { unquarantine, ...lessonWithoutUnquarantine } = lesson;
+  void unquarantine;
+  return {
+    ...lessonWithoutUnquarantine,
+    lifecycleStatus: 'quarantined',
+    quarantine,
+  };
+}
+
+export function quarantineLessonForRepeatedFailures(
+  lesson: CritiqueLesson,
+  request: RepeatedFailureQuarantineRequest,
+): CritiqueLesson {
+  if (!Number.isSafeInteger(request.threshold) || request.threshold < 1) {
+    throw new RangeError(
+      'Repeated failure quarantine threshold must be a positive integer.',
+    );
+  }
+  const distinctFailures = dedupeFailureSignals(request.failures);
+  if (distinctFailures.length < request.threshold) {
+    return lesson;
+  }
+  return quarantineLesson(lesson, {
+    trigger: 'repeated-failure-threshold',
+    reason: `Lesson caused ${distinctFailures.length} distinct failure signals, meeting the quarantine threshold of ${request.threshold}.`,
+    evidence: distinctFailures.map((failure) => ({
+      kind: 'failed-regression',
+      reference: failure.evidenceUrl,
+      note: `${failure.taskId}: ${failure.reason}`,
+    })),
+    quarantinedAt: request.observedAt,
+    threshold: request.threshold,
+  });
+}
+
+export function unquarantineLesson(
+  lesson: CritiqueLesson,
+  request: LessonUnquarantineRequest,
+): CritiqueLesson {
+  if (
+    lesson.lifecycleStatus !== 'quarantined' ||
+    lesson.quarantine === undefined
+  ) {
+    throw new RangeError('Only quarantined lessons can be unquarantined.');
+  }
+  requireNonEmptyString(request.reviewer, 'unquarantine reviewer');
+  requireNonEmptyString(request.reason, 'unquarantine reason');
+  requireNonEmptyString(request.evidenceUrl, 'unquarantine evidenceUrl');
+  const unquarantine: LessonUnquarantineMetadata = {
+    reviewedAt: normalizeTimestamp(request.reviewedAt),
+    reviewer: request.reviewer,
+    evidenceUrl: request.evidenceUrl,
+    reason: request.reason,
+  };
+  const { quarantine, ...lessonWithoutQuarantine } = lesson;
+  const restoredLifecycleStatus =
+    quarantine.previousLifecycleStatus ?? 'active';
+  return {
+    ...lessonWithoutQuarantine,
+    lifecycleStatus: restoredLifecycleStatus,
+    unquarantine,
+  };
+}
+
 export class LessonRecorder {
   private readonly memory: MemoryPort;
   private readonly cooldownMs: number;
@@ -138,6 +347,7 @@ export class LessonRecorder {
   private readonly blockerPatternThreshold: number;
   private readonly blockerPatterns: Map<string, BlockerPatternState>;
   private readonly pendingBlockerAdmissions: Map<string, Promise<void>>;
+  private readonly agentId?: string;
   private readonly pendingBlockerObservations = new WeakMap<
     CritiqueLesson,
     PendingBlockerPatternObservation[]
@@ -172,6 +382,15 @@ export class LessonRecorder {
     this.pendingBlockerAdmissions = getPendingBlockerAdmissions(
       this.blockerPatterns,
     );
+    if (options.agentId !== undefined) {
+      const agentId = options.agentId.trim();
+      if (!agentId) {
+        throw new RangeError(
+          'LessonRecorder agentId must be a non-empty string when provided.',
+        );
+      }
+      this.agentId = agentId;
+    }
     const now = options.now ?? ((): Date => new Date());
     this.now = (): string => normalizeTimestamp(now());
     this.cooldowns = options.cooldownStore ?? new Map<string, number>();
@@ -184,7 +403,7 @@ export class LessonRecorder {
     result: CritiqueLoopResult,
     taskId: TaskId,
   ): Promise<LessonRecordingResult> {
-    const recordingResult = createMutableLessonRecordingResult();
+    const recordingResult = createMutableLessonRecordingResult(this.now());
 
     // Only record lessons from multi-iteration pass/warn successes.
     if (
@@ -241,6 +460,9 @@ export class LessonRecorder {
           if (suppression && !hasMinedBlockerPatterns) {
             this.commitBlockerPatternObservations(lesson);
             recordingResult.suppressedByCooldown.push(suppression);
+            recordingResult.learningBacklogItems.push(
+              createCooldownSuppressionBacklogItem(suppression),
+            );
             admissionSettled?.(false);
             if (
               admissionPromise &&
@@ -268,6 +490,10 @@ export class LessonRecorder {
         addUniqueBlockerPatterns(
           recordingResult.minedBlockerPatterns,
           lesson.blockerPatterns,
+        );
+        addLessonBacklogItems(
+          recordingResult.learningBacklogItems,
+          admittedLesson,
         );
         if (cooldownKey && this.cooldownMs > 0) {
           this.cooldowns.set(
@@ -331,6 +557,11 @@ export class LessonRecorder {
           critiqueFindings,
           recordedAt,
         );
+        const failedTestSkillCandidate = createFailedTestSkillCandidate(
+          failingIteration.index,
+          evalResult.evaluatorName,
+          critiqueFindings,
+        );
 
         const lesson: CritiqueLesson = {
           evaluatorName: evalResult.evaluatorName,
@@ -340,6 +571,7 @@ export class LessonRecorder {
             : 'Unknown correction',
           taskId,
           timestamp: recordedAt,
+          lifecycleStatus: 'candidate',
           experimentSandbox: {
             state: 'experimental',
             promotionBlocked: true,
@@ -369,8 +601,22 @@ export class LessonRecorder {
             evalResult.evaluatorName,
             critiqueFindings,
           ),
+          ...(failedTestSkillCandidate ? { failedTestSkillCandidate } : {}),
           postPrLessonExtractionTemplate:
             createPostPrLessonExtractionTemplate(),
+          ...(this.agentId
+            ? {
+                agentImprovementScorecard: createAgentImprovementScorecard(
+                  this.agentId,
+                  taskId,
+                  evalResult.evaluatorName,
+                  failingIteration,
+                  allIterations,
+                  critiqueFindings,
+                  recordedAt,
+                ),
+              }
+            : {}),
           cooldown: {
             key: cooldownKey,
             windowMs: this.cooldownMs,
@@ -651,6 +897,14 @@ export class LessonRecorder {
     return {
       ...lesson,
       timestamp: recordedAt,
+      ...(lesson.agentImprovementScorecard
+        ? {
+            agentImprovementScorecard: {
+              ...lesson.agentImprovementScorecard,
+              generatedAt: recordedAt,
+            },
+          }
+        : {}),
       cooldown: {
         ...lesson.cooldown,
         recordedAt,
@@ -682,18 +936,38 @@ function getPendingBlockerAdmissions(
   return pending;
 }
 
-interface MutableLessonRecordingResult {
+interface MutableLessonRecordingResult extends LessonRecordingResult {
   recorded: number;
   suppressedByCooldown: LessonCooldownSuppression[];
   minedBlockerPatterns: CrossTaskBlockerPattern[];
+  learningBacklogItems: LearningBacklogPrioritizationItem[];
 }
 
-function createMutableLessonRecordingResult(): MutableLessonRecordingResult {
-  return {
+function createMutableLessonRecordingResult(
+  generatedAt: string,
+): MutableLessonRecordingResult {
+  const learningBacklogItems: LearningBacklogPrioritizationItem[] = [];
+  const result = {
     recorded: 0,
     suppressedByCooldown: [],
     minedBlockerPatterns: [],
-  };
+  } as unknown as MutableLessonRecordingResult;
+  Object.defineProperty(result, 'learningBacklogItems', {
+    value: learningBacklogItems,
+    enumerable: false,
+    writable: false,
+  });
+  Object.defineProperty(result, 'learningBacklogPrioritizationReport', {
+    value: {
+      schemaVersion: 'learning-backlog-prioritization-report-v1',
+      generatedAt,
+      guidance: LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE,
+      items: learningBacklogItems,
+    },
+    enumerable: true,
+    writable: false,
+  });
+  return result;
 }
 
 function addUniqueBlockerPatterns(
@@ -705,6 +979,100 @@ function addUniqueBlockerPatterns(
       target.push(pattern);
     }
   }
+}
+
+function addLessonBacklogItems(
+  target: LearningBacklogPrioritizationItem[],
+  lesson: CritiqueLesson,
+): void {
+  target.push(createRecordedLessonBacklogItem(lesson));
+  for (const pattern of lesson.blockerPatterns ?? []) {
+    target.push(createBlockerPatternBacklogItem(pattern));
+  }
+  sortLearningBacklogItems(target);
+}
+
+function createRecordedLessonBacklogItem(
+  lesson: CritiqueLesson,
+): LearningBacklogPrioritizationItem {
+  const hasCriticalFindings =
+    (lesson.agentImprovementScorecard?.findingCounts.critical ?? 0) > 0 ||
+    (lesson.blockerPatterns?.length ?? 0) > 0 ||
+    lesson.reviewerFeedback?.findings.some(
+      (finding) => finding.severity === 'critical',
+    ) === true;
+  const suggestionsIncomplete =
+    lesson.reviewerFeedback?.suggestionsComplete === false;
+  const priority = hasCriticalFindings
+    ? 'high'
+    : suggestionsIncomplete
+      ? 'medium'
+      : 'low';
+  const score = priority === 'high' ? 80 : priority === 'medium' ? 50 : 30;
+  const title = lesson.reviewerFeedback?.summary ?? lesson.failureDescription;
+  const traceabilityId = lesson.testTraceability?.[0]?.lessonId;
+
+  return {
+    id: `lesson:${traceabilityId ?? stableHash(`${lesson.taskId}:${lesson.evaluatorName}:${lesson.failureDescription}`)}`,
+    source: 'recorded-lesson',
+    priority,
+    score,
+    taskId: lesson.taskId,
+    evaluatorName: lesson.evaluatorName,
+    title,
+    rationale: hasCriticalFindings
+      ? 'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.'
+      : suggestionsIncomplete
+        ? 'Recorded lesson is missing reviewer suggestions and needs PM follow-up before promotion.'
+        : 'Recorded lesson is ready for routine learning backlog review once verification evidence is attached.',
+    recommendedAction:
+      'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
+  };
+}
+
+function createCooldownSuppressionBacklogItem(
+  suppression: LessonCooldownSuppression,
+): LearningBacklogPrioritizationItem {
+  return {
+    id: `suppression:${suppression.key}:${sanitizeLessonIdPart(suppression.taskId)}`,
+    source: 'cooldown-suppression',
+    priority: 'low',
+    score: 20,
+    taskId: suppression.taskId,
+    evaluatorName: suppression.evaluatorName,
+    title: `Duplicate learning signal suppressed for ${suppression.evaluatorName}`,
+    rationale:
+      'Equivalent learning feedback is already inside the cooldown window and should not create duplicate backlog churn.',
+    recommendedAction:
+      'Reuse the existing in-cooldown lesson until suppression expires; do not create a duplicate backlog item.',
+  };
+}
+
+function createBlockerPatternBacklogItem(
+  pattern: CrossTaskBlockerPattern,
+): LearningBacklogPrioritizationItem {
+  return {
+    id: `blocker:${pattern.key}`,
+    source: 'blocker-pattern',
+    priority: 'high',
+    score: 100,
+    evaluatorName: pattern.evaluatorName,
+    title: pattern.normalizedFinding,
+    rationale: `Critical learning blocker recurred across ${pattern.occurrences} distinct tasks and crossed the routing threshold of ${pattern.threshold}.`,
+    recommendedAction:
+      'Route a durable mitigation owner before accepting more duplicate worker rediscovery for this blocker pattern.',
+  };
+}
+
+function sortLearningBacklogItems(
+  items: LearningBacklogPrioritizationItem[],
+): void {
+  items.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return left.id.localeCompare(right.id);
+  });
 }
 
 function createCrossTaskBlockerPattern(
@@ -743,6 +1111,116 @@ function normalizeBlockerFinding(message: string): string {
   return message.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+function createAgentImprovementScorecard(
+  agentId: string,
+  taskId: TaskId,
+  evaluatorName: string,
+  failingIteration: CritiqueIteration,
+  allIterations: readonly CritiqueIteration[],
+  currentFindings: readonly {
+    readonly message: string;
+    readonly severity: string;
+  }[],
+  generatedAt: string,
+): AgentImprovementScorecard {
+  const evaluatorFailures = allIterations.filter((iteration) =>
+    iteration.result.results.some(
+      (result) =>
+        result.evaluatorName === evaluatorName &&
+        result.verdict === 'fail' &&
+        result.findings.some(
+          (finding) => finding.location !== EVALUATOR_EXCEPTION_LOCATION,
+        ),
+    ),
+  );
+  const failingIterations = evaluatorFailures.map(
+    (iteration) => iteration.index,
+  );
+  const allFindings = evaluatorFailures.flatMap((iteration) =>
+    iteration.result.results
+      .filter(
+        (result) =>
+          result.evaluatorName === evaluatorName && result.verdict === 'fail',
+      )
+      .flatMap((result) =>
+        result.findings.filter(
+          (finding) => finding.location !== EVALUATOR_EXCEPTION_LOCATION,
+        ),
+      ),
+  );
+  const findings = allFindings.length > 0 ? allFindings : currentFindings;
+  const initialScore =
+    evaluatorFailures[0]?.result.results.find(
+      (result) => result.evaluatorName === evaluatorName,
+    )?.score ??
+    failingIteration.result.results.find(
+      (result) => result.evaluatorName === evaluatorName,
+    )?.score ??
+    failingIteration.result.overallScore;
+  const passingIteration = allIterations.find(
+    (iteration) =>
+      iteration.result.verdict === 'pass' ||
+      iteration.result.verdict === 'warn',
+  );
+  const finalScore =
+    passingIteration?.result.results.find(
+      (result) => result.evaluatorName === evaluatorName,
+    )?.score ??
+    passingIteration?.result.overallScore ??
+    initialScore;
+  const findingCounts = countScorecardFindings(findings);
+  const scoreDelta = roundScore(finalScore - initialScore);
+  const improvementSignals = [
+    `Recovered from ${failingIterations.length} failing critique ${
+      failingIterations.length === 1 ? 'iteration' : 'iterations'
+    } before ${passingIteration?.result.verdict ?? 'recovery'}.`,
+    `Improved ${evaluatorName} score by ${scoreDelta}.`,
+    ...(findingCounts.critical > 0
+      ? [
+          `Resolved ${findingCounts.critical} critical blocker ${
+            findingCounts.critical === 1 ? 'finding' : 'findings'
+          }.`,
+        ]
+      : []),
+  ];
+
+  return {
+    schemaVersion: 'agent-improvement-scorecard-v1',
+    agentId,
+    taskId,
+    evaluatorName,
+    generatedAt,
+    initialScore: roundScore(initialScore),
+    finalScore: roundScore(finalScore),
+    scoreDelta,
+    failingIterations,
+    resolvedIteration: passingIteration?.index ?? failingIteration.index,
+    findingCounts,
+    improvementSignals,
+    guidance: AGENT_IMPROVEMENT_SCORECARD_GUIDANCE,
+  };
+}
+
+function countScorecardFindings(
+  findings: readonly { readonly severity: string }[],
+): AgentImprovementScorecard['findingCounts'] {
+  const counts = { critical: 0, warning: 0, info: 0, total: findings.length };
+  for (const finding of findings) {
+    if (finding.severity === 'critical') {
+      counts.critical += 1;
+    } else if (finding.severity === 'warning') {
+      counts.warning += 1;
+    } else {
+      counts.info += 1;
+    }
+  }
+  return counts;
+}
+
+function roundScore(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
 function createPostPrLessonExtractionTemplate(): PostPrLessonExtractionTemplate {
   return {
     ...POST_PR_LESSON_EXTRACTION_TEMPLATE,
@@ -760,6 +1238,68 @@ function createLessonRollbackWorkflow(): LessonRollbackWorkflow {
     requiredEvidence: [...LESSON_ROLLBACK_WORKFLOW.requiredEvidence],
     requestSchema: { ...LESSON_ROLLBACK_WORKFLOW.requestSchema },
   };
+}
+
+function createFailedTestSkillCandidate(
+  sourceIteration: number,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): FailedTestSkillCandidate | undefined {
+  const matched = new Set<string>();
+  const sourceFindingMessages: string[] = [];
+
+  for (const finding of findings) {
+    const primaryText = [finding.message, finding.location]
+      .filter((value): value is string => Boolean(value))
+      .join('\n');
+    const suggestionText = finding.suggestion ?? '';
+    const primarySignals = collectFailedTestSignals(primaryText);
+    const suggestionSignals = collectFailedTestSignals(suggestionText);
+    const allSignals = [...primarySignals, ...suggestionSignals];
+    const hasPrimarySignal = primarySignals.length > 0;
+    const hasStrongSignal = primarySignals.some(
+      (signal) => signal.strength === 'strong',
+    );
+    const distinctSignals = new Set(allSignals.map((signal) => signal.label));
+
+    if (hasPrimarySignal && hasStrongSignal && distinctSignals.size > 0) {
+      sourceFindingMessages.push(finding.message);
+      for (const signal of distinctSignals) {
+        matched.add(signal);
+      }
+    }
+  }
+
+  if (matched.size === 0) {
+    return undefined;
+  }
+
+  return {
+    detector: 'failed-test-to-skill-candidate',
+    candidate: true,
+    sourceIteration,
+    evaluatorName,
+    matchedSignals: [...matched].sort(),
+    sourceFindingMessages,
+    operatorGuidance: FAILED_TEST_SKILL_CANDIDATE_GUIDANCE,
+  };
+}
+
+function collectFailedTestSignals(text: string): {
+  label: string;
+  strength: 'strong' | 'supporting';
+}[] {
+  return FAILED_TEST_SIGNAL_PATTERNS.filter((signal) =>
+    signal.pattern.test(text),
+  ).map((signal) => ({
+    label: signal.label,
+    strength: signal.strength,
+  }));
 }
 
 function createReviewerFeedbackCapture(
@@ -836,6 +1376,71 @@ function addCooldownWindowMs(baseMs: number, cooldownMs: number): number {
     );
   }
   return suppressUntilMs;
+}
+
+function createLessonQuarantineReviewItem(
+  lesson: CritiqueLesson,
+  reason: string,
+  evidence: readonly LessonQuarantineEvidence[],
+  createdAt: string,
+): LessonQuarantineMetadata['reviewItem'] {
+  const lessonId =
+    lesson.testTraceability?.[0]?.lessonId ??
+    `${sanitizeLessonIdPart(lesson.taskId)}:${sanitizeLessonIdPart(lesson.evaluatorName)}`;
+  return {
+    id: `lesson-quarantine:${stableHash(`${lessonId}:${reason}:${createdAt}`)}`,
+    status: 'open',
+    lessonId,
+    createdAt,
+    reason,
+    evidence,
+    recommendedAction: LESSON_QUARANTINE_REVIEW_ACTION,
+  };
+}
+
+function normalizeQuarantineEvidence(
+  evidence: LessonQuarantineEvidence,
+): LessonQuarantineEvidence {
+  const reference = requireNonEmptyString(
+    evidence.reference,
+    'quarantine evidence reference',
+  );
+  return {
+    kind: evidence.kind,
+    reference,
+    ...(evidence.note ? { note: evidence.note } : {}),
+  };
+}
+
+function requireNonEmptyString(value: string, fieldName: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new RangeError(`Lesson ${fieldName} must be a non-empty string.`);
+  }
+  return normalized;
+}
+
+function dedupeFailureSignals(
+  failures: readonly LessonFailureSignal[],
+): LessonFailureSignal[] {
+  const seenTaskIds = new Set<string>();
+  const uniqueFailures: LessonFailureSignal[] = [];
+  for (const failure of failures) {
+    const taskIdText = requireNonEmptyString(failure.taskId, 'failure taskId');
+    if (seenTaskIds.has(taskIdText)) {
+      continue;
+    }
+    seenTaskIds.add(taskIdText);
+    uniqueFailures.push({
+      taskId: failure.taskId,
+      reason: requireNonEmptyString(failure.reason, 'failure reason'),
+      evidenceUrl: requireNonEmptyString(
+        failure.evidenceUrl,
+        'failure evidenceUrl',
+      ),
+    });
+  }
+  return uniqueFailures;
 }
 
 function stableHash(value: string): string {

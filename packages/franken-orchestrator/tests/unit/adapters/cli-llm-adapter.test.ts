@@ -513,6 +513,51 @@ describe('CliLlmAdapter', () => {
           .rejects.toThrow(/timeout/i);
       });
 
+      it('warns and still rejects when the timeout SIGTERM fails', async () => {
+        vi.useFakeTimers();
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+        try {
+          const killError = new Error('process already exited');
+          const spawnFn = (): ChildProcess => {
+            const proc = new EventEmitter() as ChildProcess;
+            Object.defineProperty(proc, 'stdin', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'stdout', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'stderr', { value: new PassThrough(), writable: false });
+            Object.defineProperty(proc, 'pid', { value: 13579, writable: false });
+            Object.defineProperty(proc, 'kill', {
+              value: vi.fn((signal?: NodeJS.Signals | number) => {
+                if (signal === 'SIGTERM') throw killError;
+                return true;
+              }),
+              writable: false,
+            });
+            return proc;
+          };
+          const adapter = new CliLlmAdapter(
+            claudeProvider,
+            { ...baseOpts, timeoutMs: 50 },
+            spawnFn,
+          );
+
+          const result = adapter.execute({ prompt: 'test', maxTurns: 1 });
+          const assertion = expect(result).rejects.toThrow('CLI timeout after 50ms');
+
+          await vi.advanceTimersByTimeAsync(50);
+          await assertion;
+          await vi.advanceTimersByTimeAsync(5_000);
+
+          expect(warnSpy).toHaveBeenCalledWith('[CliLlmAdapter] Failed to terminate timed-out CLI process', {
+            signal: 'SIGTERM',
+            pid: 13579,
+            error: 'process already exited',
+          });
+        } finally {
+          warnSpy.mockRestore();
+          vi.useRealTimers();
+        }
+      });
+
       it('settles the timeout path once when the child closes before hard kill', async () => {
         vi.useFakeTimers();
         const killSignals: NodeJS.Signals[] = [];

@@ -1,3 +1,10 @@
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto';
 import Database from 'better-sqlite3';
 import type {
   IBrain,
@@ -8,6 +15,8 @@ import type {
   EpisodicEvent,
   ExecutionState,
   EpisodicEventType,
+  LearningCooldownOptions,
+  LearningRecordResult,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
 
@@ -27,6 +36,210 @@ export const DEFAULT_WORKING_MEMORY_LIMITS: WorkingMemoryLimits = {
   maxValueBytes: 5 * 1024 * 1024,
   maxTotalBytes: 64 * 1024 * 1024,
 };
+
+export const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+
+export interface MemorySchemaStoreMetadata {
+  store: string;
+  version: number;
+  recordCount: number;
+}
+
+export interface MemorySchemaMetadata {
+  version: number;
+  stores: MemorySchemaStoreMetadata[];
+}
+
+export interface MemorySchemaMigrationOperation {
+  table: string;
+  action: string;
+}
+
+export interface MemorySchemaMigrationResult {
+  fromVersion: number;
+  toVersion: number;
+  dryRun: boolean;
+  migrated: boolean;
+  backupPath?: string;
+  operations: MemorySchemaMigrationOperation[];
+}
+
+export interface MemorySchemaMigrationOptions {
+  dryRun?: boolean;
+  backupBeforeMigrate?: boolean;
+  backupPath?: string;
+}
+
+export interface MemoryEncryptionOptions {
+  /** Enable field-level AES-256-GCM encryption for persisted memory payloads. */
+  enabled: boolean;
+  /** Raw key material. Strings are SHA-256 derived into a 32-byte AES key; Buffers must be 32 bytes. */
+  key?: string | Buffer;
+  /** Environment variable to read when key is omitted. */
+  keyEnvVar?: string;
+}
+
+export interface SqliteBrainOptions {
+  hydrateWorkingMemoryFromDb?: boolean;
+  encryption?: MemoryEncryptionOptions;
+}
+
+export interface MemoryEncryptionMetadata {
+  algorithm: 'aes-256-gcm';
+  stores: Array<{ store: string; encrypted: boolean }>;
+}
+
+export interface MemoryEncryptionMigrationOptions extends MemoryEncryptionOptions {
+  dryRun?: boolean;
+  backupBeforeMigrate?: boolean;
+  backupPath?: string;
+}
+
+export interface MemoryEncryptionMigrationResult {
+  dryRun: boolean;
+  migrated: boolean;
+  backupPath?: string;
+  operations: MemorySchemaMigrationOperation[];
+}
+
+export class MemoryEncryptionKeyUnavailableError extends Error {
+  constructor(
+    message = 'Memory encryption is enabled but no key material is available',
+  ) {
+    super(message);
+    this.name = 'MemoryEncryptionKeyUnavailableError';
+  }
+}
+
+export class MemoryEncryptionRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MemoryEncryptionRequiredError';
+  }
+}
+
+export class MemoryEncryptionMigrationRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MemoryEncryptionMigrationRequiredError';
+  }
+}
+
+export class MemoryEncryptionWrongKeyError extends Error {
+  constructor(
+    message = 'Memory encryption key cannot decrypt the persisted memory store',
+  ) {
+    super(message);
+    this.name = 'MemoryEncryptionWrongKeyError';
+  }
+}
+
+const MEMORY_ENCRYPTION_ALGORITHM = 'aes-256-gcm' as const;
+const MEMORY_ENCRYPTION_PREFIX = 'enc:v1:';
+const MEMORY_ENCRYPTION_VERIFIER = 'franken-memory-encryption-verifier:v1';
+const MEMORY_STORES = [
+  'working_memory',
+  'episodic_events',
+  'checkpoints',
+] as const;
+
+type MemoryStoreName = (typeof MEMORY_STORES)[number];
+
+class MemoryCipher {
+  readonly algorithm = MEMORY_ENCRYPTION_ALGORITHM;
+  private readonly key: Buffer;
+
+  constructor(options: MemoryEncryptionOptions) {
+    const material =
+      options.key ??
+      (options.keyEnvVar ? process.env[options.keyEnvVar] : undefined);
+    if (!material) {
+      throw new MemoryEncryptionKeyUnavailableError();
+    }
+    if (Buffer.isBuffer(material)) {
+      if (material.length !== 32) {
+        throw new MemoryEncryptionKeyUnavailableError(
+          'Memory encryption Buffer keys must be exactly 32 bytes',
+        );
+      }
+      this.key = Buffer.from(material);
+    } else {
+      this.key = createHash('sha256').update(material, 'utf8').digest();
+    }
+  }
+
+  encrypt(plaintext: string): string {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv(MEMORY_ENCRYPTION_ALGORITHM, this.key, iv);
+    const ciphertext = Buffer.concat([
+      cipher.update(plaintext, 'utf8'),
+      cipher.final(),
+    ]);
+    const tag = cipher.getAuthTag();
+    return `${MEMORY_ENCRYPTION_PREFIX}${iv.toString('base64url')}:${tag.toString('base64url')}:${ciphertext.toString('base64url')}`;
+  }
+
+  decrypt(payload: string): string {
+    if (!isEncryptedPayload(payload)) return payload;
+    const parts = payload.slice(MEMORY_ENCRYPTION_PREFIX.length).split(':');
+    if (parts.length !== 3) {
+      throw new MemoryEncryptionWrongKeyError(
+        'Encrypted memory payload is malformed',
+      );
+    }
+    try {
+      const [ivB64, tagB64, ciphertextB64] = parts;
+      const decipher = createDecipheriv(
+        MEMORY_ENCRYPTION_ALGORITHM,
+        this.key,
+        Buffer.from(ivB64!, 'base64url'),
+      );
+      decipher.setAuthTag(Buffer.from(tagB64!, 'base64url'));
+      return Buffer.concat([
+        decipher.update(Buffer.from(ciphertextB64!, 'base64url')),
+        decipher.final(),
+      ]).toString('utf8');
+    } catch (error) {
+      throw new MemoryEncryptionWrongKeyError(
+        `Memory encryption key cannot decrypt a persisted payload: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  verify(payload: string): void {
+    const decrypted = this.decrypt(payload);
+    const expected = Buffer.from(MEMORY_ENCRYPTION_VERIFIER);
+    const actual = Buffer.from(decrypted);
+    if (
+      actual.length !== expected.length ||
+      !timingSafeEqual(actual, expected)
+    ) {
+      throw new MemoryEncryptionWrongKeyError();
+    }
+  }
+
+  verifier(): string {
+    return this.encrypt(MEMORY_ENCRYPTION_VERIFIER);
+  }
+}
+
+function isEncryptedPayload(value: string): boolean {
+  return value.startsWith(MEMORY_ENCRYPTION_PREFIX);
+}
+
+function makeMemoryCipher(
+  options?: MemoryEncryptionOptions,
+): MemoryCipher | undefined {
+  if (!options?.enabled) return undefined;
+  return new MemoryCipher(options);
+}
+
+export class UnsupportedMemorySchemaVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedMemorySchemaVersionError';
+  }
+}
 
 export class WorkingMemoryLimitError extends Error {
   constructor(message: string) {
@@ -72,6 +285,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     private db: Database.Database,
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
     hydrateFromDb = true,
+    private encryption?: MemoryCipher,
   ) {
     this.loadPersistedSerializedFromDb();
     if (hydrateFromDb) {
@@ -79,12 +293,21 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
-  private loadPersistedSerializedFromDb(): Array<{ key: string; value: string }> {
+  private loadPersistedSerializedFromDb(): Array<{
+    key: string;
+    value: string;
+  }> {
     const rows = this.db
       .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
       .all() as Array<{ key: string; value: string }>;
-    this.persistedSerialized = new Map(rows.map(row => [row.key, row.value]));
-    return rows;
+    const decryptedRows = rows.map((row) => ({
+      key: row.key,
+      value: this.encryption?.decrypt(row.value) ?? row.value,
+    }));
+    this.persistedSerialized = new Map(
+      decryptedRows.map((row) => [row.key, row.value]),
+    );
+    return decryptedRows;
   }
 
   /** Hydrate in-memory state from persisted SQLite working_memory rows. */
@@ -100,7 +323,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
     let total = 0;
     for (const row of rows) {
       const parsed = parseStoredWorkingMemoryValue(row.value);
-      const { normalized, serialized, size } = this.prepareEntry(row.key, parsed);
+      const { normalized, serialized, size } = this.prepareEntry(
+        row.key,
+        parsed,
+      );
       total += size;
       prepared.push([row.key, normalized, serialized, size]);
     }
@@ -127,10 +353,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   /** Flush in-memory changes to SQLite working_memory rows (called on checkpoint). */
   flushToDb(): (() => void) | void {
-    const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
+    const deleteKey = this.db.prepare(
+      `DELETE FROM working_memory WHERE key = ?`,
+    );
     const upsert = this.db.prepare(
-      `INSERT INTO working_memory (key, value, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
        WHERE working_memory.value IS NOT excluded.value`,
     );
     const now = isoNow();
@@ -150,7 +378,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
       for (const key of this.dirtyKeys) {
         const serialized = this.serialized.get(key);
         if (serialized !== undefined) {
-          upsert.run(key, serialized, now);
+          upsert.run(
+            key,
+            this.encryption?.encrypt(serialized) ?? serialized,
+            now,
+          );
         }
       }
       flushedDirtyKeys = new Set(this.dirtyKeys);
@@ -257,7 +489,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
       );
     }
     const newTotal = this.totalBytes - (this.sizes.get(key) ?? 0) + size;
-    if (!Number.isSafeInteger(newTotal) || newTotal > this.limits.maxTotalBytes) {
+    if (
+      !Number.isSafeInteger(newTotal) ||
+      newTotal > this.limits.maxTotalBytes
+    ) {
       throw new WorkingMemoryLimitError(
         `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
       );
@@ -293,8 +528,16 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   /** Current occupancy, for callers that want to react before limits are hit. */
-  usage(): { entries: number; totalBytes: number; limits: WorkingMemoryLimits } {
-    return { entries: this.store.size, totalBytes: this.totalBytes, limits: { ...this.limits } };
+  usage(): {
+    entries: number;
+    totalBytes: number;
+    limits: WorkingMemoryLimits;
+  } {
+    return {
+      entries: this.store.size,
+      totalBytes: this.totalBytes,
+      limits: { ...this.limits },
+    };
   }
 
   has(key: string): boolean {
@@ -369,9 +612,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
 const SQLITE_VARIABLE_LIMIT = 999;
 const RECALL_VARIABLES_PER_KEYWORD = 4;
 const CORRUPT_JSON_SCAN_BATCH_SIZE = 100;
+const DEFAULT_LEARNING_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const RECALL_LIMIT_VARIABLES = 1;
 const MAX_RECALL_KEYWORDS_PER_QUERY = Math.floor(
-  (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) / RECALL_VARIABLES_PER_KEYWORD,
+  (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) /
+    RECALL_VARIABLES_PER_KEYWORD,
 );
 
 interface EpisodicRow {
@@ -384,29 +629,134 @@ interface EpisodicRow {
 }
 
 class SqliteEpisodicMemory implements IEpisodicMemory {
-  constructor(private db: Database.Database) {}
+  constructor(
+    private db: Database.Database,
+    private encryption?: MemoryCipher,
+  ) {}
 
   record(event: EpisodicEvent): void {
+    this.insertEvent(event);
+  }
+
+  recordLearning(
+    event: EpisodicEvent,
+    options: LearningCooldownOptions = {},
+  ): LearningRecordResult {
+    const key = normalizeLearningKey(
+      options.key ?? readLearningKey(event) ?? `${event.step ?? ''}:${event.summary}`,
+    );
+    const cooldownMs = options.cooldownMs ?? DEFAULT_LEARNING_COOLDOWN_MS;
+    const eventTimeMs = Date.parse(event.createdAt);
+
+    if (!key) {
+      throw new Error('Learning cooldown key must not be empty');
+    }
+    if (!Number.isInteger(cooldownMs) || cooldownMs < 0) {
+      throw new RangeError('Learning cooldown must be a non-negative integer number of milliseconds');
+    }
+    if (!Number.isFinite(eventTimeMs)) {
+      throw new Error(`Learning event createdAt must be a valid ISO timestamp: ${event.createdAt}`);
+    }
+
+    const normalizedCreatedAt = new Date(eventTimeMs).toISOString();
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (cooldownMs > 0) {
+        const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
+        if (existingEvent) {
+          this.db.exec('COMMIT');
+          return {
+            recorded: false,
+            reason: 'cooldown',
+            key,
+            cooldownMs,
+            existingEvent,
+            cooldownUntil: new Date(
+              Date.parse(existingEvent.createdAt) + (readLearningCooldownMs(existingEvent) ?? cooldownMs),
+            ).toISOString(),
+          };
+        }
+      }
+
+      this.insertEvent({
+        ...event,
+        createdAt: normalizedCreatedAt,
+        details: {
+          ...(event.details ?? {}),
+          learningKey: key,
+          learningCooldownMs: cooldownMs,
+        },
+      });
+
+      this.db.exec('COMMIT');
+      return { recorded: true, key, cooldownMs };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private insertEvent(event: EpisodicEvent): void {
     this.db
       .prepare(
-        `INSERT INTO episodic_events (type, step, summary, details, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO episodic_events (type, step, summary, details, created_at, schema_version)
+         VALUES (?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
       )
       .run(
         event.type,
         event.step ?? null,
-        event.summary,
-        event.details ? JSON.stringify(event.details) : null,
+        this.encode(event.summary),
+        event.details ? this.encode(JSON.stringify(event.details)) : null,
         event.createdAt,
       );
   }
 
+  private findLearningCooldownEvent(
+    key: string,
+    eventTimeMs: number,
+    cooldownMs: number,
+  ): EpisodicEvent | null {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM episodic_events
+         WHERE details LIKE ? ESCAPE '\\'
+         ORDER BY id DESC`,
+      )
+      .all(learningKeyDetailsPattern(key)) as EpisodicRow[];
+
+    for (const row of rows) {
+      const existingEvent = rowToEvent(row);
+      if (!existingEvent || normalizeLearningKey(readLearningKey(existingEvent) ?? '') !== key) {
+        continue;
+      }
+
+      const existingTimeMs = Date.parse(existingEvent.createdAt);
+      const existingCooldownMs = readLearningCooldownMs(existingEvent) ?? cooldownMs;
+      if (
+        Number.isFinite(existingTimeMs)
+        && Number.isInteger(existingCooldownMs)
+        && existingCooldownMs > 0
+        && existingTimeMs <= eventTimeMs
+        && eventTimeMs - existingTimeMs < existingCooldownMs
+      ) {
+        return existingEvent;
+      }
+    }
+
+    return null;
+  }
+
   recall(query: string, limit = 10): EpisodicEvent[] {
+    if (this.encryption) {
+      return this.recallEncrypted(query, limit);
+    }
+
     const keywords = query
       .toLowerCase()
       .split(/\s+/)
-      .filter(w => w.length > 2)
-      .filter(w => !STOPWORDS.has(w));
+      .filter((w) => w.length > 2)
+      .filter((w) => !STOPWORDS.has(w));
 
     if (keywords.length === 0) {
       return this.recent(limit);
@@ -414,12 +764,17 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
     if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
       return collectRowsToEvents(
-        (batchLimit, offset) => this.recallKeywordChunk(keywords, batchLimit, offset),
+        (batchLimit, offset) =>
+          this.recallKeywordChunk(keywords, batchLimit, offset),
         limit,
+        this.encryption,
       );
     }
 
-    const rowsById = new Map<number, EpisodicRow & { relevance_score: number }>();
+    const rowsById = new Map<
+      number,
+      EpisodicRow & { relevance_score: number }
+    >();
     for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
       for (const row of this.recallKeywordChunk(chunk)) {
         const existing = rowsById.get(row.id);
@@ -431,13 +786,57 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       }
     }
 
-    const sortedRows = [...rowsById.values()].sort((a, b) =>
-      b.relevance_score - a.relevance_score
-      || b.created_at.localeCompare(a.created_at)
-      || b.id - a.id,
+    const sortedRows = [...rowsById.values()].sort(
+      (a, b) =>
+        b.relevance_score - a.relevance_score ||
+        b.created_at.localeCompare(a.created_at) ||
+        b.id - a.id,
     );
 
-    return rowsToEvents(sortedRows, limit);
+    return rowsToEvents(sortedRows, limit, this.encryption);
+  }
+
+  private recallEncrypted(query: string, limit = 10): EpisodicEvent[] {
+    if (limit === 0) return [];
+    const keywords = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .filter((w) => !STOPWORDS.has(w));
+    if (keywords.length === 0) {
+      return this.recent(limit);
+    }
+    const rows = this.db
+      .prepare(`SELECT * FROM episodic_events ORDER BY created_at DESC`)
+      .all() as EpisodicRow[];
+    const scored = rowsToEvents(rows, -1, this.encryption)
+      .map((event) => {
+        const summary = event.summary.toLowerCase();
+        const details = event.details
+          ? JSON.stringify(event.details).toLowerCase()
+          : '';
+        const score = keywords.reduce(
+          (sum, keyword) =>
+            sum +
+            (summary.includes(keyword) ? 1 : 0) +
+            (details.includes(keyword) ? 1 : 0),
+          0,
+        );
+        return { event, score };
+      })
+      .filter((row) => row.score > 0)
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          b.event.createdAt.localeCompare(a.event.createdAt) ||
+          Number(b.event.id ?? 0) - Number(a.event.id ?? 0),
+      )
+      .map((row) => row.event);
+    return limit < 0 ? scored : scored.slice(0, limit);
+  }
+
+  encode(value: string): string {
+    return this.encryption?.encrypt(value) ?? value;
   }
 
   private recallKeywordChunk(
@@ -446,13 +845,19 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     offset = 0,
   ): Array<EpisodicRow & { relevance_score: number }> {
     // Build scoring SQL: count keyword matches across summary + details
-    const scoringCases = keywords.map(() =>
-      `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
-    ).join(' + ');
+    const scoringCases = keywords
+      .map(
+        () =>
+          `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
+      )
+      .join(' + ');
 
-    const whereClauses = keywords.map(() =>
-      `(LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\')`,
-    ).join(' OR ');
+    const whereClauses = keywords
+      .map(
+        () =>
+          `(LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\')`,
+      )
+      .join(' OR ');
 
     const sql = `
       SELECT *, (${scoringCases}) AS relevance_score
@@ -462,15 +867,18 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       ${limit === undefined ? '' : 'LIMIT ? OFFSET ?'}
     `;
 
-    const likeParams = keywords.flatMap(k => {
+    const likeParams = keywords.flatMap((k) => {
       const escaped = `%${escapeLike(k)}%`;
       return [escaped, escaped];
     });
-    const allParams = limit === undefined
-      ? [...likeParams, ...likeParams]
-      : [...likeParams, ...likeParams, limit, offset];
+    const allParams =
+      limit === undefined
+        ? [...likeParams, ...likeParams]
+        : [...likeParams, ...likeParams, limit, offset];
 
-    return this.db.prepare(sql).all(...allParams) as Array<EpisodicRow & { relevance_score: number }>;
+    return this.db.prepare(sql).all(...allParams) as Array<
+      EpisodicRow & { relevance_score: number }
+    >;
   }
 
   recentFailures(n = 10): EpisodicEvent[] {
@@ -481,6 +889,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     return collectRowsToEvents(
       (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
       n,
+      this.encryption,
     );
   }
 
@@ -491,7 +900,42 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     return collectRowsToEvents(
       (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
       n,
+      this.encryption,
     );
+  }
+
+  snapshotForHandoff(n = 100, nowMs = Date.now()): EpisodicEvent[] {
+    const recentEvents = this.recent(n);
+    const eventsById = new Map<number | string, EpisodicEvent>();
+    for (const event of recentEvents) {
+      eventsById.set(event.id ?? `${event.createdAt}:${event.summary}`, event);
+    }
+
+    const activeLearningRows = this.db
+      .prepare(
+        `SELECT * FROM episodic_events
+         WHERE details LIKE ? ESCAPE '\\'
+         ORDER BY id DESC`,
+      )
+      .all(learningKeyDetailsPattern()) as EpisodicRow[];
+
+    for (const row of activeLearningRows) {
+      const event = rowToEvent(row);
+      const eventTimeMs = event ? Date.parse(event.createdAt) : NaN;
+      const eventCooldownMs = event ? readLearningCooldownMs(event) ?? DEFAULT_LEARNING_COOLDOWN_MS : NaN;
+      if (
+        event
+        && readLearningKey(event) !== undefined
+        && Number.isFinite(eventTimeMs)
+        && Number.isInteger(eventCooldownMs)
+        && eventCooldownMs > 0
+        && nowMs - eventTimeMs < eventCooldownMs
+      ) {
+        eventsById.set(event.id ?? `${event.createdAt}:${event.summary}`, event);
+      }
+    }
+
+    return [...eventsById.values()].sort(compareEventsNewestFirst);
   }
 
   count(): number {
@@ -514,15 +958,25 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   constructor(
     private db: Database.Database,
     private flushWorkingMemory?: () => (() => void) | void,
+    private encryption?: MemoryCipher,
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
-    const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = { current: undefined };
+    const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = {
+      current: undefined,
+    };
     const tx = this.db.transaction(() => {
-      finalizeWorkingMemoryFlush.current = this.flushWorkingMemory?.() ?? undefined;
+      finalizeWorkingMemoryFlush.current =
+        this.flushWorkingMemory?.() ?? undefined;
       const result = this.db
-        .prepare(`INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`)
-        .run(JSON.stringify(state), state.timestamp);
+        .prepare(
+          `INSERT INTO checkpoints (state, created_at, schema_version) VALUES (?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+        )
+        .run(
+          this.encryption?.encrypt(JSON.stringify(state)) ??
+            JSON.stringify(state),
+          state.timestamp,
+        );
       return { id: String(result.lastInsertRowid) };
     });
 
@@ -532,11 +986,16 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 
   lastCheckpoint(): ExecutionState | null {
-    const stmt = this.db.prepare(`SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`);
+    const stmt = this.db.prepare(
+      `SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`,
+    );
     for (let offset = 0; ; offset += CORRUPT_JSON_SCAN_BATCH_SIZE) {
-      const rows = stmt.all(CORRUPT_JSON_SCAN_BATCH_SIZE, offset) as CheckpointRow[];
+      const rows = stmt.all(
+        CORRUPT_JSON_SCAN_BATCH_SIZE,
+        offset,
+      ) as CheckpointRow[];
       for (const row of rows) {
-        const state = parseCheckpointState(row);
+        const state = parseCheckpointState(row, this.encryption);
         if (state !== null) {
           return state;
         }
@@ -551,7 +1010,7 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
     const rows = this.db
       .prepare(`SELECT id, created_at FROM checkpoints ORDER BY id ASC`)
       .all() as Array<{ id: number; created_at: string }>;
-    return rows.map(r => ({ id: String(r.id), timestamp: r.created_at }));
+    return rows.map((r) => ({ id: String(r.id), timestamp: r.created_at }));
   }
 
   clearCheckpoints(): void {
@@ -567,30 +1026,52 @@ export class SqliteBrain implements IBrain {
   readonly recovery: SqliteRecoveryMemory;
 
   private db: Database.Database;
+  private readonly encryption: MemoryCipher | undefined;
 
   constructor(
     dbPath: string = ':memory:',
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
-    options: { hydrateWorkingMemoryFromDb?: boolean } = {},
+    options: SqliteBrainOptions = {},
   ) {
     this.db = new Database(dbPath);
+    this.db.pragma('busy_timeout = 5000');
+    assertSupportedMemorySchema(this.db);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.initSchema();
-    this.working = new SqliteWorkingMemory(this.db, {
-      ...DEFAULT_WORKING_MEMORY_LIMITS,
-      ...workingMemoryLimits,
-    }, options.hydrateWorkingMemoryFromDb ?? true);
-    this.episodic = new SqliteEpisodicMemory(this.db);
-    this.recovery = new SqliteRecoveryMemory(this.db, () => this.working.flushToDb());
+    migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
+    const encryption = makeMemoryCipher(options.encryption);
+    this.encryption = encryption;
+    assertMemoryEncryptionState(this.db, dbPath, encryption);
+    this.working = new SqliteWorkingMemory(
+      this.db,
+      {
+        ...DEFAULT_WORKING_MEMORY_LIMITS,
+        ...workingMemoryLimits,
+      },
+      options.hydrateWorkingMemoryFromDb ?? true,
+      encryption,
+    );
+    this.episodic = new SqliteEpisodicMemory(this.db, encryption);
+    this.recovery = new SqliteRecoveryMemory(
+      this.db,
+      () => this.working.flushToDb(),
+      encryption,
+    );
   }
 
   private initSchema(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_schema_versions (
+        store TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        migrated_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS working_memory (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
       CREATE TABLE IF NOT EXISTS episodic_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -599,14 +1080,77 @@ export class SqliteBrain implements IBrain {
         summary TEXT NOT NULL,
         details TEXT,
         embedding BLOB,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
       CREATE TABLE IF NOT EXISTS checkpoints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         state TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE TABLE IF NOT EXISTS memory_encryption_status (
+        store TEXT PRIMARY KEY,
+        encrypted INTEGER NOT NULL,
+        algorithm TEXT,
+        verifier TEXT,
+        updated_at TEXT NOT NULL
       );
     `);
+  }
+
+  getMemorySchemaMetadata(): MemorySchemaMetadata {
+    return readMemorySchemaMetadata(this.db);
+  }
+
+  getMemoryEncryptionMetadata(): MemoryEncryptionMetadata {
+    return readMemoryEncryptionMetadata(this.db);
+  }
+
+  static migrateMemoryEncryption(
+    dbPath: string,
+    options: MemoryEncryptionMigrationOptions,
+  ): MemoryEncryptionMigrationResult {
+    const cipher = makeMemoryCipher(options);
+    if (!cipher) {
+      throw new MemoryEncryptionKeyUnavailableError();
+    }
+    const db = new Database(
+      dbPath,
+      options.dryRun ? { readonly: true, fileMustExist: true } : {},
+    );
+    try {
+      assertSupportedMemorySchema(db);
+      if (!options.dryRun) {
+        db.pragma('busy_timeout = 5000');
+        db.pragma('journal_mode = WAL');
+        db.pragma('busy_timeout = 5000');
+      }
+      return migrateMemoryEncryptionDatabase(db, dbPath, cipher, options);
+    } finally {
+      db.close();
+    }
+  }
+
+  static migrateMemorySchema(
+    dbPath: string,
+    options: MemorySchemaMigrationOptions = {},
+  ): MemorySchemaMigrationResult {
+    const db = new Database(
+      dbPath,
+      options.dryRun ? { readonly: true, fileMustExist: true } : {},
+    );
+    try {
+      if (!options.dryRun) {
+        db.pragma('busy_timeout = 5000');
+        assertSupportedMemorySchema(db);
+        db.pragma('journal_mode = WAL');
+        db.pragma('busy_timeout = 5000');
+      }
+      return migrateMemorySchemaDatabase(db, dbPath, options);
+    } finally {
+      db.close();
+    }
   }
 
   /** Flush working memory to SQLite before serialization or checkpoint. */
@@ -620,7 +1164,7 @@ export class SqliteBrain implements IBrain {
       version: 1,
       timestamp: isoNow(),
       working: this.working.snapshot(),
-      episodic: this.episodic.recent(100),
+      episodic: this.episodic.snapshotForHandoff(100),
       checkpoint: this.recovery.lastCheckpoint(),
       metadata: {
         lastProvider: '',
@@ -634,8 +1178,12 @@ export class SqliteBrain implements IBrain {
     snapshot: BrainSnapshot,
     dbPath: string = ':memory:',
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
+    options: SqliteBrainOptions = {},
   ): SqliteBrain {
-    const brain = new SqliteBrain(dbPath, workingMemoryLimits, { hydrateWorkingMemoryFromDb: false });
+    const brain = new SqliteBrain(dbPath, workingMemoryLimits, {
+      ...options,
+      hydrateWorkingMemoryFromDb: false,
+    });
 
     try {
       const insertEvent = brain.db.prepare(
@@ -643,13 +1191,15 @@ export class SqliteBrain implements IBrain {
          VALUES (?, ?, ?, ?, ?, ?)`,
       );
       const insertCheckpoint = brain.db.prepare(
-        `INSERT INTO checkpoints (state, created_at) VALUES (?, ?)`,
+        `INSERT INTO checkpoints (state, created_at, schema_version) VALUES (?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
       );
 
-      const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } = { current: undefined };
+      const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } =
+        { current: undefined };
       const restoreSnapshot = brain.db.transaction(() => {
         brain.working.restore(snapshot.working);
-        finalizeWorkingMemoryFlush.current = brain.working.flushToDb() ?? undefined;
+        finalizeWorkingMemoryFlush.current =
+          brain.working.flushToDb() ?? undefined;
 
         brain.db.prepare(`DELETE FROM episodic_events`).run();
         brain.db.prepare(`DELETE FROM checkpoints`).run();
@@ -659,14 +1209,28 @@ export class SqliteBrain implements IBrain {
             event.id ?? null,
             event.type,
             event.step ?? null,
-            event.summary,
-            event.details ? JSON.stringify(event.details) : null,
+            (
+              brain as unknown as {
+                episodic: { encode: (value: string) => string };
+              }
+            ).episodic.encode(event.summary),
+            event.details
+              ? (
+                  brain as unknown as {
+                    episodic: { encode: (value: string) => string };
+                  }
+                ).episodic.encode(JSON.stringify(event.details))
+              : null,
             event.createdAt,
           );
         }
 
         if (snapshot.checkpoint) {
-          insertCheckpoint.run(JSON.stringify(snapshot.checkpoint), snapshot.checkpoint.timestamp);
+          insertCheckpoint.run(
+            brain.encryption?.encrypt(JSON.stringify(snapshot.checkpoint)) ??
+              JSON.stringify(snapshot.checkpoint),
+            snapshot.checkpoint.timestamp,
+          );
         }
       });
 
@@ -685,22 +1249,589 @@ export class SqliteBrain implements IBrain {
   }
 }
 
+function migrateMemorySchemaDatabase(
+  db: Database.Database,
+  dbPath: string,
+  options: MemorySchemaMigrationOptions = {},
+): MemorySchemaMigrationResult {
+  const dryRun = options.dryRun ?? false;
+  const stores = ['working_memory', 'episodic_events', 'checkpoints'];
+  const tableRows = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+    .all() as Array<{
+    name: string;
+  }>;
+  const existingTables = new Set(tableRows.map((row) => row.name));
+  const operations: MemorySchemaMigrationOperation[] = [];
+  let fromVersion = CURRENT_MEMORY_SCHEMA_VERSION;
+
+  if (!existingTables.has('memory_schema_versions')) {
+    operations.push({
+      table: 'memory_schema_versions',
+      action: 'create store schema-version registry',
+    });
+    fromVersion = 0;
+  } else {
+    const rows = db
+      .prepare(`SELECT store, version FROM memory_schema_versions`)
+      .all() as Array<{ store: string; version: number }>;
+    for (const row of rows) {
+      if (row.version > CURRENT_MEMORY_SCHEMA_VERSION) {
+        throw new UnsupportedMemorySchemaVersionError(
+          `Memory store ${row.store} uses schema version ${row.version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        );
+      }
+      if (row.version < CURRENT_MEMORY_SCHEMA_VERSION) {
+        operations.push({
+          table: 'memory_schema_versions',
+          action: `update ${row.store} registry version from ${row.version} to ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        });
+      }
+      fromVersion = Math.min(fromVersion, row.version);
+    }
+  }
+
+  for (const store of stores) {
+    if (!existingTables.has(store)) continue;
+    const columnRows = db
+      .prepare(`PRAGMA table_info(${store})`)
+      .all() as Array<{ name: string }>;
+    const columns = new Set(columnRows.map((row) => row.name));
+    if (!columns.has('schema_version')) {
+      operations.push({
+        table: store,
+        action: `add schema_version column defaulting to ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+      });
+      fromVersion = 0;
+    } else {
+      const future = db
+        .prepare(
+          `SELECT schema_version FROM ${store} WHERE schema_version > ? LIMIT 1`,
+        )
+        .get(CURRENT_MEMORY_SCHEMA_VERSION) as
+        | { schema_version: number }
+        | undefined;
+      if (future) {
+        throw new UnsupportedMemorySchemaVersionError(
+          `Memory table ${store} contains record schema version ${future.schema_version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        );
+      }
+    }
+  }
+
+  for (const store of stores) {
+    if (existingTables.has(store)) {
+      const hasRegistryRow = existingTables.has('memory_schema_versions')
+        ? db
+            .prepare(`SELECT 1 FROM memory_schema_versions WHERE store = ?`)
+            .get(store)
+        : undefined;
+      if (!hasRegistryRow) {
+        operations.push({
+          table: 'memory_schema_versions',
+          action: `record ${store} store schema version`,
+        });
+        fromVersion = 0;
+      }
+    }
+  }
+
+  const migrated = operations.length > 0;
+  let backupPath = options.backupPath;
+  let createdBackupPath: string | undefined;
+  if (!dryRun && migrated && options.backupBeforeMigrate) {
+    if (dbPath === ':memory:') {
+      throw new Error(
+        'Cannot create a backup for an in-memory SQLite database',
+      );
+    }
+    backupPath ??= `${dbPath}.backup-${Date.now()}`;
+    db.exec(`VACUUM INTO ${sqliteStringLiteral(backupPath)}`);
+    createdBackupPath = backupPath;
+  }
+
+  if (!dryRun && migrated) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_schema_versions (
+        store TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        migrated_at TEXT NOT NULL
+      );
+    `);
+    for (const store of stores) {
+      if (!existingTables.has(store)) continue;
+      const columnRows = db
+        .prepare(`PRAGMA table_info(${store})`)
+        .all() as Array<{ name: string }>;
+      const columns = new Set(columnRows.map((row) => row.name));
+      if (!columns.has('schema_version')) {
+        db.exec(
+          `ALTER TABLE ${store} ADD COLUMN schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        );
+      }
+      const now = isoNow();
+      db.prepare(
+        `INSERT INTO memory_schema_versions (store, version, migrated_at) VALUES (?, ?, ?)
+         ON CONFLICT(store) DO UPDATE SET version = excluded.version, migrated_at = excluded.migrated_at`,
+      ).run(store, CURRENT_MEMORY_SCHEMA_VERSION, now);
+    }
+  }
+
+  return {
+    fromVersion,
+    toVersion: CURRENT_MEMORY_SCHEMA_VERSION,
+    dryRun,
+    migrated,
+    ...(createdBackupPath ? { backupPath: createdBackupPath } : {}),
+    operations,
+  };
+}
+
+function migrateMemoryEncryptionDatabase(
+  db: Database.Database,
+  dbPath: string,
+  cipher: MemoryCipher,
+  options: MemoryEncryptionMigrationOptions,
+): MemoryEncryptionMigrationResult {
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    ensureMemoryEncryptionStatusTable(db);
+  }
+  verifyExistingEncryptedStores(db, cipher);
+  const operations: MemorySchemaMigrationOperation[] = [];
+  for (const store of MEMORY_STORES) {
+    if (hasPlaintextStoreRows(db, store, cipher)) {
+      operations.push({
+        table: store,
+        action: `encrypt ${store} persisted payloads with ${cipher.algorithm}`,
+      });
+    }
+  }
+  const migrated = operations.length > 0 || !allStoresHaveEncryptionStatus(db);
+  let backupPath = options.backupPath;
+  let createdBackupPath: string | undefined;
+  if (!dryRun && migrated && options.backupBeforeMigrate) {
+    if (dbPath === ':memory:') {
+      throw new Error(
+        'Cannot create a backup for an in-memory SQLite database',
+      );
+    }
+    backupPath ??= `${dbPath}.encryption-backup-${Date.now()}`;
+    db.exec(`VACUUM INTO ${sqliteStringLiteral(backupPath)}`);
+    createdBackupPath = backupPath;
+  }
+  if (!dryRun && migrated) {
+    const tx = db.transaction(() => {
+      encryptPlaintextRows(db, cipher);
+      writeMemoryEncryptionStatus(db, cipher);
+    });
+    tx.immediate();
+  }
+  return {
+    dryRun,
+    migrated,
+    ...(createdBackupPath ? { backupPath: createdBackupPath } : {}),
+    operations,
+  };
+}
+
+function assertMemoryEncryptionState(
+  db: Database.Database,
+  dbPath: string,
+  cipher?: MemoryCipher,
+): void {
+  ensureMemoryEncryptionStatusTable(db);
+  const metadata = readMemoryEncryptionMetadata(db);
+  const anyEncrypted = metadata.stores.some((store) => store.encrypted);
+  if (!cipher) {
+    if (anyEncrypted) {
+      throw new MemoryEncryptionRequiredError(
+        `Memory database ${dbPath} is encrypted; reopen it with memory encryption enabled and a valid key`,
+      );
+    }
+    return;
+  }
+
+  verifyExistingEncryptedStores(db, cipher);
+  const storesWithoutStatus = metadata.stores.filter(
+    (store) => !store.encrypted,
+  );
+  const plaintextStores = metadata.stores.filter((store) =>
+    hasPlaintextStoreRows(db, store.store as MemoryStoreName, cipher),
+  );
+  if (plaintextStores.length > 0) {
+    throw new MemoryEncryptionMigrationRequiredError(
+      `Memory encryption is enabled but ${plaintextStores.map((store) => store.store).join(', ')} contain plaintext rows; run SqliteBrain.migrateMemoryEncryption() with a backup before opening`,
+    );
+  }
+
+  if (storesWithoutStatus.length === 0) return;
+
+  const storesWithData = storesWithoutStatus.filter(
+    (store) => countStoreRows(db, store.store as MemoryStoreName) > 0,
+  );
+  if (storesWithData.length > 0) {
+    throw new MemoryEncryptionMigrationRequiredError(
+      `Memory encryption is enabled but ${storesWithData.map((store) => store.store).join(', ')} contain plaintext rows; run SqliteBrain.migrateMemoryEncryption() with a backup before opening`,
+    );
+  }
+  writeMemoryEncryptionStatus(db, cipher);
+}
+
+function verifyExistingEncryptedStores(
+  db: Database.Database,
+  cipher: MemoryCipher,
+): void {
+  if (!tableExists(db, 'memory_encryption_status')) return;
+  const rows = db
+    .prepare(`SELECT store, encrypted, verifier FROM memory_encryption_status`)
+    .all() as Array<{
+    store: string;
+    encrypted: number;
+    verifier: string | null;
+  }>;
+  for (const row of rows) {
+    if (!row.encrypted) continue;
+    if (!row.verifier)
+      throw new MemoryEncryptionWrongKeyError(
+        `Encrypted memory store ${row.store} has no verifier`,
+      );
+    cipher.verify(row.verifier);
+  }
+}
+
+function tableExists(db: Database.Database, table: string): boolean {
+  return (
+    (db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+      )
+      .get(table) as unknown) !== undefined
+  );
+}
+
+function ensureMemoryEncryptionStatusTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_encryption_status (
+      store TEXT PRIMARY KEY,
+      encrypted INTEGER NOT NULL,
+      algorithm TEXT,
+      verifier TEXT,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
+function readMemoryEncryptionMetadata(
+  db: Database.Database,
+): MemoryEncryptionMetadata {
+  if (!tableExists(db, 'memory_encryption_status')) {
+    return {
+      algorithm: MEMORY_ENCRYPTION_ALGORITHM,
+      stores: MEMORY_STORES.map((store) => ({ store, encrypted: false })),
+    };
+  }
+  const rows = db
+    .prepare(`SELECT store, encrypted FROM memory_encryption_status`)
+    .all() as Array<{ store: string; encrypted: number }>;
+  const encryptedByStore = new Map(
+    rows.map((row) => [row.store, row.encrypted === 1]),
+  );
+  return {
+    algorithm: MEMORY_ENCRYPTION_ALGORITHM,
+    stores: MEMORY_STORES.map((store) => ({
+      store,
+      encrypted: encryptedByStore.get(store) ?? false,
+    })),
+  };
+}
+
+function writeMemoryEncryptionStatus(
+  db: Database.Database,
+  cipher: MemoryCipher,
+): void {
+  const now = isoNow();
+  const upsert = db.prepare(
+    `INSERT INTO memory_encryption_status (store, encrypted, algorithm, verifier, updated_at) VALUES (?, 1, ?, ?, ?)
+     ON CONFLICT(store) DO UPDATE SET encrypted = excluded.encrypted, algorithm = excluded.algorithm, verifier = excluded.verifier, updated_at = excluded.updated_at`,
+  );
+  for (const store of MEMORY_STORES) {
+    upsert.run(store, cipher.algorithm, cipher.verifier(), now);
+  }
+}
+
+function allStoresHaveEncryptionStatus(db: Database.Database): boolean {
+  const rows = db
+    .prepare(`SELECT store, encrypted FROM memory_encryption_status`)
+    .all() as Array<{ store: string; encrypted: number }>;
+  const encrypted = new Set(
+    rows.filter((row) => row.encrypted === 1).map((row) => row.store),
+  );
+  return MEMORY_STORES.every((store) => encrypted.has(store));
+}
+
+function hasPlaintextStoreRows(
+  db: Database.Database,
+  store: MemoryStoreName,
+  cipher?: MemoryCipher,
+): boolean {
+  for (const value of readStorePayloads(db, store)) {
+    if (!isDecryptableEncryptedPayload(value, cipher)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function readStorePayloads(
+  db: Database.Database,
+  store: MemoryStoreName,
+): string[] {
+  switch (store) {
+    case 'working_memory':
+      return (
+        db.prepare(`SELECT value FROM working_memory`).all() as Array<{
+          value: string;
+        }>
+      ).map((row) => row.value);
+    case 'episodic_events':
+      return (
+        db
+          .prepare(`SELECT summary, details FROM episodic_events`)
+          .all() as Array<{ summary: string; details: string | null }>
+      ).flatMap((row) =>
+        row.details === null ? [row.summary] : [row.summary, row.details],
+      );
+    case 'checkpoints':
+      return (
+        db.prepare(`SELECT state FROM checkpoints`).all() as Array<{
+          state: string;
+        }>
+      ).map((row) => row.state);
+  }
+}
+
+function isDecryptableEncryptedPayload(
+  value: string,
+  cipher?: MemoryCipher,
+): boolean {
+  if (!isEncryptedPayload(value) || !cipher) return false;
+  try {
+    cipher.decrypt(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function countStoreRows(db: Database.Database, store: MemoryStoreName): number {
+  return (
+    db.prepare(`SELECT COUNT(*) AS count FROM ${store}`).get() as {
+      count: number;
+    }
+  ).count;
+}
+
+function encryptPlaintextRows(
+  db: Database.Database,
+  cipher: MemoryCipher,
+): void {
+  for (const row of db
+    .prepare(`SELECT key, value FROM working_memory`)
+    .all() as Array<{ key: string; value: string }>) {
+    if (!isDecryptableEncryptedPayload(row.value, cipher)) {
+      db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
+        cipher.encrypt(row.value),
+        row.key,
+      );
+    }
+  }
+  for (const row of db
+    .prepare(`SELECT id, summary, details FROM episodic_events`)
+    .all() as Array<{ id: number; summary: string; details: string | null }>) {
+    db.prepare(
+      `UPDATE episodic_events SET summary = ?, details = ? WHERE id = ?`,
+    ).run(
+      isDecryptableEncryptedPayload(row.summary, cipher)
+        ? row.summary
+        : cipher.encrypt(row.summary),
+      row.details === null || isDecryptableEncryptedPayload(row.details, cipher)
+        ? row.details
+        : cipher.encrypt(row.details),
+      row.id,
+    );
+  }
+  for (const row of db
+    .prepare(`SELECT id, state FROM checkpoints`)
+    .all() as Array<{ id: number; state: string }>) {
+    if (!isDecryptableEncryptedPayload(row.state, cipher)) {
+      db.prepare(`UPDATE checkpoints SET state = ? WHERE id = ?`).run(
+        cipher.encrypt(row.state),
+        row.id,
+      );
+    }
+  }
+}
+
+function readMemorySchemaMetadata(db: Database.Database): MemorySchemaMetadata {
+  const stores = ['working_memory', 'episodic_events', 'checkpoints'];
+  const rows = db
+    .prepare(
+      `SELECT store, version FROM memory_schema_versions ORDER BY store ASC`,
+    )
+    .all() as Array<{
+    store: string;
+    version: number;
+  }>;
+  const versionByStore = new Map(rows.map((row) => [row.store, row.version]));
+  return {
+    version: CURRENT_MEMORY_SCHEMA_VERSION,
+    stores: stores.map((store) => ({
+      store,
+      version: versionByStore.get(store) ?? CURRENT_MEMORY_SCHEMA_VERSION,
+      recordCount: (
+        db.prepare(`SELECT COUNT(*) AS count FROM ${store}`).get() as {
+          count: number;
+        }
+      ).count,
+    })),
+  };
+}
+
+function assertSupportedMemorySchema(db: Database.Database): void {
+  const tableRows = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+    .all() as Array<{
+    name: string;
+  }>;
+  const existingTables = new Set(tableRows.map((row) => row.name));
+  if (existingTables.has('memory_schema_versions')) {
+    const rows = db
+      .prepare(`SELECT store, version FROM memory_schema_versions`)
+      .all() as Array<{
+      store: string;
+      version: number;
+    }>;
+    for (const row of rows) {
+      if (row.version > CURRENT_MEMORY_SCHEMA_VERSION) {
+        throw new UnsupportedMemorySchemaVersionError(
+          `Memory store ${row.store} uses schema version ${row.version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+        );
+      }
+    }
+  }
+
+  for (const store of ['working_memory', 'episodic_events', 'checkpoints']) {
+    if (!existingTables.has(store)) continue;
+    const columnRows = db
+      .prepare(`PRAGMA table_info(${store})`)
+      .all() as Array<{ name: string }>;
+    if (!columnRows.some((row) => row.name === 'schema_version')) continue;
+    const future = db
+      .prepare(
+        `SELECT schema_version FROM ${store} WHERE schema_version > ? LIMIT 1`,
+      )
+      .get(CURRENT_MEMORY_SCHEMA_VERSION) as
+      | { schema_version: number }
+      | undefined;
+    if (future) {
+      throw new UnsupportedMemorySchemaVersionError(
+        `Memory table ${store} contains record schema version ${future.schema_version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+      );
+    }
+  }
+}
+
+function sqliteStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 // --- Constants ---
 
 const STOPWORDS = new Set([
-  'the', 'a', 'an', 'is', 'was', 'are', 'were', 'be', 'been',
-  'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-  'would', 'could', 'should', 'may', 'might', 'can', 'shall',
-  'not', 'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
-  'in', 'on', 'at', 'to', 'of', 'by', 'with', 'from', 'as',
-  'into', 'about', 'between', 'through', 'after', 'before',
-  'this', 'that', 'these', 'those', 'it', 'its',
+  'the',
+  'a',
+  'an',
+  'is',
+  'was',
+  'are',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'could',
+  'should',
+  'may',
+  'might',
+  'can',
+  'shall',
+  'not',
+  'and',
+  'but',
+  'or',
+  'nor',
+  'for',
+  'yet',
+  'so',
+  'in',
+  'on',
+  'at',
+  'to',
+  'of',
+  'by',
+  'with',
+  'from',
+  'as',
+  'into',
+  'about',
+  'between',
+  'through',
+  'after',
+  'before',
+  'this',
+  'that',
+  'these',
+  'those',
+  'it',
+  'its',
 ]);
 
 // --- Helpers ---
 
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');
+}
+
+function normalizeLearningKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function readLearningKey(event: EpisodicEvent): string | undefined {
+  const key = event.details?.learningKey;
+  return typeof key === 'string' ? key : undefined;
+}
+
+function readLearningCooldownMs(event: EpisodicEvent): number | undefined {
+  const cooldownMs = event.details?.learningCooldownMs;
+  return typeof cooldownMs === 'number' ? cooldownMs : undefined;
+}
+
+function learningKeyDetailsPattern(key?: string): string {
+  const keyPattern = key === undefined ? '' : JSON.stringify(key);
+  return `%${escapeLike(`"learningKey":${keyPattern}`)}%`;
+}
+
+function compareEventsNewestFirst(a: EpisodicEvent, b: EpisodicEvent): number {
+  return Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    || (b.id ?? 0) - (a.id ?? 0);
 }
 
 function chunkArray<T>(values: T[], size: number): T[][] {
@@ -719,14 +1850,18 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
   }
 }
 
-function rowsToEvents(rows: EpisodicRow[], limit: number): EpisodicEvent[] {
+function rowsToEvents(
+  rows: EpisodicRow[],
+  limit: number,
+  encryption?: MemoryCipher,
+): EpisodicEvent[] {
   if (limit === 0) {
     return [];
   }
 
   const events: EpisodicEvent[] = [];
   for (const row of rows) {
-    const event = rowToEvent(row);
+    const event = rowToEvent(row, encryption);
     if (event) {
       events.push(event);
       if (limit >= 0 && events.length >= limit) {
@@ -740,6 +1875,7 @@ function rowsToEvents(rows: EpisodicRow[], limit: number): EpisodicEvent[] {
 function collectRowsToEvents(
   fetchRows: (limit: number, offset: number) => EpisodicRow[],
   limit: number,
+  encryption?: MemoryCipher,
 ): EpisodicEvent[] {
   if (limit === 0) {
     return [];
@@ -747,14 +1883,15 @@ function collectRowsToEvents(
 
   const events: EpisodicEvent[] = [];
   const target = limit < 0 ? Number.POSITIVE_INFINITY : limit;
-  const batchSize = limit < 0
-    ? CORRUPT_JSON_SCAN_BATCH_SIZE
-    : Math.max(CORRUPT_JSON_SCAN_BATCH_SIZE, limit * 2);
+  const batchSize =
+    limit < 0
+      ? CORRUPT_JSON_SCAN_BATCH_SIZE
+      : Math.max(CORRUPT_JSON_SCAN_BATCH_SIZE, limit * 2);
 
   for (let offset = 0; events.length < target; offset += batchSize) {
     const rows = fetchRows(batchSize, offset);
     for (const row of rows) {
-      const event = rowToEvent(row);
+      const event = rowToEvent(row, encryption);
       if (event) {
         events.push(event);
         if (events.length >= target) {
@@ -770,25 +1907,35 @@ function collectRowsToEvents(
   return events;
 }
 
-function parseCheckpointState(row: CheckpointRow): ExecutionState | null {
+function parseCheckpointState(
+  row: CheckpointRow,
+  encryption?: MemoryCipher,
+): ExecutionState | null {
   try {
-    return JSON.parse(row.state) as ExecutionState;
+    return JSON.parse(
+      encryption?.decrypt(row.state) ?? row.state,
+    ) as ExecutionState;
   } catch {
     return null;
   }
 }
 
-function rowToEvent(row: EpisodicRow): EpisodicEvent | null {
+function rowToEvent(
+  row: EpisodicRow,
+  encryption?: MemoryCipher,
+): EpisodicEvent | null {
   const event: EpisodicEvent = {
     id: row.id,
     type: row.type as EpisodicEventType,
-    summary: row.summary,
+    summary: encryption?.decrypt(row.summary) ?? row.summary,
     createdAt: row.created_at,
   };
   if (row.step) event.step = row.step;
   if (row.details) {
     try {
-      event.details = JSON.parse(row.details) as Record<string, unknown>;
+      event.details = JSON.parse(
+        encryption?.decrypt(row.details) ?? row.details,
+      ) as Record<string, unknown>;
     } catch {
       return null;
     }

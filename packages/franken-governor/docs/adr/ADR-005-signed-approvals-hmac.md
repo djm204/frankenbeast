@@ -14,6 +14,8 @@ Use HMAC-SHA256 signatures via Node.js `node:crypto`. The `ApprovalResponse` inc
 
 The signature payload is a deterministic, non-JSON approval-response byte string formatted as `requestId:<url-encoded-id>|decision:<url-encoded-decision>|respondedBy:<url-encoded-responder>|feedback:<feedback-state>`. `feedback:<feedback-state>` is `feedback:u` when feedback is omitted and `feedback:s:<url-encoded-feedback>` when feedback is present. Signing `respondedBy` and `feedback` ensures the recorded responder identity and optional rationale cannot be tampered with after the decision is signed.
 
+Approval policy manifests use the same HMAC primitive but a separate canonical payload: stable JSON with sorted object keys, the signature `value` omitted, signature `algorithm`/`keyId` metadata authenticated, and policy array order preserved. Manifest loading is fail-closed by default: unsigned manifests require an explicit `allowUnsignedPolicyManifest` override, and signed manifests require a configured verifier. Supported built-in policy IDs are `skill`, `budget`, `confidence`, and `ambiguity`; `confidence` may carry a threshold config.
+
 ## Consequences
 
 - **Positive:** Simple, well-understood crypto primitive; no PKI infrastructure needed.

@@ -103,6 +103,17 @@ Recorded critique lessons also carry a `reviewerFeedback` object so worker retro
 
 Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create reviewer-feedback captures. This keeps broken tooling noise from being promoted as durable agent-learning guidance.
 
+## Failed-test-to-skill candidate detector
+
+When a recovered critique finding looks like a concrete failed test, `LessonRecorder` attaches `failedTestSkillCandidate` to the recorded lesson. The detector requires strong evidence from the finding message or location, such as failed-test wording, `AssertionError` text, copied test-runner failure output, or `FAIL path/to/file.test.ts` runner output. Supporting signals such as test file paths, test commands, or expected/received assertion details are included in `matchedSignals`, but remediation-only suggestions like "run npm test before handoff" do not create candidates by themselves. The structured object includes:
+
+- `detector`: the stable value `failed-test-to-skill-candidate` for PM/liveness filters.
+- `matchedSignals`: the exact detector signals that matched.
+- `sourceFindingMessages`: original finding messages to review before creating or updating a skill.
+- `operatorGuidance`: guidance to promote the finding to a skill only when the failure recurs or exposes a reusable workflow gap.
+
+Generic reviewer findings and infrastructure-only evaluator exceptions do not receive `failedTestSkillCandidate`, so dashboards can distinguish reusable skill candidates from ordinary one-off PR fixes.
+
 ## Post-PR lesson extraction template
 
 Recorded critique lessons include `postPrLessonExtractionTemplate`, a deterministic prompt/template for the post-PR moment after review or merge evidence exists. PM/liveness tooling can hand the template to an LLM or worker to extract one reusable lesson without inventing missing evidence.
@@ -136,6 +147,18 @@ Callers that need a different window can construct `new LessonRecorder(memory, {
 `LessonRecorder` also mines repeated blocker patterns while it records critique lessons. Critical findings are normalized by evaluator name and finding text, then counted across distinct task ids. Once the same blocker reaches the configured distinct-task threshold, `record()` surfaces it in `minedBlockerPatterns` and the associated recorded lesson includes `blockerPatterns` for PM/liveness consumers.
 
 Each mined pattern includes a stable `key`, evaluator name, normalized finding, threshold, occurrence count, ordered distinct task ids, first/last seen timestamps, and operator guidance. Repeated observations from the same task do not increment the pattern, and warning-only findings are ignored so the signal stays focused on true blockers. The default threshold is 3 distinct tasks; tests or replay callers can pass `blockerPatternThreshold` and a shared `blockerPatternStore` in `LessonRecorderOptions` when multiple recorder instances should mine against the same in-process history.
+
+## Per-agent improvement scorecards
+
+Callers that know the worker/agent identity can construct `new LessonRecorder(memory, { agentId })` to attach an `agentImprovementScorecard` to each recorded critique lesson. The recorder trims and validates the id up front; blank ids throw so PM summaries do not group lessons under an ambiguous agent.
+
+Each scorecard is structured for worker retrospectives and PM/liveness handoffs, with schema version, `agentId`, task/evaluator ids, generated timestamp, initial/final score, score delta, failing/resolved iterations, critical/warning/info finding counts, and LLM-friendly improvement signals. Use it to compare an agent's recovered critique loops over time without parsing free-form lesson prose.
+
+## Learning backlog prioritization report
+
+Every `LessonRecorder.record()` result exposes `learningBacklogPrioritizationReport`, a deterministic PM/liveness summary of newly observed learning follow-up. The report uses schema version `learning-backlog-prioritization-report-v1` and sorts items by numeric `score` so recurrent critical blockers appear before routine lesson cleanup.
+
+Report items identify their source as `recorded-lesson`, `blocker-pattern`, or `cooldown-suppression`, include task/evaluator context when available, and carry a concise rationale plus recommended next action. High-priority recorded lessons should go through promotion review with their traceability verifier, blocker patterns should route to a durable mitigation owner, and low-priority cooldown suppressions should reuse the existing in-cooldown lesson instead of creating duplicate backlog churn.
 
 ## Package scripts
 

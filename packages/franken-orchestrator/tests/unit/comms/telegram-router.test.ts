@@ -142,11 +142,9 @@ describe('telegramRouter', () => {
       webhookSecretToken,
     });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue({
-      ok: false,
+    mockFetch.mockResolvedValue(new Response(`upstream failed for https://api.telegram.org/bot${token}/answerCallbackQuery`, {
       status: 500,
-      text: async () => `upstream failed for https://api.telegram.org/bot${token}/answerCallbackQuery`,
-    } as Response);
+    }));
     const body = JSON.stringify({
       update_id: 4,
       callback_query: {

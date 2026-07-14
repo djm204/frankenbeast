@@ -31,13 +31,13 @@ describe('TempoAdapter', () => {
 
     it('supports a custom otlpPath', async () => {
       const adapter = new TempoAdapter({
-        endpoint: 'https://tempo-us-central1.grafana.net/tempo',
+        endpoint: 'https://otlp-gateway-prod-us-central-0.grafana.net',
         otlpPath: '/otlp/v1/traces',
         fetch: mockFetch,
       })
       await adapter.flush(makeTrace())
       const [url] = mockFetch.mock.calls[0]
-      expect(url).toBe('https://tempo-us-central1.grafana.net/tempo/otlp/v1/traces')
+      expect(url).toBe('https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces')
     })
 
     it('strips a trailing slash from endpoint before appending path', async () => {
@@ -67,7 +67,7 @@ describe('TempoAdapter', () => {
       const user = '123456'
       const password = makeGrafanaToken('mytoken')
       const adapter = new TempoAdapter({
-        endpoint: 'https://tempo-us-central1.grafana.net/tempo',
+        endpoint: 'https://otlp-gateway-prod-us-central-0.grafana.net',
         basicAuth: { user, password },
         fetch: mockFetch,
       })
@@ -188,14 +188,14 @@ describe('TempoAdapter', () => {
       const user = '987654'
       const password = makeGrafanaToken('secret_token')
       const adapter = new TempoAdapter({
-        endpoint: 'https://tempo-us-central1.grafana.net/tempo',
+        endpoint: 'https://otlp-gateway-prod-us-central-0.grafana.net',
         otlpPath: '/otlp/v1/traces',
         basicAuth: { user, password },
         fetch: mockFetch,
       })
       await adapter.flush(makeTrace())
       const [url, init] = mockFetch.mock.calls[0]
-      expect(url).toBe('https://tempo-us-central1.grafana.net/tempo/otlp/v1/traces')
+      expect(url).toBe('https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces')
       const expected = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
       expect(init.headers['Authorization']).toBe(expected)
     })

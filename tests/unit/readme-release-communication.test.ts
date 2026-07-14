@@ -7,7 +7,7 @@ const README = readFileSync(resolve(ROOT, 'README.md'), 'utf-8');
 
 describe('README release communication', () => {
   it('shows the latest release badge and release notes link', () => {
-    expect(README).toContain('[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)');
+    expect(README).toContain('[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases?q=v*&expanded=true)');
     expect(README).toContain('[Release v0.45.0](https://github.com/djm204/frankenbeast/releases/tag/v0.45.0)');
     expect(README).toContain('is the latest Frankenbeast release line.');
   });

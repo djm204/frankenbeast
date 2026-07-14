@@ -51,4 +51,24 @@ describe('WhatsAppAdapter', () => {
     expect(body.interactive.type).toBe('button');
     expect(body.interactive.action.buttons[0].reply.title).toBe('Approve');
   });
+
+  it('includes endpoint and response body when WhatsApp returns HTTP errors', async () => {
+    const adapter = new WhatsAppAdapter({
+      accessToken: 'token',
+      phoneNumberId: '123',
+    });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue(new Response('{"error":"invalid token"}', {
+      status: 401,
+      statusText: 'Unauthorized',
+    }));
+
+    await expect(adapter.send('session-123', {
+      text: 'hello whatsapp',
+      status: 'reply',
+      metadata: { phoneNumber: '123456789' },
+    })).rejects.toThrow(
+      'WhatsApp API error: 401 Unauthorized for https://graph.facebook.com/v21.0/123/messages: {"error":"invalid token"}',
+    );
+  });
 });

@@ -95,6 +95,17 @@ describe('DashboardApiClient', () => {
       const client = new DashboardApiClient(BASE_URL);
       await expect(client.toggleSkill('missing', true)).rejects.toThrow('HTTP 404');
     });
+
+    it('prefers flat server error messages over bare HTTP status codes', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'Skill "missing" was not found' }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.toggleSkill('missing', true)).rejects.toThrow('Skill "missing" was not found');
+    });
   });
 
   describe('updateSecurityProfile', () => {
@@ -124,6 +135,30 @@ describe('DashboardApiClient', () => {
 
       const client = new DashboardApiClient(BASE_URL);
       await expect(client.updateSecurityProfile('strict')).rejects.toThrow('HTTP 403');
+    });
+
+    it('surfaces strict-profile server guidance in the thrown error', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'Security profile "strict" requires allowedDomains to be configured' }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.updateSecurityProfile('strict')).rejects.toThrow(
+        'Security profile "strict" requires allowedDomains to be configured',
+      );
+    });
+
+    it('also accepts enveloped server error messages', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: 'Profile update failed' } }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+      await expect(client.updateSecurityProfile('strict')).rejects.toThrow('Profile update failed');
     });
   });
 
@@ -242,6 +277,58 @@ describe('DashboardApiClient', () => {
         expect(() => listeners['snapshot']!({ data: '{not-json' })).not.toThrow();
         expect(onSnapshot).not.toHaveBeenCalled();
         expect(onError).toHaveBeenCalledWith(expect.any(Error));
+        expect(onError.mock.calls[0]![0].message).toContain(
+          'Dashboard stream snapshot payload could not be parsed.',
+        );
+
+        const snapshot = makeMockSnapshot();
+        expect(() => listeners['snapshot']!({ data: JSON.stringify(snapshot) })).not.toThrow();
+        expect(onSnapshot).toHaveBeenCalledWith(snapshot);
+
+        unsub();
+      } finally {
+        if (originalEventSource) {
+          globalThis.EventSource = originalEventSource;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          delete (globalThis as any).EventSource;
+        }
+      }
+    });
+
+    it('reports snapshot callback failures without labeling them as parse errors', async () => {
+      const listeners: Record<string, (event: { data: string }) => void> = {};
+
+      const MockEventSource = vi.fn(function (this: {
+        addEventListener?: (type: string, handler: (event: { data: string }) => void) => void;
+        close?: () => void;
+      }) {
+        this.addEventListener = vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          listeners[type] = handler;
+        });
+        this.close = vi.fn();
+      });
+
+      const originalEventSource = globalThis.EventSource;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).EventSource = MockEventSource;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ticket: 'dashboard-ticket' }),
+      });
+
+      try {
+        const callbackError = new Error('snapshot consumer failed');
+        const onSnapshot = vi.fn(() => {
+          throw callbackError;
+        });
+        const onError = vi.fn();
+        const client = new DashboardApiClient(BASE_URL);
+        const unsub = await client.subscribeToDashboard(onSnapshot, onError);
+
+        expect(() => listeners['snapshot']!({ data: JSON.stringify(makeMockSnapshot()) })).not.toThrow();
+        expect(onError).toHaveBeenCalledWith(callbackError);
+        expect(onError.mock.calls[0]![0].message).not.toContain('could not be parsed');
 
         unsub();
       } finally {

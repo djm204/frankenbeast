@@ -74,6 +74,16 @@ export { checkInjection } from './breakers/injection-breaker.js';
 export { checkBudget, BudgetExceededError } from './breakers/budget-breaker.js';
 export { checkCritiqueSpiral } from './breakers/critique-spiral-breaker.js';
 
+// Logging redaction
+export {
+  isSensitiveLogKey,
+  redactLogData,
+  redactLogDataWithProvenance,
+  redactSensitiveText,
+  redactSensitiveTextWithProvenance,
+} from './logging/redaction.js';
+export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from './logging/redaction.js';
+
 // LLM helpers
 export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
 export {
@@ -131,6 +141,8 @@ export type {
 export { BEAST_SQLITE_SCHEMA_STATEMENTS } from './beasts/repository/sqlite-schema.js';
 export { SQLiteBeastRepository } from './beasts/repository/sqlite-beast-repository.js';
 export { BeastLogStore } from './beasts/events/beast-log-store.js';
+export { BeastEventBus } from './beasts/events/beast-event-bus.js';
+export type { BeastEventBusOptions, BeastEventBusListenerError, BeastEventReplaySnapshot, BeastSseEvent } from './beasts/events/beast-event-bus.js';
 export { BEAST_DEFINITIONS } from './beasts/definitions/catalog.js';
 export { BeastCatalogService } from './beasts/services/beast-catalog-service.js';
 export { BeastInterviewService } from './beasts/services/beast-interview-service.js';
