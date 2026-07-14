@@ -177,6 +177,22 @@ describe('SessionTokenStore', () => {
     }
   });
 
+  it('consume() reports and prunes an expired persisted token for the requested id', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const store = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(1000);
+      store.store(token);
+      vi.advanceTimersByTime(2000);
+
+      expect(new SessionTokenStore({ persistenceFile }).consume(token.tokenId, 'deploy')).toEqual({ status: 'expired' });
+      expect(JSON.parse(readFileSync(persistenceFile, 'utf8'))).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('persists tokens so a new store instance can validate them', () => {
     const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
     const persistenceFile = join(dir, 'tokens.json');

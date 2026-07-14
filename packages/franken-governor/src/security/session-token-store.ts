@@ -147,12 +147,16 @@ export class SessionTokenStore {
     }
 
     return this.withFileLock(() => {
-      this.loadPersistedTokens();
+      const expiredTokenIds = new Set<string>();
+      this.loadPersistedTokens(expiredTokenIds);
       const result = consumeLoadedToken();
-      if (result.status === 'consumed' || result.status === 'expired') {
+      const effectiveResult = result.status === 'missing' && expiredTokenIds.has(tokenId)
+        ? { status: 'expired' as const }
+        : result;
+      if (effectiveResult.status === 'consumed' || effectiveResult.status === 'expired') {
         this.persist();
       }
-      return result;
+      return effectiveResult;
     });
   }
 
@@ -167,7 +171,7 @@ export class SessionTokenStore {
     return pruned;
   }
 
-  private loadPersistedTokens(): number {
+  private loadPersistedTokens(expiredTokenIds?: Set<string>): number {
     if (!this.persistenceFile) return 0;
 
     let raw: string;
@@ -200,6 +204,7 @@ export class SessionTokenStore {
       if (token && !this.isExpired(token)) {
         this.tokens.set(token.tokenId, token);
       } else if (token) {
+        expiredTokenIds?.add(token.tokenId);
         expiredPersisted += 1;
       }
     }
