@@ -1,17 +1,5 @@
 # Changelog
 
-## [0.47.1](https://github.com/djm204/frankenbeast/compare/v0.47.0...v0.47.1) (2026-07-14)
-
-
-### Bug Fixes
-
-* **web:** preserve wizard launch selections ([#1478](https://github.com/djm204/frankenbeast/issues/1478)) ([002d39b](https://github.com/djm204/frankenbeast/commit/002d39ba6f27ae8a62ee72431aea5ab145be056c))
-
-
-### Miscellaneous
-
-* **deps:** bump actions/setup-node from 4 to 6 ([#1527](https://github.com/djm204/frankenbeast/issues/1527)) ([581b140](https://github.com/djm204/frankenbeast/commit/581b140ef70edd68019ab46d5207025240ca58e9))
-
 ## [0.47.0](https://github.com/djm204/frankenbeast/compare/v0.46.0...v0.47.0) (2026-07-14)
 
 
