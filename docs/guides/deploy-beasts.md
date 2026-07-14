@@ -76,14 +76,11 @@ In a second terminal, either reuse the same repo-root `.env`/secret-store token 
 
 ```bash
 export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
+export VITE_PROJECT_ID=my-project
 npm --workspace @franken/web run dev:chat
 ```
 
-Optionally set `VITE_PROJECT_ID` for the dashboard frontend when this checkout should use its own chat-session namespace. It defaults to `default`; use a stable, non-secret value such as a repo or workspace slug to avoid mixing chat history across local projects. Export it in the same shell that starts Vite, or put it in `packages/franken-web/.env.local`; the repo-root `.env` is reserved for server-side values and does not populate browser-bundled Vite env:
-
-```bash
-export VITE_PROJECT_ID=my-project
-```
+`VITE_PROJECT_ID` is optional; omit it to use the shared `default` project. Use a stable, non-secret value such as a repo or workspace slug to avoid mixing chat history across local projects. Export it before starting Vite, as shown above, or put it in `packages/franken-web/.env.local`; the repo-root `.env` is reserved for server-side values and does not populate browser-bundled Vite env.
 
 If the backend is not on the local dev default `http://127.0.0.1:3737` while you are serving the dashboard with Vite, keep `VITE_API_URL` unset and point the Vite dev proxy at the backend instead. Browser REST calls then stay same-origin on `:5173`; `--allow-origin` only affects the chat WebSocket origin allowlist and does not add CORS headers for cross-origin REST requests. Production deployments should use TLS-terminated `https://`/`wss://` endpoints; plain HTTP is only appropriate for isolated local development.
 
