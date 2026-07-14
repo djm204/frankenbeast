@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import brandMark from '../../../../assets/img/frankenbeast-github-logo-478x72.png';
-import { useChatSession, type ChatErrorBanner } from '../hooks/use-chat-session';
+import { useChatSession } from '../hooks/use-chat-session';
 import { TranscriptPane } from './transcript-pane';
 import { Composer } from './composer';
 import { ActivityPane } from './activity-pane';
@@ -27,203 +27,19 @@ import { AnalyticsApiClient } from '../lib/analytics-api';
 import { AnalyticsPage } from '../pages/analytics-page';
 import { DashboardApiClient } from '../lib/dashboard-api';
 import { DashboardPage } from '../pages/dashboard-page';
+import { ChatErrorBanners } from './chat-shell/chat-error-banners';
+import { PlaceholderPage } from './chat-shell/placeholder-page';
+import { PRIMARY_NAV_ROUTES, ROUTES, routeFromHash, type RouteId } from './chat-shell/route-model';
+import { formatSessionOptionLabel } from './chat-shell/session-labels';
+import { getSidebarFocusableElements } from './chat-shell/sidebar-focus';
+import { appendUniqueLogLine, formatStreamedLogLine, getAgentEventRunId } from './chat-shell/beast-log-utils';
+import { networkErrorMessage } from './chat-shell/network-error';
 
 export interface ChatShellProps {
   baseUrl: string;
   projectId: string;
   sessionId?: string;
   version: string;
-}
-
-type RouteId = 'dashboard' | 'chat' | 'beasts' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
-type PlaceholderRouteId = Exclude<RouteId, 'dashboard' | 'chat' | 'beasts' | 'network' | 'analytics'>;
-
-const ROUTES: Array<{ id: RouteId; label: string; summary: string; live: boolean }> = [
-  { id: 'dashboard', label: 'Overview', summary: 'Snapshot controls for skills, security, and providers', live: true },
-  { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console', live: true },
-  { id: 'beasts', label: 'Beasts', summary: 'Dispatch, inspect, and control tracked beast runs', live: true },
-  { id: 'network', label: 'Network', summary: 'Service controls and operator config', live: true },
-  { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands', live: false },
-  { id: 'analytics', label: 'Analytics', summary: 'Observer, governor, security, and cost telemetry', live: true },
-  { id: 'costs', label: 'Costs', summary: 'Token and provider reporting will live here', live: false },
-  { id: 'safety', label: 'Safety', summary: 'Approvals, policy, and injection telemetry', live: false },
-  { id: 'settings', label: 'Settings', summary: 'Operator configuration and launch profiles', live: false },
-];
-
-const PRIMARY_NAV_ROUTES = ROUTES.filter((route) => route.live);
-
-function formatSessionCount(count: number): string {
-  return `${count} ${count === 1 ? 'message' : 'messages'}`;
-}
-
-function formatRelativeUpdatedTime(value: string): string {
-  const updatedAt = new Date(value).getTime();
-  if (!Number.isFinite(updatedAt)) {
-    return 'updated time unknown';
-  }
-
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - updatedAt) / 1000));
-  if (elapsedSeconds < 60) {
-    return 'updated just now';
-  }
-
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  if (elapsedMinutes < 60) {
-    return `updated ${elapsedMinutes}m ago`;
-  }
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) {
-    return `updated ${elapsedHours}h ago`;
-  }
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  if (elapsedDays < 30) {
-    return `updated ${elapsedDays}d ago`;
-  }
-
-  return `updated ${new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
-}
-
-function shortenSessionId(id: string): string {
-  if (id.length <= 14) {
-    return id;
-  }
-
-  return `${id.slice(0, 8)}…${id.slice(-4)}`;
-}
-
-function getSidebarFocusableElements(sidebar: HTMLElement): HTMLElement[] {
-  return Array.from(
-    sidebar.querySelectorAll<HTMLElement>('a[href]:not(.sidebar__focus-guard), button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not(.sidebar__focus-guard)'),
-  );
-}
-
-function formatSessionOptionLabel(session: ChatSessionSummary): string {
-  const preview = session.preview.trim();
-  const details = [
-    session.state,
-    formatSessionCount(session.messageCount),
-    formatRelativeUpdatedTime(session.updatedAt),
-    shortenSessionId(session.id),
-  ];
-
-  return preview ? `${preview} — ${details.join(' · ')}` : details.join(' · ');
-}
-
-function routeFromHash(hash: string): RouteId {
-  const candidate = hash.replace(/^#\/?/, '') as RouteId;
-  return PRIMARY_NAV_ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
-}
-
-function networkErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
-function PlaceholderPage({ routeId }: { routeId: PlaceholderRouteId }) {
-  const route = ROUTES.find((item) => item.id === routeId)!;
-
-  return (
-    <section className="placeholder-page">
-      <p className="eyebrow">Dashboard Module</p>
-      <h2>{route.label}</h2>
-      <p>{route.summary}</p>
-    </section>
-  );
-}
-
-function ChatErrorBanners({
-  banners = [],
-  onDismiss = () => undefined,
-  onRetry = () => undefined,
-}: {
-  banners?: ChatErrorBanner[];
-  onDismiss?: (id: string) => void;
-  onRetry?: (id: string) => void | Promise<unknown>;
-}) {
-  if (banners.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="chat-alerts" aria-label="Chat errors" aria-live="assertive">
-      {banners.map((banner) => (
-        <article key={banner.id} className="chat-alert" role="alert">
-          <div className="chat-alert__body">
-            <p className="eyebrow">{banner.code ?? 'chat_error'}</p>
-            <h2>{banner.title}</h2>
-            <p>{banner.message}</p>
-          </div>
-          <div className="chat-alert__actions">
-            <button className="button button--secondary" type="button" onClick={() => onRetry(banner.id)}>
-              {banner.actionLabel}
-            </button>
-            <button className="button button--ghost" type="button" onClick={() => onDismiss(banner.id)}>
-              Dismiss
-            </button>
-          </div>
-        </article>
-      ))}
-    </section>
-  );
-}
-
-function appendUniqueLogLine(logs: string[], nextLine: string): string[] {
-  const nextIdentity = parseLogIdentity(nextLine);
-  if (nextIdentity?.eventId && logs.some((line) => parseLogIdentity(line)?.eventId === nextIdentity.eventId)) {
-    return logs;
-  }
-  if (nextIdentity?.createdAt && logs.some((line) => {
-    const identity = parseLogIdentity(line);
-    return identity
-      && (!identity.eventId || !nextIdentity.eventId)
-      && identity.stream === nextIdentity.stream
-      && identity.message === nextIdentity.message
-      && identity.createdAt === nextIdentity.createdAt;
-  })) {
-    return logs;
-  }
-  return logs[logs.length - 1] === nextLine ? logs : [...logs, nextLine];
-}
-
-function parseLogIdentity(line: string): { eventId?: string; stream?: string; message?: string; createdAt?: string } | null {
-  try {
-    const parsed = JSON.parse(line) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) {
-      return null;
-    }
-    const candidate = parsed as { eventId?: unknown; stream?: unknown; message?: unknown; createdAt?: unknown };
-    const identity = {
-      ...(typeof candidate.eventId === 'string' && candidate.eventId.length > 0 ? { eventId: candidate.eventId } : {}),
-      ...(typeof candidate.stream === 'string' ? { stream: candidate.stream } : {}),
-      ...(typeof candidate.message === 'string' ? { message: candidate.message } : {}),
-      ...(typeof candidate.createdAt === 'string' ? { createdAt: candidate.createdAt } : {}),
-    };
-    return identity.eventId || (identity.message && identity.createdAt) ? identity : null;
-  } catch {
-    return null;
-  }
-}
-
-function getAgentEventRunId(payload: unknown): string | null {
-  return typeof payload === 'object'
-    && payload !== null
-    && 'runId' in payload
-    && typeof (payload as { runId?: unknown }).runId === 'string'
-    ? (payload as { runId: string }).runId
-    : null;
-}
-
-function formatStreamedLogLine(event: { eventId?: string; stream?: string; line: string; createdAt?: string }): string {
-  if (event.eventId || event.createdAt || event.stream) {
-    return JSON.stringify({
-      ...(event.eventId ? { eventId: event.eventId } : {}),
-      ...(event.stream ? { stream: event.stream } : {}),
-      message: event.line,
-      ...(event.createdAt ? { createdAt: event.createdAt } : {}),
-    });
-  }
-  return event.line;
 }
 
 export function buildInitAction(
