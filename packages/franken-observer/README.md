@@ -629,7 +629,9 @@ function requireEnv(name: string): string {
 }
 
 const cloud = new TempoAdapter({
-  endpoint: 'https://tempo-us-central1.grafana.net/tempo',
+  // Copy the OTLP gateway host from your Grafana Cloud stack's OpenTelemetry tile.
+  // Do not use the Tempo query endpoint (tempo-<region>.grafana.net/tempo).
+  endpoint: 'https://otlp-gateway-<REGION>.grafana.net',
   otlpPath: '/otlp/v1/traces',
   basicAuth: {
     user: requireEnv('GRAFANA_INSTANCE_ID'),
