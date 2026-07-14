@@ -51,7 +51,7 @@ interface ResolvedLaneEgressPolicy {
   readonly allowedMethods: readonly string[];
 }
 
-const GITHUB_DOMAINS = ['github.com', 'api.github.com', 'raw.githubusercontent.com', 'uploads.github.com'];
+const GITHUB_DOMAINS = ['github.com', 'api.github.com', 'raw.githubusercontent.com', 'uploads.github.com', 'codeload.github.com'];
 const PROVIDER_DOMAINS = [
   'api.anthropic.com',
   'api.openai.com',
@@ -203,46 +203,40 @@ export function createEgressGuardedFetch(options: {
   readonly override?: EgressOverride | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
   readonly audit?: EgressAuditSink | undefined;
-  readonly maxRedirects?: number | undefined;
 }): typeof fetch {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    let currentInput = input;
-    let currentInit = init;
-    const maxRedirects = options.maxRedirects ?? 10;
-    const callerRequestedManualRedirect = init?.redirect === 'manual' || (input instanceof Request && input.redirect === 'manual');
+    const requestUrl = input instanceof Request ? input.url : input.toString();
+    const requestMethod = init?.method ?? (input instanceof Request ? input.method : undefined);
+    enforceEgressDecision({
+      lane: options.lane,
+      url: requestUrl,
+      method: requestMethod,
+      policy: options.policy,
+      override: options.override,
+    }, options.audit);
 
-    for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-      const requestUrl = currentInput instanceof Request ? currentInput.url : currentInput.toString();
-      const requestMethod = currentInit?.method ?? (currentInput instanceof Request ? currentInput.method : undefined);
-      enforceEgressDecision({
-        lane: options.lane,
-        url: requestUrl,
-        method: requestMethod,
-        policy: options.policy,
-        override: options.override,
-      }, options.audit);
-
-      const guardedInit = { ...currentInit, redirect: 'manual' as const };
-      const response = await fetchImpl(currentInput, guardedInit);
-      const location = response.headers.get('location');
-      if (!location || response.status < 300 || response.status >= 400 || callerRequestedManualRedirect) {
-        return response;
-      }
-
-      const redirectUrl = new URL(location, requestUrl).toString();
-      enforceEgressDecision({
-        lane: options.lane,
-        url: redirectUrl,
-        method: requestMethod,
-        policy: options.policy,
-        override: options.override,
-      }, options.audit);
-      currentInput = redirectUrl;
-      currentInit = guardedInit;
+    const guardedInit = { ...init, redirect: 'manual' as const };
+    const response = await fetchImpl(input, guardedInit);
+    const location = response.headers.get('location');
+    if (!location || response.status < 300 || response.status >= 400) {
+      return response;
     }
 
-    throw new Error(`Egress redirect limit exceeded for lane ${options.lane}`);
+    const redirectUrl = new URL(location, requestUrl).toString();
+    if (init?.redirect === 'error') {
+      throw new TypeError(`Egress redirect blocked for lane ${options.lane}: ${redirectUrl}`);
+    }
+
+    enforceEgressDecision({
+      lane: options.lane,
+      url: redirectUrl,
+      method: requestMethod,
+      policy: options.policy,
+      override: options.override,
+    }, options.audit);
+
+    return response;
   }) as typeof fetch;
 }
 

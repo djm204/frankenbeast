@@ -26,6 +26,12 @@ describe('lane egress policy', () => {
 
     expect(evaluateEgressPolicy({
       lane: 'triage',
+      url: 'https://codeload.github.com/djm204/frankenbeast/zip/refs/heads/main',
+      method: 'GET',
+    })).toMatchObject({ allowed: true, destinationClass: 'github' });
+
+    expect(evaluateEgressPolicy({
+      lane: 'triage',
       url: 'https://api.openai.com/v1/models',
       method: 'GET',
     })).toMatchObject({
@@ -142,6 +148,33 @@ describe('lane egress policy', () => {
       allowed: false,
       reason: 'destination-class-not-allowed',
     });
+  });
+
+  it('does not replay methods, bodies, or headers when an allowed redirect is returned', async () => {
+    const redirectResponse = new Response(null, {
+      status: 302,
+      headers: { location: 'https://codeload.github.com/djm204/frankenbeast/zip/refs/heads/main' },
+    });
+    const fetchImpl = vi.fn(async () => redirectResponse);
+    const guardedFetch = createEgressGuardedFetch({ lane: 'implementation', fetchImpl });
+
+    await expect(guardedFetch('https://github.com/djm204/frankenbeast', {
+      method: 'POST',
+      body: 'sensitive payload',
+      headers: { Authorization: 'Bearer secret' },
+    })).resolves.toBe(redirectResponse);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors redirect error mode by rejecting after a redirect response', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: 'https://codeload.github.com/djm204/frankenbeast/zip/refs/heads/main' },
+    }));
+    const guardedFetch = createEgressGuardedFetch({ lane: 'implementation', fetchImpl });
+
+    await expect(guardedFetch('https://github.com/djm204/frankenbeast', { redirect: 'error' })).rejects.toBeInstanceOf(TypeError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('accepts config-level lane overrides for approved services', () => {
