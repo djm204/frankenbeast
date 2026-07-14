@@ -138,6 +138,19 @@ function redactRightToForgetGovernanceContext(action: string, context: string): 
   return '[right-to-forget-context-redacted]';
 }
 
+function isRightToForgetDryRun(action: string, context: string): boolean {
+  if (action !== 'fbeast_memory_right_to_forget') return false;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    return parsed !== null
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && (parsed as { dryRun?: unknown }).dryRun === true;
+  } catch {
+    return false;
+  }
+}
+
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -191,8 +204,14 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
   return {
     async check(input) {
+      const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
       const context = redactRightToForgetGovernanceContext(input.action, input.context);
-      const result = assessAction(input.action, context);
+      const result = isDryRunForget
+        ? {
+            decision: 'approved' as const,
+            reason: 'Right-to-forget dryRun is non-mutating and allowed so users can inspect deletion counts before approval.',
+          }
+        : assessAction(input.action, context);
 
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)

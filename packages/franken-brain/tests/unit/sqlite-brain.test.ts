@@ -371,6 +371,42 @@ describe('SqliteBrain', () => {
       })).toThrow(/right-to-forget/);
     });
 
+    it('deletes and guards sourceScope checkpoint markers', () => {
+      brain.recovery.checkpoint({
+        runId: 'run-source-marker',
+        phase: 'execution',
+        step: 1,
+        context: { note: 'sourceScope:import-1 marker' },
+        timestamp: '2026-07-13T00:03:30.000Z',
+      });
+
+      const report = brain.rightToForget({ sourceScope: 'import-1' });
+
+      expect(report.deleted).toEqual({ working: 0, episodic: 0, derived: 1 });
+      expect(brain.recovery.lastCheckpoint()).toBeNull();
+      expect(() => brain.recovery.checkpoint({
+        runId: 'run-source-marker-reinsert',
+        phase: 'execution',
+        step: 2,
+        context: { note: 'sourceScope:import-1 again' },
+        timestamp: '2026-07-13T00:03:45.000Z',
+      })).toThrow(/right-to-forget/);
+    });
+
+    it('audits guard-only forgets and preserves prior deletion audits', () => {
+      const absentReport = brain.rightToForget({ query: 'absent-pii-value' });
+      expect(absentReport.deleted).toEqual({ working: 0, episodic: 0, derived: 0 });
+      expect(absentReport.auditEventId).toEqual(expect.any(Number));
+
+      const auditCountBefore = brain.episodic.recent(10).filter(event => event.step === 'right-to-forget').length;
+      const report = brain.rightToForget({ query: 'right-to-forget' });
+
+      expect(report.auditEventId).toEqual(expect.any(Number));
+      expect(report.deleted.episodic).toBe(0);
+      const auditEvents = brain.episodic.recent(10).filter(event => event.step === 'right-to-forget');
+      expect(auditEvents).toHaveLength(auditCountBefore + 1);
+    });
+
     it('guards long query substrings without requiring exact whole-value matches', () => {
       const longSecret = `tok_${'a'.repeat(140)}_tail`;
       brain.working.set('long-token', `prefix ${longSecret} suffix`);

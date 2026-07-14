@@ -1297,7 +1297,7 @@ export class SqliteBrain implements IBrain {
     let auditEventId: number | undefined;
     let finalizePersistedWorkingDelete: (() => void) | undefined;
 
-    if (!dryRun && (workingMatches.length > 0 || episodicMatches.length > 0 || checkpointMatches.length > 0)) {
+    if (!dryRun) {
       const tx = this.db.transaction(() => {
         finalizePersistedWorkingDelete = this.working.deletePersistedKeys(persistedWorkingMatches);
         if (episodicMatches.length > 0) {
@@ -1335,11 +1335,11 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       auditEventId = tx() as number;
-      purgeDeletedSqliteContent(this.db, this.dbPath);
-      finalizePersistedWorkingDelete?.();
-      this.working.deleteRuntimeKeys(runtimeWorkingMatches);
-    } else if (!dryRun) {
-      writeDeletionGuards(this.db, normalizedSelector, selectorHash);
+      if (workingMatches.length > 0 || episodicMatches.length > 0 || checkpointMatches.length > 0) {
+        purgeDeletedSqliteContent(this.db, this.dbPath);
+        finalizePersistedWorkingDelete?.();
+        this.working.deleteRuntimeKeys(runtimeWorkingMatches);
+      }
     }
 
     return {
@@ -1369,12 +1369,25 @@ export class SqliteBrain implements IBrain {
       details: string | null;
     }>;
     return rows
-      .filter((row) => episodicRowMatchesSelector(
-        row.step ?? '',
-        this.encryption?.decrypt(row.summary) ?? row.summary,
-        row.details ? (this.encryption?.decrypt(row.details) ?? row.details) : null,
-        selector,
-      ))
+      .filter((row) => {
+        const step = row.step ?? '';
+        const summary = this.encryption?.decrypt(row.summary) ?? row.summary;
+        const details = row.details ? (this.encryption?.decrypt(row.details) ?? row.details) : null;
+        const parsedDetails = details === null ? null : safeJsonParse(details);
+        const eventDetails = parsedDetails !== null && typeof parsedDetails === 'object' && !Array.isArray(parsedDetails)
+          ? parsedDetails as Record<string, unknown>
+          : undefined;
+        const candidateEvent: EpisodicEvent = {
+          id: row.id,
+          type: 'observation',
+          step,
+          summary,
+          createdAt: '',
+          ...(eventDetails === undefined ? {} : { details: eventDetails }),
+        };
+        if (isRightToForgetAuditEvent(candidateEvent)) return false;
+        return episodicRowMatchesSelector(step, summary, details, selector);
+      })
       .map(row => row.id);
   }
 
@@ -2211,7 +2224,7 @@ function episodicRowMatchesSelector(step: string, summary: string, details: stri
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
     const metadata = normalizeForMatch(objectMetadataString(parsedDetails, ['sourceScope', 'source', 'scope', 'sourceId']));
-    if (metadata.split(/\s+/).includes(sourceScope)) return true;
+    if (metadata.split(/\s+/).includes(sourceScope) || text.includes(`sourcescope:${sourceScope}`)) return true;
   }
   return false;
 }
@@ -2331,7 +2344,7 @@ function checkpointStateMatchesSelector(value: unknown, selector: NormalizedRigh
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
     const metadata = normalizeForMatch(objectMetadataString(context, ['sourceScope', 'source', 'scope', 'sourceId']));
-    if (metadata.split(/\s+/).includes(sourceScope)) return true;
+    if (metadata.split(/\s+/).includes(sourceScope) || text.includes(`sourcescope:${sourceScope}`)) return true;
   }
   return false;
 }
