@@ -838,7 +838,7 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
 
   const activeRoute = ROUTES.find((item) => item.id === route) ?? ROUTES[0]!;
   const isSidebarHidden = isMobileSidebar && !isSidebarOpen;
-  const sidebarHiddenAttributes: Record<string, string> = isSidebarHidden ? { 'aria-hidden': 'true', inert: '' } : {};
+  const sidebarHiddenAttributes = isSidebarHidden ? { 'aria-hidden': true, inert: true } : {};
   const focusGuardTabIndex = isMobileSidebar && isSidebarOpen ? 0 : -1;
 
   function closeSidebar() {
