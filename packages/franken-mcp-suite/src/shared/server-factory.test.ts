@@ -418,6 +418,15 @@ describe('createMcpServer', () => {
         queri: '[right-to-forget-args-redacted]',
         dryRun: true,
       });
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        type: 'alice@example.test',
+        dryRun: 'alice@example.test',
+        query: 'secret-selector',
+      })).toEqual({
+        type: '[right-to-forget-args-redacted]',
+        dryRun: '[right-to-forget-args-redacted]',
+        query: '[right-to-forget-selector-redacted]',
+      });
     });
 
 

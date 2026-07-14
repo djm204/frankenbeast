@@ -391,6 +391,28 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('includes unflushed live runtime matches in dry-run remaining references', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-dry-run-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+
+        const forgetter = new SqliteBrain(dbPath);
+        const report = forgetter.rightToForget({ query: 'alice@example.test', dryRun: true });
+
+        expect(report.deleted.working).toBe(1);
+        expect(report.remainingReferences).toBe(1);
+        expect(stale.working.get('contact')).toBe('alice@example.test');
+
+        forgetter.close();
+        stale.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('normalizes live database paths when expiring forgotten rows', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-path-'));
       const dbPath = join(dir, 'brain.db');
@@ -516,6 +538,36 @@ describe('SqliteBrain', () => {
       expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 0 });
       expect(brain.working.has('import-1')).toBe(false);
       expect(() => brain.working.set('import-1', 'secret')).toThrow(/right-to-forget/);
+    });
+
+    it('matches exact multi-word metadata array items for deletion and guards', () => {
+      brain.working.set('array-working', { value: 'contact', categories: ['personal info', 'billing'], sourceScope: ['customer import 1', 'batch-2'] });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'array scoped event',
+        details: { categories: ['personal info', 'billing'], sourceScope: ['customer import 1', 'batch-2'] } as unknown as Record<string, string>,
+        createdAt: new Date().toISOString(),
+      });
+      brain.recovery.checkpoint({
+        runId: 'run-array-metadata',
+        phase: 'execution',
+        step: 1,
+        context: { categories: ['personal info', 'billing'], sourceScope: ['customer import 1', 'batch-2'] },
+        timestamp: '2026-07-13T00:03:25.000Z',
+      });
+
+      const categoryReport = brain.rightToForget({ category: 'personal info' });
+
+      expect(categoryReport.deleted).toEqual({ working: 1, episodic: 1, derived: 2 });
+      expect(categoryReport.remainingReferences).toBe(0);
+      expect(() => brain.working.set('array-working-2', { categories: ['personal info', 'billing'] })).toThrow(/right-to-forget/);
+
+      brain.working.set('source-array-working', { value: 'contact', sourceScope: ['customer import 1', 'batch-2'] });
+      const sourceReport = brain.rightToForget({ sourceScope: 'customer import 1' });
+
+      expect(sourceReport.deleted.working).toBe(1);
+      expect(sourceReport.remainingReferences).toBe(0);
+      expect(() => brain.working.set('source-array-working-2', { sourceScope: ['customer import 1', 'batch-2'] })).toThrow(/right-to-forget/);
     });
 
     it('deletes spaced category markers in episodic and checkpoint rows', () => {

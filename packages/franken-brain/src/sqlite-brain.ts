@@ -2387,15 +2387,23 @@ function valueToSearchText(value: unknown): string {
   }
 }
 
-function objectMetadataString(value: unknown, names: string[]): string | undefined {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+function objectMetadataStrings(value: unknown, names: string[]): string[] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return [];
   const record = value as Record<string, unknown>;
   for (const name of names) {
     const raw = record[name];
-    if (typeof raw === 'string') return raw;
-    if (Array.isArray(raw) && raw.every(item => typeof item === 'string')) return raw.join(' ');
+    if (typeof raw === 'string') return [raw];
+    if (Array.isArray(raw) && raw.every(item => typeof item === 'string')) return raw as string[];
   }
-  return undefined;
+  return [];
+}
+
+function metadataMatchesSelectorValue(metadataValues: readonly string[], selectorValue: string): boolean {
+  const normalizedSelectorValue = normalizeForMatch(selectorValue);
+  return metadataValues.some((value) => {
+    const normalized = normalizeForMatch(value);
+    return normalized === normalizedSelectorValue || normalized.split(/\s+/).includes(normalizedSelectorValue);
+  });
 }
 
 function workingEntryMatchesSelector(key: string, value: unknown, selector: NormalizedRightToForgetSelector): boolean {
@@ -2405,10 +2413,8 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
   if (selector.query && text.includes(normalizeForMatch(selector.query))) return true;
   if (selector.category) {
     const category = normalizeForMatch(selector.category);
-    const metadata = normalizeForMatch(objectMetadataString(value, ['category', 'categories', 'kind']));
     if (
-      metadata === category
-      || metadata.split(/\s+/).includes(category)
+      metadataMatchesSelectorValue(objectMetadataStrings(value, ['category', 'categories', 'kind']), category)
       || extractStructuredMarkerValues(text, 'category').some(candidate => normalizeForMatch(candidate) === category)
       || lowerKey === category
       || lowerKey.startsWith(`${category}:`)
@@ -2416,9 +2422,8 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
   }
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
-    const metadata = normalizeForMatch(objectMetadataString(value, ['sourceScope', 'source', 'scope', 'sourceId']));
     if (
-      metadata.split(/\s+/).includes(sourceScope)
+      metadataMatchesSelectorValue(objectMetadataStrings(value, ['sourceScope', 'source', 'scope', 'sourceId']), sourceScope)
       || extractStructuredMarkerValues(text, 'sourceScope').some(candidate => normalizeForMatch(candidate) === sourceScope)
       || lowerKey === sourceScope
       || lowerKey.startsWith(`${sourceScope}:`)
@@ -2454,18 +2459,15 @@ function episodicRowMatchesSelector(step: string, summary: string, details: stri
   if (selector.query && text.includes(normalizeForMatch(selector.query))) return true;
   if (selector.category) {
     const category = normalizeForMatch(selector.category);
-    const metadata = normalizeForMatch(objectMetadataString(parsedDetails, ['category', 'categories', 'kind']));
     if (
-      metadata === category
-      || metadata.split(/\s+/).includes(category)
+      metadataMatchesSelectorValue(objectMetadataStrings(parsedDetails, ['category', 'categories', 'kind']), category)
       || extractStructuredMarkerValues(text, 'category').some(value => normalizeForMatch(value) === category)
     ) return true;
   }
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
-    const metadata = normalizeForMatch(objectMetadataString(parsedDetails, ['sourceScope', 'source', 'scope', 'sourceId']));
     if (
-      metadata.split(/\s+/).includes(sourceScope)
+      metadataMatchesSelectorValue(objectMetadataStrings(parsedDetails, ['sourceScope', 'source', 'scope', 'sourceId']), sourceScope)
       || extractStructuredMarkerValues(text, 'sourceScope').some(value => normalizeForMatch(value) === sourceScope)
     ) return true;
   }
@@ -2530,11 +2532,11 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
   const keyPrefixes = keyPrefixCandidates(key);
   const candidates: Array<[string, string | undefined]> = [
     ['key', key],
-    ['category', objectMetadataString(parsed, ['category', 'categories', 'kind'])],
+    ...objectMetadataStrings(parsed, ['category', 'categories', 'kind']).map(value => ['category', value] as [string, string]),
     ...extractStructuredMarkerValues(text, 'category').map(value => ['category', value] as [string, string]),
     ['category', keyPrefix],
     ...keyPrefixes.map(segment => ['category', segment] as [string, string]),
-    ['sourceScope', objectMetadataString(parsed, ['sourceScope', 'source', 'scope', 'sourceId'])],
+    ...objectMetadataStrings(parsed, ['sourceScope', 'source', 'scope', 'sourceId']).map(value => ['sourceScope', value] as [string, string]),
     ...extractStructuredMarkerValues(text, 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
     ...keySegments.map(segment => ['sourceScope', segment] as [string, string]),
   ];
@@ -2561,9 +2563,9 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
 function assertEpisodicNotDeletionGuarded(db: Database.Database, event: EpisodicEvent): void {
   const text = `${event.step ?? ''} ${event.summary} ${event.details ? valueToSearchText(event.details) : ''}`;
   const candidates: Array<[string, string | undefined]> = [
-    ['category', objectMetadataString(event.details, ['category', 'categories', 'kind'])],
+    ...objectMetadataStrings(event.details, ['category', 'categories', 'kind']).map(value => ['category', value] as [string, string]),
     ...extractStructuredMarkerValues(text, 'category').map(value => ['category', value] as [string, string]),
-    ['sourceScope', objectMetadataString(event.details, ['sourceScope', 'source', 'scope', 'sourceId'])],
+    ...objectMetadataStrings(event.details, ['sourceScope', 'source', 'scope', 'sourceId']).map(value => ['sourceScope', value] as [string, string]),
     ...extractStructuredMarkerValues(text, 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
   ];
   for (const [kind, value] of candidates) {
@@ -2599,18 +2601,15 @@ function checkpointStateMatchesSelector(value: unknown, selector: NormalizedRigh
     : undefined;
   if (selector.category) {
     const category = normalizeForMatch(selector.category);
-    const metadata = normalizeForMatch(objectMetadataString(context, ['category', 'categories', 'kind']));
     if (
-      metadata === category
-      || metadata.split(/\s+/).includes(category)
+      metadataMatchesSelectorValue(objectMetadataStrings(context, ['category', 'categories', 'kind']), category)
       || extractStructuredMarkerValues(text, 'category').some(candidate => normalizeForMatch(candidate) === category)
     ) return true;
   }
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
-    const metadata = normalizeForMatch(objectMetadataString(context, ['sourceScope', 'source', 'scope', 'sourceId']));
     if (
-      metadata.split(/\s+/).includes(sourceScope)
+      metadataMatchesSelectorValue(objectMetadataStrings(context, ['sourceScope', 'source', 'scope', 'sourceId']), sourceScope)
       || extractStructuredMarkerValues(text, 'sourceScope').some(candidate => normalizeForMatch(candidate) === sourceScope)
     ) return true;
   }
@@ -2648,9 +2647,9 @@ function hasDeletionGuard(db: Database.Database, scope: string, kind: string, va
 function assertCheckpointNotDeletionGuarded(db: Database.Database, state: ExecutionState): void {
   const context = state.context;
   const candidates: Array<[string, string | undefined]> = [
-    ['category', objectMetadataString(context, ['category', 'categories', 'kind'])],
+    ...objectMetadataStrings(context, ['category', 'categories', 'kind']).map(value => ['category', value] as [string, string]),
     ...extractStructuredMarkerValues(valueToSearchText(state), 'category').map(value => ['category', value] as [string, string]),
-    ['sourceScope', objectMetadataString(context, ['sourceScope', 'source', 'scope', 'sourceId'])],
+    ...objectMetadataStrings(context, ['sourceScope', 'source', 'scope', 'sourceId']).map(value => ['sourceScope', value] as [string, string]),
     ...extractStructuredMarkerValues(valueToSearchText(state), 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
   ];
   for (const [kind, value] of candidates) {
