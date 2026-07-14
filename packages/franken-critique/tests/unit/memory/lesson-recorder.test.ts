@@ -181,6 +181,219 @@ describe('LessonRecorder', () => {
     });
   });
 
+  it('flags recovered failed-test findings as skill candidate signals', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Failed test tests/unit/handoff.test.ts: expected PR body to include verification evidence',
+            severity: 'critical',
+            location: 'tests/unit/handoff.test.ts',
+            suggestion:
+              'Run npm run test --workspace @franken/critique before handoff.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'failed-test-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual({
+      detector: 'failed-test-to-skill-candidate',
+      candidate: true,
+      sourceIteration: 0,
+      evaluatorName: 'reviewer',
+      matchedSignals: ['failed-test wording', 'test command', 'test file path'],
+      sourceFindingMessages: [
+        'Failed test tests/unit/handoff.test.ts: expected PR body to include verification evidence',
+      ],
+      operatorGuidance:
+        'This recovered critique failure looks like a concrete failed test. PM handoffs should consider creating or updating a skill only after the failure recurs or the regression exposes a reusable workflow gap; keep one-off product bugs in the issue/PR instead of promoting them as durable skill guidance.',
+    });
+  });
+
+  it('does not flag generic reviewer findings as failed-test skill candidates', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'PR summary omits the issue link',
+            severity: 'warning',
+            suggestion: 'Add the issue URL to the PR description.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'generic-review-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toBeUndefined();
+  });
+
+  it('does not flag generic review guidance that only suggests running tests', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Expected PR body to include an issue link and verification evidence; got an empty description',
+            severity: 'warning',
+            suggestion:
+              'Run npm run test before handoff and update the PR body.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'generic-test-command-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toBeUndefined();
+  });
+
+  it('flags reversed failed-test wording as a skill candidate signal', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Tests failed in CI after the latest handoff update',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'reversed-failed-test-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual(
+      expect.objectContaining({
+        matchedSignals: ['failed-test wording'],
+        sourceFindingMessages: [
+          'Tests failed in CI after the latest handoff update',
+        ],
+      }),
+    );
+  });
+
+  it('detects copied multiline test-runner failure output', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Review pasted runner output:\nvitest v2.1.0\n\nTests 1 failed | 7 passed',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'multiline-runner-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual(
+      expect.objectContaining({
+        matchedSignals: ['test runner output'],
+        sourceFindingMessages: [
+          'Review pasted runner output:\nvitest v2.1.0\n\nTests 1 failed | 7 passed',
+        ],
+      }),
+    );
+  });
+
+  it('detects fail-prefixed runner output with assertion details', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'FAIL packages/foo.test.ts\nExpected PR body to include evidence\nReceived empty description',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'fail-prefixed-runner-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toEqual(
+      expect.objectContaining({
+        matchedSignals: [
+          'assertion expected-received',
+          'fail-prefixed runner output',
+          'test file path',
+        ],
+      }),
+    );
+  });
+
+  it('does not combine weak primary assertion prose with strong suggestion-only failures', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message:
+              'Expected PR body to include an issue link; received empty description',
+            severity: 'warning',
+            suggestion: 'Run the failed tests before handoff.',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'weak-primary-strong-suggestion-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failedTestSkillCandidate).toBeUndefined();
+  });
+
   it('marks reviewer-feedback lessons with missing suggestions for PM follow-up', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
@@ -441,7 +654,9 @@ describe('LessonRecorder', () => {
   it('rejects blank per-agent scorecard ids so PM summaries do not group lessons under an ambiguous agent', () => {
     expect(
       () => new LessonRecorder(createMockMemoryPort(), { agentId: '  ' }),
-    ).toThrow('LessonRecorder agentId must be a non-empty string when provided.');
+    ).toThrow(
+      'LessonRecorder agentId must be a non-empty string when provided.',
+    );
   });
 
   it('returns an LLM-friendly learning backlog prioritization report for PM handoffs', async () => {
@@ -474,7 +689,9 @@ describe('LessonRecorder', () => {
         'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.',
       items: [
         {
-          id: expect.stringMatching(/^lesson:learning-backlog-task:quality-gate:iteration-0$/),
+          id: expect.stringMatching(
+            /^lesson:learning-backlog-task:quality-gate:iteration-0$/,
+          ),
           source: 'recorded-lesson',
           priority: 'high',
           score: 80,
@@ -759,7 +976,8 @@ describe('LessonRecorder', () => {
 
     const quarantined = quarantineLesson(activeLesson, {
       trigger: 'explicit-user-correction',
-      reason: 'User corrected this as unsafe because verifier output was skipped.',
+      reason:
+        'User corrected this as unsafe because verifier output was skipped.',
       evidence: [
         {
           kind: 'operator-report',
@@ -772,7 +990,8 @@ describe('LessonRecorder', () => {
     expect(quarantined.lifecycleStatus).toBe('quarantined');
     expect(quarantined.quarantine).toMatchObject({
       trigger: 'explicit-user-correction',
-      reason: 'User corrected this as unsafe because verifier output was skipped.',
+      reason:
+        'User corrected this as unsafe because verifier output was skipped.',
       quarantinedAt: '2026-07-12T10:05:00.000Z',
       evidence: [
         {
@@ -840,8 +1059,14 @@ describe('LessonRecorder', () => {
       trigger: 'repeated-failure-threshold',
       threshold: 2,
       evidence: [
-        { kind: 'failed-regression', reference: 'https://github.com/djm204/frankenbeast/pull/1' },
-        { kind: 'failed-regression', reference: 'https://github.com/djm204/frankenbeast/pull/2' },
+        {
+          kind: 'failed-regression',
+          reference: 'https://github.com/djm204/frankenbeast/pull/1',
+        },
+        {
+          kind: 'failed-regression',
+          reference: 'https://github.com/djm204/frankenbeast/pull/2',
+        },
       ],
     });
     expect(isLessonApplicable(quarantined)).toBe(false);
@@ -860,7 +1085,9 @@ describe('LessonRecorder', () => {
     const firstQuarantine = quarantineLesson(candidateLesson, {
       trigger: 'explicit-user-correction',
       reason: 'User reported this candidate as harmful.',
-      evidence: [{ kind: 'operator-report', reference: 'discord://first-report' }],
+      evidence: [
+        { kind: 'operator-report', reference: 'discord://first-report' },
+      ],
       quarantinedAt: '2026-07-12T10:05:00.000Z',
     });
     const repeatedQuarantine = quarantineLesson(firstQuarantine, {
@@ -876,7 +1103,9 @@ describe('LessonRecorder', () => {
       threshold: 2,
     });
 
-    expect(repeatedQuarantine.quarantine?.previousLifecycleStatus).toBe('candidate');
+    expect(repeatedQuarantine.quarantine?.previousLifecycleStatus).toBe(
+      'candidate',
+    );
     expect(repeatedQuarantine.quarantine?.threshold).toBe(2);
     expect(repeatedQuarantine.quarantine?.evidence).toEqual([
       { kind: 'operator-report', reference: 'discord://first-report' },
@@ -929,7 +1158,9 @@ describe('LessonRecorder', () => {
       {
         trigger: 'explicit-user-correction',
         reason: 'User reported stale workaround.',
-        evidence: [{ kind: 'operator-report', reference: 'discord://operator-report' }],
+        evidence: [
+          { kind: 'operator-report', reference: 'discord://operator-report' },
+        ],
         quarantinedAt: '2026-07-12T10:05:00.000Z',
       },
     );

@@ -134,16 +134,12 @@ on:
       expect(workflow.name).toBe('CI');
     });
 
-    it('triggers on push to main', () => {
+    it('explicitly limits CI push and pull_request triggers to the main branch', () => {
       const triggers = expectRecord(workflow.on, 'workflow.on');
-      const push = expectRecord(triggers.push, 'workflow.on.push');
-      expect(push.branches).toEqual(['main']);
-    });
 
-    it('triggers on pull_request to main', () => {
-      const triggers = expectRecord(workflow.on, 'workflow.on');
-      const pullRequest = expectRecord(triggers.pull_request, 'workflow.on.pull_request');
-      expect(pullRequest.branches).toEqual(['main']);
+      expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
+      expect(expectRecord(triggers.push, 'workflow.on.push')).toEqual({ branches: ['main'] });
+      expect(expectRecord(triggers.pull_request, 'workflow.on.pull_request')).toEqual({ branches: ['main'] });
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
@@ -457,6 +453,31 @@ jobs:
     );
   });
 
+  it('does not demote component-only latest releases unless a root release exists to promote', () => {
+    const releaseLatestStep = expectSteps(releasePlease).find(
+      (step) => step.name === 'Ensure only root release is marked latest',
+    );
+    expect(releaseLatestStep).toBeTruthy();
+    const releaseLatestRun = String(releaseLatestStep?.run ?? '');
+
+    const rootLookupIndex = releaseLatestRun.indexOf('root_tag=$(gh release list');
+    const emptyRootNormalizationIndex = releaseLatestRun.indexOf('.tagName // empty');
+    const noRootGuardIndex = releaseLatestRun.indexOf(
+      'No root release found; leaving component latest unchanged',
+    );
+    const demoteIndex = releaseLatestRun.indexOf('gh release edit "$latest_tag" --latest=false');
+    const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
+
+    expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(releaseLatestRun).toContain('gh release list --limit 1000 --json tagName');
+    expect(emptyRootNormalizationIndex).toBeGreaterThan(rootLookupIndex);
+    expect(noRootGuardIndex).toBeGreaterThan(emptyRootNormalizationIndex);
+    expect(demoteIndex).toBeGreaterThan(noRootGuardIndex);
+    expect(promoteIndex).toBeGreaterThan(demoteIndex);
+    expect(releaseLatestRun).toContain('if [ -z "$root_tag" ]; then');
+    expect(releaseLatestRun).toContain('exit 0');
+  });
+
   it('defers npm token enforcement until a public package needs publishing', () => {
     const publishStep = expectSteps(publishNpm).find((step) => step.name === 'Publish released npm packages');
     const publishRun = String(publishStep?.run ?? '');
@@ -477,10 +498,11 @@ jobs:
     const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(latestRun).toContain('gh release list --limit 1000 --json tagName');
     expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
     expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
-    expect(latestRun).toContain('[0].tagName // ""');
+    expect(latestRun).toContain('[0].tagName // empty');
   });
 });
 

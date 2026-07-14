@@ -1,6 +1,7 @@
 import type {
   MemoryPort,
   CritiqueLesson,
+  FailedTestSkillCandidate,
   LessonCooldownSuppression,
   LessonRecordingResult,
   ReviewerFeedbackLessonCapture,
@@ -112,6 +113,60 @@ const LESSON_ROLLBACK_WORKFLOW: LessonRollbackWorkflow = {
 const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
   'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
 
+const FAILED_TEST_SKILL_CANDIDATE_GUIDANCE =
+  'This recovered critique failure looks like a concrete failed test. PM handoffs should consider creating or updating a skill only after the failure recurs or the regression exposes a reusable workflow gap; keep one-off product bugs in the issue/PR instead of promoting them as durable skill guidance.';
+
+const FAILED_TEST_SIGNAL_PATTERNS: readonly {
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly strength: 'strong' | 'supporting';
+}[] = [
+  {
+    label: 'failed-test wording',
+    pattern:
+      /\b(?:(?:failed|failing|broken)\s+tests?|tests?\s+(?:failed|failing|broken))\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test-failure wording',
+    pattern: /\btest\s+fail(?:ure|ed|ing)?\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'assertion error',
+    pattern: /\bassertionerror\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'assertion expected-received',
+    pattern:
+      /\b(?:expected[\s\S]{0,120}(?:received|got)|(?:received|got)[\s\S]{0,120}expected)\b/i,
+    strength: 'supporting',
+  },
+  {
+    label: 'test runner output',
+    pattern:
+      /\b(?:vitest|jest|mocha|playwright)\b[\s\S]{0,240}\b(?:fail|failed|failing)\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'fail-prefixed runner output',
+    pattern: /\bFAIL\b[\s\S]{0,240}\b[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test file path',
+    pattern:
+      /(?:^|[/\s])(?:tests?\/[^\s]+|[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?)\b/i,
+    strength: 'supporting',
+  },
+  {
+    label: 'test command',
+    pattern: /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b/i,
+    strength: 'supporting',
+  },
+];
+
 const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
   templateId: 'post-pr-lesson-extraction-v1',
   trigger: 'after-pr-review-or-merge',
@@ -172,7 +227,9 @@ export function isLessonApplicable(lesson: CritiqueLesson): boolean {
   if (lesson.experimentSandbox?.promotionBlocked === true) {
     return false;
   }
-  return lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active';
+  return (
+    lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active'
+  );
 }
 
 export function quarantineLesson(
@@ -182,19 +239,27 @@ export function quarantineLesson(
   const reason = requireNonEmptyString(request.reason, 'quarantine reason');
   const quarantinedAt = normalizeTimestamp(request.quarantinedAt);
   if (request.evidence.length === 0) {
-    throw new RangeError('Lesson quarantine requires at least one evidence item.');
+    throw new RangeError(
+      'Lesson quarantine requires at least one evidence item.',
+    );
   }
   const evidence = request.evidence.map(normalizeQuarantineEvidence);
   const previousQuarantine = lesson.quarantine;
-  const combinedEvidence = [...(previousQuarantine?.evidence ?? []), ...evidence];
+  const combinedEvidence = [
+    ...(previousQuarantine?.evidence ?? []),
+    ...evidence,
+  ];
   const reviewItem = createLessonQuarantineReviewItem(
     lesson,
     reason,
     combinedEvidence,
     quarantinedAt,
   );
-  const previousLifecycleStatus = previousQuarantine?.previousLifecycleStatus ??
-    (lesson.lifecycleStatus === 'quarantined' ? undefined : lesson.lifecycleStatus);
+  const previousLifecycleStatus =
+    previousQuarantine?.previousLifecycleStatus ??
+    (lesson.lifecycleStatus === 'quarantined'
+      ? undefined
+      : lesson.lifecycleStatus);
   const threshold = request.threshold ?? previousQuarantine?.threshold;
   const quarantine: LessonQuarantineMetadata = {
     trigger: request.trigger,
@@ -204,7 +269,9 @@ export function quarantineLesson(
     quarantinedAt,
     evidence: combinedEvidence,
     ...(threshold !== undefined ? { threshold } : {}),
-    ...(previousLifecycleStatus !== undefined ? { previousLifecycleStatus } : {}),
+    ...(previousLifecycleStatus !== undefined
+      ? { previousLifecycleStatus }
+      : {}),
     reviewItem,
   };
   const { unquarantine, ...lessonWithoutUnquarantine } = lesson;
@@ -221,7 +288,9 @@ export function quarantineLessonForRepeatedFailures(
   request: RepeatedFailureQuarantineRequest,
 ): CritiqueLesson {
   if (!Number.isSafeInteger(request.threshold) || request.threshold < 1) {
-    throw new RangeError('Repeated failure quarantine threshold must be a positive integer.');
+    throw new RangeError(
+      'Repeated failure quarantine threshold must be a positive integer.',
+    );
   }
   const distinctFailures = dedupeFailureSignals(request.failures);
   if (distinctFailures.length < request.threshold) {
@@ -244,7 +313,10 @@ export function unquarantineLesson(
   lesson: CritiqueLesson,
   request: LessonUnquarantineRequest,
 ): CritiqueLesson {
-  if (lesson.lifecycleStatus !== 'quarantined' || lesson.quarantine === undefined) {
+  if (
+    lesson.lifecycleStatus !== 'quarantined' ||
+    lesson.quarantine === undefined
+  ) {
     throw new RangeError('Only quarantined lessons can be unquarantined.');
   }
   requireNonEmptyString(request.reviewer, 'unquarantine reviewer');
@@ -257,7 +329,8 @@ export function unquarantineLesson(
     reason: request.reason,
   };
   const { quarantine, ...lessonWithoutQuarantine } = lesson;
-  const restoredLifecycleStatus = quarantine.previousLifecycleStatus ?? 'active';
+  const restoredLifecycleStatus =
+    quarantine.previousLifecycleStatus ?? 'active';
   return {
     ...lessonWithoutQuarantine,
     lifecycleStatus: restoredLifecycleStatus,
@@ -418,7 +491,10 @@ export class LessonRecorder {
           recordingResult.minedBlockerPatterns,
           lesson.blockerPatterns,
         );
-        addLessonBacklogItems(recordingResult.learningBacklogItems, admittedLesson);
+        addLessonBacklogItems(
+          recordingResult.learningBacklogItems,
+          admittedLesson,
+        );
         if (cooldownKey && this.cooldownMs > 0) {
           this.cooldowns.set(
             cooldownKey,
@@ -481,6 +557,11 @@ export class LessonRecorder {
           critiqueFindings,
           recordedAt,
         );
+        const failedTestSkillCandidate = createFailedTestSkillCandidate(
+          failingIteration.index,
+          evalResult.evaluatorName,
+          critiqueFindings,
+        );
 
         const lesson: CritiqueLesson = {
           evaluatorName: evalResult.evaluatorName,
@@ -520,6 +601,7 @@ export class LessonRecorder {
             evalResult.evaluatorName,
             critiqueFindings,
           ),
+          ...(failedTestSkillCandidate ? { failedTestSkillCandidate } : {}),
           postPrLessonExtractionTemplate:
             createPostPrLessonExtractionTemplate(),
           ...(this.agentId
@@ -1051,7 +1133,9 @@ function createAgentImprovementScorecard(
         ),
     ),
   );
-  const failingIterations = evaluatorFailures.map((iteration) => iteration.index);
+  const failingIterations = evaluatorFailures.map(
+    (iteration) => iteration.index,
+  );
   const allFindings = evaluatorFailures.flatMap((iteration) =>
     iteration.result.results
       .filter(
@@ -1075,7 +1159,8 @@ function createAgentImprovementScorecard(
     failingIteration.result.overallScore;
   const passingIteration = allIterations.find(
     (iteration) =>
-      iteration.result.verdict === 'pass' || iteration.result.verdict === 'warn',
+      iteration.result.verdict === 'pass' ||
+      iteration.result.verdict === 'warn',
   );
   const finalScore =
     passingIteration?.result.results.find(
@@ -1153,6 +1238,68 @@ function createLessonRollbackWorkflow(): LessonRollbackWorkflow {
     requiredEvidence: [...LESSON_ROLLBACK_WORKFLOW.requiredEvidence],
     requestSchema: { ...LESSON_ROLLBACK_WORKFLOW.requestSchema },
   };
+}
+
+function createFailedTestSkillCandidate(
+  sourceIteration: number,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): FailedTestSkillCandidate | undefined {
+  const matched = new Set<string>();
+  const sourceFindingMessages: string[] = [];
+
+  for (const finding of findings) {
+    const primaryText = [finding.message, finding.location]
+      .filter((value): value is string => Boolean(value))
+      .join('\n');
+    const suggestionText = finding.suggestion ?? '';
+    const primarySignals = collectFailedTestSignals(primaryText);
+    const suggestionSignals = collectFailedTestSignals(suggestionText);
+    const allSignals = [...primarySignals, ...suggestionSignals];
+    const hasPrimarySignal = primarySignals.length > 0;
+    const hasStrongSignal = primarySignals.some(
+      (signal) => signal.strength === 'strong',
+    );
+    const distinctSignals = new Set(allSignals.map((signal) => signal.label));
+
+    if (hasPrimarySignal && hasStrongSignal && distinctSignals.size > 0) {
+      sourceFindingMessages.push(finding.message);
+      for (const signal of distinctSignals) {
+        matched.add(signal);
+      }
+    }
+  }
+
+  if (matched.size === 0) {
+    return undefined;
+  }
+
+  return {
+    detector: 'failed-test-to-skill-candidate',
+    candidate: true,
+    sourceIteration,
+    evaluatorName,
+    matchedSignals: [...matched].sort(),
+    sourceFindingMessages,
+    operatorGuidance: FAILED_TEST_SKILL_CANDIDATE_GUIDANCE,
+  };
+}
+
+function collectFailedTestSignals(text: string): {
+  label: string;
+  strength: 'strong' | 'supporting';
+}[] {
+  return FAILED_TEST_SIGNAL_PATTERNS.filter((signal) =>
+    signal.pattern.test(text),
+  ).map((signal) => ({
+    label: signal.label,
+    strength: signal.strength,
+  }));
 }
 
 function createReviewerFeedbackCapture(
@@ -1237,7 +1384,8 @@ function createLessonQuarantineReviewItem(
   evidence: readonly LessonQuarantineEvidence[],
   createdAt: string,
 ): LessonQuarantineMetadata['reviewItem'] {
-  const lessonId = lesson.testTraceability?.[0]?.lessonId ??
+  const lessonId =
+    lesson.testTraceability?.[0]?.lessonId ??
     `${sanitizeLessonIdPart(lesson.taskId)}:${sanitizeLessonIdPart(lesson.evaluatorName)}`;
   return {
     id: `lesson-quarantine:${stableHash(`${lessonId}:${reason}:${createdAt}`)}`,
