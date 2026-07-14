@@ -283,11 +283,15 @@ Zero-dependency, in-process store. Good for tests and prototyping.
 ```ts
 import { InMemoryAdapter } from '@franken/observer'
 
-const adapter = new InMemoryAdapter()
+// Retains the most recent 1000 traces by default. Older traces are evicted
+// from queryByTraceId() / listTraceIds(); use maxTraces: Infinity only for
+// legacy test fixtures that intentionally need unbounded retention.
+const adapter = new InMemoryAdapter({ maxTraces: 1000 })
 await adapter.flush(trace)
 
 const retrieved = await adapter.queryByTraceId(trace.id)
 const allIds    = await adapter.listTraceIds()
+adapter.clear() // explicit cleanup hook for long-lived processes/tests
 ```
 
 ### `SQLiteAdapter`
@@ -588,15 +592,36 @@ const adapter = new LangfuseAdapter({
 await adapter.flush(trace)
 ```
 
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are caller-managed credentials; `LangfuseAdapter` does not read them automatically and has no default key values. `publicKey` identifies the Langfuse project, while `secretKey` is sent with it in the Basic Authorization header. Keep the secret key in local/CI secret stores, never commit it or expose it to browser bundles, and fail fast before constructing the adapter if a live-export job is missing either value. For local development, prefer an ignored `.env` file or shell profile and use placeholder values only with a mocked `fetch`. CI should inject masked `LANGFUSE_*` secrets only into jobs that intentionally test live Langfuse export wiring; unit and documentation checks should continue to run without real credentials.
+
+See the repository copy of [`packages/franken-observer/docs/adapters.md`](https://github.com/djm204/frankenbeast/blob/main/packages/franken-observer/docs/adapters.md#langfuseadapter) for the full environment-variable reference, local development example, and CI snippet.
+
 ### `TempoAdapter`
 
 Posts OTEL payloads to [Grafana Tempo](https://grafana.com/oss/tempo/) over OTLP/HTTP.
+
+`GRAFANA_INSTANCE_ID` and `GRAFANA_API_KEY` are only needed when exporting traces
+to Grafana Cloud Tempo. `GRAFANA_INSTANCE_ID` is the numeric Grafana Cloud stack
+or Tempo instance ID used as the Basic auth username, and `GRAFANA_API_KEY` is a
+Grafana Cloud access policy token/API key with permission to write traces. Local
+Tempo and OpenTelemetry Collector endpoints do not use either variable; omit
+`basicAuth` entirely and the adapter sends unauthenticated OTLP/HTTP requests.
+
+Keep `GRAFANA_API_KEY` out of source control. Store it in a local `.env`, shell
+secret manager, or CI secret store, and mask it in logs. Rotate the key if it is
+printed or committed. A missing value should fail fast in your own wiring before
+constructing a Grafana Cloud adapter.
 
 ```ts
 import { TempoAdapter } from '@franken/observer'
 
 // Local Tempo / OpenTelemetry Collector
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
+
+// CI example: export these from the CI secret store, not from repository files.
+if (!process.env.GRAFANA_INSTANCE_ID || !process.env.GRAFANA_API_KEY) {
+  throw new Error('Grafana Cloud export requires GRAFANA_INSTANCE_ID and GRAFANA_API_KEY')
+}
 
 // Grafana Cloud Tempo
 function requireEnv(name: string): string {
@@ -608,7 +633,9 @@ function requireEnv(name: string): string {
 }
 
 const cloud = new TempoAdapter({
-  endpoint: 'https://tempo-us-central1.grafana.net/tempo',
+  // Copy the OTLP gateway host from your Grafana Cloud stack's OpenTelemetry tile.
+  // Do not use the Tempo query endpoint (tempo-<region>.grafana.net/tempo).
+  endpoint: 'https://otlp-gateway-<REGION>.grafana.net',
   otlpPath: '/otlp/v1/traces',
   basicAuth: {
     user: requireEnv('GRAFANA_INSTANCE_ID'),

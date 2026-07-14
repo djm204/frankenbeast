@@ -62,12 +62,6 @@ export interface AnalyticsEventPage {
   pageSize: number;
 }
 
-interface AnalyticsApiErrorEnvelope {
-  error?: {
-    message?: string;
-  };
-}
-
 export class AnalyticsApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -91,19 +85,29 @@ export class AnalyticsApiClient {
   private async fetchJson<T>(path: string): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`);
     if (!res.ok) {
-      let message = `HTTP ${res.status}`;
-      try {
-        const body = (await res.json()) as AnalyticsApiErrorEnvelope;
-        if (body.error?.message) {
-          message = body.error.message;
-        }
-      } catch {
-        // Fall through with HTTP status message.
-      }
-      throw new Error(message);
+      throw new Error(await extractResponseErrorMessage(res) ?? `HTTP ${res.status}`);
     }
     return (await res.json()) as T;
   }
+}
+
+async function extractResponseErrorMessage(res: Response): Promise<string | undefined> {
+  try {
+    const body = await res.json() as unknown;
+    if (!body || typeof body !== 'object') return undefined;
+
+    const error = (body as { error?: unknown }).error;
+    if (typeof error === 'string' && error.trim()) return error;
+
+    if (error && typeof error === 'object') {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string' && message.trim()) return message;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 function queryString(filters: AnalyticsEventFilters): string {

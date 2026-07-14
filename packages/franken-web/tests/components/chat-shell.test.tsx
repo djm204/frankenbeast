@@ -1498,7 +1498,7 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('agent-1')).toBeDefined();
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
     });
 
     latestBeastEventHandlers?.error?.(new Error('SSE disconnected'));
@@ -1509,6 +1509,57 @@ describe('ChatShell', () => {
 
     const headerCreateButton = screen.getByRole('button', { name: /^\+ create agent$/i });
     expect(headerCreateButton.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('clears transient Beast stream disconnect errors after the SSE connection recovers', async () => {
+    window.location.hash = '#/beasts';
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
+    });
+
+    latestBeastEventHandlers?.error?.(new Error('Beast event stream disconnected; reconnecting'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Beast event stream disconnected; reconnecting')).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.connected?.({});
+
+    await waitFor(() => {
+      expect(screen.queryByText('Beast event stream disconnected; reconnecting')).toBeNull();
+    });
+  });
+
+  it('keeps non-stream Beast errors visible after the SSE connection opens', async () => {
+    window.location.hash = '#/beasts';
+    mockGetAgent.mockRejectedValue(new Error('Agent detail unavailable'));
+
+    render(
+      <ChatShell
+        baseUrl="http://localhost:3000"
+        projectId="test-project"
+        version="0.9.0"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent detail unavailable')).toBeDefined();
+    });
+
+    latestBeastEventHandlers?.connected?.({});
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent detail unavailable')).toBeDefined();
+    });
   });
 
   it('keeps create-agent enabled when selected agent detail fails after state loads', async () => {

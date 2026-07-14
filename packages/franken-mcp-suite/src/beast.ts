@@ -3,6 +3,7 @@ import { createMcpServer, type ToolDef } from './shared/server-factory.js';
 import { createGovernanceGate } from './shared/governance-gate.js';
 import { createAuditSink } from './shared/central-enforcement.js';
 import { isMain } from './shared/is-main.js';
+import { handleStartupFailure } from './shared/shutdown.js';
 import { createBrainAdapter } from './adapters/brain-adapter.js';
 import { createObserverAdapter } from './adapters/observer-adapter.js';
 import { createGovernorAdapter } from './adapters/governor-adapter.js';
@@ -54,7 +55,6 @@ if (isMain(import.meta.url)) {
 
   const server = createCombinedMcpServer(values['db']!);
   server.start().catch((err) => {
-    console.error('fbeast-mcp failed to start:', err);
-    process.exit(1);
+    handleStartupFailure('fbeast-mcp', err);
   });
 }

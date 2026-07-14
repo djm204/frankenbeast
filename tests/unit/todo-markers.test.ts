@@ -46,7 +46,7 @@ describe('code comment debt marker scanner', () => {
 
   it('passes when production sources have no tracked comment markers', () => {
     const root = makeFixtureRoot();
-    writeFixture(root, 'packages/example/src/index.ts', 'export const value = 1;\n');
+    writeFixture(root, 'packages/fixture-package/src/index.ts', 'export const value = 1;\n');
 
     const result = runScanner(root);
 
@@ -60,7 +60,7 @@ describe('code comment debt marker scanner', () => {
     const workaround = marker('HA', 'CK');
     writeFixture(
       root,
-      'packages/example/src/index.ts',
+      'packages/fixture-package/src/index.ts',
       [
         'export const value = 1;',
         `// ${pending}: turn this into an issue`,
@@ -76,8 +76,8 @@ describe('code comment debt marker scanner', () => {
     expect(result.status).toBe(1);
     expect(summary.totalFindings).toBe(2);
     expect(summary.findings).toEqual([
-      { path: 'packages/example/src/index.ts', line: 2, marker: pending, excerpt: `${pending}: turn this into an issue` },
-      { path: 'packages/example/src/index.ts', line: 3, marker: workaround, excerpt: `${workaround}: temporary branch` },
+      { path: 'packages/fixture-package/src/index.ts', line: 2, marker: pending, excerpt: `${pending}: turn this into an issue` },
+      { path: 'packages/fixture-package/src/index.ts', line: 3, marker: workaround, excerpt: `${workaround}: temporary branch` },
     ]);
   });
 
@@ -85,8 +85,8 @@ describe('code comment debt marker scanner', () => {
     const root = makeFixtureRoot();
     const pending = marker('TO', 'DO');
     const deferred = marker('FIX', 'ME');
-    writeFixture(root, 'packages/example/src/template.ts', 'const value = `${answer /* ' + pending + ': file issue */}`;\n');
-    writeFixture(root, 'packages/example/src/module.mts', `// ${deferred}: module follow-up\nexport const value = 1;\n`);
+    writeFixture(root, 'packages/fixture-package/src/template.ts', 'const value = `${answer /* ' + pending + ': file issue */}`;\n');
+    writeFixture(root, 'packages/fixture-package/src/module.mts', `// ${deferred}: module follow-up\nexport const value = 1;\n`);
 
     const result = runScanner(root, ['--json']);
     const summary = JSON.parse(result.stdout) as { totalFindings: number; findings: Array<{ path: string; line: number; marker: string }> };
@@ -94,17 +94,17 @@ describe('code comment debt marker scanner', () => {
     expect(result.status).toBe(1);
     expect(summary.totalFindings).toBe(2);
     expect(summary.findings.map((finding) => `${finding.path}:${finding.line}:${finding.marker}`)).toEqual([
-      `packages/example/src/module.mts:1:${deferred}`,
-      `packages/example/src/template.ts:1:${pending}`,
+      `packages/fixture-package/src/module.mts:1:${deferred}`,
+      `packages/fixture-package/src/template.ts:1:${pending}`,
     ]);
   });
 
   it('ignores marker-looking strings, tests, fixtures, and scanner source', () => {
     const root = makeFixtureRoot();
     const deferred = marker('FIX', 'ME');
-    writeFixture(root, 'packages/example/src/index.ts', `const value = "${deferred}: not a comment";\n`);
-    writeFixture(root, 'packages/example/tests/index.test.ts', `// ${deferred}: ignored test debt\n`);
-    writeFixture(root, 'packages/example/fixtures/sample.ts', `// ${deferred}: ignored fixture debt\n`);
+    writeFixture(root, 'packages/fixture-package/src/index.ts', `const value = "${deferred}: not a comment";\n`);
+    writeFixture(root, 'packages/fixture-package/tests/index.test.ts', `// ${deferred}: ignored test debt\n`);
+    writeFixture(root, 'packages/fixture-package/fixtures/sample.ts', `// ${deferred}: ignored fixture debt\n`);
     writeFixture(root, 'scripts/audit-todo-markers.mjs', `// ${deferred}: ignored self reference\n`);
 
     const result = runScanner(root, ['--json']);
@@ -120,7 +120,7 @@ describe('code comment debt marker scanner', () => {
     const deferred = marker('FIX', 'ME');
     writeFixture(
       root,
-      'packages/example/src/regex.ts',
+      'packages/fixture-package/src/regex.ts',
       [
         `const one = /[/* ${pending} */]/;`,
         `const two = /[// ${deferred}]/;`,

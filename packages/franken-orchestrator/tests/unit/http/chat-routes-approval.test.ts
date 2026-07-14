@@ -201,6 +201,63 @@ describe('chat approval route persistence', () => {
     expect(stored?.pendingApproval).toBeNull();
   });
 
+  it('rejects HTTP approval decisions without pending approval metadata', async () => {
+    const llm = { complete: vi.fn().mockResolvedValue('should not run') };
+    const app = createChatApp({
+      sessionStore,
+      llm,
+      projectName: 'chat-approval-route-test',
+    });
+    const session = sessionStore.create('project-1');
+    session.state = 'pending_approval';
+    session.pendingApproval = null;
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json() as { error: { code: string; message: string } };
+    expect(body.error).toMatchObject({
+      code: 'APPROVAL_NOT_PENDING',
+      message: expect.stringContaining('No pending approval'),
+    });
+    expect(llm.complete).not.toHaveBeenCalled();
+    const stored = sessionStore.get(session.id);
+    expect(stored?.state).toBe('pending_approval');
+    expect(stored?.pendingApproval).toBeNull();
+  });
+
+  it('lets stale state-only approvals be rejected to recover the session', async () => {
+    const llm = { complete: vi.fn().mockResolvedValue('should not run') };
+    const app = createChatApp({
+      sessionStore,
+      llm,
+      projectName: 'chat-approval-route-test',
+    });
+    const session = sessionStore.create('project-1');
+    session.state = 'pending_approval';
+    session.pendingApproval = null;
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: false }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { approved: boolean; state: string; pendingApproval: unknown } };
+    expect(body.data).toMatchObject({ approved: false, state: 'rejected', pendingApproval: null });
+    expect(llm.complete).not.toHaveBeenCalled();
+    const stored = sessionStore.get(session.id);
+    expect(stored?.state).toBe('rejected');
+    expect(stored?.pendingApproval).toBeNull();
+  });
+
   it('blocks unsafe model-derived approval commands and preserves pending approval', async () => {
     const llm = { complete: vi.fn().mockResolvedValue('should not run') };
     const app = createChatApp({

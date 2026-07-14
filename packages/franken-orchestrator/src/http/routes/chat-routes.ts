@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../../chat/approval-input.js';
-import type { CorruptChatSessionFile, ISessionStore } from '../../chat/session-store.js';
+import { isValidChatSessionId, type CorruptChatSessionFile, type ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
 import type { TurnRunner } from '../../chat/turn-runner.js';
@@ -46,11 +46,19 @@ export interface ChatRoutesDeps {
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
+  validateChatSessionId(id);
   const session = store.get(id);
   if (!session) {
     throw new HttpError(404, 'NOT_FOUND', `Session '${id}' not found`);
   }
   return session;
+}
+
+function validateChatSessionId(id: string): string {
+  if (!isValidChatSessionId(id)) {
+    throw new HttpError(400, 'INVALID_SESSION_ID', 'Invalid chat session id');
+  }
+  return id;
 }
 
 function sessionResponse(
@@ -149,7 +157,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
   // Get session
   app.get('/v1/chat/sessions/:id', (c) => {
-    const id = c.req.param('id');
+    const id = validateChatSessionId(c.req.param('id'));
     const session = getSessionOrThrow(sessionStore, id);
     return c.json({
       data: sessionResponse(session),
@@ -157,7 +165,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   });
 
   app.post('/v1/chat/sessions/:id/socket-ticket', (c) => {
-    const id = c.req.param('id');
+    const id = validateChatSessionId(c.req.param('id'));
     getSessionOrThrow(sessionStore, id);
     return c.json({
       data: { ticket: issueSocketTicket(id) },
@@ -166,7 +174,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
   // Submit message
   app.post('/v1/chat/sessions/:id/messages', async (c) => {
-    const id = c.req.param('id');
+    const id = validateChatSessionId(c.req.param('id'));
     const body = await parseJsonBody(c);
     const { content, executionMode } = validateBody(SubmitMessageBody, body);
     const session = getSessionOrThrow(sessionStore, id);
@@ -224,7 +232,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   // callers mint a short-lived, one-shot ticket with normal fetch credentials,
   // then place only that ticket in the stream URL.
   app.post('/v1/chat/sessions/:id/stream/ticket', (c) => {
-    const id = c.req.param('id');
+    const id = validateChatSessionId(c.req.param('id'));
     getSessionOrThrow(sessionStore, id);
     if (!operatorToken) {
       return c.json({ ticket: null });
@@ -245,13 +253,29 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
   // Approve action
   app.post('/v1/chat/sessions/:id/approve', async (c) => {
-    const id = c.req.param('id');
+    const id = validateChatSessionId(c.req.param('id'));
     const body = await parseJsonBody(c);
     const { approved } = validateBody(ApproveBody, body);
     const session = getSessionOrThrow(sessionStore, id);
 
     return withChatMutationAdmission(c, session.id, async () => {
       if (!session.pendingApproval) {
+        if (session.state === 'pending_approval' && !approved) {
+          session.state = 'rejected';
+          session.pendingApproval = null;
+          session.updatedAt = isoNow();
+          sessionStore.save(session);
+
+          return c.json({
+            data: {
+              id: session.id,
+              approved,
+              state: session.state,
+              pendingApproval: session.pendingApproval,
+            },
+          } satisfies ApiDataEnvelope<ApproveResult>);
+        }
+
         return c.json({
           error: {
             code: 'APPROVAL_NOT_PENDING',

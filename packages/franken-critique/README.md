@@ -103,6 +103,17 @@ Recorded critique lessons also carry a `reviewerFeedback` object so worker retro
 
 Infrastructure-only evaluator exceptions and failed iterations without actionable findings do not create reviewer-feedback captures. This keeps broken tooling noise from being promoted as durable agent-learning guidance.
 
+## Failed-test-to-skill candidate detector
+
+When a recovered critique finding looks like a concrete failed test, `LessonRecorder` attaches `failedTestSkillCandidate` to the recorded lesson. The detector requires strong evidence from the finding message or location, such as failed-test wording, `AssertionError` text, copied test-runner failure output, or `FAIL path/to/file.test.ts` runner output. Supporting signals such as test file paths, test commands, or expected/received assertion details are included in `matchedSignals`, but remediation-only suggestions like "run npm test before handoff" do not create candidates by themselves. The structured object includes:
+
+- `detector`: the stable value `failed-test-to-skill-candidate` for PM/liveness filters.
+- `matchedSignals`: the exact detector signals that matched.
+- `sourceFindingMessages`: original finding messages to review before creating or updating a skill.
+- `operatorGuidance`: guidance to promote the finding to a skill only when the failure recurs or exposes a reusable workflow gap.
+
+Generic reviewer findings and infrastructure-only evaluator exceptions do not receive `failedTestSkillCandidate`, so dashboards can distinguish reusable skill candidates from ordinary one-off PR fixes.
+
 ## Post-PR lesson extraction template
 
 Recorded critique lessons include `postPrLessonExtractionTemplate`, a deterministic prompt/template for the post-PR moment after review or merge evidence exists. PM/liveness tooling can hand the template to an LLM or worker to extract one reusable lesson without inventing missing evidence.

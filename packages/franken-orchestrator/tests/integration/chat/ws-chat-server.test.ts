@@ -760,6 +760,54 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it.each([true, false])('rejects WebSocket approval decisions without pending approval metadata (approved=%s)', async (approved) => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = null;
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn();
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute }),
+    });
+    const controller = new ChatSocketController({
+      runtime,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved,
+    }))).resolves.toBeUndefined();
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(store.get(session.id)?.state).toBe('pending_approval');
+    expect(store.get(session.id)?.pendingApproval).toBeNull();
+    const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn.error',
+      code: 'APPROVAL_NOT_PENDING',
+      message: expect.stringContaining('No pending approval'),
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: 'turn.approval.resolved',
+    }));
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('restores pending approval and notifies clients when approved execution throws', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);
