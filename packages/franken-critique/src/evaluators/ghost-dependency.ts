@@ -357,7 +357,11 @@ function canStartNativeDynamicImport(
     return false;
   }
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
-  const isNestedTypeReference = endsInsideNestedTypeReference(prefix);
+  const isObjectLiteralValue = isLikelyObjectLiteralValue(content, importIndex);
+  const isNestedTypeReference = endsInsideNestedTypeReference(
+    prefix,
+    isObjectLiteralValue,
+  );
 
   return !(
     isNestedTypeReference ||
@@ -446,7 +450,10 @@ function findContainingOpenBrace(content: string, index: number): number {
   return -1;
 }
 
-function endsInsideNestedTypeReference(prefix: string): boolean {
+function endsInsideNestedTypeReference(
+  prefix: string,
+  isObjectLiteralValue = false,
+): boolean {
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
   if (/(?:^|[^.])(?:\bas\s+|\bsatisfies\s+|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
@@ -471,6 +478,7 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
   if (operator === '<') return /(?:[>\]])<$/.test(trimmed);
 
   if (operator !== '|' && operator !== '&') return false;
+  if (isObjectLiteralValue) return false;
 
   const colonIndex = trimmed.lastIndexOf(':');
   if (colonIndex !== -1 && /[=;]/.test(trimmed.slice(colonIndex + 1))) {
@@ -583,7 +591,7 @@ function isTypeOnlyImportReferenceUse(
     return false;
   }
 
-  if (/(?:^|[;\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(trimmed)) {
+  if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(trimmed)) {
     return true;
   }
   if (/\b(?:declare\s+)?namespace\b[\s\S]*\{\s*(?:export\s+)?type\b[\s\S]*$/.test(trimmed)) {
@@ -632,6 +640,9 @@ function isInsideOpenTypeAssertion(trimmedPrefix: string): boolean {
   if (latestAssertionIndex === -1) return false;
 
   const suffix = trimmedPrefix.slice(latestAssertionIndex);
+  if (/}\s*\)?\s*\n\s*(?:void\s+)?import\s*\($/.test(suffix)) {
+    return false;
+  }
   const lastComma = suffix.lastIndexOf(',');
   const lastEquals = suffix.lastIndexOf('=');
   const lastArrow = suffix.lastIndexOf('=>');
@@ -660,12 +671,12 @@ function stripTrailingTrivia(content: string): string {
 
 function isInsideTypeDeclaration(prefix: string): boolean {
   return (
-    /(?:^|[;\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
+    /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
-    !/\n\s*(?:export\s+)?(?:const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
+    !/\n\s*(?:export\s+)?(?:default\b|const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
     ) &&
-    !/\}\s*(?:export\s+)?(?:const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b[\s\S]*$/.test(
+    !/\}\s*(?:export\s+)?(?:default\b|const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b[\s\S]*$/.test(
       prefix,
     ) &&
     !/\}\s*(?:export\s+)?$/.test(prefix) &&
@@ -682,7 +693,7 @@ function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
   const suffix = prefix.slice(newlineIndex + 1);
   if (
     !/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix) &&
-    !/^\s*(?:export\s+)?(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\(|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
+    !/^\s*(?:export\s+)?(?:default\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\(|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
       suffix,
     )
   ) {
@@ -703,6 +714,7 @@ function isInsideTypeAnnotation(
 
   const annotationIndex = prefix.lastIndexOf(':');
   if (annotationIndex === -1) return false;
+  if (hasCompletedStatementBeforeImport(prefix)) return false;
 
   const beforeAnnotation = prefix.slice(0, annotationIndex);
   if (/\bcase\s+[\s\S]*$/.test(beforeAnnotation)) return false;
@@ -793,8 +805,7 @@ function isLikelyObjectLiteralValue(content: string, importIndex: number): boole
   const colonIndex = content.lastIndexOf(':', importIndex - 1);
   if (colonIndex === -1) return false;
 
-  let i = colonIndex - 1;
-  while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
+  let i = skipTriviaBackward(content, colonIndex - 1);
 
   if (content[i] === "'" || content[i] === '"') {
     i = skipQuotedKeyBackward(content, i);
