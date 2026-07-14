@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { defaultConfig, normalizeGovernorConfig, validateGovernorConfig } from '../../../src/core/config.js';
+import {
+  MAX_TIMEOUT_MS,
+  defaultConfig,
+  normalizeGovernorConfig,
+  validateGovernorConfig,
+} from '../../../src/core/config.js';
 import type { GovernorConfig } from '../../../src/core/config.js';
 
 describe('GovernorConfig', () => {
@@ -47,6 +52,16 @@ describe('GovernorConfig', () => {
     expect(() => normalizeGovernorConfig({ timeoutMs })).toThrow(
       'timeoutMs must be a positive finite number',
     );
+  });
+
+  it('rejects timeoutMs overrides above the Node timer limit', () => {
+    expect(() => normalizeGovernorConfig({ timeoutMs: MAX_TIMEOUT_MS + 1 })).toThrow(
+      `timeoutMs must be less than or equal to ${MAX_TIMEOUT_MS}`,
+    );
+  });
+
+  it('accepts timeoutMs overrides at the Node timer limit', () => {
+    expect(normalizeGovernorConfig({ timeoutMs: MAX_TIMEOUT_MS }).timeoutMs).toBe(MAX_TIMEOUT_MS);
   });
 
   it.each([
