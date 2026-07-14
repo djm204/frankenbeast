@@ -427,7 +427,9 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
             key,
             cooldownMs,
             existingEvent,
-            cooldownUntil: new Date(Date.parse(existingEvent.createdAt) + cooldownMs).toISOString(),
+            cooldownUntil: new Date(
+              Date.parse(existingEvent.createdAt) + (readLearningCooldownMs(existingEvent) ?? cooldownMs),
+            ).toISOString(),
           };
         }
       }
@@ -473,10 +475,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     const rows = this.db
       .prepare(
         `SELECT * FROM episodic_events
-         WHERE details IS NOT NULL
+         WHERE details LIKE ? ESCAPE '\\'
          ORDER BY id DESC`,
       )
-      .all() as EpisodicRow[];
+      .all(learningKeyDetailsPattern(key)) as EpisodicRow[];
 
     for (const row of rows) {
       const existingEvent = rowToEvent(row);
@@ -485,10 +487,13 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       }
 
       const existingTimeMs = Date.parse(existingEvent.createdAt);
+      const existingCooldownMs = readLearningCooldownMs(existingEvent) ?? cooldownMs;
       if (
         Number.isFinite(existingTimeMs)
+        && Number.isInteger(existingCooldownMs)
+        && existingCooldownMs > 0
         && existingTimeMs <= eventTimeMs
-        && eventTimeMs - existingTimeMs < cooldownMs
+        && eventTimeMs - existingTimeMs < existingCooldownMs
       ) {
         return existingEvent;
       }
@@ -600,20 +605,22 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     const activeLearningRows = this.db
       .prepare(
         `SELECT * FROM episodic_events
-         WHERE details IS NOT NULL
+         WHERE details LIKE ? ESCAPE '\\'
          ORDER BY id DESC`,
       )
-      .all() as EpisodicRow[];
-    const activeSinceMs = nowMs - DEFAULT_LEARNING_COOLDOWN_MS;
+      .all(learningKeyDetailsPattern()) as EpisodicRow[];
 
     for (const row of activeLearningRows) {
       const event = rowToEvent(row);
       const eventTimeMs = event ? Date.parse(event.createdAt) : NaN;
+      const eventCooldownMs = event ? readLearningCooldownMs(event) ?? DEFAULT_LEARNING_COOLDOWN_MS : NaN;
       if (
         event
         && readLearningKey(event) !== undefined
         && Number.isFinite(eventTimeMs)
-        && eventTimeMs >= activeSinceMs
+        && Number.isInteger(eventCooldownMs)
+        && eventCooldownMs > 0
+        && nowMs - eventTimeMs < eventCooldownMs
       ) {
         eventsById.set(event.id ?? `${event.createdAt}:${event.summary}`, event);
       }
@@ -838,6 +845,16 @@ function normalizeLearningKey(value: string): string {
 function readLearningKey(event: EpisodicEvent): string | undefined {
   const key = event.details?.learningKey;
   return typeof key === 'string' ? key : undefined;
+}
+
+function readLearningCooldownMs(event: EpisodicEvent): number | undefined {
+  const cooldownMs = event.details?.learningCooldownMs;
+  return typeof cooldownMs === 'number' ? cooldownMs : undefined;
+}
+
+function learningKeyDetailsPattern(key?: string): string {
+  const keyPattern = key === undefined ? '' : JSON.stringify(key);
+  return `%${escapeLike(`"learningKey":${keyPattern}`)}%`;
 }
 
 function compareEventsNewestFirst(a: EpisodicEvent, b: EpisodicEvent): number {

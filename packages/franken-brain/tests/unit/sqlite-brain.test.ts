@@ -528,8 +528,8 @@ describe('SqliteBrain', () => {
       const now = Date.now();
       brain.episodic.recordLearning(makeEvent({
         summary: 'Keep cooldown metadata across handoffs',
-        createdAt: new Date(now - 1_000).toISOString(),
-      }), { key: 'handoff-cooldown', cooldownMs: 86_400_000 });
+        createdAt: new Date(now - 25 * 60 * 60 * 1_000).toISOString(),
+      }), { key: 'handoff-cooldown', cooldownMs: 7 * 24 * 60 * 60 * 1_000 });
 
       for (let i = 0; i < 101; i++) {
         brain.episodic.record(makeEvent({
@@ -540,6 +540,24 @@ describe('SqliteBrain', () => {
 
       const snapshot = brain.serialize();
       expect(snapshot.episodic.some(event => event.details?.learningKey === 'handoff-cooldown')).toBe(true);
+    });
+
+    it('uses the stored learning cooldown duration for duplicate detection', () => {
+      brain.episodic.recordLearning(makeEvent({
+        summary: 'Respect stored cooldowns',
+        createdAt: '2026-07-11T12:00:00.000Z',
+      }), { key: 'stored-cooldown', cooldownMs: 7 * 24 * 60 * 60 * 1_000 });
+
+      const duplicate = brain.episodic.recordLearning(makeEvent({
+        summary: 'Respect stored cooldowns',
+        createdAt: '2026-07-12T12:00:00.000Z',
+      }), { key: 'stored-cooldown' });
+
+      expect(duplicate).toMatchObject({
+        recorded: false,
+        reason: 'cooldown',
+        cooldownUntil: '2026-07-18T12:00:00.000Z',
+      });
     });
 
     it('recall() finds matching events by keyword', () => {
