@@ -2195,6 +2195,44 @@ function uniqueGuardMatchCandidates(value: string | undefined): string[] {
   return Array.from(new Set(iterateGuardMatchCandidates(value)));
 }
 
+function queryGuardHashValue(value: string): string {
+  const normalized = normalizeForMatch(value);
+  return `${normalized.length}:${hashGuardValue(normalized)}`;
+}
+
+function readQueryGuardIndex(db: Database.Database, scope: 'working' | 'episodic' | 'checkpoint'): {
+  lengths: Set<number>;
+  hasLegacyHashes: boolean;
+} {
+  const rows = db.prepare(`SELECT value_hash FROM memory_deletion_guards WHERE guard_kind = ?`).all(`${scope}:query`) as Array<{ value_hash: string }>;
+  const lengths = new Set<number>();
+  let hasLegacyHashes = false;
+  for (const row of rows) {
+    const match = /^(\d+):[a-f0-9]{64}$/i.exec(row.value_hash);
+    if (match) {
+      lengths.add(Number(match[1]));
+    } else {
+      hasLegacyHashes = true;
+    }
+  }
+  return { lengths, hasLegacyHashes };
+}
+
+function* iterateSizedGuardMatchCandidates(value: string | undefined, lengths: Set<number>): Iterable<string> {
+  const tokens = guardTokens(value).sort((a, b) => a.length - b.length);
+  yield* tokens;
+  const relevantLengths = Array.from(lengths).filter(length => length >= MIN_QUERY_GUARD_CHUNK_LENGTH).sort((a, b) => a - b);
+  if (relevantLengths.length === 0) return;
+  for (const token of tokens) {
+    for (const length of relevantLengths) {
+      if (token.length < length) continue;
+      for (let start = 0; start <= token.length - length; start += 1) {
+        yield token.slice(start, start + length);
+      }
+    }
+  }
+}
+
 function normalizeForMatch(value: string | undefined): string {
   return (value ?? '').trim().toLowerCase();
 }
@@ -2311,7 +2349,9 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
     for (const guardValue of values) {
       for (const scope of scopes) {
         if (kind === 'key' && scope !== 'working') continue;
-        insert.run(selectorHash, `${scope}:${kind}`, hashGuardValue(guardValue, kind !== 'key'), now);
+        insert.run(selectorHash, `${scope}:${kind}`, kind === 'query'
+          ? queryGuardHashValue(guardValue)
+          : hashGuardValue(guardValue, kind !== 'key'), now);
       }
     }
   }
@@ -2360,9 +2400,17 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
       }
     }
   }
-  if (hasAnyDeletionGuard(db, 'working', 'query')) {
-    for (const value of iterateGuardMatchCandidates(`${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`)) {
-      if (stmt.get('working:query', hashGuardValue(value))) {
+  const queryGuardIndex = readQueryGuardIndex(db, 'working');
+  if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
+    const text = `${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`;
+    const values = queryGuardIndex.hasLegacyHashes
+      ? iterateGuardMatchCandidates(text)
+      : iterateSizedGuardMatchCandidates(text, queryGuardIndex.lengths);
+    for (const value of values) {
+      if (
+        stmt.get('working:query', queryGuardHashValue(value))
+        || (queryGuardIndex.hasLegacyHashes && stmt.get('working:query', hashGuardValue(value)))
+      ) {
         throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
       }
     }
@@ -2386,9 +2434,16 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
       }
     }
   }
-  if (hasAnyDeletionGuard(db, 'episodic', 'query')) {
-    for (const value of iterateGuardMatchCandidates(text)) {
-      if (stmt.get('episodic:query', hashGuardValue(value))) {
+  const queryGuardIndex = readQueryGuardIndex(db, 'episodic');
+  if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
+    const values = queryGuardIndex.hasLegacyHashes
+      ? iterateGuardMatchCandidates(text)
+      : iterateSizedGuardMatchCandidates(text, queryGuardIndex.lengths);
+    for (const value of values) {
+      if (
+        stmt.get('episodic:query', queryGuardHashValue(value))
+        || (queryGuardIndex.hasLegacyHashes && stmt.get('episodic:query', hashGuardValue(value)))
+      ) {
         throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
       }
     }
@@ -2443,13 +2498,9 @@ function readDeletionGuardSnapshot(db: Database.Database): MemoryDeletionGuardSn
 
 function hasDeletionGuard(db: Database.Database, scope: string, kind: string, value: string): boolean {
   const normalize = kind !== 'key';
+  const hash = kind === 'query' ? queryGuardHashValue(value) : hashGuardValue(value, normalize);
   return Boolean(db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`)
-    .get(`${scope}:${kind}`, hashGuardValue(value, normalize)));
-}
-
-function hasAnyDeletionGuard(db: Database.Database, scope: string, kind: string): boolean {
-  return Boolean(db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? LIMIT 1`)
-    .get(`${scope}:${kind}`));
+    .get(`${scope}:${kind}`, hash));
 }
 
 function assertCheckpointNotDeletionGuarded(db: Database.Database, state: ExecutionState): void {
@@ -2468,10 +2519,18 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
       }
     }
   }
-  if (hasAnyDeletionGuard(db, 'checkpoint', 'query')) {
+  const queryGuardIndex = readQueryGuardIndex(db, 'checkpoint');
+  if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
     const text = valueToSearchText(state);
-    for (const value of iterateGuardMatchCandidates(text)) {
-      if (hasDeletionGuard(db, 'checkpoint', 'query', value)) {
+    const values = queryGuardIndex.hasLegacyHashes
+      ? iterateGuardMatchCandidates(text)
+      : iterateSizedGuardMatchCandidates(text, queryGuardIndex.lengths);
+    for (const value of values) {
+      if (
+        hasDeletionGuard(db, 'checkpoint', 'query', value)
+        || (queryGuardIndex.hasLegacyHashes && Boolean(db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`)
+          .get('checkpoint:query', hashGuardValue(value))))
+      ) {
         throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
       }
     }
