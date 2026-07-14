@@ -56,7 +56,7 @@ export class IssueFetcher implements IIssueFetcher {
       maxDepth: 48,
       maxContainers: 20_000,
       maxObjectKeys: 100_000,
-      maxArrayItems: Math.max(limit * 8, 240),
+      maxArrayItems: Math.max(limit * 64, 2_000),
     }) as RawGithubIssue[];
 
     return raw.map((issue) => ({

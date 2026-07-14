@@ -110,7 +110,7 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
   }
 
   private parseResponse(raw: string): ChunkDefinition[] {
-    const text = cleanLlmJson(raw);
+    const text = cleanLlmJson(raw, { parseFastPath: false });
 
     let parsed: unknown;
     try {

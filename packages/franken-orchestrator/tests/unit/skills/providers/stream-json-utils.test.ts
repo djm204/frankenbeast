@@ -162,6 +162,17 @@ describe('cleanLlmJson', () => {
     expect(result).toEqual([{ id: 'setup', objective: 'Set up project' }]);
   });
 
+  it('can skip the JSON.parse fast path for callers that must enforce limits first', () => {
+    const input = '[{"id":"chunk1"}]';
+    const originalParse = JSON.parse;
+    JSON.parse = (() => { throw new Error('fast path used'); }) as typeof JSON.parse;
+    try {
+      expect(cleanLlmJson(input, { parseFastPath: false })).toBe(input);
+    } finally {
+      JSON.parse = originalParse;
+    }
+  });
+
   it('strips whitespace around fences', () => {
     const input = '  \n```json\n[1,2,3]\n```\n  ';
     expect(JSON.parse(cleanLlmJson(input))).toEqual([1, 2, 3]);

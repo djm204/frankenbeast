@@ -53,17 +53,23 @@ export function stripHookJson(text: string): string {
   return result.trim();
 }
 
+export interface CleanLlmJsonOptions {
+  readonly parseFastPath?: boolean;
+}
+
 /**
  * Clean raw LLM output so it can be JSON.parse()'d.
  * Uses bracket-depth matching to extract the JSON structure,
  * so it works regardless of markdown wrapping, code fences,
  * leading/trailing prose, or other LLM formatting quirks.
  */
-export function cleanLlmJson(raw: string): string {
+export function cleanLlmJson(raw: string, options: CleanLlmJsonOptions = {}): string {
   let text = stripHookJson(raw.trim());
 
   // Try parsing as-is first (fast path)
-  try { JSON.parse(text); return text; } catch { /* fall through */ }
+  if (options.parseFastPath !== false) {
+    try { JSON.parse(text); return text; } catch { /* fall through */ }
+  }
 
   // Find the first [ or { and extract the matching structure
   // using bracket-depth counting that respects quoted strings.
