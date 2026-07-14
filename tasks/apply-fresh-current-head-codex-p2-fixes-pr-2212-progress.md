@@ -30,5 +30,11 @@
   - [x] `npm run test --workspace @franken/brain -- tests/unit/sqlite-brain.test.ts` passed (141 tests).
   - [x] `npm run test --workspace @franken/mcp-suite -- src/shared/server-factory.test.ts` passed (36 tests).
   - [x] Built workspace dependencies, then reran `typecheck`, `build`, and `lint` for `@franken/brain` and `@franken/mcp-suite`; all passed (`@franken/mcp-suite` lint has existing warnings only, 0 errors).
-- [ ] Push resolved head to PR #2212 and verify live PR merge/check/Codex state.
+- [x] Push resolved head to PR #2212 and verify live PR merge/check/Codex state.
+  - [x] Commit `be8cc9b4 fix(memory): close right-to-forget review gaps` pushed to PR #2212.
+  - [x] `npm run test --workspace @franken/brain -- tests/unit/sqlite-brain.test.ts` passed (143 tests).
+  - [x] `npm run typecheck --workspace @franken/brain` passed.
+  - [x] GraphQL review-thread audit found no unresolved review threads after push.
+  - [x] Fresh Codex trigger refused because invocation cap is reached (28/5); no explicit approval to override.
+  - [x] PR #2212 head is `be8cc9b4d1a37dd02d93b2d777dbc6b66d7fa69b`; CI checks are in progress.
 - [ ] Leave Kanban handoff and block/complete appropriately.
