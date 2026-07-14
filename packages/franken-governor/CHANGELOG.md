@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.6.0...franken-governor-v0.6.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **governor:** consume approval session tokens atomically ([#2224](https://github.com/djm204/frankenbeast/issues/2224)) ([cb47b93](https://github.com/djm204/frankenbeast/commit/cb47b93fb599a4cccf86a038d860436abd9f4550))
+* **governor:** validate timeout and token TTL config ([#1973](https://github.com/djm204/frankenbeast/issues/1973)) ([5bd2227](https://github.com/djm204/frankenbeast/commit/5bd22272d46b4ec64a7f5fd5179c4f080f0c61fc))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.0 to 0.10.1
+
 ## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.14...franken-governor-v0.6.0) (2026-07-14)
 
 

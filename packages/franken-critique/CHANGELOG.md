@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.8.0...franken-critique-v0.8.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.0 to 0.10.1
+
 ## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.7.0...franken-critique-v0.8.0) (2026-07-14)
 
 

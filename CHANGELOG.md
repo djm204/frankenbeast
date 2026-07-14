@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.48.2](https://github.com/djm204/frankenbeast/compare/v0.48.1...v0.48.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **security:** harden untrusted prompt context ([#2221](https://github.com/djm204/frankenbeast/issues/2221)) ([5cc5ca3](https://github.com/djm204/frankenbeast/commit/5cc5ca37cac440e33731f3173f3c370377aa2d5b))
+
 ## [0.48.1](https://github.com/djm204/frankenbeast/compare/v0.48.0...v0.48.1) (2026-07-14)
 
 
