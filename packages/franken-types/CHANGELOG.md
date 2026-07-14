@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.10.1...franken-types-v0.11.0) (2026-07-14)
+
+
+### Features
+
+* **memory:** add right-to-forget workflow ([#2212](https://github.com/djm204/frankenbeast/issues/2212)) ([229bc0d](https://github.com/djm204/frankenbeast/commit/229bc0d8f69d5243ba8e3703c266ec9466633ab2))
+
 ## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.10.0...franken-types-v0.10.1) (2026-07-14)
 
 

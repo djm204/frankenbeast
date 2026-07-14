@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.0](https://github.com/djm204/frankenbeast/compare/v0.52.0...v0.53.0) (2026-07-14)
+
+
+### Features
+
+* **memory:** add right-to-forget workflow ([#2212](https://github.com/djm204/frankenbeast/issues/2212)) ([229bc0d](https://github.com/djm204/frankenbeast/commit/229bc0d8f69d5243ba8e3703c266ec9466633ab2))
+
 ## [0.52.0](https://github.com/djm204/frankenbeast/compare/v0.51.0...v0.52.0) (2026-07-14)
 
 
