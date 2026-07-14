@@ -253,11 +253,11 @@ Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use
 
 ### Beast dispatch/module flags
 
-These flags are for `frankenbeast beasts create|spawn` unless otherwise noted. `status` and `logs` report the execution mode stored on the run; passing `--mode` to those read-only commands does not change output.
+These flags are for `frankenbeast beasts create|spawn` unless otherwise noted. `status` and `logs` also accept `--mode` as a compatibility/read-only parser surface, but they report the execution mode stored on the run; passing `--mode` to those read-only commands does not change output.
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `--mode <mode>` | `beasts create`, `beasts spawn` | Beast execution mode for the new run: `process` or `container`. |
+| `--mode <mode>` | `beasts create`, `beasts spawn`; accepted read-only by `beasts status`, `beasts logs` | Beast execution mode for a new run: `process` or `container`. For status/logs, output comes from stored run metadata. |
 | `--no-firewall` | `beasts create`, `beasts spawn` | Serialize firewall disabled in the spawned Beast config. |
 | `--no-skills` | `beasts create`, `beasts spawn` | Serialize skills disabled in the spawned Beast config. |
 | `--no-memory` | `beasts create`, `beasts spawn` | Serialize memory disabled in the spawned Beast config. |
@@ -283,7 +283,7 @@ These flags are for `frankenbeast beasts create|spawn` unless otherwise noted. `
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `-d`, `--detached` | `network up` | Start configured network services in daemon mode. |
+| `-d`, `--detached` | `network up`, `network start`, `network restart` | Start configured network services, one managed service, or restarted services in daemon mode. |
 | `--set <path=value>` | `network config` | Set an operator config value; may be repeated. |
 | `--client=<claude|gemini|codex>` | `fbeast mcp init`, `fbeast mcp uninstall` | Target a specific MCP client config. |
 | `--pick[=<servers>]` | `fbeast mcp init` | Choose which MCP servers to install. |
@@ -321,7 +321,7 @@ frankenbeast beasts spawn martin-loop --mode container
 frankenbeast beasts create chunk-plan --no-critique --no-governor
 ```
 
-`--mode` is supported only for `beasts create` and `beasts spawn`. Valid execution modes are `process` and `container`.
+`--mode` changes execution mode only for `beasts create` and `beasts spawn`. `beasts status` and `beasts logs` accept it for parser compatibility, but their output comes from stored run metadata. Valid execution modes are `process` and `container`.
 
 Module toggles apply to `beasts create` / `beasts spawn` run configs. Some toggles are persisted for downstream module wiring rather than changing the top-level CLI flow; for example, `--no-planner` does not skip `frankenbeast plan` chunk generation in this build.
 
@@ -422,7 +422,7 @@ frankenbeast network config --set chat.model=claude-sonnet-4-6
                                            # update one operator config value
 ```
 
-Network `up` also accepts `-d` / `--detached` for daemon mode. `network config --set path=value` may be repeated when changing more than one operator config value.
+Network `up`, `start`, and `restart` accept `-d` / `--detached` for daemon mode. `network config --set path=value` may be repeated when changing more than one operator config value.
 
 ---
 
