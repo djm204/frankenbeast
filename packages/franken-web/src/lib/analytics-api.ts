@@ -1,3 +1,5 @@
+import { extractResponseErrorMessage } from './http-error';
+
 export type AnalyticsSource = 'observer' | 'governor' | 'security' | 'cost' | 'beast';
 export type AnalyticsOutcome = 'approved' | 'denied' | 'review_recommended' | 'failed' | 'error' | 'detected';
 export type AnalyticsSeverity = 'info' | 'warning' | 'error';
@@ -91,24 +93,6 @@ export class AnalyticsApiClient {
   }
 }
 
-async function extractResponseErrorMessage(res: Response): Promise<string | undefined> {
-  try {
-    const body = await res.json() as unknown;
-    if (!body || typeof body !== 'object') return undefined;
-
-    const error = (body as { error?: unknown }).error;
-    if (typeof error === 'string' && error.trim()) return error;
-
-    if (error && typeof error === 'object') {
-      const message = (error as { message?: unknown }).message;
-      if (typeof message === 'string' && message.trim()) return message;
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
-}
 
 function queryString(filters: AnalyticsEventFilters): string {
   const params = new URLSearchParams();
