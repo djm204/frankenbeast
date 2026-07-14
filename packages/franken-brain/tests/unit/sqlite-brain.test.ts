@@ -297,6 +297,158 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('memory review and consent queue', () => {
+    it('shows proposed memory candidates with review metadata before persistence', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+
+      expect(candidate).toMatchObject({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+        status: 'pending',
+      });
+      expect(candidate.id).toMatch(/^memcand_/);
+      expect(candidate.createdAt).toMatch(/Z$/);
+      expect(brain.working.has('user.preference.response-style')).toBe(false);
+      expect(brain.memoryReview.list()).toEqual([candidate]);
+    });
+
+    it('approves a candidate atomically and stores provenance metadata', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+
+      const result = brain.memoryReview.approve(candidate.id, {
+        reviewer: 'operator',
+        note: 'Verified in repository settings.',
+      });
+
+      expect(result.status).toBe('approved');
+      expect(brain.working.get('env.repo.default-branch')).toBe('main');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'env.repo.default-branch'),
+      ).toMatchObject({
+        candidateId: candidate.id,
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+        reviewer: 'operator',
+        note: 'Verified in repository settings.',
+      });
+    });
+
+    it('edits a candidate before approval and writes the edited memory', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.tone',
+        value: 'formal',
+        source: 'chat:turn-7',
+        confidence: 0.7,
+        reason: 'Inferred from wording.',
+      });
+
+      const edited = brain.memoryReview.edit(candidate.id, {
+        value: 'direct but respectful',
+        confidence: 0.95,
+        reason: 'Operator corrected inferred tone preference.',
+      });
+      expect(edited).toMatchObject({
+        value: 'direct but respectful',
+        confidence: 0.95,
+        reason: 'Operator corrected inferred tone preference.',
+        status: 'pending',
+      });
+
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      expect(brain.working.get('user.preference.tone')).toBe(
+        'direct but respectful',
+      );
+      expect(
+        brain.memoryReview.provenanceFor('working', 'user.preference.tone'),
+      ).toMatchObject({
+        value: 'direct but respectful',
+        confidence: 0.95,
+      });
+    });
+
+    it('rejects a candidate without writing memory and suppresses duplicate evidence', () => {
+      const proposal = {
+        targetStore: 'working' as const,
+        key: 'user.location.city',
+        value: 'Paris',
+        source: 'chat:turn-9',
+        evidenceId: 'msg-9',
+        confidence: 0.55,
+        reason: 'Weak inference from travel discussion.',
+      };
+      const candidate = brain.memoryReview.propose(proposal);
+
+      const rejected = brain.memoryReview.reject(candidate.id, {
+        reviewer: 'operator',
+        note: 'Travel mention is not residence.',
+      });
+
+      expect(rejected.status).toBe('rejected');
+      expect(brain.working.has('user.location.city')).toBe(false);
+      expect(brain.memoryReview.propose(proposal)).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'rejected',
+        source: 'chat:turn-9',
+        evidenceId: 'msg-9',
+      });
+    });
+
+    it('marks a candidate as never-store and suppresses future matching proposals', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.secret.api-token',
+        value: 'sk-test-redacted',
+        source: 'terminal-output',
+        confidence: 0.99,
+        reason: 'Sensitive token should not persist without consent.',
+      });
+
+      const neverStored = brain.memoryReview.neverStore(candidate.id, {
+        reviewer: 'operator',
+        note: 'Secrets must never be stored in memory.',
+      });
+
+      expect(neverStored.status).toBe('never_store');
+      expect(brain.working.has('env.secret.api-token')).toBe(false);
+      expect(
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'env.secret.api-token',
+          value: 'sk-test-redacted',
+          source: 'later-terminal-output',
+          confidence: 0.99,
+          reason: 'Same secret appeared again.',
+        }),
+      ).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+      });
+    });
+  });
+
   describe('memory schema versioning and migrations', () => {
     it('exposes store-level and record-level schema version metadata', () => {
       brain.working.set('goal', 'ship migrations');

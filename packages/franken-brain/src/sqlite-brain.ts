@@ -84,6 +84,63 @@ export interface SqliteBrainOptions {
   encryption?: MemoryEncryptionOptions;
 }
 
+export type MemoryCandidateTargetStore = 'working';
+export type MemoryCandidateStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'never_store'
+  | 'suppressed';
+export type MemorySuppressionReason = 'rejected' | 'never_store';
+
+export interface MemoryCandidateProposal {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  source: string;
+  evidenceId?: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface MemoryCandidate extends MemoryCandidateProposal {
+  id: string;
+  status: MemoryCandidateStatus;
+  suppressionReason?: MemorySuppressionReason;
+  createdAt: string;
+  updatedAt: string;
+  decidedAt?: string;
+  reviewer?: string;
+  note?: string;
+}
+
+export interface MemoryCandidateEdit {
+  value?: unknown;
+  source?: string;
+  evidenceId?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface MemoryReviewDecisionOptions {
+  reviewer?: string;
+  note?: string;
+}
+
+export interface MemoryProvenanceRecord {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  candidateId: string;
+  source: string;
+  evidenceId?: string;
+  confidence: number;
+  reason: string;
+  reviewer?: string;
+  note?: string;
+  approvedAt: string;
+}
+
 export interface MemoryEncryptionMetadata {
   algorithm: 'aes-256-gcm';
   stores: Array<{ store: string; encrypted: boolean }>;
@@ -1018,12 +1075,444 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 }
 
+// --- User-visible memory review and consent ---
+
+type MemoryCandidateRow = {
+  id: string;
+  target_store: MemoryCandidateTargetStore;
+  memory_key: string;
+  value: string;
+  source: string;
+  evidence_id: string | null;
+  confidence: number;
+  reason: string;
+  status: MemoryCandidateStatus;
+  suppression_reason: MemorySuppressionReason | null;
+  reviewer: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+};
+
+type MemoryProvenanceRow = {
+  target_store: MemoryCandidateTargetStore;
+  memory_key: string;
+  value: string;
+  candidate_id: string;
+  source: string;
+  evidence_id: string | null;
+  confidence: number;
+  reason: string;
+  reviewer: string | null;
+  note: string | null;
+  approved_at: string;
+};
+
+export class SqliteMemoryReviewQueue {
+  constructor(
+    private db: Database.Database,
+    private working: SqliteWorkingMemory,
+    private encryption?: MemoryCipher,
+  ) {}
+
+  propose(proposal: MemoryCandidateProposal): MemoryCandidate {
+    this.validateProposal(proposal);
+    const neverStoreSuppression = this.findSuppression(
+      this.neverStoreSignature(proposal),
+    );
+    if (neverStoreSuppression) {
+      return this.suppressedCandidate(proposal, 'never_store');
+    }
+    const rejectedSuppression = this.findSuppression(
+      this.rejectedSignature(proposal),
+    );
+    if (rejectedSuppression) {
+      return this.suppressedCandidate(proposal, 'rejected');
+    }
+
+    const now = isoNow();
+    const candidate: MemoryCandidate = {
+      ...proposal,
+      id: `memcand_${randomBytes(12).toString('base64url')}`,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO memory_review_candidates (
+          id, target_store, memory_key, value, source, evidence_id, confidence,
+          reason, status, suppression_reason, reviewer, note, created_at,
+          updated_at, decided_at, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+      )
+      .run(
+        candidate.id,
+        candidate.targetStore,
+        candidate.key,
+        this.encodeValue(candidate.value),
+        this.encodeText(candidate.source),
+        candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
+        candidate.confidence,
+        this.encodeText(candidate.reason),
+        candidate.status,
+        candidate.createdAt,
+        candidate.updatedAt,
+      );
+    return candidate;
+  }
+
+  list(status: MemoryCandidateStatus = 'pending'): MemoryCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
+      )
+      .all(status) as MemoryCandidateRow[];
+    return rows.map((row) => this.rowToCandidate(row));
+  }
+
+  edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
+    const candidate = this.requireCandidate(id, 'pending');
+    const updated: MemoryCandidate = {
+      ...candidate,
+      ...edit,
+      updatedAt: isoNow(),
+    };
+    this.validateProposal(updated);
+    this.db
+      .prepare(
+        `UPDATE memory_review_candidates
+         SET value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
+         WHERE id = ? AND status = 'pending'`,
+      )
+      .run(
+        this.encodeValue(updated.value),
+        this.encodeText(updated.source),
+        updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
+        updated.confidence,
+        this.encodeText(updated.reason),
+        updated.updatedAt,
+        id,
+      );
+    return this.requireCandidate(id, 'pending');
+  }
+
+  approve(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+  ): MemoryCandidate {
+    const candidate = this.requireCandidate(id, 'pending');
+    const now = isoNow();
+    let finalizeWorkingFlush: (() => void) | undefined;
+    const approveTx = this.db.transaction(() => {
+      this.working.set(candidate.key, candidate.value);
+      finalizeWorkingFlush = this.working.flushToDb() ?? undefined;
+      this.db
+        .prepare(
+          `INSERT INTO memory_review_provenance (
+            target_store, memory_key, value, candidate_id, source, evidence_id,
+            confidence, reason, reviewer, note, approved_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+          ON CONFLICT(target_store, memory_key) DO UPDATE SET
+            value = excluded.value,
+            candidate_id = excluded.candidate_id,
+            source = excluded.source,
+            evidence_id = excluded.evidence_id,
+            confidence = excluded.confidence,
+            reason = excluded.reason,
+            reviewer = excluded.reviewer,
+            note = excluded.note,
+            approved_at = excluded.approved_at,
+            schema_version = excluded.schema_version`,
+        )
+        .run(
+          candidate.targetStore,
+          candidate.key,
+          this.encodeValue(candidate.value),
+          candidate.id,
+          this.encodeText(candidate.source),
+          candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
+          candidate.confidence,
+          this.encodeText(candidate.reason),
+          options.reviewer ? this.encodeText(options.reviewer) : null,
+          options.note ? this.encodeText(options.note) : null,
+          now,
+        );
+      this.markDecision(id, 'approved', now, options);
+    });
+    approveTx.immediate();
+    finalizeWorkingFlush?.();
+    return this.requireCandidate(id, 'approved');
+  }
+
+  reject(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+  ): MemoryCandidate {
+    const candidate = this.requireCandidate(id, 'pending');
+    const now = isoNow();
+    const tx = this.db.transaction(() => {
+      this.markDecision(id, 'rejected', now, options);
+      this.insertSuppression(candidate, 'rejected', now, options);
+    });
+    tx.immediate();
+    return this.requireCandidate(id, 'rejected');
+  }
+
+  neverStore(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+  ): MemoryCandidate {
+    const candidate = this.requireCandidate(id, 'pending');
+    const now = isoNow();
+    const tx = this.db.transaction(() => {
+      this.markDecision(id, 'never_store', now, options);
+      this.insertSuppression(candidate, 'never_store', now, options);
+    });
+    tx.immediate();
+    return this.requireCandidate(id, 'never_store');
+  }
+
+  provenanceFor(
+    targetStore: MemoryCandidateTargetStore,
+    key: string,
+  ): MemoryProvenanceRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
+      )
+      .get(targetStore, key) as MemoryProvenanceRow | undefined;
+    return row ? this.rowToProvenance(row) : null;
+  }
+
+  private validateProposal(proposal: MemoryCandidateProposal): void {
+    if (proposal.targetStore !== 'working') {
+      throw new Error(`Unsupported memory review target store: ${proposal.targetStore}`);
+    }
+    if (proposal.key.trim().length === 0) {
+      throw new Error('Memory candidate key must not be empty');
+    }
+    if (proposal.source.trim().length === 0) {
+      throw new Error('Memory candidate source must not be empty');
+    }
+    if (proposal.reason.trim().length === 0) {
+      throw new Error('Memory candidate reason must not be empty');
+    }
+    if (
+      !Number.isFinite(proposal.confidence) ||
+      proposal.confidence < 0 ||
+      proposal.confidence > 1
+    ) {
+      throw new RangeError('Memory candidate confidence must be between 0 and 1');
+    }
+    stringifyWorkingMemoryValue(proposal.key, proposal.value);
+  }
+
+  private requireCandidate(
+    id: string,
+    status?: MemoryCandidateStatus,
+  ): MemoryCandidate {
+    const row = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE id = ?`)
+      .get(id) as MemoryCandidateRow | undefined;
+    if (!row) throw new Error(`Memory candidate ${id} was not found`);
+    const candidate = this.rowToCandidate(row);
+    if (status && candidate.status !== status) {
+      throw new Error(
+        `Memory candidate ${id} is ${candidate.status}, expected ${status}`,
+      );
+    }
+    return candidate;
+  }
+
+  private markDecision(
+    id: string,
+    status: Exclude<MemoryCandidateStatus, 'pending' | 'suppressed'>,
+    decidedAt: string,
+    options: MemoryReviewDecisionOptions,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE memory_review_candidates
+         SET status = ?, reviewer = ?, note = ?, updated_at = ?, decided_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        status,
+        options.reviewer ? this.encodeText(options.reviewer) : null,
+        options.note ? this.encodeText(options.note) : null,
+        decidedAt,
+        decidedAt,
+        id,
+      );
+  }
+
+  private insertSuppression(
+    candidate: MemoryCandidate,
+    reason: MemorySuppressionReason,
+    createdAt: string,
+    options: MemoryReviewDecisionOptions,
+  ): void {
+    const signature =
+      reason === 'never_store'
+        ? this.neverStoreSignature(candidate)
+        : this.rejectedSignature(candidate);
+    this.db
+      .prepare(
+        `INSERT INTO memory_review_suppressions (
+          signature, suppression_reason, target_store, memory_key, value, source,
+          evidence_id, reason, reviewer, note, created_at, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+        ON CONFLICT(signature) DO UPDATE SET
+          suppression_reason = excluded.suppression_reason,
+          reviewer = excluded.reviewer,
+          note = excluded.note,
+          created_at = excluded.created_at`,
+      )
+      .run(
+        signature,
+        reason,
+        candidate.targetStore,
+        candidate.key,
+        this.encodeValue(candidate.value),
+        this.encodeText(candidate.source),
+        candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
+        this.encodeText(candidate.reason),
+        options.reviewer ? this.encodeText(options.reviewer) : null,
+        options.note ? this.encodeText(options.note) : null,
+        createdAt,
+      );
+  }
+
+  private findSuppression(signature: string): MemorySuppressionReason | null {
+    const row = this.db
+      .prepare(
+        `SELECT suppression_reason FROM memory_review_suppressions WHERE signature = ?`,
+      )
+      .get(signature) as { suppression_reason: MemorySuppressionReason } | undefined;
+    return row?.suppression_reason ?? null;
+  }
+
+  private suppressedCandidate(
+    proposal: MemoryCandidateProposal,
+    suppressionReason: MemorySuppressionReason,
+  ): MemoryCandidate {
+    const now = isoNow();
+    return {
+      ...proposal,
+      id: `memcand_suppressed_${createHash('sha256')
+        .update(this.neverStoreSignature(proposal))
+        .digest('hex')
+        .slice(0, 16)}`,
+      status: 'suppressed',
+      suppressionReason,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  private rejectedSignature(proposal: MemoryCandidateProposal): string {
+    return stableMemorySignature([
+      'rejected',
+      proposal.targetStore,
+      proposal.key,
+      proposal.source,
+      proposal.evidenceId ?? '',
+      stableStringify(proposal.value),
+    ]);
+  }
+
+  private neverStoreSignature(proposal: MemoryCandidateProposal): string {
+    return stableMemorySignature([
+      'never_store',
+      proposal.targetStore,
+      proposal.key,
+      stableStringify(proposal.value),
+    ]);
+  }
+
+  private rowToCandidate(row: MemoryCandidateRow): MemoryCandidate {
+    return {
+      id: row.id,
+      targetStore: row.target_store,
+      key: row.memory_key,
+      value: this.decodeValue(row.value),
+      source: this.decodeText(row.source),
+      ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
+      confidence: row.confidence,
+      reason: this.decodeText(row.reason),
+      status: row.status,
+      ...(row.suppression_reason
+        ? { suppressionReason: row.suppression_reason }
+        : {}),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      ...(row.decided_at ? { decidedAt: row.decided_at } : {}),
+      ...(row.reviewer ? { reviewer: this.decodeText(row.reviewer) } : {}),
+      ...(row.note ? { note: this.decodeText(row.note) } : {}),
+    };
+  }
+
+  private rowToProvenance(row: MemoryProvenanceRow): MemoryProvenanceRecord {
+    return {
+      targetStore: row.target_store,
+      key: row.memory_key,
+      value: this.decodeValue(row.value),
+      candidateId: row.candidate_id,
+      source: this.decodeText(row.source),
+      ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
+      confidence: row.confidence,
+      reason: this.decodeText(row.reason),
+      ...(row.reviewer ? { reviewer: this.decodeText(row.reviewer) } : {}),
+      ...(row.note ? { note: this.decodeText(row.note) } : {}),
+      approvedAt: row.approved_at,
+    };
+  }
+
+  private encodeText(value: string): string {
+    return this.encryption?.encrypt(value) ?? value;
+  }
+
+  private decodeText(value: string): string {
+    return this.encryption?.decrypt(value) ?? value;
+  }
+
+  private encodeValue(value: unknown): string {
+    return this.encodeText(stringifyWorkingMemoryValue('memory candidate', value));
+  }
+
+  private decodeValue(value: string): unknown {
+    return parseStoredWorkingMemoryValue(this.decodeText(value));
+  }
+}
+
+function stableMemorySignature(parts: unknown[]): string {
+  return createHash('sha256').update(stableStringify(parts)).digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  return `{${entries
+    .map(([key, nested]) => `${JSON.stringify(key)}:${stableStringify(nested)}`)
+    .join(',')}}`;
+}
+
 // --- SqliteBrain ---
 
 export class SqliteBrain implements IBrain {
   readonly working: SqliteWorkingMemory;
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
+  readonly memoryReview: SqliteMemoryReviewQueue;
 
   private db: Database.Database;
   private readonly encryption: MemoryCipher | undefined;
@@ -1056,6 +1545,11 @@ export class SqliteBrain implements IBrain {
     this.recovery = new SqliteRecoveryMemory(
       this.db,
       () => this.working.flushToDb(),
+      encryption,
+    );
+    this.memoryReview = new SqliteMemoryReviewQueue(
+      this.db,
+      this.working,
       encryption,
     );
   }
@@ -1095,6 +1589,55 @@ export class SqliteBrain implements IBrain {
         algorithm TEXT,
         verifier TEXT,
         updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS memory_review_candidates (
+        id TEXT PRIMARY KEY,
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        confidence REAL NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        suppression_reason TEXT,
+        reviewer TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        decided_at TEXT,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_review_candidates_status
+        ON memory_review_candidates(status, created_at);
+      CREATE TABLE IF NOT EXISTS memory_review_provenance (
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        candidate_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        confidence REAL NOT NULL,
+        reason TEXT NOT NULL,
+        reviewer TEXT,
+        note TEXT,
+        approved_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
+        PRIMARY KEY (target_store, memory_key)
+      );
+      CREATE TABLE IF NOT EXISTS memory_review_suppressions (
+        signature TEXT PRIMARY KEY,
+        suppression_reason TEXT NOT NULL,
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        reason TEXT NOT NULL,
+        reviewer TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
     `);
   }

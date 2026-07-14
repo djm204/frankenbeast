@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `DEFAULT_WORKING_MEMORY_LIMITS`, `CURRENT_MEMORY_SCHEMA_VERSION`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, and `MemoryEncryptionMigrationResult` types.
+Current public API: `SqliteBrain`, `SqliteMemoryReviewQueue`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `DEFAULT_WORKING_MEMORY_LIMITS`, `CURRENT_MEMORY_SCHEMA_VERSION`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, and `MemoryEncryptionMigrationResult` types.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -65,6 +65,45 @@ const learningResult = brain.episodic.recordLearning({
 if (!learningResult.recorded) {
   console.log(`Learning still cooling down until ${learningResult.cooldownUntil}`);
 }
+
+// Candidate durable memories stay user-visible until reviewed. They are not
+// written to working memory until approval, and approvals retain provenance.
+const candidate = brain.memoryReview.propose({
+  targetStore: 'working',
+  key: 'user.preference.response-style',
+  value: 'concise',
+  source: 'chat:turn-42',
+  confidence: 0.92,
+  reason: 'User explicitly requested concise responses.',
+});
+const visibleQueue = brain.memoryReview.list();
+brain.memoryReview.edit(candidate.id, {
+  value: 'concise and direct',
+  reason: 'Operator refined wording before persistence.',
+});
+brain.memoryReview.approve(candidate.id, {
+  reviewer: 'operator',
+  note: 'Confirmed with the user.',
+});
+const provenance = brain.memoryReview.provenanceFor(
+  'working',
+  'user.preference.response-style',
+);
+
+// Rejected candidates and never-store decisions are remembered so duplicate
+// weak evidence or sensitive values do not silently reappear in the queue.
+const secretCandidate = brain.memoryReview.propose({
+  targetStore: 'working',
+  key: 'env.secret.api-token',
+  value: '[REDACTED]',
+  source: 'terminal-output',
+  confidence: 0.99,
+  reason: 'Sensitive material should not persist without consent.',
+});
+brain.memoryReview.neverStore(secretCandidate.id, {
+  reviewer: 'operator',
+  note: 'Secrets must never be stored in memory.',
+});
 
 // Recovery memory stores execution checkpoints and flushes working memory.
 const checkpoint = brain.recovery.checkpoint({
@@ -131,9 +170,10 @@ Keep the encryption key outside the SQLite database and application logs; losing
 
 ```text
 SqliteBrain
-├── working    in-memory key/value store, flushed to SQLite on checkpoint
-├── episodic   SQLite `episodic_events` table with recent/query/failure recall
-└── recovery   SQLite `checkpoints` table for execution state recovery
+├── working       in-memory key/value store, flushed to SQLite on checkpoint
+├── memoryReview  SQLite candidate/provenance/suppression queue for consented writes
+├── episodic      SQLite `episodic_events` table with recent/query/failure recall
+└── recovery      SQLite `checkpoints` table for execution state recovery
 ```
 
 The package creates the required SQLite schema in its constructor and enables WAL mode. Use `:memory:` for tests or pass a file path for persistent state.
