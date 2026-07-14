@@ -112,6 +112,10 @@ function limitExceeded(value: number | undefined, limit: number | undefined): va
   return limit !== undefined && value !== undefined && value > limit;
 }
 
+function limitReached(value: number | undefined, limit: number | undefined): value is number {
+  return limit !== undefined && value !== undefined && value >= limit;
+}
+
 function providerBudgetAtReserve(value: number | undefined, reserve: number | undefined): value is number {
   return reserve !== undefined && value !== undefined && value <= reserve;
 }
@@ -140,8 +144,8 @@ export async function evaluateIssueBackpressure(
   const thresholds = backpressure?.thresholds ?? {};
   const reasons: string[] = [];
 
-  if (limitExceeded(signals.activeProcesses, thresholds.maxActiveProcesses)) {
-    reasons.push(`active processes ${signals.activeProcesses} exceeds limit ${thresholds.maxActiveProcesses}`);
+  if (limitReached(signals.activeProcesses, thresholds.maxActiveProcesses)) {
+    reasons.push(`active processes ${signals.activeProcesses} reached limit ${thresholds.maxActiveProcesses}`);
   }
   if (limitExceeded(signals.failedStarts, thresholds.maxFailedStarts)) {
     reasons.push(`failed starts ${signals.failedStarts} exceeds limit ${thresholds.maxFailedStarts}`);
@@ -314,38 +318,6 @@ export class IssueRunner {
         continue;
       }
 
-      const providerBudgetTokensRemaining = Math.max(0, budgetTokens - cumulativeTokens);
-      const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
-        issue,
-        index: i,
-        totalIssues: sorted.length,
-        pendingIssueCount: sorted.length - i,
-        cumulativeTokens,
-        budgetTokens,
-        providerBudgetTokensRemaining,
-      });
-
-      if (!backpressureDecision.allowed) {
-        const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
-        logger?.warn(
-          `[issues] Backpressure paused issue #${issue.number}: ${backpressureDecision.reasons.join('; ')}`,
-          {
-            issueNumber: issue.number,
-            reasons: backpressureDecision.reasons,
-            signals: backpressureDecision.signals,
-          },
-          'issues',
-        );
-        outcomes.push({
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          status: 'skipped',
-          tokensUsed: 0,
-          error: reason,
-        });
-        continue;
-      }
-
       logger?.info(`[issues] Starting issue #${issue.number} (${position})`, undefined, 'issues');
 
       const triage = findTriage(triageResults, issue.number);
@@ -361,9 +333,20 @@ export class IssueRunner {
       }
 
       try {
-        const outcome = await this.processIssue(issue, triage, config);
+        const outcome = await this.processIssue(issue, triage, config, {
+          index: i,
+          totalIssues: sorted.length,
+          pendingIssueCount: sorted.length - i,
+          cumulativeTokens,
+          budgetTokens,
+          providerBudgetTokensRemaining: Math.max(0, budgetTokens - cumulativeTokens),
+        });
         cumulativeTokens += outcome.tokensUsed;
         outcomes.push(outcome);
+
+        if (outcome.status === 'skipped' && outcome.error?.includes('queue depth')) {
+          budgetExceeded = true;
+        }
 
         if (cumulativeTokens >= budgetTokens) {
           budgetExceeded = true;
@@ -386,6 +369,7 @@ export class IssueRunner {
     issue: GithubIssue,
     triage: TriageResult,
     config: IssueRunnerConfig,
+    backpressureContext: Omit<IssueBackpressureSignalContext, 'issue'>,
   ): Promise<IssueOutcome> {
     const {
       graphBuilder,
@@ -432,6 +416,31 @@ export class IssueRunner {
         issueTitle: issue.title,
         status: 'fixed',
         tokensUsed: 0,
+      };
+    }
+
+    const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
+      issue,
+      ...backpressureContext,
+    });
+
+    if (!backpressureDecision.allowed) {
+      const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
+      logger?.warn(
+        `[issues] Backpressure paused issue #${issue.number}: ${backpressureDecision.reasons.join('; ')}`,
+        {
+          issueNumber: issue.number,
+          reasons: backpressureDecision.reasons,
+          signals: backpressureDecision.signals,
+        },
+        'issues',
+      );
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: reason,
       };
     }
 

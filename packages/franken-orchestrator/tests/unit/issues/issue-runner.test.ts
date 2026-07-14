@@ -375,7 +375,7 @@ describe('IssueRunner', () => {
         backpressure: {
           thresholds: { maxActiveProcesses: 1 },
           signals: () => ({
-            activeProcesses: 2,
+            activeProcesses: 1,
             failedStarts: 0,
             inFlightBacklog: 0,
             oldestQueueAgeMs: 0,
@@ -390,13 +390,13 @@ describe('IssueRunner', () => {
         expect.objectContaining({
           issueNumber: 11,
           status: 'skipped',
-          error: expect.stringContaining('backpressure: active processes 2 exceeds limit 1'),
+          error: expect.stringContaining('backpressure: active processes 1 reached limit 1'),
         }),
       ]);
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('[issues] Backpressure paused issue #11'),
         expect.objectContaining({
-          reasons: expect.arrayContaining(['active processes 2 exceeds limit 1']),
+          reasons: expect.arrayContaining(['active processes 1 reached limit 1']),
         }),
         'issues',
       );
@@ -450,6 +450,85 @@ describe('IssueRunner', () => {
       expect(outcomes[0]).toMatchObject({ issueNumber: 13, status: 'skipped' });
       expect(outcomes[0]!.error).toContain('failed starts 3 exceeds limit 1');
       expect(outcomes[1]).toMatchObject({ issueNumber: 14, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
+    it('preserves checkpoint-complete outcomes before evaluating backpressure', async () => {
+      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 15 })],
+        triageResults: [makeTriage(15)],
+        checkpoint,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('stops iteration after queue depth backpressure to avoid priority inversion', async () => {
+      const config = makeConfig({
+        issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
+        triageResults: [makeTriage(16), makeTriage(17)],
+        backpressure: {
+          thresholds: { maxPendingIssueCount: 1 },
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          issueNumber: 16,
+          status: 'skipped',
+          error: expect.stringContaining('queue depth 2 exceeds limit 1'),
+        }),
+        expect.objectContaining({
+          issueNumber: 17,
+          status: 'skipped',
+          tokensUsed: 0,
+        }),
+      ]);
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('contains failing signal sources to a failed issue outcome', async () => {
+      const config = makeConfig({
+        issues: [makeIssue({ number: 18 }), makeIssue({ number: 19 })],
+        triageResults: [makeTriage(18), makeTriage(19)],
+        backpressure: {
+          signals: vi
+            .fn()
+            .mockRejectedValueOnce(new Error('metrics unavailable'))
+            .mockResolvedValue({
+              activeProcesses: 0,
+              failedStarts: 0,
+              inFlightBacklog: 0,
+              oldestQueueAgeMs: 0,
+            }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 18,
+        status: 'failed',
+        error: 'metrics unavailable',
+      });
+      expect(outcomes[1]).toMatchObject({ issueNumber: 19, status: 'fixed' });
       expect(mockRun).toHaveBeenCalledOnce();
     });
   });
