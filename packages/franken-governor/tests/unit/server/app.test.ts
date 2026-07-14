@@ -387,6 +387,7 @@ describe('Governor Hono Server', () => {
         grantedBy: 'human',
       });
       expect(body.token.tokenId).toBeUndefined();
+      expect(store.isValid(token.tokenId, 'deploy-prod')).toBe(false);
     });
 
     it('validates tokens persisted by a separate store instance', async () => {
@@ -409,6 +410,34 @@ describe('Governor Hono Server', () => {
         expect(res.status).toBe(200);
         const body = await res.json();
         expect(body.valid).toBe(true);
+        expect(new SessionTokenStore({ persistenceFile }).isValid(token.tokenId)).toBe(false);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('allows only one concurrent validation request to claim a persisted token', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'governor-app-session-store-'));
+      const persistenceFile = join(dir, 'tokens.json');
+      try {
+        const issuingStore = new SessionTokenStore({ persistenceFile });
+        const token = makeStoredToken(issuingStore);
+        const app = createGovernorApp({
+          sessionTokenStorePath: persistenceFile,
+          allowUnsignedApprovalsForTests: true,
+        });
+
+        const requests = Array.from({ length: 6 }, () => app.request('/v1/approval/session/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: token.tokenId, scope: 'deploy-prod' }),
+        }));
+
+        const responses = await Promise.all(requests);
+        expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+        expect(responses.filter((response) => response.status === 401)).toHaveLength(5);
+        await Promise.all(responses.map((response) => response.json()));
+        expect(new SessionTokenStore({ persistenceFile }).isValid(token.tokenId)).toBe(false);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

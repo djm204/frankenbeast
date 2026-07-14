@@ -353,11 +353,12 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
     let token: SessionToken | undefined;
     try {
-      token = sessionTokenStore.get(body.tokenId);
+      const result = sessionTokenStore.consume(body.tokenId, body.scope);
+      token = result.status === 'consumed' ? result.token : undefined;
     } catch {
       return c.json({ error: { message: 'Session token validation unavailable' } }, 503);
     }
-    if (!token || (body.scope !== undefined && token.scope !== body.scope)) {
+    if (!token) {
       return c.json({ valid: false }, 401);
     }
 
