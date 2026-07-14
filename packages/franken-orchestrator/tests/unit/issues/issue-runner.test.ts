@@ -573,6 +573,8 @@ describe('IssueRunner', () => {
       expect(outcomes[0]).toMatchObject({ issueNumber: 9915, status: 'fixed' });
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(signals).not.toHaveBeenCalled();
+      expect(checkpoint.write).not.toHaveBeenCalledWith('issue:9915:impl:01_checkpointed-api');
+      expect(checkpoint.write).not.toHaveBeenCalledWith('issue:9915:harden:01_checkpointed-api');
       expect(mockRun).toHaveBeenCalledOnce();
     });
 

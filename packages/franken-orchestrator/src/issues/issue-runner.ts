@@ -526,7 +526,10 @@ export class IssueRunner {
       refreshPlanTasks = async () => (await realGraphBuilder.build({ goal: 'refresh issue tasks' })).tasks;
       if (issueCheckpoint && issueRuntime === undefined) {
         for (const task of graph.tasks) {
-          issueCheckpoint.write(issueTaskProgressKey(issue.number, task.id));
+          const progressKey = issueTaskProgressKey(issue.number, task.id);
+          if (!issueCheckpoint.has(progressKey)) {
+            issueCheckpoint.write(progressKey);
+          }
         }
       }
     } catch (err) {
