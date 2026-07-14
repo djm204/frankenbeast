@@ -396,6 +396,24 @@ export class ChatSocketController {
     session: ChatSession,
     approved: boolean,
   ): Promise<void> {
+    if (!session.pendingApproval) {
+      if (session.state === 'pending_approval') {
+        this.emit(peer, {
+          type: 'turn.error',
+          code: 'APPROVAL_NOT_PENDING',
+          message: 'No pending approval metadata exists for this session. Reject or recreate the stale approval state before responding.',
+          timestamp: nowIso(),
+        });
+        return;
+      }
+      this.emit(peer, {
+        type: 'turn.approval.resolved',
+        approved: session.state !== 'rejected',
+        timestamp: nowIso(),
+      });
+      return;
+    }
+
     if (!approved) {
       session.pendingApproval = null;
       session.state = 'rejected';
@@ -415,16 +433,7 @@ export class ChatSocketController {
       return;
     }
 
-    if (!session.pendingApproval && session.state !== 'pending_approval') {
-      this.emit(peer, {
-        type: 'turn.approval.resolved',
-        approved: session.state !== 'rejected',
-        timestamp: nowIso(),
-      });
-      return;
-    }
-
-    const pendingApproval = session.pendingApproval ?? null;
+    const pendingApproval = session.pendingApproval;
     const originalState = session.state;
     let runtimeInput: string;
     try {
@@ -469,7 +478,7 @@ export class ChatSocketController {
     try {
       result = await this.runtime.run(runtimeInput, {
         sessionId: session.id,
-        pendingApproval: Boolean(pendingApproval) || originalState === 'pending_approval',
+        pendingApproval: true,
         approvalResolved: true,
         projectId: session.projectId,
         transcript: session.transcript,

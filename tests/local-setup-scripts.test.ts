@@ -41,6 +41,9 @@ describe('local setup scripts', () => {
     expect(read('README.md')).toContain('Node.js** `>=22.13.0 <23 || >=24.0.0 <26`');
     expect(read('README.md')).toContain('local default is pinned in [.nvmrc](.nvmrc)');
     expect(read('README.md')).toContain('**npm** 11.5.1 via the root `packageManager` pin');
+    expect(read('docs/guides/run-cli-beast.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
+    expect(read('docs/guides/run-dashboard-chat.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
+    expect(read('docs/guides/deploy-beasts.md')).toContain('Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)');
     expect(read('packages/franken-brain/README.md')).toContain('npm 11.5.1 via the repository `packageManager` setting');
     expect(read('docs/guides/quickstart.md')).toContain('npm run bootstrap -- --no-docker');
     expect(read('docs/guides/quickstart.md')).toContain('npm install -g corepack');
@@ -54,6 +57,29 @@ describe('local setup scripts', () => {
     }
 
     expect(read('scripts/verify-setup.ts')).toContain("check('Node.js >=22.13.0 <23 || >=24.0.0 <26'");
+  });
+
+  it('keeps root env example aligned with orchestrator runtime config overrides', () => {
+    const envExample = read('.env.example');
+    const readme = read('README.md');
+
+    expect(envExample).toContain('CLI flags > FRANKEN_* env vars > config file > built-in defaults');
+    expect(envExample).toContain('FRANKEN_ENABLE_REFLECTION         -> enableReflection');
+    expect(envExample).toContain('boolean string; only "true" enables it; default false');
+    expect(envExample).toMatch(/^FRANKEN_ENABLE_REFLECTION=false$/m);
+
+    for (const frankenOverride of [
+      'FRANKEN_MAX_TOTAL_TOKENS',
+      'FRANKEN_MAX_DURATION_MS',
+      'FRANKEN_MAX_CRITIQUE_ITERATIONS',
+      'FRANKEN_ENABLE_HEARTBEAT',
+      'FRANKEN_ENABLE_TRACING',
+      'FRANKEN_ENABLE_REFLECTION',
+      'FRANKEN_MIN_CRITIQUE_SCORE',
+    ]) {
+      expect(envExample).toContain(frankenOverride);
+      expect(readme).toContain(frankenOverride);
+    }
   });
 
   it('verify-setup checks the live Chroma v2 heartbeat and no removed firewall service', () => {
@@ -75,6 +101,9 @@ describe('local setup scripts', () => {
     expect(quickstart).toContain('**Grafana** (port 3000)');
     expect(quickstart).toContain('**Tempo** (ports 3200, 4317, 4318)');
     expect(quickstart).toContain('There is no `firewall` Docker service in the current compose file.');
+    expect(read('README.md')).toContain('fixed compose defaults for Grafana (http://localhost:3000/api/health)');
+    expect(read('README.md')).toContain('Tempo readiness (http://localhost:3200/ready)');
+    expect(read('README.md')).toContain('.env.example intentionally does not define a TEMPO_ENDPOINT override');
     expect(source).toContain("await checkHttp('ChromaDB', `${chromaUrl}/api/v2/heartbeat`)");
     expect(source).toContain("await checkHttp('Grafana', 'http://localhost:3000/api/health')");
     expect(source).toContain("await checkHttp('Tempo', 'http://localhost:3200/ready')");
@@ -311,12 +340,15 @@ describe('local setup scripts', () => {
       expect(envExample).toContain(required);
     }
 
-    for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'FIREWALL_PORT']) {
+    for (const removed of ['OLLAMA_BASE_URL', 'TEMPO_ENDPOINT', 'CHROMA_HOST', 'CHROMA_PORT', 'FIREWALL_PORT']) {
       expect(envExample).not.toContain(removed);
     }
     expect(envExample).not.toMatch(/^# ── Firewall Server ──$/m);
     expect(envExample).not.toMatch(/^#?\s*FIREWALL_PORT\s*=/m);
     expect(envExample).not.toMatch(/frankenfirewall|firewall proxy|port 9090/i);
+
+    expect(readme).not.toMatch(/`CHROMA_HOST`|`CHROMA_PORT`|`FIREWALL_PORT`/);
+    expect(readme).not.toMatch(/\|\s*`?(?:CHROMA_HOST|CHROMA_PORT|FIREWALL_PORT)`?\s*\|/);
 
     expect(envExample).not.toMatch(/^GRAFANA_USER=admin$/m);
     expect(envExample).not.toMatch(/^GRAFANA_PASSWORD=admin$/m);
@@ -495,6 +527,89 @@ describe('local setup scripts', () => {
       expect(runCliBeastGuide).toContain(`--provider=${provider}`);
     }
     expect(supportedProviders).not.toContain('ollama');
+  });
+
+  it('keeps the CLI Beast guide aligned with documented orchestrator and fbeast flags', () => {
+    const runCliBeastGuide = read('docs/guides/run-cli-beast.md');
+    const orchestratorArgs = read('packages/franken-orchestrator/src/cli/args.ts');
+    const fbeastCli = read('packages/franken-mcp-suite/src/cli/main.ts');
+
+    const documentedFlags = [
+      '--base-dir',
+      '--base-branch',
+      '--budget',
+      '--provider',
+      '--providers',
+      '--trust-provider-command-overrides',
+      '--design-doc',
+      '--plan-dir',
+      '--plan-name',
+      '--config',
+      '--host',
+      '--port',
+      '--allow-origin',
+      '--no-pr',
+      '--verbose',
+      '--reset',
+      '--resume',
+      '--cleanup',
+      '--verify',
+      '--repair',
+      '--non-interactive',
+      '--backend',
+      '--help',
+      '--label',
+      '--milestone',
+      '--search',
+      '--assignee',
+      '--limit',
+      '--repo',
+      '--target-upstream',
+      '--dry-run',
+      '--mode <mode>',
+      '--no-firewall',
+      '--no-skills',
+      '--no-memory',
+      '--no-planner',
+      '--no-critique',
+      '--no-governor',
+      '--no-heartbeat',
+      '--set',
+      '--client=',
+      '--pick',
+      '--mode=standard|proxy',
+      '--hooks',
+      '--purge',
+      '--provider=<anthropic-api|codex-cli|claude-cli>',
+    ];
+
+    for (const flag of documentedFlags) {
+      expect(runCliBeastGuide).toContain(flag);
+    }
+
+    for (const parserFlag of [
+      'trust-provider-command-overrides',
+      'no-firewall',
+      'no-skills',
+      'no-memory',
+      'no-planner',
+      'no-critique',
+      'no-governor',
+      'no-heartbeat',
+      'target-upstream',
+      'dry-run',
+      'allow-origin',
+    ]) {
+      expect(orchestratorArgs).toContain(parserFlag);
+      expect(runCliBeastGuide).toContain(`--${parserFlag}`);
+    }
+
+    for (const fbeastFlag of ['--hooks', '--pick', '--client', '--mode', '--purge']) {
+      expect(fbeastCli).toContain(fbeastFlag);
+    }
+    expect(runCliBeastGuide).toContain('network config');
+    expect(runCliBeastGuide).toContain('fbeast mcp init');
+    expect(runCliBeastGuide).toContain('fbeast mcp uninstall');
   });
 
   it('keeps the root README provider-extension guidance on current provider surfaces', () => {

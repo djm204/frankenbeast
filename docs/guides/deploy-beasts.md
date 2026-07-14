@@ -15,7 +15,7 @@ The dashboard talks to two local services when run through `frankenbeast network
 
 ## Prerequisites
 
-- Node.js `>=22.13.0 <23 || >=24.0.0 <26` and repo dependencies installed (`npm install`).
+- Node.js `>=22.13.0 <23 || >=24.0.0 <26`, Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`), and repo dependencies installed (`npm install`).
 - At least one supported CLI provider works locally for chat/execution.
 - An operator token is configured so Beast control routes are enabled.
 - For container mode: Docker is installed and the sandbox image exists locally (`fbeast/sandbox:latest` by default). Current main includes the in-repo `Dockerfile`, non-root user policy, resource-limit defaults, `no-new-privileges`, and optional read-only workspace support from #459.
@@ -110,6 +110,8 @@ Use this matrix to align the deploy-beasts setup with the chat dashboard guide:
 | Deploy Beasts against a separate daemon | `beasts-daemon` owns `/v1/beasts/*` on a different URL from chat/API | Set `VITE_API_PROXY_TARGET` to the chat-server URL and `VITE_BEAST_API_PROXY_TARGET` to the daemon URL. Export the same server-side `FRANKENBEAST_BEAST_OPERATOR_TOKEN` for the daemon, chat-server, and Vite proxy processes. |
 
 Do not use `VITE_API_URL` to choose the local dashboard backend. Current local Vite development intentionally keeps browser API calls same-origin through the proxy so REST requests and operator-token injection stay server-side.
+
+Set `VITE_PROJECT_ID` when the dashboard should use a named local project for chat session history instead of the built-in `default` project id. The value is non-secret and is sent with dashboard chat session list/resume calls; use a stable per-project value such as `my-project` when multiple checkouts or demos share the same chat backend. Set it inline with the Vite command or in `packages/franken-web/.env.local`; the root `.env.example` intentionally omits a runnable example because the workspace Vite script loads browser env from the web package directory.
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`, and navigate to **Beasts**.
 

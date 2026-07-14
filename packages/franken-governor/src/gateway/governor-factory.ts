@@ -9,6 +9,11 @@ import type { GovernorMemoryPort } from '../audit/governor-memory-port.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
 import { defaultConfig, type GovernorConfig } from '../core/config.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
+import type { SignatureVerifier } from '../security/signature-verifier.js';
+import {
+  createEvaluatorsFromApprovalPolicyManifest,
+  type ApprovalPolicyManifest,
+} from '../security/approval-policy-manifest.js';
 
 export interface CreateGovernorOptions {
   readonly readline: ReadlineAdapter;
@@ -23,6 +28,14 @@ export interface CreateGovernorOptions {
   readonly budgetState?: BudgetStateSource;
   /** Shared operator-session token store for approval issuance and validation. */
   readonly sessionTokenStore?: SessionTokenStore;
+  /**
+   * Signed approval policy manifest. When present it becomes the evaluator
+   * source after signature verification; unsigned manifests are rejected unless
+   * allowUnsignedPolicyManifest is explicitly true.
+   */
+  readonly approvalPolicyManifest?: ApprovalPolicyManifest;
+  readonly policyManifestSignatureVerifier?: SignatureVerifier;
+  readonly allowUnsignedPolicyManifest?: boolean;
 }
 
 export function createGovernor(options: CreateGovernorOptions): GovernorCritiqueAdapter {
@@ -37,11 +50,18 @@ export function createGovernor(options: CreateGovernorOptions): GovernorCritique
   });
 
   const auditRecorder = new GovernorAuditRecorder(options.memoryPort);
+  const policyManifestOptions = {
+    ...(options.policyManifestSignatureVerifier ? { verifier: options.policyManifestSignatureVerifier } : {}),
+    ...(options.allowUnsignedPolicyManifest !== undefined ? { allowUnsigned: options.allowUnsignedPolicyManifest } : {}),
+  };
+  const evaluators = options.approvalPolicyManifest !== undefined
+    ? createEvaluatorsFromApprovalPolicyManifest(options.approvalPolicyManifest, policyManifestOptions)
+    : (options.evaluators ?? []);
 
   return new GovernorCritiqueAdapter({
     channel,
     auditRecorder,
-    evaluators: options.evaluators ?? [],
+    evaluators,
     projectId: options.projectId ?? 'default',
     config,
     ...(options.skillMetadata ? { skillMetadata: options.skillMetadata } : {}),

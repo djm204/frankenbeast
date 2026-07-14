@@ -238,6 +238,7 @@ export interface BeastSseRunEvent {
 }
 
 export interface BeastEventHandlers {
+  connected?: () => void;
   snapshot?: (snapshot: BeastSseSnapshot) => void;
   agentStatus?: (event: BeastSseAgentStatusEvent) => void;
   agentEvent?: (event: BeastSseAgentEvent) => void;

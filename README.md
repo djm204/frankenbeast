@@ -5,7 +5,7 @@
 </p>
 
 ![Status](https://img.shields.io/badge/status-beta-blue)
-[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/djm204/frankenbeast?label=release)](https://github.com/djm204/frankenbeast/releases/latest)
 [![Daily security scan](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml/badge.svg)](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml)
 [![Dependabot](https://img.shields.io/badge/dependabot-configured-025E8C?logo=dependabot)](.github/dependabot.yml)
 
@@ -624,7 +624,9 @@ npm run bootstrap -- --services
 # Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
 npm run local:seed
 
-# Verify everything is running. This probes the same CHROMA_URL endpoint.
+# Verify everything is running. This probes the same CHROMA_URL endpoint,
+# plus fixed compose defaults for Grafana (http://localhost:3000/api/health)
+# and Tempo readiness (http://localhost:3200/ready).
 npm run local:verify-setup
 ```
 
@@ -927,6 +929,8 @@ cd packages/franken-brain && npm test
 All modules follow the same patterns:
 
 - **Vitest** as test runner
+- **Root test entrypoints** — `npm test` runs the default deterministic package suites, `npm run test:root` runs root-only Vitest tests, and `npm run test:integration` runs deterministic workspace integration suites exposed through Turborepo.
+- **Opt-in evals** — `npm run test:eval` is intentionally separate from `npm test` and runs only workspaces with explicit eval/LLM-judge suites.
 - **Dependency injection** — all external deps are constructor-injected
 - **Mock factories** — `vi.fn()` stubs for port interfaces
 - **No I/O in unit tests** — real SQLite only in integration tests (`:memory:` mode)

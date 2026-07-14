@@ -471,6 +471,54 @@ describe('BeastApiClient', () => {
     }
   });
 
+  it('notifies handlers when the Beast event stream reconnects successfully', async () => {
+    vi.useFakeTimers();
+    const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      const instanceListeners: Record<string, (event: { data: string }) => void> = {};
+      listeners.push(instanceListeners);
+      Object.assign(this, {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      });
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ticket: 'ticket-2' }) });
+
+    try {
+      const onConnected = vi.fn();
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ connected: onConnected, error: onError });
+
+      listeners[0]?.open?.({ data: '' });
+      expect(onConnected).toHaveBeenCalledTimes(1);
+
+      listeners[0]?.error?.({ data: '' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      listeners[1]?.open?.({ data: '' });
+
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('reconnecting') }));
+      expect(onConnected).toHaveBeenCalledTimes(2);
+
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
   it('passes the last successfully parsed SSE event id when reconnecting with a fresh ticket', async () => {
     vi.useFakeTimers();
     const listeners: Array<Record<string, (event: { data: string; lastEventId?: string }) => void>> = [];
