@@ -6,6 +6,7 @@ const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
 const testFilePattern = /(?:^|\/).+\.(?:integration\.)?test\.[cm]?[jt]sx?$/u;
 const ignoredTestSearchDirs = new Set(['dist', 'node_modules', 'coverage', '.turbo']);
 const lintOptionNamesWithValues = new Set([
+  '--cache-location',
   '--config',
   '-c',
   '--ext',
@@ -13,11 +14,15 @@ const lintOptionNamesWithValues = new Set([
   '-f',
   '--global',
   '--ignore-pattern',
+  '--max-warnings',
+  '--output-file',
+  '-o',
   '--parser',
   '--parser-options',
   '--plugin',
   '--resolve-plugins-relative-to',
   '--rule',
+  '--stdin-filename',
 ]);
 
 const normalizePathToken = (token) => token
@@ -39,13 +44,21 @@ const joinRelativePath = (baseDir, target) => {
 
 const lintPathConfig = (lintScript) => {
   const tokens = lintScript.match(/(?:[^\s'"]+|"[^"]*"|'[^']*')+/gu) ?? [];
-  const targets = [];
-  const ignorePatterns = [];
+  const invocations = [];
   let currentDir = '';
-  let seenEslint = false;
+  let currentInvocation = null;
   let skipNext = false;
   let optionAwaitingValue = null;
   let awaitingCdTarget = false;
+
+  const finishInvocation = () => {
+    if (currentInvocation === null) return;
+    if (currentInvocation.targets.length === 0 && !currentInvocation.passOnNoPatterns) {
+      currentInvocation.targets.push(joinRelativePath(currentInvocation.cwd, '.'));
+    }
+    invocations.push(currentInvocation);
+    currentInvocation = null;
+  };
 
   for (const rawToken of tokens) {
     const token = normalizePathToken(rawToken);
@@ -58,7 +71,7 @@ const lintPathConfig = (lintScript) => {
 
     if (optionAwaitingValue !== null) {
       if (optionAwaitingValue === '--ignore-pattern') {
-        ignorePatterns.push(joinRelativePath(currentDir, token));
+        currentInvocation?.ignorePatterns.push(joinRelativePath(currentDir, token));
       }
 
       optionAwaitingValue = null;
@@ -71,17 +84,24 @@ const lintPathConfig = (lintScript) => {
     }
 
     if (shellCommandSeparators.has(token)) {
-      seenEslint = false;
+      finishInvocation();
       continue;
     }
 
-    if (!seenEslint) {
+    if (currentInvocation === null) {
       if (token === 'cd') {
         awaitingCdTarget = true;
         continue;
       }
 
-      seenEslint = token === 'eslint' || token.endsWith('/eslint');
+      if (token === 'eslint' || token.endsWith('/eslint')) {
+        currentInvocation = {
+          cwd: currentDir,
+          targets: [],
+          ignorePatterns: [],
+          passOnNoPatterns: false,
+        };
+      }
       continue;
     }
 
@@ -89,10 +109,15 @@ const lintPathConfig = (lintScript) => {
       const optionName = token.includes('=') ? token.slice(0, token.indexOf('=')) : token;
       if (optionName === '--ignore-pattern') {
         if (token.includes('=')) {
-          ignorePatterns.push(joinRelativePath(currentDir, token.slice(token.indexOf('=') + 1)));
+          currentInvocation.ignorePatterns.push(joinRelativePath(currentDir, token.slice(token.indexOf('=') + 1)));
         } else {
           optionAwaitingValue = optionName;
         }
+        continue;
+      }
+
+      if (optionName === '--pass-on-no-patterns') {
+        currentInvocation.passOnNoPatterns = true;
         continue;
       }
 
@@ -100,10 +125,12 @@ const lintPathConfig = (lintScript) => {
       continue;
     }
 
-    targets.push(joinRelativePath(currentDir, token));
+    currentInvocation.targets.push(joinRelativePath(currentDir, token));
   }
 
-  return { targets, ignorePatterns };
+  finishInvocation();
+
+  return invocations;
 };
 
 const globToRegExp = (glob) => {
@@ -111,6 +138,19 @@ const globToRegExp = (glob) => {
   for (let index = 0; index < glob.length; index += 1) {
     const char = glob[index];
     const next = glob[index + 1];
+
+    if (char === '{') {
+      const closeIndex = glob.indexOf('}', index + 1);
+      if (closeIndex !== -1) {
+        const alternatives = glob
+          .slice(index + 1, closeIndex)
+          .split(',')
+          .map((part) => part.replace(/[|\\{}()[\]^$+?.]/gu, '\\$&'));
+        source += `(?:${alternatives.join('|')})`;
+        index = closeIndex;
+        continue;
+      }
+    }
 
     if (char === '*' && next === '*') {
       const afterGlobstar = glob[index + 2];
@@ -166,12 +206,13 @@ const lintTargetCoversTestFile = (target, testFile) => {
 };
 
 const lintScriptCoversTestFile = (lintScript, testFile) => {
-  const { targets, ignorePatterns } = lintPathConfig(lintScript);
-  if (ignorePatterns.some((pattern) => pathMatchesGlob(pattern, testFile) || lintTargetCoversTestFile(pattern, testFile))) {
-    return false;
-  }
+  return lintPathConfig(lintScript).some(({ targets, ignorePatterns }) => {
+    if (ignorePatterns.some((pattern) => pathMatchesGlob(pattern, testFile) || lintTargetCoversTestFile(pattern, testFile))) {
+      return false;
+    }
 
-  return targets.some((target) => lintTargetCoversTestFile(target, testFile));
+    return targets.some((target) => lintTargetCoversTestFile(target, testFile));
+  });
 };
 
 const collectTestFiles = (dir, relativeDir = '') => {
