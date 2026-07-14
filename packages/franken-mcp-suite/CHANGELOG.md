@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.2.8](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.7...franken-mcp-suite-v0.2.8) (2026-07-14)
+
+
+### Bug Fixes
+
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* **mcp-suite:** avoid forced exits in server startup ([#2192](https://github.com/djm204/frankenbeast/issues/2192)) ([f01f725](https://github.com/djm204/frankenbeast/commit/f01f7253181cba6d7c8df28187ef22298af4ac69))
+* **mcp-suite:** deny unsafe tool argument shapes ([#2038](https://github.com/djm204/frankenbeast/issues/2038)) ([b1e8406](https://github.com/djm204/frankenbeast/commit/b1e8406aa7ecd9a7b95e9ac10ca77996c22f193b))
+* **mcp-suite:** harden generated hook shell assignments ([baa1f49](https://github.com/djm204/frankenbeast/commit/baa1f49aac5218a72e08f83324f1cdaddaa33e9f)), closes [#1795](https://github.com/djm204/frankenbeast/issues/1795)
+* **mcp-suite:** protect unknown proxy workspace roots ([ca4f6a6](https://github.com/djm204/frankenbeast/commit/ca4f6a6817f900c0d38e5ac3ed4af1af9df405e7)), closes [#1786](https://github.com/djm204/frankenbeast/issues/1786)
+* **mcp-suite:** share observer cost validation ([#2189](https://github.com/djm204/frankenbeast/issues/2189)) ([b1cd501](https://github.com/djm204/frankenbeast/commit/b1cd5015ef764e86a2e645995998f475a6d49291))
+* **mcp-suite:** validate brain memory query limits ([#2029](https://github.com/djm204/frankenbeast/issues/2029)) ([1bcc3e3](https://github.com/djm204/frankenbeast/commit/1bcc3e34a9a91d4e3bea0863c13d6d209e5bf474)), closes [#2016](https://github.com/djm204/frankenbeast/issues/2016)
+* **mcp-suite:** validate memory query limit safety ([#2001](https://github.com/djm204/frankenbeast/issues/2001)) ([6655e98](https://github.com/djm204/frankenbeast/commit/6655e98955ff75a87cd1c8237455c9207985b623))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Tests
+
+* **mcp-suite:** document tamper-evident audit chaining ([#2075](https://github.com/djm204/frankenbeast/issues/2075)) ([1cc34a4](https://github.com/djm204/frankenbeast/commit/1cc34a4ce8afdbea462ad790251b97fbc5e5863d))
+* **mcp-suite:** exercise Codex executor CLI path ([#2062](https://github.com/djm204/frankenbeast/issues/2062)) ([0d052ee](https://github.com/djm204/frankenbeast/commit/0d052ee978864fbfd0d085e73664837beee0eb14))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.9.0 to 0.10.0
+    * @franken/brain bumped from 0.7.5 to 0.8.0
+    * @franken/critique bumped from 0.7.0 to 0.8.0
+    * @franken/governor bumped from 0.5.14 to 0.6.0
+    * @franken/observer bumped from 0.7.16 to 0.7.17
+    * @franken/orchestrator bumped from 0.42.3 to 0.43.0
+    * @franken/planner bumped from 0.4.14 to 0.4.15
+
 ## [0.2.7](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.6...franken-mcp-suite-v0.2.7) (2026-07-11)
 
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.8](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.7...live-bench-v0.2.8) (2026-07-14)
+
+
+### Bug Fixes
+
+* **live-bench:** bound long model path segments ([#2168](https://github.com/djm204/frankenbeast/issues/2168)) ([36ec639](https://github.com/djm204/frankenbeast/commit/36ec639c8b0254080bf9f67369ebeed7fda28939))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Tests
+
+* **live-bench:** harden CLI regression coverage ([21d9ccc](https://github.com/djm204/frankenbeast/commit/21d9ccc43d32945b7f953b10e940ca5777b14ca2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.16 to 0.7.17
+    * @franken/types bumped from 0.9.0 to 0.10.0
+
 ## [0.2.7](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.6...live-bench-v0.2.7) (2026-07-11)
 
 
