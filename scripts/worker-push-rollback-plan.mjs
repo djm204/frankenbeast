@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const SHA_RE = /^[0-9a-f]{40}$/iu;
 const REF_FORBIDDEN_CHAR_RE = /[\x00-\x20\x7f~^:?*[\\]/u;
 const REF_FORBIDDEN_SEQ_RE = /\.\.|@\{|\/{2,}|^[./]|[./]$|\/\.|\.lock(?:\/|$)/u;
+const PROTECTED_BRANCHES = new Set(['main', 'master', 'trunk', 'develop', 'development', 'staging', 'production']);
 
 export function parseLsRemoteHeads(output) {
   return String(output ?? '')
@@ -39,6 +40,13 @@ export function assertSafeBranch(value, label = 'branch') {
   }
 }
 
+export function assertRollbackBranch(value) {
+  assertSafeBranch(value, 'branch');
+  if (PROTECTED_BRANCHES.has(value) || value.startsWith('release/')) {
+    throw new Error(`branch is protected and cannot be rolled back by this helper: ${value}`);
+  }
+}
+
 export function assertSafeRemote(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 2048) {
     throw new Error('remote must be a non-empty git remote name or URL');
@@ -61,7 +69,7 @@ export function buildRollbackPlan(options) {
     lastGoodOid,
   } = options;
 
-  assertSafeBranch(branch, 'branch');
+  assertRollbackBranch(branch);
   assertSafeRemote(remote);
   if (!lastGood || String(lastGood).startsWith('-')) {
     throw new Error('lastGood must be supplied as a ref or commit to roll back to');
@@ -74,21 +82,29 @@ export function buildRollbackPlan(options) {
   }
 
   const branchRef = `refs/heads/${branch}`;
+  const remoteTrackingRef = `refs/remotes/${remote}/${branch}`;
   const remoteHead = remoteHeadOid?.toLowerCase() ?? '<captured-remote-head-oid>';
   const goodOid = lastGoodOid?.toLowerCase() ?? '<resolved-last-good-oid>';
   const prSelector = pr != null ? String(pr) : '<pr-number>';
   const repoArgs = repo ? ['--repo', repo] : [];
   const approvalPrefix = splitCommandPrefix(approvalCop);
+  const remoteHeadPath = `${evidenceDir}/remote-head.txt`;
+  const lastGoodPath = `${evidenceDir}/last-good-oid.txt`;
+  const commitsPath = `${evidenceDir}/commits-to-remove.txt`;
+  const prStatePath = `${evidenceDir}/pr-state.json`;
+  const rollbackCommentPath = `${evidenceDir}/rollback-comment.md`;
 
   return {
     summary: `Dry-run rollback plan for ${branch}`,
     evidenceDir,
     readOnlyCapture: [
       ['mkdir', '-p', evidenceDir],
-      ['git', 'ls-remote', '--heads', remote, branch],
-      ['git', 'rev-parse', '--verify', `${lastGood}^{commit}`],
-      ['git', 'log', '--oneline', '--decorate', '--graph', `${lastGood}..${remote}/${branch}`],
-      ['gh', 'pr', 'view', prSelector, ...repoArgs, '--json', 'number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url'],
+      ['bash', '-lc', 'git ls-remote --heads "$1" "$2" | tee "$3"', '--', remote, branchRef, remoteHeadPath],
+      ['bash', '-lc', 'git rev-parse --verify "$1^{commit}" | tee "$2"', '--', lastGood, lastGoodPath],
+      ['git', 'fetch', '--no-tags', remote, `${branchRef}:${remoteTrackingRef}`],
+      ['bash', '-lc', 'git log --oneline --decorate --graph "$1..$2" > "$3"', '--', lastGood, remoteTrackingRef, commitsPath],
+      ['bash', '-lc', 'gh pr view "$1" "${@:3}" --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url > "$2"', '--', prSelector, prStatePath, ...repoArgs],
+      ['node', '-e', 'require("node:fs").writeFileSync(process.argv[1], `## Worker branch rollback postmortem\n\n- Branch: ${process.argv[2]}\n- Remote head before rollback: ${process.argv[3]}\n- Selected last-good commit: ${process.argv[4]}\n- Evidence directory: ${process.argv[5]}\n- Approval-cop outcome/token: <fill before posting>\n- Verification: rerun ls-remote, pr view, checks, and Codex on the new head before merging.\n`)', rollbackCommentPath, branchRef, remoteHead, goodOid, evidenceDir],
     ],
     requiredDecisions: [
       `Confirm ${remoteHead} is the current remote head for ${branchRef}.`,
@@ -102,9 +118,9 @@ export function buildRollbackPlan(options) {
       ],
     ],
     postRollbackVerification: [
-      ['git', 'ls-remote', '--heads', remote, branch],
+      ['git', 'ls-remote', '--heads', remote, branchRef],
       ['gh', 'pr', 'view', prSelector, ...repoArgs, '--json', 'headRefOid,mergeStateStatus,statusCheckRollup,url'],
-      ['gh', 'pr', 'comment', prSelector, ...repoArgs, '--body-file', `${evidenceDir}/rollback-comment.md`],
+      ['gh', 'pr', 'comment', prSelector, ...repoArgs, '--body-file', rollbackCommentPath],
     ],
     notes: [
       'This helper is dry-run only; it never executes push, force-push, or GitHub mutation commands.',

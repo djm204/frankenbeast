@@ -39,11 +39,12 @@ Create an evidence directory that can be attached to a handoff or postmortem:
 
 ```bash
 mkdir -p rollback-evidence/<branch-slug>
-git ls-remote --heads origin <branch> | tee rollback-evidence/<branch-slug>/remote-head.txt
+git ls-remote --heads origin refs/heads/<branch> | tee rollback-evidence/<branch-slug>/remote-head.txt
 gh pr view <pr-number> --repo <owner>/<repo> \
   --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url \
   > rollback-evidence/<branch-slug>/pr-state.json
-git log --oneline --decorate --graph <last-good>..origin/<branch> \
+git fetch --no-tags origin refs/heads/<branch>:refs/remotes/origin/<branch>
+git log --oneline --decorate --graph <last-good>..refs/remotes/origin/<branch> \
   > rollback-evidence/<branch-slug>/commits-to-remove.txt
 ```
 
@@ -62,8 +63,10 @@ Verify it resolves to a commit:
 
 ```bash
 git rev-parse --verify '<last-good>^{commit}'
-git merge-base --is-ancestor '<last-good>' HEAD || true
+git merge-base --is-ancestor '<last-good>' HEAD
 ```
+
+If the ancestry check fails, stop: the selected last-good ref is not an ancestor of the current head and needs human review before any rollback command is submitted.
 
 Keep the resolved SHA in the evidence bundle. If the last-good commit is ambiguous, stop and ask for a human decision on the Kanban card or PR.
 
@@ -111,7 +114,7 @@ Only submit that command after the evidence bundle and last-good selection are r
 After approval-cop executes the rollback, verify the remote and PR state:
 
 ```bash
-git ls-remote --heads origin <branch>
+git ls-remote --heads origin refs/heads/<branch>
 gh pr view <pr-number> --repo <owner>/<repo> \
   --json headRefOid,mergeStateStatus,statusCheckRollup,url
 gh pr checks <pr-number> --repo <owner>/<repo>
