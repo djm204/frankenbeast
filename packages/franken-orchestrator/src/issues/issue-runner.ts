@@ -302,18 +302,20 @@ export class IssueRunner {
     const budgetTokens = budget * TOKENS_PER_DOLLAR;
     let cumulativeTokens = 0;
     let budgetExceeded = false;
+    let stopRemainingReason: string | undefined;
     const outcomes: IssueOutcome[] = [];
 
     for (let i = 0; i < sorted.length; i++) {
       const issue = sorted[i]!;
       const position = `${i + 1}/${sorted.length}`;
 
-      if (budgetExceeded) {
+      if (budgetExceeded || stopRemainingReason) {
         outcomes.push({
           issueNumber: issue.number,
           issueTitle: issue.title,
           status: 'skipped',
           tokensUsed: 0,
+          ...(stopRemainingReason ? { error: stopRemainingReason } : {}),
         });
         continue;
       }
@@ -345,7 +347,7 @@ export class IssueRunner {
         outcomes.push(outcome);
 
         if (outcome.status === 'skipped' && outcome.error?.includes('queue depth')) {
-          budgetExceeded = true;
+          stopRemainingReason = outcome.error;
         }
 
         if (cumulativeTokens >= budgetTokens) {
@@ -386,6 +388,38 @@ export class IssueRunner {
     const logFile = runtimeArtifacts?.logFile;
     const planDir = runtimeArtifacts?.planDir ?? resolve(getProjectPaths('.').plansDir, planName);
 
+    const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
+      const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
+        issue,
+        ...backpressureContext,
+      });
+
+      if (backpressureDecision.allowed) return undefined;
+
+      const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
+      logger?.warn(
+        `[issues] Backpressure paused issue #${issue.number}: ${backpressureDecision.reasons.join('; ')}`,
+        {
+          issueNumber: issue.number,
+          reasons: backpressureDecision.reasons,
+          signals: backpressureDecision.signals,
+        },
+        'issues',
+      );
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: reason,
+      };
+    };
+
+    if (!issueCheckpoint) {
+      const paused = await pauseForBackpressure();
+      if (paused) return paused;
+    }
+
     let graph: PlanGraph;
     let executionGraphBuilder: BeastLoopDeps['graphBuilder'];
     let refreshPlanTasks: BeastLoopDeps['refreshPlanTasks'];
@@ -419,30 +453,8 @@ export class IssueRunner {
       };
     }
 
-    const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
-      issue,
-      ...backpressureContext,
-    });
-
-    if (!backpressureDecision.allowed) {
-      const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
-      logger?.warn(
-        `[issues] Backpressure paused issue #${issue.number}: ${backpressureDecision.reasons.join('; ')}`,
-        {
-          issueNumber: issue.number,
-          reasons: backpressureDecision.reasons,
-          signals: backpressureDecision.signals,
-        },
-        'issues',
-      );
-      return {
-        issueNumber: issue.number,
-        issueTitle: issue.title,
-        status: 'skipped',
-        tokensUsed: 0,
-        error: reason,
-      };
-    }
+    const paused = await pauseForBackpressure();
+    if (paused) return paused;
 
     git.isolate(`issue-${issue.number}`);
 

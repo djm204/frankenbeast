@@ -368,10 +368,12 @@ describe('IssueRunner', () => {
       const logger = mockLogger();
       const issues = [makeIssue({ number: 11 })];
       const triages = [makeTriage(11)];
+      const graphBuilder = mockGraphBuilder();
       const config = makeConfig({
         issues,
         triageResults: triages,
         logger,
+        graphBuilder,
         backpressure: {
           thresholds: { maxActiveProcesses: 1 },
           signals: () => ({
@@ -386,6 +388,7 @@ describe('IssueRunner', () => {
       const outcomes = await runner.run(config);
 
       expect(mockRun).not.toHaveBeenCalled();
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(outcomes).toEqual([
         expect.objectContaining({
           issueNumber: 11,
@@ -499,6 +502,7 @@ describe('IssueRunner', () => {
           issueNumber: 17,
           status: 'skipped',
           tokensUsed: 0,
+          error: expect.stringContaining('queue depth 2 exceeds limit 1'),
         }),
       ]);
       expect(mockRun).not.toHaveBeenCalled();
