@@ -415,31 +415,39 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
     const normalizedCreatedAt = new Date(eventTimeMs).toISOString();
 
-    if (cooldownMs > 0) {
-      const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
-      if (existingEvent) {
-        return {
-          recorded: false,
-          reason: 'cooldown',
-          key,
-          cooldownMs,
-          existingEvent,
-          cooldownUntil: new Date(Date.parse(existingEvent.createdAt) + cooldownMs).toISOString(),
-        };
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (cooldownMs > 0) {
+        const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
+        if (existingEvent) {
+          this.db.exec('COMMIT');
+          return {
+            recorded: false,
+            reason: 'cooldown',
+            key,
+            cooldownMs,
+            existingEvent,
+            cooldownUntil: new Date(Date.parse(existingEvent.createdAt) + cooldownMs).toISOString(),
+          };
+        }
       }
+
+      this.insertEvent({
+        ...event,
+        createdAt: normalizedCreatedAt,
+        details: {
+          ...(event.details ?? {}),
+          learningKey: key,
+          learningCooldownMs: cooldownMs,
+        },
+      });
+
+      this.db.exec('COMMIT');
+      return { recorded: true, key, cooldownMs };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
     }
-
-    this.insertEvent({
-      ...event,
-      createdAt: normalizedCreatedAt,
-      details: {
-        ...(event.details ?? {}),
-        learningKey: key,
-        learningCooldownMs: cooldownMs,
-      },
-    });
-
-    return { recorded: true, key, cooldownMs };
   }
 
   private insertEvent(event: EpisodicEvent): void {
@@ -480,7 +488,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       if (
         Number.isFinite(existingTimeMs)
         && existingTimeMs <= eventTimeMs
-        && eventTimeMs - existingTimeMs <= cooldownMs
+        && eventTimeMs - existingTimeMs < cooldownMs
       ) {
         return existingEvent;
       }
@@ -580,6 +588,38 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
       n,
     );
+  }
+
+  snapshotForHandoff(n = 100, nowMs = Date.now()): EpisodicEvent[] {
+    const recentEvents = this.recent(n);
+    const eventsById = new Map<number | string, EpisodicEvent>();
+    for (const event of recentEvents) {
+      eventsById.set(event.id ?? `${event.createdAt}:${event.summary}`, event);
+    }
+
+    const activeLearningRows = this.db
+      .prepare(
+        `SELECT * FROM episodic_events
+         WHERE details IS NOT NULL
+         ORDER BY id DESC`,
+      )
+      .all() as EpisodicRow[];
+    const activeSinceMs = nowMs - DEFAULT_LEARNING_COOLDOWN_MS;
+
+    for (const row of activeLearningRows) {
+      const event = rowToEvent(row);
+      const eventTimeMs = event ? Date.parse(event.createdAt) : NaN;
+      if (
+        event
+        && readLearningKey(event) !== undefined
+        && Number.isFinite(eventTimeMs)
+        && eventTimeMs >= activeSinceMs
+      ) {
+        eventsById.set(event.id ?? `${event.createdAt}:${event.summary}`, event);
+      }
+    }
+
+    return [...eventsById.values()].sort(compareEventsNewestFirst);
   }
 
   count(): number {
@@ -708,7 +748,7 @@ export class SqliteBrain implements IBrain {
       version: 1,
       timestamp: isoNow(),
       working: this.working.snapshot(),
-      episodic: this.episodic.recent(100),
+      episodic: this.episodic.snapshotForHandoff(100),
       checkpoint: this.recovery.lastCheckpoint(),
       metadata: {
         lastProvider: '',
@@ -798,6 +838,11 @@ function normalizeLearningKey(value: string): string {
 function readLearningKey(event: EpisodicEvent): string | undefined {
   const key = event.details?.learningKey;
   return typeof key === 'string' ? key : undefined;
+}
+
+function compareEventsNewestFirst(a: EpisodicEvent, b: EpisodicEvent): number {
+  return Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    || (b.id ?? 0) - (a.id ?? 0);
 }
 
 function chunkArray<T>(values: T[], size: number): T[][] {

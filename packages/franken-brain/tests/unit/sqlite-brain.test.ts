@@ -473,7 +473,7 @@ describe('SqliteBrain', () => {
       brain.episodic.recordLearning(base, { key: 'handoff-receipts', cooldownMs: 60_000 });
       const afterCooldown = brain.episodic.recordLearning({
         ...base,
-        createdAt: '2026-07-11T12:01:01.000Z',
+        createdAt: '2026-07-11T12:01:00.000Z',
       }, { key: 'handoff-receipts', cooldownMs: 60_000 });
 
       expect(afterCooldown.recorded).toBe(true);
@@ -522,6 +522,24 @@ describe('SqliteBrain', () => {
         '2026-07-11T12:00:00.000Z',
       );
       expect(brain.episodic.count()).toBe(1);
+    });
+
+    it('keeps active learning cooldown rows in handoff snapshots beyond the recent limit', () => {
+      const now = Date.now();
+      brain.episodic.recordLearning(makeEvent({
+        summary: 'Keep cooldown metadata across handoffs',
+        createdAt: new Date(now - 1_000).toISOString(),
+      }), { key: 'handoff-cooldown', cooldownMs: 86_400_000 });
+
+      for (let i = 0; i < 101; i++) {
+        brain.episodic.record(makeEvent({
+          summary: `newer event ${i}`,
+          createdAt: new Date(now + i).toISOString(),
+        }));
+      }
+
+      const snapshot = brain.serialize();
+      expect(snapshot.episodic.some(event => event.details?.learningKey === 'handoff-cooldown')).toBe(true);
     });
 
     it('recall() finds matching events by keyword', () => {
