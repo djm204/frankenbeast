@@ -205,6 +205,8 @@ describe('GhostDependencyEvaluator', () => {
       const readonlyAssertion = value as readonly import('ghost-package').Readonly[];
       const genericCall = createPlugin<import('ghost-package').Options>();
       const indexedGenericCall = createPlugin<import('ghost-package')['Options']>();
+      const nonFinalGenericCall = createPlugin<import('ghost-package').Options, Other>();
+      const unionGenericCall = createPlugin<import('ghost-package').Options | Other>();
       const unionAssertion = value as string | import('ghost-package').Shape;
       const functionType = (() => {}) as () => import('ghost-package').Factory;
       const typedFunctionValue: () => import('ghost-package').Factory = () => ({}) as never;
@@ -255,6 +257,8 @@ describe('GhostDependencyEvaluator', () => {
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
       loadPlugin: import('label-ghost');
       const parenthesized = await import(('parenthesized-ghost'));
+      const parenthesizedAsserted = await import(('parenthesized-asserted-ghost' as const));
+      const nestedParenthesizedNonNull = await import((('nested-parenthesized-non-null-ghost')!));
       const angleAsserted = await import(<const>'angle-asserted-ghost');
       const genericAngleAsserted = await import(<Readonly<string>>'generic-angle-ghost');
       const literalAsserted = await import('literal-asserted-ghost' as const);
@@ -263,9 +267,11 @@ describe('GhostDependencyEvaluator', () => {
       const runtimeTernary = kind === 'extends' ? fallback : import('ternary-ghost');
       const lessThanRuntime = count < import('less-than-ghost');
       const compactLessThanRuntime = count<import('compact-less-than-ghost');
+      load(count < limit, import('less-than-argument-ghost'));
       const bitwiseRuntime = flags | import('bitwise-or-ghost');
       const bitwiseAfterAnnotation: number = flags | import('bitwise-after-annotation-ghost');
       const chainedAfterTypeValue = import('chained-type-value-ghost').then(load);
+      const typedInitializerChain: Promise<unknown> = import('typed-initializer-chain-ghost').then(load);
       type DoneAlias = string
       load(import('after-type-alias-call-ghost'));
       const typeNamedObject = { type: import('type-named-object-ghost') };
@@ -297,7 +303,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(48);
+    expect(result.findings).toHaveLength(52);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -317,6 +323,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('switch-case-ghost'),
         expect.stringContaining('label-ghost'),
         expect.stringContaining('parenthesized-ghost'),
+        expect.stringContaining('parenthesized-asserted-ghost'),
+        expect.stringContaining('nested-parenthesized-non-null-ghost'),
         expect.stringContaining('angle-asserted-ghost'),
         expect.stringContaining('generic-angle-ghost'),
         expect.stringContaining('literal-asserted-ghost'),
@@ -325,9 +333,11 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('ternary-ghost'),
         expect.stringContaining('less-than-ghost'),
         expect.stringContaining('compact-less-than-ghost'),
+        expect.stringContaining('less-than-argument-ghost'),
         expect.stringContaining('bitwise-or-ghost'),
         expect.stringContaining('bitwise-after-annotation-ghost'),
         expect.stringContaining('chained-type-value-ghost'),
+        expect.stringContaining('typed-initializer-chain-ghost'),
         expect.stringContaining('after-type-alias-call-ghost'),
         expect.stringContaining('type-named-object-ghost'),
         expect.stringContaining('type-named-field-ghost'),
@@ -371,12 +381,14 @@ describe('GhostDependencyEvaluator', () => {
       const numeric = { 1: import('numeric-key-ghost') };
       const computed = { [pluginName]: import('computed-key-ghost') };
       const commented = { /* generated */ plugin: import('commented-key-ghost') };
+      const nestedOption = { with: { loader: import('nested-option-ghost') } };
+      await import('zod', { with: { type: await import('nested-import-option-ghost') } });
       const invalidNode = await import('node:not-a-real-builtin');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(14);
+    expect(result.findings).toHaveLength(16);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('ghost-package'),
@@ -392,6 +404,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('numeric-key-ghost'),
         expect.stringContaining('computed-key-ghost'),
         expect.stringContaining('commented-key-ghost'),
+        expect.stringContaining('nested-option-ghost'),
+        expect.stringContaining('nested-import-option-ghost'),
         expect.stringContaining('node:not-a-real-builtin'),
       ]),
     );

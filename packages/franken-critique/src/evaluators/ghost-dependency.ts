@@ -321,7 +321,15 @@ function readDynamicImportArgumentSpecifier(
   const nested = readDynamicImportArgumentSpecifier(content, nestedStart);
   if (!nested) return null;
 
-  const closingIndex = skipImportTrivia(content, nested.endIndex + 1);
+  const nextTokenIndex = skipTypeScriptNonNullAssertion(
+    content,
+    skipImportTrivia(content, nested.endIndex + 1),
+  );
+  const assertedTokenIndex = skipTypeScriptImportArgumentAssertion(
+    content,
+    nextTokenIndex,
+  );
+  const closingIndex = skipTypeScriptNonNullAssertion(content, assertedTokenIndex);
   if (content[closingIndex] !== ')') return null;
 
   return { value: nested.value, endIndex: closingIndex };
@@ -402,14 +410,23 @@ function findTypeScriptAngleAssertionEnd(content: string, index: number): number
 }
 
 function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boolean {
-  const openBraceIndex = findContainingOpenBrace(content, semicolonIndex);
-  if (openBraceIndex === -1) return false;
+  let searchIndex = semicolonIndex;
+  while (searchIndex > 0) {
+    const openBraceIndex = findContainingOpenBrace(content, searchIndex);
+    if (openBraceIndex === -1) return false;
 
-  const beforeBrace = content.slice(0, openBraceIndex);
-  return (
-    /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace) ||
-    /(?:\bas\s*|\bsatisfies\s*|:)\s*$/.test(beforeBrace.trimEnd())
-  );
+    const beforeBrace = content.slice(0, openBraceIndex);
+    if (
+      /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace) ||
+      /(?:\bas\s*|\bsatisfies\s*|:)\s*$/.test(beforeBrace.trimEnd())
+    ) {
+      return true;
+    }
+
+    searchIndex = openBraceIndex;
+  }
+
+  return false;
 }
 
 function findContainingOpenBrace(content: string, index: number): number {
@@ -445,7 +462,7 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
 
   if (
     /(?:,|\bextends\b|=)$/.test(trimmed) &&
-    trimmed.lastIndexOf('<') > trimmed.lastIndexOf('>')
+    hasUnclosedGenericTypeArgument(trimmed)
   ) {
     return true;
   }
@@ -462,9 +479,20 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
 
   return (
     trimmed.at(-2) !== operator &&
-    (trimmed.lastIndexOf('<') > trimmed.lastIndexOf('>') ||
+    (hasUnclosedGenericTypeArgument(trimmed) ||
       /(?:\bas\b|\bsatisfies\b|:)\s*[\s\S]*[|&]$/.test(trimmed))
   );
+}
+
+function hasUnclosedGenericTypeArgument(trimmed: string): boolean {
+  const lastOpen = trimmed.lastIndexOf('<');
+  if (lastOpen === -1 || lastOpen < trimmed.lastIndexOf('>')) return false;
+
+  // Runtime less-than expressions such as `load(count < limit, import('x'))`
+  // also leave an earlier `<` in the prefix.  Treat it as a generic/type
+  // context only when the `<` is attached to the preceding type/callee token.
+  const beforeOpen = trimmed[lastOpen - 1];
+  return beforeOpen !== undefined && !/\s/.test(beforeOpen);
 }
 
 function isInsideGenericTypeArgument(
@@ -496,10 +524,18 @@ function isInsideGenericTypeArgument(
     i = skipImportTrivia(content, indexedAccessEnd + 1);
   }
 
-  if (content[i] !== '>') return false;
+  if (content[i] !== '>' && content[i] !== ',' && content[i] !== '|' && content[i] !== '&') {
+    return false;
+  }
 
-  const afterClose = skipImportTrivia(content, i + 1);
-  return !isIdentifierCharacter(content[afterClose] ?? '');
+  if (content[i] === ',') return true;
+
+  if (content[i] === '>') {
+    const afterDelimiter = skipImportTrivia(content, i + 1);
+    return !isIdentifierCharacter(content[afterDelimiter] ?? '');
+  }
+
+  return true;
 }
 
 function findBalancedBracketEnd(content: string, openIndex: number): number {
@@ -570,6 +606,8 @@ function isTypeOnlyImportReferenceUse(
   if (colonIndex === -1) return false;
   const openBraceIndex = trimmed.lastIndexOf('{');
   const semicolonIndex = trimmed.lastIndexOf(';');
+  const annotationSuffix = trimmed.slice(colonIndex + 1);
+  if (/[=;]/.test(annotationSuffix)) return false;
   return colonIndex > semicolonIndex && !/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed.slice(openBraceIndex));
 }
 
@@ -670,12 +708,14 @@ function isInsideTypeAnnotation(
   if (/\bcase\s+[\s\S]*$/.test(beforeAnnotation)) return false;
   if (
     /(?:\bas|\bsatisfies)\s*\{[^}]*$/.test(beforeAnnotation) &&
+    !isLikelyObjectLiteralValue(content, importIndex) &&
     !hasRuntimeAfterAnnotation(prefix, annotationIndex)
   ) {
     return true;
   }
   if (
     /:\s*\{[^}]*$/.test(beforeAnnotation) &&
+    !isLikelyObjectLiteralValue(content, importIndex) &&
     !hasRuntimeAfterAnnotation(prefix, annotationIndex)
   ) {
     return true;
@@ -693,7 +733,8 @@ function isInsideTypeAnnotation(
     if (
       outerAnnotationSuffix.includes('{') &&
       !outerAnnotationSuffix.includes('}') &&
-      !/[=;]/.test(outerAnnotationSuffix)
+      !/[=;]/.test(outerAnnotationSuffix) &&
+      !isLikelyObjectLiteralValue(content, importIndex)
     ) {
       return true;
     }
@@ -701,13 +742,13 @@ function isInsideTypeAnnotation(
 
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (hasRuntimeAfterClosedTypeContext(annotationSuffix)) return false;
-  if (/[=;]/.test(annotationSuffix)) return false;
   if (/=>/.test(annotationSuffix)) {
     if (/\)\s*:\s*[^=]*=>\s*$/.test(prefix)) return false;
     return /^\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*(?:\[\])?)\s*=>\s*$/.test(
       annotationSuffix,
     );
   }
+  if (/[=;]/.test(annotationSuffix)) return false;
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
   if (/\n\s*(?:void\s*)?$|\n\s*(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(annotationSuffix)) {
     return false;
