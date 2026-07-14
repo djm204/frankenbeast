@@ -218,7 +218,7 @@ export function createEgressGuardedFetch(options: {
 
     const guardedInit = { ...init, redirect: 'manual' as const };
     const response = await fetchImpl(input, guardedInit);
-    const location = response.headers.get('location');
+    const location = response.headers?.get?.('location') ?? null;
     if (!location || response.status < 300 || response.status >= 400) {
       return response;
     }

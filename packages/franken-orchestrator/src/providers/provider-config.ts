@@ -177,6 +177,7 @@ export function createLlmProvider(config: ProviderConfig, runtimeOptions: Provid
       return new GeminiApiAdapter({
         ...(config.apiKey ? { apiKey: config.apiKey } : {}),
         ...(config.model ? { model: config.model } : {}),
+        ...(runtimeOptions.egressPolicy ? { egressPolicy: runtimeOptions.egressPolicy } : {}),
       });
   }
 }

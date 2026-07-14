@@ -12,11 +12,13 @@ import type {
 } from '@franken/types';
 import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
+import { createEgressGuardedFetch, type EgressPolicyConfig } from '../network/egress-policy.js';
 
 export interface GeminiApiOptions {
   apiKey?: string;
   model?: string;
   maxTokens?: number;
+  egressPolicy?: EgressPolicyConfig | undefined;
 }
 
 function normalizeApiKey(value: string | undefined): string | undefined {
@@ -47,10 +49,12 @@ export class GeminiApiAdapter implements ILlmProvider {
   };
 
   private client: GoogleGenAI;
+  private readonly guardedFetch: typeof fetch;
   private readonly apiKey: string;
 
   constructor(private options: GeminiApiOptions = {}) {
     this.apiKey = resolveGeminiApiKey(options);
+    this.guardedFetch = createEgressGuardedFetch({ lane: 'implementation', policy: options.egressPolicy });
     this.client = new GoogleGenAI({ apiKey: this.apiKey });
   }
 
@@ -75,11 +79,11 @@ export class GeminiApiAdapter implements ILlmProvider {
       if (request.temperature !== undefined) {
         config['temperature'] = request.temperature;
       }
-      const response = await this.client.models.generateContentStream({
+      const response = await this.withGuardedFetch(() => this.client.models.generateContentStream({
         model,
         contents: this.translateMessages(request.messages),
         config,
-      });
+      }));
 
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
@@ -123,6 +127,16 @@ export class GeminiApiAdapter implements ILlmProvider {
         message.includes('429') ||
         message.includes('RESOURCE_EXHAUSTED');
       yield { type: 'error', error: message, retryable };
+    }
+  }
+
+  private async withGuardedFetch<T>(operation: () => Promise<T>): Promise<T> {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = this.guardedFetch;
+    try {
+      return await operation();
+    } finally {
+      globalThis.fetch = previousFetch;
     }
   }
 

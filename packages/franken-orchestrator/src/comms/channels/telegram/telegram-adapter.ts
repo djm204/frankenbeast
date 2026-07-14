@@ -6,8 +6,11 @@ import type {
 } from '../../core/types.js';
 import { redactTelegramBotTokenUrls } from '../../../security/telegram-redaction.js';
 import { formatHttpErrorMessage } from '../http-error-context.js';
+import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
 
 export interface TelegramAdapterOptions {
+  egressPolicy?: EgressPolicyConfig | undefined;
+  fetchImpl?: typeof fetch | undefined;
   token: string;
 }
 
@@ -46,8 +49,11 @@ export class TelegramAdapter implements ChannelAdapter {
 
   private readonly token: string;
 
+  private readonly fetchImpl: typeof fetch;
+
   constructor(options: TelegramAdapterOptions) {
     this.token = options.token;
+    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
@@ -55,7 +61,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const body = this.formatPayload(sessionId, chatId, message);
     const targetUrl = `https://api.telegram.org/bot${this.token}/sendMessage`;
 
-    const response = await fetch(targetUrl, {
+    const response = await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

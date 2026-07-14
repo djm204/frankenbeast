@@ -147,8 +147,13 @@ describe('createLlmProvider', () => {
       { name: 'openai', type: 'openai-api' },
       { egressPolicy },
     );
+    const gemini = createLlmProvider(
+      { name: 'gemini-api', type: 'gemini-api' },
+      { egressPolicy },
+    );
 
     expect(optionsOf<{ egressPolicy?: unknown }>(anthropic).egressPolicy).toBe(egressPolicy);
     expect(optionsOf<{ egressPolicy?: unknown }>(openai).egressPolicy).toBe(egressPolicy);
+    expect(optionsOf<{ egressPolicy?: unknown }>(gemini).egressPolicy).toBe(egressPolicy);
   });
 });

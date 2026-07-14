@@ -5,8 +5,11 @@ import type {
   ChannelType
 } from '../../core/types.js';
 import { formatHttpErrorMessage } from '../http-error-context.js';
+import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
 
 export interface WhatsAppAdapterOptions {
+  egressPolicy?: EgressPolicyConfig | undefined;
+  fetchImpl?: typeof fetch | undefined;
   accessToken: string;
   phoneNumberId: string;
 }
@@ -25,9 +28,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
   private readonly accessToken: string;
   private readonly phoneNumberId: string;
 
+  private readonly fetchImpl: typeof fetch;
+
   constructor(options: WhatsAppAdapterOptions) {
     this.accessToken = options.accessToken;
     this.phoneNumberId = options.phoneNumberId;
+    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
@@ -35,7 +41,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     const body = this.formatPayload(to, message);
 
     const targetUrl = `https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`;
-    const response = await fetch(targetUrl, {
+    const response = await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -5,8 +5,11 @@ import type {
   ChannelType
 } from '../../core/types.js';
 import { formatHttpErrorMessage } from '../http-error-context.js';
+import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
 
 export interface SlackAdapterOptions {
+  egressPolicy?: EgressPolicyConfig | undefined;
+  fetchImpl?: typeof fetch | undefined;
   token: string;
 }
 
@@ -23,8 +26,11 @@ export class SlackAdapter implements ChannelAdapter {
 
   private readonly token: string;
 
+  private readonly fetchImpl: typeof fetch;
+
   constructor(options: SlackAdapterOptions) {
     this.token = options.token;
+    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
@@ -36,7 +42,7 @@ export class SlackAdapter implements ChannelAdapter {
     const blocks = this.formatBlocks(message);
 
     const targetUrl = 'https://slack.com/api/chat.postMessage';
-    const response = await fetch(targetUrl, {
+    const response = await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
