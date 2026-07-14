@@ -57,6 +57,18 @@ describe('Firewall Server', () => {
     );
   });
 
+  it('expands project placeholders followed by Windows separators', () => {
+    expect(resolveFirewallConfigPath('${CLAUDE_PROJECT_DIR}\\.fbeast\\config.json', '/project-a')).toBe(
+      '/project-a\\.fbeast\\config.json',
+    );
+  });
+
+  it('preserves dollar sequences while expanding project placeholders', () => {
+    expect(resolveFirewallConfigPath('${CLAUDE_PROJECT_DIR}/.fbeast/config.json', '/project-$&')).toBe(
+      join('/project-$&', '.fbeast', 'config.json'),
+    );
+  });
+
   it('preserves explicit relative config paths containing nested .fbeast dirs', () => {
     expect(resolveFirewallConfigPath('nested/.fbeast/config.json', '/project-a')).toBe(
       join('/project-a', 'nested', '.fbeast', 'config.json'),

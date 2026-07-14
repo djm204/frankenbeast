@@ -25,12 +25,12 @@ export function resolveFirewallConfigPath(configPath: string | undefined, root: 
 
 function expandProjectRootPlaceholder(configPath: string, root: string): string {
   return configPath
-    .replace(/^\$\{CLAUDE_PROJECT_DIR}(?=\/|$)/, root)
-    .replace(/^\$CLAUDE_PROJECT_DIR(?=\/|$)/, root)
-    .replace(/^\$\{GEMINI_PROJECT_ROOT}(?=\/|$)/, root)
-    .replace(/^\$GEMINI_PROJECT_ROOT(?=\/|$)/, root)
-    .replace(/^\$\{FBEAST_ROOT}(?=\/|$)/, root)
-    .replace(/^\$FBEAST_ROOT(?=\/|$)/, root);
+    .replace(/^\$\{CLAUDE_PROJECT_DIR}(?=[/\\]|$)/, () => root)
+    .replace(/^\$CLAUDE_PROJECT_DIR(?=[/\\]|$)/, () => root)
+    .replace(/^\$\{GEMINI_PROJECT_ROOT}(?=[/\\]|$)/, () => root)
+    .replace(/^\$GEMINI_PROJECT_ROOT(?=[/\\]|$)/, () => root)
+    .replace(/^\$\{FBEAST_ROOT}(?=[/\\]|$)/, () => root)
+    .replace(/^\$FBEAST_ROOT(?=[/\\]|$)/, () => root);
 }
 
 if (isMain(import.meta.url)) {
