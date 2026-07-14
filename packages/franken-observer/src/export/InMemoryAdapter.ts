@@ -5,13 +5,37 @@ import { warnIfTraceHasActiveSpans } from './ExportAdapter.js'
 /**
  * Zero-dependency in-process adapter. Useful in tests and as a
  * fallback when no persistent backend is configured.
+ *
+ * Retains at most `maxTraces` completed traces, evicting the oldest retained
+ * trace id when the bound is exceeded. Pass `maxTraces: Infinity` for legacy
+ * unbounded test fixtures.
  */
+export interface InMemoryAdapterOptions {
+  /** Maximum retained traces. Defaults to 1000; use Infinity for no bound. */
+  maxTraces?: number
+}
+
 export class InMemoryAdapter implements ExportAdapter {
+  private readonly maxTraces: number
   private readonly store = new Map<string, Trace>()
+
+  constructor(options: InMemoryAdapterOptions = {}) {
+    const maxTraces = options.maxTraces ?? 1000
+    if (!Number.isInteger(maxTraces) && maxTraces !== Infinity) {
+      throw new RangeError('InMemoryAdapter maxTraces must be a non-negative integer or Infinity')
+    }
+    if (maxTraces < 0) {
+      throw new RangeError('InMemoryAdapter maxTraces must be a non-negative integer or Infinity')
+    }
+    this.maxTraces = maxTraces
+  }
 
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'InMemoryAdapter')
-    this.store.set(trace.id, cloneTrace(trace))
+    const clonedTrace = cloneTrace(trace)
+    this.store.delete(trace.id)
+    this.store.set(trace.id, clonedTrace)
+    this.evictOverflow()
   }
 
   async queryByTraceId(traceId: string): Promise<Trace | null> {
@@ -21,6 +45,20 @@ export class InMemoryAdapter implements ExportAdapter {
 
   async listTraceIds(): Promise<string[]> {
     return Array.from(this.store.keys())
+  }
+
+  clear(): void {
+    this.store.clear()
+  }
+
+  private evictOverflow(): void {
+    if (this.maxTraces === Infinity) return
+
+    while (this.store.size > this.maxTraces) {
+      const oldestTraceId = this.store.keys().next().value
+      if (oldestTraceId === undefined) return
+      this.store.delete(oldestTraceId)
+    }
   }
 }
 
