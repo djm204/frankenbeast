@@ -47,6 +47,7 @@ const lintPathConfig = (lintScript) => {
   const invocations = [];
   let currentDir = '';
   let currentInvocation = null;
+  let skippingOrFallback = false;
   let skipNext = false;
   let optionAwaitingValue = null;
   let awaitingCdTarget = false;
@@ -85,6 +86,11 @@ const lintPathConfig = (lintScript) => {
 
     if (shellCommandSeparators.has(token)) {
       finishInvocation();
+      skippingOrFallback = token === '||';
+      continue;
+    }
+
+    if (skippingOrFallback) {
       continue;
     }
 
@@ -99,6 +105,7 @@ const lintPathConfig = (lintScript) => {
           cwd: currentDir,
           targets: [],
           ignorePatterns: [],
+          ignoreDisabled: false,
           passOnNoPatterns: false,
         };
       }
@@ -118,6 +125,11 @@ const lintPathConfig = (lintScript) => {
 
       if (optionName === '--pass-on-no-patterns') {
         currentInvocation.passOnNoPatterns = true;
+        continue;
+      }
+
+      if (optionName === '--no-ignore') {
+        currentInvocation.ignoreDisabled = true;
         continue;
       }
 
@@ -147,6 +159,15 @@ const globToRegExp = (glob) => {
           .split(',')
           .map((part) => part.replace(/[|\\{}()[\]^$+?.]/gu, '\\$&'));
         source += `(?:${alternatives.join('|')})`;
+        index = closeIndex;
+        continue;
+      }
+    }
+
+    if (char === '[') {
+      const closeIndex = glob.indexOf(']', index + 1);
+      if (closeIndex !== -1) {
+        source += glob.slice(index, closeIndex + 1);
         index = closeIndex;
         continue;
       }
@@ -206,8 +227,8 @@ const lintTargetCoversTestFile = (target, testFile) => {
 };
 
 const lintScriptCoversTestFile = (lintScript, testFile) => {
-  return lintPathConfig(lintScript).some(({ targets, ignorePatterns }) => {
-    if (ignorePatterns.some((pattern) => pathMatchesGlob(pattern, testFile) || lintTargetCoversTestFile(pattern, testFile))) {
+  return lintPathConfig(lintScript).some(({ targets, ignorePatterns, ignoreDisabled }) => {
+    if (!ignoreDisabled && ignorePatterns.some((pattern) => pathMatchesGlob(pattern, testFile) || lintTargetCoversTestFile(pattern, testFile))) {
       return false;
     }
 
