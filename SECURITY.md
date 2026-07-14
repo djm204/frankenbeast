@@ -53,6 +53,7 @@ When deploying Frankenbeast services, apply defense-in-depth controls around the
 - Run services with the least privileges and a dedicated service account.
 - Set explicit project roots (`--base-dir` where supported) so file access and generated artifacts stay inside the intended checkout.
 - Keep human-in-the-loop approval gateways enabled for destructive or high-risk actions.
+- Route worker branch rollback or force-with-lease recovery through the [worker push rollback runbook](docs/runbooks/worker-push-rollback.md) and approval-cop instead of ad-hoc force pushes.
 - Validate webhook signatures and operator tokens before processing privileged requests.
 - Use secure HTTP headers such as Helmet-compatible defaults at the edge or application layer.
 - Apply rate limits to authentication, webhook, chat, and operator-action endpoints.

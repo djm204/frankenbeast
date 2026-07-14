@@ -16,6 +16,7 @@
     "audit:dependencies": "node scripts/check-package-manager.mjs && npm audit",
     "check:package-manager": "node scripts/check-package-manager.mjs",
     "check:dependabot-supply-chain": "node scripts/check-dependabot-supply-chain.mjs",
+    "dr:worker-push-rollback:dry-run": "node scripts/worker-push-rollback-plan.mjs --dry-run",
     "create:project": "bash scripts/create-project.sh",
     "deps:outdated:major": "node scripts/check-major-outdated.mjs",
     "lint": "node scripts/check-workspace-lint-coverage.mjs && turbo run lint",
