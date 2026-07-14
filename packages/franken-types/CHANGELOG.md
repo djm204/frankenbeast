@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.10.0...franken-types-v0.10.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+
 ## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.9.0...franken-types-v0.10.0) (2026-07-14)
 
 

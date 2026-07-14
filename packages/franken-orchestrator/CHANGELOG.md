@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.44.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.44.1...@franken/orchestrator-v0.44.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **orchestrator:** reject unknown beast status runs ([f971b4a](https://github.com/djm204/frankenbeast/commit/f971b4a929cb0a22770e30ee22ad81eaf0a6be0d)), closes [#1698](https://github.com/djm204/frankenbeast/issues/1698)
+* **security:** harden untrusted prompt context ([#2221](https://github.com/djm204/frankenbeast/issues/2221)) ([5cc5ca3](https://github.com/djm204/frankenbeast/commit/5cc5ca37cac440e33731f3173f3c370377aa2d5b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.8.0 to 0.8.1
+    * @franken/governor bumped from 0.6.0 to 0.6.1
+    * @franken/types bumped from 0.10.0 to 0.10.1
+    * @franken/observer bumped from 0.7.17 to 0.7.18
+    * @franken/planner bumped from 0.4.15 to 0.4.16
+    * @franken/brain bumped from 0.8.0 to 0.8.1
+
 ## [0.44.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.44.0...@franken/orchestrator-v0.44.1) (2026-07-14)
 
 
