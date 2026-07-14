@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Trace } from '../core/types.js'
 import type { ExportAdapter } from '../export/ExportAdapter.js'
 import {
@@ -53,6 +53,29 @@ describe('runtime artifact data classification', () => {
     expect(() => enforceRuntimeArtifactExportPolicy(memory, { allowSensitiveExportOverride: true })).not.toThrow()
   })
 
+  it('keeps exported classification policy immutable at runtime', () => {
+    const mutablePolicy = RUNTIME_ARTIFACT_CLASSIFICATIONS as unknown as Record<string, { classification: string }>
+    expect(Object.isFrozen(RUNTIME_ARTIFACT_CLASSIFICATIONS)).toBe(true)
+    expect(Object.isFrozen(RUNTIME_ARTIFACT_CLASSIFICATIONS.backup)).toBe(true)
+    expect(Object.isFrozen(RUNTIME_ARTIFACT_CLASSIFICATIONS.backup.defaultControls)).toBe(true)
+
+    expect(() => {
+      mutablePolicy.backup.classification = 'sensitive'
+    }).toThrow()
+
+    expect(classifyRuntimeArtifact('backup').classification).toBe('secret')
+  })
+
+  it('returns defensive classification labels instead of live policy aliases', () => {
+    const backup = classifyRuntimeArtifact('backup') as unknown as { classification: string }
+
+    expect(() => {
+      backup.classification = 'sensitive'
+    }).toThrow()
+
+    expect(classifyRuntimeArtifact('backup').classification).toBe('secret')
+  })
+
   it('allows sensitive non-secret exports so redaction policy can be applied by destination wrappers', () => {
     expect(() => enforceRuntimeArtifactExportPolicy(classifyRuntimeArtifact('trace'))).not.toThrow()
     expect(() => enforceRuntimeArtifactExportPolicy(classifyRuntimeArtifact('webhook'))).not.toThrow()
@@ -69,6 +92,35 @@ describe('runtime artifact data classification', () => {
 
     await expect(guarded.flush(exampleTrace)).rejects.toThrow(
       'Refusing to export secret trace artifact to third-party collector without redaction or explicit override',
+    )
+    expect(inner.flushed).toHaveLength(0)
+  })
+
+  it('enforces policy before active-span warnings can leak rejected artifact details', async () => {
+    const inner = new RecordingAdapter()
+    const guarded = new ClassificationGuardAdapter({
+      adapter: inner,
+      artifactType: 'prompt',
+    })
+    const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => true)
+
+    await expect(guarded.flush(activeTrace)).rejects.toThrow(
+      'Refusing to export user-private prompt artifact without redaction or explicit override',
+    )
+    expect(emitWarning).not.toHaveBeenCalled()
+    emitWarning.mockRestore()
+  })
+
+  it('prevents callers from downgrading a secret default classification', async () => {
+    const inner = new RecordingAdapter()
+    const guarded = new ClassificationGuardAdapter({
+      adapter: inner,
+      artifactType: 'backup',
+      classification: 'sensitive',
+    })
+
+    await expect(guarded.flush(exampleTrace)).rejects.toThrow(
+      'Refusing to export secret backup artifact without redaction or explicit override',
     )
     expect(inner.flushed).toHaveLength(0)
   })
@@ -94,6 +146,21 @@ const exampleTrace: Trace = {
   startedAt: 1,
   endedAt: 2,
   spans: [],
+}
+
+const activeTrace: Trace = {
+  ...exampleTrace,
+  spans: [
+    {
+      id: 'span-1',
+      traceId: 'trace-1',
+      name: 'collect private prompt',
+      status: 'active',
+      startedAt: 1,
+      metadata: {},
+      thoughtBlocks: [],
+    },
+  ],
 }
 
 class RecordingAdapter implements ExportAdapter {

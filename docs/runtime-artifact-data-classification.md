@@ -42,15 +42,15 @@ Example:
 ```ts
 import { ClassificationGuardAdapter, SpanRedactor } from '@franken/observer'
 
-const redacted = new SpanRedactor({
+const redactedTraceAdapter = new SpanRedactor({
   adapter: thirdPartyAdapter,
   rules: [{ key: /token|secret|password/i, action: 'mask' }],
   redactThoughtBlocks: true,
 })
 
 const guarded = new ClassificationGuardAdapter({
-  adapter: redacted,
-  artifactType: 'prompt',
+  adapter: redactedTraceAdapter,
+  artifactType: 'trace',
   redactionApplied: true,
   destination: 'third-party collector',
 })

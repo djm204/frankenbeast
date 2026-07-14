@@ -37,6 +37,7 @@ export interface RuntimeArtifactExportPolicyOptions {
 export interface ClassificationGuardAdapterOptions extends RuntimeArtifactExportPolicyOptions {
   readonly adapter: ExportAdapter
   readonly artifactType?: RuntimeArtifactType
+  /** Optional stricter classification for a specific payload; never downgrades the default artifact class. */
   readonly classification?: DataClassification
 }
 
@@ -48,7 +49,7 @@ const CLASSIFICATION_RANK: Record<DataClassification, number> = {
   'user-private': 3,
 }
 
-export const RUNTIME_ARTIFACT_CLASSIFICATIONS: Readonly<Record<RuntimeArtifactType, RuntimeArtifactClassification>> = {
+const RUNTIME_ARTIFACT_CLASSIFICATION_DEFINITIONS = {
   log: {
     artifactType: 'log',
     classification: 'sensitive',
@@ -103,10 +104,13 @@ export const RUNTIME_ARTIFACT_CLASSIFICATIONS: Readonly<Record<RuntimeArtifactTy
     rationale: 'Post-mortems can contain trace goals, failures, operator decisions, and diagnostic details.',
     defaultControls: ['sanitize filenames', 'redact before external publication'],
   },
-}
+} satisfies Record<RuntimeArtifactType, RuntimeArtifactClassification>
+
+export const RUNTIME_ARTIFACT_CLASSIFICATIONS: Readonly<Record<RuntimeArtifactType, RuntimeArtifactClassification>> =
+  freezeClassificationMap(RUNTIME_ARTIFACT_CLASSIFICATION_DEFINITIONS)
 
 export function classifyRuntimeArtifact(artifactType: RuntimeArtifactType): RuntimeArtifactClassification {
-  return RUNTIME_ARTIFACT_CLASSIFICATIONS[artifactType]
+  return cloneClassification(RUNTIME_ARTIFACT_CLASSIFICATIONS[artifactType])
 }
 
 export function isHighSensitivityClassification(classification: DataClassification): boolean {
@@ -145,12 +149,7 @@ export class ClassificationGuardAdapter implements ExportAdapter {
 
   constructor(options: ClassificationGuardAdapterOptions) {
     this.inner = options.adapter
-    this.artifact = options.classification
-      ? {
-          ...classifyRuntimeArtifact(options.artifactType ?? 'trace'),
-          classification: options.classification,
-        }
-      : classifyRuntimeArtifact(options.artifactType ?? 'trace')
+    this.artifact = buildGuardClassification(options.artifactType ?? 'trace', options.classification)
     this.policyOptions = {
       redactionApplied: options.redactionApplied,
       allowSensitiveExportOverride: options.allowSensitiveExportOverride,
@@ -159,8 +158,8 @@ export class ClassificationGuardAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
-    warnIfTraceHasActiveSpans(trace, 'ClassificationGuardAdapter')
     enforceRuntimeArtifactExportPolicy(this.artifact, this.policyOptions)
+    warnIfTraceHasActiveSpans(trace, 'ClassificationGuardAdapter')
     await this.inner.flush(trace)
   }
 
@@ -191,4 +190,41 @@ export class ClassificationGuardAdapter implements ExportAdapter {
     }
     return this.inner.listTraceSummaries()
   }
+}
+
+function buildGuardClassification(
+  artifactType: RuntimeArtifactType,
+  overrideClassification: DataClassification | undefined,
+): RuntimeArtifactClassification {
+  const base = classifyRuntimeArtifact(artifactType)
+  if (!overrideClassification || classificationAtLeast(base.classification, overrideClassification)) {
+    return base
+  }
+
+  return Object.freeze({
+    ...base,
+    classification: overrideClassification,
+    defaultControls: Object.freeze([...base.defaultControls]),
+  })
+}
+
+function freezeClassificationMap(
+  value: Record<RuntimeArtifactType, RuntimeArtifactClassification>,
+): Readonly<Record<RuntimeArtifactType, RuntimeArtifactClassification>> {
+  const entries = Object.entries(value).map(([key, classification]) => [key, freezeClassification(classification)])
+  return Object.freeze(Object.fromEntries(entries)) as Readonly<Record<RuntimeArtifactType, RuntimeArtifactClassification>>
+}
+
+function freezeClassification(classification: RuntimeArtifactClassification): RuntimeArtifactClassification {
+  return Object.freeze({
+    ...classification,
+    defaultControls: Object.freeze([...classification.defaultControls]),
+  })
+}
+
+function cloneClassification(classification: RuntimeArtifactClassification): RuntimeArtifactClassification {
+  return Object.freeze({
+    ...classification,
+    defaultControls: Object.freeze([...classification.defaultControls]),
+  })
 }
