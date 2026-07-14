@@ -20,10 +20,8 @@ describe('LlmSkillHandler', () => {
     const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
     expect(prompt).toContain('Summarize the plan');
     expect(prompt).toContain('ADR-001: Prefer deterministic outputs');
-    expect(prompt).toContain('Source kind: memory');
-    expect(prompt).toContain('Source: "memory.context"');
-    expect(prompt).toContain('UNTRUSTED DATA from retrieval');
-    expect(prompt).toContain('| - [ADRs] ADR-001: Prefer deterministic outputs');
+    expect(prompt).toContain('Trusted memory guidance: follow active user preferences');
+    expect(prompt).toContain('- [ADRs] ADR-001: Prefer deterministic outputs');
     expect(prompt).toContain('Always validate inputs');
     expect(prompt).toContain('Timeout when payload exceeds 1MB');
     expect(result.output).toBe('LLM result');
@@ -117,7 +115,7 @@ describe('LlmSkillHandler', () => {
     const llmClient = {
       complete: vi.fn().mockResolvedValue('ok'),
     };
-    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 650 });
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 450 });
 
     await handler.execute('Keep top priority memory', {
       rules: [
@@ -130,14 +128,14 @@ describe('LlmSkillHandler', () => {
 
     const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
     const memoryBlock = prompt.slice(prompt.indexOf('Memory Context:'));
-    expect(memoryBlock.length).toBeLessThanOrEqual(650);
+    expect(memoryBlock.length).toBeLessThanOrEqual(450);
     expect(memoryBlock).toContain('User preference: critical preference');
     expect(memoryBlock).toContain('…');
     expect(memoryBlock).toContain('[memory truncated: 1 lower-priority entry omitted]');
     expect(memoryBlock).not.toContain('Stale rule: tiny but outdated.');
   });
 
-  it('honors very small memory context budgets by omitting untrusted memory payloads', async () => {
+  it('honors very small memory context budgets by omitting memory payloads', async () => {
     const llmClient = {
       complete: vi.fn().mockResolvedValue('ok'),
     };

@@ -143,4 +143,24 @@ describe('LlmPlanner', () => {
       ],
     });
   });
+
+  it('keeps internally generated critique feedback as trusted replan guidance', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue(JSON.stringify({ tasks: [{ id: 'fix', objective: 'Fix plan', dependsOn: [] }] })),
+    };
+    const planner = new LlmPlanner(llmClient);
+
+    await planner.createPlan({
+      goal: 'Repair invalid plan',
+      context: {
+        repo: 'frankenbeast',
+        critiqueFeedback: 'Add the missing dependency edge before retrying.',
+      },
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain('Trusted replan critique feedback:\nAdd the missing dependency edge before retrying.');
+    expect(prompt).toContain('| {"repo":"frankenbeast"}');
+    expect(prompt).not.toContain('| {"repo":"frankenbeast","critiqueFeedback"');
+  });
 });

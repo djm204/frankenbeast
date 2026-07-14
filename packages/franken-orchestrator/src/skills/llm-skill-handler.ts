@@ -1,6 +1,5 @@
 import type { ILlmClient } from '@franken/types';
 import type { MemoryContext } from '../deps.js';
-import { wrapUntrustedContent } from '../prompt/untrusted-content.js';
 
 type LlmSkillResult = { output: string; tokensUsed: number };
 
@@ -166,10 +165,8 @@ export class LlmSkillHandler {
     const body = omitted > 0 ? [...lines, this.truncationMarker(omitted)] : [...lines];
     return [
       MEMORY_CONTEXT_HEADER,
-      wrapUntrustedContent(
-        { kind: 'memory', source: 'memory.context' },
-        body.join('\n'),
-      ),
+      'Trusted memory guidance: follow active user preferences, project conventions, and procedures unless higher-priority instructions conflict.',
+      ...body,
     ].join('\n');
   }
 

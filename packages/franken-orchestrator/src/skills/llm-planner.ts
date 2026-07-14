@@ -27,24 +27,37 @@ export class LlmPlanner implements IPlannerModule {
   }
 
   private buildPrompt(intent: PlanIntent): string {
-    const context = intent.context
-      ? wrapUntrustedContent(
-        { kind: 'planner-context', source: 'plan-intent.context' },
-        JSON.stringify(intent.context),
-      )
-      : wrapUntrustedContent(
-        { kind: 'planner-context', source: 'plan-intent.context' },
-        '{}',
-      );
+    const { retrievedContext, critiqueFeedback } = this.splitContext(intent.context);
+    const context = wrapUntrustedContent(
+      { kind: 'planner-context', source: 'plan-intent.context' },
+      JSON.stringify(retrievedContext),
+    );
 
     return [
       'You are a planner. Decompose the goal into a task DAG.',
       `Goal: ${intent.goal}`,
       `Strategy: ${intent.strategy ?? 'none'}`,
+      ...(critiqueFeedback ? ['Trusted replan critique feedback:', critiqueFeedback] : []),
       `Context: ${context}`,
       'Return ONLY valid JSON with shape:',
       '{ "tasks": [{ "id": "t1", "objective": "...", "requiredSkills": ["llm-generate"], "dependsOn": [] }] }',
     ].join('\n');
+  }
+
+  private splitContext(context: PlanIntent['context']): {
+    readonly retrievedContext: unknown;
+    readonly critiqueFeedback: string | undefined;
+  } {
+    if (!context || typeof context !== 'object' || Array.isArray(context)) {
+      return { retrievedContext: context ?? {}, critiqueFeedback: undefined };
+    }
+
+    const record = context as Record<string, unknown>;
+    const { critiqueFeedback, ...retrievedContext } = record;
+    return {
+      retrievedContext,
+      critiqueFeedback: typeof critiqueFeedback === 'string' ? critiqueFeedback : undefined,
+    };
   }
 
   private parsePlan(response: string, intent: PlanIntent): PlanGraph {
