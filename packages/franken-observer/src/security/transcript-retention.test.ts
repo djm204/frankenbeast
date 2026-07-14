@@ -104,6 +104,18 @@ describe('transcript retention controls', () => {
     expect(await adapter.listTraceIds()).toEqual([])
   })
 
+  it('hides pre-existing backend traces and summaries when retention is disabled', async () => {
+    const inner = new InMemoryAdapter()
+    await inner.flush(makeTrace())
+
+    const adapter = new TranscriptRetentionAdapter({ adapter: inner, mode: 'disabled' })
+
+    expect(await adapter.queryByTraceId('trace-1')).toBeNull()
+    expect(await adapter.listTraceIds()).toEqual([])
+    expect(await adapter.listTraceSummaries()).toEqual([])
+    expect(await inner.listTraceIds()).toEqual(['trace-1'])
+  })
+
   it('can drop selected transcript fields while retaining non-transcript metadata', () => {
     const retained = applyRetentionPolicy(makeTrace(), {
       retainedFields: {
@@ -282,6 +294,59 @@ describe('transcript retention controls', () => {
     expect(retained.spans[0].metadata).toEqual({
       payload: '[REDACTED_TRANSCRIPT]',
       safeCounter: 1,
+    })
+  })
+
+  it('redacts delegated summary goals nested under opaque metadata keys', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          delegation: {
+            delegatedTask: {
+              goal: 'private delegated task goal',
+              status: 'completed',
+            },
+            delegatedSummary: {
+              goal: 'private delegated task goal',
+              summary: 'private delegated summary',
+            },
+            childGoals: ['private child goal'],
+          },
+          safeCounter: 1,
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata).toEqual({
+      delegation: {
+        delegatedTask: {
+          goal: '[REDACTED_TRANSCRIPT]',
+          status: 'completed',
+        },
+        delegatedSummary: '[REDACTED_TRANSCRIPT]',
+        childGoals: '[REDACTED_TRANSCRIPT]',
+      },
+      safeCounter: 1,
+    })
+  })
+
+  it('redacts transcript fields inside enumerable non-plain metadata objects', () => {
+    class ToolPayload {
+      promptText = 'private class prompt'
+      stdout = 'private class output'
+      safeCounter = 1
+    }
+
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { payload: new ToolPayload() } })],
+    }))
+
+    expect(retained.spans[0].metadata).toEqual({
+      payload: {
+        promptText: '[REDACTED_TRANSCRIPT]',
+        stdout: '[REDACTED_TRANSCRIPT]',
+        safeCounter: 1,
+      },
     })
   })
 

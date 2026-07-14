@@ -69,7 +69,7 @@ const DEFAULT_FIELDS: TranscriptRetainedFields = Object.freeze({
   summaries: true,
 })
 
-const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions'])
+const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'goal', 'goals'])
 const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'input', 'inputs', 'arguments', 'args', 'parameters', 'params'])
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
@@ -99,6 +99,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   async queryByTraceId(traceId: string): Promise<Trace | null> {
+    if (this.policy.mode === 'disabled') return null
     if (this.expiredTraceIds.has(traceId)) return null
     if (await this.expireStoredTraceIfNeeded(traceId)) return null
 
@@ -112,6 +113,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   async listTraceIds(): Promise<string[]> {
+    if (this.policy.mode === 'disabled') return []
     await this.cleanupExpired()
     const ids = await this.inner.listTraceIds()
     const result: string[] = []
@@ -123,6 +125,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   async listTraceSummaries(): Promise<TraceSummary[]> {
+    if (this.policy.mode === 'disabled') return []
     await this.cleanupExpired()
     const summaries = this.inner.listTraceSummaries
       ? await this.inner.listTraceSummaries()
@@ -288,7 +291,11 @@ function redactNestedTranscriptValues(
     return retained
   }
   if (value instanceof Date) return new Date(value.getTime())
-  if (!isPlainRecord(value)) return cloneValue(value)
+  if (!isPlainRecord(value)) {
+    return shouldRedactEnumerableObject(value)
+      ? redactEnumerableObject(value, policy, seen)
+      : cloneValue(value)
+  }
 
   const retained: Record<string, unknown> = {}
   seen.set(value, retained)
@@ -302,7 +309,7 @@ function redactNestedTranscriptValues(
 
 function classifyTranscriptField(key: string): TranscriptField | undefined {
   const normalized = key.replace(/[_-]/g, '').toLowerCase()
-  if (PROMPT_KEYS.has(normalized) || normalized.includes('prompt')) return 'prompts'
+  if (PROMPT_KEYS.has(normalized) || normalized.includes('prompt') || normalized.endsWith('goal') || normalized.endsWith('goals')) return 'prompts'
   if (
     TOOL_INPUT_KEYS.has(normalized) ||
     normalized === 'query' ||
@@ -332,6 +339,33 @@ function redactValue(value: unknown, policy: ResolvedTranscriptRetentionPolicy):
   if (policy.mode === 'raw' || policy.redactionLevel === 'none') return cloneValue(value)
   if (policy.redactionLevel === 'drop') return DROPPED
   return MASK
+}
+
+function redactEnumerableObject(
+  value: object,
+  policy: ResolvedTranscriptRetentionPolicy,
+  seen: WeakMap<object, unknown>,
+): Record<string, unknown> {
+  const retained: Record<string, unknown> = {}
+  seen.set(value, retained)
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const field = classifyTranscriptField(key)
+    if (field && !policy.retainedFields[field]) continue
+    retained[key] = field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen)
+  }
+  return retained
+}
+
+function shouldRedactEnumerableObject(value: object): boolean {
+  return Object.keys(value).length > 0 &&
+    !(value instanceof RegExp) &&
+    !(value instanceof ArrayBuffer) &&
+    !ArrayBuffer.isView(value) &&
+    !(value instanceof Map) &&
+    !(value instanceof Set) &&
+    !(value instanceof Promise) &&
+    !(value instanceof WeakMap) &&
+    !(value instanceof WeakSet)
 }
 
 function redactString(value: string | undefined, policy: ResolvedTranscriptRetentionPolicy): string | undefined {
