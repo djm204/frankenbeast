@@ -188,6 +188,12 @@ describe('Brain interfaces (type-level)', () => {
       working: {} as IWorkingMemory,
       episodic: {} as IEpisodicMemory,
       recovery: {} as IRecoveryMemory,
+      rightToForget: () => ({
+        selectorHash: 'hash',
+        dryRun: false,
+        deleted: { working: 0, episodic: 0, derived: 0 },
+        remainingReferences: 0,
+      }),
       serialize: () => ({}) as BrainSnapshot,
     };
     expect(brain).toBeDefined();

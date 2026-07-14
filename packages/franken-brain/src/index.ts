@@ -1,6 +1,7 @@
 export {
   SqliteBrain,
   WorkingMemoryLimitError,
+  MemoryDeletionGuardError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
   MemoryEncryptionMigrationRequiredError,
@@ -19,4 +20,7 @@ export {
   type MemoryEncryptionMigrationOptions,
   type MemoryEncryptionMigrationResult,
   type MemoryEncryptionOptions,
+  type RightToForgetSelector,
+  type RightToForgetReport,
+  type RightToForgetMemoryType,
 } from './sqlite-brain.js';

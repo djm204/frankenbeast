@@ -78,6 +78,78 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('right-to-forget deletion workflow', () => {
+    it('deletes selected working and episodic memories without echoing sensitive selectors', () => {
+      brain.working.set('pii:email', {
+        value: 'alice@example.test',
+        category: 'pii',
+        sourceScope: 'import-1',
+      });
+      brain.working.set('safe', { value: 'keep me', category: 'notes' });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'User email alice@example.test was imported',
+        details: { category: 'pii', sourceScope: 'import-1' },
+        createdAt: new Date().toISOString(),
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'Safe project note',
+        details: { category: 'notes' },
+        createdAt: new Date().toISOString(),
+      });
+
+      const report = brain.rightToForget({ query: 'alice@example.test', category: 'pii', sourceScope: 'import-1' });
+
+      expect(report.deleted).toEqual({ working: 1, episodic: 1, derived: 1 });
+      expect(report.remainingReferences).toBe(0);
+      expect(report.selectorHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(JSON.stringify(report)).not.toContain('alice@example.test');
+      expect(brain.working.has('pii:email')).toBe(false);
+      expect(brain.working.get('safe')).toEqual({ value: 'keep me', category: 'notes' });
+      expect(brain.episodic.recall('alice@example.test', 5)).toEqual([]);
+      expect(brain.episodic.recall('Safe project note', 5)).toHaveLength(1);
+      expect(brain.episodic.recent(5).some(event => event.step === 'right-to-forget')).toBe(true);
+    });
+
+    it('supports dry-run counts without deleting or auditing', () => {
+      brain.working.set('pii:phone', { value: '+15555550123', category: 'pii' });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'Phone +15555550123',
+        details: { category: 'pii' },
+        createdAt: new Date().toISOString(),
+      });
+
+      const report = brain.rightToForget({ category: 'pii', dryRun: true });
+
+      expect(report.dryRun).toBe(true);
+      expect(report.deleted).toEqual({ working: 1, episodic: 1, derived: 1 });
+      expect(report.remainingReferences).toBe(2);
+      expect(report.auditEventId).toBeUndefined();
+      expect(brain.working.has('pii:phone')).toBe(true);
+      expect(brain.episodic.recall('+15555550123', 5)).toHaveLength(1);
+    });
+
+    it('guards against reintroducing forgotten working memory', () => {
+      brain.working.set('pii:ssn', { value: '123-45-6789', category: 'pii' });
+      brain.rightToForget({ key: 'pii:ssn', category: 'pii' });
+
+      expect(() => brain.working.set('pii:ssn', { value: '123-45-6789', category: 'pii' })).toThrow(
+        /right-to-forget/,
+      );
+      expect(() => brain.working.set('another-key', { value: 'other', category: 'pii' })).toThrow(/right-to-forget/);
+      expect(() => brain.working.restore({ restored: { value: 'other', category: 'pii' } })).toThrow(/right-to-forget/);
+
+      brain.rightToForget({ query: 'alice@example.test' });
+      expect(() => brain.working.set('contact', { value: 'alice@example.test' })).toThrow(/right-to-forget/);
+    });
+
+    it('requires at least one selector', () => {
+      expect(() => brain.rightToForget({})).toThrow(/requires at least one/);
+    });
+  });
+
   describe('working memory limits (issue #37)', () => {
     it('applies generous default limits', () => {
       const usage = brain.working.usage();
@@ -332,6 +404,11 @@ describe('SqliteBrain', () => {
           version: CURRENT_MEMORY_SCHEMA_VERSION,
           recordCount: 1,
         },
+        {
+          store: 'memory_deletion_guards',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 0,
+        },
       ]);
 
       const db = (
@@ -443,6 +520,11 @@ describe('SqliteBrain', () => {
           },
           {
             store: 'checkpoints',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_deletion_guards',
             version: CURRENT_MEMORY_SCHEMA_VERSION,
             recordCount: 0,
           },

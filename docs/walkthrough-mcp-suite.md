@@ -270,6 +270,7 @@ Once installed, your MCP-compatible client has access to the tools registered in
 | `fbeast_memory_query` | memory | Search memory entries by keyword substring |
 | `fbeast_memory_frontload` | memory | Load all memory entries from this database as context |
 | `fbeast_memory_forget` | memory | Delete a working memory entry by key |
+| `fbeast_memory_right_to_forget` | memory | Delete memory by key, category, source scope, or sensitive query and return hashed deletion evidence |
 | `fbeast_plan_decompose` | planner | Create a scaffold DAG for a task objective |
 | `fbeast_plan_status` | planner | Get status and visualization for a plan |
 | `fbeast_plan_validate` | planner | Validate a plan DAG for cycles and missing dependencies |

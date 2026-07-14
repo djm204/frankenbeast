@@ -6,7 +6,31 @@ export interface IBrain {
   readonly working: IWorkingMemory;
   readonly episodic: IEpisodicMemory;
   readonly recovery: IRecoveryMemory;
+  rightToForget(selector: RightToForgetSelector): RightToForgetReport;
   serialize(): BrainSnapshot;
+}
+
+export type RightToForgetMemoryType = 'working' | 'episodic' | 'all';
+
+export interface RightToForgetSelector {
+  key?: string;
+  category?: string;
+  sourceScope?: string;
+  query?: string;
+  type?: RightToForgetMemoryType;
+  dryRun?: boolean;
+}
+
+export interface RightToForgetReport {
+  selectorHash: string;
+  dryRun: boolean;
+  deleted: {
+    working: number;
+    episodic: number;
+    derived: number;
+  };
+  remainingReferences: number;
+  auditEventId?: number;
 }
 
 export interface IWorkingMemory {

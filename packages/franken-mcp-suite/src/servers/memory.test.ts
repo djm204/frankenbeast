@@ -3,13 +3,14 @@ import { createToolDefsForServer } from '../shared/tool-registry.js';
 import { createMemoryServer } from './memory.js';
 
 describe('Memory Server', () => {
-  it('exposes 4 tools', () => {
+  it('exposes 5 tools', () => {
     const server = createMemoryServer({
       brain: {
         query: vi.fn(),
         store: vi.fn(),
         frontload: vi.fn(),
         forget: vi.fn(),
+        rightToForget: vi.fn(),
       },
     });
 
@@ -19,6 +20,7 @@ describe('Memory Server', () => {
       'fbeast_memory_query',
       'fbeast_memory_frontload',
       'fbeast_memory_forget',
+      'fbeast_memory_right_to_forget',
     ]);
     const storeTool = server.tools.find((t) => t.name === 'fbeast_memory_store')!;
     expect(storeTool.description).toBe('Store key/value in working or episodic memory');
@@ -31,6 +33,7 @@ describe('Memory Server', () => {
         store: vi.fn(),
         frontload: vi.fn(),
         forget: vi.fn(),
+        rightToForget: vi.fn(),
       },
     }).tools.find((t) => t.name === 'fbeast_memory_store')!;
 
@@ -40,6 +43,7 @@ describe('Memory Server', () => {
         store: vi.fn(),
         frontload: vi.fn(),
         forget: vi.fn(),
+        rightToForget: vi.fn(),
       },
     }).tools.find((t) => t.name === 'fbeast_memory_query')!;
 
@@ -63,6 +67,13 @@ describe('Memory Server', () => {
         { type: 'working', entries: ['adr: use adapters'] },
       ]),
       forget: vi.fn().mockResolvedValue(true),
+      rightToForget: vi.fn().mockResolvedValue({
+        selectorHash: 'hashed-selector',
+        dryRun: false,
+        deleted: { working: 1, episodic: 1, derived: 1 },
+        remainingReferences: 0,
+        auditEventId: 42,
+      }),
     };
 
     const server = createMemoryServer({ brain });
@@ -70,6 +81,7 @@ describe('Memory Server', () => {
     const queryTool = server.tools.find((t) => t.name === 'fbeast_memory_query')!;
     const frontloadTool = server.tools.find((t) => t.name === 'fbeast_memory_frontload')!;
     const forgetTool = server.tools.find((t) => t.name === 'fbeast_memory_forget')!;
+    const rightToForgetTool = server.tools.find((t) => t.name === 'fbeast_memory_right_to_forget')!;
 
     await storeTool.handler({ key: 'adr', value: 'use adapters', type: 'working' });
     expect(brain.store).toHaveBeenCalledWith({ key: 'adr', value: 'use adapters', type: 'working' });
@@ -88,6 +100,11 @@ describe('Memory Server', () => {
     const forgetResult = await forgetTool.handler({ key: 'adr' });
     expect(brain.forget).toHaveBeenCalledWith('adr');
     expect(forgetResult.content[0]!.text).toContain('Removed memory: adr');
+
+    const deletionResult = await rightToForgetTool.handler({ category: 'pii', sourceScope: 'import-1', query: 'secret' });
+    expect(brain.rightToForget).toHaveBeenCalledWith({ category: 'pii', sourceScope: 'import-1', query: 'secret' });
+    expect(deletionResult.content[0]!.text).toContain('hashed-selector');
+    expect(deletionResult.content[0]!.text).not.toContain('secret');
   });
 
   it('rejects invalid query limits before calling the brain adapter', async () => {
@@ -97,6 +114,7 @@ describe('Memory Server', () => {
         store: vi.fn(),
         frontload: vi.fn(),
         forget: vi.fn(),
+        rightToForget: vi.fn(),
       };
       const server = createMemoryServer({ brain });
       const result = await server.callTool('fbeast_memory_query', { query: 'adr', limit: invalidLimit });
@@ -113,6 +131,7 @@ describe('Memory Server', () => {
       store: vi.fn(),
       frontload: vi.fn(),
       forget: vi.fn(),
+      rightToForget: vi.fn(),
     };
     const queryTool = createToolDefsForServer('memory', { brain }).find((t) => t.name === 'fbeast_memory_query')!;
 

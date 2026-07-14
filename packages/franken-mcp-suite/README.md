@@ -90,7 +90,7 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget` | Key-value and episodic memory via SqliteBrain |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget` | Key-value, episodic, and auditable deletion memory via SqliteBrain |
 | `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
@@ -99,6 +99,8 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 | `fbeast-skills` | `fbeast_skills_list`, `fbeast_skills_discover`, `fbeast_skills_load` | Skill registry discovery and loading |
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
+
+`fbeast_memory_right_to_forget` performs user-directed memory deletion by exact key, category metadata, source scope, or sensitive query text. The report returns only a selector hash, deleted counts, remaining-reference count, and optional audit event id; it does not echo the deleted content. Non-dry-run deletions also install hashed reinference guards so future working-memory writes matching forgotten keys, categories, source scopes, or query tokens are rejected.
 
 ### Skill health endpoint
 

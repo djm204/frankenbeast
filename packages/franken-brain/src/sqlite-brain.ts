@@ -232,6 +232,35 @@ function makeMemoryCipher(
   return new MemoryCipher(options);
 }
 
+export type RightToForgetMemoryType = 'working' | 'episodic' | 'all';
+
+export interface RightToForgetSelector {
+  /** Exact working-memory key to delete and guard against reinsertion. */
+  key?: string;
+  /** Category metadata or key prefix to delete. */
+  category?: string;
+  /** Source/sourceScope metadata or key prefix to delete. */
+  sourceScope?: string;
+  /** Sensitive fact substring used only for this deletion pass; only a hash is audited. */
+  query?: string;
+  /** Memory scope to touch. Defaults to all memory stores. */
+  type?: RightToForgetMemoryType;
+  /** Report what would be deleted without mutating stores or writing audit evidence. */
+  dryRun?: boolean;
+}
+
+export interface RightToForgetReport {
+  selectorHash: string;
+  dryRun: boolean;
+  deleted: {
+    working: number;
+    episodic: number;
+    derived: number;
+  };
+  remainingReferences: number;
+  auditEventId?: number;
+}
+
 export class UnsupportedMemorySchemaVersionError extends Error {
   constructor(message: string) {
     super(message);
@@ -243,6 +272,13 @@ export class WorkingMemoryLimitError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'WorkingMemoryLimitError';
+  }
+}
+
+export class MemoryDeletionGuardError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MemoryDeletionGuardError';
   }
 }
 
@@ -480,6 +516,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
 
   set(key: string, value: unknown): void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
+    assertNotDeletionGuarded(this.db, key, serialized);
 
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
@@ -572,6 +609,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const prepared: Array<[string, unknown, string, number]> = [];
     for (const [key, value] of entries) {
       const { normalized, serialized, size } = this.prepareEntry(key, value);
+      assertNotDeletionGuarded(this.db, key, serialized);
       total += size;
       prepared.push([key, normalized, serialized, size]);
     }
@@ -961,6 +999,14 @@ export class SqliteBrain implements IBrain {
         verifier TEXT,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS memory_deletion_guards (
+        selector_hash TEXT NOT NULL,
+        guard_kind TEXT NOT NULL,
+        value_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
+        PRIMARY KEY (guard_kind, value_hash)
+      );
     `);
   }
 
@@ -1021,6 +1067,103 @@ export class SqliteBrain implements IBrain {
   /** Flush working memory to SQLite before serialization or checkpoint. */
   flush(): void {
     this.working.flushToDb();
+  }
+
+  rightToForget(selector: RightToForgetSelector): RightToForgetReport {
+    const normalizedSelector = normalizeRightToForgetSelector(selector);
+    const selectorHash = hashSelector(normalizedSelector);
+    const dryRun = normalizedSelector.dryRun ?? false;
+    const memoryType = normalizedSelector.type ?? 'all';
+
+    const workingMatches = memoryType === 'episodic'
+      ? []
+      : this.matchingWorkingKeys(normalizedSelector);
+    const episodicMatches = memoryType === 'working'
+      ? []
+      : this.matchingEpisodicIds(normalizedSelector);
+
+    let auditEventId: number | undefined;
+    let finalizeWorkingMemoryFlush: (() => void) | undefined;
+
+    if (!dryRun && (workingMatches.length > 0 || episodicMatches.length > 0)) {
+      const tx = this.db.transaction(() => {
+        for (const key of workingMatches) {
+          this.working.delete(key);
+        }
+        finalizeWorkingMemoryFlush = this.working.flushToDb() ?? undefined;
+        if (episodicMatches.length > 0) {
+          const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
+          for (const id of episodicMatches) {
+            deleteEpisodic.run(id);
+          }
+        }
+        writeDeletionGuards(this.db, normalizedSelector, selectorHash);
+        const result = this.db.prepare(
+          `INSERT INTO episodic_events (type, step, summary, details, created_at, schema_version)
+           VALUES (?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+        ).run(
+          'observation',
+          'right-to-forget',
+          'Right-to-forget deletion completed',
+          JSON.stringify({
+            selectorHash,
+            deleted: {
+              working: workingMatches.length,
+              episodic: episodicMatches.length,
+              derived: episodicMatches.length,
+            },
+          }),
+          isoNow(),
+        );
+        return Number(result.lastInsertRowid);
+      });
+      auditEventId = tx() as number;
+      finalizeWorkingMemoryFlush?.();
+    } else if (!dryRun) {
+      writeDeletionGuards(this.db, normalizedSelector, selectorHash);
+    }
+
+    return {
+      selectorHash,
+      dryRun,
+      deleted: {
+        working: workingMatches.length,
+        episodic: episodicMatches.length,
+        derived: episodicMatches.length,
+      },
+      remainingReferences: this.countRemainingReferences(normalizedSelector),
+      ...(auditEventId === undefined ? {} : { auditEventId }),
+    };
+  }
+
+  private matchingWorkingKeys(selector: NormalizedRightToForgetSelector): string[] {
+    const snapshot = this.working.snapshot();
+    return Object.entries(snapshot)
+      .filter(([key, value]) => workingEntryMatchesSelector(key, value, selector))
+      .map(([key]) => key);
+  }
+
+  private matchingEpisodicIds(selector: NormalizedRightToForgetSelector): number[] {
+    const rows = this.db.prepare(`SELECT id, summary, details FROM episodic_events`).all() as Array<{
+      id: number;
+      summary: string;
+      details: string | null;
+    }>;
+    return rows
+      .filter(row => episodicRowMatchesSelector(row.summary, row.details, selector))
+      .map(row => row.id);
+  }
+
+  private countRemainingReferences(selector: NormalizedRightToForgetSelector): number {
+    const memoryType = selector.type ?? 'all';
+    let count = 0;
+    if (memoryType !== 'episodic') {
+      count += this.matchingWorkingKeys(selector).length;
+    }
+    if (memoryType !== 'working') {
+      count += this.matchingEpisodicIds(selector).length;
+    }
+    return count;
   }
 
   serialize(): BrainSnapshot {
@@ -1120,7 +1263,12 @@ function migrateMemorySchemaDatabase(
   options: MemorySchemaMigrationOptions = {},
 ): MemorySchemaMigrationResult {
   const dryRun = options.dryRun ?? false;
-  const stores = ['working_memory', 'episodic_events', 'checkpoints'];
+  const stores = [
+    'working_memory',
+    'episodic_events',
+    'checkpoints',
+    'memory_deletion_guards',
+  ];
   const tableRows = db
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
     .all() as Array<{
@@ -1129,6 +1277,11 @@ function migrateMemorySchemaDatabase(
   const existingTables = new Set(tableRows.map((row) => row.name));
   const operations: MemorySchemaMigrationOperation[] = [];
   let fromVersion = CURRENT_MEMORY_SCHEMA_VERSION;
+
+  if (!existingTables.has('memory_deletion_guards')) {
+    operations.push({ table: 'memory_deletion_guards', action: 'create right-to-forget deletion guard store' });
+    fromVersion = 0;
+  }
 
   if (!existingTables.has('memory_schema_versions')) {
     operations.push({
@@ -1222,9 +1375,17 @@ function migrateMemorySchemaDatabase(
         version INTEGER NOT NULL,
         migrated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS memory_deletion_guards (
+        selector_hash TEXT NOT NULL,
+        guard_kind TEXT NOT NULL,
+        value_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
+        PRIMARY KEY (guard_kind, value_hash)
+      );
     `);
     for (const store of stores) {
-      if (!existingTables.has(store)) continue;
+      if (!existingTables.has(store) && store !== 'memory_deletion_guards') continue;
       const columnRows = db
         .prepare(`PRAGMA table_info(${store})`)
         .all() as Array<{ name: string }>;
@@ -1539,7 +1700,12 @@ function encryptPlaintextRows(
 }
 
 function readMemorySchemaMetadata(db: Database.Database): MemorySchemaMetadata {
-  const stores = ['working_memory', 'episodic_events', 'checkpoints'];
+  const stores = [
+    'working_memory',
+    'episodic_events',
+    'checkpoints',
+    'memory_deletion_guards',
+  ];
   const rows = db
     .prepare(
       `SELECT store, version FROM memory_schema_versions ORDER BY store ASC`,
@@ -1609,6 +1775,168 @@ function assertSupportedMemorySchema(db: Database.Database): void {
 
 function sqliteStringLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+type NormalizedRightToForgetSelector = Omit<RightToForgetSelector, 'type'> & { type?: RightToForgetMemoryType };
+
+function normalizeRightToForgetSelector(selector: RightToForgetSelector): NormalizedRightToForgetSelector {
+  const normalized: NormalizedRightToForgetSelector = {};
+  for (const field of ['key', 'category', 'sourceScope', 'query'] as const) {
+    const value = selector[field];
+    if (value !== undefined) {
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        throw new Error(`right-to-forget ${field} must be a non-empty string when provided`);
+      }
+      normalized[field] = value.trim();
+    }
+  }
+  if (selector.type !== undefined) {
+    if (!['working', 'episodic', 'all'].includes(selector.type)) {
+      throw new Error('right-to-forget type must be working, episodic, or all');
+    }
+    normalized.type = selector.type;
+  }
+  if (selector.dryRun !== undefined) {
+    normalized.dryRun = Boolean(selector.dryRun);
+  }
+  if (!normalized.key && !normalized.category && !normalized.sourceScope && !normalized.query) {
+    throw new Error('right-to-forget requires at least one of key, category, sourceScope, or query');
+  }
+  return normalized;
+}
+
+function hashSelector(selector: NormalizedRightToForgetSelector): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      key: normalizeForMatch(selector.key),
+      category: normalizeForMatch(selector.category),
+      sourceScope: normalizeForMatch(selector.sourceScope),
+      query: normalizeForMatch(selector.query),
+      type: selector.type ?? 'all',
+    }))
+    .digest('hex');
+}
+
+function hashGuardValue(value: string): string {
+  return createHash('sha256').update(normalizeForMatch(value)).digest('hex');
+}
+
+function guardTokens(value: string | undefined): string[] {
+  const normalized = normalizeForMatch(value);
+  if (!normalized) return [];
+  return Array.from(new Set([
+    normalized,
+    ...(normalized.match(/[a-z0-9][a-z0-9@._:-]*/g) ?? []),
+  ]));
+}
+
+function normalizeForMatch(value: string | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function safeJsonParse(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function valueToSearchText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function objectMetadataString(value: unknown, names: string[]): string | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  for (const name of names) {
+    const raw = record[name];
+    if (typeof raw === 'string') return raw;
+    if (Array.isArray(raw) && raw.every(item => typeof item === 'string')) return raw.join(' ');
+  }
+  return undefined;
+}
+
+function workingEntryMatchesSelector(key: string, value: unknown, selector: NormalizedRightToForgetSelector): boolean {
+  const lowerKey = normalizeForMatch(key);
+  const text = normalizeForMatch(`${key} ${valueToSearchText(value)}`);
+  if (selector.key && lowerKey === normalizeForMatch(selector.key)) return true;
+  if (selector.query && text.includes(normalizeForMatch(selector.query))) return true;
+  if (selector.category) {
+    const category = normalizeForMatch(selector.category);
+    const metadata = normalizeForMatch(objectMetadataString(value, ['category', 'categories', 'kind']));
+    if (metadata.split(/\s+/).includes(category) || lowerKey.startsWith(`${category}:`)) return true;
+  }
+  if (selector.sourceScope) {
+    const sourceScope = normalizeForMatch(selector.sourceScope);
+    const metadata = normalizeForMatch(objectMetadataString(value, ['sourceScope', 'source', 'scope', 'sourceId']));
+    if (metadata === sourceScope || lowerKey.startsWith(`${sourceScope}:`) || lowerKey.includes(`:${sourceScope}:`)) return true;
+  }
+  return false;
+}
+
+function episodicRowMatchesSelector(summary: string, details: string | null, selector: NormalizedRightToForgetSelector): boolean {
+  const parsedDetails = details ? safeJsonParse(details) : undefined;
+  const text = normalizeForMatch(`${summary} ${details ?? ''}`);
+  if (selector.key && text.includes(normalizeForMatch(selector.key))) return true;
+  if (selector.query && text.includes(normalizeForMatch(selector.query))) return true;
+  if (selector.category) {
+    const category = normalizeForMatch(selector.category);
+    const metadata = normalizeForMatch(objectMetadataString(parsedDetails, ['category', 'categories', 'kind']));
+    if (metadata.split(/\s+/).includes(category) || text.includes(`category:${category}`)) return true;
+  }
+  if (selector.sourceScope) {
+    const sourceScope = normalizeForMatch(selector.sourceScope);
+    const metadata = normalizeForMatch(objectMetadataString(parsedDetails, ['sourceScope', 'source', 'scope', 'sourceId']));
+    if (metadata === sourceScope || text.includes(sourceScope)) return true;
+  }
+  return false;
+}
+
+function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToForgetSelector, selectorHash: string): void {
+  const now = isoNow();
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version)
+     VALUES (?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+  );
+  for (const [kind, value] of [
+    ['key', selector.key],
+    ['category', selector.category],
+    ['sourceScope', selector.sourceScope],
+    ['query', selector.query],
+  ] as const) {
+    if (!value) continue;
+    const values = kind === 'query' ? guardTokens(value) : [value];
+    for (const guardValue of values) {
+      insert.run(selectorHash, kind, hashGuardValue(guardValue), now);
+    }
+  }
+}
+
+function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string): void {
+  const parsed = safeJsonParse(serializedValue);
+  const candidates: Array<[string, string | undefined]> = [
+    ['key', key],
+    ['category', objectMetadataString(parsed, ['category', 'categories', 'kind'])],
+    ['sourceScope', objectMetadataString(parsed, ['sourceScope', 'source', 'scope', 'sourceId'])],
+  ];
+  const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
+  for (const [kind, value] of candidates) {
+    if (!value) continue;
+    if (stmt.get(kind, hashGuardValue(value))) {
+      throw new MemoryDeletionGuardError(`Refusing to store memory because it matches a prior right-to-forget ${kind} guard`);
+    }
+  }
+  for (const value of guardTokens(typeof parsed === 'string' ? parsed : valueToSearchText(parsed))) {
+    if (stmt.get('query', hashGuardValue(value))) {
+      throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
+    }
+  }
 }
 
 // --- Constants ---
