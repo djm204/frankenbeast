@@ -3,6 +3,7 @@ import {
   BrainSnapshotSchema,
   EpisodicEventSchema,
   ExecutionStateSchema,
+  LearningCooldownOptionsSchema,
   type BrainSnapshot,
   type EpisodicEvent,
   type ExecutionState,
@@ -179,6 +180,16 @@ describe('ExecutionState schema', () => {
         timestamp: new Date().toISOString(),
       }),
     ).toThrow();
+  });
+});
+
+describe('LearningCooldownOptions schema', () => {
+  it('trims cooldown keys and rejects whitespace-only values', () => {
+    expect(LearningCooldownOptionsSchema.parse({ key: ' Lesson Key ', cooldownMs: 1 })).toEqual({
+      key: 'Lesson Key',
+      cooldownMs: 1,
+    });
+    expect(() => LearningCooldownOptionsSchema.parse({ key: '   ' })).toThrow();
   });
 });
 

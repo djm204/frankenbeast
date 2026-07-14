@@ -484,6 +484,46 @@ describe('SqliteBrain', () => {
       )).toThrow(RangeError);
     });
 
+    it('does not let non-learning events satisfy the learning cooldown', () => {
+      brain.episodic.record(makeEvent({
+        type: 'success',
+        step: 'retro',
+        summary: 'Prefer targeted verification for touched packages',
+        createdAt: '2026-07-11T12:00:00.000Z',
+      }));
+
+      const result = brain.episodic.recordLearning(makeEvent({
+        step: 'retro',
+        summary: 'Prefer targeted verification for touched packages',
+        createdAt: '2026-07-11T12:00:30.000Z',
+      }), { cooldownMs: 60_000 });
+
+      expect(result.recorded).toBe(true);
+      expect(brain.episodic.count()).toBe(2);
+    });
+
+    it('compares learning cooldown timestamps as instants', () => {
+      brain.episodic.recordLearning(makeEvent({
+        summary: 'Normalize timestamps before comparing cooldowns',
+        createdAt: '2026-07-11T08:00:00-04:00',
+      }), { key: 'timestamp-normalization', cooldownMs: 60_000 });
+
+      const duplicate = brain.episodic.recordLearning(makeEvent({
+        summary: 'Normalize timestamps before comparing cooldowns',
+        createdAt: '2026-07-11T12:00:30.000Z',
+      }), { key: 'timestamp-normalization', cooldownMs: 60_000 });
+
+      expect(duplicate).toMatchObject({
+        recorded: false,
+        reason: 'cooldown',
+        cooldownUntil: '2026-07-11T12:01:00.000Z',
+      });
+      expect(duplicate.recorded === false ? duplicate.existingEvent.createdAt : '').toBe(
+        '2026-07-11T12:00:00.000Z',
+      );
+      expect(brain.episodic.count()).toBe(1);
+    });
+
     it('recall() finds matching events by keyword', () => {
       brain.episodic.record(makeEvent({ summary: 'first test event' }));
       brain.episodic.record(makeEvent({ summary: 'second test event' }));

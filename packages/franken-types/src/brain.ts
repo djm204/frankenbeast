@@ -102,7 +102,7 @@ export const EpisodicEventSchema = z.object({
 });
 
 export const LearningCooldownOptionsSchema = z.object({
-  key: z.string().min(1).optional(),
+  key: z.string().trim().min(1).optional(),
   cooldownMs: z.number().int().nonnegative().optional(),
 });
 

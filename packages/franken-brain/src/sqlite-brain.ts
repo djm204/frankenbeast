@@ -413,6 +413,8 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       throw new Error(`Learning event createdAt must be a valid ISO timestamp: ${event.createdAt}`);
     }
 
+    const normalizedCreatedAt = new Date(eventTimeMs).toISOString();
+
     if (cooldownMs > 0) {
       const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
       if (existingEvent) {
@@ -429,6 +431,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
     this.insertEvent({
       ...event,
+      createdAt: normalizedCreatedAt,
       details: {
         ...(event.details ?? {}),
         learningKey: key,
@@ -459,19 +462,26 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     eventTimeMs: number,
     cooldownMs: number,
   ): EpisodicEvent | null {
-    const cooldownStart = new Date(eventTimeMs - cooldownMs).toISOString();
-    const eventTime = new Date(eventTimeMs).toISOString();
     const rows = this.db
       .prepare(
         `SELECT * FROM episodic_events
-         WHERE created_at >= ? AND created_at <= ?
-         ORDER BY created_at DESC, id DESC`,
+         WHERE details IS NOT NULL
+         ORDER BY id DESC`,
       )
-      .all(cooldownStart, eventTime) as EpisodicRow[];
+      .all() as EpisodicRow[];
 
     for (const row of rows) {
       const existingEvent = rowToEvent(row);
-      if (existingEvent && learningKeyForEvent(existingEvent) === key) {
+      if (!existingEvent || normalizeLearningKey(readLearningKey(existingEvent) ?? '') !== key) {
+        continue;
+      }
+
+      const existingTimeMs = Date.parse(existingEvent.createdAt);
+      if (
+        Number.isFinite(existingTimeMs)
+        && existingTimeMs <= eventTimeMs
+        && eventTimeMs - existingTimeMs <= cooldownMs
+      ) {
         return existingEvent;
       }
     }
@@ -788,12 +798,6 @@ function normalizeLearningKey(value: string): string {
 function readLearningKey(event: EpisodicEvent): string | undefined {
   const key = event.details?.learningKey;
   return typeof key === 'string' ? key : undefined;
-}
-
-function learningKeyForEvent(event: EpisodicEvent): string {
-  return normalizeLearningKey(
-    readLearningKey(event) ?? `${event.step ?? ''}:${event.summary}`,
-  );
 }
 
 function chunkArray<T>(values: T[], size: number): T[][] {
