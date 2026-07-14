@@ -61,10 +61,10 @@ describe('worker push rollback dry-run helper', () => {
     });
 
     expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'bash -lc git ls-remote --heads "$1" "$2" | tee "$3" -- origin refs/heads/resolve/issue-1720-feat-dr rollback-evidence/resolve-issue-1720-feat-dr/remote-head.txt',
+      'bash -lc set -o pipefail; git ls-remote --heads "$1" "$2" | tee "$3" -- origin refs/heads/resolve/issue-1720-feat-dr rollback-evidence/resolve-issue-1720-feat-dr/remote-head.txt',
     );
     expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'git fetch --no-tags origin refs/heads/resolve/issue-1720-feat-dr:refs/remotes/origin/resolve/issue-1720-feat-dr',
+      'git fetch --force --no-tags origin +refs/heads/resolve/issue-1720-feat-dr:refs/fbeast/rollback-evidence/resolve-issue-1720-feat-dr',
     );
     expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
       'bash -lc gh pr view "$1" "${@:3}" --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url > "$2" -- 1720 rollback-evidence/resolve-issue-1720-feat-dr/pr-state.json --repo djm204/frankenbeast',
@@ -103,8 +103,9 @@ describe('worker push rollback dry-run helper', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('## 1. Capture read-only evidence');
-    expect(result.stdout).toContain('git ls-remote --heads "$1" "$2" | tee "$3"');
+    expect(result.stdout).toContain('set -o pipefail; git ls-remote --heads "$1" "$2" | tee "$3"');
     expect(result.stdout).toContain('refs/heads/resolve/issue-1720-feat-dr');
+    expect(result.stdout).toContain('refs/fbeast/rollback-evidence/resolve-issue-1720-feat-dr');
     expect(result.stdout).toContain('rollback-comment.md');
     expect(result.stdout).toContain('approval-cop run -- git push --force-with-lease=refs/heads/resolve/issue-1720-feat-dr:1111111111111111111111111111111111111111 origin 2222222222222222222222222222222222222222:refs/heads/resolve/issue-1720-feat-dr');
     expect(result.stdout).toContain('This helper is dry-run only; it never executes push, force-push, or GitHub mutation commands.');

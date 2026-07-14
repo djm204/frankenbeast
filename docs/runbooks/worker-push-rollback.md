@@ -39,12 +39,13 @@ Create an evidence directory that can be attached to a handoff or postmortem:
 
 ```bash
 mkdir -p rollback-evidence/<branch-slug>
+set -o pipefail
 git ls-remote --heads origin refs/heads/<branch> | tee rollback-evidence/<branch-slug>/remote-head.txt
 gh pr view <pr-number> --repo <owner>/<repo> \
   --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url \
   > rollback-evidence/<branch-slug>/pr-state.json
-git fetch --no-tags origin refs/heads/<branch>:refs/remotes/origin/<branch>
-git log --oneline --decorate --graph <last-good>..refs/remotes/origin/<branch> \
+git fetch --force --no-tags origin +refs/heads/<branch>:refs/fbeast/rollback-evidence/<branch-slug>
+git log --oneline --decorate --graph <last-good>..refs/fbeast/rollback-evidence/<branch-slug> \
   > rollback-evidence/<branch-slug>/commits-to-remove.txt
 ```
 
@@ -62,11 +63,12 @@ Choose the last-good ref from one of these sources, in order of preference:
 Verify it resolves to a commit:
 
 ```bash
-git rev-parse --verify '<last-good>^{commit}'
-git merge-base --is-ancestor '<last-good>' HEAD
+set -o pipefail
+git rev-parse --verify '<last-good>^{commit}' | tee rollback-evidence/<branch-slug>/last-good-oid.txt
+git merge-base --is-ancestor '<last-good>' refs/fbeast/rollback-evidence/<branch-slug>
 ```
 
-If the ancestry check fails, stop: the selected last-good ref is not an ancestor of the current head and needs human review before any rollback command is submitted.
+If the ancestry check fails, stop: the selected last-good ref is not an ancestor of the freshly fetched remote branch head and needs human review before any rollback command is submitted.
 
 Keep the resolved SHA in the evidence bundle. If the last-good commit is ambiguous, stop and ask for a human decision on the Kanban card or PR.
 
