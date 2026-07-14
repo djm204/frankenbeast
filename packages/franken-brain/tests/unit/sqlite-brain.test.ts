@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +24,11 @@ import {
 
 describe('SqliteBrain', () => {
   let brain: SqliteBrain;
+
+  const queryGuardHash = (value: string): string => {
+    const normalized = value.trim().toLowerCase();
+    return `${normalized.length}:${createHash('sha256').update(normalized).digest('hex')}`;
+  };
 
   beforeEach(() => {
     brain = new SqliteBrain(); // in-memory
@@ -299,6 +305,13 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('long-contact', `${'x'.repeat(5000)}secret-token`)).toThrow(/right-to-forget/);
     });
 
+    it('does not guard standalone tokens from a multi-word query selector', () => {
+      brain.rightToForget({ query: 'secret token' });
+
+      expect(() => brain.working.set('standalone-token', 'token')).not.toThrow();
+      expect(() => brain.working.set('phrase-token', 'contains secret token phrase')).toThrow(/right-to-forget/);
+    });
+
     it('rejects short query selectors instead of installing incomplete substring guards', () => {
       expect(() => brain.rightToForget({ query: 'abc' })).toThrow(/at least 8/);
     });
@@ -331,6 +344,7 @@ describe('SqliteBrain', () => {
 
       expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 1 });
       expect(brain.working.has('plain-scoped-record')).toBe(false);
+      expect(() => brain.working.set('plain-scoped-record-2', 'sourceScope: import-1')).toThrow(/right-to-forget/);
       expect(brain.recovery.lastCheckpoint()).toBeNull();
     });
 
@@ -348,6 +362,27 @@ describe('SqliteBrain', () => {
 
         expect(stale.working.get('contact')).toBeUndefined();
         expect(stale.working.snapshot()).not.toHaveProperty('contact');
+
+        forgetter.close();
+        stale.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('counts unflushed live runtime matches deleted from other instances', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-count-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+
+        const forgetter = new SqliteBrain(dbPath);
+        const report = forgetter.rightToForget({ query: 'alice@example.test' });
+
+        expect(report.deleted.working).toBe(1);
+        expect(stale.working.get('contact')).toBeUndefined();
 
         forgetter.close();
         stale.close();
@@ -403,6 +438,40 @@ describe('SqliteBrain', () => {
         expect(forgetter.working.get('contact')).toBe('safe persisted value');
       } finally {
         forgetter?.close();
+        stale?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves safe persisted rows when flushing after an external query guard drops a dirty overlay', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-flush-safe-overlay-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'safe persisted value');
+        stale.flush();
+        stale.working.set('contact', 'alice@example.test transient overwrite');
+
+        db = new Database(dbPath);
+        db.prepare(`INSERT INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at) VALUES (?, ?, ?, ?)`).run(
+          'selector-hash',
+          'working:query',
+          queryGuardHash('alice@example.test'),
+          '2026-07-14T00:00:00.000Z',
+        );
+        db.close();
+        db = undefined;
+
+        stale.flush();
+        stale.close();
+        stale = new SqliteBrain(dbPath);
+
+        expect(stale.working.get('contact')).toBe('safe persisted value');
+      } finally {
+        db?.close();
         stale?.close();
         rmSync(dir, { recursive: true, force: true });
       }

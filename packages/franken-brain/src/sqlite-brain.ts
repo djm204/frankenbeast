@@ -470,6 +470,21 @@ class SqliteWorkingMemory implements IWorkingMemory {
         assertNotDeletionGuarded(this.db, key, serialized);
       } catch (error) {
         if (error instanceof MemoryDeletionGuardError) {
+          const persisted = this.persistedSerialized.get(key);
+          if (persisted !== undefined) {
+            try {
+              assertNotDeletionGuarded(this.db, key, persisted);
+            } catch (persistedError) {
+              if (persistedError instanceof MemoryDeletionGuardError) {
+                continue;
+              }
+              throw persistedError;
+            }
+            const parsed = parseStoredWorkingMemoryValue(persisted);
+            const preparedPersisted = this.prepareEntry(key, parsed);
+            total += preparedPersisted.size;
+            prepared.push([key, preparedPersisted.normalized, preparedPersisted.serialized, preparedPersisted.size]);
+          }
           continue;
         }
         throw error;
@@ -1238,6 +1253,14 @@ export class SqliteBrain implements IBrain {
     }
   }
 
+  private static matchingLiveWorkingKeys(dbPath: string, selector: NormalizedRightToForgetSelector): string[] {
+    const normalizedDbPath = normalizeSqliteDbPath(dbPath);
+    if (normalizedDbPath === ':memory:' || selector.type === 'episodic') return [];
+    const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
+    if (!liveBrains) return [];
+    return Array.from(new Set(Array.from(liveBrains).flatMap(brain => brain.working.matchingRuntimeKeys(selector))));
+  }
+
   private initSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS memory_schema_versions (
@@ -1356,6 +1379,9 @@ export class SqliteBrain implements IBrain {
     const persistedWorkingMatches = workingMatches.filter(match => match.source === 'persisted').map(match => match.key);
     const runtimeWorkingMatches = workingMatches.filter(match => match.source === 'runtime').map(match => match.key);
     const deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
+    for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector)) {
+      deletedWorkingKeys.add(key);
+    }
     const episodicMatches = memoryType === 'working'
       ? []
       : this.matchingEpisodicIds(normalizedSelector);
@@ -2375,7 +2401,7 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
     ['query', selector.query],
   ] as const) {
     if (!value) continue;
-    const values = kind === 'query' ? guardTokens(value) : [value];
+    const values = [value];
     for (const guardValue of values) {
       for (const scope of scopes) {
         if (kind === 'key' && scope !== 'working') continue;
@@ -2409,6 +2435,7 @@ function keyPrefixCandidates(key: string): string[] {
 
 function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string): void {
   const parsed = safeJsonParse(serializedValue);
+  const text = `${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`;
   const keyPrefix = key.includes(':') ? key.split(':', 1)[0] : undefined;
   const keySegments = keySegmentCandidates(key);
   const keyPrefixes = keyPrefixCandidates(key);
@@ -2418,6 +2445,7 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
     ['category', keyPrefix],
     ...keyPrefixes.map(segment => ['category', segment] as [string, string]),
     ['sourceScope', objectMetadataString(parsed, ['sourceScope', 'source', 'scope', 'sourceId'])],
+    ...extractStructuredMarkerValues(text, 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
     ...keySegments.map(segment => ['sourceScope', segment] as [string, string]),
   ];
   const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
@@ -2432,7 +2460,6 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
   }
   const queryGuardIndex = readQueryGuardIndex(db, 'working');
   if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
-    const text = `${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`;
     const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
     for (const value of values) {
       if (
