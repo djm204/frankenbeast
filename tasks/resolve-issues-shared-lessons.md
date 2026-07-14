@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-14 — Restore preview conflict detector drift coverage
+- Restore preview comparisons must include record metadata (`state`, `updatedAt`) alongside content digests; digest-only equality can hide approval-state or task-timestamp drift that a restore would roll back.
+- Treat backup-only approval/session-token records as blocker-severity conflicts, not informational drift, because restoring them can reintroduce stale authorization state that live has already cleared.
+
 ## 2026-07-13 — Lesson contradiction detector Codex edge cases
 - For lesson-contradiction heuristics, compare negation per corrective/directive guidance fragment rather than across a whole lesson blob; multi-finding lessons can otherwise mask one reversed clause with an unrelated negated clause.
 - Keep high-signal short technical tokens such as `log`, `PII`, `JWT`, `API`, `CLI`, `SQL`, `URL`, and `env` in overlap matching, but avoid ambiguous negation words such as standalone `block` that also appear in affirmative guidance like code blocks.

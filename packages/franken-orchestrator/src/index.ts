@@ -188,6 +188,18 @@ export type { ShutdownHandler } from './resilience/graceful-shutdown.js';
 export { checkModuleHealth, allHealthy } from './resilience/module-initializer.js';
 export type { ModuleHealth } from './resilience/module-initializer.js';
 
+// Disaster recovery
+export { detectRestorePreviewConflicts } from './dr/restore-preview.js';
+export type {
+  RestorePreviewArea,
+  RestorePreviewConflict,
+  RestorePreviewConflictType,
+  RestorePreviewManifest,
+  RestorePreviewRecord,
+  RestorePreviewResult,
+  RestorePreviewSeverity,
+} from './dr/restore-preview.js';
+
 // CLI — file writer
 export { writeDesignDoc, readDesignDoc } from './cli/file-writer.js';
 
