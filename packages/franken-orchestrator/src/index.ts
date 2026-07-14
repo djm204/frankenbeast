@@ -99,6 +99,8 @@ export type {
 } from './providers/format-handoff.js';
 export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
+export { quoteUntrustedPayload, wrapUntrustedContent } from './prompt/untrusted-content.js';
+export type { UntrustedContentSource } from './prompt/untrusted-content.js';
 
 // Planning
 export { ChunkFileGraphBuilder } from './planning/chunk-file-graph-builder.js';

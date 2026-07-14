@@ -100,11 +100,12 @@ describe('runPlanning', () => {
       strategy: 'safe',
       context: { repo: 'x' },
     });
-    // Second call (replan): feedback injected into context for plan repair.
+    // Second call (replan): trusted critique feedback is carried separately from untrusted context.
     expect(planner.createPlan).toHaveBeenNthCalledWith(2, {
       goal: 'ship it',
       strategy: 'safe',
-      context: { repo: 'x', critiqueFeedback: 'safety: add a rollback step' },
+      context: { repo: 'x' },
+      critiqueFeedback: 'safety: add a rollback step',
     });
   });
 
