@@ -1,6 +1,6 @@
 {
   "name": "@franken/observer",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "MOD-05 – Observability and Evaluation for the Frankenbeast system",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.10.1",
+    "@franken/types": "0.11.0",
     "better-sqlite3": "^12.11.1"
   },
   "engines": {

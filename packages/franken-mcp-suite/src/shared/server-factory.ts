@@ -227,6 +227,51 @@ export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unk
   return isObjectLike(value) && !Array.isArray(value) ? (value as Record<string, unknown>) : { invalid: value };
 }
 
+const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
+const RIGHT_TO_FORGET_SAFE_AUDIT_KEYS = new Set(['type', 'dryRun']);
+const RIGHT_TO_FORGET_SAFE_TYPES = new Set(['working', 'episodic', 'all']);
+
+export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
+  const sanitized = sanitizeToolArgumentsForAudit(args);
+  const isDirectRightToForget = toolName === 'fbeast_memory_right_to_forget';
+  const auditedTool = toolName === 'fbeast_memory_right_to_forget'
+    ? toolName
+    : typeof sanitized['tool'] === 'string'
+      ? sanitized['tool']
+      : toolName;
+  const auditedAction = typeof sanitized['action'] === 'string' ? sanitized['action'] : undefined;
+  if (auditedTool !== 'fbeast_memory_right_to_forget' && auditedAction !== 'fbeast_memory_right_to_forget') return sanitized;
+  if (auditedAction === 'fbeast_memory_right_to_forget' && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = '[right-to-forget-args-redacted]';
+  }
+  if (toolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    sanitized['args'] = '[right-to-forget-args-redacted]';
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = '[right-to-forget-args-redacted]';
+    return sanitized;
+  }
+  for (const key of RIGHT_TO_FORGET_SELECTOR_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(sanitized, key)) {
+      sanitized[key] = '[right-to-forget-selector-redacted]';
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'type') && !RIGHT_TO_FORGET_SAFE_TYPES.has(String(sanitized['type']))) {
+    sanitized['type'] = '[right-to-forget-args-redacted]';
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'dryRun') && typeof sanitized['dryRun'] !== 'boolean') {
+    sanitized['dryRun'] = '[right-to-forget-args-redacted]';
+  }
+  for (const key of Object.keys(sanitized)) {
+    const isWrapperToolKey = key === 'tool' && !isDirectRightToForget && sanitized[key] === 'fbeast_memory_right_to_forget';
+    const isPreflightActionKey = key === 'action' && !isDirectRightToForget && sanitized[key] === 'fbeast_memory_right_to_forget';
+    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && !isWrapperToolKey && !isPreflightActionKey) {
+      sanitized[key] = '[right-to-forget-args-redacted]';
+    }
+  }
+  return sanitized;
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -289,14 +334,14 @@ async function dispatchTool(
   }): Promise<void> => {
     if (!audit) return;
     try {
-      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: input.args });
+      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAuditTrail(toolName, input.args) });
     } catch (err) {
       process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   };
   // Normalize the raw payload to an object so a malformed (null/array/scalar)
   // probe is still captured in the audit record rather than dropped.
-  const rawArgs = sanitizeToolArgumentsForAudit(args);
+  const rawArgs = sanitizeToolArgumentsForAuditTrail(toolName, args);
 
   const tool = toolMap.get(toolName);
   if (!tool) {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMcpServer, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
+import { createMcpServer, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type ToolDef, type GovernanceGate, type AuditSink } from './server-factory.js';
 
 describe('createMcpServer', () => {
   it('creates server with name and version', () => {
@@ -335,6 +335,121 @@ describe('createMcpServer', () => {
       const srv = createMcpServer('t', '1', [tool], { audit });
       await srv.callTool('echo', { msg: 'hi' });
       expect(recorded).toEqual([{ tool: 'echo', ok: true, args: { msg: 'hi' } }]);
+    });
+
+    it('redacts right-to-forget selectors before recording audit args', async () => {
+      const recorded: Array<{ tool: string; ok: boolean; args?: unknown }> = [];
+      const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
+      const tool: ToolDef = {
+        name: 'fbeast_memory_right_to_forget',
+        description: 'forget',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'q' },
+            category: { type: 'string', description: 'c' },
+            dryRun: { type: 'boolean', description: 'd' },
+          },
+          required: ['query'],
+        },
+        handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+      };
+      const srv = createMcpServer('t', '1', [tool], { audit });
+      await srv.callTool('fbeast_memory_right_to_forget', { query: 'alice@example.test', category: 'pii', dryRun: true });
+      expect(recorded).toEqual([
+        {
+          tool: 'fbeast_memory_right_to_forget',
+          ok: true,
+          args: {
+            query: '[right-to-forget-selector-redacted]',
+            category: '[right-to-forget-selector-redacted]',
+            dryRun: true,
+          },
+        },
+      ]);
+      expect(JSON.stringify(recorded)).not.toContain('alice@example.test');
+    });
+
+    it('redacts right-to-forget selectors in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        key: 'pii:email',
+        sourceScope: 'import-1',
+        query: 'alice@example.test',
+        dryRun: true,
+      })).toEqual({
+        key: '[right-to-forget-selector-redacted]',
+        sourceScope: '[right-to-forget-selector-redacted]',
+        query: '[right-to-forget-selector-redacted]',
+        dryRun: true,
+      });
+    });
+
+    it('redacts direct right-to-forget selectors even when malformed args include envelope-like properties', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        tool: 'not_the_memory_tool',
+        action: 'alice@example.test',
+        query: 'alice@example.test',
+        extra: 'secret detail',
+      })).toEqual({
+        tool: '[right-to-forget-args-redacted]',
+        action: '[right-to-forget-args-redacted]',
+        query: '[right-to-forget-selector-redacted]',
+        extra: '[right-to-forget-args-redacted]',
+      });
+    });
+
+    it('redacts proxied right-to-forget envelope args in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_right_to_forget',
+        args: 'alice@example.test',
+      })).toEqual({
+        tool: 'fbeast_memory_right_to_forget',
+        args: '[right-to-forget-args-redacted]',
+      });
+    });
+
+
+    it('redacts invalid and unknown right-to-forget audit payloads wholesale', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', 'alice@example.test')).toEqual({
+        invalid: '[right-to-forget-args-redacted]',
+      });
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        queri: 'alice@example.test',
+        dryRun: true,
+      })).toEqual({
+        queri: '[right-to-forget-args-redacted]',
+        dryRun: true,
+      });
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        type: 'alice@example.test',
+        dryRun: 'alice@example.test',
+        query: 'secret-selector',
+      })).toEqual({
+        type: '[right-to-forget-args-redacted]',
+        dryRun: '[right-to-forget-args-redacted]',
+        query: '[right-to-forget-selector-redacted]',
+      });
+    });
+
+
+    it('redacts right-to-forget governor preflight context in the audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
+        action: 'fbeast_memory_right_to_forget',
+        context: '{"query":"alice@example.test"}',
+      })).toEqual({
+        action: 'fbeast_memory_right_to_forget',
+        context: '[right-to-forget-args-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        context: 'alice@example.test',
+        args: { query: 'alice@example.test' },
+        dryRun: true,
+      })).toEqual({
+        context: '[right-to-forget-args-redacted]',
+        args: '[right-to-forget-args-redacted]',
+        dryRun: true,
+      });
     });
 
     it('audits failed handler results as ok=false with args', async () => {

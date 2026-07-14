@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.3.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.16...franken-mcp-suite-v0.3.0) (2026-07-14)
+
+
+### Features
+
+* **memory:** add right-to-forget workflow ([#2212](https://github.com/djm204/frankenbeast/issues/2212)) ([229bc0d](https://github.com/djm204/frankenbeast/commit/229bc0d8f69d5243ba8e3703c266ec9466633ab2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.1 to 0.11.0
+    * @franken/brain bumped from 0.8.1 to 0.9.0
+    * @franken/critique bumped from 0.8.1 to 0.8.2
+    * @franken/governor bumped from 0.6.1 to 0.6.2
+    * @franken/observer bumped from 0.8.0 to 0.8.1
+    * @franken/orchestrator bumped from 0.47.0 to 0.47.1
+    * @franken/planner bumped from 0.4.16 to 0.4.17
+
+## [0.2.16](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.15...franken-mcp-suite-v0.2.16) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/orchestrator bumped from 0.46.1 to 0.47.0
+
 ## [0.2.15](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.14...franken-mcp-suite-v0.2.15) (2026-07-14)
 
 

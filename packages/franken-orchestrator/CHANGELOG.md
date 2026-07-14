@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.47.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.47.0...@franken/orchestrator-v0.47.1) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.8.1 to 0.8.2
+    * @franken/governor bumped from 0.6.1 to 0.6.2
+    * @franken/types bumped from 0.10.1 to 0.11.0
+    * @franken/observer bumped from 0.8.0 to 0.8.1
+    * @franken/planner bumped from 0.4.16 to 0.4.17
+    * @franken/brain bumped from 0.8.1 to 0.9.0
+
+## [0.47.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.46.1...@franken/orchestrator-v0.47.0) (2026-07-14)
+
+
+### Features
+
+* **orchestrator:** add per-lane egress policy ([#2233](https://github.com/djm204/frankenbeast/issues/2233)) ([5d9cdfe](https://github.com/djm204/frankenbeast/commit/5d9cdfeab65394bf5759059d338d2e62963cc77f))
+
 ## [0.46.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.46.0...@franken/orchestrator-v0.46.1) (2026-07-14)
 
 

@@ -33,13 +33,49 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('approved');
   });
 
-  it('denies a destructive fbeast tool (fbeast_memory_forget) on the SHARED path', async () => {
+  it('denies legacy memory forget but allows explicit right-to-forget privacy deletions', async () => {
     // The word heuristic does not catch "forget"; classification lives in the
     // shared governor so every caller (hook, fbeast_governor_check, central
-    // gate, governor_log) gets the same 'denied' decision for a benign key.
+    // gate, governor_log) gets the same decision for a benign key. The explicit
+    // privacy deletion workflow stays executable through the installed server.
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
-    const result = await governor.check({ action: 'fbeast_memory_forget', context: '{"key":"note"}' });
-    expect(result.decision).toBe('denied');
+    await expect(governor.check({ action: 'fbeast_memory_forget', context: '{"key":"note"}' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({ action: 'fbeast_memory_right_to_forget', context: '{"category":"[right-to-forget-selector-redacted]"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+
+  it('redacts right-to-forget context before shared governor logging', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_right_to_forget',
+      context: '{"query":"alice@example.test","key":"pii:email"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_right_to_forget') as { context: string };
+    db.close();
+    expect(row.context).toBe('[right-to-forget-context-redacted]');
+    expect(row.context).not.toContain('alice@example.test');
+  });
+
+  it('allows right-to-forget dryRun calls while keeping selector context redacted', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_right_to_forget',
+      context: '{"query":"alice@example.test","dryRun":true}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_right_to_forget') as { context: string };
+    db.close();
+    expect(row.context).toBe('[right-to-forget-context-redacted]');
+    expect(row.context).not.toContain('alice@example.test');
   });
 
   it('denies raw destructive patterns (rm -rf)', async () => {

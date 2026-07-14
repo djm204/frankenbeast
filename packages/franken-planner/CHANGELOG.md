@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.17](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.16...@franken/planner-v0.4.17) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.1 to 0.11.0
+
 ## [0.4.16](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.15...@franken/planner-v0.4.16) (2026-07-14)
 
 

@@ -12,7 +12,7 @@ const standaloneServers = [
   {
     registryServer: 'memory',
     createServer: () => createMemoryServer({
-      brain: { query: vi.fn(), store: vi.fn(), frontload: vi.fn(), forget: vi.fn() },
+      brain: { query: vi.fn(), store: vi.fn(), frontload: vi.fn(), forget: vi.fn(), rightToForget: vi.fn() },
     }),
   },
   {

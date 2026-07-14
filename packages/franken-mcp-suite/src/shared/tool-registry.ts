@@ -178,6 +178,45 @@ const TOOLS: ToolFull[] = [
       return { content: [{ type: 'text', text: `Removed memory: ${key}` }] };
     },
   },
+  {
+    name: 'fbeast_memory_right_to_forget',
+    server: 'memory',
+    description: 'Delete selected memory entries and derived artifacts, then return non-sensitive deletion evidence',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Exact working-memory key to delete' },
+        category: { type: 'string', description: 'Category metadata or key prefix to delete' },
+        sourceScope: { type: 'string', description: 'Source/sourceScope metadata or key prefix to delete' },
+        query: { type: 'string', description: 'Sensitive fact substring to delete without echoing in the report' },
+        type: { type: 'string', description: 'Memory scope: working, episodic, or all', enum: ['working', 'episodic', 'all'] },
+        dryRun: { type: 'boolean', description: 'Report counts without deleting or writing audit evidence' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const input = {
+        ...(args['key'] !== undefined ? { key: String(args['key']) } : {}),
+        ...(args['category'] !== undefined ? { category: String(args['category']) } : {}),
+        ...(args['sourceScope'] !== undefined ? { sourceScope: String(args['sourceScope']) } : {}),
+        ...(args['query'] !== undefined ? { query: String(args['query']) } : {}),
+        ...(args['type'] !== undefined ? { type: String(args['type']) as 'working' | 'episodic' | 'all' } : {}),
+        ...(args['dryRun'] !== undefined ? { dryRun: args['dryRun'] === true || String(args['dryRun']) === 'true' } : {}),
+      };
+      const report = await brain.rightToForget(input);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            selectorHash: report.selectorHash,
+            dryRun: report.dryRun,
+            deleted: report.deleted,
+            remainingReferences: report.remainingReferences,
+            ...(report.auditEventId === undefined ? {} : { auditEventId: report.auditEventId }),
+          }, null, 2),
+        }],
+      };
+    },
+  },
 
   // --- planner ---
   {
