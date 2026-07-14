@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.7.17](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.16...franken-observer-v0.7.17) (2026-07-14)
+
+
+### Bug Fixes
+
+* bound and redact error bodies ([de5b902](https://github.com/djm204/frankenbeast/commit/de5b902bb01c41caa2b7678bfbf2db99e2ddb00c))
+* cap and sanitize webhook error bodies ([f9829b1](https://github.com/djm204/frankenbeast/commit/f9829b19a3222dcf5ab194cabfa76a45ff78251a))
+* close remaining HTTP error body review gaps ([685727c](https://github.com/djm204/frankenbeast/commit/685727cba7b472380d1f6510d0ddce66581d430e))
+* enrich HTTP error context ([681a32d](https://github.com/djm204/frankenbeast/commit/681a32d638c3b818389746cf220b331d57821e37))
+* enrich HTTP error context ([79b5b40](https://github.com/djm204/frankenbeast/commit/79b5b4064d85b7d2037b30a6b90431cf893def94))
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* harden HTTP error body handling ([ba89762](https://github.com/djm204/frankenbeast/commit/ba8976259b36f86639c99382bf9da27ce9d12d8b))
+* harden HTTP error redaction ([e244b16](https://github.com/djm204/frankenbeast/commit/e244b16c21faaa562ea52cd2c7c0ef019e9fca6b))
+* **http:** scrub urls and cloned diagnostic streams ([62fb98c](https://github.com/djm204/frankenbeast/commit/62fb98c3d95a5514de2d96c97af14d96504ca0d8))
+* **observer:** bound InMemoryAdapter trace retention ([#1969](https://github.com/djm204/frankenbeast/issues/1969)) ([e55ac66](https://github.com/djm204/frankenbeast/commit/e55ac66bec376f202f68784b56563bc59e65cac3))
+* **observer:** bound webhook error body reads ([e78cd20](https://github.com/djm204/frankenbeast/commit/e78cd208471d115e6c602d2abb329b79e55bd3a3))
+* **observer:** cancel exact-cap error body reads ([7e3e412](https://github.com/djm204/frankenbeast/commit/7e3e4123a2b00a9f951d35c24fd8b4c252d90780))
+* **observer:** enforce webhook target allowlist ([0055ddb](https://github.com/djm204/frankenbeast/commit/0055ddba117a7fafcc07e68b4b374cf60dee8ef6))
+* **observer:** validate attribution token counts ([#2009](https://github.com/djm204/frankenbeast/issues/2009)) ([d3cebf9](https://github.com/djm204/frankenbeast/commit/d3cebf9aa01f9667fc3152f2b01a84b0725be488))
+* **observer:** validate HTTP retry count ([#2172](https://github.com/djm204/frankenbeast/issues/2172)) ([a7d01af](https://github.com/djm204/frankenbeast/commit/a7d01afc6fc198a5461dd602453e4e7bc19d9d97))
+* **observer:** validate webhook retry bounds ([#2162](https://github.com/djm204/frankenbeast/issues/2162)) ([58782a9](https://github.com/djm204/frankenbeast/commit/58782a93adb286a8919c310b98954b966032a0b9))
+* **observer:** validate webhook retry counts ([f8ab30d](https://github.com/djm204/frankenbeast/commit/f8ab30d90cb0e69f16886c37fb211e5ea6086a57)), closes [#2015](https://github.com/djm204/frankenbeast/issues/2015)
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+* redact auth data in HTTP errors ([69f5f05](https://github.com/djm204/frankenbeast/commit/69f5f0540bccb21ccf11b943ec43e598fa12095a))
+* redact webhook error endpoints ([3de22b9](https://github.com/djm204/frankenbeast/commit/3de22b904ccedbb35a47dbd74b0ff1e2ba2c174b))
+
+
+### Documentation
+
+* **dx:** document Grafana observer env vars ([#2131](https://github.com/djm204/frankenbeast/issues/2131)) ([97c806b](https://github.com/djm204/frankenbeast/commit/97c806bb809dd04f79ac9d5f070e11e71d049c4c))
+* **observer:** document Grafana env vars ([9caf363](https://github.com/djm204/frankenbeast/commit/9caf363b2f822860ac27563fbbf80252eab09bf2)), closes [#2130](https://github.com/djm204/frankenbeast/issues/2130)
+* **observer:** document Langfuse environment variables ([#2185](https://github.com/djm204/frankenbeast/issues/2185)) ([9bb68ca](https://github.com/djm204/frankenbeast/commit/9bb68ca139e2d646ed4f0d16c19b133f8eae1ea0))
+
+
+### Tests
+
+* document webhook redaction edge cases ([6eb32c9](https://github.com/djm204/frankenbeast/commit/6eb32c9ff5427dc17501482b888487b6ce173bc9))
+* **observer:** assert invalid replay refs skip blob reads ([#2054](https://github.com/djm204/frankenbeast/issues/2054)) ([ad36aea](https://github.com/djm204/frankenbeast/commit/ad36aea28093cb4342b0357dce69bd68862d9d88)), closes [#2052](https://github.com/djm204/frankenbeast/issues/2052)
+* **observer:** cover missing audit hash content ([#2053](https://github.com/djm204/frankenbeast/issues/2053)) ([bb0064f](https://github.com/djm204/frankenbeast/commit/bb0064fd1e991ebefb0fd4d64b412f3f6292b3a0)), closes [#2048](https://github.com/djm204/frankenbeast/issues/2048)
+* **observer:** cover missing rate limit header ([#2202](https://github.com/djm204/frankenbeast/issues/2202)) ([660d3d0](https://github.com/djm204/frankenbeast/commit/660d3d05e6bea29576452db693290b57de58ffd2))
+* **observer:** document webhook async drain ([7dbf4ed](https://github.com/djm204/frankenbeast/commit/7dbf4ed27c1315663abc9fe6f0ed49a71a565c4e)), closes [#2155](https://github.com/djm204/frankenbeast/issues/2155)
+* **observer:** isolate eval suite discovery ([#1972](https://github.com/djm204/frankenbeast/issues/1972)) ([19b217f](https://github.com/djm204/frankenbeast/commit/19b217f1784fa469ed7cd91488fda831f5299607)), closes [#1962](https://github.com/djm204/frankenbeast/issues/1962)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.9.0 to 0.10.0
+
 ## [0.7.16](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.15...franken-observer-v0.7.16) (2026-07-11)
 
 

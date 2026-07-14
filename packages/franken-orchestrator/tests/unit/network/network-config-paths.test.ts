@@ -28,6 +28,12 @@ describe('network-config-paths', () => {
     expect(getNetworkConfigValue(next, 'chat.port')).toBe(4242);
   });
 
+  it('coerces delivery sensitivity channel opt-ins through setNetworkConfigValue', () => {
+    const next = setNetworkConfigValue(defaultConfig(), 'comms.slack.allowSensitiveDelivery', 'true');
+
+    expect(next.comms.slack.allowSensitiveDelivery).toBe(true);
+  });
+
   it('applies multiple --set assignments', () => {
     const next = applyNetworkConfigSets(defaultConfig(), [
       'chat.model=gpt-5',

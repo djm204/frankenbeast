@@ -1,4 +1,4 @@
-import type { ChannelType, OutboundMessageStatus, ChannelAction } from './types.js';
+import type { ChannelType, OutboundMessageStatus, ChannelAction, DeliverySensitivity } from './types.js';
 
 export interface CommsRuntimePort {
   processInbound(input: CommsInboundInput): Promise<CommsInboundResult>;
@@ -15,6 +15,7 @@ export interface CommsInboundInput {
 export interface CommsInboundResult {
   text: string;
   status?: OutboundMessageStatus;
+  sensitivity?: DeliverySensitivity;
   actions?: ChannelAction[];
   metadata?: Record<string, unknown>;
   provider?: {

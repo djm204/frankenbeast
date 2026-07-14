@@ -110,6 +110,121 @@ describe('createMcpServer', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('rejects denied argument-shape keys before invoking handlers', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+
+    const res = await srv.callTool('cfg', { args: { safe: 'ok', constructor: { prototype: { polluted: true } } } });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toContain('rejected unsafe argument shape');
+    expect(res.content[0]!.text).toContain('denied property name: constructor');
+    expect(res.content[0]!.text).not.toContain('polluted');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects accessor, array, and non-plain object argument shapes without reading attacker-controlled values', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    const accessorPayload: Record<string, unknown> = {};
+    Object.defineProperty(accessorPayload, 'secret', {
+      enumerable: true,
+      get() {
+        throw new Error('getter should not run');
+      },
+    });
+    const accessorArray: unknown[] = [];
+    Object.defineProperty(accessorArray, '0', {
+      enumerable: true,
+      get() {
+        throw new Error('array getter should not run');
+      },
+    });
+    Object.defineProperty(accessorArray, 'constructor', { enumerable: true, value: {} });
+    const taggedObject = Object.create(Date.prototype) as Record<PropertyKey, unknown>;
+    Object.defineProperty(taggedObject, Symbol.toStringTag, {
+      get() {
+        throw new Error('toStringTag should not run');
+      },
+    });
+
+    const accessorRes = await srv.callTool('cfg', { args: accessorPayload });
+    const arrayRes = await srv.callTool('cfg', { args: { nested: accessorArray } });
+    const dateRes = await srv.callTool('cfg', { args: new Date('2026-07-12T00:00:00Z') });
+    const taggedRes = await srv.callTool('cfg', { args: taggedObject });
+
+    expect(accessorRes.isError).toBe(true);
+    expect(accessorRes.content[0]!.text).toContain('must be a data property');
+    expect(arrayRes.isError).toBe(true);
+    expect(arrayRes.content[0]!.text).toContain('must be a data property');
+    expect(dateRes.isError).toBe(true);
+    expect(dateRes.content[0]!.text).toContain('must be a plain JSON object');
+    expect(taggedRes.isError).toBe(true);
+    expect(taggedRes.content[0]!.text).toContain('must be a plain JSON object');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('depth-limits unsafe shape validation before primitive schema checks can overflow the stack', async () => {
+    const calls: unknown[] = [];
+    const tool: ToolDef = {
+      name: 'scan',
+      description: 'scan',
+      inputSchema: { type: 'object', properties: { input: { type: 'string', description: 'input' } }, required: ['input'] },
+      handler: async (a) => { calls.push(a); return { content: [{ type: 'text' as const, text: 'ok' }] }; },
+    };
+    const srv = createMcpServer('t', '1', [tool]);
+    let nested: Record<string, unknown> = { leaf: 'x' };
+    for (let i = 0; i < 80; i += 1) nested = { child: nested };
+
+    const res = await srv.callTool('scan', { input: nested });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toContain('exceeds maximum nesting depth');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('sanitizes unsafe rejected payloads before audit sinks serialize them', async () => {
+    const recorded: Array<{ tool: string; ok: boolean; decision?: string; args?: unknown }> = [];
+    const audit: AuditSink = { record: async (e) => { recorded.push(e); JSON.stringify(e.args); } };
+    const tool: ToolDef = {
+      name: 'cfg',
+      description: 'cfg',
+      inputSchema: { type: 'object', properties: { args: { type: 'object', description: 'a' } }, required: ['args'] },
+      handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+    };
+    const srv = createMcpServer('t', '1', [tool], { audit });
+    const accessorPayload: Record<string, unknown> = {};
+    Object.defineProperty(accessorPayload, 'secret', {
+      enumerable: true,
+      get() {
+        throw new Error('getter should not run');
+      },
+    });
+    const nonJsonPayload = { toJSON: () => { throw new Error('toJSON should not run'); } };
+
+    const accessorRes = await srv.callTool('cfg', { args: accessorPayload });
+    const nonJsonRes = await srv.callTool('cfg', { args: nonJsonPayload });
+
+    expect(accessorRes.isError).toBe(true);
+    expect(nonJsonRes.isError).toBe(true);
+    expect(recorded).toEqual([
+      { tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { secret: '[accessor]' } } },
+      { tool: 'cfg', ok: false, decision: 'validation_error', args: { args: { toJSON: '[non-json-value]' } } },
+    ]);
+  });
+
   it('rejects non-finite number arguments before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

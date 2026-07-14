@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.2.8](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.7...franken-web-v0.2.8) (2026-07-14)
+
+
+### Bug Fixes
+
+* **web:** preserve wizard launch selections ([#1478](https://github.com/djm204/frankenbeast/issues/1478)) ([002d39b](https://github.com/djm204/frankenbeast/commit/002d39ba6f27ae8a62ee72431aea5ab145be056c))
+
+## [0.2.7](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.6...franken-web-v0.2.7) (2026-07-14)
+
+
+### Bug Fixes
+
+* address Codex HTTP error diagnostics feedback ([2d05a16](https://github.com/djm204/frankenbeast/commit/2d05a16de1f39211774875997d4c09c9eaee6c06))
+* bound and redact error bodies ([de5b902](https://github.com/djm204/frankenbeast/commit/de5b902bb01c41caa2b7678bfbf2db99e2ddb00c))
+* bound provider error body diagnostics ([189e3b0](https://github.com/djm204/frankenbeast/commit/189e3b08b218bd4a6ad76db92c7f297fb0383fe6))
+* close remaining HTTP error body review gaps ([685727c](https://github.com/djm204/frankenbeast/commit/685727cba7b472380d1f6510d0ddce66581d430e))
+* enrich HTTP error context ([681a32d](https://github.com/djm204/frankenbeast/commit/681a32d638c3b818389746cf220b331d57821e37))
+* enrich HTTP error context ([79b5b40](https://github.com/djm204/frankenbeast/commit/79b5b4064d85b7d2037b30a6b90431cf893def94))
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* harden HTTP error body handling ([ba89762](https://github.com/djm204/frankenbeast/commit/ba8976259b36f86639c99382bf9da27ce9d12d8b))
+* harden HTTP error redaction ([e244b16](https://github.com/djm204/frankenbeast/commit/e244b16c21faaa562ea52cd2c7c0ef019e9fca6b))
+* **http:** scrub urls and cloned diagnostic streams ([62fb98c](https://github.com/djm204/frankenbeast/commit/62fb98c3d95a5514de2d96c97af14d96504ca0d8))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+* redact auth data in HTTP errors ([69f5f05](https://github.com/djm204/frankenbeast/commit/69f5f0540bccb21ccf11b943ec43e598fa12095a))
+* **web:** clarify dashboard SSE snapshot parse errors ([#2213](https://github.com/djm204/frankenbeast/issues/2213)) ([6758717](https://github.com/djm204/frankenbeast/commit/67587170fa1478e7f15d1c6b23192a0d6566719c)), closes [#2205](https://github.com/djm204/frankenbeast/issues/2205)
+* **web:** clear Beast SSE reconnect errors ([#2195](https://github.com/djm204/frankenbeast/issues/2195)) ([1278ebc](https://github.com/djm204/frankenbeast/commit/1278ebc5b7a26dfe799171fc4e012a9f4746af04))
+* **web:** fall back when websocket send throws ([#2147](https://github.com/djm204/frankenbeast/issues/2147)) ([3114fc2](https://github.com/djm204/frankenbeast/commit/3114fc2d81536414a52dbaba03187fb657156190))
+* **web:** fall back when websocket send throws ([#2151](https://github.com/djm204/frankenbeast/issues/2151)) ([69a7b7b](https://github.com/djm204/frankenbeast/commit/69a7b7b1a45214040cb5169b14011a306b212f01))
+* **web:** load Beast LLM targets from providers ([#2117](https://github.com/djm204/frankenbeast/issues/2117)) ([6bf0927](https://github.com/djm204/frankenbeast/commit/6bf09276330c4654a7acc446daae9dfe242ef818))
+* **web:** preserve json-only network error envelopes ([683f5ff](https://github.com/djm204/frankenbeast/commit/683f5ff6f56759aa7c5f9cb8c73272ef60a49a30))
+* **web:** reconnect Beast SSE after malformed payloads ([b13a575](https://github.com/djm204/frankenbeast/commit/b13a57579b5e190182da62dcddd7388f0597849e)), closes [#2082](https://github.com/djm204/frankenbeast/issues/2082)
+* **web:** reject fake directory picker paths ([#2097](https://github.com/djm204/frankenbeast/issues/2097)) ([ac5b707](https://github.com/djm204/frankenbeast/commit/ac5b707a99226ae942f0c8d07b8f3613d565dfad))
+* **web:** reject path traversal during normalization ([482cf54](https://github.com/djm204/frankenbeast/commit/482cf543cd579c23c0da157b910c5012365de069)), closes [#1792](https://github.com/djm204/frankenbeast/issues/1792)
+* **web:** restrict untrusted markdown attachments ([#2017](https://github.com/djm204/frankenbeast/issues/2017)) ([a0aa90e](https://github.com/djm204/frankenbeast/commit/a0aa90e937376375e5fee8cb121fe73c43111dcb))
+* **web:** surface analytics API error messages ([fb33e79](https://github.com/djm204/frankenbeast/commit/fb33e7900b912c7fa617653f86ee9d76d7c2e5fd))
+* **web:** surface Beast API structured errors ([#2116](https://github.com/djm204/frankenbeast/issues/2116)) ([c4f4f5e](https://github.com/djm204/frankenbeast/commit/c4f4f5eb164755d24c01b9096e129ef7b6a00e4d))
+* **web:** surface dashboard response errors ([2f7466f](https://github.com/djm204/frankenbeast/commit/2f7466f4f690b693d20037e307cb8ccdf33290d6))
+* **web:** surface dashboard stream reconnect failures ([54edd90](https://github.com/djm204/frankenbeast/commit/54edd90b3f47e3038d15ef0f87c16db8d8ba0c5b)), closes [#2034](https://github.com/djm204/frankenbeast/issues/2034)
+
+
+### Documentation
+
+* **dx:** refresh franken-web ramp-up map ([#2115](https://github.com/djm204/frankenbeast/issues/2115)) ([91de9f6](https://github.com/djm204/frankenbeast/commit/91de9f66b2531e1f36cc13500b53abde6aea6f28))
+* **web:** clarify dashboard backend proxy env vars ([#2028](https://github.com/djm204/frankenbeast/issues/2028)) ([171c79d](https://github.com/djm204/frankenbeast/commit/171c79d6943bb8a1d32514a1165b0d5fac2eacf4))
+* **web:** refresh ramp-up source map ([232405c](https://github.com/djm204/frankenbeast/commit/232405c38dad086a3d1e54e5c286cfa72b0eb56c)), closes [#2109](https://github.com/djm204/frankenbeast/issues/2109)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.9.0 to 0.10.0
+
 ## [0.2.6](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.5...franken-web-v0.2.6) (2026-07-11)
 
 

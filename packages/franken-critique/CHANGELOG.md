@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.7.0...franken-critique-v0.8.0) (2026-07-14)
+
+
+### Features
+
+* **critique:** quarantine stale lessons ([#2188](https://github.com/djm204/frankenbeast/issues/2188)) ([881c072](https://github.com/djm204/frankenbeast/commit/881c072db62fb02846133f7a6671439557fac9e4))
+* **learning:** add backlog prioritization report ([#2118](https://github.com/djm204/frankenbeast/issues/2118)) ([ea038ca](https://github.com/djm204/frankenbeast/commit/ea038ca9e70948ff0b04264905b443172d51e8ba))
+* **learning:** add lesson contradiction detector ([#1886](https://github.com/djm204/frankenbeast/issues/1886)) ([aea86da](https://github.com/djm204/frankenbeast/commit/aea86dac73b041022f8feb048f05e404840d9bfb))
+* **learning:** add lesson cooldown guard ([#1917](https://github.com/djm204/frankenbeast/issues/1917)) ([ccf6d94](https://github.com/djm204/frankenbeast/commit/ccf6d94e2c57be38dcdffbbd1ce68a5719a9ec91))
+* **learning:** add lesson rollback workflow ([#2040](https://github.com/djm204/frankenbeast/issues/2040)) ([001bd7e](https://github.com/djm204/frankenbeast/commit/001bd7e4eeface23a959c2c33ff8e5745c0795ea))
+* **learning:** add per-agent improvement scorecards ([#2105](https://github.com/djm204/frankenbeast/issues/2105)) ([e2f8a03](https://github.com/djm204/frankenbeast/commit/e2f8a03d9cbe62bf81339f4a7b7dd20e3b4f5bca))
+* **learning:** mine cross-task blocker patterns ([#1991](https://github.com/djm204/frankenbeast/issues/1991)) ([f7318be](https://github.com/djm204/frankenbeast/commit/f7318be7c0895c47d7795aaf953701e62c27c2bf))
+
+
+### Bug Fixes
+
+* **critique:** detect block comment markers ([#1651](https://github.com/djm204/frankenbeast/issues/1651)) ([4afa817](https://github.com/djm204/frankenbeast/commit/4afa8178b77490a2fbeff7b2af4324af631aac02))
+* **critique:** evict expired rate-limit buckets ([ad1ef8c](https://github.com/djm204/frankenbeast/commit/ad1ef8c68d1f71bebbb637844d54e2c86ac46224)), closes [#1922](https://github.com/djm204/frankenbeast/issues/1922)
+* **critique:** report unresolved marker locations ([2180419](https://github.com/djm204/frankenbeast/commit/21804192ab3f897513d37ff3cede2b9c71848878))
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* **learning:** tighten failed-test skill detector ([#1888](https://github.com/djm204/frankenbeast/issues/1888)) ([72624b4](https://github.com/djm204/frankenbeast/commit/72624b452758506c229732a969694c15e1af90fd))
+* **lint:** require parseInt radix arguments ([023d526](https://github.com/djm204/frankenbeast/commit/023d526a400bc1cd4f2a71bb134b47d750ad7ac0))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+* **security:** harden token comparisons ([#1961](https://github.com/djm204/frankenbeast/issues/1961)) ([82321ea](https://github.com/djm204/frankenbeast/commit/82321eae757df4eb7b78fad07d5752689a5402f8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.9.0 to 0.10.0
+
 ## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.6.16...franken-critique-v0.7.0) (2026-07-11)
 
 

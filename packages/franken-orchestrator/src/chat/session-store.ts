@@ -4,6 +4,18 @@ import { join, resolve, sep } from 'node:path';
 import { ChatSessionSchema, type ChatSession } from './types.js';
 import { isoNow, now as deterministicNow } from '@franken/types';
 
+const MAX_CHAT_SESSION_ID_LENGTH = 128;
+
+export function isValidChatSessionId(id: string): boolean {
+  return id.length > 0
+    && id.length <= MAX_CHAT_SESSION_ID_LENGTH
+    && id !== '.'
+    && id !== '..'
+    && !id.includes('/')
+    && !id.includes('\\')
+    && !id.includes('\0');
+}
+
 export interface CorruptChatSessionFile {
   id: string;
   projectId?: string;
@@ -119,8 +131,13 @@ export class FileSessionStore implements ISessionStore {
   }
 
   delete(id: string): void {
+    const path = this.safeFilePath(id);
+    if (path === undefined) {
+      return;
+    }
+
     try {
-      unlinkSync(this.filePath(id));
+      unlinkSync(path);
     } catch {
       // swallow ENOENT
     }
@@ -131,6 +148,11 @@ export class FileSessionStore implements ISessionStore {
   }
 
   private safeFilePath(id: string): string | undefined {
+    if (!isValidChatSessionId(id)) {
+      console.warn(`[chat-session-store] ignoring invalid chat session id ${JSON.stringify(id)}`);
+      return undefined;
+    }
+
     const resolvedStoreDir = resolve(this.storeDir);
     const resolvedPath = resolve(this.storeDir, `${id}.json`);
     if (resolvedPath === resolvedStoreDir || !resolvedPath.startsWith(`${resolvedStoreDir}${sep}`)) {

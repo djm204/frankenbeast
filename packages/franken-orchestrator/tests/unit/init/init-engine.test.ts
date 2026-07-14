@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { runInteractiveInit } from '../../../src/init/init-engine.js';
+import { runInteractiveInit, runRepairInit } from '../../../src/init/init-engine.js';
 import { FileInitStateStore } from '../../../src/init/init-state-store.js';
 import { createEmptyInitState } from '../../../src/init/init-types.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
@@ -124,6 +124,80 @@ describe('runInteractiveInit', () => {
     });
 
     expect(result.config.network.secureBackend).toBe('1password');
+  });
+
+  it('repairs malformed config JSON after quarantine instead of aborting', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateStore = new FileInitStateStore(join(tempDir, '.fbeast', 'init-state.json'));
+    const { io } = scriptedIo();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, '{"comms": ', 'utf-8');
+    await stateStore.save(createEmptyInitState(configFile));
+
+    const result = await runRepairInit({ configFile, stateStore, io });
+
+    expect(result.state.configPath).toBe(configFile);
+    expect(result.config.chat.enabled).toBe(true);
+    expect(JSON.parse(await readFile(configFile, 'utf-8'))).toMatchObject({ chat: { enabled: true } });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
+  });
+
+  it('repairs malformed init state by rebuilding it from valid config defaults', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateFile = join(tempDir, '.fbeast', 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
+    const config = defaultConfig();
+    config.chat.enabled = true;
+    config.network.mode = 'insecure';
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateFile, '{"answers": {', 'utf-8');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { io } = scriptedIo(
+      '', // keep chat enabled from config
+      '', // keep dashboard from config
+      '', // keep comms from config
+      '', // keep provider from config
+      '', // keep security mode from config
+    );
+
+    const result = await runRepairInit({ configFile, stateStore, io });
+
+    expect(result.config.chat.enabled).toBe(true);
+    expect(result.state.configPath).toBe(configFile);
+    expect(result.state.selectedModules).toEqual(['chat', 'dashboard']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Malformed init verification JSON'));
+  });
+
+  it('repairs non-object init state by rebuilding it from valid config defaults', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-init-engine-'));
+    const configFile = join(tempDir, '.fbeast', 'config.json');
+    const stateFile = join(tempDir, '.fbeast', 'init-state.json');
+    const stateStore = new FileInitStateStore(stateFile);
+    const config = defaultConfig();
+    config.chat.enabled = true;
+    config.network.mode = 'insecure';
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await writeFile(stateFile, 'null\n', 'utf-8');
+    const { io } = scriptedIo(
+      '', // keep chat enabled from config
+      '', // keep dashboard from config
+      '', // keep comms from config
+      '', // keep provider from config
+      '', // keep security mode from config
+    );
+
+    const result = await runRepairInit({ configFile, stateStore, io });
+
+    expect(result.config.chat.enabled).toBe(true);
+    expect(result.config.network.mode).toBe('insecure');
+    expect(result.state.configPath).toBe(configFile);
+    expect(result.state.securityMode).toBe('insecure');
+    expect(result.state.selectedModules).toEqual(['chat', 'dashboard']);
   });
 
   it('resumes from saved init state defaults instead of starting from scratch', async () => {

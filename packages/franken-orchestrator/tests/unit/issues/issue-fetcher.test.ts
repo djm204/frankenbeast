@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { IssueFetcher } from '../../../src/issues/issue-fetcher.js';
-import type { GithubIssue, IIssueFetcher, IssueFetchOptions } from '../../../src/issues/types.js';
+import type { GithubIssue, IIssueFetcher } from '../../../src/issues/types.js';
 
 type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void;
 type ExecFn = (file: string, args: string[], callback: ExecCallback) => void;
@@ -52,8 +52,7 @@ describe('IssueFetcher', () => {
       const execFn = vi.fn(makeExecFn('[]'));
       const fetcher = new IssueFetcher(execFn);
 
-      // Will throw because 0 results, but we can check the command built
-      await expect(fetcher.fetch({})).rejects.toThrow();
+      await expect(fetcher.fetch({})).resolves.toEqual([]);
 
       expect(execFn).toHaveBeenCalledOnce();
       const [file, args] = execFn.mock.calls[0]!;
@@ -178,11 +177,11 @@ describe('IssueFetcher', () => {
       expect(issues[1]!.labels).toEqual(['enhancement']);
     });
 
-    it('throws descriptive error when fetch returns 0 results', async () => {
+    it('returns an empty issue list when filters match no issues', async () => {
       const execFn = makeExecFn('[]');
       const fetcher = new IssueFetcher(execFn);
 
-      await expect(fetcher.fetch({})).rejects.toThrow(/no issues found/i);
+      await expect(fetcher.fetch({})).resolves.toEqual([]);
     });
 
     it('throws descriptive error when gh command fails', async () => {

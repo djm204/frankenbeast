@@ -48,7 +48,7 @@ describe('MCP execution adapters', () => {
     writeFileSync(join(skillsDir, 'github', 'mcp.json'), JSON.stringify({ mcpServers: { github: { command: 'github' } } }));
     writeFileSync(join(skillsDir, 'github', 'tools.json'), JSON.stringify([
       { name: 'create_issue', description: 'Create issue', inputSchema: {}, requiresHitl: true },
-      { name: 'list_repos', description: 'List repos', inputSchema: {} },
+      { name: 'list_repos', description: 'List repos', inputSchema: {}, requiresHitl: false },
     ]));
     const manager = new SkillManager(skillsDir, new Set(['github']));
     const adapter = new SkillManagerAdapter(manager);
@@ -83,7 +83,9 @@ describe('MCP execution adapters', () => {
     const adapter = new SkillManagerAdapter(manager);
 
     expect(adapter.hasSkill('dynamic')).toBe(true);
-    expect(adapter.getAvailableSkills().map(skill => skill.id)).toEqual(['dynamic']);
+    expect(adapter.getAvailableSkills()).toEqual([
+      expect.objectContaining({ id: 'dynamic', requiresHitl: true, executionType: 'mcp' }),
+    ]);
   });
 
   it('McpSdkAdapter fails closed when no live MCP transport is configured', async () => {

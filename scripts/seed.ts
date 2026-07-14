@@ -1,7 +1,35 @@
 #!/usr/bin/env npx tsx
 
+import { existsSync, readFileSync } from 'node:fs';
+
 function printLine(...args: unknown[]): void {
   console.info(...args);
+}
+
+function parseEnvFile(path: string): Map<string, string> {
+  const env = new Map<string, string>();
+
+  if (!existsSync(path)) {
+    return env;
+  }
+
+  for (const rawLine of readFileSync(path, 'utf8').split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const equalsIndex = line.indexOf('=');
+    if (equalsIndex <= 0) {
+      continue;
+    }
+
+    const key = line.slice(0, equalsIndex).trim();
+    const value = line.slice(equalsIndex + 1).trim().replace(/^(?:"|')|(?:"|')$/gu, '');
+    env.set(key, value);
+  }
+
+  return env;
 }
 
 /**
@@ -11,9 +39,10 @@ function printLine(...args: unknown[]): void {
  * Usage: npm run local:seed
  */
 
-const CHROMA_URL = process.env['CHROMA_URL'] ?? 'http://localhost:8000';
-const CHROMA_TENANT = process.env['CHROMA_TENANT'] ?? 'default_tenant';
-const CHROMA_DATABASE = process.env['CHROMA_DATABASE'] ?? 'default_database';
+const envFile = parseEnvFile('.env');
+const CHROMA_URL = process.env['CHROMA_URL'] ?? envFile.get('CHROMA_URL') ?? 'http://localhost:8000';
+const CHROMA_TENANT = process.env['CHROMA_TENANT'] ?? envFile.get('CHROMA_TENANT') ?? 'default_tenant';
+const CHROMA_DATABASE = process.env['CHROMA_DATABASE'] ?? envFile.get('CHROMA_DATABASE') ?? 'default_database';
 
 export {};
 

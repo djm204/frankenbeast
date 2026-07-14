@@ -55,6 +55,14 @@ Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxi
 
 If you use a non-default backend port in local development, keep `VITE_API_URL` unset and set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side. Beast routes (`/v1/beasts/*`) reuse that same target by default. Set `VITE_BEAST_API_PROXY_TARGET` only when Beast controls run on a different backend, for example a separate local orchestrator or daemon port:
 
+| Local workflow | Backend topology | Vite env vars to set |
+| --- | --- | --- |
+| Chat-only dashboard | `chat-server` serves `/api/*`, `/v1/chat/*`, and the chat WebSocket | Defaults need no extra env; for a custom chat-server port, set only `VITE_API_PROXY_TARGET`. |
+| Chat plus Beast controls through one backend | `chat-server` also handles or proxies `/v1/beasts/*` | Set `VITE_API_PROXY_TARGET` to the chat-server URL and leave `VITE_BEAST_API_PROXY_TARGET` unset. |
+| Chat plus separate Beast daemon | `chat-server` handles chat/API; `beasts-daemon` handles `/v1/beasts/*` on another URL | Set `VITE_API_PROXY_TARGET` to chat-server and `VITE_BEAST_API_PROXY_TARGET` to beasts-daemon. |
+
+Leave `VITE_API_URL` unset for all local Vite workflows. It is a legacy/reserved browser value and does not select the backend port for the current same-origin dashboard client.
+
 ```bash
 npm --workspace @franken/orchestrator run chat-server -- --base-dir /path/to/your-project --port 4242
 VITE_API_PROXY_TARGET=http://127.0.0.1:4242 npm --workspace @franken/web run dev
@@ -87,6 +95,13 @@ The `Beasts` tab is now tracked-agent based:
 - `design-doc -> chunk creation` uses a file-style path field
 - `martin-loop` uses a directory-style path field
 - agent detail shows init lifecycle status, startup events, linked run id, and linked run logs once dispatch occurs
+
+Path-style fields entered in the dashboard are normalized client-side before submission:
+
+- duplicate separators and `.` segments are collapsed for deterministic display/submission
+- NUL bytes and `..` parent-traversal segments are rejected by default
+- launch submissions use repo-relative paths; absolute paths, drive-letter paths, and UNC paths are rejected at the wizard boundary
+- the only traversal override is the explicit `allowParentTraversal` option in `normalizePath`, reserved for already-trusted operator-supplied paths outside untrusted launch submissions; untrusted UI/API text should keep the default deny-by-default behavior
 
 Execution controls (`start`, `stop`, `restart`, `kill`) still target Beast runs after a tracked agent has dispatched.
 

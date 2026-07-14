@@ -59,6 +59,97 @@ describe('BeastDispatchService', () => {
     expect(metrics.render()).toContain('beast_runs_created_total{definition_id="martin-loop",source="dashboard"} 1');
   });
 
+  it('preserves shared runtime config keys when strict definition parsing strips wizard metadata', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async () => repo.createAttempt('placeholder', { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        workflow: { workflowType: 'martin-loop' },
+        provider: 'claude',
+        objective: 'Implement the dispatch panel',
+        chunkDirectory: 'docs/chunks',
+        skills: ['code-review', 'testing'],
+        promptConfig: { text: 'Launch with this context.' },
+        gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: true, mergeStrategy: 'squash', commitConvention: 'conventional' },
+        llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      executionMode: 'process',
+      moduleConfig: { firewall: true, skills: true, planner: false },
+    });
+
+    expect(run.configSnapshot).toEqual({
+      provider: 'claude',
+      objective: 'Implement the dispatch panel',
+      chunkDirectory: 'docs/chunks',
+      skills: ['code-review', 'testing'],
+      promptConfig: { text: 'Launch with this context.' },
+      gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
+      llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
+      modules: { firewall: true, skills: true, planner: false },
+    });
+  });
+
+  it('drops invalid restored runtime config instead of preserving snapshots the CLI cannot parse', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async () => repo.createAttempt('placeholder', { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        workflow: { workflowType: 'martin-loop' },
+        provider: 'claude',
+        objective: 'Implement the dispatch panel',
+        chunkDirectory: 'docs/chunks',
+        llmConfig: { default: { provider: 1 } },
+        promptConfig: { text: 'Launch with this context.' },
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      executionMode: 'process',
+    });
+
+    expect(run.configSnapshot).toEqual({
+      provider: 'claude',
+      objective: 'Implement the dispatch panel',
+      chunkDirectory: 'docs/chunks',
+      promptConfig: { text: 'Launch with this context.' },
+    });
+  });
+
   it('links tracked agents to dispatch and backfills the run id', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

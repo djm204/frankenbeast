@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { NetworkConfigFieldsSchema, validateNetworkConfig } from '../network/network-config.js';
 import { validateProviderCommandOverride } from './provider-command-override-policy.js';
@@ -94,6 +96,78 @@ export const ProvidersConfigSchema = createProvidersConfigSchema();
 const MIN_TOTAL_TOKEN_BUDGET = 10_000;
 const MIN_DURATION_MS_PER_CRITIQUE_ITERATION = 10_000;
 
+function resolvedPathCandidates(path: string): string[] {
+  const lexical = resolve(path);
+  try {
+    const real = realpathSync(lexical);
+    return real === lexical ? [lexical] : [real, lexical];
+  } catch {
+    const ancestorResolved = resolveExistingAncestor(lexical);
+    return ancestorResolved && ancestorResolved !== lexical ? [ancestorResolved, lexical] : [lexical];
+  }
+}
+
+function resolveExistingAncestor(lexical: string): string | undefined {
+  const missingParts: string[] = [];
+  let current = lexical;
+
+  while (true) {
+    try {
+      const resolved = realpathSync(current);
+      return missingParts.length > 0 ? join(resolved, ...missingParts.reverse()) : resolved;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) {
+        return undefined;
+      }
+      missingParts.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
+function hermesProfileFromResolvedPath(path: string): string | undefined {
+  const parts = path.split(sep);
+  for (let index = 0; index < parts.length - 2; index += 1) {
+    if (parts[index] === '.hermes' && parts[index + 1] === 'profiles') {
+      return parts[index + 2];
+    }
+  }
+  return undefined;
+}
+
+function hermesProfileFromPath(path: string): string | undefined {
+  for (const candidate of resolvedPathCandidates(path)) {
+    const profile = hermesProfileFromResolvedPath(candidate);
+    if (profile !== undefined) {
+      return profile;
+    }
+  }
+  return undefined;
+}
+
+function activeHermesProfile(): string {
+  const profile = process.env.HERMES_PROFILE?.trim();
+  return profile && profile.length > 0 ? profile : 'default';
+}
+
+export function validateCrossProfileStateDir(config: {
+  readonly stateDir?: string | undefined;
+  readonly allowCrossProfileStateAccess?: boolean | undefined;
+}): string | undefined {
+  const targetProfile = config.stateDir ? hermesProfileFromPath(config.stateDir) : undefined;
+  const currentProfile = activeHermesProfile();
+  if (
+    targetProfile !== undefined &&
+    targetProfile !== currentProfile &&
+    !config.allowCrossProfileStateAccess
+  ) {
+    return `stateDir points at Hermes profile '${targetProfile}' while the active profile is '${currentProfile}'. ` +
+      'Cross-profile state access is denied by default; set allowCrossProfileStateAccess: true only for deliberate migrations or imports.';
+  }
+  return undefined;
+}
+
 const BaseOrchestratorConfigSchema = z.object({
   /** Maximum plan-critique iterations before escalation. */
   maxCritiqueIterations: z.number().int().min(1).max(10).default(3),
@@ -144,6 +218,9 @@ const BaseOrchestratorConfigSchema = z.object({
   /** Directory for durable Beast phase state snapshots. */
   stateDir: z.string().optional(),
 
+  /** Whether stateDir may deliberately point at another Hermes profile. Defaults denied. */
+  allowCrossProfileStateAccess: z.boolean().default(false),
+
   /** Consolidation: typed provider list for ProviderRegistry. */
   consolidatedProviders: z.array(ProviderConfigSchema).optional(),
 });
@@ -159,6 +236,15 @@ function createOrchestratorConfigSchema(options: OrchestratorConfigParseOptions 
     NetworkConfigFieldsSchema.shape,
   ).superRefine((config, ctx) => {
     validateNetworkConfig(config, ctx);
+
+    const stateDirIssue = validateCrossProfileStateDir(config);
+    if (stateDirIssue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stateDir'],
+        message: stateDirIssue,
+      });
+    }
 
     config.consolidatedProviders?.forEach((provider, index) => {
       if (!provider.type.endsWith('-cli') || !provider.cliPath) return;

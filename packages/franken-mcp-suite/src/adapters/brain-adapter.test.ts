@@ -100,6 +100,20 @@ describe('createBrainAdapter', () => {
     expect(episodicResult.some((row) => row.type === 'episodic')).toBe(true);
   });
 
+  it('rejects unsafe query limits before reading memory', async () => {
+    const brain = createBrainAdapter('/tmp/beast.db');
+    const mockBrain = brainInstances[0];
+
+    for (const invalidLimit of [NaN, Infinity, 0, -1, 1.5, 1001, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(
+        brain.query({ query: 'task', limit: invalidLimit as number }),
+      ).rejects.toThrow('limit must be a positive integer between 1 and 1000');
+    }
+
+    expect(mockBrain.episodic.recall).not.toHaveBeenCalled();
+    expect(mockBrain.working.snapshot).not.toHaveBeenCalled();
+  });
+
   it('rejects unsupported memory type', async () => {
     const brain = createBrainAdapter('/tmp/beast.db');
 

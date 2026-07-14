@@ -86,6 +86,19 @@ describe('commsRoutes', () => {
     expect(body).toEqual({ status: 'ok' });
   });
 
+  it('handles partial security delivery channel policies as fail-closed defaults', () => {
+    expect(() => commsRoutes({
+      config: minimalConfig({
+        security: {
+          deliveryChannels: {
+            slack: { allowSensitiveDelivery: true },
+          },
+        } as unknown as CommsConfig['security'],
+      }),
+      runtime: mockRuntime(),
+    })).not.toThrow();
+  });
+
   it('handles POST /v1/comms/inbound', async () => {
     const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
     const res = await app.request('/v1/comms/inbound', {

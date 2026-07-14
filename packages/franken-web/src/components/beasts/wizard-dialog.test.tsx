@@ -143,6 +143,26 @@ describe('WizardDialog validation', () => {
     expect(screen.getByText('Required workflow fields are missing:')).toBeTruthy();
   });
 
+  it('rejects browser fake paths for directory prompts before launch', () => {
+    useBeastStore.getState().setStepValues(0, { name: 'Martin Agent' });
+    useBeastStore.getState().nextStep();
+    renderWizard();
+
+    fireEvent.click(screen.getByRole('button', { name: /Martin Loop/ }));
+    expect(screen.getByText(/Browser directory pickers cannot provide server paths/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/Which provider should run the martin loop/i), { target: { value: 'codex' } });
+    fireEvent.change(screen.getByLabelText(/What should the martin loop accomplish/i), { target: { value: 'Run chunks' } });
+    fireEvent.change(screen.getByLabelText(/Which chunk directory should MartinLoop execute from/i), {
+      target: { value: 'C:\\fakepath\\chunks' },
+    });
+
+    expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Browser directory pickers cannot provide a server path. Enter a repo-relative path manually.',
+    );
+  });
+
   it('includes the review summary in form view before the launch action', () => {
     useBeastStore.getState().setStepValues(0, { name: 'Reviewable Agent' });
     useBeastStore.getState().setStepValues(1, {

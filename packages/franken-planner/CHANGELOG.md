@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.15](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.14...@franken/planner-v0.4.15) (2026-07-14)
+
+
+### Bug Fixes
+
+* **governor:** honor scoped operator session tokens ([#2112](https://github.com/djm204/frankenbeast/issues/2112)) ([1420a32](https://github.com/djm204/frankenbeast/commit/1420a328a61b44ff168ae02051766086ad741abc))
+* **lint:** require parseInt radix arguments ([023d526](https://github.com/djm204/frankenbeast/commit/023d526a400bc1cd4f2a71bb134b47d750ad7ac0))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.9.0 to 0.10.0
+
 ## [0.4.14](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.13...@franken/planner-v0.4.14) (2026-07-11)
 
 

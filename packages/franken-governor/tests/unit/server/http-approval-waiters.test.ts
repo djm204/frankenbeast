@@ -126,6 +126,54 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
     await expect(outcomePromise).resolves.toMatchObject({ decision: 'APPROVE' });
   });
 
+  it('rejects duplicate real waiters without orphaning the original requestId waiter', async () => {
+    const registry = new ApprovalWaiterRegistry();
+
+    const firstWaiter = registry.waitFor('req-duplicate-1', 'task-1', 'First approval');
+
+    await expect(
+      registry.waitFor('req-duplicate-1', 'task-2', 'Duplicate approval'),
+    ).rejects.toThrow('Approval waiter already registered for requestId req-duplicate-1');
+
+    expect(registry.size).toBe(1);
+
+    const response = {
+      requestId: 'req-duplicate-1',
+      decision: 'APPROVE' as const,
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+
+    expect(registry.resolve('req-duplicate-1', response)).toBe(true);
+    await expect(firstWaiter).resolves.toBe(response);
+    expect(registry.size).toBe(0);
+  });
+
+  it('allows a real waiter to replace a placeholder and preserves it across later placeholder refreshes', async () => {
+    const registry = new ApprovalWaiterRegistry();
+
+    registry.register('req-placeholder-1', 'task-placeholder', 'Placeholder approval');
+    const waiter = registry.waitFor('req-placeholder-1', 'task-real', 'Real approval');
+
+    registry.register('req-placeholder-1', 'task-refreshed', 'Refreshed approval');
+
+    expect(registry.get('req-placeholder-1')).toEqual({
+      taskId: 'task-refreshed',
+      summary: 'Refreshed approval',
+    });
+
+    const response = {
+      requestId: 'req-placeholder-1',
+      decision: 'REGEN' as const,
+      feedback: 'Add tests',
+      respondedBy: 'operator',
+      respondedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+
+    expect(registry.resolve('req-placeholder-1', response)).toBe(true);
+    await expect(waiter).resolves.toBe(response);
+  });
+
   /**
    * Regression coverage for a Codex review follow-up on PR #452:
    * `ApprovalGateway`'s own timeout fired without telling the channel, so

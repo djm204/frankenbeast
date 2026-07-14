@@ -7,6 +7,7 @@ import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
 import { UnknownBeastDefinitionError } from '../errors.js';
+import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
@@ -15,6 +16,91 @@ export interface BeastDispatchServiceOptions {
 export interface BeastExecutors {
   readonly process: BeastExecutor;
   readonly container: BeastExecutor;
+}
+
+const SHARED_RUNTIME_CONFIG_KEYS = [
+  'skills',
+  'gitConfig',
+  'llmConfig',
+  'promptConfig',
+  'provider',
+  'model',
+  'maxDurationMs',
+  'maxTotalTokens',
+  'reflection',
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeGitConfig(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+
+  const gitConfig: Record<string, unknown> = {};
+  for (const key of ['preset', 'baseBranch', 'commitConvention'] as const) {
+    if (typeof value[key] === 'string' && value[key].trim().length > 0) {
+      gitConfig[key] = value[key];
+    }
+  }
+  if (typeof value.branchPattern === 'string') {
+    gitConfig.branchPattern = value.branchPattern;
+  }
+  if (value.prCreation === true) {
+    gitConfig.prCreation = 'auto';
+  } else if (value.prCreation === false) {
+    gitConfig.prCreation = 'disabled';
+  } else if (value.prCreation === 'auto' || value.prCreation === 'manual' || value.prCreation === 'disabled') {
+    gitConfig.prCreation = value.prCreation;
+  }
+  if (value.mergeStrategy === 'merge' || value.mergeStrategy === 'squash' || value.mergeStrategy === 'rebase') {
+    gitConfig.mergeStrategy = value.mergeStrategy;
+  }
+  if (typeof value.disableBranding === 'boolean') {
+    gitConfig.disableBranding = value.disableBranding;
+  }
+
+  return Object.keys(gitConfig).length > 0 ? gitConfig : undefined;
+}
+
+function parseOptionalSharedConfig<T>(
+  schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } },
+  value: unknown,
+): T | undefined {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown | undefined {
+  switch (key) {
+    case 'skills':
+      return Array.isArray(value) && value.every((skill) => typeof skill === 'string') ? value : undefined;
+    case 'gitConfig':
+      return parseOptionalSharedConfig(GitConfigSchema, normalizeGitConfig(value));
+    case 'llmConfig':
+      return parseOptionalSharedConfig(LlmConfigSchema, value);
+    case 'promptConfig':
+      return parseOptionalSharedConfig(PromptConfigSchema, value);
+    case 'provider':
+    case 'model':
+      return typeof value === 'string' ? value : undefined;
+    case 'maxDurationMs':
+    case 'maxTotalTokens':
+      return typeof value === 'number' ? value : undefined;
+    case 'reflection':
+      return typeof value === 'boolean' ? value : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function pickSharedRuntimeConfig(config: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    SHARED_RUNTIME_CONFIG_KEYS.flatMap((key) => {
+      const value = normalizeSharedRuntimeConfigValue(key, config[key]);
+      return value !== undefined ? [[key, value]] : [];
+    }),
+  );
 }
 
 export interface CreateBeastRunRequest {
@@ -54,12 +140,18 @@ export class BeastDispatchService {
         // Real validation error — surface it
         throw firstAttempt.error;
       }
-      // Extract only the keys the schema knows about
+      // Extract only the keys the schema knows about, then restore shared runtime
+      // config accepted by the spawned process contract (for example dashboard
+      // selected skills and git workflow policy). Wizard review metadata remains
+      // stripped so strict definition schemas are still protected from unknowns.
       const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
       const stripped = shape
         ? Object.fromEntries(Object.entries(request.config).filter(([k]) => k in shape))
         : request.config;
-      config = definition.configSchema.parse(stripped);
+      config = {
+        ...definition.configSchema.parse(stripped),
+        ...pickSharedRuntimeConfig(request.config),
+      };
     }
     const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
     const configSnapshot: Readonly<Record<string, unknown>> = moduleConfig

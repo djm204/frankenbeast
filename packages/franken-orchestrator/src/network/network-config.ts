@@ -114,6 +114,7 @@ export const SlackChannelConfigSchema = z.object({
   appId: z.string().min(1).optional(),
   botTokenRef: z.string().min(1).optional(),
   signingSecretRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const DiscordChannelConfigSchema = z.object({
@@ -121,12 +122,14 @@ export const DiscordChannelConfigSchema = z.object({
   applicationId: z.string().min(1).optional(),
   botTokenRef: z.string().min(1).optional(),
   publicKeyRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const TelegramChannelConfigSchema = z.object({
   enabled: z.boolean().default(false),
   botTokenRef: z.string().min(1).optional(),
   webhookSecretTokenRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const WhatsAppChannelConfigSchema = z.object({
@@ -135,6 +138,7 @@ export const WhatsAppChannelConfigSchema = z.object({
   phoneNumberIdRef: z.string().min(1).optional(),
   appSecretRef: z.string().min(1).optional(),
   verifyTokenRef: z.string().min(1).optional(),
+  allowSensitiveDelivery: z.boolean().default(false),
 });
 
 export const CommsServiceConfigSchema = z.object({
@@ -143,10 +147,10 @@ export const CommsServiceConfigSchema = z.object({
   port: PortSchema.default(3200),
   orchestratorWsUrl: UrlSchema.default('ws://127.0.0.1:3737/v1/chat/ws'),
   orchestratorTokenRef: z.string().min(1).optional(),
-  slack: SlackChannelConfigSchema.default(() => ({ enabled: false })),
-  discord: DiscordChannelConfigSchema.default(() => ({ enabled: false })),
-  telegram: TelegramChannelConfigSchema.default(() => ({ enabled: false })),
-  whatsapp: WhatsAppChannelConfigSchema.default(() => ({ enabled: false })),
+  slack: SlackChannelConfigSchema.default(() => ({ enabled: false, allowSensitiveDelivery: false })),
+  discord: DiscordChannelConfigSchema.default(() => ({ enabled: false, allowSensitiveDelivery: false })),
+  telegram: TelegramChannelConfigSchema.default(() => ({ enabled: false, allowSensitiveDelivery: false })),
+  whatsapp: WhatsAppChannelConfigSchema.default(() => ({ enabled: false, allowSensitiveDelivery: false })),
 }).superRefine((value, ctx) => {
   if (!value.enabled) return;
   requireLoopbackServiceHost(ctx, value.host);
@@ -196,10 +200,10 @@ export const NetworkConfigFieldsSchema = z.object({
     host: '127.0.0.1',
     port: 3200,
     orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
-    slack: { enabled: false },
-    discord: { enabled: false },
-    telegram: { enabled: false },
-    whatsapp: { enabled: false },
+    slack: { enabled: false, allowSensitiveDelivery: false },
+    discord: { enabled: false, allowSensitiveDelivery: false },
+    telegram: { enabled: false, allowSensitiveDelivery: false },
+    whatsapp: { enabled: false, allowSensitiveDelivery: false },
   })),
 });
 

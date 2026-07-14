@@ -131,6 +131,57 @@ describe('OnePasswordStore', () => {
       });
     });
 
+    it('resolves keys with spaces and URL-reserved symbols through the raw stored title', async () => {
+      const key = 'providers.openai/workspace token?region=us east&scope=chat';
+      const title = 'frankenbeast/providers.openai/workspace token?region=us east&scope=chat';
+      mock.responses.set('--format=json', {
+        stdout: JSON.stringify({ id: 'reserved-symbol-item-id' }),
+        stderr: '',
+        exitCode: 0,
+      });
+      mock.responses.set('read', {
+        stdout: RESOLVED_SLACK_BOT_TOKEN,
+        stderr: '',
+        exitCode: 0,
+      });
+      mock.responses.set('item get', { stdout: '', stderr: 'not found', exitCode: 1 });
+      mock.responses.set('item create', { stdout: '{}', stderr: '', exitCode: 0 });
+
+      await store.store(key, TEST_SLACK_BOT_TOKEN);
+      const value = await store.resolve(key);
+
+      expect(value).toBe(RESOLVED_SLACK_BOT_TOKEN);
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: ['item', 'get', title, '--vault=frankenbeast'],
+      });
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: [
+          'item',
+          'create',
+          '--category=Login',
+          `--title=${title}`,
+          '--vault=frankenbeast',
+          `password=${TEST_SLACK_BOT_TOKEN}`,
+        ],
+      });
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: [
+          'item',
+          'get',
+          title,
+          '--vault=frankenbeast',
+          '--format=json',
+        ],
+      });
+      expect(mock.calls).toContainEqual({
+        command: 'op',
+        args: ['read', 'op://frankenbeast/reserved-symbol-item-id/password'],
+      });
+    });
+
     it('returns undefined when secret not found', async () => {
       mock.responses.set('--format=json', { stdout: '', stderr: 'not found', exitCode: 1 });
       const value = await store.resolve('nonexistent');

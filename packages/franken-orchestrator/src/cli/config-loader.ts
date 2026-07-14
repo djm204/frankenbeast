@@ -1,15 +1,29 @@
 import { realpathSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
+import { parseSafeJson } from '../utils/safe-json.js';
 import type { CliArgs } from './args.js';
 
 /** Environment variable prefix for orchestrator config. */
 const ENV_PREFIX = 'FRANKEN_';
 
+function parseBooleanEnv(name: string): boolean | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) return undefined;
+
+  const normalized = raw.trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+
+  throw new Error(
+    `Invalid boolean value for ${name}: ${JSON.stringify(raw)}. Expected true/false, 1/0, yes/no, or on/off.`,
+  );
+}
+
 /** Extract config values from environment variables. */
-function fromEnv(): Partial<OrchestratorConfig> {
+function fromEnv(shadowedFields: ReadonlySet<keyof OrchestratorConfig> = new Set()): Partial<OrchestratorConfig> {
   const env: Partial<OrchestratorConfig> = {};
 
   const maxTokens = process.env[`${ENV_PREFIX}MAX_TOTAL_TOKENS`];
@@ -21,14 +35,20 @@ function fromEnv(): Partial<OrchestratorConfig> {
   const maxCritique = process.env[`${ENV_PREFIX}MAX_CRITIQUE_ITERATIONS`];
   if (maxCritique) env.maxCritiqueIterations = Number(maxCritique);
 
-  const heartbeat = process.env[`${ENV_PREFIX}ENABLE_HEARTBEAT`];
-  if (heartbeat !== undefined) env.enableHeartbeat = heartbeat === 'true';
+  if (!shadowedFields.has('enableHeartbeat')) {
+    const heartbeat = parseBooleanEnv(`${ENV_PREFIX}ENABLE_HEARTBEAT`);
+    if (heartbeat !== undefined) env.enableHeartbeat = heartbeat;
+  }
 
-  const tracing = process.env[`${ENV_PREFIX}ENABLE_TRACING`];
-  if (tracing !== undefined) env.enableTracing = tracing === 'true';
+  if (!shadowedFields.has('enableTracing')) {
+    const tracing = parseBooleanEnv(`${ENV_PREFIX}ENABLE_TRACING`);
+    if (tracing !== undefined) env.enableTracing = tracing;
+  }
 
-  const reflection = process.env[`${ENV_PREFIX}ENABLE_REFLECTION`];
-  if (reflection !== undefined) env.enableReflection = reflection === 'true';
+  if (!shadowedFields.has('enableReflection')) {
+    const reflection = parseBooleanEnv(`${ENV_PREFIX}ENABLE_REFLECTION`);
+    if (reflection !== undefined) env.enableReflection = reflection;
+  }
 
   const minScore = process.env[`${ENV_PREFIX}MIN_CRITIQUE_SCORE`];
   if (minScore) env.minCritiqueScore = Number(minScore);
@@ -38,8 +58,23 @@ function fromEnv(): Partial<OrchestratorConfig> {
 
 /** Load config from a JSON file. */
 async function fromFile(filePath: string): Promise<Partial<OrchestratorConfig>> {
+  const info = await stat(filePath);
+  if (info.size > 1_048_576) {
+    throw new RangeError(`Config file ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+  }
   const raw = await readFile(filePath, 'utf-8');
-  return JSON.parse(raw) as Partial<OrchestratorConfig>;
+  const parsed = parseSafeJson(raw, {
+    context: `Config file ${filePath}`,
+    maxBytes: 1_048_576,
+    maxDepth: 64,
+    maxContainers: 10_000,
+    maxObjectKeys: 20_000,
+    maxArrayItems: 50_000,
+  });
+  if (!isRecord(parsed)) {
+    throw new TypeError('Config file must contain a JSON object');
+  }
+  return parsed as Partial<OrchestratorConfig>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -144,6 +179,8 @@ function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig
   const sanitized = JSON.parse(JSON.stringify(fileConfig)) as Partial<OrchestratorConfig>;
   const root = sanitized as Record<string, unknown>;
 
+  delete root['allowCrossProfileStateAccess'];
+
   const providers = root['providers'];
   if (isRecord(providers) && isRecord(providers['overrides'])) {
     for (const override of Object.values(providers['overrides'])) {
@@ -159,6 +196,17 @@ function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig
   }
 
   return sanitized;
+}
+
+function isNetworkChildSpawningAction(args: CliArgs): boolean {
+  return args.subcommand === 'network' && ['up', 'start', 'restart'].includes(args.networkAction ?? 'help');
+}
+
+function getCliShadowedFields(args: CliArgs): Set<keyof OrchestratorConfig> {
+  const fields = new Set<keyof OrchestratorConfig>();
+  if (args.verbose && !isNetworkChildSpawningAction(args)) fields.add('enableTracing');
+  if (args.initBackend) fields.add('network');
+  return fields;
 }
 
 /** Extract config overrides from CLI args. */
@@ -206,7 +254,7 @@ export async function loadConfig(args: CliArgs, defaultConfigPath?: string): Pro
     }
   }
 
-  const envConfig = fromEnv();
+  const envConfig = fromEnv(getCliShadowedFields(args));
   const cliConfig = fromCli(args);
 
   let merged = deepMerge<OrchestratorConfig>(

@@ -1,6 +1,6 @@
 {
   "name": "@franken/types",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,6 +12,10 @@
     "./path-containment": {
       "import": "./dist/path-containment.js",
       "types": "./dist/path-containment.d.ts"
+    },
+    "./json-pointer": {
+      "import": "./dist/json-pointer.js",
+      "types": "./dist/json-pointer.d.ts"
     },
     "./utils": {
       "import": "./dist/utils/index.js",

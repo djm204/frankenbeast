@@ -50,6 +50,13 @@ describe('GeminiProvider', () => {
     expect(args).toContain('gemini-2.5-pro');
   });
 
+  it('buildArgs includes the selected model', () => {
+    const args = provider.buildArgs({ model: 'gemini-2.5-pro' });
+    const idx = args.indexOf('--model');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe('gemini-2.5-pro');
+  });
+
   // -- supportsStreamJson --------------------------------------------------
 
   it('supportsStreamJson returns true', () => {

@@ -9,6 +9,7 @@ export default tseslint.config(
   prettierConfig,
   {
     rules: {
+      'radix': ['error', 'always'],
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',

@@ -381,6 +381,329 @@ describe('dep-factory provider wiring', () => {
     );
   });
 
+  it('preserves top-level model fallback when llmConfig.default only restates the same provider', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        provider: 'codex',
+        objective: 'Fallback model compatibility',
+        model: 'gpt-5',
+        llmConfig: {
+          default: { provider: 'codex' },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'codex' }),
+      expect.objectContaining({ model: 'gpt-5' }),
+    );
+  });
+
+  it('preserves top-level model fallback when llmConfig.default matches the CLI-selected fallback provider', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        objective: 'Fallback provider inherited from CLI',
+        model: 'claude-sonnet-4-6',
+        llmConfig: {
+          default: { provider: 'claude' },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({ model: 'claude-sonnet-4-6' }),
+    );
+  });
+
+  it('routes cli-session overrides into the Martin execution provider without carrying stale default models', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        objective: 'Use execution override',
+        provider: 'codex',
+        model: 'gpt-5.3-codex-spark',
+        llmConfig: {
+          default: { provider: 'codex', model: 'gpt-5.3-codex-spark' },
+          overrides: {
+            'cli-session': { provider: 'claude' },
+          },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.not.objectContaining({ model: 'gpt-5.3-codex-spark' }),
+    );
+  });
+
+  it('providerless operation overrides inherit the default target instead of the execution provider', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      runConfig: {
+        objective: 'Operation override inherits default provider',
+        provider: 'codex',
+        model: 'gpt-5.3-codex-spark',
+        llmConfig: {
+          default: { provider: 'codex' },
+          overrides: {
+            'cli-session': { provider: 'claude' },
+            'plan-build': { model: 'gpt-5' },
+          },
+        },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCachedCliLlmClient).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'plan-build',
+      provider: 'codex',
+      model: 'gpt-5',
+    }));
+  });
+
+  it('keeps built-in cli skills available when the skills module is disabled', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const result = await createCliDeps(makeOpts());
+
+    expect(result.deps.skills.hasSkill('cli:chunk-a')).toBe(true);
+    expect(result.deps.skills.hasSkill('project-skill')).toBe(false);
+  });
+
+  it('routes custom consolidated CLI providers through their registry provider type', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      runConfig: {
+        objective: 'Use custom consolidated provider',
+        provider: 'prod-claude',
+        llmConfig: {
+          default: { provider: 'prod-claude', model: 'sonnet' },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({ model: 'sonnet' }),
+    );
+  });
+
+  it('lets explicit run-config models override consolidated provider defaults', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      runConfig: {
+        objective: 'Use selected custom model',
+        provider: 'prod-claude',
+        model: 'haiku',
+        llmConfig: {
+          default: { provider: 'prod-claude', model: 'sonnet' },
+          overrides: {
+            'cli-session': { provider: 'prod-claude', model: 'haiku' },
+          },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        model: 'haiku',
+        providerOverrides: expect.not.objectContaining({
+          'prod-claude': expect.anything(),
+        }),
+      }),
+    );
+    expect(MockCachedCliLlmClient).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'cli-session',
+      provider: 'prod-claude',
+      model: 'haiku',
+    }));
+  });
+
+  it('preserves model-only consolidated provider defaults when no explicit model is selected', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      runConfig: {
+        objective: 'Use configured custom provider defaults',
+        provider: 'prod-claude',
+        llmConfig: {
+          default: { provider: 'prod-claude' },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet', extraArgs: ['--verbose'] },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        model: 'sonnet',
+        providerOverrides: expect.objectContaining({
+          claude: expect.objectContaining({ model: 'sonnet', extraArgs: ['--verbose'] }),
+        }),
+      }),
+    );
+  });
+
+  it('keeps custom provider aliases out of command-policy override maps', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      trustProviderCommandOverrides: true,
+      runConfig: {
+        objective: 'Use aliased custom provider command',
+        provider: 'prod-claude',
+      },
+      orchestratorConfig: parseOrchestratorConfig({
+        consolidatedProviders: [
+          {
+            name: 'prod-claude',
+            type: 'claude-cli',
+            cliPath: 'claude',
+            trustCommandOverride: true,
+          },
+        ],
+      }, { allowTrustedProviderCommandOverrides: true }),
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        commandOverride: 'claude',
+        providerOverrides: expect.not.objectContaining({
+          'prod-claude': expect.anything(),
+        }),
+      }),
+    );
+  }, 10_000);
+
+  it('normalizes custom fallback provider aliases before wiring CLI adapters and Martin skills', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+    const opts = makeOpts({
+      providers: ['prod-claude', 'spark'],
+      runConfig: {
+        objective: 'Use custom fallback providers',
+        provider: 'prod-claude',
+        llmConfig: {
+          default: { provider: 'prod-claude', model: 'sonnet' },
+        },
+      },
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+          { name: 'spark', type: 'codex-cli', model: 'gpt-5.3-codex-spark' },
+        ],
+      } as never,
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({ providers: ['claude', 'codex'] }),
+    );
+    const cliExecutorCalls = (CliSkillExecutor as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(cliExecutorCalls[0]?.[6]).toEqual(expect.objectContaining({
+      provider: 'claude',
+      providers: ['claude', 'codex'],
+      providerModels: expect.objectContaining({
+        claude: 'sonnet',
+        codex: 'gpt-5.3-codex-spark',
+      }),
+    }));
+  });
+
+  it('ignores unrelated non-CLI provider overrides while building CLI provider maps', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'claude',
+      providersConfig: {
+        openai: { model: 'gpt-5' },
+        claude: { model: 'claude-sonnet-4-6' },
+      },
+    });
+
+    await createCliDeps(opts);
+
+    expect(MockCliLlmAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'claude' }),
+      expect.objectContaining({
+        providerOverrides: expect.objectContaining({
+          claude: expect.objectContaining({ model: 'claude-sonnet-4-6' }),
+        }),
+      }),
+    );
+  });
+
+  it('keeps PR-disabled branch patterns isolated instead of direct-to-base', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { GitBranchIsolator } = await import('../../../src/skills/git-branch-isolator.js');
+
+    await createCliDeps(makeOpts({
+      runConfig: {
+        objective: 'Disable PR creation but keep feature branch isolation',
+        gitConfig: { prCreation: 'disabled', branchPattern: 'feat/' },
+      },
+    }));
+
+    expect(GitBranchIsolator).toHaveBeenCalledWith(expect.objectContaining({
+      branchPrefix: 'feat/',
+      directCommit: false,
+    }));
+  });
+
+  it('allows direct commits only when PR creation is disabled and no branch pattern remains', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const { GitBranchIsolator } = await import('../../../src/skills/git-branch-isolator.js');
+
+    await createCliDeps(makeOpts({
+      runConfig: {
+        objective: 'Direct commit yolo run',
+        gitConfig: { prCreation: 'disabled', branchPattern: '' },
+      },
+    }));
+
+    expect(GitBranchIsolator).toHaveBeenCalledWith(expect.objectContaining({
+      branchPrefix: '',
+      directCommit: true,
+    }));
+  });
+
   it('rejects command overrides from providersConfig unless explicitly trusted', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
@@ -512,6 +835,11 @@ describe('dep-factory provider wiring', () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
       provider: 'codex',
+      runConfig: {
+        objective: 'Use selected codex model',
+        provider: 'codex',
+        model: 'gpt-5.3-codex-spark',
+      },
       providers: ['codex'],
       trustProviderCommandOverrides: true,
       providersConfig: {
@@ -531,6 +859,7 @@ describe('dep-factory provider wiring', () => {
 
     expect(cliExecutorCall.mock.calls[0]?.[6]).toEqual(expect.objectContaining({
       provider: 'codex',
+      model: 'gpt-5.3-codex-spark',
       providers: ['codex'],
       command: '/usr/local/bin/codex',
     }));

@@ -24,6 +24,8 @@ export interface ProviderOpts {
   readonly chatMode?: boolean | undefined;
   /** When true, ask the provider to resume its native CLI session if supported. */
   readonly sessionContinue?: boolean | undefined;
+  /** Provider-native session id to resume, when known. */
+  readonly sessionId?: string | undefined;
 }
 
 export interface ProviderCacheCapabilities {
