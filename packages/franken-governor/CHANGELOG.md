@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.6.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.14...franken-governor-v0.6.0) (2026-07-14)
+
+
+### Features
+
+* **governor:** add signed approval policy manifests ([#2173](https://github.com/djm204/frankenbeast/issues/2173)) ([353bd4b](https://github.com/djm204/frankenbeast/commit/353bd4b5efa23379f9f7bca2643126c116598b01))
+
+
+### Bug Fixes
+
+* **governor:** add approval prompt anti-spoofing markers ([#2013](https://github.com/djm204/frankenbeast/issues/2013)) ([f13c71c](https://github.com/djm204/frankenbeast/commit/f13c71ca688e918e585d1334535cf34bf9decd21))
+* **governor:** honor scoped operator session tokens ([#2112](https://github.com/djm204/frankenbeast/issues/2112)) ([1420a32](https://github.com/djm204/frankenbeast/commit/1420a328a61b44ff168ae02051766086ad741abc))
+* **governor:** reject duplicate approval waiters ([8940ade](https://github.com/djm204/frankenbeast/commit/8940ade873e198b90b9d69c7dcd1c7c7055becf0)), closes [#1956](https://github.com/djm204/frankenbeast/issues/1956)
+* **governor:** resolve root test suite merge drift ([29270d5](https://github.com/djm204/frankenbeast/commit/29270d533f252535ff122b422d60095a949e6aab))
+* **governor:** sweep expired session tokens ([#2005](https://github.com/djm204/frankenbeast/issues/2005)) ([5e23567](https://github.com/djm204/frankenbeast/commit/5e23567dbab5ad265a2362e4b928817f6c959791))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Documentation
+
+* **governor:** refresh ramp-up wiring status ([15e413c](https://github.com/djm204/frankenbeast/commit/15e413c83f688eaacec66f3cd4ee5a8aec20e75b))
+
+
+### Tests
+
+* add root integration and eval entrypoints ([fae9bad](https://github.com/djm204/frankenbeast/commit/fae9bad925976c208b5199046ccf794378c72070))
+* **governor:** accept conditional vitest suite selection ([b36994d](https://github.com/djm204/frankenbeast/commit/b36994d9cd19455661f6bdefda51e81ff8c99f07))
+* **governor:** isolate integration suite ([#1891](https://github.com/djm204/frankenbeast/issues/1891)) ([93f6be9](https://github.com/djm204/frankenbeast/commit/93f6be9dfa97ae4a9c464c4a679c166088f27a12))
+* **governor:** verify integration test selection ([#1968](https://github.com/djm204/frankenbeast/issues/1968)) ([c88865e](https://github.com/djm204/frankenbeast/commit/c88865e2ebd26d568c190d0de9ef900de302543f))
+* include integration and eval suites in turbo ([585744c](https://github.com/djm204/frankenbeast/commit/585744c04d0c354f15e3cc0a0db242438cd17e8c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.9.0 to 0.10.0
+
 ## [0.5.14](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.5.13...franken-governor-v0.5.14) (2026-07-11)
 
 
