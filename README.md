@@ -5,7 +5,7 @@
 </p>
 
 ![Status](https://img.shields.io/badge/status-beta-blue)
-[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases/latest)
+[![Latest root release](https://img.shields.io/github/v/release/djm204/frankenbeast?filter=v*&label=release)](https://github.com/djm204/frankenbeast/releases?q=v*&expanded=true)
 [![Daily security scan](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml/badge.svg)](https://github.com/djm204/frankenbeast/actions/workflows/daily-security-scan.yml)
 [![Dependabot](https://img.shields.io/badge/dependabot-configured-025E8C?logo=dependabot)](.github/dependabot.yml)
 
@@ -610,7 +610,7 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 # Override it only when ChromaDB runs at a different local port/host or a remote
 # TLS-terminated endpoint, then export that same endpoint before seed/verify.
 # In CI, point CHROMA_URL at the Chroma service container hostname instead.
-# export CHROMA_URL=http://127.0.0.1:18000
+# export CHROMA_URL=http://chroma:8000
 
 # Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
 # compose file pins image versions and mounts ./tempo.yaml so local tracing
