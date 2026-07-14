@@ -44,7 +44,7 @@ export function quoteUntrustedPayload(content: string): string {
 }
 
 function normalizeMetadataValue(value: string, fallback: string): string {
-  const normalized = value.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalized = value.replace(/[\r\n\t\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
   return normalized.length > 0 ? normalized : fallback;
 }
 
