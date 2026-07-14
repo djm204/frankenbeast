@@ -412,10 +412,11 @@ frankenbeast network up                    # start configured services
 frankenbeast network up -d                 # detached (daemon mode)
 frankenbeast network status                # show service health and URLs
 frankenbeast network start chat-server     # start one managed service
-frankenbeast network stop dashboard-web    # stop one managed service
-frankenbeast network restart beasts-daemon # restart one managed service
-frankenbeast network restart all           # restart every managed service
-frankenbeast network down                  # tear down the managed network
+frankenbeast network start all             # start all managed services without changing config
+frankenbeast network stop chat-server      # stop one managed service
+frankenbeast network restart chat-server   # restart one managed service
+frankenbeast network restart all           # restart all managed services
+frankenbeast network down                  # tear down all managed services
 frankenbeast network logs <service|all>    # show service logs
 frankenbeast network config                # inspect operator config
 frankenbeast network config --set chat.model=claude-sonnet-4-6
@@ -424,6 +425,7 @@ frankenbeast network up --set chat.model=codex
                                            # one-off override for this start
 ```
 
+Use `network up` for the normal bring-up flow that applies the configured network, and `network down` to tear down the managed network. Use `network start`, `network stop`, and `network restart` when you need lifecycle control for a specific managed service such as `chat-server`, or pass `all` to apply the action across managed services.
 Network `up`, `start`, and `restart` accept `-d` / `--detached` for daemon mode and `--set path=value` for transient config overrides. `network config --set path=value` persists the value; either form may be repeated when changing more than one config path.
 
 ---
