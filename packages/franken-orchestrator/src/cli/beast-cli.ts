@@ -1,6 +1,7 @@
 import type { CliArgs } from './args.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { createBeastServices } from '../beasts/create-beast-services.js';
+import { UnknownBeastRunError } from '../beasts/services/beast-run-service.js';
 import { collectBeastConfig } from './beast-prompts.js';
 import type { ProjectPaths } from './project-root.js';
 import { createBeastControlClient } from './beast-control-client.js';
@@ -150,8 +151,11 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           throw new Error('beasts status requires a run id');
         }
         const run = services.runs.getRun(args.beastTarget);
-        const attempts = run ? services.runs.listAttempts(args.beastTarget) : [];
-        print(JSON.stringify(run ? statusPayload(run, attempts) : undefined, null, 2));
+        if (!run) {
+          throw new UnknownBeastRunError(args.beastTarget);
+        }
+        const attempts = services.runs.listAttempts(args.beastTarget);
+        print(JSON.stringify(statusPayload(run, attempts), null, 2));
         return;
       }
       case 'logs': {
