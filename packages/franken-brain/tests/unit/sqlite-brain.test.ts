@@ -348,6 +348,29 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('project:tenant:123:new', 'secret')).toThrow(/right-to-forget/);
     });
 
+    it('guards composite category key prefixes and checkpoint markers', () => {
+      brain.working.set('tenant:123:item', 'secret');
+      brain.recovery.checkpoint({
+        runId: 'run-category-marker',
+        phase: 'execution',
+        step: 1,
+        context: { note: 'category:tenant:123 marker' },
+        timestamp: '2026-07-13T00:02:00.000Z',
+      });
+
+      const report = brain.rightToForget({ category: 'tenant:123' });
+
+      expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 1 });
+      expect(() => brain.working.set('tenant:123:new', 'secret')).toThrow(/right-to-forget/);
+      expect(() => brain.recovery.checkpoint({
+        runId: 'run-category-marker-reinsert',
+        phase: 'execution',
+        step: 2,
+        context: { note: 'category:tenant:123 again' },
+        timestamp: '2026-07-13T00:03:00.000Z',
+      })).toThrow(/right-to-forget/);
+    });
+
     it('guards long query substrings without requiring exact whole-value matches', () => {
       const longSecret = `tok_${'a'.repeat(140)}_tail`;
       brain.working.set('long-token', `prefix ${longSecret} suffix`);
@@ -359,6 +382,10 @@ describe('SqliteBrain', () => {
 
     it('requires at least one selector', () => {
       expect(() => brain.rightToForget({})).toThrow(/requires at least one/);
+    });
+
+    it('rejects short query selectors that cannot be safely guarded', () => {
+      expect(() => brain.rightToForget({ query: 'ab' })).toThrow(/at least 3/);
     });
   });
 

@@ -2062,6 +2062,9 @@ function normalizeRightToForgetSelector(selector: RightToForgetSelector): Normal
         if (value.trim().length === 0) {
           throw new Error(`right-to-forget ${field} must be a non-empty string when provided`);
         }
+        if (field === 'query' && normalizeForMatch(value).length < 3) {
+          throw new Error('right-to-forget query must be at least 3 normalized characters when provided');
+        }
         normalized[field] = value.trim();
       }
     }
@@ -2260,6 +2263,7 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
     ['key', key],
     ['category', objectMetadataString(parsed, ['category', 'categories', 'kind'])],
     ['category', keyPrefix],
+    ...keySegments.map(segment => ['category', segment] as [string, string]),
     ['sourceScope', objectMetadataString(parsed, ['sourceScope', 'source', 'scope', 'sourceId'])],
     ...keySegments.map(segment => ['sourceScope', segment] as [string, string]),
   ];
@@ -2309,7 +2313,7 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
 
 function extractStructuredMarkerValues(text: string, name: string): string[] {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`${escapedName}\\s*[:=]\\s*([a-z0-9@._-]+)`, 'gi');
+  const regex = new RegExp(`${escapedName}\\s*[:=]\\s*([a-z0-9@._:-]+)`, 'gi');
   return Array.from(new Set(Array.from(text.matchAll(regex), match => match[1] ?? '').filter(Boolean)));
 }
 
@@ -2368,7 +2372,9 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
   const context = state.context;
   const candidates: Array<[string, string | undefined]> = [
     ['category', objectMetadataString(context, ['category', 'categories', 'kind'])],
+    ...extractStructuredMarkerValues(valueToSearchText(state), 'category').map(value => ['category', value] as [string, string]),
     ['sourceScope', objectMetadataString(context, ['sourceScope', 'source', 'scope', 'sourceId'])],
+    ...extractStructuredMarkerValues(valueToSearchText(state), 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
   ];
   for (const [kind, value] of candidates) {
     if (!value) continue;

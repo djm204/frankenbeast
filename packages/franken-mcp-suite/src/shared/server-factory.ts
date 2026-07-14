@@ -251,7 +251,7 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
   }
   for (const key of Object.keys(sanitized)) {
-    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && key !== 'tool' && key !== 'args' && key !== 'action' && key !== 'context') {
+    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && key !== 'tool' && key !== 'action') {
       sanitized[key] = '[right-to-forget-args-redacted]';
     }
   }

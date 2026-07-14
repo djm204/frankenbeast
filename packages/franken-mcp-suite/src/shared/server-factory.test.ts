@@ -417,6 +417,16 @@ describe('createMcpServer', () => {
         action: 'fbeast_memory_right_to_forget',
         context: '[right-to-forget-args-redacted]',
       });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        context: 'alice@example.test',
+        args: { query: 'alice@example.test' },
+        dryRun: true,
+      })).toEqual({
+        context: '[right-to-forget-args-redacted]',
+        args: '[right-to-forget-args-redacted]',
+        dryRun: true,
+      });
     });
 
     it('audits failed handler results as ok=false with args', async () => {
