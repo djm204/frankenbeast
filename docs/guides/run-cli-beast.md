@@ -223,14 +223,14 @@ The orchestrator CLI accepts global flags before or after the subcommand unless 
 | `--design-doc <path>` | `plan`, full flow | Start from an existing design document instead of the interview output. |
 | `--plan-dir <path>` | `run`, full flow | Execute chunks from an existing chunk-plan directory. |
 | `--plan-name <name>` | `plan`, full flow | Override the generated plan name. |
-| `--output-dir <path>` | full flow and artifact-producing steps | Directory for generated artifacts where supported. |
-| `--goal <text>` | `interview`, full flow | Seed the interview-style flow with an initial objective. |
-| `--output <path>` | `interview` | Write the generated design document to an explicit path. |
+| `--output-dir <path>` | parser-recognized compatibility flag | Accepted by the parser, but current plan/run flows still write artifacts under the configured `.fbeast` paths. Do not rely on it to redirect plan output in this build. |
+| `--goal <text>` | parser-recognized compatibility flag | Accepted by the parser, but the current interview flow still starts from its built-in requirements-gathering prompt. |
+| `--output <path>` | parser-recognized compatibility flag | Accepted by the parser, but the current interview flow still writes the design document through the configured `.fbeast` design-doc path. |
 | `--reset` | `run` | Clear checkpoint and trace state before executing. |
 | `--resume` | `run` | Preserve checkpoint/chunk-session state and resume from the last run. |
 | `--cleanup` | `run` | Remove build logs, checkpoints, and traces without following symlinked cleanup entries. |
 
-`--provider` selects the initial provider, while `--providers` supplies the comma-separated fallback order used by the managed provider flow. `--trust-provider-command-overrides` is intentionally explicit because it allows trusted repository config to override provider commands.
+`--provider` selects the initial provider, while `--providers` supplies the comma-separated fallback order used by the managed provider flow. `--trust-provider-command-overrides` is intentionally explicit because it allows command overrides only from trusted config locations outside the repository; repo-local `.fbeast/config.json` command trust fields remain rejected.
 
 Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts. `--cleanup` refuses to clean a symlinked `.build/` root or symlinked `.fbeast` cleanup component by default and unlinks symlinks found inside `.build/` instead of traversing them, so cleanup cannot delete files outside the project through a symlink. Symlinked workspace parents are allowed; replace symlinked `.fbeast`/`.build` cleanup path components with real disposable directories before cleaning.
 
@@ -238,7 +238,7 @@ Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `--verify` | `init` | Verify init config/readiness without running the full wizard. |
+| `--verify` | `init` | Verify init config/readiness without running the full wizard; the command still ensures the local `.fbeast` scaffold directories exist. |
 | `--repair` | `init` | Re-run only missing or failed setup steps. |
 | `--non-interactive` | `init` | Disable prompts for headless setup. Required HITL approvals still fail closed unless explicitly allowed by environment. |
 | `--backend <name>` | `init` | Secret backend: `local-encrypted`, `os-keychain`, `1password`, or `bitwarden`. |
@@ -297,7 +297,7 @@ Verbose and build-log output redacts secret-like environment/config keys such as
 ### Init flag examples
 
 ```bash
-frankenbeast init --verify                       # Verify config/readiness without changing setup
+frankenbeast init --verify                       # Verify config/readiness and ensure scaffold dirs exist
 frankenbeast init --repair                       # Re-run only missing or failed init steps
 frankenbeast init --non-interactive              # Disable interactive prompts
 frankenbeast init --backend os-keychain          # Secret backend: local-encrypted, os-keychain, 1password, bitwarden
