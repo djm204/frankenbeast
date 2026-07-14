@@ -458,6 +458,12 @@ describe('IssueRunner', () => {
 
     it('preserves checkpoint-complete outcomes before evaluating backpressure', async () => {
       const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(checkpoint);
+      vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({
+        planName: 'issue-15',
+        planDir: '.tmp/test-issue-15',
+      });
       const signals = vi.fn(() => ({
         activeProcesses: 1,
         failedStarts: 0,
@@ -468,6 +474,7 @@ describe('IssueRunner', () => {
         issues: [makeIssue({ number: 15 })],
         triageResults: [makeTriage(15)],
         checkpoint,
+        issueRuntime,
         backpressure: {
           thresholds: { maxActiveProcesses: 1 },
           signals,

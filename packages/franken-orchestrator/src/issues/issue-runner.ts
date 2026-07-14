@@ -309,7 +309,10 @@ export class IssueRunner {
       const issue = sorted[i]!;
       const position = `${i + 1}/${sorted.length}`;
 
-      if (budgetExceeded || stopRemainingReason) {
+      const hasIssueSpecificCheckpointProgress =
+        (config.issueRuntime?.checkpointForIssue(issue.number).readAll().size ?? 0) > 0;
+
+      if (budgetExceeded || (stopRemainingReason && !hasIssueSpecificCheckpointProgress)) {
         outcomes.push({
           issueNumber: issue.number,
           issueTitle: issue.title,
@@ -387,7 +390,7 @@ export class IssueRunner {
     const planName = runtimeArtifacts?.planName ?? issueRuntime?.planNameForIssue(issue.number) ?? `issue-${issue.number}`;
     const logFile = runtimeArtifacts?.logFile;
     const planDir = runtimeArtifacts?.planDir ?? resolve(getProjectPaths('.').plansDir, planName);
-    const checkpointHasProgress = (issueCheckpoint?.readAll().size ?? 0) > 0;
+    const checkpointHasProgress = issueRuntime !== undefined && (issueCheckpoint?.readAll().size ?? 0) > 0;
 
     const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
       const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
