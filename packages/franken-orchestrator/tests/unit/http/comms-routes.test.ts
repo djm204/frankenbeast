@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../../src/comms/channels/slack/slack-adapter.js', () => ({
@@ -120,6 +121,13 @@ describe('commsRoutes', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ accepted: true });
+  });
+
+  it('keeps generic inbound comms validation coupled to the ChannelInboundMessage type without double-casts', async () => {
+    const source = await readFile(new URL('../../../src/http/routes/comms-routes.ts', import.meta.url), 'utf-8');
+
+    expect(source).toContain('satisfies z.ZodType<ChannelInboundMessage>');
+    expect(source).not.toContain('as unknown as ChannelInboundMessage');
   });
 
   it('handles POST /v1/comms/action', async () => {

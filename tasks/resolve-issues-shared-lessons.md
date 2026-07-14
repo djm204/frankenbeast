@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-14 — Type-safety hardening regressions
+- For removing unsafe TypeScript double-casts, pair the runtime regression with a source-inspection guard that names the exact bypass (`as unknown as ...`) and the intended type-coupling construct (`satisfies z.ZodType<...>` or typed null-object helpers) so future changes cannot silently reintroduce the cast while preserving behavior.
+- Disabled/null-object implementations should return structurally complete domain objects rather than partial objects cast through `unknown`; include required lifecycle/status/time fields in the helper so `tsc --noEmit` enforces drift against upstream type changes.
+
 ## 2026-07-14 — Right-to-forget privacy/code-review hardening
 - For deletion/right-to-forget flows, compare selectors against both persisted storage rows and the current in-memory overlay; avoid broad stale-instance flushes that can delete unrelated external rows, and keep persisted/runtime deletion finalization rollback-safe.
 - Redact destructive privacy selectors before every audit/governance sink, including proxy/envelope validation failures and governor logs; if a tool is destructive, route it through the same governance path as sibling deletion tools rather than exempting it as non-executing data.

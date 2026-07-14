@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { describe, it, expect } from 'vitest';
 import {
   TokenCounter,
@@ -247,6 +248,36 @@ describe('CliObserverBridge', () => {
     it('observerDeps throws when startTrace has not been called', () => {
       const bridge = new CliObserverBridge(defaultConfig);
       expect(() => bridge.observerDeps).toThrow('No active trace');
+    });
+
+    it('returns fully shaped disabled observer trace and span null objects without double-casts', async () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      bridge.startTrace('session-disabled');
+
+      const deps = bridge.disabledObserverDeps;
+      expect(deps.trace).toMatchObject({
+        id: 'session-disabled',
+        goal: 'tracing-disabled',
+        status: 'completed',
+        spans: [],
+      });
+      expect(deps.trace.startedAt).toEqual(expect.any(Number));
+
+      const span = deps.startSpan(deps.trace, { name: 'disabled-span', parentSpanId: 'parent-span' });
+      expect(span).toMatchObject({
+        id: 'tracing-disabled:disabled-span',
+        traceId: 'session-disabled',
+        parentSpanId: 'parent-span',
+        name: 'disabled-span',
+        status: 'completed',
+        metadata: {},
+        thoughtBlocks: [],
+      });
+      expect(span.startedAt).toEqual(expect.any(Number));
+
+      const source = await readFile(new URL('../../../src/adapters/cli-observer-bridge.ts', import.meta.url), 'utf-8');
+      expect(source).not.toContain('as unknown as Trace');
+      expect(source).not.toContain('as unknown as Span');
     });
   });
 

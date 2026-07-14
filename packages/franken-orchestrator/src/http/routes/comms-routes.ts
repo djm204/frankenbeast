@@ -45,7 +45,7 @@ const GenericCommsInboundBody = z.object({
   text: z.string().min(1),
   rawEvent: z.custom<unknown>((value) => value !== undefined, { message: 'Required' }),
   receivedAt: z.string().datetime({ offset: true }),
-}).strict();
+}).strict() satisfies z.ZodType<ChannelInboundMessage>;
 
 const GenericCommsActionBody = z.object({
   channelType: ChannelTypeSchema,
@@ -153,7 +153,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
   }
 
   app.post('/v1/comms/inbound', async (c) => {
-    const body = validateBody(GenericCommsInboundBody, await parseJsonBody(c)) as unknown as ChannelInboundMessage;
+    const body = validateBody(GenericCommsInboundBody, await parseJsonBody(c));
     await gateway.handleInbound(body);
     return c.json({ accepted: true });
   });
