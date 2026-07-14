@@ -1,6 +1,6 @@
 {
   "name": "@franken/observer",
-  "version": "0.7.17",
+  "version": "0.7.18",
   "description": "MOD-05 – Observability and Evaluation for the Frankenbeast system",
   "type": "module",
   "main": "dist/index.js",
@@ -27,13 +27,13 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^20.14.0",
-    "typescript": "^5.5.0",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.10.0",
-    "better-sqlite3": "^12.6.2"
+    "@franken/types": "0.10.1",
+    "better-sqlite3": "^12.11.1"
   },
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"

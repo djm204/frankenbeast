@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.2.12](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.11...franken-mcp-suite-v0.2.12) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+* **mcp-suite:** harden project-scoped MCP config paths ([#1350](https://github.com/djm204/frankenbeast/issues/1350)) ([e55be12](https://github.com/djm204/frankenbeast/commit/e55be12870523f3c7108ff4e650a94742230b7de))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.0 to 0.10.1
+    * @franken/brain bumped from 0.8.0 to 0.8.1
+    * @franken/critique bumped from 0.8.0 to 0.8.1
+    * @franken/governor bumped from 0.6.0 to 0.6.1
+    * @franken/observer bumped from 0.7.17 to 0.7.18
+    * @franken/orchestrator bumped from 0.44.1 to 0.44.2
+    * @franken/planner bumped from 0.4.15 to 0.4.16
+
+## [0.2.11](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.10...franken-mcp-suite-v0.2.11) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/orchestrator bumped from 0.44.0 to 0.44.1
+
+## [0.2.10](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.9...franken-mcp-suite-v0.2.10) (2026-07-14)
+
+
+### Tests
+
+* **mcp-suite:** keep test files in lint coverage ([#2047](https://github.com/djm204/frankenbeast/issues/2047)) ([79e5fcc](https://github.com/djm204/frankenbeast/commit/79e5fccc2f75b34a9af476125090edafbe3f10fa))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/orchestrator bumped from 0.43.1 to 0.44.0
+
 ## [0.2.9](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.8...franken-mcp-suite-v0.2.9) (2026-07-14)
 
 

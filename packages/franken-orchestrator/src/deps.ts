@@ -89,6 +89,11 @@ export interface PlanIntent {
   readonly goal: string;
   readonly strategy?: string | undefined;
   readonly context?: Record<string, unknown> | undefined;
+  /**
+   * Internally generated critique guidance from a prior planning iteration.
+   * User/retrieved context fields with the same name must stay in context.
+   */
+  readonly critiqueFeedback?: string | undefined;
 }
 
 export interface PlanGraph {

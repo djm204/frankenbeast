@@ -15,22 +15,61 @@ export const CommsRunConfigSchema = z.object({
       slack: CommsChannelConfigSchema.extend({
         tokenRef: z.string().default('SLACK_BOT_TOKEN'),
         signingSecretRef: z.string().default('SLACK_SIGNING_SECRET'),
-      }).default({}),
+      }).default(() => ({
+        enabled: false,
+        tokenRef: 'SLACK_BOT_TOKEN',
+        signingSecretRef: 'SLACK_SIGNING_SECRET',
+      })),
       discord: CommsChannelConfigSchema.extend({
         tokenRef: z.string().default('DISCORD_BOT_TOKEN'),
         publicKeyRef: z.string().default('DISCORD_PUBLIC_KEY'),
-      }).default({}),
+      }).default(() => ({
+        enabled: false,
+        tokenRef: 'DISCORD_BOT_TOKEN',
+        publicKeyRef: 'DISCORD_PUBLIC_KEY',
+      })),
       telegram: CommsChannelConfigSchema.extend({
         botTokenRef: z.string().default('TELEGRAM_BOT_TOKEN'),
-      }).default({}),
+      }).default(() => ({
+        enabled: false,
+        botTokenRef: 'TELEGRAM_BOT_TOKEN',
+      })),
       whatsapp: CommsChannelConfigSchema.extend({
         accessTokenRef: z.string().default('WHATSAPP_ACCESS_TOKEN'),
         phoneNumberIdRef: z.string().default('WHATSAPP_PHONE_NUMBER_ID'),
         appSecretRef: z.string().default('WHATSAPP_APP_SECRET'),
         verifyTokenRef: z.string().default('WHATSAPP_VERIFY_TOKEN'),
-      }).default({}),
+      }).default(() => ({
+        enabled: false,
+        accessTokenRef: 'WHATSAPP_ACCESS_TOKEN',
+        phoneNumberIdRef: 'WHATSAPP_PHONE_NUMBER_ID',
+        appSecretRef: 'WHATSAPP_APP_SECRET',
+        verifyTokenRef: 'WHATSAPP_VERIFY_TOKEN',
+      })),
     })
-    .default({}),
+    .default(() => ({
+      slack: {
+        enabled: false,
+        tokenRef: 'SLACK_BOT_TOKEN',
+        signingSecretRef: 'SLACK_SIGNING_SECRET',
+      },
+      discord: {
+        enabled: false,
+        tokenRef: 'DISCORD_BOT_TOKEN',
+        publicKeyRef: 'DISCORD_PUBLIC_KEY',
+      },
+      telegram: {
+        enabled: false,
+        botTokenRef: 'TELEGRAM_BOT_TOKEN',
+      },
+      whatsapp: {
+        enabled: false,
+        accessTokenRef: 'WHATSAPP_ACCESS_TOKEN',
+        phoneNumberIdRef: 'WHATSAPP_PHONE_NUMBER_ID',
+        appSecretRef: 'WHATSAPP_APP_SECRET',
+        verifyTokenRef: 'WHATSAPP_VERIFY_TOKEN',
+      },
+    })),
 });
 
 export type CommsRunConfig = z.infer<typeof CommsRunConfigSchema>;

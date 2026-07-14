@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createFirewallServer } from './firewall.js';
+import { createFirewallServer, resolveFirewallConfigPath } from './firewall.js';
 import { createFirewallAdapter } from '../adapters/firewall-adapter.js';
 
 describe('Firewall Server', () => {
@@ -46,6 +46,38 @@ describe('Firewall Server', () => {
     const fileResult = await scanFileTool.handler({ path: '/tmp/prompt.txt' });
     expect(firewall.scanFile).toHaveBeenCalledWith('/tmp/prompt.txt');
     expect(fileResult.content[0]!.text).toContain('clean');
+  });
+
+  it('expands project placeholders in explicit firewall config paths', () => {
+    expect(resolveFirewallConfigPath('${CLAUDE_PROJECT_DIR}/.fbeast/config.json', '/project-a')).toBe(
+      join('/project-a', '.fbeast', 'config.json'),
+    );
+    expect(resolveFirewallConfigPath('$FBEAST_ROOT/.fbeast/config.json', '/project-a')).toBe(
+      join('/project-a', '.fbeast', 'config.json'),
+    );
+  });
+
+  it('expands project placeholders followed by Windows separators', () => {
+    expect(resolveFirewallConfigPath('${CLAUDE_PROJECT_DIR}\\.fbeast\\config.json', '/project-a')).toBe(
+      '/project-a\\.fbeast\\config.json',
+    );
+  });
+
+  it('preserves dollar sequences while expanding project placeholders', () => {
+    expect(resolveFirewallConfigPath('${CLAUDE_PROJECT_DIR}/.fbeast/config.json', '/project-$&')).toBe(
+      join('/project-$&', '.fbeast', 'config.json'),
+    );
+  });
+
+  it('preserves explicit relative config paths containing nested .fbeast dirs', () => {
+    expect(resolveFirewallConfigPath('nested/.fbeast/config.json', '/project-a')).toBe(
+      join('/project-a', 'nested', '.fbeast', 'config.json'),
+    );
+  });
+
+  it('rejects empty explicit firewall config paths', () => {
+    expect(resolveFirewallConfigPath(undefined, '/project-a')).toBeUndefined();
+    expect(() => resolveFirewallConfigPath('', '/project-a')).toThrow(/config path must not be empty/i);
   });
 
   it('rejects scanning a path outside the project root', async () => {

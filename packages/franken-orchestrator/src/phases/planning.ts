@@ -130,9 +130,8 @@ export async function runPlanning(
     const planIntent: PlanIntent = {
       goal: ctx.sanitizedIntent.goal,
       strategy: ctx.sanitizedIntent.strategy,
-      context: ctx.critiqueFeedback
-        ? { ...ctx.sanitizedIntent.context, critiqueFeedback: ctx.critiqueFeedback }
-        : ctx.sanitizedIntent.context,
+      context: ctx.sanitizedIntent.context,
+      critiqueFeedback: ctx.critiqueFeedback,
     };
     const plan = await planner.createPlan(planIntent);
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.9](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.8...live-bench-v0.2.9) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.17 to 0.7.18
+    * @franken/types bumped from 0.10.0 to 0.10.1
+
 ## [0.2.8](https://github.com/djm204/frankenbeast/compare/live-bench-v0.2.7...live-bench-v0.2.8) (2026-07-14)
 
 

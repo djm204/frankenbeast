@@ -571,6 +571,22 @@ describe('GitBranchIsolator', () => {
       expect(() => isolator.autoCommit('chunk$(evil)', 'impl', 1)).toThrow();
       expect(() => isolator.merge('chunk`whoami`')).toThrow();
     });
+
+    it('passes hostile-looking working directories only as exec cwd metadata', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list main') return '  main\n';
+        if (cmd === 'git branch --list chunk/03_my_chunk') return '';
+        return '';
+      });
+      const cwd = '/tmp/repo; touch /tmp/pwned $(whoami)';
+      const cwdIsolator = new GitBranchIsolator(makeConfig({ workingDir: cwd }));
+
+      cwdIsolator.isolate('03_my_chunk');
+
+      expectGit(['checkout', '-b', 'chunk/03_my_chunk'], cwd);
+      expect(mockExecFileSync.mock.calls.every(([, , opts]) => (opts as { cwd?: string } | undefined)?.cwd === cwd)).toBe(true);
+      expect(mockExecSync.mock.calls.every(([cmd]) => !String(cmd).includes('touch /tmp/pwned'))).toBe(true);
+    });
   });
 
   describe('autoCommit() submodule awareness', () => {

@@ -1,6 +1,6 @@
 {
   "name": "@franken/brain",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "MOD-03: Memory Systems for the Frankenbeast AI agent",
   "type": "module",
   "main": "dist/index.js",
@@ -27,15 +27,15 @@
   "license": "MIT",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.3.0",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@franken/types": "0.10.0",
-    "better-sqlite3": "^12.6.2"
+    "@franken/types": "0.10.1",
+    "better-sqlite3": "^12.11.1"
   },
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"

@@ -146,6 +146,9 @@ describe('ChatShell route heading', () => {
       removeEventListener: vi.fn(),
     });
     vi.clearAllMocks();
+    for (const mock of Object.values(networkApiMocks)) {
+      mock.mockReset();
+    }
     networkApiMocks.getStatus.mockResolvedValue({ mode: 'secure', secureBackend: 'local-encrypted', services: [] });
     networkApiMocks.getConfig.mockResolvedValue({
       network: { mode: 'secure', secureBackend: 'local-encrypted' },

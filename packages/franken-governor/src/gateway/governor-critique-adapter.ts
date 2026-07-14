@@ -251,8 +251,8 @@ export class GovernorCritiqueAdapter {
     const scope = formatApprovalSessionTokenScope(request);
     for (const tokenId of this.getApprovalSessionTokenCandidates(rationale)) {
       try {
-        const token = this.sessionTokenStore.get(tokenId);
-        if (token?.scope === scope) return token;
+        const result = this.sessionTokenStore.consume(tokenId, scope);
+        if (result.status === 'consumed') return result.token;
       } catch {
         return undefined;
       }

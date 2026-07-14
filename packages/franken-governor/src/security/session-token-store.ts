@@ -32,6 +32,12 @@ export interface SweepExpiredSessionTokenOptions {
   readonly nowMs?: number;
 }
 
+export type ConsumeSessionTokenResult =
+  | { readonly status: 'consumed'; readonly token: SessionToken }
+  | { readonly status: 'missing' }
+  | { readonly status: 'expired' }
+  | { readonly status: 'scope_mismatch' };
+
 interface SerializedSessionToken {
   readonly tokenId: string;
   readonly approvalId: string;
@@ -118,6 +124,42 @@ export class SessionTokenStore {
     return scope === undefined || token.scope === scope;
   }
 
+  consume(tokenId: string, scope?: string): ConsumeSessionTokenResult {
+    const consumeLoadedToken = (): ConsumeSessionTokenResult => {
+      const token = this.tokens.get(tokenId);
+      if (token === undefined) return { status: 'missing' };
+
+      if (this.isExpired(token)) {
+        this.tokens.delete(tokenId);
+        return { status: 'expired' };
+      }
+
+      if (scope !== undefined && token.scope !== scope) {
+        return { status: 'scope_mismatch' };
+      }
+
+      this.tokens.delete(tokenId);
+      return { status: 'consumed', token };
+    };
+
+    if (!this.persistenceFile) {
+      return consumeLoadedToken();
+    }
+
+    return this.withFileLock(() => {
+      const expiredTokenIds = new Set<string>();
+      this.loadPersistedTokens(expiredTokenIds);
+      const result = consumeLoadedToken();
+      const effectiveResult = result.status === 'missing' && expiredTokenIds.has(tokenId)
+        ? { status: 'expired' as const }
+        : result;
+      if (effectiveResult.status === 'consumed' || effectiveResult.status === 'expired') {
+        this.persist();
+      }
+      return effectiveResult;
+    });
+  }
+
   private pruneExpiredTokens(nowMs: number = wallClockNow()): number {
     let pruned = 0;
     for (const [tokenId, token] of this.tokens) {
@@ -129,7 +171,7 @@ export class SessionTokenStore {
     return pruned;
   }
 
-  private loadPersistedTokens(): number {
+  private loadPersistedTokens(expiredTokenIds?: Set<string>): number {
     if (!this.persistenceFile) return 0;
 
     let raw: string;
@@ -162,6 +204,7 @@ export class SessionTokenStore {
       if (token && !this.isExpired(token)) {
         this.tokens.set(token.tokenId, token);
       } else if (token) {
+        expiredTokenIds?.add(token.tokenId);
         expiredPersisted += 1;
       }
     }

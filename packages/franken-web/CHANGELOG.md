@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.9](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.8...franken-web-v0.2.9) (2026-07-14)
+
+
+### Bug Fixes
+
+* **deps:** repair npm security and maintenance update ([4fd8ecc](https://github.com/djm204/frankenbeast/commit/4fd8eccf9b57960572d624aaa18ceac773fddcc0))
+
+
+### Miscellaneous
+
+* **web:** deduplicate API error helpers ([33a2a73](https://github.com/djm204/frankenbeast/commit/33a2a73637df5dd520e744d1151a0776a74c2ba1))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.10.0 to 0.10.1
+
 ## [0.2.8](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.7...franken-web-v0.2.8) (2026-07-14)
 
 

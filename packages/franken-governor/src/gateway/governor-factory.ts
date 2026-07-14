@@ -7,13 +7,14 @@ import { GovernorAuditRecorder } from '../audit/audit-recorder.js';
 import { CliChannel, type ReadlineAdapter } from '../channels/cli-channel.js';
 import type { GovernorMemoryPort } from '../audit/governor-memory-port.js';
 import type { TriggerEvaluator } from '../triggers/trigger-evaluator.js';
-import { defaultConfig, type GovernorConfig } from '../core/config.js';
+import { normalizeGovernorConfig, type GovernorConfig } from '../core/config.js';
 import type { SessionTokenStore } from '../security/session-token-store.js';
 import type { SignatureVerifier } from '../security/signature-verifier.js';
 import {
   createEvaluatorsFromApprovalPolicyManifest,
   type ApprovalPolicyManifest,
 } from '../security/approval-policy-manifest.js';
+import { ApprovalConfigurationError } from '../errors/index.js';
 
 export interface CreateGovernorOptions {
   readonly readline: ReadlineAdapter;
@@ -39,10 +40,12 @@ export interface CreateGovernorOptions {
 }
 
 export function createGovernor(options: CreateGovernorOptions): GovernorCritiqueAdapter {
-  const config: GovernorConfig = {
-    ...defaultConfig(),
-    ...options.config,
-  };
+  let config: GovernorConfig;
+  try {
+    config = normalizeGovernorConfig(options.config);
+  } catch (error) {
+    throw new ApprovalConfigurationError((error as Error).message);
+  }
 
   const channel = new CliChannel({
     readline: options.readline,

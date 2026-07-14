@@ -1,6 +1,6 @@
 {
   "name": "@franken/governor",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "MOD-07: Human-in-the-Loop (HITL) & Governance for the Frankenbeast AI agent",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,13 +35,13 @@
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
   "dependencies": {
-    "@franken/types": "0.10.0",
-    "hono": "^4.12.27"
+    "@franken/types": "0.10.1",
+    "hono": "^4.12.29"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0",
-    "@vitest/coverage-v8": "^4.1.9",
-    "typescript": "^5.7.0",
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   }
 }

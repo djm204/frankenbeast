@@ -99,6 +99,8 @@ export type {
 } from './providers/format-handoff.js';
 export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
+export { quoteUntrustedPayload, wrapUntrustedContent } from './prompt/untrusted-content.js';
+export type { UntrustedContentSource } from './prompt/untrusted-content.js';
 
 // Planning
 export { ChunkFileGraphBuilder } from './planning/chunk-file-graph-builder.js';
@@ -185,6 +187,18 @@ export { GracefulShutdown } from './resilience/graceful-shutdown.js';
 export type { ShutdownHandler } from './resilience/graceful-shutdown.js';
 export { checkModuleHealth, allHealthy } from './resilience/module-initializer.js';
 export type { ModuleHealth } from './resilience/module-initializer.js';
+
+// Disaster recovery
+export { detectRestorePreviewConflicts } from './dr/restore-preview.js';
+export type {
+  RestorePreviewArea,
+  RestorePreviewConflict,
+  RestorePreviewConflictType,
+  RestorePreviewManifest,
+  RestorePreviewRecord,
+  RestorePreviewResult,
+  RestorePreviewSeverity,
+} from './dr/restore-preview.js';
 
 // CLI — file writer
 export { writeDesignDoc, readDesignDoc } from './cli/file-writer.js';

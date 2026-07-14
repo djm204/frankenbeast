@@ -204,6 +204,18 @@ describe('handleBeastCommand() spawn', () => {
 });
 
 describe('handleBeastCommand() status and logs', () => {
+  it('throws for an unknown status run id instead of printing undefined', async () => {
+    mockServices.runs.getRun.mockReturnValue(undefined);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'status', beastTarget: 'missing-run' } as CliArgs,
+    });
+
+    await expect(handleBeastCommand(deps)).rejects.toThrow('Unknown Beast run: missing-run');
+    expect(deps.print).not.toHaveBeenCalled();
+    expect(mockServices.runs.listAttempts).not.toHaveBeenCalled();
+    expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it('renders current attempt container metadata in status output', async () => {
     mockServices.runs.getRun.mockReturnValue({
       id: 'run-1',

@@ -171,7 +171,7 @@ export interface ProviderSkillConfig {
 export const ToolDefinitionSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
-  inputSchema: z.record(z.unknown()),
+  inputSchema: z.record(z.string(), z.unknown()),
   requiresHitl: z.boolean().optional(),
 });
 
@@ -211,7 +211,7 @@ export const TokenUsageSchema = z
 export const McpServerConfigSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   url: z.string().url().optional(),
 });
 

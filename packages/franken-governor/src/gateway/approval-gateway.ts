@@ -1,5 +1,5 @@
 import type { ApprovalRequest, ApprovalResponse, ApprovalOutcome } from '../core/types.js';
-import type { GovernorConfig } from '../core/config.js';
+import { validateGovernorConfig, type GovernorConfig } from '../core/config.js';
 import type { ApprovalChannel } from './approval-channel.js';
 import {
   formatApprovalResponseSignaturePayload,
@@ -45,6 +45,12 @@ export class ApprovalGateway {
   private readonly sessionTokenStore: SessionTokenStore | undefined;
 
   constructor(deps: ApprovalGatewayDeps) {
+    try {
+      validateGovernorConfig(deps.config);
+    } catch (error) {
+      throw new ApprovalConfigurationError((error as Error).message);
+    }
+
     try {
       assertValidSessionTokenTtl(deps.config.sessionTokenTtlMs);
     } catch (error) {

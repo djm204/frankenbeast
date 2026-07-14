@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileCheckpointStore } from '../../src/checkpoint/file-checkpoint-store.js';
 import type { ICheckpointStore } from '../../src/deps.js';
+
+const rootRequire = createRequire(new URL('../../../../package.json', import.meta.url));
 
 describe('FileCheckpointStore', () => {
   let tmpDir: string;
@@ -333,7 +336,7 @@ describe('FileCheckpointStore', () => {
 
   describe('concurrent writers', () => {
     it('does not lose or corrupt entries under concurrent multi-process writes', async () => {
-      const ts = await import('typescript');
+      const ts = rootRequire('typescript') as typeof import('typescript');
       const { pathToFileURL, fileURLToPath } = await import('node:url');
       const srcPath = fileURLToPath(
         new URL('../../src/checkpoint/file-checkpoint-store.ts', import.meta.url),

@@ -1,0 +1,1 @@
+{"mode":"secure","secureBackend":"local-encrypted","detached":false,"startedAt":"2026-03-09T00:00:00.000Z","services":[{"id":"chat-server","pid":101,"dependsOn":[],"startedAt":"2026-03-09T00:00:00.000Z"},{"id":"chat-server","pid":102,"dependsOn":[],"startedAt":"2026-03-09T00:00:01.000Z"}]}

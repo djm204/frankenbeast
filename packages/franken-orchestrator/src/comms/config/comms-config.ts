@@ -48,11 +48,16 @@ export const CommsConfigSchema = z.object({
       max: z.number().default(100), // 100 requests per window
     }).optional(),
     deliveryChannels: z.object({
-      slack: DeliveryChannelPolicySchema.default({}),
-      discord: DeliveryChannelPolicySchema.default({}),
-      telegram: DeliveryChannelPolicySchema.default({}),
-      whatsapp: DeliveryChannelPolicySchema.default({}),
-    }).default({}),
+      slack: DeliveryChannelPolicySchema.default(() => ({ allowSensitiveDelivery: false })),
+      discord: DeliveryChannelPolicySchema.default(() => ({ allowSensitiveDelivery: false })),
+      telegram: DeliveryChannelPolicySchema.default(() => ({ allowSensitiveDelivery: false })),
+      whatsapp: DeliveryChannelPolicySchema.default(() => ({ allowSensitiveDelivery: false })),
+    }).default(() => ({
+      slack: { allowSensitiveDelivery: false },
+      discord: { allowSensitiveDelivery: false },
+      telegram: { allowSensitiveDelivery: false },
+      whatsapp: { allowSensitiveDelivery: false },
+    })),
   }).optional(),
 });
 

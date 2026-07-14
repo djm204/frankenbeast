@@ -7,10 +7,11 @@ import { ToolDefinitionSchema } from './provider.js';
  */
 export const McpConfigSchema = z.object({
   mcpServers: z.record(
+    z.string(),
     z.object({
       command: z.string().min(1),
       args: z.array(z.string()).optional(),
-      env: z.record(z.string()).optional(),
+      env: z.record(z.string(), z.string()).optional(),
       url: z.string().url().optional(),
     }),
   ),
