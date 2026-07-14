@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0](https://github.com/djm204/frankenbeast/compare/v0.51.0...v0.52.0) (2026-07-14)
+
+
+### Features
+
+* **orchestrator:** add per-lane egress policy ([#2233](https://github.com/djm204/frankenbeast/issues/2233)) ([5d9cdfe](https://github.com/djm204/frankenbeast/commit/5d9cdfeab65394bf5759059d338d2e62963cc77f))
+
 ## [0.51.0](https://github.com/djm204/frankenbeast/compare/v0.50.0...v0.51.0) (2026-07-14)
 
 

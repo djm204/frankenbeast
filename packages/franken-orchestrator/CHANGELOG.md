@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.46.1...@franken/orchestrator-v0.47.0) (2026-07-14)
+
+
+### Features
+
+* **orchestrator:** add per-lane egress policy ([#2233](https://github.com/djm204/frankenbeast/issues/2233)) ([5d9cdfe](https://github.com/djm204/frankenbeast/commit/5d9cdfeab65394bf5759059d338d2e62963cc77f))
+
 ## [0.46.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.46.0...@franken/orchestrator-v0.46.1) (2026-07-14)
 
 
