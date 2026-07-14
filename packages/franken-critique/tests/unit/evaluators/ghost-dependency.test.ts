@@ -204,11 +204,13 @@ describe('GhostDependencyEvaluator', () => {
       const tupleAssertion = value as [import('ghost-package').Tuple];
       const readonlyAssertion = value as readonly import('ghost-package').Readonly[];
       const genericCall = createPlugin<import('ghost-package').Options>();
+      const indexedGenericCall = createPlugin<import('ghost-package')['Options']>();
       const unionAssertion = value as string | import('ghost-package').Shape;
       const functionType = (() => {}) as () => import('ghost-package').Factory;
       const typedFunctionValue: () => import('ghost-package').Factory = () => ({}) as never;
       interface Cfg { name: string; plugin: import('ghost-package').Plugin }
       type InlineObject = { name: string; plugin: import('ghost-package').Plugin };
+      type NestedInlineObject = { nested: { ok: string }; plugin: typeof import('ghost-package') };
       declare namespace N { type T = import('ghost-package').T }
       namespace ExportedTypeNamespace { export type T = import('ghost-package').T }
       type TemplateKey = \`\${import('ghost-package').Name}\`;
@@ -273,11 +275,18 @@ describe('GhostDependencyEvaluator', () => {
       Plugin<import('uppercase-less-than-ghost');
       let dep: SomeType
       load(import('after-typed-var-ghost'));
+      async function loadObject(): { plugin: string } { return import('object-shaped-return-ghost'); }
+      type Done = string
+      sql\`\${require('tagged-template-ghost')}\`;
+      let dep2: SomeType
+      void import('void-after-typed-decl-ghost');
+      let dep3: SomeType
+      import('bare-after-typed-decl-ghost');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(36);
+    expect(result.findings).toHaveLength(40);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -315,6 +324,10 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('keyword-helper-ghost'),
         expect.stringContaining('uppercase-less-than-ghost'),
         expect.stringContaining('after-typed-var-ghost'),
+        expect.stringContaining('object-shaped-return-ghost'),
+        expect.stringContaining('tagged-template-ghost'),
+        expect.stringContaining('void-after-typed-decl-ghost'),
+        expect.stringContaining('bare-after-typed-decl-ghost'),
       ]),
     );
   });
