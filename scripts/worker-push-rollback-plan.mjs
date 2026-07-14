@@ -85,9 +85,13 @@ export function buildRollbackPlan(options) {
   const evidenceRef = `refs/fbeast/rollback-evidence/${sanitizePathSegment(branch)}`;
   const remoteHead = remoteHeadOid?.toLowerCase() ?? '<captured-remote-head-oid>';
   const goodOid = lastGoodOid?.toLowerCase() ?? '<resolved-last-good-oid>';
+  const lastGoodEvidence = lastGoodOid?.toLowerCase() ?? lastGood;
   const prSelector = pr != null ? String(pr) : '<pr-number>';
   const repoArgs = repo ? ['--repo', repo] : [];
   const approvalPrefix = splitCommandPrefix(approvalCop);
+  if (approvalPrefix.length === 0) {
+    throw new Error('approvalCop must name the approval-cop/HITL command; blank overrides are not allowed');
+  }
   const remoteHeadPath = `${evidenceDir}/remote-head.txt`;
   const lastGoodPath = `${evidenceDir}/last-good-oid.txt`;
   const commitsPath = `${evidenceDir}/commits-to-remove.txt`;
@@ -100,9 +104,9 @@ export function buildRollbackPlan(options) {
     readOnlyCapture: [
       ['mkdir', '-p', evidenceDir],
       ['bash', '-lc', 'set -o pipefail; git ls-remote --heads "$1" "$2" | tee "$3"', '--', remote, branchRef, remoteHeadPath],
-      ['bash', '-lc', 'set -o pipefail; git rev-parse --verify "$1^{commit}" | tee "$2"', '--', lastGood, lastGoodPath],
+      ['bash', '-lc', 'set -o pipefail; git rev-parse --verify "$1^{commit}" | tee "$2"', '--', lastGoodEvidence, lastGoodPath],
       ['git', 'fetch', '--force', '--no-tags', remote, `+${branchRef}:${evidenceRef}`],
-      ['bash', '-lc', 'git merge-base --is-ancestor "$1" "$2" && git log --oneline --decorate --graph "$1..$2" > "$3"', '--', lastGood, evidenceRef, commitsPath],
+      ['bash', '-lc', 'git merge-base --is-ancestor "$1" "$2" && git log --oneline --decorate --graph "$1..$2" > "$3"', '--', lastGoodEvidence, evidenceRef, commitsPath],
       ['bash', '-lc', 'gh pr view "$1" "${@:3}" --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url > "$2"', '--', prSelector, prStatePath, ...repoArgs],
       ['node', '-e', 'require("node:fs").writeFileSync(process.argv[1], `## Worker branch rollback postmortem\n\n- Branch: ${process.argv[2]}\n- Remote head before rollback: ${process.argv[3]}\n- Selected last-good commit: ${process.argv[4]}\n- Evidence directory: ${process.argv[5]}\n- Approval-cop outcome/token: <fill before posting>\n- Verification: rerun ls-remote, pr view, checks, and Codex on the new head before merging.\n`)', rollbackCommentPath, branchRef, remoteHead, goodOid, evidenceDir],
     ],
@@ -110,6 +114,7 @@ export function buildRollbackPlan(options) {
       `Confirm ${remoteHead} is the current remote head for ${branchRef}.`,
       `Confirm ${goodOid} is the intended last-good commit for ${lastGood}.`,
       'Preserve read-only command output in the evidence directory before requesting approval.',
+      `Fill ${rollbackCommentPath} with the approval-cop outcome and verification results before posting it to the PR.`,
     ],
     approvalGatedActions: [
       [
@@ -120,12 +125,13 @@ export function buildRollbackPlan(options) {
     postRollbackVerification: [
       ['git', 'ls-remote', '--heads', remote, branchRef],
       ['gh', 'pr', 'view', prSelector, ...repoArgs, '--json', 'headRefOid,mergeStateStatus,statusCheckRollup,url'],
-      ['gh', 'pr', 'comment', prSelector, ...repoArgs, '--body-file', rollbackCommentPath],
+      ['bash', '-lc', '! grep -q "<fill before posting>" "$1" && gh pr comment "$2" "${@:4}" --body-file "$1"', '--', rollbackCommentPath, prSelector, ...repoArgs],
     ],
     notes: [
       'This helper is dry-run only; it never executes push, force-push, or GitHub mutation commands.',
       'The force-with-lease value pins the expected remote head so concurrent worker pushes are not overwritten silently.',
       'Run the approval-gated command only through approval-cop/HITL after evidence and last-good selection are reviewed.',
+      'Requires approval-cop, or an equivalent HITL wrapper supplied with --approval-cop, to be installed in PATH; blank approval-cop overrides are rejected.',
     ],
   };
 }

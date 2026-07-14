@@ -7,6 +7,7 @@ Use this runbook when a worker push fails midway, a force-with-lease update is d
 - Applies to worker-owned feature/issue branches, not `main` or release tags.
 - Treat branch rewrites as destructive. Never run `git push --force`, `git push --force-with-lease`, branch deletion, or equivalent GitHub mutation directly from a worker shell.
 - Use approval-cop/HITL for the rollback command after evidence and the last-good commit are reviewed.
+- Ensure `approval-cop` or the repository's approved HITL wrapper is installed and on `PATH` before generating or submitting a rollback plan.
 - Prefer a normal merge/revert commit when it preserves the PR history safely. Use branch rollback only when the remote branch itself needs to be restored to a prior commit.
 
 ## 1. Diagnose the failure shape
@@ -38,14 +39,18 @@ gh pr view <pr-number> --repo <owner>/<repo> \
 Create an evidence directory that can be attached to a handoff or postmortem:
 
 ```bash
+branch='<branch>'
+branch_slug='<branch-slug>'
+branch_ref="refs/heads/${branch}"
+evidence_ref="refs/fbeast/rollback-evidence/${branch_slug}"
 mkdir -p rollback-evidence/<branch-slug>
 set -o pipefail
-git ls-remote --heads origin refs/heads/<branch> | tee rollback-evidence/<branch-slug>/remote-head.txt
+git ls-remote --heads origin "${branch_ref}" | tee rollback-evidence/<branch-slug>/remote-head.txt
 gh pr view <pr-number> --repo <owner>/<repo> \
   --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url \
   > rollback-evidence/<branch-slug>/pr-state.json
-git fetch --force --no-tags origin +refs/heads/<branch>:refs/fbeast/rollback-evidence/<branch-slug>
-git log --oneline --decorate --graph <last-good>..refs/fbeast/rollback-evidence/<branch-slug> \
+git fetch --force --no-tags origin "+${branch_ref}:${evidence_ref}"
+git log --oneline --decorate --graph <last-good>.."${evidence_ref}" \
   > rollback-evidence/<branch-slug>/commits-to-remove.txt
 ```
 
@@ -65,7 +70,7 @@ Verify it resolves to a commit:
 ```bash
 set -o pipefail
 git rev-parse --verify '<last-good>^{commit}' | tee rollback-evidence/<branch-slug>/last-good-oid.txt
-git merge-base --is-ancestor '<last-good>' refs/fbeast/rollback-evidence/<branch-slug>
+git merge-base --is-ancestor '<last-good>' "${evidence_ref}"
 ```
 
 If the ancestry check fails, stop: the selected last-good ref is not an ancestor of the freshly fetched remote branch head and needs human review before any rollback command is submitted.
@@ -110,6 +115,7 @@ approval-cop run -- git push \
 ```
 
 Only submit that command after the evidence bundle and last-good selection are reviewed. Do not reshape the command to bypass approval-cop if approval is denied or pending.
+The helper refuses blank `--approval-cop` overrides because the approval/HITL wrapper is the safety boundary for the rendered force-with-lease command.
 
 ## 6. Verify the rollback
 
@@ -134,5 +140,7 @@ Post a concise PR comment with:
 - The approval-cop command outcome or approval token reference.
 - Verification commands and results.
 - Any follow-up CI/Codex review required for the new head.
+
+Do not post the generated `rollback-comment.md` while it still contains placeholder fields; fill in the approval-cop outcome and verification results first.
 
 If the rollback is part of a Kanban worker recovery, also add a Kanban comment with the same evidence summary before blocking or completing the card.

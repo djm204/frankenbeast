@@ -67,6 +67,9 @@ describe('worker push rollback dry-run helper', () => {
       'git fetch --force --no-tags origin +refs/heads/resolve/issue-1720-feat-dr:refs/fbeast/rollback-evidence/resolve-issue-1720-feat-dr',
     );
     expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
+      `bash -lc set -o pipefail; git rev-parse --verify "$1^{commit}" | tee "$2" -- ${LAST_GOOD} rollback-evidence/resolve-issue-1720-feat-dr/last-good-oid.txt`,
+    );
+    expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
       'bash -lc gh pr view "$1" "${@:3}" --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url > "$2" -- 1720 rollback-evidence/resolve-issue-1720-feat-dr/pr-state.json --repo djm204/frankenbeast',
     );
     expect(plan.approvalGatedActions).toEqual([
@@ -82,8 +85,16 @@ describe('worker push rollback dry-run helper', () => {
       ],
     ]);
     expect(plan.postRollbackVerification.map(command => command.join(' '))).toContain(
-      'gh pr comment 1720 --repo djm204/frankenbeast --body-file rollback-evidence/resolve-issue-1720-feat-dr/rollback-comment.md',
+      'bash -lc ! grep -q "<fill before posting>" "$1" && gh pr comment "$2" "${@:4}" --body-file "$1" -- rollback-evidence/resolve-issue-1720-feat-dr/rollback-comment.md 1720 --repo djm204/frankenbeast',
     );
+  });
+
+  it('rejects blank approval-cop overrides', () => {
+    expect(() => buildRollbackPlan({
+      branch: 'resolve/issue-1720-feat-dr',
+      lastGood: 'origin/main',
+      approvalCop: '   ',
+    })).toThrow(/approvalCop/u);
   });
 
   it('prints planned actions in dry-run mode without executing side effects', () => {
