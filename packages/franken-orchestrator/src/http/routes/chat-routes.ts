@@ -260,6 +260,17 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
     return withChatMutationAdmission(c, session.id, async () => {
       if (!session.pendingApproval) {
+        if (session.state === 'approved' || session.state === 'rejected') {
+          return c.json({
+            data: {
+              id: session.id,
+              approved: session.state === 'approved',
+              state: session.state,
+              pendingApproval: null,
+            },
+          } satisfies ApiDataEnvelope<ApproveResult>);
+        }
+
         if (session.state === 'pending_approval' && !approved) {
           session.state = 'rejected';
           session.pendingApproval = null;

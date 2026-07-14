@@ -108,9 +108,9 @@ describe('chat approval route persistence', () => {
       body: JSON.stringify({ approved: true }),
     });
 
-    expect(staleResponse.status).toBe(409);
-    const staleBody = await staleResponse.json() as { error: { code: string } };
-    expect(staleBody.error.code).toBe('APPROVAL_NOT_PENDING');
+    expect(staleResponse.status).toBe(200);
+    const staleBody = await staleResponse.json() as { data: { approved: boolean; state: string; pendingApproval?: unknown } };
+    expect(staleBody.data).toMatchObject({ approved: true, state: 'approved', pendingApproval: null });
   });
 
   it('clears pending approval metadata when a session is rejected over HTTP', async () => {

@@ -398,6 +398,25 @@ export class ChatSocketController {
   ): Promise<void> {
     if (!session.pendingApproval) {
       if (session.state === 'pending_approval') {
+        if (!approved) {
+          session.pendingApproval = null;
+          session.state = 'rejected';
+          session.updatedAt = nowIso();
+          this.sessionStore.save(session);
+          this.emit(peer, {
+            type: 'turn.approval.resolved',
+            approved: false,
+            timestamp: session.updatedAt,
+          });
+          this.emit(peer, {
+            type: 'assistant.message.complete',
+            messageId: deterministicUuid('packages/franken-orchestrator/src/http/ws-chat-server.ts'),
+            content: 'Rejected.',
+            timestamp: nowIso(),
+          });
+          return;
+        }
+
         this.emit(peer, {
           type: 'turn.error',
           code: 'APPROVAL_NOT_PENDING',
