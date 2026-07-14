@@ -1,4 +1,5 @@
 import { execFile as defaultExecFile } from 'node:child_process';
+import { parseSafeJson } from '../utils/safe-json.js';
 import type { GithubIssue, IIssueFetcher, IssueFetchOptions } from './types.js';
 
 type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void;
@@ -49,7 +50,14 @@ export class IssueFetcher implements IIssueFetcher {
     args.push('--limit', String(limit));
 
     const stdout = await this.run('gh', args);
-    const raw: RawGithubIssue[] = JSON.parse(stdout) as RawGithubIssue[];
+    const raw = parseSafeJson(stdout, {
+      context: 'GitHub issue list payload',
+      maxBytes: 2_097_152,
+      maxDepth: 48,
+      maxContainers: 20_000,
+      maxObjectKeys: 100_000,
+      maxArrayItems: Math.max(limit * 8, 240),
+    }) as RawGithubIssue[];
 
     return raw.map((issue) => ({
       number: issue.number,
@@ -63,7 +71,14 @@ export class IssueFetcher implements IIssueFetcher {
 
   async inferRepo(): Promise<string> {
     const stdout = await this.run('gh', ['repo', 'view', '--json', 'nameWithOwner']);
-    const parsed = JSON.parse(stdout) as { nameWithOwner: string };
+    const parsed = parseSafeJson(stdout, {
+      context: 'GitHub repository payload',
+      maxBytes: 16_384,
+      maxDepth: 8,
+      maxContainers: 20,
+      maxObjectKeys: 50,
+      maxArrayItems: 10,
+    }) as { nameWithOwner: string };
     return parsed.nameWithOwner;
   }
 

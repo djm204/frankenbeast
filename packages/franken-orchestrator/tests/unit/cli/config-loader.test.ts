@@ -92,6 +92,23 @@ describe('Config loader', () => {
     await expect(loadConfig(makeArgs({ subcommand: 'init', config: filePath }))).rejects.toThrow(SyntaxError);
   });
 
+  it('rejects config files that exceed the safe byte limit with an actionable error', async () => {
+    const filePath = join(tmpdir(), `beast-config-huge-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    await writeFile(filePath, JSON.stringify({ notes: 'x'.repeat(1_048_576) }));
+
+    await expect(loadConfig(makeArgs({ config: filePath }))).rejects.toThrow(/maxBytes/u);
+  });
+
+  it('rejects config files that exceed the safe nesting limit with an actionable error', async () => {
+    const filePath = join(tmpdir(), `beast-config-deep-${Date.now()}.json`);
+    tmpFiles.push(filePath);
+    const deep = '{' + '"a":{'.repeat(65) + '"value":true' + '}'.repeat(65) + '}';
+    await writeFile(filePath, deep);
+
+    await expect(loadConfig(makeArgs({ config: filePath }))).rejects.toThrow(/maxDepth/u);
+  });
+
   it('deep merges nested network config from file', async () => {
     const filePath = join(tmpdir(), `beast-network-config-${Date.now()}.json`);
     tmpFiles.push(filePath);

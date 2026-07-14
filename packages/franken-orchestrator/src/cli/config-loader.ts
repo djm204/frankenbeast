@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { parseOrchestratorConfig, type OrchestratorConfig } from '../config/orchestrator-config.js';
 import { applyNetworkConfigSets } from '../network/network-config-paths.js';
+import { parseSafeJson } from '../utils/safe-json.js';
 import type { CliArgs } from './args.js';
 
 /** Environment variable prefix for orchestrator config. */
@@ -58,7 +59,14 @@ function fromEnv(shadowedFields: ReadonlySet<keyof OrchestratorConfig> = new Set
 /** Load config from a JSON file. */
 async function fromFile(filePath: string): Promise<Partial<OrchestratorConfig>> {
   const raw = await readFile(filePath, 'utf-8');
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed = parseSafeJson(raw, {
+    context: `Config file ${filePath}`,
+    maxBytes: 1_048_576,
+    maxDepth: 64,
+    maxContainers: 10_000,
+    maxObjectKeys: 20_000,
+    maxArrayItems: 50_000,
+  });
   if (!isRecord(parsed)) {
     throw new TypeError('Config file must contain a JSON object');
   }

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { parseSafeJson } from '../utils/safe-json.js';
 
 
 function printLine(...args: unknown[]): void {
@@ -77,7 +78,14 @@ export function loadRunConfig(filePath: string): RunConfig {
   const raw = readFileSync(filePath, 'utf-8');
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw) as unknown;
+    parsed = parseSafeJson(raw, {
+      context: `Run config ${filePath}`,
+      maxBytes: 1_048_576,
+      maxDepth: 64,
+      maxContainers: 10_000,
+      maxObjectKeys: 20_000,
+      maxArrayItems: 50_000,
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new RunConfigParseError(filePath, reason, error instanceof Error ? { cause: error } : undefined);
