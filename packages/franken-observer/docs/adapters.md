@@ -268,7 +268,7 @@ Security notes:
 | Environment              | `endpoint`                                          | `otlpPath`            | Auth |
 |--------------------------|-----------------------------------------------------|-----------------------|------|
 | Local Tempo / Collector  | `http://localhost:4318`                             | `/v1/traces` (default)| none |
-| Grafana Cloud            | `https://tempo-{region}.grafana.net/tempo`          | `/otlp/v1/traces`     | `GRAFANA_INSTANCE_ID` / `GRAFANA_API_KEY` via `basicAuth` |
+| Grafana Cloud            | `https://otlp-gateway-<REGION>.grafana.net`         | `/otlp/v1/traces`     | `GRAFANA_INSTANCE_ID` / `GRAFANA_API_KEY` via `basicAuth` |
 
 **Testing without a real Tempo instance**
 
