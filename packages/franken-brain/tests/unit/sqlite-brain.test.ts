@@ -1965,6 +1965,28 @@ describe('SqliteBrain', () => {
       source.close();
     });
 
+
+    it('hydrate() rejects right-to-forget audit events with forged extra details', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('task', 'alice@example.test');
+      source.rightToForget({ query: 'alice@example.test' });
+      const snapshot = source.serialize();
+      snapshot.episodic.push({
+        type: 'observation',
+        step: 'right-to-forget',
+        summary: 'Right-to-forget deletion completed',
+        details: {
+          selectorHash: snapshot.deletionGuards?.[0]?.selectorHash,
+          deleted: { working: 0, episodic: 0, derived: 0 },
+          note: 'alice@example.test',
+        },
+        createdAt: '2026-07-14T00:00:00.000Z',
+      });
+
+      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/right-to-forget/);
+      source.close();
+    });
+
     it('round-trips with null checkpoint', () => {
       brain.working.set('key', 'val');
       const snapshot = brain.serialize();

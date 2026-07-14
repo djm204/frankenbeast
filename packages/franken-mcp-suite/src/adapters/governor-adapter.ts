@@ -133,6 +133,11 @@ function matchesDangerousPattern(action: string, context: string): boolean {
   return matchesDangerousActionName(action) || DANGEROUS_CONTEXT_PATTERNS.some((p) => p.test(combined));
 }
 
+function redactRightToForgetGovernanceContext(action: string, context: string): string {
+  if (action !== 'fbeast_memory_right_to_forget') return context;
+  return '[right-to-forget-context-redacted]';
+}
+
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -186,12 +191,13 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
   return {
     async check(input) {
-      const result = assessAction(input.action, input.context);
+      const context = redactRightToForgetGovernanceContext(input.action, input.context);
+      const result = assessAction(input.action, context);
 
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)
         VALUES (?, ?, ?, ?)
-      `).run(input.action, input.context, result.decision, result.reason);
+      `).run(input.action, context, result.decision, result.reason);
 
       return result;
     },

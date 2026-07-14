@@ -2160,10 +2160,14 @@ function isRightToForgetAuditEvent(event: EpisodicEvent): boolean {
   const details = event.details;
   if (details === null || typeof details !== 'object' || Array.isArray(details)) return false;
   const record = details as Record<string, unknown>;
+  const detailKeys = Object.keys(record).sort();
+  if (detailKeys.join(',') !== 'deleted,selectorHash') return false;
   if (typeof record.selectorHash !== 'string' || !/^[a-f0-9]{64}$/i.test(record.selectorHash)) return false;
   const deleted = record.deleted;
   if (deleted === null || typeof deleted !== 'object' || Array.isArray(deleted)) return false;
   const counts = deleted as Record<string, unknown>;
+  const countKeys = Object.keys(counts).sort();
+  if (countKeys.join(',') !== 'derived,episodic,working') return false;
   return ['working', 'episodic', 'derived'].every((name) => (
     Number.isSafeInteger(counts[name]) && Number(counts[name]) >= 0
   ));
@@ -2234,9 +2238,11 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
       }
     }
   }
-  for (const value of guardMatchCandidates(`${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`)) {
-    if (stmt.get('working:query', hashGuardValue(value))) {
-      throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
+  if (hasAnyDeletionGuard(db, 'working', 'query')) {
+    for (const value of guardMatchCandidates(`${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`)) {
+      if (stmt.get('working:query', hashGuardValue(value))) {
+        throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
+      }
     }
   }
 }
@@ -2257,9 +2263,11 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
       }
     }
   }
-  for (const value of guardMatchCandidates(text)) {
-    if (stmt.get('episodic:query', hashGuardValue(value))) {
-      throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
+  if (hasAnyDeletionGuard(db, 'episodic', 'query')) {
+    for (const value of guardMatchCandidates(text)) {
+      if (stmt.get('episodic:query', hashGuardValue(value))) {
+        throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
+      }
     }
   }
 }
@@ -2316,6 +2324,11 @@ function hasDeletionGuard(db: Database.Database, scope: string, kind: string, va
     .get(`${scope}:${kind}`, hashGuardValue(value, normalize)));
 }
 
+function hasAnyDeletionGuard(db: Database.Database, scope: string, kind: string): boolean {
+  return Boolean(db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? LIMIT 1`)
+    .get(`${scope}:${kind}`));
+}
+
 function assertCheckpointNotDeletionGuarded(db: Database.Database, state: ExecutionState): void {
   const context = state.context;
   const candidates: Array<[string, string | undefined]> = [
@@ -2330,10 +2343,12 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
       }
     }
   }
-  const text = valueToSearchText(state);
-  for (const value of guardMatchCandidates(text)) {
-    if (hasDeletionGuard(db, 'checkpoint', 'query', value)) {
-      throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
+  if (hasAnyDeletionGuard(db, 'checkpoint', 'query')) {
+    const text = valueToSearchText(state);
+    for (const value of guardMatchCandidates(text)) {
+      if (hasDeletionGuard(db, 'checkpoint', 'query', value)) {
+        throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
+      }
     }
   }
 }

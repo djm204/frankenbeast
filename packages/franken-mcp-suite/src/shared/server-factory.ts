@@ -228,6 +228,7 @@ export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unk
 }
 
 const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
+const RIGHT_TO_FORGET_SAFE_AUDIT_KEYS = new Set(['type', 'dryRun']);
 
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
@@ -236,9 +237,18 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   if (toolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
     sanitized['args'] = '[right-to-forget-args-redacted]';
   }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = '[right-to-forget-args-redacted]';
+    return sanitized;
+  }
   for (const key of RIGHT_TO_FORGET_SELECTOR_KEYS) {
     if (Object.prototype.hasOwnProperty.call(sanitized, key)) {
       sanitized[key] = '[right-to-forget-selector-redacted]';
+    }
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && key !== 'tool' && key !== 'args') {
+      sanitized[key] = '[right-to-forget-args-redacted]';
     }
   }
   return sanitized;

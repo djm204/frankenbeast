@@ -394,6 +394,20 @@ describe('createMcpServer', () => {
       });
     });
 
+
+    it('redacts invalid and unknown right-to-forget audit payloads wholesale', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', 'alice@example.test')).toEqual({
+        invalid: '[right-to-forget-args-redacted]',
+      });
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
+        queri: 'alice@example.test',
+        dryRun: true,
+      })).toEqual({
+        queri: '[right-to-forget-args-redacted]',
+        dryRun: true,
+      });
+    });
+
     it('audits failed handler results as ok=false with args', async () => {
       const recorded: Array<{ tool: string; ok: boolean; args?: unknown }> = [];
       const audit: AuditSink = { record: async (e) => { recorded.push(e); } };
