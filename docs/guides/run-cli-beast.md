@@ -284,7 +284,7 @@ These flags are for `frankenbeast beasts create|spawn` unless otherwise noted. `
 | Flag | Applies to | Behavior |
 |------|------------|----------|
 | `-d`, `--detached` | `network up`, `network start`, `network restart` | Start configured network services, one managed service, or restarted services in daemon mode. |
-| `--set <path=value>` | `network config` | Set an operator config value; may be repeated. |
+| `--set <path=value>` | `network config`, `network up`, `network start`, `network restart` | Persist an operator config value with `network config`; for `up`/`start`/`restart`, apply a non-persistent config override for that invocation. May be repeated. |
 | `--client=<claude|gemini|codex>` | `fbeast mcp init`, `fbeast mcp uninstall` | Target a specific MCP client config. |
 | `--pick[=<servers>]` | `fbeast mcp init` | Choose which MCP servers to install. |
 | `--mode=standard|proxy` | `fbeast mcp init` | Register individual MCP servers or the lower-context proxy server. |
@@ -420,9 +420,11 @@ frankenbeast network logs <service|all>    # show service logs
 frankenbeast network config                # inspect operator config
 frankenbeast network config --set chat.model=claude-sonnet-4-6
                                            # update one operator config value
+frankenbeast network up --set chat.model=codex
+                                           # one-off override for this start
 ```
 
-Network `up`, `start`, and `restart` accept `-d` / `--detached` for daemon mode. `network config --set path=value` may be repeated when changing more than one operator config value.
+Network `up`, `start`, and `restart` accept `-d` / `--detached` for daemon mode and `--set path=value` for transient config overrides. `network config --set path=value` persists the value; either form may be repeated when changing more than one config path.
 
 ---
 
