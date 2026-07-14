@@ -1,0 +1,1 @@
+{"mode":"secure","secureBackend":"local-encrypted","detached":false,"startedAt":"2026-03-09T00:00:00.000Z","services":[{"id":"comms-gateway","pid":0,"dependsOn":[],"startedAt":"2026-03-09T00:00:00.000Z","inProcess":"true"}]}
