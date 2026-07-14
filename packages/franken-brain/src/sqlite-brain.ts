@@ -144,6 +144,7 @@ const MEMORY_STORES = [
   'working_memory',
   'episodic_events',
   'checkpoints',
+  'memory_deletion_hash_keys',
 ] as const;
 
 type MemoryStoreName = (typeof MEMORY_STORES)[number];
@@ -517,7 +518,49 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   get(key: string): unknown {
+    if (this.expireRuntimeKeyIfGuarded(key)) return undefined;
     return cloneStoredWorkingMemoryValue(this.store.get(key));
+  }
+
+  private expireRuntimeKeyIfGuarded(key: string): boolean {
+    const serialized = this.serialized.get(key);
+    if (serialized === undefined) return false;
+    try {
+      assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+      return false;
+    } catch (error) {
+      if (!(error instanceof MemoryDeletionGuardError)) throw error;
+      this.totalBytes -= this.sizes.get(key) ?? 0;
+      this.store.delete(key);
+      this.sizes.delete(key);
+      this.serialized.delete(key);
+      this.dirtyKeys.delete(key);
+      this.deletedKeys.delete(key);
+      const persisted = this.persistedSerialized.get(key);
+      if (persisted === undefined) return true;
+      try {
+        assertNotDeletionGuarded(this.db, key, persisted, this.encryption);
+      } catch (persistedError) {
+        if (persistedError instanceof MemoryDeletionGuardError) {
+          this.persistedSerialized.delete(key);
+          return true;
+        }
+        throw persistedError;
+      }
+      const parsed = parseStoredWorkingMemoryValue(persisted);
+      const { normalized, serialized: restoredSerialized, size } = this.prepareEntry(key, parsed);
+      this.store.set(key, normalized);
+      this.sizes.set(key, size);
+      this.serialized.set(key, restoredSerialized);
+      this.totalBytes += size;
+      return false;
+    }
+  }
+
+  private expireRuntimeKeysMatchingCurrentGuards(): void {
+    for (const key of Array.from(this.store.keys())) {
+      this.expireRuntimeKeyIfGuarded(key);
+    }
   }
 
   /**
@@ -690,14 +733,17 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   has(key: string): boolean {
+    if (this.expireRuntimeKeyIfGuarded(key)) return false;
     return this.store.has(key);
   }
 
   keys(): string[] {
+    this.expireRuntimeKeysMatchingCurrentGuards();
     return [...this.store.keys()];
   }
 
   snapshot(): Record<string, unknown> {
+    this.expireRuntimeKeysMatchingCurrentGuards();
     const result: Record<string, unknown> = {};
     for (const [key, value] of this.store) {
       Object.defineProperty(result, key, {
@@ -1572,9 +1618,14 @@ export class SqliteBrain implements IBrain {
         throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with deletion guards but no right-to-forget hash key material');
       }
 
+      const snapshotDeletionGuards = snapshot.deletionGuards ?? [];
       if (snapshot.deletionGuardHashKey) {
         const existingDeletionHashKey = readDeletionHashKey(brain.db, brain.encryption);
-        if (existingDeletionHashKey && existingDeletionHashKey !== snapshot.deletionGuardHashKey) {
+        if (
+          existingDeletionHashKey
+          && existingDeletionHashKey !== snapshot.deletionGuardHashKey
+          && (snapshotDeletionGuards.length > 0 || countDeletionGuards(brain.db) > 0)
+        ) {
           throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with deletion guards that use different right-to-forget hash key material');
         }
       }
@@ -1584,10 +1635,10 @@ export class SqliteBrain implements IBrain {
       const restoreSnapshot = brain.db.transaction(() => {
         brain.db.prepare(`DELETE FROM episodic_events`).run();
         brain.db.prepare(`DELETE FROM checkpoints`).run();
-        if (snapshot.deletionGuardHashKey) {
+        if (snapshot.deletionGuardHashKey && snapshotDeletionGuards.length > 0) {
           writeDeletionHashKey(brain.db, snapshot.deletionGuardHashKey, brain.encryption);
         }
-        for (const guard of snapshot.deletionGuards ?? []) {
+        for (const guard of snapshotDeletionGuards) {
           if (guard.schemaVersion > CURRENT_MEMORY_SCHEMA_VERSION) {
             throw new UnsupportedMemorySchemaVersionError(
               `Unsupported memory_deletion_guards schema version ${guard.schemaVersion}; current version is ${CURRENT_MEMORY_SCHEMA_VERSION}`,
@@ -2023,6 +2074,7 @@ function readStorePayloads(
   db: Database.Database,
   store: MemoryStoreName,
 ): string[] {
+  if (!tableExists(db, store)) return [];
   switch (store) {
     case 'working_memory':
       return (
@@ -2044,6 +2096,12 @@ function readStorePayloads(
           state: string;
         }>
       ).map((row) => row.state);
+    case 'memory_deletion_hash_keys':
+      return (
+        db.prepare(`SELECT key_material FROM memory_deletion_hash_keys`).all() as Array<{
+          key_material: string;
+        }>
+      ).map((row) => row.key_material);
   }
 }
 
@@ -2061,6 +2119,7 @@ function isDecryptableEncryptedPayload(
 }
 
 function countStoreRows(db: Database.Database, store: MemoryStoreName): number {
+  if (!tableExists(db, store)) return 0;
   return (
     db.prepare(`SELECT COUNT(*) AS count FROM ${store}`).get() as {
       count: number;
@@ -2105,6 +2164,18 @@ function encryptPlaintextRows(
         cipher.encrypt(row.state),
         row.id,
       );
+    }
+  }
+  if (tableExists(db, 'memory_deletion_hash_keys')) {
+    for (const row of db
+      .prepare(`SELECT id, key_material FROM memory_deletion_hash_keys`)
+      .all() as Array<{ id: string; key_material: string }>) {
+      if (!isDecryptableEncryptedPayload(row.key_material, cipher)) {
+        db.prepare(`UPDATE memory_deletion_hash_keys SET key_material = ? WHERE id = ?`).run(
+          cipher.encrypt(row.key_material),
+          row.id,
+        );
+      }
     }
   }
 }
@@ -2244,6 +2315,15 @@ function readDeletionHashKey(db: Database.Database, encryption?: MemoryCipher): 
   return row ? encryption?.decrypt(row.key_material) ?? row.key_material : undefined;
 }
 
+function countDeletionGuards(db: Database.Database): number {
+  if (!tableExists(db, 'memory_deletion_guards')) return 0;
+  return (
+    db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_guards`).get() as {
+      count: number;
+    }
+  ).count;
+}
+
 function writeDeletionHashKey(db: Database.Database, key: string, encryption?: MemoryCipher): void {
   db.prepare(`INSERT OR IGNORE INTO memory_deletion_hash_keys (id, key_material, created_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`)
     .run(DELETION_HASH_KEY_ID, encryption?.encrypt(key) ?? key, isoNow());
@@ -2265,6 +2345,11 @@ function readOrCreateDeletionHashKey(db: Database.Database, encryption?: MemoryC
 
 function keyedDeletionHash(db: Database.Database, value: string, encryption?: MemoryCipher): string {
   return createHmac('sha256', readOrCreateDeletionHashKey(db, encryption)).update(value).digest('hex');
+}
+
+function existingKeyedDeletionHash(db: Database.Database, value: string, encryption?: MemoryCipher): string | undefined {
+  const key = readDeletionHashKey(db, encryption);
+  return key ? createHmac('sha256', key).update(value).digest('hex') : undefined;
 }
 
 function hashSelector(
@@ -2295,10 +2380,11 @@ function hashGuardValue(db: Database.Database, value: string, normalize = true, 
 }
 
 function guardHashCandidates(db: Database.Database, value: string, normalize = true, encryption?: MemoryCipher): string[] {
+  const normalized = normalize ? normalizeForMatch(value) : value;
   return Array.from(new Set([
-    hashGuardValue(db, value, normalize, encryption),
+    existingKeyedDeletionHash(db, normalized, encryption),
     legacyHashGuardValue(value, normalize),
-  ]));
+  ].filter((hash): hash is string => typeof hash === 'string')));
 }
 
 function guardTokens(value: string | undefined): string[] {
@@ -2339,7 +2425,12 @@ function legacyQueryGuardHashValue(value: string): string {
 }
 
 function queryGuardHashCandidates(db: Database.Database, value: string, encryption?: MemoryCipher): string[] {
-  return Array.from(new Set([queryGuardHashValue(db, value, encryption), legacyQueryGuardHashValue(value)]));
+  const normalized = normalizeForMatch(value);
+  const keyed = existingKeyedDeletionHash(db, normalized, encryption);
+  return Array.from(new Set([
+    keyed ? `${normalized.length}:${keyed}` : undefined,
+    legacyQueryGuardHashValue(value),
+  ].filter((hash): hash is string => typeof hash === 'string')));
 }
 
 function readQueryGuardIndex(db: Database.Database, scope: 'working' | 'episodic' | 'checkpoint'): {
@@ -2409,12 +2500,16 @@ function valueToSearchText(value: unknown): string {
 function objectMetadataStrings(value: unknown, names: string[]): string[] {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return [];
   const record = value as Record<string, unknown>;
+  const result: string[] = [];
   for (const name of names) {
     const raw = record[name];
-    if (typeof raw === 'string') return [raw];
-    if (Array.isArray(raw) && raw.every(item => typeof item === 'string')) return raw as string[];
+    if (typeof raw === 'string') {
+      result.push(raw);
+    } else if (Array.isArray(raw) && raw.every(item => typeof item === 'string')) {
+      result.push(...raw as string[]);
+    }
   }
-  return [];
+  return result;
 }
 
 function metadataMatchesSelectorValue(metadataValues: readonly string[], selectorValue: string): boolean {

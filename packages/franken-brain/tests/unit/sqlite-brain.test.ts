@@ -392,6 +392,38 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('invalidates cached working-memory reads after another process writes deletion guards', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-cross-process-read-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+        stale.flush();
+
+        db = new Database(dbPath);
+        db.prepare(`INSERT INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at) VALUES (?, ?, ?, ?)`).run(
+          'selector-hash',
+          'working:query',
+          queryGuardHash('alice@example.test'),
+          '2026-07-14T00:00:00.000Z',
+        );
+        db.prepare(`DELETE FROM working_memory WHERE key = ?`).run('contact');
+        db.close();
+        db = undefined;
+
+        expect(stale.working.get('contact')).toBeUndefined();
+        expect(stale.working.has('contact')).toBe(false);
+        expect(stale.working.snapshot()).not.toHaveProperty('contact');
+      } finally {
+        db?.close();
+        stale?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('counts unflushed live runtime matches deleted from other instances', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-count-'));
       const dbPath = join(dir, 'brain.db');
@@ -590,6 +622,52 @@ describe('SqliteBrain', () => {
       expect(sourceReport.deleted.working).toBe(1);
       expect(sourceReport.remainingReferences).toBe(0);
       expect(() => brain.working.set('source-array-working-2', { sourceScope: ['customer import 1', 'batch-2'] })).toThrow(/right-to-forget/);
+    });
+
+    it('checks every metadata alias before deciding category and sourceScope matches', () => {
+      brain.working.set('aliased-working', {
+        value: 'contact',
+        category: 'safe',
+        categories: ['pii'],
+        sourceScope: 'safe-import',
+        source: 'import-1',
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'aliased event',
+        details: {
+          category: 'safe',
+          categories: ['pii'],
+          sourceScope: 'safe-import',
+          source: 'import-1',
+        },
+        createdAt: new Date().toISOString(),
+      });
+      brain.recovery.checkpoint({
+        runId: 'run-aliased-metadata',
+        phase: 'execution',
+        step: 1,
+        context: {
+          category: 'safe',
+          categories: ['pii'],
+          sourceScope: 'safe-import',
+          source: 'import-1',
+        },
+        timestamp: '2026-07-13T00:03:27.000Z',
+      });
+
+      const categoryReport = brain.rightToForget({ category: 'pii' });
+
+      expect(categoryReport.deleted).toEqual({ working: 1, episodic: 1, derived: 2 });
+      expect(categoryReport.remainingReferences).toBe(0);
+      expect(() => brain.working.set('aliased-category-reinsert', { category: 'safe', categories: ['pii'] })).toThrow(/right-to-forget/);
+
+      brain.working.set('aliased-source-working', { sourceScope: 'safe-import', source: 'import-1' });
+      const sourceReport = brain.rightToForget({ sourceScope: 'import-1' });
+
+      expect(sourceReport.deleted.working).toBe(1);
+      expect(sourceReport.remainingReferences).toBe(0);
+      expect(() => brain.working.set('aliased-source-reinsert', { sourceScope: 'safe-import', source: 'import-1' })).toThrow(/right-to-forget/);
     });
 
     it('deletes spaced category markers in episodic and checkpoint rows', () => {
@@ -954,6 +1032,41 @@ describe('SqliteBrain', () => {
       hydrated.close();
     });
 
+    it('hydrate() ignores deletion hash key mismatches when no guards exist', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydrate-no-guards-key-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const seeded = new SqliteBrain(dbPath);
+        seeded.close();
+        const db = new Database(dbPath);
+        db.prepare(`INSERT INTO memory_deletion_hash_keys (id, key_material, created_at, schema_version) VALUES (?, ?, ?, ?)`).run(
+          'right-to-forget-hmac-v1',
+          'existing-unused-key',
+          '2026-07-14T00:00:00.000Z',
+          CURRENT_MEMORY_SCHEMA_VERSION,
+        );
+        db.close();
+
+        const hydrated = SqliteBrain.hydrate({
+          version: 1,
+          timestamp: '2026-07-14T00:00:00.000Z',
+          working: { safe: 'value' },
+          episodic: [],
+          checkpoint: null,
+          deletionGuards: [],
+          deletionGuardHashKey: 'different-unused-key',
+          metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+        }, dbPath);
+
+        expect(hydrated.working.get('safe')).toBe('value');
+        expect(hydrated.serialize().deletionGuards).toEqual([]);
+        hydrated.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('constructor hydration honors stricter custom working memory limits', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
       const dbPath = join(dir, 'brain.db');
@@ -1079,7 +1192,7 @@ describe('SqliteBrain', () => {
         {
           store: 'memory_deletion_hash_keys',
           version: CURRENT_MEMORY_SCHEMA_VERSION,
-          recordCount: 1,
+          recordCount: 0,
         },
       ]);
 
@@ -1507,6 +1620,53 @@ describe('SqliteBrain', () => {
             .getMemoryEncryptionMetadata()
             .stores.every((store) => store.encrypted),
         ).toBe(true);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('encrypts migrated deletion hash key material', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-deletion-key-migration-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const plaintext = new SqliteBrain(dbPath);
+        plaintext.working.set('pii:email', 'alice@example.test');
+        plaintext.rightToForget({ query: 'alice@example.test' });
+        plaintext.close();
+
+        const before = new Database(dbPath, { readonly: true });
+        const plaintextKey = (
+          before
+            .prepare(`SELECT key_material FROM memory_deletion_hash_keys LIMIT 1`)
+            .get() as { key_material: string }
+        ).key_material;
+        expect(plaintextKey).not.toMatch(/^enc:v1:/);
+        before.close();
+
+        const dryRun = SqliteBrain.migrateMemoryEncryption(dbPath, {
+          ...encryption,
+          dryRun: true,
+        });
+        expect(dryRun.operations.map((op) => op.table)).toContain('memory_deletion_hash_keys');
+
+        SqliteBrain.migrateMemoryEncryption(dbPath, encryption);
+
+        const raw = new Database(dbPath, { readonly: true });
+        const migratedKey = (
+          raw
+            .prepare(`SELECT key_material FROM memory_deletion_hash_keys LIMIT 1`)
+            .get() as { key_material: string }
+        ).key_material;
+        expect(migratedKey).toMatch(/^enc:v1:/);
+        expect(migratedKey).not.toBe(plaintextKey);
+        raw.close();
+
+        const reopened = new SqliteBrain(dbPath, undefined, { encryption });
+        expect(() => reopened.working.set('contact', 'alice@example.test')).toThrow(/right-to-forget/);
         reopened.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });
