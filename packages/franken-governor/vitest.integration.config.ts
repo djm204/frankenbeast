@@ -7,6 +7,7 @@ export default defineConfig({
     alias: createFrankenSourceAliases(import.meta.url),
   },
   test: {
+    pool: 'threads',
     setupFiles: [fileURLToPath(new URL('../../scripts/vitest-deterministic-setup.ts', import.meta.url))],
     globals: false,
     include: ['tests/integration/**/*.test.ts'],

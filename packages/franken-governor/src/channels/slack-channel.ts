@@ -2,6 +2,10 @@ import type { ApprovalChannel } from '../gateway/approval-channel.js';
 import type { ApprovalRequest, ApprovalResponse, ResponseCode } from '../core/types.js';
 import { ChannelUnavailableError } from '../errors/index.js';
 import { now as deterministicNow } from '@franken/types';
+import {
+  approvalPromptBoundary,
+  formatApprovalPromptWithBoundaries,
+} from '../gateway/approval-prompt-markers.js';
 
 export interface HttpClient {
   post(url: string, body: unknown): Promise<{ ok: boolean; body?: unknown }>;
@@ -19,6 +23,18 @@ export interface SlackChannelDeps {
   readonly webhookUrl: string;
   readonly httpClient: HttpClient;
   readonly callbackServer: SlackCallbackServer;
+}
+
+const SLACK_SECTION_TEXT_LIMIT = 3000;
+
+function truncateForSlackSection(text: string, requestId: string): string {
+  if (text.length <= SLACK_SECTION_TEXT_LIMIT) {
+    return text;
+  }
+
+  const endBoundary = approvalPromptBoundary(requestId, 'END');
+  const suffix = `\n> … untrusted approval details truncated to fit Slack section limits; use CLI or logs for the full payload.\n${endBoundary}`;
+  return `${text.slice(0, SLACK_SECTION_TEXT_LIMIT - suffix.length).trimEnd()}${suffix}`;
 }
 
 export class SlackChannel implements ApprovalChannel {
@@ -50,14 +66,16 @@ export class SlackChannel implements ApprovalChannel {
   }
 
   private async sendWebhook(request: ApprovalRequest): Promise<void> {
+    const message = this.formatMessage(request);
+    const blockText = truncateForSlackSection(message, request.requestId);
     const payload = {
-      text: this.formatMessage(request),
+      text: message,
       blocks: [
         {
           type: 'section',
           text: {
-            type: 'mrkdwn',
-            text: this.formatMessage(request),
+            type: 'plain_text',
+            text: blockText,
           },
         },
       ],
@@ -71,12 +89,6 @@ export class SlackChannel implements ApprovalChannel {
   }
 
   private formatMessage(request: ApprovalRequest): string {
-    return [
-      `*HITL Approval Required*`,
-      `*Task:* ${request.taskId}`,
-      `*Trigger:* [${request.trigger.triggerId}] ${request.trigger.reason ?? 'No reason'}`,
-      `*Summary:* ${request.summary}`,
-      `*Request ID:* ${request.requestId}`,
-    ].join('\n');
+    return formatApprovalPromptWithBoundaries(request, { untrustedPrefix: '> ' });
   }
 }

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { constantTimeTokenEqual } from '../../../src/http/security/constant-time.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 
 describe('TransportSecurityService', () => {
+  it('uses a digest-backed constant-time token comparator for unequal length tokens', () => {
+    expect(constantTimeTokenEqual('operator-token-123', 'operator-token-123')).toBe(true);
+    expect(constantTimeTokenEqual('operator-token-123', 'operator-token-12')).toBe(false);
+    expect(constantTimeTokenEqual('operator-token-123', '')).toBe(false);
+  });
+
   it('allows signed websocket requests without an Origin header', () => {
     const security = new TransportSecurityService();
     const secret = security.createSecret();

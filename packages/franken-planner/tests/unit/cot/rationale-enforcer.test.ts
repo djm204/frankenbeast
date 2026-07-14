@@ -65,4 +65,50 @@ describe('RationaleEnforcer', () => {
     // each call must create a distinct Date — not the same reference
     expect(r1.timestamp).not.toBe(r2.timestamp);
   });
+
+  it('includes a remembered approval session token in generated rationales', () => {
+    const enforcer = new RationaleEnforcer();
+
+    enforcer.rememberApprovalSessionToken('session-token-123');
+
+    expect(enforcer.generate(makeTask('t-1')).approvalSessionTokenId).toBe('session-token-123');
+    expect(enforcer.generate(makeTask('t-1')).approvalSessionTokenIds).toEqual(['session-token-123']);
+  });
+
+  it('keeps prior approval session token candidates for other scopes', () => {
+    const enforcer = new RationaleEnforcer();
+
+    enforcer.rememberApprovalSessionToken('skill-token');
+    enforcer.rememberApprovalSessionToken('budget-token');
+
+    const rationale = enforcer.generate(makeTask('t-1'));
+    expect(rationale.approvalSessionTokenId).toBe('budget-token');
+    expect(rationale.approvalSessionTokenIds).toEqual(['budget-token', 'skill-token']);
+  });
+
+  it('prefers the newest token for the same scope after a replacement approval', () => {
+    const enforcer = new RationaleEnforcer();
+    const task: Task = { ...makeTask('deploy-task'), metadata: { tool: 'deploy-prod' } };
+
+    enforcer.rememberApprovalSessionToken('expired-token', task, 'skill');
+    enforcer.rememberApprovalSessionToken('fresh-token', task, 'skill');
+
+    const rationale = enforcer.generate(task);
+    expect(rationale.approvalSessionTokenId).toBe('fresh-token');
+    expect(rationale.approvalSessionTokenIds).toEqual(['fresh-token', 'expired-token']);
+  });
+
+  it('keeps non-skill approvals for tool-backed tasks as candidates without overwriting skill scope', () => {
+    const enforcer = new RationaleEnforcer();
+    const firstTask: Task = { ...makeTask('deploy-task'), metadata: { tool: 'deploy-prod' } };
+    const secondTask: Task = { ...makeTask('other-deploy-task'), metadata: { tool: 'deploy-prod' } };
+
+    enforcer.rememberApprovalSessionToken('skill-token', firstTask, 'skill');
+    enforcer.rememberApprovalSessionToken('budget-token', firstTask, 'budget');
+
+    const firstRationale = enforcer.generate(firstTask);
+    const secondRationale = enforcer.generate(secondTask);
+    expect(firstRationale.approvalSessionTokenIds).toEqual(['skill-token', 'budget-token']);
+    expect(secondRationale.approvalSessionTokenIds).toEqual(['skill-token', 'budget-token']);
+  });
 });

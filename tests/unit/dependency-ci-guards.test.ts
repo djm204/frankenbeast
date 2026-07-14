@@ -1,26 +1,38 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const OUTDATED_SCRIPT = resolve(ROOT, 'scripts/check-major-outdated.mjs');
 const DEPENDABOT_SUPPLY_CHAIN_SCRIPT = resolve(ROOT, 'scripts/check-dependabot-supply-chain.mjs');
+const fixtureRoots = new Set<string>();
+
+function cleanupFixtureRoots() {
+  for (const dir of fixtureRoots) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  fixtureRoots.clear();
+}
+
+function writeFixtureFile(prefix: 'franken-outdated-' | 'franken-dependabot-', filename: string, content: string) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  fixtureRoots.add(dir);
+  const file = join(dir, filename);
+  writeFileSync(file, content, 'utf8');
+  return { dir, file };
+}
 
 function writeJson(value: unknown, filename = 'outdated.json') {
-  const dir = mkdtempSync(join(tmpdir(), 'franken-outdated-'));
-  const file = join(dir, filename);
-  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  return file;
+  return writeFixtureFile('franken-outdated-', filename, `${JSON.stringify(value, null, 2)}\n`).file;
 }
 
 function writeText(content: string, filename: string) {
-  const dir = mkdtempSync(join(tmpdir(), 'franken-dependabot-'));
-  const file = join(dir, filename);
-  writeFileSync(file, content, 'utf8');
-  return file;
+  return writeFixtureFile('franken-dependabot-', filename, content).file;
 }
+
+afterEach(cleanupFixtureRoots);
 
 function runOutdatedGuard(report: unknown, baseline: unknown = []) {
   return spawnSync(process.execPath, [OUTDATED_SCRIPT, '--input', writeJson(report), '--baseline', writeJson(baseline, 'baseline.json')], {
@@ -37,6 +49,19 @@ function runDependabotSupplyChainGuard(config: string) {
 }
 
 describe('dependency CI guards for issue #1414', () => {
+  it('removes tracked temp fixture roots even when assertions fail before guard execution', () => {
+    const outdatedFixture = writeFixtureFile('franken-outdated-', 'outdated.json', '{}\n');
+    const dependabotFixture = writeFixtureFile('franken-dependabot-', 'dependabot.yml', 'version: 2\n');
+
+    expect(existsSync(outdatedFixture.dir)).toBe(true);
+    expect(existsSync(dependabotFixture.dir)).toBe(true);
+
+    cleanupFixtureRoots();
+
+    expect(existsSync(outdatedFixture.dir)).toBe(false);
+    expect(existsSync(dependabotFixture.dir)).toBe(false);
+  });
+
   it('fails only for dependencies with latest versions on a newer major', () => {
     const result = runOutdatedGuard({
       acorn: {
@@ -281,7 +306,7 @@ updates:
     expect(workflow).toContain('npm run deps:outdated:major');
     expect(workflow).toContain('npm run check:dependabot-supply-chain');
     expect(workflow).toContain('npm sbom --sbom-format cyclonedx');
-    expect(workflow).toContain('actions/upload-artifact@v4');
+    expect(workflow).toContain('actions/upload-artifact@v7');
     expect(workflow).toContain('dependency-sbom-cyclonedx');
   });
 });

@@ -20,9 +20,13 @@ export const commsGatewayService: NetworkServiceDefinition = {
     'comms.port',
     'comms.orchestratorWsUrl',
     'comms.slack.enabled',
+    'comms.slack.allowSensitiveDelivery',
     'comms.discord.enabled',
+    'comms.discord.allowSensitiveDelivery',
     'comms.telegram.enabled',
+    'comms.telegram.allowSensitiveDelivery',
     'comms.whatsapp.enabled',
+    'comms.whatsapp.allowSensitiveDelivery',
   ],
   enabled: (config: OrchestratorConfig) => config.comms.enabled || hasEnabledChannels(config),
   describe: (config: OrchestratorConfig) =>

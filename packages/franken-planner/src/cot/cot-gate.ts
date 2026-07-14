@@ -28,6 +28,14 @@ export function buildCoTExecutor(
       throw new RationaleRejectedError(task.id, verification.reason);
     }
 
+    if (verification.approvalSessionTokenId !== undefined) {
+      enforcer.rememberApprovalSessionToken(
+        verification.approvalSessionTokenId,
+        task,
+        verification.approvalSessionTokenTriggerId
+      );
+    }
+
     return executor(task);
   };
 }

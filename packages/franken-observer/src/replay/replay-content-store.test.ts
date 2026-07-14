@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -74,6 +74,31 @@ describe('ReplayContentStore', () => {
     writeFileSync(join(root, ref), 'secret', 'utf8');
 
     expect(() => store.get(`../${ref}`)).toThrow(/exactly 64 lowercase sha256 hex/i);
+  });
+
+  it('rejects malformed refs before calling readFileSync', async () => {
+    vi.resetModules();
+    const mockedReadFileSync = vi.fn(() => {
+      throw new Error('readFileSync should not be called for invalid refs');
+    });
+    vi.doMock('node:fs', async (importOriginal) => ({
+      ...await importOriginal<typeof import('node:fs')>(),
+      readFileSync: mockedReadFileSync,
+    }));
+
+    try {
+      const { ReplayContentStore: MockedReplayContentStore } = await import('./replay-content-store.js');
+      const root = mkdtempSync(join(tmpdir(), 'replay-'));
+      const store = new MockedReplayContentStore(root);
+
+      for (const invalidRef of ['../x', 'not-a-hash', 'a'.repeat(32) + '/' + 'b'.repeat(32)]) {
+        expect(() => store.get(invalidRef)).toThrow(/exactly 64 lowercase sha256 hex/i);
+      }
+      expect(mockedReadFileSync).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
   });
 
   it('rejects a blobs directory symlink that escapes the replay base directory', () => {

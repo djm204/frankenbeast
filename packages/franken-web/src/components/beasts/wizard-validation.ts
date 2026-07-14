@@ -79,6 +79,11 @@ function isDirectoryPathPrompt(prompt: BeastInterviewPrompt): boolean {
   return prompt.kind === 'directory' || key.includes('dir') || key.includes('directory');
 }
 
+function isPathPrompt(prompt: BeastInterviewPrompt): boolean {
+  const key = prompt.key.toLowerCase();
+  return prompt.kind === 'file' || isDirectoryPathPrompt(prompt) || key.includes('path');
+}
+
 function requiredMessage(prompt: BeastInterviewPrompt): string {
   if (prompt.key === 'goal') return 'Design interview goal is required.';
   if (prompt.key === 'outputPath') return 'Design interview output path is required.';
@@ -104,9 +109,12 @@ function validateCatalogPrompt(
   if (prompt.key === 'designDocPath' && typeof value === 'string' && !isRepoRelativeMarkdownDesignDocPath(value)) {
     errors.designDocPath = 'Design doc path must be a repo-relative Markdown file without traversal.';
   }
+  if (!errors[errorKey] && isPathPrompt(prompt) && typeof value === 'string' && hasUnsafeRepoPathSegments(value)) {
+    errors[errorKey] = 'Path must be a repo-relative path without traversal.';
+  }
   if (isDirectoryPathPrompt(prompt) && typeof value === 'string' && (isBrowserFakePath(value) || hasUnsafeRepoPathSegments(value))) {
     errors[errorKey] = isBrowserFakePath(value)
-      ? 'Directory path must be a repo-relative path, not a browser fake path.'
+      ? 'Browser directory pickers cannot provide a server path. Enter a repo-relative path manually.'
       : 'Directory path must be a repo-relative path without traversal.';
   }
 }

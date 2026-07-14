@@ -317,8 +317,15 @@ function hasColumn(db: Database.Database, table: string, column: string): boolea
   if (!hasTable(db, table)) {
     return false;
   }
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  const rows = db.prepare(`PRAGMA table_info(${quoteSqlIdentifier(table)})`).all() as Array<{ name: string }>;
   return rows.some((row) => row.name === column);
+}
+
+function quoteSqlIdentifier(identifier: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
+    throw new Error(`Unsafe SQLite identifier: ${identifier}`);
+  }
+  return `"${identifier}"`;
 }
 
 function auditRowToEvent(row: AuditRow): AnalyticsEvent {

@@ -180,10 +180,14 @@ Returns global or filtered summary metrics:
 
 Query params:
 
-- `sessionId` optional
+- `sessionId` optional; printable text only, max 256 characters
 - `timeWindow` optional
-- `toolQuery` optional
+- `toolQuery` optional; printable text only, max 128 characters
 - `outcome` optional
+
+Text filters are validated before analytics reads run. Operators should expect malformed,
+oversized, or control-character-bearing filter values to fail closed with
+`invalid_filter_text` rather than being interpreted as SQLite syntax.
 
 ### `GET /api/analytics/events`
 

@@ -60,7 +60,7 @@ describe('buildWizardLaunchConfig', () => {
       5: {
         promptText: 'Use the attached context.',
         files: [
-          { name: 'context.md', content: 'Project context' },
+          { name: 'context.txt', content: 'Project context' },
           { name: 'empty.md', content: '' },
         ],
       },
@@ -68,7 +68,7 @@ describe('buildWizardLaunchConfig', () => {
 
     expect(config.prompts).toBeUndefined();
     expect(config.promptConfig).toEqual({
-      text: 'Use the attached context.\n\n---\n\nAttached file: context.md\n\nProject context',
+      text: 'Use the attached context.\n\n---\n\nAttached file: context.txt\n\nProject context',
     });
   });
 });

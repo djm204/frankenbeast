@@ -33,8 +33,26 @@ describe('ConversationEngine', () => {
 
     await engine.processTurn('who are you?', []);
 
-    expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('You are Frankenbeast'));
-    expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('Do not describe yourself as Claude, Codex, or any underlying model or provider'));
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('You are Frankenbeast'),
+      expect.objectContaining({ sessionContinue: false }),
+    );
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('Do not describe yourself as Claude, Codex, or any underlying model or provider'),
+      expect.objectContaining({ sessionContinue: false }),
+    );
+  });
+
+  it('does not pass chat session ids to the provider when continuation is disabled', async () => {
+    const llm = mockLlm('response');
+    const engine = new ConversationEngine({ llm, projectName: 'test', sessionContinuation: false });
+
+    await engine.processTurn('hello', [], { sessionId: 'session-1' });
+
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('You are Frankenbeast'),
+      { sessionContinue: false },
+    );
   });
 
   it('does NOT call the LLM for execute outcomes', async () => {

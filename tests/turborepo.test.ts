@@ -96,6 +96,22 @@ describe("Turborepo configuration", () => {
       expect(liveBenchTask.env).toContain("FBEAST_LIVE_BENCH_E2E");
     });
 
+    it('defines a deterministic integration test task across packages', () => {
+      const turbo = readJson('turbo.json');
+      const integrationTask = turbo.tasks?.['test:integration'];
+      expect(integrationTask).toBeDefined();
+      expect(integrationTask.inputs).toEqual(turbo.tasks?.test?.inputs);
+      expect(integrationTask.env).toContain('INTEGRATION');
+    });
+
+    it('defines an uncached opt-in eval test task across packages', () => {
+      const turbo = readJson('turbo.json');
+      const evalTask = turbo.tasks?.['test:eval'];
+      expect(evalTask).toBeDefined();
+      expect(evalTask.cache).toBe(false);
+      expect(evalTask.env).toContain('EVAL');
+    });
+
     it("defines typecheck task", () => {
       const turbo = readJson("turbo.json");
       expect(turbo.tasks?.typecheck).toBeDefined();
@@ -155,10 +171,16 @@ describe("Turborepo configuration", () => {
 
     it("test:ci script runs the same root-plus-package test target as CI", () => {
       expect(rootPkg.scripts["test:ci"]).toBe(
-        "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration",
+        "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval",
       );
       expect(rootPkg.scripts["ci:test:planner-integration"]).toBe(
         "node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner",
+      );
+      expect(rootPkg.scripts["ci:test:observer-eval"]).toBe(
+        "node scripts/retry-ci-command.mjs -- npm run test:eval --workspace @franken/observer",
+      );
+      expect(rootPkg.scripts["ci:test:e2e"]).toBe(
+        "node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts",
       );
 
       const ciWorkflow = readFileSync(
@@ -166,6 +188,10 @@ describe("Turborepo configuration", () => {
         "utf8",
       );
       expect(ciWorkflow).toContain("run: npm run test:ci");
+      expect(ciWorkflow).toContain("run: npm run ci:test:e2e");
+      expect(ciWorkflow.indexOf("run: npm run test:ci")).toBeLessThan(
+        ciWorkflow.indexOf("run: npm run ci:test:e2e"),
+      );
     });
 
     it("typecheck script uses turbo run typecheck", () => {
@@ -212,6 +238,9 @@ describe("Turborepo configuration", () => {
       expect(rootPkg.scripts["test:e2e"]).toBe(
         "npm run test:e2e --workspace @franken/orchestrator --",
       );
+      expect(rootPkg.scripts["ci:test:e2e"]).toBe(
+        "node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts",
+      );
       expect(readme).toContain("npm run test:e2e");
       expect(readme).toContain("E2E=true");
       expect(readme).toContain("npm run build");
@@ -231,6 +260,24 @@ describe("Turborepo configuration", () => {
       expect(rootPkg.scripts["test:live:bench"]).toBe(
         "turbo run test:live --filter=@franken/live-bench",
       );
+    });
+
+    it('exposes deterministic integration suites through an explicit root script', () => {
+      const integrationScript = rootPkg.scripts['test:integration'];
+      expect(integrationScript).toContain('turbo run test:integration');
+      expect(integrationScript.split(' ')).toEqual(
+        expect.arrayContaining([
+          '--filter=@franken/brain',
+          '--filter=@franken/critique',
+          '--filter=@franken/governor',
+          '--filter=@franken/observer',
+        ]),
+      );
+      expect(integrationScript).not.toContain('--filter=@franken/orchestrator');
+    });
+
+    it('exposes eval suites through an explicit opt-in root script', () => {
+      expect(rootPkg.scripts['test:eval']).toBe('turbo run test:eval --filter=@franken/observer');
     });
   });
 

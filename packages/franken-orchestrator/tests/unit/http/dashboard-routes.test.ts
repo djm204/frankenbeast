@@ -144,6 +144,26 @@ describe('dashboard routes', () => {
       expect(body.ticket).toBeTruthy();
     });
 
+    it('POST /events/ticket accepts proxied HTTPS same-origin operator cookies', async () => {
+      const deps = createMockDeps();
+      const app = createDashboardRoutes(deps);
+
+      const res = await app.request('http://internal.local/events/ticket', {
+        method: 'POST',
+        headers: {
+          cookie: `frankenbeast_operator_token=${TEST_DASHBOARD_TOKEN}`,
+          origin: 'https://dashboard.example.com',
+          'sec-fetch-site': 'same-origin',
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'dashboard.example.com',
+        },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ticket?: string };
+      expect(body.ticket).toBeTruthy();
+    });
+
     it('rejects raw streams without a ticket', async () => {
       const deps = createMockDeps();
       const app = createDashboardRoutes(deps);

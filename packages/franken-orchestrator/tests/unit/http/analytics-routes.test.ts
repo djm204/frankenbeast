@@ -125,6 +125,29 @@ describe('analytics routes', () => {
   });
 
   it.each([
+    ['/summary?sessionId=session-a%00OR%201%3D1', 'sessionId', 'getSummary'],
+    [`/sessions?sessionId=${'a'.repeat(257)}`, 'sessionId', 'listSessions'],
+    ['/events?toolQuery=exec%0AUNION%20SELECT%20secret', 'toolQuery', 'listEvents'],
+    [`/events?toolQuery=${'x'.repeat(129)}`, 'toolQuery', 'listEvents'],
+  ] as const)('rejects unsafe analytics filter text for %s before reading analytics data', async (path, parameter, serviceMethod) => {
+    const service = mockAnalyticsService();
+    const app = createAnalyticsRoutes({ analytics: service });
+
+    const res = await app.request(path);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        message: 'Unsafe Analytics filter value',
+        code: 'invalid_filter_text',
+        parameter,
+        expected: 'printable text within dashboard filter length limits',
+      },
+    });
+    expect(service[serviceMethod]).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['/summary?outcome=faild', 'getSummary'],
     ['/sessions?outcome=blocked', 'listSessions'],
     ['/events?outcome=unknown', 'listEvents'],

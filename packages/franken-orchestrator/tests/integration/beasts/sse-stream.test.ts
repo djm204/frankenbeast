@@ -36,11 +36,13 @@ async function issueTicket(app: Hono): Promise<string> {
  * Parse raw SSE text into structured events.
  * Each SSE event block is separated by a blank line.
  */
-function parseSseEvents(text: string): Array<{ id?: string; event?: string; data?: string }> {
+type ParsedSseEvent = { id?: string; event?: string; data?: string };
+
+function parseSseEvents(text: string): ParsedSseEvent[] {
   const blocks = text.split('\n\n').filter((b) => b.trim().length > 0);
   return blocks.map((block) => {
     const lines = block.split('\n');
-    const event: { id?: string; event?: string; data?: string } = {};
+    const event: ParsedSseEvent = {};
     for (const line of lines) {
       if (line.startsWith('id:')) event.id = line.slice(3).trim();
       else if (line.startsWith('event:')) event.event = line.slice(6).trim();
@@ -48,6 +50,88 @@ function parseSseEvents(text: string): Array<{ id?: string; event?: string; data
     }
     return event;
   });
+}
+
+async function readSseEventsUntil(
+  app: Hono,
+  url: string,
+  until: (events: ParsedSseEvent[]) => boolean,
+  options: {
+    headers?: HeadersInit;
+    onConnected?: () => void;
+    timeoutMs?: number;
+    continueAfterMatchMs?: number;
+    allowTimeout?: boolean;
+  } = {},
+): Promise<ParsedSseEvent[]> {
+  const controller = new AbortController();
+  const timeoutSignal = AbortSignal.timeout(options.timeoutMs ?? 1_000);
+  let timedOut = false;
+  let observedExpectedEvents = false;
+  let settleSignal: AbortSignal | undefined;
+  const abortOnTimeout = () => {
+    timedOut = true;
+    controller.abort(timeoutSignal.reason);
+  };
+  const abortAfterSettling = () => controller.abort(settleSignal?.reason);
+
+  timeoutSignal.addEventListener('abort', abortOnTimeout, { once: true });
+
+  const req = new Request(url, {
+    signal: controller.signal,
+    headers: options.headers,
+  });
+  const res = await app.request(req);
+  if (!res.body) {
+    timeoutSignal.removeEventListener('abort', abortOnTimeout);
+    throw new Error('Expected SSE response body to be readable');
+  }
+
+  options.onConnected?.();
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      const events = parseSseEvents(text);
+      if (until(events)) {
+        if (options.continueAfterMatchMs !== undefined) {
+          if (!observedExpectedEvents) {
+            observedExpectedEvents = true;
+            settleSignal = AbortSignal.timeout(options.continueAfterMatchMs);
+            settleSignal.addEventListener('abort', abortAfterSettling, { once: true });
+          }
+          continue;
+        }
+        observedExpectedEvents = true;
+        controller.abort();
+        return events;
+      }
+    }
+  } catch (error) {
+    if (!observedExpectedEvents && !timedOut) {
+      throw error;
+    }
+  } finally {
+    timeoutSignal.removeEventListener('abort', abortOnTimeout);
+    settleSignal?.removeEventListener('abort', abortAfterSettling);
+    reader.releaseLock();
+  }
+
+  const finalEvents = parseSseEvents(text);
+  if (timedOut && !options.allowTimeout) {
+    throw new Error(`Timed out waiting for expected SSE events. Received: ${text}`);
+  }
+  if (!timedOut && !until(finalEvents)) {
+    throw new Error(`SSE stream ended before expected events were observed. Received: ${text}`);
+  }
+
+  return finalEvents;
 }
 
 describe('Beast SSE routes', () => {
@@ -82,6 +166,26 @@ describe('Beast SSE routes', () => {
       headers: {
         cookie: `frankenbeast_operator_token=${OPERATOR_TOKEN}`,
         origin: 'http://localhost',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticket).toBeDefined();
+  });
+
+  it('POST /v1/beasts/events/ticket accepts proxied HTTPS same-origin operator cookies', async () => {
+    const ctx = createSseApp();
+    ticketStore = ctx.ticketStore;
+
+    const res = await ctx.app.request('http://internal.local/v1/beasts/events/ticket', {
+      method: 'POST',
+      headers: {
+        cookie: `frankenbeast_operator_token=${OPERATOR_TOKEN}`,
+        origin: 'https://dashboard.example.com',
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'dashboard.example.com',
       },
     });
 
@@ -132,23 +236,20 @@ describe('Beast SSE routes', () => {
 
     const ticket = await issueTicket(ctx.app);
 
-    // Schedule events to publish after the stream connects
-    setTimeout(() => {
-      ctx.bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running' } });
-      ctx.bus.publish({ type: 'run.status', data: { runId: 'r1', status: 'active' } });
-    }, 30);
-
-    // Abort after events have been delivered
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 150);
-
-    const req = new Request('http://localhost/v1/beasts/events/stream?ticket=' + ticket, {
-      signal: controller.signal,
-    });
-    const res = await ctx.app.request(req);
-    const text = await res.text();
-
-    const events = parseSseEvents(text);
+    const events = await readSseEventsUntil(
+      ctx.app,
+      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      (candidateEvents) => (
+        candidateEvents.some((e) => e.event === 'agent.status')
+        && candidateEvents.some((e) => e.event === 'run.status')
+      ),
+      {
+        onConnected: () => {
+          ctx.bus.publish({ type: 'agent.status', data: { agentId: 'a1', status: 'running' } });
+          ctx.bus.publish({ type: 'run.status', data: { runId: 'r1', status: 'active' } });
+        },
+      },
+    );
     const agentEvent = events.find((e) => e.event === 'agent.status');
     const runEvent = events.find((e) => e.event === 'run.status');
 
@@ -169,16 +270,11 @@ describe('Beast SSE routes', () => {
 
     const ticket = await issueTicket(ctx.app);
 
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 100);
-
-    const req = new Request('http://localhost/v1/beasts/events/stream?ticket=' + ticket, {
-      signal: controller.signal,
-    });
-    const res = await ctx.app.request(req);
-    const text = await res.text();
-
-    const events = parseSseEvents(text);
+    const events = await readSseEventsUntil(
+      ctx.app,
+      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      (candidateEvents) => candidateEvents.some((e) => e.event === 'snapshot'),
+    );
     const snapshot = events.find((e) => e.event === 'snapshot');
 
     expect(snapshot).toBeDefined();
@@ -197,18 +293,16 @@ describe('Beast SSE routes', () => {
 
     const ticket = await issueTicket(ctx.app);
 
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 100);
-
     // Reconnect with Last-Event-ID=1 — should replay events 2 and 3
-    const req = new Request('http://localhost/v1/beasts/events/stream?ticket=' + ticket, {
-      signal: controller.signal,
-      headers: { 'Last-Event-ID': '1' },
-    });
-    const res = await ctx.app.request(req);
-    const text = await res.text();
-
-    const events = parseSseEvents(text);
+    const events = await readSseEventsUntil(
+      ctx.app,
+      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      (candidateEvents) => (
+        candidateEvents.some((e) => e.id === '2')
+        && candidateEvents.some((e) => e.id === '3')
+      ),
+      { headers: { 'Last-Event-ID': '1' }, continueAfterMatchMs: 25 },
+    );
 
     // Should NOT contain event id=1 (already seen)
     expect(events.find((e) => e.id === '1')).toBeUndefined();
@@ -225,26 +319,29 @@ describe('Beast SSE routes', () => {
     ctx.bus.publish({ type: 'run.status', data: { runId: 'r1', status: 'active' } });
 
     const ticket = await issueTicket(ctx.app);
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 100);
 
-    const req = new Request(`http://localhost/v1/beasts/events/stream?ticket=${ticket}&lastEventId=1`, {
-      signal: controller.signal,
-    });
-    const res = await ctx.app.request(req);
-    const text = await res.text();
-    const events = parseSseEvents(text);
+    const events = await readSseEventsUntil(
+      ctx.app,
+      `http://localhost/v1/beasts/events/stream?ticket=${ticket}&lastEventId=1`,
+      (candidateEvents) => candidateEvents.some((e) => e.id === '2'),
+      { continueAfterMatchMs: 25 },
+    );
 
     expect(events.find((e) => e.id === '1')).toBeUndefined();
     expect(events.find((e) => e.id === '2')).toBeDefined();
   });
 
-  it.each([
+  const malformedReconnectCursorCases: Array<[
+    string,
+    { headers?: HeadersInit; query?: string },
+  ]> = [
     ['partial numeric Last-Event-ID header', { headers: { 'Last-Event-ID': '10abc' } }],
     ['non-numeric lastEventId query', { query: 'lastEventId=abc' }],
     ['negative lastEventId query', { query: 'lastEventId=-1' }],
     ['unsafe integer Last-Event-ID header', { headers: { 'Last-Event-ID': '9007199254740992' } }],
-  ])('rejects malformed reconnect cursor: %s', async (_label, options) => {
+  ];
+
+  it.each(malformedReconnectCursorCases)('rejects malformed reconnect cursor: %s', async (_label, options) => {
     const getSnapshot = vi.fn(() => ({ agents: [{ id: 'a1', status: 'idle' }] }));
     const ctx = createSseApp({ getSnapshot });
     ticketStore = ctx.ticketStore;
@@ -282,7 +379,7 @@ describe('Beast SSE routes', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'INVALID_LAST_EVENT_ID' } });
   });
 
-  it('does not send snapshot on reconnect with Last-Event-ID', async () => {
+  it('does not send snapshot on reconnect with Last-Event-ID when no events are missed', async () => {
     const ctx = createSseApp({
       getSnapshot: () => ({ agents: [] }),
     });
@@ -290,17 +387,12 @@ describe('Beast SSE routes', () => {
 
     const ticket = await issueTicket(ctx.app);
 
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 100);
-
-    const req = new Request('http://localhost/v1/beasts/events/stream?ticket=' + ticket, {
-      signal: controller.signal,
-      headers: { 'Last-Event-ID': '0' },
-    });
-    const res = await ctx.app.request(req);
-    const text = await res.text();
-
-    const events = parseSseEvents(text);
+    const events = await readSseEventsUntil(
+      ctx.app,
+      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      () => false,
+      { headers: { 'Last-Event-ID': '0' }, timeoutMs: 50, allowTimeout: true },
+    );
     expect(events.find((e) => e.event === 'snapshot')).toBeUndefined();
   });
 
@@ -310,22 +402,19 @@ describe('Beast SSE routes', () => {
 
     const ticket = await issueTicket(ctx.app);
 
-    setTimeout(() => {
-      for (let i = 0; i < 5; i++) {
-        ctx.bus.publish({ type: 'run.log', data: { line: `line-${i}` } });
-      }
-    }, 30);
-
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 150);
-
-    const req = new Request('http://localhost/v1/beasts/events/stream?ticket=' + ticket, {
-      signal: controller.signal,
-    });
-    const res = await ctx.app.request(req);
-    const text = await res.text();
-
-    const events = parseSseEvents(text).filter((e) => e.id && e.event === 'run.log');
+    const events = (await readSseEventsUntil(
+      ctx.app,
+      'http://localhost/v1/beasts/events/stream?ticket=' + ticket,
+      (candidateEvents) => candidateEvents.filter((e) => e.event === 'run.log').length === 5,
+      {
+        continueAfterMatchMs: 25,
+        onConnected: () => {
+          for (let i = 0; i < 5; i++) {
+            ctx.bus.publish({ type: 'run.log', data: { line: `line-${i}` } });
+          }
+        },
+      },
+    )).filter((e) => e.id && e.event === 'run.log');
     expect(events.length).toBe(5);
 
     const ids = events.map((e) => parseInt(e.id!, 10));

@@ -22,7 +22,7 @@ export default defineConfig({
         : ['src/**/*.test.ts'],
     exclude: isIntegration || isEval
       ? []
-      : ['src/**/*.integration.test.ts', 'src/**/*.eval.test.ts'],
+      : ['src/**/*.integration.test.ts', 'src/**/*.eval.test.ts', 'src/evals/**/*.test.ts'],
     reporters: ['verbose'],
   },
 })

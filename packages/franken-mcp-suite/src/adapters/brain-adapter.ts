@@ -33,8 +33,18 @@ export interface BrainAdapter {
 }
 
 const SUPPORTED_MEMORY_TYPES = ['working', 'episodic'] as const;
+const DEFAULT_QUERY_LIMIT = 20;
+const MAX_QUERY_LIMIT = 1000;
 
 type SupportedMemoryType = (typeof SUPPORTED_MEMORY_TYPES)[number];
+
+function resolveQueryLimit(limit: number | undefined): number {
+  if (limit === undefined) return DEFAULT_QUERY_LIMIT;
+  if (!Number.isFinite(limit) || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_QUERY_LIMIT) {
+    throw new Error(`limit must be a positive integer between 1 and ${MAX_QUERY_LIMIT}`);
+  }
+  return limit;
+}
 
 export function createBrainAdapter(dbPath: string): BrainAdapter {
   const brain = new SqliteBrain(dbPath);
@@ -74,11 +84,12 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
   return {
     async query(input) {
       const memoryType = resolveMemoryType(input.type);
+      const limit = resolveQueryLimit(input.limit);
       const results: BrainMemoryEntry[] = [];
 
       // Search episodic memory
       if (!memoryType || memoryType === 'episodic') {
-        const events = brain.episodic.recall(input.query, input.limit ?? 20);
+        const events = brain.episodic.recall(input.query, limit);
         for (const event of events) {
           results.push({
             key: String(event.id ?? event.summary),
@@ -101,7 +112,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         }
       }
 
-      return results.slice(0, input.limit ?? 20);
+      return results.slice(0, limit);
     },
 
     async store(input) {
