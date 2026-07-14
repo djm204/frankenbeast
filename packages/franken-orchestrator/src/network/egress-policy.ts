@@ -7,6 +7,7 @@ export type EgressDecisionReason =
   | 'method-not-allowed'
   | 'destination-class-not-allowed'
   | 'domain-not-allowed'
+  | 'scheme-not-allowed'
   | 'invalid-url';
 
 export interface LaneEgressPolicy {
@@ -131,6 +132,10 @@ export function evaluateEgressPolicy(request: EgressPolicyRequest): EgressDecisi
   const host = parsed.hostname.toLowerCase();
   const destinationClass = classifyEgressDestination(parsed);
 
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return { lane: request.lane, destinationClass, host, method, allowed: false, reason: 'scheme-not-allowed' };
+  }
+
   if (request.override?.allow) {
     return {
       lane: request.lane,
@@ -198,24 +203,55 @@ export function createEgressGuardedFetch(options: {
   readonly override?: EgressOverride | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
   readonly audit?: EgressAuditSink | undefined;
+  readonly maxRedirects?: number | undefined;
 }): typeof fetch {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const requestUrl = input instanceof Request ? input.url : input.toString();
-    const requestMethod = init?.method ?? (input instanceof Request ? input.method : undefined);
-    const decision = evaluateEgressPolicy({
-      lane: options.lane,
-      url: requestUrl,
-      method: requestMethod,
-      policy: options.policy,
-      override: options.override,
-    });
-    if (!decision.allowed) {
-      options.audit?.(redactEgressDecisionForLog(decision));
-      throw new EgressPolicyViolation(decision);
+    let currentInput = input;
+    let currentInit = init;
+    const maxRedirects = options.maxRedirects ?? 10;
+    const callerRequestedManualRedirect = init?.redirect === 'manual' || (input instanceof Request && input.redirect === 'manual');
+
+    for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+      const requestUrl = currentInput instanceof Request ? currentInput.url : currentInput.toString();
+      const requestMethod = currentInit?.method ?? (currentInput instanceof Request ? currentInput.method : undefined);
+      enforceEgressDecision({
+        lane: options.lane,
+        url: requestUrl,
+        method: requestMethod,
+        policy: options.policy,
+        override: options.override,
+      }, options.audit);
+
+      const guardedInit = { ...currentInit, redirect: 'manual' as const };
+      const response = await fetchImpl(currentInput, guardedInit);
+      const location = response.headers.get('location');
+      if (!location || response.status < 300 || response.status >= 400 || callerRequestedManualRedirect) {
+        return response;
+      }
+
+      const redirectUrl = new URL(location, requestUrl).toString();
+      enforceEgressDecision({
+        lane: options.lane,
+        url: redirectUrl,
+        method: requestMethod,
+        policy: options.policy,
+        override: options.override,
+      }, options.audit);
+      currentInput = redirectUrl;
+      currentInit = guardedInit;
     }
-    return fetchImpl(input, init);
+
+    throw new Error(`Egress redirect limit exceeded for lane ${options.lane}`);
   }) as typeof fetch;
+}
+
+function enforceEgressDecision(request: EgressPolicyRequest, audit: EgressAuditSink | undefined): void {
+  const decision = evaluateEgressPolicy(request);
+  if (!decision.allowed) {
+    audit?.(redactEgressDecisionForLog(decision));
+    throw new EgressPolicyViolation(decision);
+  }
 }
 
 export function classifyEgressDestination(url: URL): EgressDestinationClass {

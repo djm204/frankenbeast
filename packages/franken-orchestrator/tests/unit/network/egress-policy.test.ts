@@ -103,6 +103,47 @@ describe('lane egress policy', () => {
     });
   });
 
+  it('rejects non-http schemes before host-based lane classification can allow them', () => {
+    expect(evaluateEgressPolicy({
+      lane: 'triage',
+      url: 'ssh://github.com/djm204/frankenbeast',
+      method: 'GET',
+    })).toMatchObject({
+      allowed: false,
+      destinationClass: 'github',
+      reason: 'scheme-not-allowed',
+    });
+
+    expect(evaluateEgressPolicy({
+      lane: 'test',
+      url: 'file://localhost/etc/passwd',
+      method: 'GET',
+    })).toMatchObject({
+      allowed: false,
+      reason: 'scheme-not-allowed',
+    });
+  });
+
+  it('forces manual redirects and denies redirected destinations that violate lane policy', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: 'https://api.openai.com/v1/models' },
+    }));
+    const audit = vi.fn();
+    const guardedFetch = createEgressGuardedFetch({ lane: 'triage', fetchImpl, audit });
+
+    await expect(guardedFetch('https://github.com/djm204/frankenbeast')).rejects.toBeInstanceOf(EgressPolicyViolation);
+    expect(fetchImpl).toHaveBeenCalledWith('https://github.com/djm204/frankenbeast', { redirect: 'manual' });
+    expect(audit).toHaveBeenCalledWith({
+      lane: 'triage',
+      destinationClass: 'provider',
+      host: 'api.openai.com',
+      method: 'GET',
+      allowed: false,
+      reason: 'destination-class-not-allowed',
+    });
+  });
+
   it('accepts config-level lane overrides for approved services', () => {
     const config = NetworkConfigSchema.parse({
       network: {

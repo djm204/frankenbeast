@@ -159,7 +159,7 @@ Default lanes separate GitHub access from model/provider access and arbitrary we
 | `operator` | `github`, `provider`, `messaging`, `local` | common HTTP verbs | Human/operator messaging and control-plane integrations. |
 | `unrestricted` | all classes / `*` domains | common HTTP verbs | Explicitly approved break-glass lane. |
 
-Use lane overrides for narrow exceptions instead of broadening low-risk lanes:
+Use lane overrides for narrow exceptions instead of broadening low-risk lanes. The `network config --set` command accepts JSON values for array/object egress policy paths, for example `network.egressPolicy.lanes.docs.allowedDomains='["docs.example.org"]'`.
 
 ```json
 {
