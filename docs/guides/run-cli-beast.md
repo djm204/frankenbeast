@@ -223,9 +223,14 @@ The orchestrator CLI accepts global flags before or after the subcommand unless 
 | `--design-doc <path>` | `plan`, full flow | Start from an existing design document instead of the interview output. |
 | `--plan-dir <path>` | `run`, full flow | Execute chunks from an existing chunk-plan directory. |
 | `--plan-name <name>` | `plan`, full flow | Override the generated plan name. |
+| `--output-dir <path>` | parser-recognized compatibility flag | Accepted by the parser, but current plan/run flows still write artifacts under the configured `.fbeast` paths. Do not rely on it to redirect plan output in this build. |
+| `--goal <text>` | parser-recognized compatibility flag | Accepted by the parser, but the current interview flow still starts from its built-in requirements-gathering prompt. |
+| `--output <path>` | parser-recognized compatibility flag | Accepted by the parser, but the current interview flow still writes the design document through the configured `.fbeast` design-doc path. |
 | `--reset` | `run` | Clear checkpoint and trace state before executing. |
 | `--resume` | `run` | Preserve checkpoint/chunk-session state and resume from the last run. |
 | `--cleanup` | `run` | Remove build logs, checkpoints, and traces without following symlinked cleanup entries. |
+
+`--provider` selects the initial provider, while `--providers` supplies the comma-separated fallback order used by the managed provider flow. `--trust-provider-command-overrides` is intentionally explicit because it allows command overrides only from trusted config locations outside the repository; repo-local `.fbeast/config.json` command trust fields remain rejected.
 
 Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts. `--cleanup` refuses to clean a symlinked `.build/` root or symlinked `.fbeast` cleanup component by default and unlinks symlinks found inside `.build/` instead of traversing them, so cleanup cannot delete files outside the project through a symlink. Symlinked workspace parents are allowed; replace symlinked `.fbeast`/`.build` cleanup path components with real disposable directories before cleaning.
 
@@ -233,7 +238,7 @@ Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `--verify` | `init` | Verify init config/readiness without running the full wizard. |
+| `--verify` | `init` | Verify init config/readiness without running the full wizard; the command still ensures the local `.fbeast` scaffold directories exist. |
 | `--repair` | `init` | Re-run only missing or failed setup steps. |
 | `--non-interactive` | `init` | Disable prompts for headless setup. Required HITL approvals still fail closed unless explicitly allowed by environment. |
 | `--backend <name>` | `init` | Secret backend: `local-encrypted`, `os-keychain`, `1password`, or `bitwarden`. |
@@ -248,18 +253,18 @@ Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use
 
 ### Beast dispatch/module flags
 
-These flags are for `frankenbeast beasts create|spawn|status|logs` unless otherwise noted.
+These flags are for `frankenbeast beasts create|spawn` unless otherwise noted. `status` and `logs` also accept `--mode` as a compatibility/read-only parser surface, but they report the execution mode stored on the run; passing `--mode` to those read-only commands does not change output.
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `--mode <mode>` | `beasts create`, `beasts spawn`, `beasts status`, `beasts logs` | Beast execution mode: `process` or `container`. |
-| `--no-firewall` | `beasts create`, `beasts spawn` | Disable the firewall module for the spawned Beast config. |
-| `--no-skills` | `beasts create`, `beasts spawn` | Disable skills module wiring. |
-| `--no-memory` | `beasts create`, `beasts spawn` | Disable memory module wiring. |
-| `--no-planner` | `beasts create`, `beasts spawn` | Disable planner module wiring. |
-| `--no-critique` | `beasts create`, `beasts spawn` | Disable critique module wiring. |
-| `--no-governor` | `beasts create`, `beasts spawn` | Disable governor module wiring. |
-| `--no-heartbeat` | `beasts create`, `beasts spawn` | Disable heartbeat module wiring. |
+| `--mode <mode>` | `beasts create`, `beasts spawn`; accepted read-only by `beasts status`, `beasts logs` | Beast execution mode for a new run: `process` or `container`. For status/logs, output comes from stored run metadata. |
+| `--no-firewall` | `beasts create`, `beasts spawn` | Serialize firewall disabled in the spawned Beast config. |
+| `--no-skills` | `beasts create`, `beasts spawn` | Serialize skills disabled in the spawned Beast config. |
+| `--no-memory` | `beasts create`, `beasts spawn` | Serialize memory disabled in the spawned Beast config. |
+| `--no-planner` | `beasts create`, `beasts spawn` | Serialize planner disabled in the spawned Beast config; this does not skip the CLI `plan` phase in this build. |
+| `--no-critique` | `beasts create`, `beasts spawn` | Disable critique wiring where the spawned Beast dependency factory consumes the module setting. |
+| `--no-governor` | `beasts create`, `beasts spawn` | Disable governor wiring where the spawned Beast dependency factory consumes the module setting. |
+| `--no-heartbeat` | `beasts create`, `beasts spawn` | Serialize heartbeat disabled in the spawned Beast config. |
 
 ### Issues mode flags
 
@@ -278,8 +283,8 @@ These flags are for `frankenbeast beasts create|spawn|status|logs` unless otherw
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `-d`, `--detached` | `network up` | Start configured network services in daemon mode. |
-| `--set <path=value>` | `network config` | Set an operator config value; may be repeated. |
+| `-d`, `--detached` | `network up`, `network start`, `network restart` | Start configured network services, one managed service, or restarted services in daemon mode. |
+| `--set <path=value>` | `network config`, `network up`, `network start`, `network restart` | Persist an operator config value with `network config`; for `up`/`start`/`restart`, apply a non-persistent config override for that invocation. May be repeated. |
 | `--client=<claude|gemini|codex>` | `fbeast mcp init`, `fbeast mcp uninstall` | Target a specific MCP client config. |
 | `--pick[=<servers>]` | `fbeast mcp init` | Choose which MCP servers to install. |
 | `--mode=standard|proxy` | `fbeast mcp init` | Register individual MCP servers or the lower-context proxy server. |
@@ -288,6 +293,62 @@ These flags are for `frankenbeast beasts create|spawn|status|logs` unless otherw
 | `--provider=<anthropic-api|codex-cli|claude-cli>` | `fbeast mcp beast` | Activate the fbeast Beast-mode preset provider. |
 
 Verbose and build-log output redacts secret-like environment/config keys such as `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, and `*_API_KEY` by default. The logger exposes an explicit local diagnostic override (`redactSecrets: false`) for trusted development-only callers, but normal CLI/runtime paths keep redaction enabled so environment dumps do not leak provider tokens or credentials. Redaction helpers also expose provenance-aware variants (`redactSensitiveTextWithProvenance` and `redactLogDataWithProvenance`) for audit paths that need to explain why a value was replaced; provenance records include only the matched key, source, and path, never the secret value itself.
+
+### Init flag examples
+
+```bash
+frankenbeast init --verify                       # Verify config/readiness and ensure scaffold dirs exist
+frankenbeast init --repair                       # Re-run only missing or failed init steps
+frankenbeast init --non-interactive              # Disable interactive prompts
+frankenbeast init --backend os-keychain          # Secret backend: local-encrypted, os-keychain, 1password, bitwarden
+```
+
+### Chat and daemon flag examples
+
+```bash
+frankenbeast chat-server --host 127.0.0.1 --port 3737
+frankenbeast chat-server --allow-origin http://localhost:5173
+frankenbeast beasts-daemon --host 127.0.0.1 --port 4050
+```
+
+`chat-server` defaults to port `3737`; `beasts-daemon` defaults to port `4050`. Both default to `127.0.0.1`. Use `--allow-origin` to allow one additional websocket Origin for local browser or preview tooling.
+
+### Beast dispatch flag examples
+
+```bash
+frankenbeast beasts spawn martin-loop --mode process
+frankenbeast beasts spawn martin-loop --mode container
+frankenbeast beasts create chunk-plan --no-critique --no-governor
+```
+
+`--mode` changes execution mode only for `beasts create` and `beasts spawn`. `beasts status` and `beasts logs` accept it for parser compatibility, but their output comes from stored run metadata. Valid execution modes are `process` and `container`.
+
+Module toggles apply to `beasts create` / `beasts spawn` run configs. Some toggles are persisted for downstream module wiring rather than changing the top-level CLI flow; for example, `--no-planner` does not skip `frankenbeast plan` chunk generation in this build.
+
+```bash
+--no-firewall    # Disable firewall module
+--no-skills      # Disable skills module
+--no-memory      # Disable memory module
+--no-planner     # Disable planner module
+--no-critique    # Disable critique module
+--no-governor    # Disable governor module
+--no-heartbeat   # Disable heartbeat module
+```
+
+### Issues flag examples
+
+```bash
+frankenbeast issues --repo owner/repo            # Explicit GitHub repo
+frankenbeast issues --target-upstream            # Derive canonical repo from fork upstream remote
+frankenbeast issues --label bug,critical         # Filter by comma-separated labels
+frankenbeast issues --milestone v1               # Filter by milestone
+frankenbeast issues --search "parser docs"       # Search issue text
+frankenbeast issues --assignee octocat           # Filter by assignee
+frankenbeast issues --limit 10                   # Max issues to fetch (default: 30)
+frankenbeast issues --dry-run                    # Preview without executing
+```
+
+`--repo` and `--target-upstream` are mutually exclusive because `--repo` explicitly selects the canonical repository while `--target-upstream` derives it from git remotes.
 
 ---
 
@@ -357,7 +418,13 @@ frankenbeast network restart all           # restart every managed service
 frankenbeast network down                  # tear down the managed network
 frankenbeast network logs <service|all>    # show service logs
 frankenbeast network config                # inspect operator config
+frankenbeast network config --set chat.model=claude-sonnet-4-6
+                                           # update one operator config value
+frankenbeast network up --set chat.model=codex
+                                           # one-off override for this start
 ```
+
+Network `up`, `start`, and `restart` accept `-d` / `--detached` for daemon mode and `--set path=value` for transient config overrides. `network config --set path=value` persists the value; either form may be repeated when changing more than one config path.
 
 ---
 
