@@ -253,18 +253,18 @@ Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use
 
 ### Beast dispatch/module flags
 
-These flags are for `frankenbeast beasts create|spawn|status|logs` unless otherwise noted.
+These flags are for `frankenbeast beasts create|spawn` unless otherwise noted. `status` and `logs` report the execution mode stored on the run; passing `--mode` to those read-only commands does not change output.
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `--mode <mode>` | `beasts create`, `beasts spawn`, `beasts status`, `beasts logs` | Beast execution mode: `process` or `container`. |
-| `--no-firewall` | `beasts create`, `beasts spawn` | Disable the firewall module for the spawned Beast config. |
-| `--no-skills` | `beasts create`, `beasts spawn` | Disable skills module wiring. |
-| `--no-memory` | `beasts create`, `beasts spawn` | Disable memory module wiring. |
-| `--no-planner` | `beasts create`, `beasts spawn` | Disable planner module wiring. |
-| `--no-critique` | `beasts create`, `beasts spawn` | Disable critique module wiring. |
-| `--no-governor` | `beasts create`, `beasts spawn` | Disable governor module wiring. |
-| `--no-heartbeat` | `beasts create`, `beasts spawn` | Disable heartbeat module wiring. |
+| `--mode <mode>` | `beasts create`, `beasts spawn` | Beast execution mode for the new run: `process` or `container`. |
+| `--no-firewall` | `beasts create`, `beasts spawn` | Serialize firewall disabled in the spawned Beast config. |
+| `--no-skills` | `beasts create`, `beasts spawn` | Serialize skills disabled in the spawned Beast config. |
+| `--no-memory` | `beasts create`, `beasts spawn` | Serialize memory disabled in the spawned Beast config. |
+| `--no-planner` | `beasts create`, `beasts spawn` | Serialize planner disabled in the spawned Beast config; this does not skip the CLI `plan` phase in this build. |
+| `--no-critique` | `beasts create`, `beasts spawn` | Disable critique wiring where the spawned Beast dependency factory consumes the module setting. |
+| `--no-governor` | `beasts create`, `beasts spawn` | Disable governor wiring where the spawned Beast dependency factory consumes the module setting. |
+| `--no-heartbeat` | `beasts create`, `beasts spawn` | Serialize heartbeat disabled in the spawned Beast config. |
 
 ### Issues mode flags
 
@@ -318,12 +318,12 @@ frankenbeast beasts-daemon --host 127.0.0.1 --port 4050
 ```bash
 frankenbeast beasts spawn martin-loop --mode process
 frankenbeast beasts spawn martin-loop --mode container
-frankenbeast beasts create chunk-plan --no-planner --no-critique
+frankenbeast beasts create chunk-plan --no-critique --no-governor
 ```
 
-`--mode` is supported only for `beasts create`, `beasts spawn`, `beasts status`, and `beasts logs`. Valid execution modes are `process` and `container`.
+`--mode` is supported only for `beasts create` and `beasts spawn`. Valid execution modes are `process` and `container`.
 
-Module toggles apply to `beasts create` / `beasts spawn` run configs:
+Module toggles apply to `beasts create` / `beasts spawn` run configs. Some toggles are persisted for downstream module wiring rather than changing the top-level CLI flow; for example, `--no-planner` does not skip `frankenbeast plan` chunk generation in this build.
 
 ```bash
 --no-firewall    # Disable firewall module
