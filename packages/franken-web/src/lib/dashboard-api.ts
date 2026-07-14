@@ -110,7 +110,8 @@ export class DashboardApiClient {
           const snapshot = JSON.parse(event.data) as DashboardSnapshot;
           onSnapshot(snapshot);
         } catch (error) {
-          onError?.(toError(error));
+          const parseError = toError(error);
+          onError?.(new Error(`Dashboard stream snapshot payload could not be parsed. ${parseError.message}`));
         }
       });
       nextEventSource.addEventListener('error', () => {

@@ -277,6 +277,13 @@ describe('DashboardApiClient', () => {
         expect(() => listeners['snapshot']!({ data: '{not-json' })).not.toThrow();
         expect(onSnapshot).not.toHaveBeenCalled();
         expect(onError).toHaveBeenCalledWith(expect.any(Error));
+        expect(onError.mock.calls[0]![0].message).toContain(
+          'Dashboard stream snapshot payload could not be parsed.',
+        );
+
+        const snapshot = makeMockSnapshot();
+        expect(() => listeners['snapshot']!({ data: JSON.stringify(snapshot) })).not.toThrow();
+        expect(onSnapshot).toHaveBeenCalledWith(snapshot);
 
         unsub();
       } finally {
