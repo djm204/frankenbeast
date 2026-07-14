@@ -903,7 +903,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
     setStatus('sending');
 
-    const sendViaHttpFallback = async () => {
+    const sendViaHttpFallback = async (): Promise<void> => {
       let fallbackRefreshError: Error | null = null;
       try {
         const result = await clientRef.current.sendMessage(sessionId, content);
@@ -998,32 +998,34 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     const liveSocket = socket as WebSocket;
-    let socketSendError: Error | null = null;
-    await new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
-      }, SOCKET_SEND_ACK_TIMEOUT_MS);
-      pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
-      try {
-        liveSocket.send(JSON.stringify({
-          type: 'message.send',
-          clientMessageId,
-          content,
-        }));
-      } catch (error) {
-        const pending = pendingSendsRef.current.get(clientMessageId);
-        if (pending) {
-          clearTimeout(pending.timeoutId);
+    let immediateSendError: Error | null = null;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          failPendingSend(clientMessageId, new Error('Server did not acknowledge the message. Your draft was kept.'));
+        }, SOCKET_SEND_ACK_TIMEOUT_MS);
+        pendingSendsRef.current.set(clientMessageId, { timeoutId, resolve, reject });
+        try {
+          liveSocket.send(JSON.stringify({
+            type: 'message.send',
+            clientMessageId,
+            content,
+          }));
+        } catch (error) {
+          immediateSendError = error instanceof Error
+            ? error
+            : new Error('Message failed to send. Your draft was kept.');
+          clearTimeout(timeoutId);
           pendingSendsRef.current.delete(clientMessageId);
+          reject(immediateSendError);
         }
-        socketSendError = error instanceof Error
-          ? error
-          : new Error('Message failed to send over the live socket.');
-        resolve();
+      });
+    } catch (error) {
+      if (error === immediateSendError) {
+        await sendViaHttpFallback();
+        return;
       }
-    });
-    if (socketSendError) {
-      await sendViaHttpFallback();
+      throw error;
     }
   }
 

@@ -6,8 +6,7 @@ type FetchResponse = Awaited<ReturnType<FetchFn>>
 export interface HttpRetryOptions {
   /**
    * Max retry attempts after the initial try. Default: 0 (no retry).
-   * Invalid, negative, or non-finite values are clamped to 0; fractional
-   * values are floored so the initial attempt is never skipped.
+   * Must be an integer between 0 and 10 to prevent runaway retry loops.
    */
   maxRetries?: number
   /** Base delay in ms before the first retry. Default: 200. */
@@ -20,6 +19,8 @@ export interface HttpRetryOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
+const MAX_HTTP_RETRIES = 10
+
 /**
  * A response is transient and worth retrying when it is a 5xx server error or a
  * 429 (Too Many Requests) rate-limit response. Other 4xx responses are the
@@ -31,8 +32,10 @@ function isTransientStatus(status: number): boolean {
 
 function normalizeMaxRetries(maxRetries: number | undefined): number {
   if (maxRetries === undefined) return 0
-  if (!Number.isFinite(maxRetries) || maxRetries < 0) return 0
-  return Math.floor(maxRetries)
+  if (!Number.isInteger(maxRetries) || maxRetries < 0 || maxRetries > MAX_HTTP_RETRIES) {
+    throw new Error(`maxRetries must be an integer between 0 and ${MAX_HTTP_RETRIES}`)
+  }
+  return maxRetries
 }
 
 function requireFiniteNonNegative(name: 'baseDelayMs' | 'maxDelayMs', value: number | undefined, defaultValue: number): number {

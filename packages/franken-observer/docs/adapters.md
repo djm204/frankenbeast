@@ -12,13 +12,17 @@ Zero-dependency, in-process store. Good for tests and local prototyping.
 ```ts
 import { InMemoryAdapter, TraceContext } from '@franken/observer'
 
-const adapter = new InMemoryAdapter()
+// Retains the most recent 1000 traces by default. Older traces are evicted
+// from queryByTraceId() / listTraceIds(); use maxTraces: Infinity only for
+// legacy test fixtures that intentionally need unbounded retention.
+const adapter = new InMemoryAdapter({ maxTraces: 1000 })
 const trace   = TraceContext.createTrace('my goal')
 // … startSpan / endSpan …
 TraceContext.endTrace(trace)
 
 await adapter.flush(trace)
 const retrieved = await adapter.queryByTraceId(trace.id)
+adapter.clear() // explicit cleanup hook for long-lived processes/tests
 ```
 
 ---
@@ -66,12 +70,34 @@ await adapter.flush(trace) // throws on non-2xx response
 
 **Options**
 
-| Option      | Type     | Default                          | Description                      |
-|-------------|----------|----------------------------------|----------------------------------|
-| `publicKey` | `string` | —                                | Langfuse project public key      |
-| `secretKey` | `string` | —                                | Langfuse project secret key      |
-| `baseUrl`   | `string` | `https://cloud.langfuse.com`     | Override for EU region or Phoenix|
-| `fetch`     | `FetchFn`| `globalThis.fetch`               | Injectable for testing           |
+| Option      | Type      | Default                      | Description                       |
+|-------------|-----------|------------------------------|-----------------------------------|
+| `publicKey` | `string`  | —                            | Langfuse project public key       |
+| `secretKey` | `string`  | —                            | Langfuse project secret key       |
+| `baseUrl`   | `string`  | `https://cloud.langfuse.com` | Override for EU region or Phoenix |
+| `fetch`     | `FetchFn` | `globalThis.fetch`           | Injectable for testing            |
+
+**Environment variables**
+
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are the recommended application-level names for the two required Langfuse credentials. The adapter does not read environment variables by itself and does not provide default credential values: callers must pass both keys into `new LangfuseAdapter({ publicKey, secretKey })`. If either variable is missing, fail fast in the application or CI job that enables Langfuse export rather than constructing the adapter with an empty string.
+
+`LANGFUSE_PUBLIC_KEY` identifies the Langfuse project that receives the OTEL payloads. `LANGFUSE_SECRET_KEY` is paired with it and is sent as part of the adapter's HTTP Basic Authorization header (`publicKey:secretKey`). Keep the secret key in a password manager, CI secret store, or local uncommitted `.env` file; never commit it, print it in logs, or expose it to browser bundles.
+
+Local development usually keeps Langfuse export opt-in. Store real keys in an ignored `.env` file (or equivalent shell profile), use placeholder values only when paired with a mocked `fetch`, and point `baseUrl` at the correct Langfuse region when you are testing live exports:
+
+```bash
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+# Optional: pass baseUrl: 'https://eu.cloud.langfuse.com' in code for EU projects.
+```
+
+CI pipelines should inject masked secrets only into jobs that intentionally exercise Langfuse export wiring. Documentation, unit, and mock-transport tests should not require real Langfuse credentials.
+
+```yaml
+env:
+  LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+  LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+```
 
 **Testing without a real Langfuse instance**
 
@@ -140,6 +166,26 @@ adapter.reset() // clear accumulators
 Posts OTEL-formatted trace payloads to a [Grafana Tempo](https://grafana.com/oss/tempo/)
 endpoint (local or Grafana Cloud) over OTLP/HTTP. **Write-only** — `queryByTraceId` returns `null`.
 
+### Grafana Cloud environment variables
+
+`GRAFANA_INSTANCE_ID` and `GRAFANA_API_KEY` are convenience inputs for the
+Grafana Cloud example below; the adapter itself only receives a `basicAuth`
+object. Leave both variables unset for local Tempo or an unauthenticated
+OpenTelemetry Collector.
+
+| Variable | Required for | Purpose | Default behavior |
+|---|---|---|---|
+| `GRAFANA_INSTANCE_ID` | Grafana Cloud Tempo | Numeric Grafana Cloud stack/Tempo instance ID used as the Basic auth username. | No default. Local examples omit `basicAuth`. |
+| `GRAFANA_API_KEY` | Grafana Cloud Tempo | Grafana Cloud access policy token/API key used as the Basic auth password; grant only trace write permissions where possible. | No default. Local examples omit `basicAuth`. |
+
+Security notes:
+
+- Do not commit `GRAFANA_API_KEY`; keep it in `.env`, a shell secret manager, or
+  your CI platform's masked secret store.
+- Fail fast in application/CI wiring when either Grafana Cloud variable is
+  missing so traces are not silently dropped or sent without authentication.
+- Rotate the token immediately if it is printed in logs or committed.
+
 ```ts
 import { TempoAdapter } from '@franken/observer'
 
@@ -147,7 +193,12 @@ import { TempoAdapter } from '@franken/observer'
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
 await local.flush(trace)
 
-// Grafana Cloud Tempo (Basic auth + cloud OTLP path)
+// CI example: inject these from masked CI secrets.
+if (!process.env.GRAFANA_INSTANCE_ID || !process.env.GRAFANA_API_KEY) {
+  throw new Error('Grafana Cloud export requires GRAFANA_INSTANCE_ID and GRAFANA_API_KEY')
+}
+
+// Grafana Cloud Tempo (Basic auth + cloud OTLP gateway path)
 function requireEnv(name: string): string {
   const value = process.env[name]
   if (!value) {
@@ -157,8 +208,10 @@ function requireEnv(name: string): string {
 }
 
 const cloud = new TempoAdapter({
-  endpoint: 'https://tempo-us-central1.grafana.net/tempo',
-  otlpPath: '/otlp/v1/traces',       // Grafana Cloud uses this path
+  // Copy the OTLP gateway host from your Grafana Cloud stack's OpenTelemetry tile.
+  // Do not use the Tempo query endpoint (tempo-<region>.grafana.net/tempo).
+  endpoint: 'https://otlp-gateway-<REGION>.grafana.net',
+  otlpPath: '/otlp/v1/traces',       // Grafana Cloud OTLP gateway traces path
   basicAuth: {
     user: requireEnv('GRAFANA_INSTANCE_ID'),   // numeric instance ID
     password: requireEnv('GRAFANA_API_KEY'),
@@ -219,7 +272,7 @@ Security notes:
 | Environment              | `endpoint`                                          | `otlpPath`            | Auth |
 |--------------------------|-----------------------------------------------------|-----------------------|------|
 | Local Tempo / Collector  | `http://localhost:4318`                             | `/v1/traces` (default)| none |
-| Grafana Cloud            | `https://tempo-{region}.grafana.net/tempo`          | `/otlp/v1/traces`     | `GRAFANA_INSTANCE_ID` / `GRAFANA_API_KEY` via `basicAuth` |
+| Grafana Cloud            | `https://otlp-gateway-<REGION>.grafana.net`         | `/otlp/v1/traces`     | `GRAFANA_INSTANCE_ID` / `GRAFANA_API_KEY` via `basicAuth` |
 
 **Testing without a real Tempo instance**
 

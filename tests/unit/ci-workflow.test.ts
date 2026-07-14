@@ -56,6 +56,18 @@ function expectCiJob(workflow: Record<string, unknown>): Record<string, unknown>
   return expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
 }
 
+function expectSetupNodeUsesPinnedNvmrc(step: Record<string, unknown>, label: string): void {
+  const setupNodeWith = expectRecord(step.with, `${label}.actions/setup-node.with`);
+  expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+  expect(setupNodeWith['node-version']).toBeUndefined();
+
+  for (const key of Object.keys(setupNodeWith)) {
+    expect(key, `${label} should not configure malformed Node version inputs`).not.toMatch(
+      /^node-version(?:$|-(?!file$))/,
+    );
+  }
+}
+
 function expectStepByRun(
   steps: Array<Record<string, unknown>>,
   run: string,
@@ -112,28 +124,28 @@ on:
       expect(() => parseWorkflowYaml(content)).not.toThrow();
     });
 
+    it('has required top-level workflow keys', () => {
+      expect(workflow).toHaveProperty('name');
+      expect(workflow).toHaveProperty('on');
+      expect(workflow).toHaveProperty('jobs');
+    });
+
     it('has a workflow name', () => {
       expect(workflow.name).toBe('CI');
     });
 
-    it('triggers on push to main', () => {
+    it('explicitly limits CI push and pull_request triggers to the main branch', () => {
       const triggers = expectRecord(workflow.on, 'workflow.on');
-      const push = expectRecord(triggers.push, 'workflow.on.push');
-      expect(push.branches).toEqual(['main']);
-    });
 
-    it('triggers on pull_request to main', () => {
-      const triggers = expectRecord(workflow.on, 'workflow.on');
-      const pullRequest = expectRecord(triggers.pull_request, 'workflow.on.pull_request');
-      expect(pullRequest.branches).toEqual(['main']);
+      expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
+      expect(expectRecord(triggers.push, 'workflow.on.push')).toEqual({ branches: ['main'] });
+      expect(expectRecord(triggers.pull_request, 'workflow.on.pull_request')).toEqual({ branches: ['main'] });
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
       const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v4');
       expect(setupNode).toBeTruthy();
-      const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
-      expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
-      expect(setupNodeWith['node-version']).toBeUndefined();
+      expectSetupNodeUsesPinnedNvmrc(setupNode as Record<string, unknown>, 'build-test-lint');
     });
 
     it('runs npm ci for deterministic installs', () => {
@@ -271,13 +283,12 @@ on:
     it('uses the pinned minimum Node.js version in every CI setup-node step', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const nvmrc = readFileSync(resolve(ROOT, '.nvmrc'), 'utf-8').trim();
+      expect(nvmrc).toMatch(/^\d+\.\d+\.\d+$/);
 
       for (const [jobName, jobConfig] of Object.entries(jobs)) {
         const job = expectRecord(jobConfig, `jobs.${jobName}`);
         for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v4')) {
-          const setupNodeWith = expectRecord(step.with, `${jobName}.actions/setup-node.with`);
-          expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
-          expect(setupNodeWith['node-version']).toBeUndefined();
+          expectSetupNodeUsesPinnedNvmrc(step, jobName);
         }
       }
 
@@ -442,6 +453,31 @@ jobs:
     );
   });
 
+  it('does not demote component-only latest releases unless a root release exists to promote', () => {
+    const releaseLatestStep = expectSteps(releasePlease).find(
+      (step) => step.name === 'Ensure only root release is marked latest',
+    );
+    expect(releaseLatestStep).toBeTruthy();
+    const releaseLatestRun = String(releaseLatestStep?.run ?? '');
+
+    const rootLookupIndex = releaseLatestRun.indexOf('root_tag=$(gh release list');
+    const emptyRootNormalizationIndex = releaseLatestRun.indexOf('.tagName // empty');
+    const noRootGuardIndex = releaseLatestRun.indexOf(
+      'No root release found; leaving component latest unchanged',
+    );
+    const demoteIndex = releaseLatestRun.indexOf('gh release edit "$latest_tag" --latest=false');
+    const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
+
+    expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(releaseLatestRun).toContain('gh release list --limit 1000 --json tagName');
+    expect(emptyRootNormalizationIndex).toBeGreaterThan(rootLookupIndex);
+    expect(noRootGuardIndex).toBeGreaterThan(emptyRootNormalizationIndex);
+    expect(demoteIndex).toBeGreaterThan(noRootGuardIndex);
+    expect(promoteIndex).toBeGreaterThan(demoteIndex);
+    expect(releaseLatestRun).toContain('if [ -z "$root_tag" ]; then');
+    expect(releaseLatestRun).toContain('exit 0');
+  });
+
   it('defers npm token enforcement until a public package needs publishing', () => {
     const publishStep = expectSteps(publishNpm).find((step) => step.name === 'Publish released npm packages');
     const publishRun = String(publishStep?.run ?? '');
@@ -449,6 +485,24 @@ jobs:
     const privateSkipIndex = publishRun.indexOf('Skipping $package_path: package is private');
     expect(tokenCheckIndex).toBeGreaterThan(privateSkipIndex);
     expect(publishRun).toContain('npm publish "$package_path" --access public --provenance');
+  });
+
+  it('does not demote a component latest release unless a root release can be promoted', () => {
+    const latestStep = expectSteps(releasePlease).find((step) => step.name === 'Ensure only root release is marked latest');
+    expect(latestStep).toBeTruthy();
+
+    const latestRun = String(latestStep?.run ?? '');
+    const rootLookupIndex = latestRun.indexOf('root_tag=$(gh release list');
+    const missingRootGuardIndex = latestRun.indexOf('No root release found; leaving component latest unchanged');
+    const demoteIndex = latestRun.indexOf('gh release edit "$latest_tag" --latest=false');
+    const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
+
+    expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(latestRun).toContain('gh release list --limit 1000 --json tagName');
+    expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
+    expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
+    expect(promoteIndex).toBeGreaterThan(demoteIndex);
+    expect(latestRun).toContain('[0].tagName // empty');
   });
 });
 

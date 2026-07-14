@@ -17,6 +17,8 @@ export interface BeastEventBusOptions {
   onListenerError?: (failure: BeastEventBusListenerError) => void | Promise<void>;
 }
 
+export type BeastEventReplaySnapshot = readonly BeastSseEvent[];
+
 function reportDefaultListenerError({ event, error }: BeastEventBusListenerError): void {
   console.error('[BeastEventBus] Listener failed', {
     eventId: event.id,
@@ -57,6 +59,10 @@ function cloneEvent(event: BeastSseEvent): BeastSseEvent {
   };
 }
 
+function isRecordPayload(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 export class BeastEventBus {
   private sequence = 0;
   private readonly listeners = new Set<EventListener>();
@@ -71,6 +77,23 @@ export class BeastEventBus {
 
     this.maxBufferSize = options.maxBufferSize ?? 1000;
     this.onListenerError = options.onListenerError ?? reportDefaultListenerError;
+  }
+
+  static fromReplaySnapshot(
+    snapshot: BeastEventReplaySnapshot,
+    maxBufferSizeOrOptions?: number | BeastEventBusOptions,
+  ): BeastEventBus {
+    const defaultReplayBufferSize = Math.max(1000, snapshot.length);
+    const options = maxBufferSizeOrOptions ?? { maxBufferSize: defaultReplayBufferSize };
+    const resolvedMaxBufferSize = typeof options === 'number' ? options : (options.maxBufferSize ?? defaultReplayBufferSize);
+    if (resolvedMaxBufferSize < snapshot.length) {
+      throw new Error('Replay snapshot length exceeds configured maxBufferSize');
+    }
+
+    const busOptions = typeof options === 'number' ? options : { ...options, maxBufferSize: resolvedMaxBufferSize };
+    const bus = new BeastEventBus(busOptions);
+    bus.loadReplaySnapshot(snapshot);
+    return bus;
   }
 
   publish(event: Omit<BeastSseEvent, 'id'>): void {
@@ -104,6 +127,33 @@ export class BeastEventBus {
 
   replaySince(lastEventId: number): BeastSseEvent[] {
     return this.buffer.filter((e) => e.id !== undefined && e.id > lastEventId).map((event) => cloneEvent(event));
+  }
+
+  exportReplaySnapshot(): BeastEventReplaySnapshot {
+    return this.buffer.map((event) => cloneEvent(event));
+  }
+
+  private loadReplaySnapshot(snapshot: BeastEventReplaySnapshot): void {
+    let previousId = 0;
+    for (const event of snapshot) {
+      const eventId = event.id;
+      if (eventId === undefined || !Number.isSafeInteger(eventId) || eventId <= previousId) {
+        throw new Error('Replay snapshot event ids must be strictly increasing safe integers');
+      }
+      if (typeof event.type !== 'string' || event.type.length === 0) {
+        throw new Error('Replay snapshot events must include a non-empty string type');
+      }
+      if (!isRecordPayload(event.data)) {
+        throw new Error('Replay snapshot events must include an object data payload');
+      }
+      const cloned = cloneEvent(event);
+      this.buffer.push(cloned);
+      if (this.buffer.length > this.maxBufferSize) {
+        this.buffer.shift();
+      }
+      previousId = eventId;
+    }
+    this.sequence = previousId;
   }
 
   private reportListenerError(event: BeastSseEvent, error: unknown, listener: EventListener): void {

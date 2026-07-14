@@ -4,6 +4,7 @@ import type {
   ChannelCapabilities,
   ChannelType
 } from '../../core/types.js';
+import { formatHttpErrorMessage } from '../http-error-context.js';
 
 export interface WhatsAppAdapterOptions {
   accessToken: string;
@@ -33,7 +34,8 @@ export class WhatsAppAdapter implements ChannelAdapter {
     const to = (message.metadata?.phoneNumber as string) || 'unknown';
     const body = this.formatPayload(to, message);
 
-    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+    const targetUrl = `https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`;
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -43,8 +45,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`WhatsApp API error: ${response.status} ${error}`);
+      throw new Error(await formatHttpErrorMessage('WhatsApp API error', response, targetUrl));
     }
   }
 

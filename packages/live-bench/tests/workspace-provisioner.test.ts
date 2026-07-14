@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { BenchmarkMatrixRow, BenchmarkTask } from '../src/types.js';
 import { FixtureStore } from '../src/workspace/fixture-store.js';
@@ -162,6 +162,30 @@ describe('workspace provisioning', () => {
     expect(uppercaseBase64Lookalike.runDir).not.toBe(lowercaseBase64Lookalike.runDir);
     expect(uppercaseBase64Lookalike.runDir.toLowerCase()).not.toBe(lowercaseBase64Lookalike.runDir.toLowerCase());
     expect(readFileSync(join(uppercaseBase64Lookalike.evidenceDir, 'sentinel.txt'), 'utf8')).toBe('keep uppercase lookalike\n');
+  });
+
+  it('bounds long model path segments while preserving distinct model directories and metadata', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const runsRoot = tempRoot('live-bench-runs-');
+    createFixture(fixturesRoot);
+
+    const provisioner = new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    });
+
+    const longModel = 'a'.repeat(126);
+    const otherLongModel = `${'a'.repeat(125)}b`;
+    const provisioned = provisioner.provision({ ...row, runId: 'run-long-model', model: longModel }, task);
+    const otherProvisioned = provisioner.provision({ ...row, runId: 'run-long-model', model: otherLongModel }, task);
+
+    const modelSegment = basename(provisioned.runDir);
+    expect(Buffer.byteLength(modelSegment)).toBeLessThanOrEqual(255);
+    expect(modelSegment).toMatch(/^model-sha256-[a-f0-9]{64}$/);
+    expect(otherProvisioned.runDir).not.toBe(provisioned.runDir);
+    expect(existsSync(provisioned.workspaceDir)).toBe(true);
+    const environment = JSON.parse(readFileSync(provisioned.environmentPath, 'utf8')) as Record<string, unknown>;
+    expect(environment.model).toBe(longModel);
   });
 
   it('rejects non-canonical and timezone-less run timestamps', () => {
