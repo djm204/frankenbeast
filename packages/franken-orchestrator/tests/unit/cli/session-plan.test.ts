@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
@@ -13,6 +13,7 @@ let progressCtorInner: unknown = undefined;
 let progressCtorOptions: unknown = undefined;
 let progressInstance: unknown = undefined;
 let llmGraphBuilderCtorArg: unknown = undefined;
+let lastCreateCliDepsOptions: import('../../../src/cli/dep-factory.js').CliDepOptions | undefined;
 const mockFinalize = vi.fn(async () => {});
 
 // ── Mock heavy deps ──
@@ -55,12 +56,15 @@ const mockDeps = {
 };
 
 vi.mock('../../../src/cli/dep-factory.js', () => ({
-  createCliDeps: vi.fn(() => ({
-    deps: mockDeps,
-    logger: mockDeps.logger,
-    finalize: mockFinalize,
-    cliLlmAdapter: mockCliLlmAdapter,
-  })),
+  createCliDeps: vi.fn((options: import('../../../src/cli/dep-factory.js').CliDepOptions) => {
+    lastCreateCliDepsOptions = options;
+    return {
+      deps: mockDeps,
+      logger: mockDeps.logger,
+      finalize: mockFinalize,
+      cliLlmAdapter: mockCliLlmAdapter,
+    };
+  }),
 }));
 
 // Mock AdapterLlmClient — capture constructor arg
@@ -236,6 +240,7 @@ function makeConfig(
 
 describe('Session plan phase — CliLlmAdapter wiring', () => {
   const origLog = console.info;
+  const origRunConfigEnv = process.env.FRANKENBEAST_RUN_CONFIG;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -245,11 +250,17 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     progressCtorOptions = undefined;
     progressInstance = undefined;
     llmGraphBuilderCtorArg = undefined;
+    lastCreateCliDepsOptions = undefined;
     console.info = vi.fn();
   });
 
   afterEach(() => {
     console.info = origLog;
+    if (origRunConfigEnv === undefined) {
+      delete process.env.FRANKENBEAST_RUN_CONFIG;
+    } else {
+      process.env.FRANKENBEAST_RUN_CONFIG = origRunConfigEnv;
+    }
   });
 
   it('runPlan() passes a cached CliLlmAdapter-backed LLM to LlmGraphBuilder', async () => {
@@ -302,6 +313,29 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
       `No design document found at ${missingDesignDoc}`,
     );
     expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
+  it('runPlan() drops a stale default model when the plan-build override changes provider only', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const config = makeConfig();
+    const runConfigPath = resolve(config.paths.root, 'run-config.json');
+    writeFileSync(runConfigPath, JSON.stringify({
+      provider: 'codex',
+      model: 'gpt-5.3-codex-spark',
+      llmConfig: {
+        default: { provider: 'codex', model: 'gpt-5.3-codex-spark' },
+        overrides: { 'plan-build': { provider: 'claude' } },
+      },
+    }));
+    process.env.FRANKENBEAST_RUN_CONFIG = runConfigPath;
+
+    await new Session(config).start();
+
+    expect(lastCreateCliDepsOptions?.runConfig?.llmConfig?.default).toEqual({
+      provider: 'claude',
+      model: undefined,
+    });
+    expect(lastCreateCliDepsOptions?.runConfig?.llmConfig?.overrides?.['cli-session']).toBeUndefined();
   });
 
   it('runPlan() passes LLM directly to LlmGraphBuilder (no ProgressLlmClient spinner)', async () => {

@@ -17,6 +17,9 @@ export class AiderProvider implements ICliProvider {
 
   buildArgs(opts: ProviderOpts): string[] {
     const args: string[] = ['--message', '--yes-always', '--no-stream', '--no-auto-commits'];
+    if (opts.model) {
+      args.push('--model', opts.model);
+    }
     if (opts.extraArgs) {
       args.push(...opts.extraArgs);
     }

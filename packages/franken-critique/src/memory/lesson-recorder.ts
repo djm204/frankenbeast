@@ -1,6 +1,7 @@
 import type {
   MemoryPort,
   CritiqueLesson,
+  LessonContradictionReport,
   FailedTestSkillCandidate,
   LessonCooldownSuppression,
   LessonRecordingResult,
@@ -21,6 +22,8 @@ import { createHash } from 'node:crypto';
 
 const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
   'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
+const LESSON_CONTRADICTION_VERIFICATION_COMMAND =
+  LESSON_TRACEABILITY_VERIFICATION_COMMAND;
 
 const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_LESSON_COOLDOWN_MS = 100 * 365 * 24 * 60 * 60 * 1000;
@@ -483,7 +486,12 @@ export class LessonRecorder {
       }
 
       try {
-        const admittedLesson = this.withAdmissionTimestamp(lesson);
+        const contradictionReport =
+          await this.createContradictionReport(lesson);
+        const admittedLesson = this.withAdmissionTimestamp({
+          ...lesson,
+          contradictionReport,
+        });
         await this.memory.recordLesson(admittedLesson);
         recordingResult.recorded += 1;
         this.commitBlockerPatternObservations(lesson);
@@ -515,6 +523,24 @@ export class LessonRecorder {
         }
       }
     });
+  }
+
+  private async createContradictionReport(
+    lesson: CritiqueLesson,
+  ): Promise<LessonContradictionReport> {
+    if (!this.memory.searchLessons) {
+      return detectLessonContradictions(lesson);
+    }
+
+    try {
+      const priorLessons = await this.memory.searchLessons(
+        createLessonSearchQuery(lesson),
+        10,
+      );
+      return detectLessonContradictions(lesson, priorLessons);
+    } catch {
+      return createLessonSearchFailureReport();
+    }
   }
 
   private extractLessons(
@@ -578,6 +604,7 @@ export class LessonRecorder {
             reason: LESSON_EXPERIMENT_SANDBOX_REASON,
             exitCriteria: [
               'Confirm at least one lesson-to-test traceability entry is present.',
+              'Check the contradiction report and resolve any conflicting prior lesson before promotion.',
               'Run the listed verification command and attach the evidence to the PM handoff.',
               'Promote or retire the lesson only after review confirms the regression covers the source finding.',
             ],
@@ -912,6 +939,74 @@ export class LessonRecorder {
       },
     };
   }
+}
+
+export function detectLessonContradictions(
+  lesson: CritiqueLesson,
+  priorLessons?: readonly CritiqueLesson[],
+): LessonContradictionReport {
+  if (!priorLessons) {
+    return {
+      status: 'not_checked',
+      guidance:
+        'No lesson search adapter is available, so historical lesson contradictions were not checked.',
+      verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
+      contradictions: [],
+    };
+  }
+
+  const comparablePriorLessons = priorLessons.filter(
+    (prior) => prior !== lesson,
+  );
+
+  const contradictions = comparablePriorLessons.flatMap((prior) => {
+    const contradictionMatch = findContradictoryGuidanceMatch(lesson, prior);
+
+    if (!sameEvaluator(lesson, prior) || contradictionMatch === undefined) {
+      return [];
+    }
+
+    return [
+      {
+        conflictingLessonId: getLessonId(prior),
+        evaluatorName: prior.evaluatorName,
+        sharedTerms: contradictionMatch.sharedTerms,
+        reason:
+          'A prior lesson from the same evaluator discusses the same normalized terms but reverses negated guidance; review before promotion.',
+        conflictingFailureDescription: prior.failureDescription,
+        conflictingCorrectionApplied: prior.correctionApplied,
+        conflictingGuidance: contradictionMatch.conflictingGuidance,
+      },
+    ];
+  });
+
+  if (contradictions.length > 0) {
+    return {
+      status: 'contradiction_detected',
+      guidance:
+        'Promotion is blocked until PM/liveness review reconciles the contradictory lesson guidance.',
+      verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
+      contradictions,
+    };
+  }
+
+  return {
+    status: 'clear',
+    guidance:
+      'No deterministic lesson contradiction was detected among comparable prior lessons.',
+    verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
+    contradictions: [],
+  };
+}
+
+function createLessonSearchFailureReport(): LessonContradictionReport {
+  return {
+    status: 'not_checked',
+    guidance:
+      'Lesson search adapter failed, so historical lesson contradictions could not be checked; treat this as an adapter outage rather than a missing hook.',
+    verificationCommand: LESSON_CONTRADICTION_VERIFICATION_COMMAND,
+    contradictions: [],
+  };
 }
 
 function getPendingAdmissions(
@@ -1454,3 +1549,1080 @@ function sanitizeLessonIdPart(value: string): string {
     .replace(/[^a-z0-9._-]+/g, '-');
   return normalized.replace(/^-+|-+$/g, '') || 'unknown';
 }
+
+function createLessonSearchQuery(lesson: CritiqueLesson): string {
+  return `${lesson.evaluatorName} ${createLessonGuidanceText(lesson)}`;
+}
+
+function sameEvaluator(a: CritiqueLesson, b: CritiqueLesson): boolean {
+  return normalizeText(a.evaluatorName) === normalizeText(b.evaluatorName);
+}
+
+function findContradictoryGuidanceMatch(
+  lesson: CritiqueLesson,
+  prior: CritiqueLesson,
+):
+  | {
+      sharedTerms: string[];
+      lessonGuidance: string;
+      conflictingGuidance: string;
+    }
+  | undefined {
+  const lessonDirectives = createLessonDirectiveClauses(lesson);
+  const priorDirectives = createLessonDirectiveClauses(prior);
+  for (const lessonDirective of lessonDirectives) {
+    for (const priorDirective of priorDirectives) {
+      if (normalizeText(lessonDirective.sourceText) === normalizeText(priorDirective.sourceText)) {
+        continue;
+      }
+      if (hasDoubleNegativeOppositeDirectivePair(lessonDirective, priorDirective)) {
+        return {
+          sharedTerms: sharedDirectiveObjectTerms(lessonDirective, priorDirective),
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
+      const sharedTerms = sharedTextTerms(
+        lessonDirective.text,
+        priorDirective.text,
+      );
+      if (hasAuthenticationScopeConflict(lessonDirective, priorDirective)) {
+        return {
+          sharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
+      if (lessonDirective.polarity === priorDirective.polarity) {
+        continue;
+      }
+      if (hasCompatibleSiblingDirective(lessonDirectives, priorDirectives, lessonDirective, priorDirective)) {
+        continue;
+      }
+      const opposedGuardSharedTerms = opposedConditionalGuardSharedTerms(
+        lessonDirective,
+        priorDirective,
+      );
+      if (opposedGuardSharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
+        return {
+          sharedTerms: opposedGuardSharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
+      if (hasExactTopLevelReversal(lessonDirective, priorDirective)) {
+        return {
+          sharedTerms:
+            sharedTerms.length > 0
+              ? sharedTerms
+              : sharedDirectiveObjectTerms(lessonDirective, priorDirective),
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
+      if (hasCompatibleConditionalGuard(lessonDirective, priorDirective)) {
+        continue;
+      }
+      if (hasDivergentQualifiedGenericObjectPair(lessonDirective, priorDirective, sharedTerms)) {
+        continue;
+      }
+      if (hasExplicitOppositeDirectivePair(lessonDirective, priorDirective)) {
+        return {
+          sharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
+      if (sharedTerms.length >= MIN_CONTRADICTION_SHARED_TERMS) {
+        if (hasDifferentLeadingActions(lessonDirective, priorDirective)) {
+          continue;
+        }
+        return {
+          sharedTerms,
+          lessonGuidance: lessonDirective.sourceText,
+          conflictingGuidance: priorDirective.sourceText,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+function hasAuthenticationScopeConflict(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return hasAuthenticationScopeConflictInOrder(a, b) || hasAuthenticationScopeConflictInOrder(b, a);
+}
+
+function hasAuthenticationScopeConflictInOrder(
+  maybeRequirement: LessonDirectiveClause,
+  maybeAllowance: LessonDirectiveClause,
+): boolean {
+  return (
+    maybeRequirement.polarity === 'positive' &&
+    maybeAllowance.polarity === 'positive' &&
+    /\b(?:require|requires|required|verify|validated|validation|authenticate|authentication)\b/.test(
+      maybeRequirement.text,
+    ) &&
+    /\bunauthenticated\b/.test(maybeAllowance.text) &&
+    !hasDivergentScopeQualifiers(maybeRequirement.text, maybeAllowance.text) &&
+    sharedTextTerms(maybeRequirement.text, maybeAllowance.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+const SCOPE_QUALIFIER_OPPOSITES: Record<string, readonly string[]> = {
+  private: ['public'],
+  public: ['private', 'internal', 'admin', 'secret', 'sensitive'],
+  internal: ['public', 'external'],
+  external: ['internal'],
+  admin: ['public'],
+  secret: ['public'],
+  sensitive: ['public', 'non_sensitive'],
+  non_sensitive: ['sensitive'],
+};
+
+function hasDivergentScopeQualifiers(a: string, b: string): boolean {
+  const aScopes = extractScopeQualifiers(a);
+  const bScopes = extractScopeQualifiers(b);
+  return aScopes.some((scope) =>
+    SCOPE_QUALIFIER_OPPOSITES[scope]?.some((opposite) => bScopes.includes(opposite)),
+  );
+}
+
+function extractScopeQualifiers(text: string): string[] {
+  return extractComparableTerms(text).filter(
+    (term) => SCOPE_QUALIFIER_OPPOSITES[term] !== undefined,
+  );
+}
+
+function hasCompatibleSiblingDirective(
+  lessonDirectives: LessonDirectiveClause[],
+  priorDirectives: LessonDirectiveClause[],
+  currentDirective: LessonDirectiveClause,
+  priorDirective: LessonDirectiveClause,
+): boolean {
+  if (startsWithDoubleNegativeDirective(currentDirective.text)) {
+    return false;
+  }
+  return (
+    hasCompatibleSiblingInList(lessonDirectives, currentDirective, priorDirective) ||
+    hasCompatibleSiblingInList(priorDirectives, priorDirective, currentDirective)
+  );
+}
+
+function hasCompatibleSiblingInList(
+  directives: LessonDirectiveClause[],
+  currentDirective: LessonDirectiveClause,
+  comparedDirective: LessonDirectiveClause,
+): boolean {
+  return directives.some(
+    (directive) =>
+      directive !== currentDirective &&
+      directive.polarity === comparedDirective.polarity &&
+      canonicalComparableText(directive.text) === canonicalComparableText(comparedDirective.text),
+  );
+}
+
+function sharedTextTerms(a: string, b: string): string[] {
+  const aTerms = new Set(extractComparableTerms(a));
+  const bTerms = new Set(extractComparableTerms(b).map(canonicalComparableTerm));
+  return [...aTerms]
+    .filter((term) => bTerms.has(canonicalComparableTerm(term)))
+    .sort();
+}
+
+function createLessonGuidanceText(lesson: CritiqueLesson): string {
+  return [lesson.failureDescription, createLessonDirectiveText(lesson)].join(
+    ' ',
+  );
+}
+
+function createLessonDirectiveText(lesson: CritiqueLesson): string {
+  return createLessonDirectiveFragments(lesson).join(' ');
+}
+
+function createLessonDirectiveFragments(lesson: CritiqueLesson): string[] {
+  const reviewerGuidance =
+    lesson.reviewerFeedback?.findings.flatMap((finding) => {
+      if (finding.suggestion) {
+        return [finding.suggestion];
+      }
+      return isDirectiveLikeFindingMessage(finding.message) ? [finding.message] : [];
+    }) ?? [];
+  return [lesson.correctionApplied, ...reviewerGuidance].filter(
+    (fragment) => normalizeText(fragment).length > 0,
+  );
+}
+
+function isDirectiveLikeFindingMessage(message: string): boolean {
+  const normalized = normalizeText(message);
+  const looksLikeFailureProse =
+    /\b(?:did not|does not|skipped|reused|failed|failing|failure|lacked|missing)\b/i.test(
+      message,
+    );
+  return (
+    (startsWithPositiveDirective(normalized) && !looksLikeFailureProse) ||
+    startsWithNegativeDirective(normalized) ||
+    (!looksLikeFailureProse && /\b(?:do not|don t|must not|should not|unless|until)\b/i.test(message))
+  );
+}
+
+type LessonDirectivePolarity = 'positive' | 'negative';
+
+interface LessonDirectiveClause {
+  readonly text: string;
+  readonly sourceText: string;
+  readonly polarity: LessonDirectivePolarity;
+  readonly guardCondition?: string;
+  readonly conditionalProhibition?: boolean;
+  readonly embeddedNegatedCondition?: string;
+}
+
+function createLessonDirectiveClauses(
+  lesson: CritiqueLesson,
+): LessonDirectiveClause[] {
+  return createLessonDirectiveFragments(lesson).flatMap((fragment) =>
+    createDirectiveClauses(fragment),
+  );
+}
+
+function createDirectiveClauses(fragment: string): LessonDirectiveClause[] {
+  const directiveFragments = splitDirectiveFragments(fragment);
+  if (directiveFragments.length > 1) {
+    return directiveFragments.flatMap((directiveFragment) =>
+      createDirectiveClauses(directiveFragment),
+    );
+  }
+
+  const normalized = normalizeText(fragment);
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const guardCondition = extractGuardCondition(fragment);
+  const leadingPolarity = leadingDirectivePolarity(normalized);
+  const conditionalProhibition =
+    leadingPolarity === 'negative' &&
+    guardCondition !== undefined &&
+    !/^(bypass|skip|omit|ignore)\b/.test(normalized);
+  const embeddedNegatedCondition = extractEmbeddedNegatedCondition(normalized);
+  const clauses: LessonDirectiveClause[] = [
+    {
+      text: normalized,
+      sourceText: fragment,
+      polarity: leadingPolarity,
+      ...(guardCondition ? { guardCondition } : {}),
+      ...(conditionalProhibition ? { conditionalProhibition } : {}),
+      ...(embeddedNegatedCondition ? { embeddedNegatedCondition } : {}),
+    },
+  ];
+
+  if (guardCondition && (conditionalProhibition || /\b(?:without|unless)\b/i.test(fragment))) {
+    clauses.push({
+      text: `${normalized} ${guardCondition}`,
+      sourceText: fragment,
+      polarity: 'negative',
+      guardCondition,
+      ...(conditionalProhibition ? { conditionalProhibition } : {}),
+    });
+  }
+
+  if (embeddedNegatedCondition && leadingPolarity === 'positive' && !startsWithDoubleNegativeDirective(normalized)) {
+    clauses.push({
+      text: embeddedNegatedCondition,
+      sourceText: fragment,
+      polarity: 'negative',
+      embeddedNegatedCondition,
+    });
+  }
+
+  return clauses;
+}
+
+function splitDirectiveFragments(fragment: string): string[] {
+  return fragment
+    .split(/[.;\n\r]+/)
+    .flatMap(splitCoordinatedDirectiveFragment)
+    .filter((part) => normalizeText(part).length > 0);
+}
+
+function splitCoordinatedDirectiveFragment(fragment: string): string[] {
+  const parts = fragment.split(/,?\s+(?:and|then)\s+/i).map((part) => part.trim());
+  if (parts.length <= 1) {
+    return parts;
+  }
+
+  const fragments: string[] = [];
+  let current = parts[0]!;
+  for (const part of parts.slice(1)) {
+    const normalizedPart = normalizeText(part);
+    if (startsWithPositiveDirective(normalizedPart) || startsWithNegativeDirective(normalizedPart)) {
+      fragments.push(current);
+      current = part;
+      continue;
+    }
+    current = `${current} and ${part}`;
+  }
+  fragments.push(current);
+  return fragments;
+}
+
+function extractGuardCondition(fragment: string): string | undefined {
+  const match =
+    /\b(?:without|unless|before|until)\s+([^.;,\n\r]+)/i.exec(fragment) ??
+    /\b(?:if|when)\s+([^.;,\n\r]+)/i.exec(fragment);
+  const condition = match?.[1] ? normalizeGuardCondition(match[1]) : '';
+  return condition.length > 0 ? condition : undefined;
+}
+
+function normalizeGuardCondition(value: string): string {
+  return normalizeText(value).replace(/\bis\b\s+/g, '');
+}
+
+function extractEmbeddedNegatedCondition(
+  normalized: string,
+): string | undefined {
+  const match = /\b(?:do not|don t|does not|not|never|cannot|can t|must not|should not)\s+(.+)$/i.exec(normalized);
+  const condition = match?.[1]?.trim() ?? '';
+  return condition.length > 0 ? condition : undefined;
+}
+
+function opposedConditionalGuardSharedTerms(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): string[] {
+  const sharedTerms = sharedTextTerms(a.text, b.text);
+  if (sharedTerms.length < MIN_CONTRADICTION_SHARED_TERMS) {
+    return [];
+  }
+
+  if (hasComplementaryConditionalGuardPair(a, b) || hasComplementaryConditionalGuardPair(b, a)) {
+    return [];
+  }
+
+  if (
+    a.conditionalProhibition &&
+    a.guardCondition &&
+    hasOpposedGuardOutcome(a.guardCondition, b.text) &&
+    hasSharedGuardSubject(a.guardCondition, b)
+  ) {
+    return sharedTerms;
+  }
+
+  if (
+    b.conditionalProhibition &&
+    b.guardCondition &&
+    hasOpposedGuardOutcome(b.guardCondition, a.text) &&
+    hasSharedGuardSubject(b.guardCondition, a)
+  ) {
+    return sharedTerms;
+  }
+
+  return [];
+}
+
+function hasComplementaryConditionalGuardPair(
+  maybeProhibition: LessonDirectiveClause,
+  maybeAllowance: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeProhibition.polarity !== 'negative' ||
+    maybeAllowance.polarity !== 'positive' ||
+    !maybeProhibition.guardCondition ||
+    !maybeAllowance.guardCondition
+  ) {
+    return false;
+  }
+
+  return (
+    hasOpposedGuardOutcome(
+      maybeProhibition.guardCondition,
+      maybeAllowance.guardCondition,
+    ) &&
+    sharedTextTerms(maybeProhibition.guardCondition, maybeAllowance.guardCondition)
+      .length >= 1 &&
+    sharedTextTerms(maybeProhibition.text, maybeAllowance.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasCompatibleConditionalGuard(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return (
+    hasCompatibleConditionalGuardPair(a, b) ||
+    hasCompatibleConditionalGuardPair(b, a) ||
+    hasDivergentConditionalGuardPair(a, b) ||
+    hasCompatibleEmbeddedNegationPair(a, b) ||
+    hasCompatibleEmbeddedNegationPair(b, a) ||
+    hasCompatibleQualifiedExclusionPair(a, b) ||
+    hasCompatibleQualifiedExclusionPair(b, a) ||
+    hasCompatibleWithoutWithPair(a, b) ||
+    hasCompatibleWithoutWithPair(b, a) ||
+    hasCompatibleGuardedAllowancePair(a, b) ||
+    hasCompatibleGuardedAllowancePair(b, a) ||
+    hasCompatibleValidityQualifierPair(a, b) ||
+    hasCompatibleValidityQualifierPair(b, a) ||
+    hasCompatibleValidatedScopePair(a, b) ||
+    hasCompatibleValidatedScopePair(b, a)
+  );
+}
+
+function hasDivergentConditionalGuardPair(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  if (!a.guardCondition || !b.guardCondition || a.polarity === b.polarity) {
+    return false;
+  }
+  if (!hasGuardOutcomeWord(a.guardCondition) || !hasGuardOutcomeWord(b.guardCondition)) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(a.text, b.text).length >= MIN_CONTRADICTION_SHARED_TERMS &&
+    !hasSharedGuardSubject(a.guardCondition, b)
+  );
+}
+
+function hasGuardOutcomeWord(text: string): boolean {
+  return /\b(?:pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted|fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(
+    text,
+  );
+}
+
+function hasCompatibleValidatedScopePair(
+  maybeScopedProhibition: LessonDirectiveClause,
+  maybeValidatedAllowance: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeScopedProhibition.polarity !== 'negative' ||
+    maybeValidatedAllowance.polarity !== 'positive'
+  ) {
+    return false;
+  }
+
+  return (
+    (/\bunauthenticated\b/.test(maybeScopedProhibition.text) &&
+      /\bafter\s+validation\b/.test(maybeValidatedAllowance.text) &&
+      sharedTextTerms(maybeScopedProhibition.text, maybeValidatedAllowance.text)
+        .length >= MIN_CONTRADICTION_SHARED_TERMS) ||
+    hasComplementaryValidatedQualifierScope(
+      maybeScopedProhibition,
+      maybeValidatedAllowance,
+    )
+  );
+}
+
+function hasComplementaryValidatedQualifierScope(
+  maybeScopedProhibition: LessonDirectiveClause,
+  maybeValidatedAllowance: LessonDirectiveClause,
+): boolean {
+  return (
+    /\bunvalidated\b/.test(maybeScopedProhibition.text) &&
+    /\b(?:validated|after\s+validation)\b/.test(maybeValidatedAllowance.text) &&
+    sharedTextTerms(
+      stripValidationQualifier(maybeScopedProhibition.text),
+      stripValidationQualifier(maybeValidatedAllowance.text),
+    ).length >= MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function stripValidationQualifier(text: string): string {
+  return text.replace(/\b(?:unvalidated|validated|after\s+validation)\b/g, '');
+}
+
+function hasCompatibleConditionalGuardPair(
+  maybeProhibition: LessonDirectiveClause,
+  maybeRequirement: LessonDirectiveClause,
+): boolean {
+  const guardedRequirementAllowed =
+    maybeRequirement.guardCondition === undefined ||
+    /^(require|requires|required|verify|verifies|verified|validate|validates|validated)\b/.test(
+      maybeRequirement.text,
+    );
+
+  if (
+    maybeProhibition.polarity !== 'negative' ||
+    maybeRequirement.polarity !== 'positive' ||
+    !maybeProhibition.conditionalProhibition ||
+    !maybeProhibition.guardCondition ||
+    !guardedRequirementAllowed
+  ) {
+    return false;
+  }
+
+  if (!describesRequiredPrerequisite(maybeRequirement.text)) {
+    return false;
+  }
+
+  if (
+    hasOpposedGuardOutcome(
+      maybeProhibition.guardCondition,
+      maybeRequirement.text,
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text)
+      .length >= MIN_CONTRADICTION_SHARED_TERMS ||
+    hasSingleTermGuardMatch(maybeProhibition, maybeRequirement)
+  );
+}
+
+function hasSingleTermGuardMatch(
+  maybeProhibition: LessonDirectiveClause,
+  maybeRequirement: LessonDirectiveClause,
+): boolean {
+  if (!maybeProhibition.guardCondition) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeProhibition.guardCondition, maybeRequirement.text)
+      .length >= 1 &&
+    sharedTextTerms(maybeProhibition.text, maybeRequirement.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasCompatibleEmbeddedNegationPair(
+  maybeAllowedNegation: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowedNegation.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative' ||
+    !maybeAllowedNegation.embeddedNegatedCondition
+  ) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(
+      maybeAllowedNegation.embeddedNegatedCondition,
+      maybeProhibition.text,
+    ).length >= MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasCompatibleQualifiedExclusionPair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative'
+  ) {
+    return false;
+  }
+
+  const allowanceTerms = extractComparableTerms(maybeAllowance.text);
+  const prohibitedTerms = extractComparableTerms(maybeProhibition.text);
+  const prohibitedTermSet = new Set(prohibitedTerms);
+  const allowanceTermSet = new Set(allowanceTerms);
+  return (
+    allowanceTerms.some((term) => {
+      if (!term.startsWith('non_')) {
+        return false;
+      }
+      return prohibitedTermSet.has(term.slice('non_'.length));
+    }) ||
+    prohibitedTerms.some((term) => {
+      if (!term.startsWith('non_')) {
+        return false;
+      }
+      return allowanceTermSet.has(term.slice('non_'.length));
+    })
+  );
+}
+
+function hasSharedGuardSubject(
+  guardCondition: string,
+  comparedDirective: LessonDirectiveClause,
+): boolean {
+  const comparedGuard = comparedDirective.guardCondition ?? comparedDirective.text;
+  return (
+    sharedTextTerms(
+      stripGuardOutcomeWords(guardCondition),
+      stripGuardOutcomeWords(comparedGuard),
+    ).length >= 1
+  );
+}
+
+function stripGuardOutcomeWords(text: string): string {
+  return text.replace(
+    /\b(?:pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted|fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/g,
+    '',
+  );
+}
+
+
+function hasCompatibleWithoutWithPair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative' ||
+    !/\bwithout\b/i.test(maybeAllowance.sourceText) ||
+    !/\bwith\b/i.test(maybeProhibition.sourceText) ||
+    !maybeAllowance.guardCondition
+  ) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeAllowance.guardCondition, maybeProhibition.text).length >=
+      1 &&
+    sharedTextTerms(maybeAllowance.text, maybeProhibition.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasCompatibleGuardedAllowancePair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  const allowanceHasGuardSyntax = new RegExp(
+    '\\b(?:with|if|when|after|unless)\\b',
+    'i',
+  ).test(maybeAllowance.sourceText);
+  const prohibitionHasGuardSyntax = new RegExp(
+    '\\b(?:without|unless|until|if|when)\\b',
+    'i',
+  ).test(maybeProhibition.sourceText);
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative' ||
+    !maybeProhibition.guardCondition ||
+    !allowanceHasGuardSyntax ||
+    !prohibitionHasGuardSyntax
+  ) {
+    return false;
+  }
+
+  const allowanceHasFailingGuardOutcome = new RegExp(
+    '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|not\\s+(?:approved|granted|allowed|permitted)|unapproved)\\b',
+    'i',
+  ).test(maybeAllowance.sourceText);
+  const allowanceUsesUnless = /\bunless\b/i.test(maybeAllowance.sourceText);
+  const unlessGuardIsFailing = maybeAllowance.guardCondition
+    ? new RegExp(
+        '\\b(?:missing|absent|fail|fails|failed|failing|failure|invalid|lack|lacks|lacked|denied|rejected|not\\s+(?:approved|granted|allowed|permitted)|unapproved)\\b',
+        'i',
+      ).test(maybeAllowance.guardCondition)
+    : false;
+  if (
+    /\bunverified\b/i.test(maybeAllowance.sourceText) ||
+    (allowanceHasFailingGuardOutcome && !allowanceUsesUnless) ||
+    (allowanceUsesUnless && !unlessGuardIsFailing)
+  ) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(maybeProhibition.guardCondition, maybeAllowance.text).length >=
+      1 &&
+    sharedTextTerms(maybeProhibition.text, maybeAllowance.text).length >=
+      MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+function hasCompatibleValidityQualifierPair(
+  maybeAllowance: LessonDirectiveClause,
+  maybeProhibition: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeAllowance.polarity !== 'positive' ||
+    maybeProhibition.polarity !== 'negative'
+  ) {
+    return false;
+  }
+
+  const validAllowanceMatch = /\b(?:valid|validated)\s+(\w+)\b/i.exec(maybeAllowance.text);
+  const invalidProhibitionMatch = /\b(?:invalid|unvalidated)\s+(\w+)\b/i.exec(maybeProhibition.text);
+  return (
+    validAllowanceMatch?.[1] !== undefined &&
+    invalidProhibitionMatch?.[1] !== undefined &&
+    canonicalComparableTerm(validAllowanceMatch[1]) ===
+      canonicalComparableTerm(invalidProhibitionMatch[1])
+  );
+}
+
+function hasOpposedGuardOutcome(
+  guardCondition: string,
+  requirementText: string,
+): boolean {
+  const guardHasPass =
+    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted)\b/.test(
+      guardCondition,
+    );
+  const guardHasFail = /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(
+    guardCondition,
+  );
+  const requirementHasPass =
+    /\b(pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted)\b/.test(
+      requirementText,
+    );
+  const requirementHasFail =
+    /\b(fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(requirementText);
+
+  return (
+    (guardHasPass && requirementHasFail) ||
+    (guardHasFail && requirementHasPass) ||
+    (requirementHasFail && sharedTextTerms(guardCondition, requirementText).length >= 1)
+  );
+}
+
+function describesRequiredPrerequisite(text: string): boolean {
+  return /\b(require|requires|required|verify|verifies|verified|verification|validate|validates|validated|validation|when|after|before|present|provenance)\b/.test(
+    text,
+  );
+}
+
+function leadingDirectivePolarity(normalized: string): LessonDirectivePolarity {
+  if (startsWithDoubleNegativeDirective(normalized)) {
+    return 'positive';
+  }
+  if (
+    /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny)\b/.test(
+      normalized,
+    ) ||
+    /^(do not|don t|must not|should not|cannot|can t)\b/.test(normalized)
+  ) {
+    return 'negative';
+  }
+  return 'positive';
+}
+
+function hasExplicitOppositeDirectivePair(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return (
+    hasExplicitOppositeDirectivePairInOrder(a, b) ||
+    hasExplicitOppositeDirectivePairInOrder(b, a)
+  );
+}
+
+function hasExactTopLevelReversal(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return hasExactTopLevelReversalInOrder(a, b) || hasExactTopLevelReversalInOrder(b, a);
+}
+
+function hasExactTopLevelReversalInOrder(
+  maybeNegative: LessonDirectiveClause,
+  maybePositive: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeNegative.polarity !== 'negative' ||
+    maybePositive.polarity !== 'positive' ||
+    maybeNegative.guardCondition ||
+    maybePositive.guardCondition ||
+    !startsWithNegativeDirective(maybeNegative.text) ||
+    startsWithNegativeDirective(maybePositive.text)
+  ) {
+    return false;
+  }
+
+  const negativeObject = stripLeadingPositiveDirective(stripLeadingDirective(maybeNegative.text));
+  const positiveObject = stripLeadingDirective(maybePositive.text);
+  const negativeAction = leadingDirectiveAction(maybeNegative.text);
+  const positiveAction = leadingDirectiveAction(maybePositive.text);
+  if (negativeAction && positiveAction && negativeAction !== positiveAction) {
+    return false;
+  }
+  return (
+    negativeObject.length > 0 &&
+    positiveObject.length > 0 &&
+    normalizeText(negativeObject) === normalizeText(positiveObject)
+  );
+}
+
+function hasDoubleNegativeOppositeDirectivePair(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  return (
+    hasDoubleNegativeOppositeDirectivePairInOrder(a, b) ||
+    hasDoubleNegativeOppositeDirectivePairInOrder(b, a)
+  );
+}
+
+function hasDoubleNegativeOppositeDirectivePairInOrder(
+  maybeDoubleNegative: LessonDirectiveClause,
+  maybeNegative: LessonDirectiveClause,
+): boolean {
+  if (
+    !startsWithDoubleNegativeDirective(maybeDoubleNegative.text) ||
+    !startsWithNegativeDirective(maybeNegative.text)
+  ) {
+    return false;
+  }
+  return (
+    canonicalComparableText(stripLeadingPositiveDirective(maybeDoubleNegative.text)) ===
+    canonicalComparableText(stripLeadingDirective(maybeNegative.text))
+  );
+}
+
+function hasDifferentLeadingActions(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  if (a.guardCondition || b.guardCondition) {
+    return false;
+  }
+  const aAction = leadingDirectiveAction(a.text);
+  const bAction = leadingDirectiveAction(b.text);
+  return Boolean(aAction && bAction && aAction !== bAction);
+}
+
+function leadingDirectiveAction(text: string): string | undefined {
+  const strippedNegation = text
+    .replace(/^(?:do not|don t|must not|should not|cannot|can t)\s+/, '')
+    .replace(/^(?:should|must)\s+/, '');
+  const action = normalizeText(strippedNegation).split(' ').find(Boolean);
+  if (['disallow', 'prohibit', 'forbid', 'deny', 'reject'].includes(action ?? '')) {
+    return 'allow';
+  }
+  if (action === 'permit') {
+    return 'allow';
+  }
+  return action;
+}
+
+function sharedDirectiveObjectTerms(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): string[] {
+  const aObjectTerms = extractComparableTerms(stripLeadingDirective(a.text));
+  const bObjectTerms = extractComparableTerms(stripLeadingDirective(b.text));
+  return aObjectTerms.filter((aTerm) =>
+    bObjectTerms.some(
+      (bTerm) => canonicalComparableTerm(aTerm) === canonicalComparableTerm(bTerm),
+    ),
+  );
+}
+
+function stripLeadingDirective(normalized: string): string {
+  return stripLeadingPositiveDirective(
+    stripLeadingNegativeDirective(stripLeadingDoubleNegativeDirective(normalized)),
+  );
+}
+
+function stripLeadingDoubleNegativeDirective(normalized: string): string {
+  return normalized
+    .replace(
+      /^(?:do not|don t|must not|should not|cannot|can t)\s+(?:skip|omit|ignore|bypass|avoid|disable|disabled|prohibit|disallow|reject|forbid|deny)\s+/,
+      '',
+    )
+    .trim();
+}
+
+function hasDivergentQualifiedGenericObjectPair(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+  sharedTerms: string[],
+): boolean {
+  if (sharedTerms.length < MIN_CONTRADICTION_SHARED_TERMS) {
+    return false;
+  }
+  const sharedCanonicalTerms = new Set(sharedTerms.map(canonicalComparableTerm));
+  const sharedGenericObjects = [...sharedCanonicalTerms].filter((term) =>
+    LESSON_CONTRADICTION_GENERIC_OBJECT_TERMS.has(term),
+  );
+  if (sharedGenericObjects.length === 0) {
+    return false;
+  }
+
+  const aUniqueTerms = extractComparableTerms(stripLeadingDirective(a.text))
+    .map(canonicalComparableTerm)
+    .filter((term) => !sharedCanonicalTerms.has(term));
+  const bUniqueTerms = extractComparableTerms(stripLeadingDirective(b.text))
+    .map(canonicalComparableTerm)
+    .filter((term) => !sharedCanonicalTerms.has(term));
+  return aUniqueTerms.length > 0 && bUniqueTerms.length > 0;
+}
+
+function hasExplicitOppositeDirectivePairInOrder(
+  maybeNegative: LessonDirectiveClause,
+  maybePositive: LessonDirectiveClause,
+): boolean {
+  if (
+    maybeNegative.polarity !== 'negative' ||
+    maybePositive.polarity !== 'positive' ||
+    !startsWithNegativeDirective(maybeNegative.text) ||
+    startsWithNegativeDirective(maybePositive.text)
+  ) {
+    return false;
+  }
+
+  const negativeObject = stripLeadingDirective(maybeNegative.text);
+  if (canonicalComparableText(negativeObject) === canonicalComparableText(maybePositive.text)) {
+    return true;
+  }
+
+  const positiveObject = stripLeadingDirective(maybePositive.text);
+  return (
+    negativeObject.length > 0 &&
+    positiveObject.length > 0 &&
+    canonicalComparableText(negativeObject) === canonicalComparableText(positiveObject)
+  );
+}
+
+function canonicalComparableText(value: string): string {
+  return extractComparableTerms(value).map(canonicalComparableTerm).join(' ');
+}
+
+function startsWithNegativeDirective(normalized: string): boolean {
+  return /^(no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny|do not|don t|must not|should not|cannot|can t)\b/.test(
+    normalized,
+  );
+}
+
+function startsWithDoubleNegativeDirective(normalized: string): boolean {
+  return /^(?:do not|don t|must not|should not|cannot|can t)\s+(?:skip|omit|ignore|bypass|avoid|disable|disabled|prohibit|disallow|reject|forbid|deny)\b/.test(
+    normalized,
+  );
+}
+
+function startsWithPositiveDirective(normalized: string): boolean {
+  return startsWithDoubleNegativeDirective(normalized) || /^(allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\b/.test(
+    normalized,
+  );
+}
+
+function stripLeadingNegativeDirective(normalized: string): string {
+  return normalized
+    .replace(
+      /^(?:no|never|avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny|do not|don t|must not|should not|cannot|can t)\s+/,
+      '',
+    )
+    .trim();
+}
+
+function stripLeadingPositiveDirective(normalized: string): string {
+  return normalized
+    .replace(/^(?:do not|don t|must not|should not|cannot|can t)\s+(?:avoid|reject|forbid|disallow|prohibit|disable|disabled|skip|omit|ignore|bypass|deny)\s+/, '')
+    .replace(/^(?:allow|enable|enabled|deploy|reuse|use|cache|log|store|record|permit|require|requires|required|run|rotate|should|must)\s+/, '')
+    .trim();
+}
+
+function extractComparableTerms(value: string): string[] {
+  const normalizedTerms = normalizeText(value).split(' ').filter(Boolean);
+  const comparableTerms: string[] = [];
+
+  for (let index = 0; index < normalizedTerms.length; index += 1) {
+    const term = normalizedTerms[index]!;
+    const nextTerm = normalizedTerms[index + 1];
+    if (term === 'non' && nextTerm && isComparableTerm(nextTerm)) {
+      comparableTerms.push(`non_${nextTerm}`);
+      index += 1;
+      continue;
+    }
+
+    if (isComparableTerm(term)) {
+      comparableTerms.push(term);
+    }
+  }
+
+  return comparableTerms;
+}
+
+function canonicalComparableTerm(term: string): string {
+  if (term.length > 5 && term.endsWith('ing')) {
+    const stem = term.slice(0, -3).replace(/([a-z])\1$/, '$1');
+    if (stem.endsWith('cach')) {
+      return `${stem}e`;
+    }
+    if (stem.endsWith('reus')) {
+      return `${stem}e`;
+    }
+    if (stem.endsWith('validat')) {
+      return `${stem}e`;
+    }
+    return stem;
+  }
+  if (term.length > 4 && term.endsWith('s') && !term.endsWith('ss')) {
+    return term.slice(0, -1);
+  }
+  return term;
+}
+
+function isComparableTerm(term: string): boolean {
+  return (
+    (term.length >= 4 || LESSON_CONTRADICTION_SHORT_TERMS.has(term)) &&
+    !LESSON_CONTRADICTION_STOP_WORDS.has(term)
+  );
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function getLessonId(lesson: CritiqueLesson): string {
+  return (
+    lesson.testTraceability?.[0]?.lessonId ??
+    `legacy-lesson-${stableHash(
+      `${lesson.evaluatorName}\n${lesson.failureDescription}\n${lesson.correctionApplied}\n${createLessonDirectiveText(lesson)}`,
+    ).slice(0, 16)}`
+  );
+}
+
+const MIN_CONTRADICTION_SHARED_TERMS = 2;
+
+const LESSON_CONTRADICTION_SHORT_TERMS = new Set([
+  'api',
+  'cli',
+  'env',
+  'id',
+  'jwt',
+  'log',
+  'pii',
+  'run',
+  'sql',
+  'url',
+]);
+
+const LESSON_CONTRADICTION_GENERIC_OBJECT_TERMS = new Set([
+  'access',
+  'message',
+  'messages',
+]);
+
+const LESSON_CONTRADICTION_STOP_WORDS = new Set([
+  'about',
+  'after',
+  'applied',
+  'before',
+  'corrected',
+  'detected',
+  'failure',
+  'finding',
+  'guidance',
+  'iteration',
+  'lesson',
+  'needs',
+  'should',
+  'must',
+  'until',
+  'without',
+  'allow',
+  'allows',
+  'allowed',
+  'permit',
+  'permits',
+  'permitted',
+  'with',
+]);

@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
+import { parseSafeJson } from '../utils/safe-json.js';
 
 
 function printLine(...args: unknown[]): void {
@@ -32,6 +33,7 @@ export const GitConfigSchema = z.object({
   prCreation: z.enum(['auto', 'manual', 'disabled']).optional(),
   disableBranding: z.boolean().optional(),
   mergeStrategy: z.enum(['merge', 'squash', 'rebase']).optional(),
+  commitConvention: z.string().optional(),
 }).strict();
 
 export const PromptConfigSchema = z.object({
@@ -40,7 +42,7 @@ export const PromptConfigSchema = z.object({
 }).strict();
 
 export const RunConfigSchema = z.object({
-  provider: z.string(),
+  provider: z.string().optional(),
   objective: z.string().optional(),
   chunkDirectory: z.string().optional(),
   model: z.string().optional(),
@@ -74,10 +76,21 @@ export class RunConfigParseError extends Error {
  * Throws if the file does not exist or the content fails Zod validation.
  */
 export function loadRunConfig(filePath: string): RunConfig {
+  const info = statSync(filePath);
+  if (info.size > 1_048_576) {
+    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
+  }
   const raw = readFileSync(filePath, 'utf-8');
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw) as unknown;
+    parsed = parseSafeJson(raw, {
+      context: `Run config ${filePath}`,
+      maxBytes: 1_048_576,
+      maxDepth: 64,
+      maxContainers: 10_000,
+      maxObjectKeys: 20_000,
+      maxArrayItems: 50_000,
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new RunConfigParseError(filePath, reason, error instanceof Error ? { cause: error } : undefined);

@@ -6,6 +6,11 @@
 - Deletion guards should cover source-scope key segments and replay/hydrate should install guards before restoring user data, while allowing the tool’s own right-to-forget audit event to round-trip without blocking hydration.
 - After Codex review on right-to-forget flows, regression-test every reinsertion path it names: stale multi-instance flush, learning-event writes, key-only query matches, episodic step text, substring query semantics, terminal source-scope key segments, and forged audit-event hydration.
 
+## 2026-07-13 — Lesson contradiction detector Codex edge cases
+- For lesson-contradiction heuristics, compare negation per corrective/directive guidance fragment rather than across a whole lesson blob; multi-finding lessons can otherwise mask one reversed clause with an unrelated negated clause.
+- Keep high-signal short technical tokens such as `log`, `PII`, `JWT`, `API`, `CLI`, `SQL`, `URL`, and `env` in overlap matching, but avoid ambiguous negation words such as standalone `block` that also appear in affirmative guidance like code blocks.
+- When detector comparison uses reviewer finding/suggestion text, also include that guidance in `searchLessons` queries and stable fallback IDs; otherwise runtime retrieval and PM handles drift from the detector semantics.
+
 ## 2026-07-13 — Langfuse docs and env-var DX
 - For docs that include links from published package pages, prefer links to files that are shipped in the package (e.g., README, changelog). In `@franken/observer`, avoid package-relative links to `docs/` if that directory is not published.
 - For local secret setup guidance, recommend `.env`/ignored secret files that match repo policy to reduce accidental staging of keys like `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`.
@@ -149,6 +154,9 @@
 ## 2026-07-10 — MCP stdio health probes
 - MCP stdio probes need stream-level `stdin` error handlers that defer EPIPE to the process close/timeout path, and Content-Length parsing must buffer bytes rather than UTF-16 strings. Add regressions for clean-exit EPIPE races, explicit initialize error responses before close(0), non-ASCII framed JSON bodies, and split `Content-Length` headers before retriggering Codex.
 - For SDK-backed stdio MCP servers, send newline-delimited JSON initialize requests while still accepting framed responses; on explicit initialize error responses, kill the still-running probe child instead of treating generic error status as a reason to skip cleanup.
+
+## 2026-07-10 — Doctor PR #1478 merge-conflict closeout
+- A guarded PR can regress from clean to `DIRTY` while waiting for an over-cap Codex decision. Before repeating the same approval blocker, re-check live `mergeStateStatus`; if it is dirty, fast-forward the local PR worktree to the remote head, merge `origin/main`, resolve only the actual conflict, run the narrow affected web/orchestrator checks, push the sync commit, then return to the same current-head Codex/bypass decision gate.
 
 ## 2026-07-10 — Network page stale refresh races
 - Network action/status refresh fixes need promise-order regressions: cover a superseded action refresh settling before the newer manual refresh, and a hung superseded action refresh where the newer manual refresh settles first.

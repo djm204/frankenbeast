@@ -293,6 +293,16 @@ describe('IssueGraphBuilder', () => {
       await expect(builder.buildForIssue(issue, triage)).rejects.toThrow(/missing required fields/i);
     });
 
+    it('throws when an LLM decomposition response exceeds safe JSON limits', async () => {
+      const oversized = JSON.stringify([{ id: 'huge', objective: 'x'.repeat(262_144), files: [], successCriteria: 'ok', verificationCommand: 'echo ok', dependencies: [] }]);
+      const completeFn = vi.fn<CompleteFn>(async () => oversized);
+      const builder = new IssueGraphBuilder(completeFn);
+      const issue = makeIssue({ number: 43 });
+      const triage = makeTriageResult(43, 'chunked');
+
+      await expect(builder.buildForIssue(issue, triage)).rejects.toThrow(/maxBytes/u);
+    });
+
     it('decomposition prompt is distinct from LlmGraphBuilder prompt (issue-focused, not design-doc)', async () => {
       const completeFn = vi.fn<CompleteFn>(async () => JSON.stringify(twoChunks));
       const builder = new IssueGraphBuilder(completeFn);

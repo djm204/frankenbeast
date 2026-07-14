@@ -42,6 +42,13 @@ describe('CodexProvider', () => {
     expect(args).toContain('o3');
   });
 
+  it('buildArgs includes the selected model', () => {
+    const args = provider.buildArgs({ model: 'gpt-5.3-codex-spark' });
+    const idx = args.indexOf('--model');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe('gpt-5.3-codex-spark');
+  });
+
   // -- supportsStreamJson --------------------------------------------------
 
   it('supportsStreamJson returns false', () => {

@@ -246,7 +246,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -386,6 +386,89 @@ describe('provider CLI availability preflight', () => {
       claude: { command: 'definitely-missing-frankenbeast-claude' },
       codex: { command: 'definitely-missing-frankenbeast-codex' },
     })).toThrow('Install one of: claude, codex, gemini, aider');
+  });
+
+  it('preflights the execution provider override when dashboard run config selects one', () => {
+    expect(resolveEffectivePreflightProvider('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+        },
+      },
+    })).toBe('gemini');
+  });
+
+  it('preflights the plan-build provider override for planning runs', () => {
+    expect(resolveEffectivePreflightProvider('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+          'plan-build': { provider: 'prod-claude' },
+        },
+      },
+    }, 'plan')).toBe('prod-claude');
+  });
+
+  it('preflights the interview execution provider during interview runs', () => {
+    expect(resolveEffectivePreflightProvider('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+          'plan-build': { provider: 'prod-claude' },
+        },
+      },
+    }, 'interview')).toBe('gemini');
+  });
+
+  it('preflights both interview execution and plan-build providers for full interview-to-plan runs', () => {
+    expect(resolveEffectivePreflightProviders('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+          'plan-build': { provider: 'prod-claude' },
+        },
+      },
+    }, 'interview')).toEqual(['gemini', 'prod-claude']);
+  });
+
+  it('does not preflight plan-build providers for interview-only runs', () => {
+    expect(resolveEffectivePreflightProviders('claude', {
+      provider: 'claude',
+      llmConfig: {
+        default: { provider: 'codex' },
+        overrides: {
+          'cli-session': { provider: 'gemini' },
+          'plan-build': { provider: 'prod-claude' },
+        },
+      },
+    }, 'interview', 'interview')).toEqual(['gemini']);
+  });
+
+  it('normalizes custom consolidated providers before CLI availability preflight', () => {
+    const report = checkProviderCliAvailability('prod-claude', [], {}, [
+      { name: 'prod-claude', type: 'claude-cli', model: 'sonnet' },
+    ] as never);
+
+    expect(report[0]?.provider).toBe('prod-claude');
+    expect(report[0]?.command).toBe('claude');
+  });
+
+  it('preflights consolidated providers with their trusted cliPath', () => {
+    const report = checkProviderCliAvailability('prod-claude', [], {}, [
+      { name: 'prod-claude', type: 'claude-cli', cliPath: 'sh', trustCommandOverride: true },
+    ] as never);
+
+    expect(report).toEqual([
+      { provider: 'prod-claude', command: 'sh', available: true },
+    ]);
   });
 });
 

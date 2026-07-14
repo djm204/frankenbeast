@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.5...@franken/brain-v0.8.0) (2026-07-14)
+
+
+### Features
+
+* **brain:** add memory schema migrations ([1b4b494](https://github.com/djm204/frankenbeast/commit/1b4b494f416edddc43520868569b04a19432d0e8)), closes [#1687](https://github.com/djm204/frankenbeast/issues/1687)
+* **learning:** add episodic learning cooldown ([#1873](https://github.com/djm204/frankenbeast/issues/1873)) ([badbe7c](https://github.com/djm204/frankenbeast/commit/badbe7c61fccb95e4076ddf8e38b11d42120bf3b))
+* **memory:** add encryption-at-rest option ([dda831d](https://github.com/djm204/frankenbeast/commit/dda831d368fc7a79f23f9ee1338bd0f50bc6d144))
+* **memory:** add encryption-at-rest option ([63e875d](https://github.com/djm204/frankenbeast/commit/63e875dff7415c1afb360d0525e8a14a564e2596))
+
+
+### Bug Fixes
+
+* **lint:** require parseInt radix arguments ([023d526](https://github.com/djm204/frankenbeast/commit/023d526a400bc1cd4f2a71bb134b47d750ad7ac0))
+* **memory:** address encryption review findings ([103f106](https://github.com/djm204/frankenbeast/commit/103f1064a73a7541a61d810c2ff5a9724f4943c5))
+* **orchestrator:** close beast attempt cleanup issue ([#2003](https://github.com/djm204/frankenbeast/issues/2003)) ([ae34c42](https://github.com/djm204/frankenbeast/commit/ae34c42ecba98db09aa5b43c097d8ecf0819170e))
+
+
+### Documentation
+
+* **brain:** refresh ramp-up wiring status ([7f4276b](https://github.com/djm204/frankenbeast/commit/7f4276b2738567200bbb7a27978364449e698b92)), closes [#2101](https://github.com/djm204/frankenbeast/issues/2101)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.9.0 to 0.10.0
+
 ## [0.7.5](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.7.4...@franken/brain-v0.7.5) (2026-07-11)
 
 

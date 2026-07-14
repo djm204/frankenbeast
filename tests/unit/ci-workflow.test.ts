@@ -7,6 +7,7 @@ import { load } from 'js-yaml';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
+const DAILY_SECURITY_SCAN_PATH = resolve(ROOT, '.github/workflows/daily-security-scan.yml');
 const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
 const NPMRC_PATH = resolve(ROOT, '.npmrc');
 
@@ -143,7 +144,7 @@ on:
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
-      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v4');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v6');
       expect(setupNode).toBeTruthy();
       expectSetupNodeUsesPinnedNvmrc(setupNode as Record<string, unknown>, 'build-test-lint');
     });
@@ -274,7 +275,7 @@ on:
     });
 
     it('uses actions/setup-node with npm cache', () => {
-      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v4');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v6');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith.cache).toBe('npm');
@@ -287,7 +288,7 @@ on:
 
       for (const [jobName, jobConfig] of Object.entries(jobs)) {
         const job = expectRecord(jobConfig, `jobs.${jobName}`);
-        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v4')) {
+        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v6')) {
           expectSetupNodeUsesPinnedNvmrc(step, jobName);
         }
       }
@@ -317,7 +318,9 @@ on:
     });
 
     it('uses actions/checkout with full history for root verification tests', () => {
-      const checkout = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/checkout@v4');
+      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
+      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+      const checkout = expectSteps(buildTestLint).find((step) => step.uses === 'actions/checkout@v7');
       expect(checkout).toBeTruthy();
       const checkoutWith = expectRecord(checkout?.with, 'actions/checkout.with');
       expect(checkoutWith['fetch-depth']).toBe(0);
@@ -405,7 +408,7 @@ jobs:
 
   it('authenticates npm only in the publish step with the NPM_TOKEN secret and registry auth', () => {
     const publishSteps = expectSteps(publishNpm);
-    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v4');
+    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v6');
     expect(setupNode).toBeTruthy();
     expect(expectRecord(setupNode?.with, 'publish setup-node with')['registry-url']).toBe('https://registry.npmjs.org');
 
@@ -503,6 +506,21 @@ jobs:
     expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
     expect(latestRun).toContain('[0].tagName // empty');
+  });
+});
+
+describe('daily-security-scan.yml security scan workflow', () => {
+  it('disables implicit setup-node npm caching for the privileged scan job', () => {
+    const content = readFileSync(DAILY_SECURITY_SCAN_PATH, 'utf-8');
+    const workflow = parseWorkflowYaml(content);
+    const jobs = expectRecord(workflow.jobs, 'daily security scan jobs');
+    const scan = expectRecord(jobs.scan, 'jobs.scan');
+    const setupNode = expectSteps(scan).find((step) => step.uses === 'actions/setup-node@v6');
+
+    expect(setupNode).toBeTruthy();
+    expect(expectRecord(setupNode?.with, 'daily security scan setup-node with')['package-manager-cache']).toBe(
+      false,
+    );
   });
 });
 

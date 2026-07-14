@@ -314,6 +314,34 @@ export class Session {
   private async runPlan(): Promise<void> {
     const { paths, io, designDocPath } = this.config;
     const depOptions = this.buildDepOptions();
+    const planOverride = depOptions.runConfig?.llmConfig?.overrides?.['plan-build'];
+    if (planOverride) {
+      const currentLlmConfig = depOptions.runConfig?.llmConfig ?? {};
+      const currentDefault = currentLlmConfig.default ?? {};
+      const providerChanged = planOverride.provider !== undefined
+        && planOverride.provider !== currentDefault.provider;
+      const nextOverrides = Object.fromEntries(
+        Object.entries(currentLlmConfig.overrides ?? {}).filter(([operation]) => operation !== 'cli-session'),
+      );
+      depOptions.runConfig = {
+        ...depOptions.runConfig!,
+        llmConfig: {
+          ...currentLlmConfig,
+          ...(Object.keys(nextOverrides).length > 0 ? { overrides: nextOverrides } : { overrides: undefined }),
+          default: {
+            ...currentDefault,
+            ...planOverride,
+            ...(providerChanged && planOverride.model === undefined ? { model: undefined } : {}),
+          },
+        },
+      };
+    }
+    const planProvider = depOptions.runConfig?.llmConfig?.default?.provider
+      ?? depOptions.runConfig?.provider
+      ?? this.config.provider;
+    const planModel = depOptions.runConfig?.llmConfig?.default?.model
+      ?? depOptions.runConfig?.model
+      ?? planProvider;
     // Run planning CLI from tmpdir to prevent project-scoped plugins (superpowers, etc.)
     // from loading in the spawned CLI. Plugins poison the session by injecting skill
     // instructions that make the CLI explore the codebase instead of returning JSON.
@@ -361,8 +389,8 @@ export class Session {
       cacheRootDir: paths.llmCacheDir,
       cliAdapter: cliLlmAdapter,
       projectId: paths.root,
-      provider: this.config.provider,
-      model: this.config.provider,
+      provider: planProvider,
+      model: planModel,
       operation: 'plan-build',
       workId: `plan:${planName}`,
       stablePrefix: 'surface:plan',
@@ -471,12 +499,14 @@ export class Session {
 
     logger.info(`Budget: $${budget} | Provider: ${ANSI.bold}${this.config.provider}${ANSI.reset}`, 'session');
 
+    const runConfig = loadCompatibleRunConfigFromEnv();
     const loopConfig: Partial<OrchestratorConfig> = {};
     if (this.config.maxCritiqueIterations !== undefined) {
       loopConfig.maxCritiqueIterations = this.config.maxCritiqueIterations;
     }
-    if (this.config.maxDurationMs !== undefined) {
-      loopConfig.maxDurationMs = this.config.maxDurationMs;
+    const maxDurationMs = this.config.maxDurationMs ?? runConfig?.maxDurationMs;
+    if (maxDurationMs !== undefined) {
+      loopConfig.maxDurationMs = maxDurationMs;
     }
     if (this.config.enableTracing !== undefined) {
       loopConfig.enableTracing = this.config.enableTracing;
@@ -484,14 +514,16 @@ export class Session {
     if (this.config.enableHeartbeat !== undefined) {
       loopConfig.enableHeartbeat = this.config.enableHeartbeat;
     }
-    if (this.config.enableReflection !== undefined) {
-      loopConfig.enableReflection = this.config.enableReflection;
+    const enableReflection = this.config.enableReflection ?? runConfig?.reflection;
+    if (enableReflection !== undefined) {
+      loopConfig.enableReflection = enableReflection;
     }
     if (this.config.minCritiqueScore !== undefined) {
       loopConfig.minCritiqueScore = this.config.minCritiqueScore;
     }
-    if (this.config.maxTotalTokens !== undefined) {
-      loopConfig.maxTotalTokens = this.config.maxTotalTokens;
+    const maxTotalTokens = this.config.maxTotalTokens ?? runConfig?.maxTotalTokens;
+    if (maxTotalTokens !== undefined) {
+      loopConfig.maxTotalTokens = maxTotalTokens;
     }
     const configuredStateDir = this.config.orchestratorConfig?.stateDir;
     if (

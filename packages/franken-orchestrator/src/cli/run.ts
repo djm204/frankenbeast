@@ -421,10 +421,38 @@ function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): str
   return args.providerSpecified ? args.provider : config.providers.default;
 }
 
-function resolveEffectivePreflightProvider(selectedProvider: string, runConfig: RunConfig | undefined): string {
-  return runConfig?.llmConfig?.default?.provider
+export function resolveEffectivePreflightProvider(
+  selectedProvider: string,
+  runConfig: RunConfig | undefined,
+  entryPhase: SessionPhase = 'execute',
+): string {
+  const phaseOverride = entryPhase === 'plan'
+    ? runConfig?.llmConfig?.overrides?.['plan-build']?.provider
+    : runConfig?.llmConfig?.overrides?.['cli-session']?.provider;
+  return phaseOverride
+    ?? runConfig?.llmConfig?.default?.provider
     ?? runConfig?.provider
     ?? selectedProvider;
+}
+
+export function resolveEffectivePreflightProviders(
+  selectedProvider: string,
+  runConfig: RunConfig | undefined,
+  entryPhase: SessionPhase = 'execute',
+  exitAfter?: SessionPhase | undefined,
+): string[] {
+  const fallback = runConfig?.llmConfig?.default?.provider
+    ?? runConfig?.provider
+    ?? selectedProvider;
+  const providers = entryPhase === 'plan'
+    ? [runConfig?.llmConfig?.overrides?.['plan-build']?.provider ?? fallback]
+    : entryPhase === 'interview'
+      ? [
+          runConfig?.llmConfig?.overrides?.['cli-session']?.provider ?? fallback,
+          ...(exitAfter === 'interview' ? [] : [runConfig?.llmConfig?.overrides?.['plan-build']?.provider]),
+        ]
+      : [runConfig?.llmConfig?.overrides?.['cli-session']?.provider ?? fallback];
+  return [...new Set(providers.filter((provider): provider is string => Boolean(provider)))];
 }
 
 export interface ProviderCliAvailability {
@@ -433,15 +461,42 @@ export interface ProviderCliAvailability {
   readonly available: boolean;
 }
 
+function resolvePreflightCliProviderName(
+  providerName: string,
+  consolidatedProviders: OrchestratorConfig['consolidatedProviders'] = [],
+): string {
+  if (providerName === 'aider') return 'aider';
+  const configured = consolidatedProviders
+    ?.find((provider) => provider.name === providerName || provider.type === providerName);
+  const catalogEntry = resolveProviderCatalogEntry(configured?.type ?? providerName);
+  return catalogEntry.cliRegistryName ?? providerName;
+}
+
+function resolvePreflightCommandOverride(
+  providerName: string,
+  cliProviderName: string,
+  overrides: OrchestratorConfig['providers']['overrides'] = {},
+  consolidatedProviders: OrchestratorConfig['consolidatedProviders'] = [],
+): string | undefined {
+  const configured = consolidatedProviders
+    ?.find((provider) => provider.name === providerName || provider.type === providerName);
+  return overrides?.[providerName]?.command
+    ?? overrides?.[cliProviderName]?.command
+    ?? configured?.cliPath;
+}
+
 export function checkProviderCliAvailability(
   selectedProvider: string,
   fallbackChain: readonly string[],
   overrides: OrchestratorConfig['providers']['overrides'] = {},
+  consolidatedProviders: OrchestratorConfig['consolidatedProviders'] = [],
 ): ProviderCliAvailability[] {
   const registry = createDefaultRegistry();
   const providerNames = [...new Set([selectedProvider, ...fallbackChain].filter(Boolean))];
   return providerNames.map((provider) => {
-    const command = overrides?.[provider]?.command ?? registry.get(provider).command;
+    const cliProvider = resolvePreflightCliProviderName(provider, consolidatedProviders);
+    const command = resolvePreflightCommandOverride(provider, cliProvider, overrides, consolidatedProviders)
+      ?? registry.get(cliProvider).command;
     return {
       provider,
       command,
@@ -454,8 +509,9 @@ export function assertAnyProviderCliAvailable(
   selectedProvider: string,
   fallbackChain: readonly string[],
   overrides: OrchestratorConfig['providers']['overrides'] = {},
+  consolidatedProviders: OrchestratorConfig['consolidatedProviders'] = [],
 ): void {
-  const report = checkProviderCliAvailability(selectedProvider, fallbackChain, overrides);
+  const report = checkProviderCliAvailability(selectedProvider, fallbackChain, overrides, consolidatedProviders);
   if (report.some((entry) => entry.available)) {
     return;
   }
@@ -1272,12 +1328,15 @@ export async function main(): Promise<void> {
   const { entryPhase, exitAfter } = resolvePhases(args);
   const provider = resolveSelectedProvider(args, config);
   const runConfig = loadRunConfigFromEnv();
-  const preflightProvider = resolveEffectivePreflightProvider(provider, runConfig);
-  assertAnyProviderCliAvailable(
-    preflightProvider,
-    args.providers ?? config.providers.fallbackChain,
-    config.providers.overrides,
-  );
+  const preflightProviders = resolveEffectivePreflightProviders(provider, runConfig, entryPhase, exitAfter);
+  for (const preflightProvider of preflightProviders) {
+    assertAnyProviderCliAvailable(
+      preflightProvider,
+      args.providers ?? config.providers.fallbackChain,
+      config.providers.overrides,
+      config.consolidatedProviders,
+    );
+  }
 
   // Create and run session
   // Precedence: CLI args > config file > defaults

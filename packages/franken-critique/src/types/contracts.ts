@@ -69,6 +69,31 @@ export interface LessonExperimentSandbox {
   readonly verificationCommand: string;
 }
 
+/** Structured signal emitted when a new lesson conflicts with prior lesson guidance. */
+export interface LessonContradiction {
+  /** Stable identifier for the conflicting lesson when available, or a deterministic fallback. */
+  readonly conflictingLessonId: string;
+  readonly evaluatorName: string;
+  /** Common normalized terms that made the pair comparable instead of unrelated. */
+  readonly sharedTerms: readonly string[];
+  /** Human-readable reason that PM/liveness tooling can surface directly. */
+  readonly reason: string;
+  readonly conflictingFailureDescription: string;
+  readonly conflictingCorrectionApplied: string;
+  /** Exact conflicting directive text used for the match when it differs from the summary. */
+  readonly conflictingGuidance?: string;
+}
+
+/** Deterministic contradiction-detector result for a recorded lesson. */
+export interface LessonContradictionReport {
+  readonly status: 'clear' | 'contradiction_detected' | 'not_checked';
+  /** Operator-facing interpretation of the detector outcome. */
+  readonly guidance: string;
+  /** Targeted command that verifies the detector contract itself. */
+  readonly verificationCommand: string;
+  readonly contradictions: readonly LessonContradiction[];
+}
+
 /** Structured workflow that tells PM/liveness tooling how to roll back a bad lesson safely. */
 export interface LessonRollbackWorkflow {
   /** Stable workflow identifier for downstream PM/liveness tooling. */
@@ -354,6 +379,8 @@ export interface CritiqueLesson {
   readonly testTraceability?: readonly LessonTestTraceabilityEntry[];
   /** Present for new lessons that must remain quarantined until independently verified. */
   readonly experimentSandbox?: LessonExperimentSandbox;
+  /** Present for lessons recorded by LessonRecorder so PM/liveness tooling can detect drift. */
+  readonly contradictionReport?: LessonContradictionReport;
   /** LLM-friendly workflow for rolling back an incorrect, stale, or harmful learned lesson. */
   readonly rollbackWorkflow?: LessonRollbackWorkflow;
   /** Structured reviewer feedback that produced the lesson and should be reusable in PM handoffs. */
@@ -391,6 +418,11 @@ export interface GuardrailsPort {
 export interface MemoryPort {
   searchADRs(query: string, topK: number): Promise<readonly ADRMatch[]>;
   searchEpisodic(taskId: TaskId): Promise<readonly EpisodicTrace[]>;
+  /** Optional adapter hook for comparable prior lessons used by contradiction detection. */
+  searchLessons?(
+    query: string,
+    topK: number,
+  ): Promise<readonly CritiqueLesson[]>;
   recordLesson(lesson: CritiqueLesson): Promise<void>;
 }
 

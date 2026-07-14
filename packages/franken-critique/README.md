@@ -134,6 +134,18 @@ New lessons recorded by `LessonRecorder` also include an `experimentSandbox` obj
 
 Failing iterations without actionable findings, and infrastructure-only evaluator exceptions, do not create sandboxed lessons. This keeps broken evaluator/tooling noise from entering the learning pipeline as experimental guidance.
 
+
+## Lesson contradiction detector
+
+`LessonRecorder` emits a `contradictionReport` for each recorded lesson. When the memory adapter implements optional `searchLessons(query, topK)`, the recorder queries comparable prior lessons and runs the deterministic detector before calling `recordLesson`. The report is structured for PM/liveness surfaces:
+
+- `status: "clear"` means no comparable prior lesson from the same evaluator had both shared normalized terms and reversed negated guidance.
+- `status: "contradiction_detected"` includes `contradictions[]` entries with the conflicting lesson id, evaluator, shared terms, reason, prior failure description, and prior correction. Treat this as a promotion blocker until an operator reconciles, supersedes, or retires one side.
+- `status: "not_checked"` means the memory adapter has not implemented `searchLessons`, so historical contradictions are unknown and should be treated as unresolved before promotion.
+- `verificationCommand` points at the focused unit test that covers success and negative detector cases.
+
+Adapters that want historical contradiction checks should return likely prior critique lessons for the query string without mutating memory.
+
 ## Learning cooldown
 
 `LessonRecorder` applies a deterministic cooldown to equivalent critique lessons so repeated reviewer/worker feedback does not churn memory, PM handoffs, or promotion/retirement flows. By default, equivalent lessons are keyed by evaluator name plus the normalized finding messages and suppressed for 24 hours after the first successful record.

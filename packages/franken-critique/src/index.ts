@@ -29,6 +29,8 @@ export type {
   EpisodicTrace,
   LessonTestTraceabilityEntry,
   LessonExperimentSandbox,
+  LessonContradiction,
+  LessonContradictionReport,
   LessonRollbackWorkflow,
   LessonLifecycleStatus,
   LessonQuarantineEvidence,
@@ -88,6 +90,7 @@ export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
 export {
   LessonRecorder,
+  detectLessonContradictions,
   isLessonApplicable,
   quarantineLesson,
   quarantineLessonForRepeatedFailures,

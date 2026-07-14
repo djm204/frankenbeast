@@ -2,6 +2,7 @@ import type { PlanGraph, PlanTask } from '../deps.js';
 import type { GithubIssue, TriageResult } from './types.js';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
+import { assertSafeJsonText, parseSafeJson } from '../utils/safe-json.js';
 
 type CompleteFn = (prompt: string, hint?: {
   operation?: string;
@@ -109,15 +110,27 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
   }
 
   private parseResponse(raw: string): ChunkDefinition[] {
-    const text = cleanLlmJson(raw);
+    assertSafeJsonText(raw, {
+      context: 'Raw LLM issue decomposition response',
+      maxBytes: 262_144,
+    });
+    const text = cleanLlmJson(raw, { parseFastPath: false });
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
-    } catch {
+      parsed = parseSafeJson(text, {
+        context: 'LLM issue decomposition response',
+        maxBytes: 262_144,
+        maxDepth: 24,
+        maxContainers: 1_000,
+        maxObjectKeys: 5_000,
+        maxArrayItems: 1_000,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
       throw new Error(
         `Failed to parse LLM response as JSON. Expected a JSON array of chunk definitions. ` +
-          `Response starts with: "${raw.slice(0, 100)}..."`,
+          `${reason}. Response starts with: "${raw.slice(0, 100)}..."`,
       );
     }
 

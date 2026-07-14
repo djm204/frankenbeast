@@ -1,6 +1,6 @@
 {
   "name": "@franken/web",
-  "version": "0.2.6",
+  "version": "0.2.8",
   "description": "Browser dashboard for Frankenbeast operator workflows",
   "type": "module",
   "files": [
@@ -23,7 +23,7 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "0.9.0",
+    "@franken/types": "0.10.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dialog": "^1.1.15",
