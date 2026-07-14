@@ -23,6 +23,7 @@ import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveProjectRoot, getProjectPaths, generatePlanName, scaffoldFrankenbeast, readActivePlanName, writeActivePlanName } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
+import { createEgressGuardedFetch } from '../network/egress-policy.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
@@ -718,7 +719,8 @@ async function readLiveBeastsDaemonPid(root: string): Promise<number | undefined
 
 async function isHealthyBeastsDaemonEndpoint(baseUrl: string, expected: { root: string; pid: number }): Promise<boolean> {
   try {
-    const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
+    const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
+    const response = await guardedFetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
     if (!response.ok) {
       return false;
     }

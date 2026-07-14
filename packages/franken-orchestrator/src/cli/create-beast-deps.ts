@@ -1,6 +1,7 @@
 import { SqliteBrain } from '@franken/brain';
 import { ProviderRegistry } from '../providers/provider-registry.js';
 import { createLlmProvider, type ProviderConfig } from '../providers/provider-config.js';
+import type { EgressPolicyConfig } from '../network/egress-policy.js';
 import { now as deterministicNow } from '@franken/types';
 import {
   buildMiddlewareChain,
@@ -40,6 +41,9 @@ export type { ProviderConfig } from '../providers/provider-config.js';
 
 export interface BeastDepsConfig {
   providers?: ProviderConfig[];
+  network?: {
+    egressPolicy?: EgressPolicyConfig;
+  };
   security?: {
     profile?: SecurityProfile;
     injectionDetection?: boolean;
@@ -112,7 +116,7 @@ export function createBeastDeps(
   const replayStore = new ReplayContentStore(auditRoot);
 
   // 3. Provider registry
-  const providers = buildProviderList(config.providers);
+  const providers = buildProviderList(config.providers, config.network?.egressPolicy);
   const registry = new ProviderRegistry(providers, brain, {
     onProviderSwitch: (event) => {
       auditTrail.append(
@@ -223,6 +227,7 @@ function collectEnabledMcpTools(skillManager: SkillManager): McpToolInfo[] {
 
 export function buildProviderList(
   configs?: ProviderConfig[],
+  egressPolicy?: EgressPolicyConfig,
 ): ILlmProvider[] {
   if (!configs || configs.length === 0) {
     throw new Error(
@@ -230,5 +235,5 @@ export function buildProviderList(
         + '{"consolidatedProviders":[{"name":"claude","type":"claude-cli"}]}',
     );
   }
-  return configs.map((pc) => createLlmProvider(pc));
+  return configs.map((pc) => createLlmProvider(pc, { egressPolicy }));
 }

@@ -129,7 +129,7 @@ export function evaluateEgressPolicy(request: EgressPolicyRequest): EgressDecisi
     };
   }
 
-  const host = parsed.hostname.toLowerCase();
+  const host = normalizeEgressHostname(parsed.hostname);
   const destinationClass = classifyEgressDestination(parsed);
 
   if (!['http:', 'https:'].includes(parsed.protocol)) {
@@ -224,7 +224,8 @@ export function createEgressGuardedFetch(options: {
     }
 
     const redirectUrl = new URL(location, requestUrl).toString();
-    if (init?.redirect === 'error') {
+    const requestRedirect = input instanceof Request ? input.redirect : undefined;
+    if (init?.redirect === 'error' || requestRedirect === 'error') {
       throw new TypeError(`Egress redirect blocked for lane ${options.lane}: ${redirectUrl}`);
     }
 
@@ -249,12 +250,16 @@ function enforceEgressDecision(request: EgressPolicyRequest, audit: EgressAuditS
 }
 
 export function classifyEgressDestination(url: URL): EgressDestinationClass {
-  const host = url.hostname.toLowerCase();
+  const host = normalizeEgressHostname(url.hostname);
   if (isLocalHost(host)) return 'local';
   if (GITHUB_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'github';
   if (PROVIDER_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'provider';
   if (MESSAGING_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'messaging';
   return 'arbitrary';
+}
+
+function normalizeEgressHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/u, '');
 }
 
 function resolveLanePolicy(lane: string, policy?: EgressPolicyConfig | undefined): ResolvedLaneEgressPolicy | undefined {

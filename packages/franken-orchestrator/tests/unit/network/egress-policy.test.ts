@@ -32,6 +32,12 @@ describe('lane egress policy', () => {
 
     expect(evaluateEgressPolicy({
       lane: 'triage',
+      url: 'https://api.github.com./repos/djm204/frankenbeast/issues/1739',
+      method: 'GET',
+    })).toMatchObject({ allowed: true, destinationClass: 'github', host: 'api.github.com' });
+
+    expect(evaluateEgressPolicy({
+      lane: 'triage',
       url: 'https://api.openai.com/v1/models',
       method: 'GET',
     })).toMatchObject({
@@ -174,7 +180,8 @@ describe('lane egress policy', () => {
     const guardedFetch = createEgressGuardedFetch({ lane: 'implementation', fetchImpl });
 
     await expect(guardedFetch('https://github.com/djm204/frankenbeast', { redirect: 'error' })).rejects.toBeInstanceOf(TypeError);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await expect(guardedFetch(new Request('https://github.com/djm204/frankenbeast', { redirect: 'error' }))).rejects.toBeInstanceOf(TypeError);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('accepts config-level lane overrides for approved services', () => {

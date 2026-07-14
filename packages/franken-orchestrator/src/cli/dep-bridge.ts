@@ -90,9 +90,11 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
 
   // Brain
   const dbPath = resolve(options.paths.frankenbeastDir, 'beast.db');
+  const egressPolicy = config?.network?.egressPolicy;
 
   return {
     providers,
+    ...(egressPolicy ? { network: { egressPolicy } } : {}),
     security: config?.security
       ? {
           profile: (config.security.profile as SecurityProfile) ?? securityProfile,

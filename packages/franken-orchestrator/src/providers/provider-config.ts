@@ -5,6 +5,7 @@ import { GeminiCliAdapter } from './gemini-cli-adapter.js';
 import { AnthropicApiAdapter } from './anthropic-api-adapter.js';
 import { OpenAiApiAdapter } from './openai-api-adapter.js';
 import { GeminiApiAdapter } from './gemini-api-adapter.js';
+import type { EgressPolicyConfig } from '../network/egress-policy.js';
 
 export const PROVIDER_TYPES = [
   'claude-cli',
@@ -34,6 +35,10 @@ export interface ProviderConfig {
   readonly trustedCommandPaths?: readonly string[] | undefined;
   readonly model?: string | undefined;
   readonly extraArgs?: readonly string[] | undefined;
+}
+
+export interface ProviderRuntimeOptions {
+  readonly egressPolicy?: EgressPolicyConfig | undefined;
 }
 
 export interface ProviderCatalogEntry {
@@ -135,7 +140,7 @@ export function buildProviderConfig(
   };
 }
 
-export function createLlmProvider(config: ProviderConfig): ILlmProvider {
+export function createLlmProvider(config: ProviderConfig, runtimeOptions: ProviderRuntimeOptions = {}): ILlmProvider {
   const type = resolveProviderType(config.name, config.type);
   switch (type) {
     case 'claude-cli':
@@ -160,11 +165,13 @@ export function createLlmProvider(config: ProviderConfig): ILlmProvider {
       return new AnthropicApiAdapter({
         ...(config.apiKey ? { apiKey: config.apiKey } : {}),
         ...(config.model ? { model: config.model } : {}),
+        ...(runtimeOptions.egressPolicy ? { egressPolicy: runtimeOptions.egressPolicy } : {}),
       });
     case 'openai-api':
       return new OpenAiApiAdapter({
         ...(config.apiKey ? { apiKey: config.apiKey } : {}),
         ...(config.model ? { model: config.model } : {}),
+        ...(runtimeOptions.egressPolicy ? { egressPolicy: runtimeOptions.egressPolicy } : {}),
       });
     case 'gemini-api':
       return new GeminiApiAdapter({

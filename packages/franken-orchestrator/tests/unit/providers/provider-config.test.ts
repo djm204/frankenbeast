@@ -125,7 +125,7 @@ describe('createLlmProvider', () => {
       { name: 'gemini-api', type: 'gemini-api', model: 'gemini-2.5-pro' },
     ];
 
-    const [anthropic, openai, gemini] = configs.map(createLlmProvider);
+    const [anthropic, openai, gemini] = configs.map((config) => createLlmProvider(config));
 
     expect(anthropic).toBeInstanceOf(AnthropicApiAdapter);
     expect(optionsOf<{ model?: string }>(anthropic).model).toBe('claude-opus-4');
@@ -135,5 +135,20 @@ describe('createLlmProvider', () => {
 
     expect(gemini).toBeInstanceOf(GeminiApiAdapter);
     expect(optionsOf<{ model?: string }>(gemini).model).toBe('gemini-2.5-pro');
+  });
+
+  it('passes runtime egress policies into API adapters', () => {
+    const egressPolicy = { enabled: true, lanes: {} };
+    const anthropic = createLlmProvider(
+      { name: 'anthropic', type: 'anthropic-api' },
+      { egressPolicy },
+    );
+    const openai = createLlmProvider(
+      { name: 'openai', type: 'openai-api' },
+      { egressPolicy },
+    );
+
+    expect(optionsOf<{ egressPolicy?: unknown }>(anthropic).egressPolicy).toBe(egressPolicy);
+    expect(optionsOf<{ egressPolicy?: unknown }>(openai).egressPolicy).toBe(egressPolicy);
   });
 });
