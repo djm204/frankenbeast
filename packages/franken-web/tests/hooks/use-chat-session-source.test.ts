@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(resolve(process.cwd(), 'src/hooks/use-chat-session.ts'), 'utf8');
+const sourcePath = resolve(process.cwd(), 'src/hooks/use-chat-session.ts');
+const source = readFileSync(sourcePath, 'utf8');
 
 describe('useChatSession source hygiene', () => {
   const patchAdditionMarker = new RegExp(`^\\s*${'\\+'}\\s*(?:\\/\\/|const|if|try|catch|socket|set\\w*|return|throw|await|for|function)\\b`, 'm');
@@ -32,5 +33,12 @@ describe('useChatSession source hygiene', () => {
 
     const recoveryImplementation = source.slice(pendingSendStart, retryErrorStart);
     expect(recoveryImplementation).not.toMatch(patchAdditionMarker);
+  });
+
+  it('keeps pure transcript, receipt, telemetry, banner, and id helpers extracted from the hook body', () => {
+    const helperModulePath = resolve(process.cwd(), 'src/hooks/chat-session-state.ts');
+    expect(existsSync(helperModulePath)).toBe(true);
+    expect(source.split('\n').length).toBeLessThan(900);
+    expect(readFileSync(helperModulePath, 'utf8')).toContain('export function preserveLocalRecoveryMessages');
   });
 });
