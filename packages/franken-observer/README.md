@@ -311,6 +311,31 @@ const recovered = await adapter2.queryByTraceId(trace.id)
 adapter.close() // release the SQLite handle
 ```
 
+### `TranscriptRetentionAdapter`
+
+Prompt and tool transcripts can contain private user data, secrets, and operator context. Wrap any trace backend with `TranscriptRetentionAdapter` to control whether transcript fields are retained, how long they remain readable, how they are redacted, and what access level operators should treat the retained data as.
+
+Safe defaults use `mode: 'redacted'`, `redactionLevel: 'mask'`, `ttlMs: 24h`, and `accessLevel: 'restricted'`. The policy covers trace goals/prompts, tool inputs, tool outputs, span errors, summaries, and thought blocks.
+
+```ts
+import { SQLiteAdapter, TranscriptRetentionAdapter } from '@franken/observer'
+
+const db = new SQLiteAdapter('./traces.db')
+const adapter = new TranscriptRetentionAdapter({
+  adapter: db,
+  ttlMs: 6 * 60 * 60 * 1000,
+  retainedFields: {
+    toolOutputs: false, // keep debugging shape without retaining raw tool output
+  },
+})
+
+await adapter.flush(trace)
+console.log(adapter.describePolicy()) // mode, ttlMs, accessLevel, retainedFields
+await adapter.cleanupExpired()
+```
+
+Use `mode: 'disabled'` for sensitive lanes that should not persist transcripts at all. Use `mode: 'raw'` with `redactionLevel: 'none'` only as an explicit operator override for short-lived local debugging.
+
 ### Stacking adapters
 
 ```ts
