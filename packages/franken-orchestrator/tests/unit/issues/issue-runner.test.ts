@@ -363,6 +363,97 @@ describe('IssueRunner', () => {
     });
   });
 
+  describe('backpressure controls', () => {
+    it('skips fresh issue starts when active process capacity is exhausted and explains the throttle', async () => {
+      const logger = mockLogger();
+      const issues = [makeIssue({ number: 11 })];
+      const triages = [makeTriage(11)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        logger,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals: () => ({
+            activeProcesses: 2,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(mockRun).not.toHaveBeenCalled();
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          issueNumber: 11,
+          status: 'skipped',
+          error: expect.stringContaining('backpressure: active processes 2 exceeds limit 1'),
+        }),
+      ]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Backpressure paused issue #11'),
+        expect.objectContaining({
+          reasons: expect.arrayContaining(['active processes 2 exceeds limit 1']),
+        }),
+        'issues',
+      );
+    });
+
+    it('blocks fresh ticket creation while in-flight backlog remains above threshold', async () => {
+      const issues = [makeIssue({ number: 12 })];
+      const triages = [makeTriage(12)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        backpressure: {
+          thresholds: { maxInFlightBacklog: 1 },
+          signals: () => ({
+            activeProcesses: 0,
+            failedStarts: 0,
+            inFlightBacklog: 2,
+            oldestQueueAgeMs: 5_000,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(mockRun).not.toHaveBeenCalled();
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 12,
+        status: 'skipped',
+        error: expect.stringContaining('fresh ticket creation blocked while in-flight backlog 2 exceeds limit 1'),
+      });
+    });
+
+    it('recovers automatically when backpressure signals return to normal on the next issue', async () => {
+      const snapshots = [
+        { activeProcesses: 0, failedStarts: 3, inFlightBacklog: 0, oldestQueueAgeMs: 0 },
+        { activeProcesses: 0, failedStarts: 0, inFlightBacklog: 0, oldestQueueAgeMs: 0 },
+      ];
+      const issues = [makeIssue({ number: 13 }), makeIssue({ number: 14 })];
+      const triages = [makeTriage(13), makeTriage(14)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        backpressure: {
+          thresholds: { maxFailedStarts: 1 },
+          signals: () => snapshots.shift()!,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 13, status: 'skipped' });
+      expect(outcomes[0]!.error).toContain('failed starts 3 exceeds limit 1');
+      expect(outcomes[1]).toMatchObject({ issueNumber: 14, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+  });
+
   describe('checkpoint integration', () => {
     it('skips issues where all tasks already checkpointed', async () => {
       const checkpoint = mockCheckpoint(

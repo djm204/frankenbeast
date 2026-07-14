@@ -1,4 +1,5 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
+import { loadavg } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
@@ -34,6 +35,51 @@ export interface IssueRuntimeSupport {
   artifactsForIssue(issueNumber: number): IssueRuntimeArtifacts;
 }
 
+export interface IssueBackpressureSignals {
+  readonly activeProcesses: number;
+  readonly failedStarts: number;
+  readonly inFlightBacklog: number;
+  readonly oldestQueueAgeMs?: number | undefined;
+  readonly systemLoadAverage?: number | undefined;
+  readonly providerBudgetTokensRemaining?: number | undefined;
+  readonly pendingIssueCount?: number | undefined;
+}
+
+export interface IssueBackpressureSignalContext {
+  readonly issue: GithubIssue;
+  readonly index: number;
+  readonly totalIssues: number;
+  readonly pendingIssueCount: number;
+  readonly cumulativeTokens: number;
+  readonly budgetTokens: number;
+  readonly providerBudgetTokensRemaining: number;
+}
+
+export type IssueBackpressureSignalSource = (
+  context: IssueBackpressureSignalContext,
+) => IssueBackpressureSignals | Promise<IssueBackpressureSignals>;
+
+export interface IssueBackpressureThresholds {
+  readonly maxActiveProcesses?: number | undefined;
+  readonly maxFailedStarts?: number | undefined;
+  readonly maxInFlightBacklog?: number | undefined;
+  readonly maxPendingIssueCount?: number | undefined;
+  readonly maxOldestQueueAgeMs?: number | undefined;
+  readonly maxSystemLoadAverage?: number | undefined;
+  readonly minProviderBudgetTokensRemaining?: number | undefined;
+}
+
+export interface IssueBackpressureConfig {
+  readonly thresholds?: IssueBackpressureThresholds | undefined;
+  readonly signals?: IssueBackpressureSignalSource | undefined;
+}
+
+export interface IssueBackpressureDecision {
+  readonly allowed: boolean;
+  readonly reasons: readonly string[];
+  readonly signals: IssueBackpressureSignals;
+}
+
 export interface IssueRunnerConfig {
   readonly issues: readonly GithubIssue[];
   readonly triageResults: readonly TriageResult[];
@@ -47,6 +93,7 @@ export interface IssueRunnerConfig {
   readonly checkpoint?: ICheckpointStore | undefined;
   readonly timeoutMs?: number | undefined;
   readonly enableTracing?: boolean | undefined;
+  readonly backpressure?: IssueBackpressureConfig | undefined;
 }
 
 const SEVERITY_ORDER: Record<string, number> = {
@@ -60,6 +107,71 @@ const NO_SEVERITY = 4;
 const TOKENS_PER_DOLLAR = 1_000_000;
 const ONE_SHOT_MAX_ITERATIONS = 50;
 const ONE_SHOT_STALE_MATE_LIMIT = 3;
+
+function limitExceeded(value: number | undefined, limit: number | undefined): value is number {
+  return limit !== undefined && value !== undefined && value > limit;
+}
+
+function providerBudgetAtReserve(value: number | undefined, reserve: number | undefined): value is number {
+  return reserve !== undefined && value !== undefined && value <= reserve;
+}
+
+function defaultBackpressureSignals(context: IssueBackpressureSignalContext): IssueBackpressureSignals {
+  return {
+    activeProcesses: 0,
+    failedStarts: 0,
+    inFlightBacklog: 0,
+    pendingIssueCount: context.pendingIssueCount,
+    providerBudgetTokensRemaining: context.providerBudgetTokensRemaining,
+    systemLoadAverage: loadavg()[0],
+  };
+}
+
+export async function evaluateIssueBackpressure(
+  backpressure: IssueBackpressureConfig | undefined,
+  context: IssueBackpressureSignalContext,
+): Promise<IssueBackpressureDecision> {
+  const rawSignals = await (backpressure?.signals?.(context) ?? defaultBackpressureSignals(context));
+  const signals: IssueBackpressureSignals = {
+    ...rawSignals,
+    providerBudgetTokensRemaining: rawSignals.providerBudgetTokensRemaining ?? context.providerBudgetTokensRemaining,
+    pendingIssueCount: rawSignals.pendingIssueCount ?? context.pendingIssueCount,
+  };
+  const thresholds = backpressure?.thresholds ?? {};
+  const reasons: string[] = [];
+
+  if (limitExceeded(signals.activeProcesses, thresholds.maxActiveProcesses)) {
+    reasons.push(`active processes ${signals.activeProcesses} exceeds limit ${thresholds.maxActiveProcesses}`);
+  }
+  if (limitExceeded(signals.failedStarts, thresholds.maxFailedStarts)) {
+    reasons.push(`failed starts ${signals.failedStarts} exceeds limit ${thresholds.maxFailedStarts}`);
+  }
+  if (limitExceeded(signals.inFlightBacklog, thresholds.maxInFlightBacklog)) {
+    reasons.push(
+      `fresh ticket creation blocked while in-flight backlog ${signals.inFlightBacklog} exceeds limit ${thresholds.maxInFlightBacklog}`,
+    );
+  }
+  if (limitExceeded(signals.pendingIssueCount, thresholds.maxPendingIssueCount)) {
+    reasons.push(`queue depth ${signals.pendingIssueCount} exceeds limit ${thresholds.maxPendingIssueCount}`);
+  }
+  if (limitExceeded(signals.oldestQueueAgeMs, thresholds.maxOldestQueueAgeMs)) {
+    reasons.push(`oldest queue age ${signals.oldestQueueAgeMs}ms exceeds limit ${thresholds.maxOldestQueueAgeMs}ms`);
+  }
+  if (limitExceeded(signals.systemLoadAverage, thresholds.maxSystemLoadAverage)) {
+    reasons.push(`system load ${signals.systemLoadAverage} exceeds limit ${thresholds.maxSystemLoadAverage}`);
+  }
+  if (providerBudgetAtReserve(signals.providerBudgetTokensRemaining, thresholds.minProviderBudgetTokensRemaining)) {
+    reasons.push(
+      `provider budget remaining ${signals.providerBudgetTokensRemaining} tokens is at or below reserve ${thresholds.minProviderBudgetTokensRemaining}`,
+    );
+  }
+
+  return {
+    allowed: reasons.length === 0,
+    reasons,
+    signals,
+  };
+}
 
 function extractSeverity(labels: readonly string[]): number {
   for (const label of labels) {
@@ -202,6 +314,38 @@ export class IssueRunner {
         continue;
       }
 
+      const providerBudgetTokensRemaining = Math.max(0, budgetTokens - cumulativeTokens);
+      const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
+        issue,
+        index: i,
+        totalIssues: sorted.length,
+        pendingIssueCount: sorted.length - i,
+        cumulativeTokens,
+        budgetTokens,
+        providerBudgetTokensRemaining,
+      });
+
+      if (!backpressureDecision.allowed) {
+        const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
+        logger?.warn(
+          `[issues] Backpressure paused issue #${issue.number}: ${backpressureDecision.reasons.join('; ')}`,
+          {
+            issueNumber: issue.number,
+            reasons: backpressureDecision.reasons,
+            signals: backpressureDecision.signals,
+          },
+          'issues',
+        );
+        outcomes.push({
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+          status: 'skipped',
+          tokensUsed: 0,
+          error: reason,
+        });
+        continue;
+      }
+
       logger?.info(`[issues] Starting issue #${issue.number} (${position})`, undefined, 'issues');
 
       const triage = findTriage(triageResults, issue.number);
@@ -217,7 +361,7 @@ export class IssueRunner {
       }
 
       try {
-        const outcome = await this.processIssue(issue, triage, config, cumulativeTokens, budgetTokens);
+        const outcome = await this.processIssue(issue, triage, config);
         cumulativeTokens += outcome.tokensUsed;
         outcomes.push(outcome);
 
@@ -242,8 +386,6 @@ export class IssueRunner {
     issue: GithubIssue,
     triage: TriageResult,
     config: IssueRunnerConfig,
-    cumulativeTokens: number,
-    budgetTokens: number,
   ): Promise<IssueOutcome> {
     const {
       graphBuilder,
