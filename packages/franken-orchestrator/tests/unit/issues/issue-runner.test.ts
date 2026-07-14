@@ -578,8 +578,8 @@ describe('IssueRunner', () => {
       expect(mockRun).toHaveBeenCalledOnce();
     });
 
-    it('does not treat unrelated shared checkpoint entries as progress for fresh starts', async () => {
-      writePlanChunks('issue-15', ['api']);
+    it('does not treat partial legacy shared checkpoint entries as progress for fresh starts', async () => {
+      writePlanChunks('issue-15', ['api', 'ui']);
       const checkpoint = mockCheckpoint(new Set(['impl:01_api:done', 'harden:01_api:done']));
       const graphBuilder = mockGraphBuilder();
       const config = makeConfig({
@@ -602,6 +602,38 @@ describe('IssueRunner', () => {
 
       expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'skipped' });
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('recognizes completed legacy shared-checkpoint chunk plans before pausing', async () => {
+      writePlanChunks('issue-9917', ['legacy-api']);
+      const checkpoint = mockCheckpoint(new Set([
+        'impl:01_legacy-api:done',
+        'harden:01_legacy-api:done',
+      ]));
+      const graphBuilder = mockGraphBuilder();
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 9917 })],
+        triageResults: [makeTriage(9917, 'chunked')],
+        checkpoint,
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 9917, status: 'fixed' });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(signals).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
     });
 

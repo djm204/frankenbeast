@@ -228,7 +228,8 @@ function checkpointEntriesHavePlanProgress(
   issueNumber: number,
   planDir: string,
 ): boolean {
-  for (const chunkPath of listPlanChunkPaths(planDir)) {
+  const chunkPaths = listPlanChunkPaths(planDir);
+  for (const chunkPath of chunkPaths) {
     const chunkId = basename(chunkPath, '.md');
     if (
       entries.has(issueTaskProgressKey(issueNumber, `impl:${chunkId}`)) ||
@@ -236,6 +237,16 @@ function checkpointEntriesHavePlanProgress(
     ) {
       return true;
     }
+  }
+
+  if (chunkPaths.length > 0) {
+    return chunkPaths.every((chunkPath) => {
+      const chunkId = basename(chunkPath, '.md');
+      return (
+        entries.has(issueCompletionKey(`impl:${chunkId}`)) &&
+        entries.has(issueCompletionKey(`harden:${chunkId}`))
+      );
+    });
   }
 
   return false;
