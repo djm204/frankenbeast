@@ -21,6 +21,7 @@ import type {
   TrackedAgentInitAction,
   TrackedAgentSummary,
 } from '@franken/types';
+import { toError } from './http-error';
 
 export { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 export type {
@@ -472,6 +473,3 @@ function normalizeHeaders(headers: HeadersInit | undefined): Record<string, stri
   return { ...headers };
 }
 
-function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
