@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.10](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.9...franken-mcp-suite-v0.2.10) (2026-07-14)
+
+
+### Tests
+
+* **mcp-suite:** keep test files in lint coverage ([#2047](https://github.com/djm204/frankenbeast/issues/2047)) ([79e5fcc](https://github.com/djm204/frankenbeast/commit/79e5fccc2f75b34a9af476125090edafbe3f10fa))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/orchestrator bumped from 0.43.1 to 0.44.0
+
 ## [0.2.9](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.8...franken-mcp-suite-v0.2.9) (2026-07-14)
 
 

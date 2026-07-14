@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.43.1...@franken/orchestrator-v0.44.0) (2026-07-14)
+
+
+### Features
+
+* **memory:** add snapshot diff command ([#1890](https://github.com/djm204/frankenbeast/issues/1890)) ([c7ab1a1](https://github.com/djm204/frankenbeast/commit/c7ab1a1ce10f463a05ebd6a1f316ee39915712c0))
+
 ## [0.43.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.43.0...@franken/orchestrator-v0.43.1) (2026-07-14)
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.48.0](https://github.com/djm204/frankenbeast/compare/v0.47.1...v0.48.0) (2026-07-14)
+
+
+### Features
+
+* **memory:** add snapshot diff command ([#1890](https://github.com/djm204/frankenbeast/issues/1890)) ([c7ab1a1](https://github.com/djm204/frankenbeast/commit/c7ab1a1ce10f463a05ebd6a1f316ee39915712c0))
+
+
+### Tests
+
+* **mcp-suite:** keep test files in lint coverage ([#2047](https://github.com/djm204/frankenbeast/issues/2047)) ([79e5fcc](https://github.com/djm204/frankenbeast/commit/79e5fccc2f75b34a9af476125090edafbe3f10fa))
+
 ## [0.47.1](https://github.com/djm204/frankenbeast/compare/v0.47.0...v0.47.1) (2026-07-14)
 
 
