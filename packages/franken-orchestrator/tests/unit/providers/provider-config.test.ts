@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AnthropicApiAdapter } from '../../../src/providers/anthropic-api-adapter.js';
 import { ClaudeCliAdapter } from '../../../src/providers/claude-cli-adapter.js';
 import { CodexCliAdapter } from '../../../src/providers/codex-cli-adapter.js';
