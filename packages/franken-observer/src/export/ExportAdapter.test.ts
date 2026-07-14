@@ -77,6 +77,30 @@ describe('InMemoryAdapter', () => {
       expect(retrieved!.goal).toBe('updated goal')
     })
 
+    it('keeps the previous snapshot when an overwrite fails to clone', async () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      SpanLifecycle.setMetadata(span, { safe: true })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      Object.defineProperty(span.metadata, 'unsafe', {
+        enumerable: true,
+        get() {
+          throw new Error('metadata exploded')
+        },
+      })
+
+      await expect(adapter.flush(trace)).rejects.toThrow('metadata exploded')
+
+      const retrieved = await adapter.queryByTraceId(trace.id)
+      expect(retrieved).not.toBeNull()
+      expect(retrieved!.goal).toBe('goal')
+      expect(retrieved!.spans[0]!.metadata).toEqual({ safe: true })
+      expect(await adapter.listTraceIds()).toEqual([trace.id])
+    })
+
     it('evicts older traces when flushing more than the configured retention bound', async () => {
       const bounded = new InMemoryAdapter({ maxTraces: 2 })
       const t1 = TraceContext.createTrace('first')

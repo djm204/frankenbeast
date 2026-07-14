@@ -32,8 +32,9 @@ export class InMemoryAdapter implements ExportAdapter {
 
   async flush(trace: Trace): Promise<void> {
     warnIfTraceHasActiveSpans(trace, 'InMemoryAdapter')
+    const clonedTrace = cloneTrace(trace)
     this.store.delete(trace.id)
-    this.store.set(trace.id, cloneTrace(trace))
+    this.store.set(trace.id, clonedTrace)
     this.evictOverflow()
   }
 
