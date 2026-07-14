@@ -55,6 +55,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+          package-manager-cache: false
 
       - name: Enable packageManager-pinned npm
         # Use the repo's pinned npm (package.json packageManager) so npm audit

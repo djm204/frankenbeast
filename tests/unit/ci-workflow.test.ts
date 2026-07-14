@@ -7,6 +7,7 @@ import { load } from 'js-yaml';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CI_PATH = resolve(ROOT, '.github/workflows/ci.yml');
 const RELEASE_PATH = resolve(ROOT, '.github/workflows/release-please.yml');
+const DAILY_SECURITY_SCAN_PATH = resolve(ROOT, '.github/workflows/daily-security-scan.yml');
 const WORKFLOW_LINT_PATH = resolve(ROOT, '.github/workflows/workflow-lint.yml');
 const NPMRC_PATH = resolve(ROOT, '.npmrc');
 
@@ -505,6 +506,21 @@ jobs:
     expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
     expect(latestRun).toContain('[0].tagName // empty');
+  });
+});
+
+describe('daily-security-scan.yml security scan workflow', () => {
+  it('disables implicit setup-node npm caching for the privileged scan job', () => {
+    const content = readFileSync(DAILY_SECURITY_SCAN_PATH, 'utf-8');
+    const workflow = parseWorkflowYaml(content);
+    const jobs = expectRecord(workflow.jobs, 'daily security scan jobs');
+    const scan = expectRecord(jobs.scan, 'jobs.scan');
+    const setupNode = expectSteps(scan).find((step) => step.uses === 'actions/setup-node@v6');
+
+    expect(setupNode).toBeTruthy();
+    expect(expectRecord(setupNode?.with, 'daily security scan setup-node with')['package-manager-cache']).toBe(
+      false,
+    );
   });
 });
 
