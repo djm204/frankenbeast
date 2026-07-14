@@ -15,6 +15,7 @@ export type Subcommand =
   | 'chat-server'
   | 'beasts-daemon'
   | 'network'
+  | 'memory'
   | 'skill'
   | 'security'
   | undefined;
@@ -48,6 +49,7 @@ export type BeastAction =
 
 export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
+export type MemoryAction = 'snapshot-diff' | undefined;
 
 export interface CliArgs {
   subcommand: Subcommand;
@@ -55,6 +57,9 @@ export interface CliArgs {
   beastTarget?: string | undefined;
   networkAction?: NetworkAction;
   networkTarget?: string | undefined;
+  memoryAction?: MemoryAction;
+  memorySnapshotBefore?: string | undefined;
+  memorySnapshotAfter?: string | undefined;
   networkDetached: boolean;
   networkSet?: string[] | undefined;
   skillAction?: SkillAction;
@@ -102,8 +107,9 @@ export interface CliArgs {
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'skill', 'security']);
+const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
+const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -167,6 +173,7 @@ Subcommands:
   chat-server             Run the local HTTP+WebSocket chat server for franken-web
   beasts-daemon           Run the standalone Beast control-plane daemon
   network                 Manage Frankenbeast request-serving services
+  memory                  Inspect persisted BrainSnapshot JSON artifacts
   skill                   Manage MCP skill plugins
   security                View or change security profile
 
@@ -222,6 +229,10 @@ Network Commands:
   network config [--set a.b.c=value]  Inspect or update operator config
   network credentials                 Print scoped credential refs inventory (never secret values)
   network help                        Show network command help
+
+Memory Commands:
+  memory snapshot-diff <before> <after>
+                                  Print a structured JSON diff between two BrainSnapshot files
 
 Beast Commands:
   beasts catalog                      List fixed Beast definitions
@@ -498,6 +509,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let networkTarget: string | undefined;
   let beastAction: BeastAction;
   let beastTarget: string | undefined;
+  let memoryAction: MemoryAction;
+  let memorySnapshotBefore: string | undefined;
+  let memorySnapshotAfter: string | undefined;
   let skillAction: SkillAction;
   let skillTarget: string | undefined;
   let skillCommand: string | undefined;
@@ -525,6 +539,19 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     }
     assertNoExtraPositionals('beasts', positionals, maxBeastPositionals(beastAction));
     beastTarget = positionals[1];
+  } else if (subcommand === 'memory') {
+    const actionCandidate = positionals[0];
+    if (actionCandidate !== undefined) {
+      if (!VALID_MEMORY_ACTIONS.has(actionCandidate)) {
+        throw new TypeError(`Unknown memory action: ${actionCandidate}`);
+      }
+      memoryAction = actionCandidate as MemoryAction;
+    }
+    memorySnapshotBefore = positionals[1];
+    memorySnapshotAfter = positionals[2];
+    if (positionals.length > 3) {
+      throw new TypeError(`Unexpected argument '${positionals[3]}'. memory snapshot-diff accepts exactly two snapshot files`);
+    }
   } else if (subcommand === 'skill') {
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
@@ -657,6 +684,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     beastTarget,
     networkAction,
     networkTarget,
+    memoryAction,
+    memorySnapshotBefore,
+    memorySnapshotAfter,
     networkDetached: values.detached ?? false,
     networkSet: values.set,
     skillAction,
