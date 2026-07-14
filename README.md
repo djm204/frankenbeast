@@ -607,9 +607,9 @@ npm run bootstrap -- --no-docker
 $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and adjust CHROMA_URL if needed
 
 # .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.
-# Override it only when ChromaDB runs at a different local port/host, a CI
-# service container, or a remote TLS-terminated endpoint, then export that same
-# endpoint before seed/verify.
+# Override it only when ChromaDB runs at a different local port/host or a remote
+# TLS-terminated endpoint, then export that same endpoint before seed/verify.
+# In CI, point CHROMA_URL at the Chroma service container hostname instead.
 # export CHROMA_URL=http://127.0.0.1:18000
 
 # Start supporting services (ChromaDB, Grafana, Tempo) through bootstrap. The
