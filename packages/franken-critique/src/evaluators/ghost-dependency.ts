@@ -542,6 +542,7 @@ function isTypeOnlyImportReferenceUse(
   }
 
   const trimmed = prefix.trimEnd();
+  if (hasCompletedStatementBeforeImport(prefix)) return false;
   if (/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed)) {
     return false;
   }
@@ -552,10 +553,16 @@ function isTypeOnlyImportReferenceUse(
   if (/\b(?:declare\s+)?namespace\b[\s\S]*\{\s*(?:export\s+)?type\b[\s\S]*$/.test(trimmed)) {
     return true;
   }
-  if (/(?:^|[^.])(?:\bimplements\b|\bkeyof\b|\btypeof\b)\s*(?:\([^)]*)?$/.test(trimmed)) {
+  if (/(?:^|[^.])(?:\bimplements\b|\bkeyof\b)\s*(?:\([^)]*)?$/.test(trimmed)) {
     return true;
   }
-  if (/(?:^|[^.])(?:\bas\b|\bsatisfies\b)\s+[\s\S]*$/.test(trimmed)) {
+  if (/(?:^|[^.])\bkeyof\s+typeof\s*(?:\([^)]*)?$/.test(trimmed)) {
+    return true;
+  }
+  if (/(?:^|[^.])\btypeof\s*(?:\([^)]*)?$/.test(trimmed)) {
+    return isInsideTypeDeclaration(prefix) || isInsideTypeAnnotation(prefix, content, importIndex, false);
+  }
+  if (isInsideOpenTypeAssertion(trimmed)) {
     return true;
   }
 
@@ -564,6 +571,33 @@ function isTypeOnlyImportReferenceUse(
   const openBraceIndex = trimmed.lastIndexOf('{');
   const semicolonIndex = trimmed.lastIndexOf(';');
   return colonIndex > semicolonIndex && !/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed.slice(openBraceIndex));
+}
+
+function hasCompletedStatementBeforeImport(prefix: string): boolean {
+  const newlineIndex = prefix.lastIndexOf('\n');
+  if (newlineIndex === -1) return false;
+
+  const suffix = prefix.slice(newlineIndex + 1);
+  if (!/^\s*$/.test(suffix)) return false;
+
+  const previousLine = prefix.slice(0, newlineIndex).trimEnd();
+  return !/[=?:,|&<{([]$/.test(previousLine) && !/\bextends\s*$/.test(previousLine);
+}
+
+function isInsideOpenTypeAssertion(trimmedPrefix: string): boolean {
+  const assertionMatch = /(?:^|[^.])\b(?:as|satisfies)\b/g;
+  let latestAssertionIndex = -1;
+  let match: RegExpExecArray | null;
+  while ((match = assertionMatch.exec(trimmedPrefix)) !== null) {
+    latestAssertionIndex = match.index;
+  }
+  if (latestAssertionIndex === -1) return false;
+
+  const suffix = trimmedPrefix.slice(latestAssertionIndex);
+  const lastComma = suffix.lastIndexOf(',');
+  const lastEquals = suffix.lastIndexOf('=');
+  const lastArrow = suffix.lastIndexOf('=>');
+  return lastComma === -1 && lastEquals === -1 && lastArrow === -1;
 }
 
 function readDynamicImportSpecifierForTypeContext(
@@ -636,13 +670,13 @@ function isInsideTypeAnnotation(
   if (/\bcase\s+[\s\S]*$/.test(beforeAnnotation)) return false;
   if (
     /(?:\bas|\bsatisfies)\s*\{[^}]*$/.test(beforeAnnotation) &&
-    !hasRuntimeBlockAfterAnnotation(prefix, annotationIndex)
+    !hasRuntimeAfterAnnotation(prefix, annotationIndex)
   ) {
     return true;
   }
   if (
     /:\s*\{[^}]*$/.test(beforeAnnotation) &&
-    !hasRuntimeBlockAfterAnnotation(prefix, annotationIndex)
+    !hasRuntimeAfterAnnotation(prefix, annotationIndex)
   ) {
     return true;
   }
@@ -666,8 +700,10 @@ function isInsideTypeAnnotation(
   }
 
   const annotationSuffix = prefix.slice(annotationIndex + 1);
+  if (hasRuntimeAfterClosedTypeContext(annotationSuffix)) return false;
   if (/[=;]/.test(annotationSuffix)) return false;
   if (/=>/.test(annotationSuffix)) {
+    if (/\)\s*:\s*[^=]*=>\s*$/.test(prefix)) return false;
     return /^\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*(?:\[\])?)\s*=>\s*$/.test(
       annotationSuffix,
     );
@@ -686,9 +722,13 @@ function isInsideTypeAnnotation(
   return !isLikelyObjectLiteralValue(content, importIndex);
 }
 
-function hasRuntimeBlockAfterAnnotation(prefix: string, annotationIndex: number): boolean {
-  return /}\s*\{\s*(?:return|throw|void|await|yield|case|default)\b/.test(
-    prefix.slice(annotationIndex + 1),
+function hasRuntimeAfterAnnotation(prefix: string, annotationIndex: number): boolean {
+  return hasRuntimeAfterClosedTypeContext(prefix.slice(annotationIndex + 1));
+}
+
+function hasRuntimeAfterClosedTypeContext(annotationSuffix: string): boolean {
+  return /}\s*\)?(?:\s*\{\s*(?:return|throw|void|await|yield|case|default)\b|[^\S\n]*\n\s*(?:void\s*$|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
+    annotationSuffix,
   );
 }
 

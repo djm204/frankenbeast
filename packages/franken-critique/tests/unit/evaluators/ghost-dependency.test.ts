@@ -282,11 +282,22 @@ describe('GhostDependencyEvaluator', () => {
       void import('void-after-typed-decl-ghost');
       let dep3: SomeType
       import('bare-after-typed-decl-ghost');
+      const cfg = value as { dep: string }
+      void import('after-object-assertion-ghost');
+      const annotatedArrow = (): any => import('annotated-arrow-body-ghost');
+      function typedObjectParam(opts: { path: string }) { return import('object-param-body-ghost'); }
+      const url = 'http://example.invalid'
+      import('chained-after-colon-ghost').then(load);
+      type ChainAfterAlias = Foo
+      import('chained-after-type-alias-ghost').then(load);
+      const runtimeTypeofProperty = typeof import('runtime-typeof-property-ghost').then;
+      function templateAfterTypedParam(opts: { path: string }) { return \`\${require('template-after-typed-param-ghost')}\`; }
+      const assertedPair = value as Foo, chained = import('chained-after-assertion-ghost').then(load);
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(40);
+    expect(result.findings).toHaveLength(48);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -328,6 +339,14 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('tagged-template-ghost'),
         expect.stringContaining('void-after-typed-decl-ghost'),
         expect.stringContaining('bare-after-typed-decl-ghost'),
+        expect.stringContaining('after-object-assertion-ghost'),
+        expect.stringContaining('annotated-arrow-body-ghost'),
+        expect.stringContaining('object-param-body-ghost'),
+        expect.stringContaining('chained-after-colon-ghost'),
+        expect.stringContaining('chained-after-type-alias-ghost'),
+        expect.stringContaining('runtime-typeof-property-ghost'),
+        expect.stringContaining('template-after-typed-param-ghost'),
+        expect.stringContaining('chained-after-assertion-ghost'),
       ]),
     );
   });
