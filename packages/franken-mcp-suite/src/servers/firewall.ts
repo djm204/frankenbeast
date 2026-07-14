@@ -18,7 +18,8 @@ export function createFirewallServer(deps: FirewallServerDeps, options: CreateMc
 }
 
 export function resolveFirewallConfigPath(configPath: string | undefined, root: string): string | undefined {
-  if (!configPath) return undefined;
+  if (configPath === undefined) return undefined;
+  if (configPath === '') throw new Error('Explicit firewall config path must not be empty');
   const expandedConfigPath = expandProjectRootPlaceholder(configPath, root);
   return isAbsolute(expandedConfigPath) ? expandedConfigPath : resolve(root, expandedConfigPath);
 }

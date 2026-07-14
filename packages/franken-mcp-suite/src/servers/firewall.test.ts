@@ -75,6 +75,11 @@ describe('Firewall Server', () => {
     );
   });
 
+  it('rejects empty explicit firewall config paths', () => {
+    expect(resolveFirewallConfigPath(undefined, '/project-a')).toBeUndefined();
+    expect(() => resolveFirewallConfigPath('', '/project-a')).toThrow(/config path must not be empty/i);
+  });
+
   it('rejects scanning a path outside the project root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'fw-root-'));
     const adapter = createFirewallAdapter(join(root, 'fw.db'), 'standard', { root });
