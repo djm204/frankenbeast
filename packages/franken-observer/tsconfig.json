@@ -12,7 +12,8 @@
     "rootDir": "src",
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/**/*.integration.test.ts", "src/**/*.eval.test.ts"]

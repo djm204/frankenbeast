@@ -97,7 +97,7 @@ export const EpisodicEventSchema = z.object({
   type: z.enum(['success', 'failure', 'decision', 'observation']),
   step: z.string().optional(),
   summary: z.string().min(1),
-  details: z.record(z.unknown()).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string().datetime(),
 });
 
@@ -110,14 +110,14 @@ export const ExecutionStateSchema = z.object({
   runId: z.string().min(1),
   phase: z.string().min(1),
   step: z.number().int().nonnegative(),
-  context: z.record(z.unknown()),
+  context: z.record(z.string(), z.unknown()),
   timestamp: z.string().datetime(),
 });
 
 export const BrainSnapshotSchema = z.object({
   version: z.literal(1),
   timestamp: z.string().datetime(),
-  working: z.record(z.unknown()),
+  working: z.record(z.string(), z.unknown()),
   episodic: z.array(EpisodicEventSchema),
   checkpoint: ExecutionStateSchema.nullable(),
   metadata: z.object({

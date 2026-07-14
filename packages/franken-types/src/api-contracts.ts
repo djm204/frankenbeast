@@ -53,7 +53,7 @@ export const ChatSessionResponseSchema = z.object({
   state: z.string(),
   pendingApproval: PendingApprovalSchema.nullable().optional(),
   beastContext: ChatBeastContextSchema.nullable().optional(),
-  routingMetadata: z.record(z.unknown()).optional(),
+  routingMetadata: z.record(z.string(), z.unknown()).optional(),
   tokenTotals: TokenTotalsSchema,
   costUsd: z.number().nonnegative(),
   createdAt: z.string(),

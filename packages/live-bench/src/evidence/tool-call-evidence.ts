@@ -4,7 +4,7 @@ import type { ToolCallEvidence } from '../types.js';
 export const ToolCallEvidenceSchema: z.ZodType<ToolCallEvidence> = z.object({
   id: z.string().min(1),
   tool: z.string().min(1),
-  params: z.record(z.unknown()),
+  params: z.record(z.string(), z.unknown()),
   source: z.enum(['client', 'mcp-proxy', 'fbeast-proxy', 'adapter']),
   startedAt: z.string().datetime({ offset: true }).optional(),
   completedAt: z.string().datetime({ offset: true }).optional(),

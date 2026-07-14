@@ -1034,7 +1034,7 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('agent-1')).toBeDefined();
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
     });
 
     expect(screen.getByRole('heading', { level: 1, name: 'Beasts' })).toBeDefined();
@@ -1125,8 +1125,8 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('agent-deleted')).toBeDefined();
-      expect(screen.getByText('agent-active')).toBeDefined();
+      expect(screen.getAllByText('agent-deleted').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('agent-active').length).toBeGreaterThan(0);
       expect(mockGetAgent).toHaveBeenCalledWith('agent-active');
     });
     expect(mockGetAgent).not.toHaveBeenCalledWith('agent-deleted');
@@ -1258,7 +1258,7 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('agent-1')).toBeDefined();
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
     });
 
     mockListAgents.mockResolvedValue([
@@ -1297,7 +1297,7 @@ describe('ChatShell', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('agent-2')).toBeDefined();
+      expect(screen.getAllByText('agent-2').length).toBeGreaterThan(0);
     });
   });
 
@@ -1456,7 +1456,7 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('agent-1')).toBeDefined();
+      expect(screen.getAllByText('agent-1').length).toBeGreaterThan(0);
     });
   });
 
@@ -1633,7 +1633,7 @@ describe('ChatShell', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('agent-init')).toBeDefined();
+      expect(screen.getAllByText('agent-init').length).toBeGreaterThan(0);
     });
   });
 });

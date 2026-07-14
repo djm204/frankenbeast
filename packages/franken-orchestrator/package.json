@@ -43,29 +43,29 @@
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
+    "@anthropic-ai/sdk": "^0.111.0",
     "@franken/critique": "0.8.0",
     "@franken/governor": "0.6.0",
     "@franken/types": "0.10.0",
     "@franken/observer": "0.7.17",
-    "@google/genai": "^1.46.0",
-    "better-sqlite3": "^12.6.2",
-    "dotenv": "^17.3.1",
+    "@google/genai": "^2.11.0",
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^17.4.2",
     "@franken/planner": "0.4.15",
     "@franken/brain": "0.8.0",
-    "hono": "^4.12.27",
-    "openai": "^6.32.0",
+    "hono": "^4.12.29",
+    "openai": "^6.46.0",
     "ws": "^8.21.0",
-    "zod": "^3.24.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^22.15.2",
+    "@types/node": "^26.1.1",
     "@types/ws": "^8.18.1",
-    "typescript": "^5.8.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },
   "optionalDependencies": {
-    "sharp": "^0.34.5"
+    "sharp": "^0.35.3"
   }
 }
