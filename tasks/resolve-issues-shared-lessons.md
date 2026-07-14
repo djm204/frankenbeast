@@ -4,6 +4,7 @@
 - For deletion/right-to-forget flows, compare selectors against both persisted storage rows and the current in-memory overlay; avoid broad stale-instance flushes that can delete unrelated external rows, and keep persisted/runtime deletion finalization rollback-safe.
 - Redact destructive privacy selectors before every audit/governance sink, including proxy/envelope validation failures and governor logs; if a tool is destructive, route it through the same governance path as sibling deletion tools rather than exempting it as non-executing data.
 - Deletion guards should cover source-scope key segments and replay/hydrate should install guards before restoring user data, while allowing the tool’s own right-to-forget audit event to round-trip without blocking hydration.
+- After Codex review on right-to-forget flows, regression-test every reinsertion path it names: stale multi-instance flush, learning-event writes, key-only query matches, episodic step text, substring query semantics, terminal source-scope key segments, and forged audit-event hydration.
 
 ## 2026-07-13 — Langfuse docs and env-var DX
 - For docs that include links from published package pages, prefer links to files that are shipped in the package (e.g., README, changelog). In `@franken/observer`, avoid package-relative links to `docs/` if that directory is not published.

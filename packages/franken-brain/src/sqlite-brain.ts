@@ -465,6 +465,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
     let total = 0;
     for (const [key, value] of this.store) {
       const { normalized, serialized, size } = this.prepareEntry(key, value);
+      try {
+        assertNotDeletionGuarded(this.db, key, serialized);
+      } catch (error) {
+        if (error instanceof MemoryDeletionGuardError) {
+          continue;
+        }
+        throw error;
+      }
       total += size;
       prepared.push([key, normalized, serialized, size]);
     }
@@ -774,7 +782,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         }
       }
 
-      this.insertEvent({
+      const guardedEvent = {
         ...event,
         createdAt: normalizedCreatedAt,
         details: {
@@ -782,7 +790,9 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           learningKey: key,
           learningCooldownMs: cooldownMs,
         },
-      });
+      };
+      assertEpisodicNotDeletionGuarded(this.db, guardedEvent);
+      this.insertEvent(guardedEvent);
 
       this.db.exec('COMMIT');
       return { recorded: true, key, cooldownMs };
@@ -1454,7 +1464,7 @@ export class SqliteBrain implements IBrain {
           brain.working.flushToDb() ?? undefined;
 
         for (const event of snapshot.episodic) {
-          if (event.step !== 'right-to-forget') {
+          if (!isRightToForgetAuditEvent(event)) {
             assertEpisodicNotDeletionGuarded(brain.db, event);
           }
           insertEvent.run(
@@ -2075,6 +2085,20 @@ function guardTokens(value: string | undefined): string[] {
   ]));
 }
 
+function guardMatchCandidates(value: string | undefined): string[] {
+  const tokens = guardTokens(value);
+  const substrings: string[] = [];
+  for (const token of tokens) {
+    if (token.length > 128) continue;
+    for (let start = 0; start < token.length; start += 1) {
+      for (let end = start + 3; end <= token.length; end += 1) {
+        substrings.push(token.slice(start, end));
+      }
+    }
+  }
+  return Array.from(new Set([...tokens, ...substrings]));
+}
+
 function normalizeForMatch(value: string | undefined): string {
   return (value ?? '').trim().toLowerCase();
 }
@@ -2120,9 +2144,29 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
     const metadata = normalizeForMatch(objectMetadataString(value, ['sourceScope', 'source', 'scope', 'sourceId']));
-    if (metadata.split(/\s+/).includes(sourceScope) || lowerKey.startsWith(`${sourceScope}:`) || lowerKey.includes(`:${sourceScope}:`)) return true;
+    if (
+      metadata.split(/\s+/).includes(sourceScope)
+      || lowerKey.startsWith(`${sourceScope}:`)
+      || lowerKey.includes(`:${sourceScope}:`)
+      || lowerKey.endsWith(`:${sourceScope}`)
+    ) return true;
   }
   return false;
+}
+
+function isRightToForgetAuditEvent(event: EpisodicEvent): boolean {
+  if (event.type !== 'observation' || event.step !== 'right-to-forget') return false;
+  if (event.summary !== 'Right-to-forget deletion completed') return false;
+  const details = event.details;
+  if (details === null || typeof details !== 'object' || Array.isArray(details)) return false;
+  const record = details as Record<string, unknown>;
+  if (typeof record.selectorHash !== 'string' || !/^[a-f0-9]{64}$/i.test(record.selectorHash)) return false;
+  const deleted = record.deleted;
+  if (deleted === null || typeof deleted !== 'object' || Array.isArray(deleted)) return false;
+  const counts = deleted as Record<string, unknown>;
+  return ['working', 'episodic', 'derived'].every((name) => (
+    Number.isSafeInteger(counts[name]) && Number(counts[name]) >= 0
+  ));
 }
 
 function episodicRowMatchesSelector(step: string, summary: string, details: string | null, selector: NormalizedRightToForgetSelector): boolean {
@@ -2190,7 +2234,7 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
       }
     }
   }
-  for (const value of guardTokens(typeof parsed === 'string' ? parsed : valueToSearchText(parsed))) {
+  for (const value of guardMatchCandidates(`${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`)) {
     if (stmt.get('working:query', hashGuardValue(value))) {
       throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
     }
@@ -2199,7 +2243,7 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
 
 function assertEpisodicNotDeletionGuarded(db: Database.Database, event: EpisodicEvent): void {
   const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
-  const text = `${event.summary} ${event.details ? valueToSearchText(event.details) : ''}`;
+  const text = `${event.step ?? ''} ${event.summary} ${event.details ? valueToSearchText(event.details) : ''}`;
   const candidates: Array<[string, string | undefined]> = [
     ['category', objectMetadataString(event.details, ['category', 'categories', 'kind'])],
     ...extractStructuredMarkerValues(text, 'category').map(value => ['category', value] as [string, string]),
@@ -2213,7 +2257,7 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
       }
     }
   }
-  for (const value of guardTokens(text)) {
+  for (const value of guardMatchCandidates(text)) {
     if (stmt.get('episodic:query', hashGuardValue(value))) {
       throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
     }
