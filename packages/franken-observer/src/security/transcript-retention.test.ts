@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Span, Trace } from '../core/types.js'
+import { BatchAdapter } from '../adapters/batch/BatchAdapter.js'
+import { MultiAdapter } from '../adapters/multi/MultiAdapter.js'
 import { InMemoryAdapter } from '../export/InMemoryAdapter.js'
 import type { ExportAdapter, TraceSummary } from '../export/ExportAdapter.js'
 import {
@@ -242,6 +244,74 @@ describe('transcript retention controls', () => {
       tool_output: '[REDACTED_TRANSCRIPT]',
       error_message: '[REDACTED_TRANSCRIPT]',
     })
+  })
+
+  it('redacts common suffixed transcript metadata keys', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          promptText: 'raw prompt text',
+          systemPromptAddition: 'raw system prompt',
+          tool_input_json: 'raw tool input',
+          toolResultPayload: 'raw tool output',
+          safeCounter: 1,
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata).toEqual({
+      promptText: '[REDACTED_TRANSCRIPT]',
+      systemPromptAddition: '[REDACTED_TRANSCRIPT]',
+      tool_input_json: '[REDACTED_TRANSCRIPT]',
+      toolResultPayload: '[REDACTED_TRANSCRIPT]',
+      safeCounter: 1,
+    })
+  })
+
+  it('redacts Error objects stored under opaque metadata keys', () => {
+    const cause = new Error('nested private cause')
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          payload: new Error('private prompt stack', { cause }),
+          safeCounter: 1,
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata).toEqual({
+      payload: '[REDACTED_TRANSCRIPT]',
+      safeCounter: 1,
+    })
+  })
+
+  it('removes expired traces from batch and multi adapter wrappers', async () => {
+    let now = 10
+    const primary = new InMemoryAdapter()
+    const secondary = new InMemoryAdapter()
+    const batch = new BatchAdapter({ adapter: primary, maxBatchSize: 10 })
+    const multi = new MultiAdapter({ adapters: [batch, secondary] })
+    const adapter = new TranscriptRetentionAdapter({ adapter: multi, ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
+    now = 16
+
+    expect(await adapter.cleanupExpired()).toEqual(['trace-1'])
+    await batch.drain()
+
+    expect(await primary.listTraceIds()).toEqual([])
+    expect(await secondary.listTraceIds()).toEqual([])
+    expect(await adapter.queryByTraceId('trace-1')).toBeNull()
+  })
+
+  it('keeps internal-slot objects intact instead of cloning them with fake prototypes', () => {
+    const url = new URL('https://example.test/path')
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { url } })],
+    }))
+
+    expect(retained.spans[0].metadata['url']).toBe(url)
+    expect(String(retained.spans[0].metadata['url'])).toBe('https://example.test/path')
   })
 
   it('handles cyclic metadata while redacting nested transcript fields', () => {

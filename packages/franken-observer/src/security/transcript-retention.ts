@@ -50,6 +50,13 @@ interface DeletableAdapter extends ExportAdapter {
   deleteTrace(traceId: string): Promise<void> | void
 }
 
+type AdapterWrapperShape = Partial<{
+  inner: ExportAdapter
+  adapter: ExportAdapter
+  adapters: ExportAdapter[]
+  buffer: Trace[]
+}>
+
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000
 const MASK = '[REDACTED_TRANSCRIPT]'
 const DROPPED = '[TRANSCRIPT_NOT_RETAINED]'
@@ -178,8 +185,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
 
   private async markExpired(traceId: string): Promise<void> {
     this.retained.delete(traceId)
-    if (hasDeleteTrace(this.inner)) {
-      await this.inner.deleteTrace(traceId)
+    if (await deleteTraceFromAdapter(this.inner, traceId)) {
       this.expiredTraceIds.delete(traceId)
     } else {
       this.expiredTraceIds.add(traceId)
@@ -273,6 +279,7 @@ function redactNestedTranscriptValues(
   seen: WeakMap<object, unknown>,
 ): unknown {
   if (value === null || typeof value !== 'object') return value
+  if (value instanceof Error) return policy.retainedFields.errors ? redactValue(value, policy) : DROPPED
   if (seen.has(value)) return seen.get(value)
   if (Array.isArray(value)) {
     const retained: unknown[] = []
@@ -295,11 +302,29 @@ function redactNestedTranscriptValues(
 
 function classifyTranscriptField(key: string): TranscriptField | undefined {
   const normalized = key.replace(/[_-]/g, '').toLowerCase()
-  if (PROMPT_KEYS.has(normalized)) return 'prompts'
-  if (TOOL_INPUT_KEYS.has(normalized)) return 'toolInputs'
-  if (TOOL_OUTPUT_KEYS.has(normalized)) return 'toolOutputs'
-  if (ERROR_KEYS.has(normalized)) return 'errors'
-  if (SUMMARY_KEYS.has(normalized)) return 'summaries'
+  if (PROMPT_KEYS.has(normalized) || normalized.includes('prompt')) return 'prompts'
+  if (
+    TOOL_INPUT_KEYS.has(normalized) ||
+    normalized === 'query' ||
+    normalized.includes('toolinput') ||
+    normalized.includes('toolarg') ||
+    normalized.includes('toolparam')
+  ) return 'toolInputs'
+  if (
+    TOOL_OUTPUT_KEYS.has(normalized) ||
+    normalized.includes('tooloutput') ||
+    normalized.includes('toolresult') ||
+    normalized.includes('toolresponse') ||
+    normalized.endsWith('stdout') ||
+    normalized.endsWith('stderr')
+  ) return 'toolOutputs'
+  if (
+    ERROR_KEYS.has(normalized) ||
+    normalized.includes('error') ||
+    normalized.includes('exception') ||
+    normalized.includes('stacktrace')
+  ) return 'errors'
+  if (SUMMARY_KEYS.has(normalized) || normalized.includes('summary')) return 'summaries'
   return undefined
 }
 
@@ -321,6 +346,53 @@ function getTraceExpiry(trace: Trace, ttlMs: number): number {
 
 function hasDeleteTrace(adapter: ExportAdapter): adapter is DeletableAdapter {
   return typeof (adapter as Partial<DeletableAdapter>).deleteTrace === 'function'
+}
+
+async function deleteTraceFromAdapter(
+  adapter: ExportAdapter,
+  traceId: string,
+  seen = new WeakSet<object>(),
+): Promise<boolean> {
+  if (seen.has(adapter)) return false
+  seen.add(adapter)
+
+  const wrapper = adapter as AdapterWrapperShape
+  let deleted = false
+
+  if (Array.isArray(wrapper.buffer)) {
+    for (let i = wrapper.buffer.length - 1; i >= 0; i--) {
+      if (wrapper.buffer[i]?.id === traceId) {
+        wrapper.buffer.splice(i, 1)
+        deleted = true
+      }
+    }
+  }
+
+  if (hasDeleteTrace(adapter)) {
+    await adapter.deleteTrace(traceId)
+    deleted = true
+  }
+
+  for (const child of childAdapters(wrapper)) {
+    if (await deleteTraceFromAdapter(child, traceId, seen)) deleted = true
+  }
+
+  return deleted
+}
+
+function childAdapters(wrapper: AdapterWrapperShape): ExportAdapter[] {
+  const children: ExportAdapter[] = []
+  if (isExportAdapter(wrapper.inner)) children.push(wrapper.inner)
+  if (isExportAdapter(wrapper.adapter)) children.push(wrapper.adapter)
+  if (Array.isArray(wrapper.adapters)) children.push(...wrapper.adapters.filter(isExportAdapter))
+  return children
+}
+
+function isExportAdapter(value: unknown): value is ExportAdapter {
+  return typeof value === 'object' && value !== null &&
+    typeof (value as ExportAdapter).flush === 'function' &&
+    typeof (value as ExportAdapter).queryByTraceId === 'function' &&
+    typeof (value as ExportAdapter).listTraceIds === 'function'
 }
 
 function cloneValue(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
