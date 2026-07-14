@@ -440,6 +440,73 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('project:import-1', 'secret')).toThrow(/right-to-forget/);
     });
 
+    it('matches exact sourceScope working-memory keys', () => {
+      brain.working.set('import-1', 'secret');
+      const report = brain.rightToForget({ sourceScope: 'import-1' });
+
+      expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 0 });
+      expect(brain.working.has('import-1')).toBe(false);
+      expect(() => brain.working.set('import-1', 'secret')).toThrow(/right-to-forget/);
+    });
+
+    it('deletes spaced category markers in episodic and checkpoint rows', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'category: pii scoped event',
+        details: 'contains a marker',
+        createdAt: new Date().toISOString(),
+      });
+      brain.recovery.checkpoint({
+        runId: 'run-spaced-category',
+        phase: 'execution',
+        step: 1,
+        context: { value: 'category: pii' },
+        timestamp: '2026-07-13T00:03:20.000Z',
+      });
+
+      const report = brain.rightToForget({ category: 'pii' });
+
+      expect(report.deleted).toMatchObject({ episodic: 1 });
+      expect(report.deleted.derived).toBeGreaterThanOrEqual(1);
+      expect(brain.episodic.recall('scoped event', 5)).toEqual([]);
+      expect(brain.recovery.lastCheckpoint()).toBeNull();
+    });
+
+    it('deletes and guards multi-word category metadata', () => {
+      brain.working.set('profile', { category: 'personal info', value: 'secret' });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'personal profile',
+        details: { category: 'personal info' },
+        createdAt: new Date().toISOString(),
+      });
+      brain.recovery.checkpoint({
+        runId: 'run-multi-category',
+        phase: 'execution',
+        step: 1,
+        context: { category: 'personal info' },
+        timestamp: '2026-07-13T00:03:25.000Z',
+      });
+
+      const report = brain.rightToForget({ category: 'personal info' });
+
+      expect(report.deleted).toMatchObject({ working: 1, episodic: 1 });
+      expect(report.deleted.derived).toBeGreaterThanOrEqual(1);
+      expect(() => brain.working.set('profile-2', { category: 'personal info' })).toThrow(/right-to-forget/);
+      expect(() => brain.episodic.record({
+        type: 'observation',
+        summary: 'another profile',
+        details: { category: 'personal info' },
+        createdAt: new Date().toISOString(),
+      })).toThrow(/right-to-forget/);
+      expect(() => brain.recovery.checkpoint({
+        runId: 'run-multi-category-reinsert',
+        phase: 'execution',
+        step: 2,
+        context: { category: 'personal info' },
+        timestamp: '2026-07-13T00:03:26.000Z',
+      })).toThrow(/right-to-forget/);
+    });
 
     it('preserves exact working-memory keys with surrounding spaces', () => {
       brain.working.set(' pii ', 'secret');
