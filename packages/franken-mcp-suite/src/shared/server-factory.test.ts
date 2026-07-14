@@ -384,13 +384,15 @@ describe('createMcpServer', () => {
       });
     });
 
-    it('redacts direct right-to-forget selectors even when malformed args include a tool property', () => {
+    it('redacts direct right-to-forget selectors even when malformed args include envelope-like properties', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
         tool: 'not_the_memory_tool',
+        action: 'alice@example.test',
         query: 'alice@example.test',
         extra: 'secret detail',
       })).toEqual({
-        tool: 'not_the_memory_tool',
+        tool: '[right-to-forget-args-redacted]',
+        action: '[right-to-forget-args-redacted]',
         query: '[right-to-forget-selector-redacted]',
         extra: '[right-to-forget-args-redacted]',
       });

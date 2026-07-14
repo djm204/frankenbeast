@@ -467,6 +467,42 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('keeps dry-run from expiring live working memory that matches existing deletion guards', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-dry-run-no-expire-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+
+        db = new Database(dbPath);
+        db.prepare(`INSERT INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at) VALUES (?, ?, ?, ?)`).run(
+          'selector-hash',
+          'working:query',
+          queryGuardHash('alice@example.test'),
+          '2026-07-14T00:00:00.000Z',
+        );
+        db.close();
+        db = undefined;
+
+        const preview = new SqliteBrain(dbPath);
+        const report = preview.rightToForget({ query: 'alice@example.test', dryRun: true });
+        preview.close();
+
+        expect(report.dryRun).toBe(true);
+        expect(stale.working.matchingRuntimeKeys(
+          { query: 'alice@example.test', type: 'all' },
+          { expireGuardedEntries: false },
+        )).toEqual(['contact']);
+      } finally {
+        db?.close();
+        stale?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('normalizes live database paths when expiring forgotten rows', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-path-'));
       const dbPath = join(dir, 'brain.db');
@@ -1065,6 +1101,38 @@ describe('SqliteBrain', () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    });
+
+    it('hydrate() accepts legacy deletion guard snapshots without hash keys', () => {
+      const snapshot: BrainSnapshot = {
+        version: 1,
+        timestamp: '2026-07-14T00:00:00.000Z',
+        working: { safe: 'value' },
+        episodic: [],
+        checkpoint: null,
+        deletionGuards: [{
+          selectorHash: 'legacy-selector-hash',
+          guardKind: 'working:query',
+          valueHash: queryGuardHash('alice@example.test'),
+          createdAt: '2026-07-14T00:00:00.000Z',
+          schemaVersion: CURRENT_MEMORY_SCHEMA_VERSION,
+        }],
+        metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+      };
+
+      const hydrated = SqliteBrain.hydrate(snapshot);
+
+      expect(hydrated.working.get('safe')).toBe('value');
+      expect(() => hydrated.working.set('contact', 'alice@example.test')).toThrow(/right-to-forget/);
+      hydrated.close();
+    });
+
+    it('caps query guard replay scans instead of running unbounded per-candidate checks', () => {
+      brain.rightToForget({ query: 'abcdefgh' });
+
+      const largeToken = Array.from({ length: 7_000 }, (_, index) => index.toString(36).padStart(4, '0')).join('');
+
+      expect(() => brain.working.set('large-token', largeToken)).toThrow(/cannot be safely evaluated/);
     });
 
     it('constructor hydration honors stricter custom working memory limits', () => {
@@ -2613,14 +2681,17 @@ describe('SqliteBrain', () => {
       }
     });
 
-    it('hydrate() rejects deletion guard snapshots without matching hash key material', () => {
+    it('hydrate() accepts deletion guard snapshots without hash key material for legacy handoff compatibility', () => {
       const source = new SqliteBrain(':memory:');
       source.working.set('pii:email', 'alice@example.test');
       source.rightToForget({ query: 'alice@example.test' });
       const snapshot = source.serialize();
       delete snapshot.deletionGuardHashKey;
 
-      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/no right-to-forget hash key material/);
+      const hydrated = SqliteBrain.hydrate(snapshot);
+
+      expect(hydrated.serialize().deletionGuards).toEqual(snapshot.deletionGuards);
+      hydrated.close();
       source.close();
     });
 

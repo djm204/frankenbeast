@@ -633,7 +633,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return this.store.delete(key);
   }
 
-  snapshotIncludingPersistedEntries(): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
+  snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
     const result: Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> = [];
     for (const { key, value: serialized } of this.loadPersistedSerializedFromDb()) {
       result.push({
@@ -642,7 +642,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
         source: 'persisted',
       });
     }
-    for (const [key, value] of Object.entries(this.snapshot())) {
+    for (const [key, value] of Object.entries(this.snapshotEntries({ expireGuardedEntries: options.expireRuntimeGuardedEntries ?? true }))) {
       result.push({
         key,
         value,
@@ -713,8 +713,8 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
-  matchingRuntimeKeys(selector: NormalizedRightToForgetSelector): string[] {
-    return Object.entries(this.snapshot())
+  matchingRuntimeKeys(selector: NormalizedRightToForgetSelector, options: { expireGuardedEntries?: boolean } = {}): string[] {
+    return Object.entries(this.snapshotEntries({ expireGuardedEntries: options.expireGuardedEntries ?? true }))
       .filter(([key, value]) => workingEntryMatchesSelector(key, value, selector))
       .map(([key]) => key);
   }
@@ -742,8 +742,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return [...this.store.keys()];
   }
 
-  snapshot(): Record<string, unknown> {
-    this.expireRuntimeKeysMatchingCurrentGuards();
+  private snapshotEntries(options: { expireGuardedEntries?: boolean } = {}): Record<string, unknown> {
+    if (options.expireGuardedEntries ?? true) {
+      this.expireRuntimeKeysMatchingCurrentGuards();
+    }
     const result: Record<string, unknown> = {};
     for (const [key, value] of this.store) {
       Object.defineProperty(result, key, {
@@ -754,6 +756,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
       });
     }
     return result;
+  }
+
+  snapshot(): Record<string, unknown> {
+    return this.snapshotEntries();
   }
 
   restore(snap: Record<string, unknown>): void {
@@ -1300,12 +1306,12 @@ export class SqliteBrain implements IBrain {
     }
   }
 
-  private static matchingLiveWorkingKeys(dbPath: string, selector: NormalizedRightToForgetSelector): string[] {
+  private static matchingLiveWorkingKeys(dbPath: string, selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean } = {}): string[] {
     const normalizedDbPath = normalizeSqliteDbPath(dbPath);
     if (normalizedDbPath === ':memory:' || selector.type === 'episodic') return [];
     const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
     if (!liveBrains) return [];
-    return Array.from(new Set(Array.from(liveBrains).flatMap(brain => brain.working.matchingRuntimeKeys(selector))));
+    return Array.from(new Set(Array.from(liveBrains).flatMap(brain => brain.working.matchingRuntimeKeys(selector, { expireGuardedEntries: options.expireRuntimeGuards ?? true }))));
   }
 
   private initSchema(): void {
@@ -1430,11 +1436,11 @@ export class SqliteBrain implements IBrain {
 
     const workingMatches = memoryType === 'episodic'
       ? []
-      : this.matchingWorkingKeys(normalizedSelector);
+      : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: !dryRun });
     const persistedWorkingMatches = workingMatches.filter(match => match.source === 'persisted').map(match => match.key);
     const runtimeWorkingMatches = workingMatches.filter(match => match.source === 'runtime').map(match => match.key);
     const deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
-    for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector)) {
+    for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: !dryRun })) {
       deletedWorkingKeys.add(key);
     }
     const episodicMatches = memoryType === 'working'
@@ -1501,13 +1507,13 @@ export class SqliteBrain implements IBrain {
         episodic: episodicMatches.length,
         derived: episodicMatches.length + checkpointMatches.length,
       },
-      remainingReferences: this.countRemainingReferences(normalizedSelector),
+      remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: !dryRun }),
       ...(auditEventId === undefined ? {} : { auditEventId }),
     };
   }
 
-  private matchingWorkingKeys(selector: NormalizedRightToForgetSelector): Array<{ key: string; source: 'persisted' | 'runtime' }> {
-    return this.working.snapshotIncludingPersistedEntries()
+  private matchingWorkingKeys(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean } = {}): Array<{ key: string; source: 'persisted' | 'runtime' }> {
+    return this.working.snapshotIncludingPersistedEntries({ expireRuntimeGuardedEntries: options.expireRuntimeGuards ?? true })
       .filter(({ key, value }) => workingEntryMatchesSelector(key, value, selector))
       .map(({ key, source }) => ({ key, source }));
   }
@@ -1555,13 +1561,13 @@ export class SqliteBrain implements IBrain {
       .map(row => row.id);
   }
 
-  private countRemainingReferences(selector: NormalizedRightToForgetSelector): number {
+  private countRemainingReferences(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean } = {}): number {
     const memoryType = selector.type ?? 'all';
     let count = 0;
     if (memoryType !== 'episodic') {
       count += new Set([
-        ...this.matchingWorkingKeys(selector).map(match => match.key),
-        ...SqliteBrain.matchingLiveWorkingKeys(this.dbPath, selector),
+        ...this.matchingWorkingKeys(selector, { expireRuntimeGuards: options.expireRuntimeGuards ?? true }).map(match => match.key),
+        ...SqliteBrain.matchingLiveWorkingKeys(this.dbPath, selector, { expireRuntimeGuards: options.expireRuntimeGuards ?? true }),
       ]).size;
     }
     if (memoryType !== 'working') {
@@ -1614,10 +1620,6 @@ export class SqliteBrain implements IBrain {
       const insertDeletionGuard = brain.db.prepare(
         `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version) VALUES (?, ?, ?, ?, ?)`,
       );
-      if ((snapshot.deletionGuards?.length ?? 0) > 0 && !snapshot.deletionGuardHashKey) {
-        throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with deletion guards but no right-to-forget hash key material');
-      }
-
       const snapshotDeletionGuards = snapshot.deletionGuards ?? [];
       if (snapshot.deletionGuardHashKey) {
         const existingDeletionHashKey = readDeletionHashKey(brain.db, brain.encryption);
@@ -2399,6 +2401,7 @@ function guardTokens(value: string | undefined): string[] {
 const MIN_QUERY_GUARD_CHUNK_LENGTH = 8;
 const MAX_QUERY_GUARD_CHUNK_LENGTH = 128;
 const MAX_LEGACY_QUERY_GUARD_SCAN_CHARS = 8192;
+const MAX_QUERY_GUARD_SCAN_CANDIDATES = 20_000;
 
 function* iterateGuardMatchCandidates(value: string | undefined): Iterable<string> {
   const tokens = guardTokens(value).sort((a, b) => a.length - b.length);
@@ -2466,14 +2469,25 @@ function* iterateSizedGuardMatchCandidates(value: string | undefined, lengths: S
   }
 }
 
-function queryGuardCandidatesForReplay(value: string | undefined, index: ReturnType<typeof readQueryGuardIndex>): Iterable<string> {
+function queryGuardCandidatesForReplay(value: string | undefined, index: ReturnType<typeof readQueryGuardIndex>): string[] {
   const normalized = normalizeForMatch(value);
   if (index.hasLegacyHashes && normalized.length > MAX_LEGACY_QUERY_GUARD_SCAN_CHARS) {
     throw new MemoryDeletionGuardError('Refusing to store memory because legacy right-to-forget query guards cannot be safely evaluated for this large value');
   }
-  return index.hasLegacyHashes
+  const candidates = index.hasLegacyHashes
     ? iterateGuardMatchCandidates(value)
     : iterateSizedGuardMatchCandidates(value, index.lengths);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    result.push(candidate);
+    if (result.length > MAX_QUERY_GUARD_SCAN_CANDIDATES) {
+      throw new MemoryDeletionGuardError('Refusing to store memory because right-to-forget query guards cannot be safely evaluated for this large value');
+    }
+  }
+  return result;
 }
 
 function normalizeForMatch(value: string | undefined): string {
@@ -2672,10 +2686,8 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
   const queryGuardIndex = readQueryGuardIndex(db, 'working');
   if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
     const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
-    for (const value of values) {
-      if (hasDeletionGuard(db, 'working', 'query', value, encryption)) {
-        throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
-      }
+    if (hasAnyDeletionQueryGuard(db, 'working', values, encryption)) {
+      throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
     }
   }
 }
@@ -2699,10 +2711,8 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
   const queryGuardIndex = readQueryGuardIndex(db, 'episodic');
   if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
     const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
-    for (const value of values) {
-      if (hasDeletionGuard(db, 'episodic', 'query', value, encryption)) {
-        throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
-      }
+    if (hasAnyDeletionQueryGuard(db, 'episodic', values, encryption)) {
+      throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
     }
   }
 }
@@ -2766,6 +2776,22 @@ function hasDeletionGuard(db: Database.Database, scope: string, kind: string, va
   return hashes.some(hash => Boolean(stmt.get(`${scope}:${kind}`, hash)));
 }
 
+function hasAnyDeletionQueryGuard(db: Database.Database, scope: string, values: readonly string[], encryption?: MemoryCipher): boolean {
+  if (values.length === 0) return false;
+  const rows = db.prepare(`SELECT value_hash FROM memory_deletion_guards WHERE guard_kind = ?`).all(`${scope}:query`) as Array<{ value_hash: string }>;
+  if (rows.length === 0) return false;
+  const guardHashes = new Set(rows.map(row => row.value_hash));
+  const key = readDeletionHashKey(db, encryption);
+  for (const value of values) {
+    const normalized = normalizeForMatch(value);
+    if (key && guardHashes.has(`${normalized.length}:${createHmac('sha256', key).update(normalized).digest('hex')}`)) {
+      return true;
+    }
+    if (guardHashes.has(legacyQueryGuardHashValue(value))) return true;
+  }
+  return false;
+}
+
 function assertCheckpointNotDeletionGuarded(db: Database.Database, state: ExecutionState, encryption?: MemoryCipher): void {
   const context = state.context;
   const candidates: Array<[string, string | undefined]> = [
@@ -2786,10 +2812,8 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
   if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
     const text = valueToSearchText(state);
     const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
-    for (const value of values) {
-      if (hasDeletionGuard(db, 'checkpoint', 'query', value, encryption)) {
-        throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
-      }
+    if (hasAnyDeletionQueryGuard(db, 'checkpoint', values, encryption)) {
+      throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
     }
   }
 }

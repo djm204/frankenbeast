@@ -233,6 +233,7 @@ const RIGHT_TO_FORGET_SAFE_TYPES = new Set(['working', 'episodic', 'all']);
 
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
+  const isDirectRightToForget = toolName === 'fbeast_memory_right_to_forget';
   const auditedTool = toolName === 'fbeast_memory_right_to_forget'
     ? toolName
     : typeof sanitized['tool'] === 'string'
@@ -262,7 +263,9 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     sanitized['dryRun'] = '[right-to-forget-args-redacted]';
   }
   for (const key of Object.keys(sanitized)) {
-    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && key !== 'tool' && key !== 'action') {
+    const isWrapperToolKey = key === 'tool' && !isDirectRightToForget && sanitized[key] === 'fbeast_memory_right_to_forget';
+    const isPreflightActionKey = key === 'action' && !isDirectRightToForget && sanitized[key] === 'fbeast_memory_right_to_forget';
+    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && !isWrapperToolKey && !isPreflightActionKey) {
       sanitized[key] = '[right-to-forget-args-redacted]';
     }
   }
