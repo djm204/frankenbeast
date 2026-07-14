@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const SHA_RE = /^[0-9a-f]{40}$/iu;
@@ -63,14 +64,15 @@ export function buildRollbackPlan(options) {
     remote = 'origin',
     repo,
     pr,
-    evidenceDir = `rollback-evidence/${sanitizePathSegment(branch)}`,
+    evidenceDir: providedEvidenceDir,
     approvalCop = 'approval-cop run --',
     remoteHeadOid,
     lastGoodOid,
   } = options;
-
   assertRollbackBranch(branch);
   assertSafeRemote(remote);
+  const branchSlug = buildBranchEvidenceSlug(branch);
+  const evidenceDir = providedEvidenceDir ?? `rollback-evidence/${branchSlug}`;
   if (!lastGood || String(lastGood).startsWith('-')) {
     throw new Error('lastGood must be supplied as a ref or commit to roll back to');
   }
@@ -82,7 +84,7 @@ export function buildRollbackPlan(options) {
   }
 
   const branchRef = `refs/heads/${branch}`;
-  const evidenceRef = `refs/fbeast/rollback-evidence/${sanitizePathSegment(branch)}`;
+  const evidenceRef = `refs/fbeast/rollback-evidence/${branchSlug}`;
   const remoteHead = remoteHeadOid?.toLowerCase() ?? '<captured-remote-head-oid>';
   const goodOid = lastGoodOid?.toLowerCase() ?? '<resolved-last-good-oid>';
   const lastGoodEvidence = lastGoodOid?.toLowerCase() ?? lastGood;
@@ -104,8 +106,8 @@ export function buildRollbackPlan(options) {
     readOnlyCapture: [
       ['mkdir', '-p', evidenceDir],
       ['bash', '-lc', 'set -o pipefail; git ls-remote --heads "$1" "$2" | tee "$3"', '--', remote, branchRef, remoteHeadPath],
-      ['bash', '-lc', 'set -o pipefail; git rev-parse --verify "$1^{commit}" | tee "$2"', '--', lastGoodEvidence, lastGoodPath],
       ['git', 'fetch', '--force', '--no-tags', remote, `+${branchRef}:${evidenceRef}`],
+      ['bash', '-lc', 'set -o pipefail; git rev-parse --verify "$1^{commit}" | tee "$2"', '--', lastGoodEvidence, lastGoodPath],
       ['bash', '-lc', 'git merge-base --is-ancestor "$1" "$2" && git log --oneline --decorate --graph "$1..$2" > "$3"', '--', lastGoodEvidence, evidenceRef, commitsPath],
       ['bash', '-lc', 'gh pr view "$1" "${@:3}" --json number,title,state,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url > "$2"', '--', prSelector, prStatePath, ...repoArgs],
       ['node', '-e', 'require("node:fs").writeFileSync(process.argv[1], `## Worker branch rollback postmortem\n\n- Branch: ${process.argv[2]}\n- Remote head before rollback: ${process.argv[3]}\n- Selected last-good commit: ${process.argv[4]}\n- Evidence directory: ${process.argv[5]}\n- Approval-cop outcome/token: <fill before posting>\n- Verification: rerun ls-remote, pr view, checks, and Codex on the new head before merging.\n`)', rollbackCommentPath, branchRef, remoteHead, goodOid, evidenceDir],
@@ -125,7 +127,8 @@ export function buildRollbackPlan(options) {
     postRollbackVerification: [
       ['git', 'ls-remote', '--heads', remote, branchRef],
       ['gh', 'pr', 'view', prSelector, ...repoArgs, '--json', 'headRefOid,mergeStateStatus,statusCheckRollup,url'],
-      ['bash', '-lc', '! grep -q "<fill before posting>" "$1" && gh pr comment "$2" "${@:4}" --body-file "$1"', '--', rollbackCommentPath, prSelector, ...repoArgs],
+      ['gh', 'pr', 'checks', prSelector, ...repoArgs],
+      ['bash', '-lc', '! grep -Eq "<(fill before posting|captured-remote-head-oid|resolved-last-good-oid)>" "$1" && gh pr comment "$2" "${@:3}" --body-file "$1"', '--', rollbackCommentPath, prSelector, ...repoArgs],
     ],
     notes: [
       'This helper is dry-run only; it never executes push, force-push, or GitHub mutation commands.',
@@ -170,6 +173,12 @@ function splitCommandPrefix(command) {
 
 function sanitizePathSegment(value) {
   return String(value).replace(/[^A-Za-z0-9._-]+/gu, '-').replace(/^-+|-+$/gu, '') || 'branch';
+}
+
+function buildBranchEvidenceSlug(branch) {
+  const safeBranch = sanitizePathSegment(branch);
+  const branchHash = createHash('sha256').update(branch).digest('hex').slice(0, 8);
+  return `${safeBranch}-${branchHash}`;
 }
 
 function quoteCommand(args) {
