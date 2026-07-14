@@ -36,7 +36,7 @@ import { createSkillRoutes } from './routes/skill-routes.js';
 import { createDashboardRoutes, type DashboardRouteDeps } from './routes/dashboard-routes.js';
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
 import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analytics-routes.js';
-import { createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
+import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 
 export interface ChatAppOptions {
@@ -79,6 +79,7 @@ export interface ChatAppOptions {
   /** Rate/concurrency guard shared by chat REST, websocket, and comms mutations. */
   chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
+  chatMutationAdmission?: ChatMutationAdmission;
   /** Optional gateway compatibility proxy for /v1/beasts/* now owned by beasts-daemon. */
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
 }
@@ -152,6 +153,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const chatStreamTicketStore = opts.chatStreamTicketStore ?? (effectiveOperatorToken ? new SseConnectionTicketStore() : undefined);
   const chatRateLimiter = opts.chatRateLimiter
     ?? createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
+  const chatMutationAdmission = opts.chatMutationAdmission ?? new ChatMutationAdmission(chatRateLimiter);
 
   const app = new Hono();
   app.use('*', requestId);
@@ -247,6 +249,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     operatorToken: effectiveOperatorToken,
     streamTicketStore: chatStreamTicketStore,
     chatRateLimiter,
+    chatMutationAdmission,
     issueSocketTicket: (sessionId) => issueSessionToken({
       expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS,
       secret: sessionTokenSecret,

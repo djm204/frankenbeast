@@ -1099,7 +1099,7 @@ export function SecurityPanel({ mode }: { mode: 'simple' | 'advanced' }) {
                 value={security.maxTokenBudget ?? ''}
                 placeholder="Unlimited"
                 onChange={(e) => updateSecurity({
-                  maxTokenBudget: e.target.value ? parseInt(e.target.value) : undefined,
+                  maxTokenBudget: e.target.value ? parseInt(e.target.value, 10) : undefined,
                 })}
               />
             </label>

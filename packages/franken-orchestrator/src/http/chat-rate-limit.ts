@@ -45,3 +45,30 @@ export function chatClientKey(parts: {
 }): string {
   return `chat:${parts.action}:${chatRateLimitPrincipal(parts)}`;
 }
+
+export function chatMutationKey(sessionId: string): string {
+  return `session:${sessionId}`;
+}
+
+export class ChatMutationAdmission {
+  private readonly inFlightMutations = new Set<string>();
+
+  constructor(private readonly limiter: InMemoryRateLimiter) {}
+
+  takeRateLimit(key: string): boolean {
+    return this.limiter.take(key).allowed;
+  }
+
+  begin(sessionId: string): boolean {
+    const mutationKey = chatMutationKey(sessionId);
+    if (this.inFlightMutations.has(mutationKey)) {
+      return false;
+    }
+    this.inFlightMutations.add(mutationKey);
+    return true;
+  }
+
+  end(sessionId: string): void {
+    this.inFlightMutations.delete(chatMutationKey(sessionId));
+  }
+}
