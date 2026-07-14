@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.1](https://github.com/djm204/frankenbeast/compare/v0.48.0...v0.48.1) (2026-07-14)
+
+
+### Tests
+
+* **dr:** add corrupt state parser fixtures ([#2218](https://github.com/djm204/frankenbeast/issues/2218)) ([d168a48](https://github.com/djm204/frankenbeast/commit/d168a48fdddb7d838ea0c5ad97b201188efce2f1))
+
 ## [0.48.0](https://github.com/djm204/frankenbeast/compare/v0.47.1...v0.48.0) (2026-07-14)
 
 
