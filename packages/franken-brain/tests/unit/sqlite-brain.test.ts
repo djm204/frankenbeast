@@ -296,6 +296,43 @@ describe('SqliteBrain', () => {
 
       brain.rightToForget({ query: 'secret-token' });
       expect(() => brain.working.set('contact', 'mysecret-tokenvalue')).toThrow(/right-to-forget/);
+      expect(() => brain.working.set('long-contact', `${'x'.repeat(5000)}secret-token`)).toThrow(/right-to-forget/);
+    });
+
+    it('deletes episodic sourceScope markers with optional spacing', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'imported scoped record',
+        details: 'sourceScope: import-1',
+        createdAt: new Date().toISOString(),
+      });
+
+      const report = brain.rightToForget({ sourceScope: 'import-1' });
+
+      expect(report.deleted).toEqual({ working: 0, episodic: 1, derived: 1 });
+      expect(brain.episodic.recall('scoped record', 5)).toEqual([]);
+    });
+
+    it('expires forgotten rows from other live working-memory instances', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-expire-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+        stale.flush();
+
+        const forgetter = new SqliteBrain(dbPath);
+        forgetter.rightToForget({ query: 'alice@example.test' });
+
+        expect(stale.working.get('contact')).toBeUndefined();
+        expect(stale.working.snapshot()).not.toHaveProperty('contact');
+
+        forgetter.close();
+        stale.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('deletes and guards checkpoints for all-memory query deletions', () => {
