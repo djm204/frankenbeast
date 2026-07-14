@@ -630,6 +630,15 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('import-1', 'secret')).toThrow(/right-to-forget/);
     });
 
+    it('matches leading sourceScope key prefixes for deletion and reinsertion guards', () => {
+      brain.working.set('import-1:contact', 'secret');
+      const report = brain.rightToForget({ sourceScope: 'import-1' });
+
+      expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 0 });
+      expect(brain.working.has('import-1:contact')).toBe(false);
+      expect(() => brain.working.set('import-1:next-contact', 'secret')).toThrow(/right-to-forget/);
+    });
+
     it('matches exact multi-word metadata array items for deletion and guards', () => {
       brain.working.set('array-working', { value: 'contact', categories: ['personal info', 'billing'], sourceScope: ['customer import 1', 'batch-2'] });
       brain.episodic.record({
@@ -1125,6 +1134,19 @@ describe('SqliteBrain', () => {
       expect(hydrated.working.get('safe')).toBe('value');
       expect(() => hydrated.working.set('contact', 'alice@example.test')).toThrow(/right-to-forget/);
       hydrated.close();
+    });
+
+    it('hydrate() rejects keyed deletion guard snapshots without hash keys', () => {
+      const source = new SqliteBrain();
+      source.rightToForget({ query: 'alice@example.test' });
+      const snapshot = source.serialize();
+      source.close();
+      const strippedSnapshot: BrainSnapshot = {
+        ...snapshot,
+        deletionGuardHashKey: undefined,
+      };
+
+      expect(() => SqliteBrain.hydrate(strippedSnapshot)).toThrow(/hash key material/);
     });
 
     it('caps query guard replay scans instead of running unbounded per-candidate checks', () => {
@@ -2681,17 +2703,14 @@ describe('SqliteBrain', () => {
       }
     });
 
-    it('hydrate() accepts deletion guard snapshots without hash key material for legacy handoff compatibility', () => {
+    it('hydrate() rejects keyed deletion guard snapshots without hash key material', () => {
       const source = new SqliteBrain(':memory:');
       source.working.set('pii:email', 'alice@example.test');
       source.rightToForget({ query: 'alice@example.test' });
       const snapshot = source.serialize();
       delete snapshot.deletionGuardHashKey;
 
-      const hydrated = SqliteBrain.hydrate(snapshot);
-
-      expect(hydrated.serialize().deletionGuards).toEqual(snapshot.deletionGuards);
-      hydrated.close();
+      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/hash key material/);
       source.close();
     });
 
@@ -2759,6 +2778,7 @@ describe('SqliteBrain', () => {
         working: { 'pii:email': 'alice@example.test' },
         episodic: [],
         checkpoint: null,
+        metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
       };
 
       try {

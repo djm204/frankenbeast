@@ -1433,28 +1433,46 @@ export class SqliteBrain implements IBrain {
       ? { createKey: !dryRun, encryption: this.encryption }
       : { createKey: !dryRun });
     const memoryType = normalizedSelector.type ?? 'all';
-
-    const workingMatches = memoryType === 'episodic'
-      ? []
-      : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: !dryRun });
-    const persistedWorkingMatches = workingMatches.filter(match => match.source === 'persisted').map(match => match.key);
-    const runtimeWorkingMatches = workingMatches.filter(match => match.source === 'runtime').map(match => match.key);
-    const deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
-    for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: !dryRun })) {
-      deletedWorkingKeys.add(key);
-    }
-    const episodicMatches = memoryType === 'working'
-      ? []
-      : this.matchingEpisodicIds(normalizedSelector);
-    const checkpointMatches = memoryType === 'all'
-      ? this.matchingCheckpointIds(normalizedSelector)
-      : [];
-
-    let auditEventId: number | undefined;
+    let deletedWorkingKeys = new Set<string>();
+    let runtimeWorkingKeysToDelete = new Set<string>();
+    let episodicMatchCount = 0;
+    let checkpointMatchCount = 0;
     let finalizePersistedWorkingDelete: (() => void) | undefined;
 
-    if (!dryRun) {
+    if (dryRun) {
+      const workingMatches = memoryType === 'episodic'
+        ? []
+        : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: false });
+      deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
+      for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: false })) {
+        deletedWorkingKeys.add(key);
+      }
+      episodicMatchCount = memoryType === 'working'
+        ? 0
+        : this.matchingEpisodicIds(normalizedSelector).length;
+      checkpointMatchCount = memoryType === 'all'
+        ? this.matchingCheckpointIds(normalizedSelector).length
+        : 0;
+    } else {
       const tx = this.db.transaction(() => {
+        const workingMatches = memoryType === 'episodic'
+          ? []
+          : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true });
+        const persistedWorkingMatches = workingMatches.filter(match => match.source === 'persisted').map(match => match.key);
+        runtimeWorkingKeysToDelete = new Set(workingMatches.filter(match => match.source === 'runtime').map(match => match.key));
+        deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
+        for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: true })) {
+          deletedWorkingKeys.add(key);
+          runtimeWorkingKeysToDelete.add(key);
+        }
+        const episodicMatches = memoryType === 'working'
+          ? []
+          : this.matchingEpisodicIds(normalizedSelector);
+        const checkpointMatches = memoryType === 'all'
+          ? this.matchingCheckpointIds(normalizedSelector)
+          : [];
+        episodicMatchCount = episodicMatches.length;
+        checkpointMatchCount = checkpointMatches.length;
         finalizePersistedWorkingDelete = this.working.deletePersistedKeys(persistedWorkingMatches);
         if (episodicMatches.length > 0) {
           const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
@@ -1474,8 +1492,8 @@ export class SqliteBrain implements IBrain {
           selectorHash,
           deleted: {
             working: deletedWorkingKeys.size,
-            episodic: episodicMatches.length,
-            derived: episodicMatches.length + checkpointMatches.length,
+            episodic: episodicMatchCount,
+            derived: episodicMatchCount + checkpointMatchCount,
           },
         });
         const result = this.db.prepare(
@@ -1490,13 +1508,24 @@ export class SqliteBrain implements IBrain {
         );
         return Number(result.lastInsertRowid);
       });
-      auditEventId = tx() as number;
-      if (workingMatches.length > 0 || episodicMatches.length > 0 || checkpointMatches.length > 0) {
+      const auditEventId = tx() as number;
+      if (deletedWorkingKeys.size > 0 || episodicMatchCount > 0 || checkpointMatchCount > 0) {
         finalizePersistedWorkingDelete?.();
-        this.working.deleteRuntimeKeys(runtimeWorkingMatches);
+        this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
         purgeDeletedSqliteContent(this.db, this.dbPath);
       }
       SqliteBrain.expireLiveWorkingMatches(this.dbPath, normalizedSelector);
+      return {
+        selectorHash,
+        dryRun,
+        deleted: {
+          working: deletedWorkingKeys.size,
+          episodic: episodicMatchCount,
+          derived: episodicMatchCount + checkpointMatchCount,
+        },
+        remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: true }),
+        auditEventId,
+      };
     }
 
     return {
@@ -1504,11 +1533,10 @@ export class SqliteBrain implements IBrain {
       dryRun,
       deleted: {
         working: deletedWorkingKeys.size,
-        episodic: episodicMatches.length,
-        derived: episodicMatches.length + checkpointMatches.length,
+        episodic: episodicMatchCount,
+        derived: episodicMatchCount + checkpointMatchCount,
       },
-      remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: !dryRun }),
-      ...(auditEventId === undefined ? {} : { auditEventId }),
+      remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false }),
     };
   }
 
@@ -1621,6 +1649,9 @@ export class SqliteBrain implements IBrain {
         `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version) VALUES (?, ?, ?, ?, ?)`,
       );
       const snapshotDeletionGuards = snapshot.deletionGuards ?? [];
+      if (!snapshot.deletionGuardHashKey && snapshotDeletionGuards.some(guard => !isLegacyDeletionGuardSnapshot(guard))) {
+        throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with keyed deletion guards but no right-to-forget hash key material');
+      }
       if (snapshot.deletionGuardHashKey) {
         const existingDeletionHashKey = readDeletionHashKey(brain.db, brain.encryption);
         if (
@@ -2765,6 +2796,13 @@ function readDeletionGuardSnapshot(db: Database.Database): MemoryDeletionGuardSn
     createdAt: row.created_at,
     schemaVersion: row.schema_version,
   }));
+}
+
+function isLegacyDeletionGuardSnapshot(guard: MemoryDeletionGuardSnapshot): boolean {
+  // Pre-HMAC deletion guard snapshots did not carry key material. Current keyed
+  // snapshots use a 64-character HMAC selector hash and must be accompanied by
+  // deletionGuardHashKey, otherwise the imported guards cannot be enforced.
+  return !/^[a-f0-9]{64}$/i.test(guard.selectorHash);
 }
 
 function hasDeletionGuard(db: Database.Database, scope: string, kind: string, value: string, encryption?: MemoryCipher): boolean {
