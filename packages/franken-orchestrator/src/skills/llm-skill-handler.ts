@@ -181,11 +181,22 @@ export class LlmSkillHandler {
   }
 
   private renderCompactTruncatedMemoryContext(omitted: number): string {
-    return [
+    const prefix = [
       MEMORY_CONTEXT_HEADER,
       'UNTRUSTED DATA from retrieval omitted due to memory budget.',
-      this.truncationMarker(omitted),
     ].join('\n');
+    const marker = this.truncationMarker(omitted);
+    const candidate = [prefix, marker].join('\n');
+    if (candidate.length <= this.memoryContextBudgetChars) {
+      return candidate;
+    }
+
+    const markerBudget = this.memoryContextBudgetChars - prefix.length - 1;
+    if (markerBudget > 0) {
+      return [prefix, this.truncateLine(marker, markerBudget)].join('\n');
+    }
+
+    return this.truncateLine(prefix, this.memoryContextBudgetChars);
   }
 
   private fitTruncatedLine(

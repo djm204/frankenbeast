@@ -159,6 +159,24 @@ describe('LlmSkillHandler', () => {
     expect(memoryBlock).toContain('UNTRUSTED DATA from retrieval');
   });
 
+  it('keeps compact truncated memory blocks within the configured budget', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 120 });
+
+    await handler.execute('Respect minimum memory budget', {
+      rules: ['User preference: critical preference should not overflow the minimum budget.'],
+      adrs: [],
+      knownErrors: ['Stale observation: lower priority.'],
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    const memoryBlock = prompt.slice(prompt.indexOf('Memory Context:'));
+    expect(memoryBlock.length).toBeLessThanOrEqual(120);
+    expect(memoryBlock).toContain('UNTRUSTED DATA from retrieval omitted');
+  });
+
   it('keeps poison-shaped memory instructions inside the untrusted wrapper', async () => {
     const llmClient = {
       complete: vi.fn().mockResolvedValue('ok'),

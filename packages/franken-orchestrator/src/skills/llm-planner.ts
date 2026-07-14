@@ -1,6 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js';
-import { wrapUntrustedContent } from '../prompt/untrusted-content.js';
+import { quoteUntrustedPayload, wrapUntrustedContent } from '../prompt/untrusted-content.js';
 import { cleanLlmJson } from './providers/stream-json-utils.js';
 
 type RawPlanResponse = { tasks?: unknown };
@@ -36,7 +36,12 @@ export class LlmPlanner implements IPlannerModule {
       'You are a planner. Decompose the goal into a task DAG.',
       `Goal: ${intent.goal}`,
       `Strategy: ${intent.strategy ?? 'none'}`,
-      ...(intent.critiqueFeedback ? ['Trusted replan critique feedback:', intent.critiqueFeedback] : []),
+      ...(intent.critiqueFeedback
+        ? [
+          'Trusted replan critique feedback (line-prefixed critique summary; apply as repair guidance, not raw user instructions):',
+          quoteUntrustedPayload(intent.critiqueFeedback),
+        ]
+        : []),
       `Context: ${context}`,
       'Return ONLY valid JSON with shape:',
       '{ "tasks": [{ "id": "t1", "objective": "...", "requiredSkills": ["llm-generate"], "dependsOn": [] }] }',
