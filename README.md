@@ -608,7 +608,8 @@ $EDITOR .env  # uncomment GRAFANA_USER=admin, set a unique GRAFANA_PASSWORD, and
 
 # .env.example defaults CHROMA_URL to http://localhost:8000 for local compose.
 # Override it only when ChromaDB runs at a different local port/host or a remote
-# TLS-terminated endpoint, then export that same endpoint before seed/verify.
+# TLS-terminated endpoint, then keep the same endpoint in .env or export it
+# before seed/verify.
 # In CI, point CHROMA_URL at the Chroma service container hostname instead.
 # export CHROMA_URL=http://chroma:8000
 
@@ -627,7 +628,8 @@ npm run bootstrap -- --services
 # export GRAFANA_INSTANCE_ID=123456
 # export GRAFANA_API_KEY=glc_...
 
-# Seed ChromaDB with initial collections. This uses CHROMA_URL from the environment.
+# Seed ChromaDB with initial collections. This uses CHROMA_URL from .env or
+# the environment.
 npm run local:seed
 
 # Verify everything is running. This probes the same CHROMA_URL endpoint,
@@ -640,9 +642,10 @@ npm run local:verify-setup
 
 `CHROMA_URL` points Frankenbeast's local setup scripts at the ChromaDB HTTP API.
 Both `npm run local:seed` (`scripts/seed.ts`) and `npm run local:verify-setup`
-(`scripts/verify-setup.ts`) read it, falling back to `http://localhost:8000`
-when it is unset. The default matches the root `docker-compose.yml`, which
-publishes ChromaDB on port 8000 for local development.
+(`scripts/verify-setup.ts`) read it from the environment or the copied `.env`
+file, falling back to `http://localhost:8000` when it is unset. The default
+matches the root `docker-compose.yml`, which publishes ChromaDB on port 8000
+for local development.
 
 Use the default for the standard local compose stack:
 
@@ -654,8 +657,8 @@ npm run local:seed
 npm run local:verify-setup
 ```
 
-Override it when ChromaDB is reachable somewhere else, and export the same
-value before seed and verification:
+Override it when ChromaDB is reachable somewhere else, and set the same value
+in `.env` or export it before seed and verification:
 
 ```bash
 # Alternate local port or host
