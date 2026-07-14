@@ -330,6 +330,33 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('project:import-1', 'secret')).toThrow(/right-to-forget/);
     });
 
+
+    it('preserves exact working-memory keys with surrounding spaces', () => {
+      brain.working.set(' pii ', 'secret');
+      const report = brain.rightToForget({ key: ' pii ' });
+
+      expect(report.deleted.working).toBe(1);
+      expect(brain.working.has(' pii ')).toBe(false);
+      expect(() => brain.working.set(' pii ', 'secret')).toThrow(/right-to-forget/);
+    });
+
+    it('guards composite sourceScope key segments', () => {
+      brain.working.set('project:tenant:123:item', 'secret');
+      const report = brain.rightToForget({ sourceScope: 'tenant:123' });
+
+      expect(report.deleted.working).toBe(1);
+      expect(() => brain.working.set('project:tenant:123:new', 'secret')).toThrow(/right-to-forget/);
+    });
+
+    it('guards long query substrings without requiring exact whole-value matches', () => {
+      const longSecret = `tok_${'a'.repeat(140)}_tail`;
+      brain.working.set('long-token', `prefix ${longSecret} suffix`);
+      const report = brain.rightToForget({ query: longSecret });
+
+      expect(report.deleted.working).toBe(1);
+      expect(() => brain.working.set('long-token-2', `other ${longSecret} copy`)).toThrow(/right-to-forget/);
+    });
+
     it('requires at least one selector', () => {
       expect(() => brain.rightToForget({})).toThrow(/requires at least one/);
     });

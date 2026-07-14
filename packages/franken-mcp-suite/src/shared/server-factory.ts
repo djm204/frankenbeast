@@ -233,7 +233,11 @@ const RIGHT_TO_FORGET_SAFE_AUDIT_KEYS = new Set(['type', 'dryRun']);
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const auditedTool = typeof sanitized['tool'] === 'string' ? sanitized['tool'] : toolName;
-  if (auditedTool !== 'fbeast_memory_right_to_forget') return sanitized;
+  const auditedAction = typeof sanitized['action'] === 'string' ? sanitized['action'] : undefined;
+  if (auditedTool !== 'fbeast_memory_right_to_forget' && auditedAction !== 'fbeast_memory_right_to_forget') return sanitized;
+  if (auditedAction === 'fbeast_memory_right_to_forget' && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = '[right-to-forget-args-redacted]';
+  }
   if (toolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
     sanitized['args'] = '[right-to-forget-args-redacted]';
   }
@@ -247,7 +251,7 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
   }
   for (const key of Object.keys(sanitized)) {
-    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && key !== 'tool' && key !== 'args') {
+    if (!RIGHT_TO_FORGET_SELECTOR_KEYS.has(key) && !RIGHT_TO_FORGET_SAFE_AUDIT_KEYS.has(key) && key !== 'tool' && key !== 'args' && key !== 'action' && key !== 'context') {
       sanitized[key] = '[right-to-forget-args-redacted]';
     }
   }

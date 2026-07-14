@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.9](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.8...franken-mcp-suite-v0.2.9) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/orchestrator bumped from 0.43.0 to 0.43.1
+
 ## [0.2.8](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.7...franken-mcp-suite-v0.2.8) (2026-07-14)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.8](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.7...franken-web-v0.2.8) (2026-07-14)
+
+
+### Bug Fixes
+
+* **web:** preserve wizard launch selections ([#1478](https://github.com/djm204/frankenbeast/issues/1478)) ([002d39b](https://github.com/djm204/frankenbeast/commit/002d39ba6f27ae8a62ee72431aea5ab145be056c))
+
 ## [0.2.7](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.6...franken-web-v0.2.7) (2026-07-14)
 
 

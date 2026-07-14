@@ -408,6 +408,17 @@ describe('createMcpServer', () => {
       });
     });
 
+
+    it('redacts right-to-forget governor preflight context in the audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
+        action: 'fbeast_memory_right_to_forget',
+        context: '{"query":"alice@example.test"}',
+      })).toEqual({
+        action: 'fbeast_memory_right_to_forget',
+        context: '[right-to-forget-args-redacted]',
+      });
+    });
+
     it('audits failed handler results as ok=false with args', async () => {
       const recorded: Array<{ tool: string; ok: boolean; args?: unknown }> = [];
       const audit: AuditSink = { record: async (e) => { recorded.push(e); } };

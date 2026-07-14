@@ -1132,6 +1132,7 @@ export class SqliteBrain implements IBrain {
   readonly recovery: SqliteRecoveryMemory;
 
   private db: Database.Database;
+  private readonly dbPath: string;
   private readonly encryption: MemoryCipher | undefined;
 
   constructor(
@@ -1139,8 +1140,10 @@ export class SqliteBrain implements IBrain {
     workingMemoryLimits?: Partial<WorkingMemoryLimits>,
     options: SqliteBrainOptions = {},
   ) {
+    this.dbPath = dbPath;
     this.db = new Database(dbPath);
     this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('secure_delete = ON');
     assertSupportedMemorySchema(this.db);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
@@ -1332,6 +1335,7 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       auditEventId = tx() as number;
+      purgeDeletedSqliteContent(this.db, this.dbPath);
       finalizePersistedWorkingDelete?.();
       this.working.deleteRuntimeKeys(runtimeWorkingMatches);
     } else if (!dryRun) {
@@ -2032,6 +2036,13 @@ function sqliteStringLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function purgeDeletedSqliteContent(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  db.pragma('secure_delete = ON');
+  db.pragma('wal_checkpoint(TRUNCATE)');
+  db.exec('VACUUM');
+}
+
 type NormalizedRightToForgetSelector = Omit<RightToForgetSelector, 'type'> & { type?: RightToForgetMemoryType };
 
 function normalizeRightToForgetSelector(selector: RightToForgetSelector): NormalizedRightToForgetSelector {
@@ -2039,10 +2050,20 @@ function normalizeRightToForgetSelector(selector: RightToForgetSelector): Normal
   for (const field of ['key', 'category', 'sourceScope', 'query'] as const) {
     const value = selector[field];
     if (value !== undefined) {
-      if (typeof value !== 'string' || value.trim().length === 0) {
+      if (typeof value !== 'string') {
         throw new Error(`right-to-forget ${field} must be a non-empty string when provided`);
       }
-      normalized[field] = value.trim();
+      if (field === 'key') {
+        if (value.length === 0) {
+          throw new Error('right-to-forget key must be a non-empty string when provided');
+        }
+        normalized[field] = value;
+      } else {
+        if (value.trim().length === 0) {
+          throw new Error(`right-to-forget ${field} must be a non-empty string when provided`);
+        }
+        normalized[field] = value.trim();
+      }
     }
   }
   if (selector.type !== undefined) {
@@ -2063,7 +2084,7 @@ function normalizeRightToForgetSelector(selector: RightToForgetSelector): Normal
 function hashSelector(selector: NormalizedRightToForgetSelector): string {
   return createHash('sha256')
     .update(JSON.stringify({
-      key: normalizeForMatch(selector.key),
+      key: selector.key,
       category: normalizeForMatch(selector.category),
       sourceScope: normalizeForMatch(selector.sourceScope),
       query: normalizeForMatch(selector.query),
@@ -2085,18 +2106,20 @@ function guardTokens(value: string | undefined): string[] {
   ]));
 }
 
+const MAX_GUARD_MATCH_CANDIDATES = 4096;
+
 function guardMatchCandidates(value: string | undefined): string[] {
-  const tokens = guardTokens(value);
-  const substrings: string[] = [];
+  const tokens = guardTokens(value).sort((a, b) => a.length - b.length);
+  const values = new Set(tokens);
   for (const token of tokens) {
-    if (token.length > 128) continue;
-    for (let start = 0; start < token.length; start += 1) {
-      for (let end = start + 3; end <= token.length; end += 1) {
-        substrings.push(token.slice(start, end));
+    for (let start = 0; start < token.length && values.size < MAX_GUARD_MATCH_CANDIDATES; start += 1) {
+      const maxEnd = Math.min(token.length, start + 128);
+      for (let end = start + 3; end <= maxEnd && values.size < MAX_GUARD_MATCH_CANDIDATES; end += 1) {
+        values.add(token.slice(start, end));
       }
     }
   }
-  return Array.from(new Set([...tokens, ...substrings]));
+  return Array.from(values);
 }
 
 function normalizeForMatch(value: string | undefined): string {
@@ -2208,7 +2231,7 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
     ['query', selector.query],
   ] as const) {
     if (!value) continue;
-    const values = kind === 'query' ? guardTokens(value) : [value];
+    const values = kind === 'query' ? guardMatchCandidates(value) : [value];
     for (const guardValue of values) {
       for (const scope of scopes) {
         if (kind === 'key' && scope !== 'working') continue;
@@ -2218,10 +2241,21 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
   }
 }
 
+function keySegmentCandidates(key: string): string[] {
+  const segments = key.split(':').filter(Boolean);
+  const candidates = new Set(segments);
+  for (let start = 0; start < segments.length; start += 1) {
+    for (let end = start + 2; end <= segments.length; end += 1) {
+      candidates.add(segments.slice(start, end).join(':'));
+    }
+  }
+  return Array.from(candidates);
+}
+
 function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string): void {
   const parsed = safeJsonParse(serializedValue);
   const keyPrefix = key.includes(':') ? key.split(':', 1)[0] : undefined;
-  const keySegments = key.split(':').filter(Boolean);
+  const keySegments = keySegmentCandidates(key);
   const candidates: Array<[string, string | undefined]> = [
     ['key', key],
     ['category', objectMetadataString(parsed, ['category', 'categories', 'kind'])],
@@ -2232,7 +2266,8 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
   const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
   for (const [kind, value] of candidates) {
     if (!value) continue;
-    for (const candidate of value.split(/\s+/).filter(Boolean)) {
+    const guardValues = kind === 'key' ? [value] : value.split(/\s+/).filter(Boolean);
+    for (const candidate of guardValues) {
       if (stmt.get(`working:${kind}`, hashGuardValue(candidate, kind !== 'key'))) {
         throw new MemoryDeletionGuardError(`Refusing to store memory because it matches a prior right-to-forget ${kind} guard`);
       }
