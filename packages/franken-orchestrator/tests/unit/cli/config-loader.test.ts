@@ -165,6 +165,28 @@ describe('Config loader', () => {
     ).rejects.toThrow('Invalid boolean value for FRANKEN_ENABLE_TRACING');
   });
 
+  it.each(['status', 'logs', 'config'] as const)(
+    'does not reject invalid tracing env shadowed by verbose network %s',
+    async (networkAction) => {
+      process.env['FRANKEN_ENABLE_TRACING'] = 'disabled';
+
+      const config = await loadConfig(makeArgs({ subcommand: 'network', networkAction, verbose: true }));
+
+      expect(config.enableTracing).toBe(true);
+    },
+  );
+
+  it.each(['up', 'start', 'restart'] as const)(
+    'rejects invalid tracing env for verbose network %s because children inherit env',
+    async (networkAction) => {
+      process.env['FRANKEN_ENABLE_TRACING'] = 'disabled';
+
+      await expect(
+        loadConfig(makeArgs({ subcommand: 'network', networkAction, verbose: true })),
+      ).rejects.toThrow('Invalid boolean value for FRANKEN_ENABLE_TRACING');
+    },
+  );
+
   it('reads numeric env vars', async () => {
     process.env['FRANKEN_MIN_CRITIQUE_SCORE'] = '0.9';
     const config = await loadConfig(makeArgs());

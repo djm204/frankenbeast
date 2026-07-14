@@ -114,9 +114,13 @@ function stripRepositoryLocalCommandTrust(fileConfig: Partial<OrchestratorConfig
   return sanitized;
 }
 
+function isNetworkChildSpawningAction(args: CliArgs): boolean {
+  return args.subcommand === 'network' && ['up', 'start', 'restart'].includes(args.networkAction ?? 'help');
+}
+
 function getCliShadowedFields(args: CliArgs): Set<keyof OrchestratorConfig> {
   const fields = new Set<keyof OrchestratorConfig>();
-  if (args.verbose && args.subcommand !== 'network') fields.add('enableTracing');
+  if (args.verbose && !isNetworkChildSpawningAction(args)) fields.add('enableTracing');
   if (args.initBackend) fields.add('network');
   return fields;
 }
