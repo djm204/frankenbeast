@@ -493,7 +493,15 @@ export class CliLlmAdapter implements IAdapter {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        try {
+          child.kill('SIGTERM');
+        } catch (error) {
+          console.warn('[CliLlmAdapter] Failed to terminate timed-out CLI process', {
+            signal: 'SIGTERM',
+            pid: child.pid,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         hardKillTimer = setTimeout(() => {
           try {
             child.kill('SIGKILL');
