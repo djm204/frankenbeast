@@ -69,6 +69,37 @@ describe('PrCreator argv subprocess safety', () => {
     expect(create!.args).toContain('--body');
   });
 
+  it('keeps hostile PR titles and bodies as single gh argv values', async () => {
+    const { exec, calls } = makeExecRecorder('feature/security-boundary');
+    const hostileTitle = 'fix: close issue; touch /tmp/pwned';
+    const hostileBody = [
+      '## Summary',
+      '- preserve webhook URL https://hooks.example.test/a?token=$(cat ~/.ssh/id_rsa)',
+      '- keep body text with semicolons; pipes | and backticks `uname` literal',
+      '',
+      'Closes #1711',
+    ].join('\n');
+    const llm = { complete: async () => `TITLE: ${hostileTitle}\nBODY:\n${hostileBody}` };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin', disableBranding: true },
+      exec,
+      llm,
+    );
+
+    const result = await creator.create(makeResult(), undefined, { issueNumber: 1711 });
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const create = calls.find(c => c.command === 'gh' && c.args.includes('create'));
+    expect(create).toBeDefined();
+    const titleIndex = create!.args.indexOf('--title');
+    const bodyIndex = create!.args.indexOf('--body');
+    expect(create!.args[titleIndex + 1]).toBe(hostileTitle);
+    expect(create!.args[bodyIndex + 1]).toContain('$(cat ~/.ssh/id_rsa)');
+    expect(create!.args[bodyIndex + 1]).toContain('`uname` literal');
+    expect(create!.args[bodyIndex + 1]).toContain('Fixes #1711');
+    expect(create!.args.every(arg => arg !== 'touch' && arg !== '/tmp/pwned')).toBe(true);
+  });
+
   it('refuses to run any subprocess when the branch contains shell metacharacters', async () => {
     const { exec, calls } = makeExecRecorder('evil$(touch pwned)');
     const creator = new PrCreator(
