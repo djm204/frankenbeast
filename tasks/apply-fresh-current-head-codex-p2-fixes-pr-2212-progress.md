@@ -22,4 +22,13 @@
 - [x] Attempt fresh current-head Codex review.
   - [x] `codex-review-loop.sh trigger` refused because invocation cap is reached (26/5); no explicit approval to override.
   - [x] PR checks query reports no checks on the branch; PR merge state remains `DIRTY`.
+- [x] Resolve live PR merge conflict after `origin/main` advanced to `c410dd1a54bc1346aad48b47d6d30a56e9a0a499`.
+  - [x] Created isolated worktree `/home/pfkagent/.hermes/kanban/workspaces/t_4cc33ad8/pr2212`.
+  - [x] Merged `origin/main` into old PR head `cb37e38a78fbbb9fead15a07982bed79072ca769`.
+  - [x] Resolved the single conflict in `tasks/resolve-issues-shared-lessons.md` by keeping both the right-to-forget and observer-classification lessons.
+  - [x] `git diff --check` passed.
+  - [x] `npm run test --workspace @franken/brain -- tests/unit/sqlite-brain.test.ts` passed (141 tests).
+  - [x] `npm run test --workspace @franken/mcp-suite -- src/shared/server-factory.test.ts` passed (36 tests).
+  - [x] Built workspace dependencies, then reran `typecheck`, `build`, and `lint` for `@franken/brain` and `@franken/mcp-suite`; all passed (`@franken/mcp-suite` lint has existing warnings only, 0 errors).
+- [ ] Push resolved head to PR #2212 and verify live PR merge/check/Codex state.
 - [ ] Leave Kanban handoff and block/complete appropriately.

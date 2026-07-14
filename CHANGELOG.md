@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.51.0](https://github.com/djm204/frankenbeast/compare/v0.50.0...v0.51.0) (2026-07-14)
+
+
+### Features
+
+* **observer:** classify runtime artifacts ([#2235](https://github.com/djm204/frankenbeast/issues/2235)) ([ed2f803](https://github.com/djm204/frankenbeast/commit/ed2f803fec0aa19837c51a779c418135b947bed5))
+
+## [0.50.0](https://github.com/djm204/frankenbeast/compare/v0.49.0...v0.50.0) (2026-07-14)
+
+
+### Features
+
+* **availability:** add issue runner backpressure ([#2223](https://github.com/djm204/frankenbeast/issues/2223)) ([f61855e](https://github.com/djm204/frankenbeast/commit/f61855e62766f812c6f92e2814a4ec51f2b9f2b1))
+
+## [0.49.0](https://github.com/djm204/frankenbeast/compare/v0.48.2...v0.49.0) (2026-07-14)
+
+
+### Features
+
+* **dr:** add restore preview conflict detector ([#2231](https://github.com/djm204/frankenbeast/issues/2231)) ([0d6f9ed](https://github.com/djm204/frankenbeast/commit/0d6f9ed5c4de89b4e3c50bd3db73a34772d81836))
+
 ## [0.48.2](https://github.com/djm204/frankenbeast/compare/v0.48.1...v0.48.2) (2026-07-14)
 
 

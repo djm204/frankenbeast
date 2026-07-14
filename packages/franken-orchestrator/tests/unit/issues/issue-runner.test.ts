@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { IssueRunner } from '../../../src/issues/issue-runner.js';
 import type { IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
@@ -12,6 +14,7 @@ import type { ChunkDefinition } from '../../../src/cli/file-writer.js';
 // ── Mocks ──
 
 const mockLoopConstructions: Array<{ deps: BeastLoopDeps; config: unknown }> = [];
+const tempPlanFiles: string[] = [];
 
 const mockRun = vi.fn(async (deps?: BeastLoopDeps) => {
   // Default mock behavior: success with some tokens used
@@ -146,6 +149,24 @@ function mockCheckpoint(completed: Set<string> = new Set()): ICheckpointStore {
   };
 }
 
+function writePlanChunks(planName: string, chunkIds: readonly string[]): string {
+  const planDir = resolve(process.cwd(), '.fbeast', 'plans', planName);
+  mkdirSync(planDir, { recursive: true });
+
+  chunkIds.forEach((chunkId, index) => {
+    const chunkNumber = String(index + 1).padStart(2, '0');
+    const filePath = resolve(planDir, `${chunkNumber}_${chunkId}.md`);
+    writeFileSync(
+      filePath,
+      `# Chunk ${chunkNumber}: ${chunkId}\n\n## Objective\n\nResume ${chunkId}\n\n## Files\n\n- test.ts\n\n## Success Criteria\n\nDone\n\n## Verification Command\n\n\`\`\`bash\nnpm test\n\`\`\`\n`,
+      'utf8',
+    );
+    tempPlanFiles.push(filePath);
+  });
+
+  return planDir;
+}
+
 function makeConfig(overrides: Partial<IssueRunnerConfig> = {}): IssueRunnerConfig {
   return {
     issues: [],
@@ -193,6 +214,12 @@ describe('IssueRunner', () => {
       return result;
     });
     runner = new IssueRunner();
+  });
+
+  afterEach(() => {
+    for (const file of tempPlanFiles.splice(0)) {
+      rmSync(file, { force: true });
+    }
   });
 
   describe('run() basic contract', () => {
@@ -360,6 +387,404 @@ describe('IssueRunner', () => {
       expect(outcomes).toHaveLength(2);
       expect(outcomes[0]!.status).toBe('fixed');
       expect(outcomes[1]!.status).toBe('skipped');
+    });
+  });
+
+  describe('backpressure controls', () => {
+    it('skips fresh issue starts when active process capacity is exhausted and explains the throttle', async () => {
+      const logger = mockLogger();
+      const issues = [makeIssue({ number: 11 })];
+      const triages = [makeTriage(11)];
+      const graphBuilder = mockGraphBuilder();
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        logger,
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals: () => ({
+            activeProcesses: 1,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(mockRun).not.toHaveBeenCalled();
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          issueNumber: 11,
+          status: 'skipped',
+          error: expect.stringContaining('backpressure: active processes 1 reached limit 1'),
+        }),
+      ]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Backpressure paused issue #11'),
+        expect.objectContaining({
+          reasons: expect.arrayContaining(['active processes 1 reached limit 1']),
+        }),
+        'issues',
+      );
+    });
+
+    it('blocks fresh ticket creation while in-flight backlog remains above threshold', async () => {
+      const issues = [makeIssue({ number: 12 })];
+      const triages = [makeTriage(12)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        backpressure: {
+          thresholds: { maxInFlightBacklog: 1 },
+          signals: () => ({
+            activeProcesses: 0,
+            failedStarts: 0,
+            inFlightBacklog: 2,
+            oldestQueueAgeMs: 5_000,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(mockRun).not.toHaveBeenCalled();
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 12,
+        status: 'skipped',
+        error: expect.stringContaining('fresh ticket creation blocked while in-flight backlog 2 exceeds limit 1'),
+      });
+    });
+
+    it('recovers automatically when backpressure signals return to normal on the next issue', async () => {
+      const snapshots = [
+        { activeProcesses: 0, failedStarts: 3, inFlightBacklog: 0, oldestQueueAgeMs: 0 },
+        { activeProcesses: 0, failedStarts: 0, inFlightBacklog: 0, oldestQueueAgeMs: 0 },
+      ];
+      const issues = [makeIssue({ number: 13 }), makeIssue({ number: 14 })];
+      const triages = [makeTriage(13), makeTriage(14)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        backpressure: {
+          thresholds: { maxFailedStarts: 1 },
+          signals: () => snapshots.shift()!,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 13, status: 'skipped' });
+      expect(outcomes[0]!.error).toContain('failed starts 3 exceeds limit 1');
+      expect(outcomes[1]).toMatchObject({ issueNumber: 14, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
+    it('preserves checkpoint-complete outcomes before evaluating backpressure', async () => {
+      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(checkpoint);
+      vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({
+        planName: 'issue-15',
+        planDir: '.tmp/test-issue-15',
+        checkpointFile: '.tmp/test-issue-15.checkpoint',
+        logFile: '.tmp/test-issue-15.log',
+      });
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 15 })],
+        triageResults: [makeTriage(15)],
+        checkpoint,
+        issueRuntime,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('preserves shared-checkpoint completions before evaluating backpressure', async () => {
+      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 15 })],
+        triageResults: [makeTriage(15)],
+        checkpoint,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('recognizes issue-scoped shared-checkpoint progress from existing arbitrary chunk plans before pausing', async () => {
+      writePlanChunks('issue-9915', ['checkpointed-api', 'checkpointed-ui']);
+      const checkpoint = mockCheckpoint(new Set([
+        'issue:9915:impl:01_checkpointed-api',
+        'issue:9915:harden:01_checkpointed-api',
+        'impl:01_checkpointed-api:done',
+        'harden:01_checkpointed-api:done',
+      ]));
+      const graphBuilder = mockGraphBuilder();
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 9915 })],
+        triageResults: [makeTriage(9915, 'chunked')],
+        checkpoint,
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 9915, status: 'fixed' });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(signals).not.toHaveBeenCalled();
+      expect(checkpoint.write).not.toHaveBeenCalledWith('issue:9915:impl:01_checkpointed-api');
+      expect(checkpoint.write).not.toHaveBeenCalledWith('issue:9915:harden:01_checkpointed-api');
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
+    it('does not treat partial legacy shared checkpoint entries as progress for fresh starts', async () => {
+      writePlanChunks('issue-15', ['api', 'ui']);
+      const checkpoint = mockCheckpoint(new Set(['impl:01_api:done', 'harden:01_api:done']));
+      const graphBuilder = mockGraphBuilder();
+      const config = makeConfig({
+        issues: [makeIssue({ number: 15 })],
+        triageResults: [makeTriage(15)],
+        checkpoint,
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals: () => ({
+            activeProcesses: 1,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'skipped' });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('recognizes completed legacy shared-checkpoint chunk plans before pausing', async () => {
+      writePlanChunks('issue-9917', ['legacy-api']);
+      const checkpoint = mockCheckpoint(new Set([
+        'impl:01_legacy-api:done',
+        'harden:01_legacy-api:done',
+      ]));
+      const graphBuilder = mockGraphBuilder();
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 9917 })],
+        triageResults: [makeTriage(9917, 'chunked')],
+        checkpoint,
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 9917, status: 'fixed' });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('resumes issue-scoped shared-checkpoint commit recovery under backpressure', async () => {
+      writePlanChunks('issue-9916', ['checkpointed-api']);
+      const checkpoint = {
+        ...mockCheckpoint(new Set(['issue:9916:impl:01_checkpointed-api'])),
+        lastCommit: vi.fn((taskId: string, stage: string) =>
+          taskId === 'impl:01_checkpointed-api' && stage === 'impl' ? 'abc123' : undefined,
+        ),
+      };
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 9916 })],
+        triageResults: [makeTriage(9916, 'chunked')],
+        checkpoint,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 9916, status: 'fixed' });
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
+    it('stops iteration after queue depth backpressure to avoid priority inversion', async () => {
+      const graphBuilder = mockGraphBuilder();
+      const config = makeConfig({
+        issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
+        triageResults: [makeTriage(16), makeTriage(17)],
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxPendingIssueCount: 1 },
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          issueNumber: 16,
+          status: 'skipped',
+          error: expect.stringContaining('queue depth 2 exceeds limit 1'),
+        }),
+        expect.objectContaining({
+          issueNumber: 17,
+          status: 'skipped',
+          tokensUsed: 0,
+          error: expect.stringContaining('queue depth 2 exceeds limit 1'),
+        }),
+      ]);
+      expect(mockRun).not.toHaveBeenCalled();
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+    });
+
+    it('resumes partially checkpointed issueRuntime work after queue-depth stops fresh starts', async () => {
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockImplementation((issueNumber: number) =>
+        issueNumber === 17 ? mockCheckpoint(new Set(['impl:01_issue-17:done'])) : mockCheckpoint(),
+      );
+      vi.mocked(issueRuntime.artifactsForIssue).mockImplementation((issueNumber: number): IssueRuntimeArtifacts => ({
+        planName: `issue-${issueNumber}`,
+        planDir: `.tmp/test-issue-${issueNumber}`,
+        checkpointFile: `.tmp/test-issue-${issueNumber}.checkpoint`,
+        logFile: `.tmp/test-issue-${issueNumber}.log`,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
+        triageResults: [makeTriage(16), makeTriage(17)],
+        issueRuntime,
+        backpressure: {
+          thresholds: { maxPendingIssueCount: 1 },
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 16, status: 'skipped' });
+      expect(outcomes[1]).toMatchObject({ issueNumber: 17, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
+    it('contains issue-runtime checkpoint read failures to one issue outcome', async () => {
+      const throwingCheckpoint = {
+        ...mockCheckpoint(),
+        readAll: vi.fn(() => {
+          throw new Error('checkpoint unreadable');
+        }),
+      };
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockImplementation((issueNumber: number) =>
+        issueNumber === 21 ? throwingCheckpoint : mockCheckpoint(),
+      );
+      vi.mocked(issueRuntime.artifactsForIssue).mockImplementation((issueNumber: number): IssueRuntimeArtifacts => ({
+        planName: `issue-${issueNumber}`,
+        planDir: `.tmp/test-issue-${issueNumber}`,
+        checkpointFile: `.tmp/test-issue-${issueNumber}.checkpoint`,
+        logFile: `.tmp/test-issue-${issueNumber}.log`,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 21 }), makeIssue({ number: 22 })],
+        triageResults: [makeTriage(21), makeTriage(22)],
+        issueRuntime,
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 21,
+        status: 'failed',
+        error: 'checkpoint unreadable',
+      });
+      expect(outcomes[1]).toMatchObject({ issueNumber: 22, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
+    it('contains failing signal sources to a failed issue outcome', async () => {
+      const config = makeConfig({
+        issues: [makeIssue({ number: 18 }), makeIssue({ number: 19 })],
+        triageResults: [makeTriage(18), makeTriage(19)],
+        backpressure: {
+          signals: vi
+            .fn()
+            .mockRejectedValueOnce(new Error('metrics unavailable'))
+            .mockResolvedValue({
+              activeProcesses: 0,
+              failedStarts: 0,
+              inFlightBacklog: 0,
+              oldestQueueAgeMs: 0,
+            }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 18,
+        status: 'failed',
+        error: 'metrics unavailable',
+      });
+      expect(outcomes[1]).toMatchObject({ issueNumber: 19, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
     });
   });
 

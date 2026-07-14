@@ -48,6 +48,18 @@ export type {
   TaskOutcome,
 } from './types.js';
 
+// Issues
+export { IssueRunner, evaluateIssueBackpressure } from './issues/index.js';
+export type {
+  IssueRunnerConfig,
+  IssueBackpressureConfig,
+  IssueBackpressureDecision,
+  IssueBackpressureSignalContext,
+  IssueBackpressureSignals,
+  IssueBackpressureSignalSource,
+  IssueBackpressureThresholds,
+} from './issues/index.js';
+
 // Config
 export { OrchestratorConfigSchema, defaultConfig, parseOrchestratorConfig } from './config/orchestrator-config.js';
 export type { OrchestratorConfig, OrchestratorConfigParseOptions } from './config/orchestrator-config.js';

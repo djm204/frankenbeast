@@ -113,3 +113,7 @@ Prompts: `Approve all? [Y/n/edit]`
 ## Budget
 
 The `--budget` flag sets a USD spending cap across all issues (default: $10). When the budget is exhausted, remaining issues are skipped with status `skipped`. Budget tracking converts USD to tokens at 1 USD = 1,000,000 tokens.
+
+## Backpressure
+
+Issue execution has a programmatic backpressure policy for orchestrator/refill callers that need to pause fresh issue starts before they create an availability incident. Callers can pass capacity signals for active processes, failed starts, in-flight backlog, pending queue depth, oldest queue age, provider budget remaining, and system load. When a configured threshold is exceeded, the runner skips the fresh issue start with status `skipped`, logs `[issues] Backpressure paused issue #<n>`, and includes a `backpressure: ...` reason in the issue outcome so refill/liveness output explains why work was paused. Once later signals fall below threshold, the next eligible issue is allowed automatically; no manual reset is required.

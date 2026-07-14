@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.46.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.46.0...@franken/orchestrator-v0.46.1) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.18 to 0.8.0
+
+## [0.46.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.45.0...@franken/orchestrator-v0.46.0) (2026-07-14)
+
+
+### Features
+
+* **availability:** add issue runner backpressure ([#2223](https://github.com/djm204/frankenbeast/issues/2223)) ([f61855e](https://github.com/djm204/frankenbeast/commit/f61855e62766f812c6f92e2814a4ec51f2b9f2b1))
+
+## [0.45.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.44.2...@franken/orchestrator-v0.45.0) (2026-07-14)
+
+
+### Features
+
+* **dr:** add restore preview conflict detector ([#2231](https://github.com/djm204/frankenbeast/issues/2231)) ([0d6f9ed](https://github.com/djm204/frankenbeast/commit/0d6f9ed5c4de89b4e3c50bd3db73a34772d81836))
+
 ## [0.44.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.44.1...@franken/orchestrator-v0.44.2) (2026-07-14)
 
 

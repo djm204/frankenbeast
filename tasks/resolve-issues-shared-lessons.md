@@ -6,6 +6,10 @@
 - Deletion guards should cover source-scope key segments and replay/hydrate should install guards before restoring user data, while allowing the tool’s own right-to-forget audit event to round-trip without blocking hydration.
 - After Codex review on right-to-forget flows, regression-test every reinsertion path it names: stale multi-instance flush, learning-event writes, key-only query matches, episodic step text, substring query semantics, terminal source-scope key segments, checkpoint deletion/guards, and forged audit-event hydration.
 
+## 2026-07-14 — Observer classification verification
+- In fresh worktrees, build `@franken/types` before running `@franken/observer` typecheck/build because observer imports generated workspace package exports.
+- For runtime-artifact classification/security changes, cover runtime policy immutability, downgrade prevention, warning side effects before rejection, and docs examples that might overclaim redaction semantics before triggering Codex.
+
 ## 2026-07-14 — Restore preview conflict detector drift coverage
 - Restore preview comparisons must include record metadata (`state`, `updatedAt`) alongside content digests; digest-only equality can hide approval-state or task-timestamp drift that a restore would roll back.
 - Treat backup-only approval/session-token records as blocker-severity conflicts, not informational drift, because restoring them can reintroduce stale authorization state that live has already cleared.

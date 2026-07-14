@@ -1,13 +1,13 @@
 {
-  ".": "0.48.2",
+  ".": "0.51.0",
   "packages/franken-brain": "0.8.1",
   "packages/franken-critique": "0.8.1",
   "packages/franken-governor": "0.6.1",
-  "packages/franken-observer": "0.7.18",
-  "packages/franken-orchestrator": "0.44.2",
+  "packages/franken-observer": "0.8.0",
+  "packages/franken-orchestrator": "0.46.1",
   "packages/franken-planner": "0.4.16",
   "packages/franken-types": "0.10.1",
-  "packages/franken-mcp-suite": "0.2.12",
-  "packages/live-bench": "0.2.9",
+  "packages/franken-mcp-suite": "0.2.15",
+  "packages/live-bench": "0.2.10",
   "packages/franken-web": "0.2.9"
 }
