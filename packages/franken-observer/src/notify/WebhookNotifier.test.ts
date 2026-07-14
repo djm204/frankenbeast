@@ -7,9 +7,20 @@ import { LoopDetector } from '../incident/LoopDetector.js'
 describe('WebhookNotifier', () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
-  const drainAsync = () => Promise.resolve()
+  const drainAlreadyQueuedMicrotasks = async () => {
+    // CircuitBreaker emits limit events synchronously. The below-limit negative
+    // path should only need to drain promise continuations already queued by
+    // the test harness; do not use a zero-delay macrotask sleep.
+    await Promise.resolve()
+  }
   const webhookUrl = 'https://hooks.example.com/signal'
   const allowedTargetOrigins = ['https://hooks.example.com']
+  const responseBody = (value: string) => new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(value))
+      controller.close()
+    },
+  })
 
   const createNotifier = (options: Partial<ConstructorParameters<typeof WebhookNotifier>[0]> = {}) =>
     new WebhookNotifier({
@@ -96,6 +107,218 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send({ type: 'test' })).rejects.toThrow('Forbidden')
     })
 
+    it('error message includes webhook endpoint and response body', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        body: responseBody('{"error":"bad payload"}'),
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 422 Unprocessable Entity for https://hooks.example.com/[REDACTED]: {"error":"bad payload"}',
+      )
+    })
+
+    it('redacts secret webhook URL components from HTTP error messages', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 410,
+        statusText: 'Gone',
+        body: responseBody('disabled at https://hooks.example.com/services/aaa.bbb.cccccccccccccccccccccccccccccc?debug=true'),
+      })
+      const notifier = createNotifier({
+        url: 'https://hooks.example.com/services/aaa.bbb.cccccccccccccccccccccccccccccc?debug=true',
+        allowedTargetOrigins,
+      })
+
+      await notifier.send({ type: 'test' }).catch((error: Error) => {
+        expect(error.message).toContain('Webhook delivery failed: 410 Gone for https://hooks.example.com/')
+        expect(error.message).toContain('disabled at https://hooks.example.com/')
+        expect(error.message).not.toContain('aaa.bbb')
+        expect(error.message).not.toContain('debug=true')
+      })
+    })
+
+    it('defers reading retryable response bodies until the final attempt', async () => {
+      const text = vi.fn().mockResolvedValue('{"error":"still down"}')
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        body: responseBody('{"error":"still down"}'),
+        text,
+      })
+      const notifier = createNotifier({
+        retry: { maxRetries: 1, jitter: false },
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 503 Service Unavailable for https://hooks.example.com/[REDACTED]: {"error":"still down"}',
+      )
+      expect(text).not.toHaveBeenCalled()
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('truncates oversized HTTP error bodies', async () => {
+      const text = vi.fn().mockResolvedValue('x'.repeat(3000))
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('x'.repeat(3000)))
+          controller.close()
+        },
+      })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+        text,
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        `Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]: ${'x'.repeat(2048)}`,
+      )
+      expect(text).not.toHaveBeenCalled()
+    })
+
+    it('redacts echoed authentication headers from HTTP error bodies', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        body: responseBody('Authorization: Bearer *** X-Api-Key=other-secret'),
+      })
+      const notifier = createNotifier()
+      await notifier.send({ type: 'test' }).catch((error: Error) => {
+        expect(error.message).toContain(
+          'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: Authorization:',
+        )
+        expect(error.message).not.toContain('other-secret')
+      })
+    })
+
+    it('redacts quoted echoed authentication headers from HTTP error bodies', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        body: responseBody('{"Authorization":"Bearer secret-token","x-api-key":"other-secret"}'),
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
+      )
+    })
+
+    it('redacts array-valued echoed authentication headers from HTTP error bodies', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        body: responseBody('{"Authorization":["Bearer secret-token"],"x-api-key":["other-secret"]}'),
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: {"Authorization":["[REDACTED]"],"x-api-key":["[REDACTED]"]}',
+      )
+    })
+
+    it('skips body context instead of buffering non-Web response streams', async () => {
+      const text = vi.fn().mockResolvedValue('body from text fallback')
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: { pipe: vi.fn() },
+        text,
+      })
+      const notifier = createNotifier()
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]',
+      )
+      expect(text).not.toHaveBeenCalled()
+    })
+
+    it('redacts truncated quoted authentication fields from streamed error bodies', async () => {
+      const secret = 's'.repeat(3000)
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        body: responseBody(`{"Authorization":"Bearer ${secret}`),
+      })
+      const notifier = createNotifier()
+
+      await notifier.send({ type: 'test' }).catch((error: Error) => {
+        expect(error.message).toContain(
+          'Webhook delivery failed: 401 Unauthorized for https://hooks.example.com/[REDACTED]: {"Authorization":"[REDACTED]"',
+        )
+        expect(error.message).not.toContain(secret.slice(0, 32))
+      })
+    })
+
+    it('redacts short webhook path secrets from error endpoints', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 410,
+        statusText: 'Gone',
+        body: responseBody('gone'),
+      })
+      const notifier = createNotifier({
+        url: 'https://hooks.example.com/h/abc123',
+        allowedTargetOrigins,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 410 Gone for https://hooks.example.com/[REDACTED]/[REDACTED]: gone',
+      )
+    })
+
+    it('stops waiting on stalled error-body streams', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('partial diagnostic'))
+        },
+        cancel: vi.fn(),
+      })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+      })
+      const notifier = createNotifier()
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]: partial diagnostic',
+      )
+    })
+
+    it('stops waiting on slow-drip error-body streams after the overall body deadline', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          await new Promise(resolve => setTimeout(resolve, 25))
+          controller.enqueue(new TextEncoder().encode('x'))
+        },
+        cancel: vi.fn(),
+      })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+      })
+      const notifier = createNotifier()
+      const startedAt = Date.now()
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://hooks.example.com/[REDACTED]:',
+      )
+      expect(Date.now() - startedAt).toBeLessThan(750)
+    })
+
     it('rethrows if fetch itself rejects (network error)', async () => {
       mockFetch.mockRejectedValue(new Error('ECONNREFUSED'))
       const notifier = createNotifier()
@@ -176,7 +399,7 @@ describe('WebhookNotifier', () => {
         void notifier.send({ type: 'circuit-breaker', ...result })
       })
       breaker.check(1.0) // below limit
-      await drainAsync()
+      await drainAlreadyQueuedMicrotasks()
       expect(mockFetch).not.toHaveBeenCalled()
     })
   })
@@ -368,6 +591,39 @@ describe('WebhookNotifier', () => {
           }),
       ).toThrow('retry.maxRetries must be a non-negative integer')
       expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects invalid retry delay bounds during retry configuration validation', () => {
+      const invalidOptions = [
+        { retry: { maxRetries: 1, baseDelayMs: -1 } },
+        { retry: { maxRetries: 1, baseDelayMs: Number.NaN } },
+        { retry: { maxRetries: 1, baseDelayMs: Number.POSITIVE_INFINITY } },
+        { retry: { maxRetries: 1, maxDelayMs: -1 } },
+        { retry: { maxRetries: 1, maxDelayMs: Number.NaN } },
+        { retry: { maxRetries: 1, maxDelayMs: Number.POSITIVE_INFINITY } },
+      ]
+
+      for (const options of invalidOptions) {
+        expect(() => createNotifier(options)).toThrow(/retry\.(baseDelayMs|maxDelayMs) must be a finite non-negative number/)
+      }
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('passes only finite non-negative bounded delays to sleepFn', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const notifier = createNotifier({
+        retry: { maxRetries: 3, baseDelayMs: 100, maxDelayMs: 150, jitter: true },
+        sleep: sleepFn,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow()
+
+      for (const [delay] of sleepFn.mock.calls) {
+        expect(Number.isFinite(delay)).toBe(true)
+        expect(delay).toBeGreaterThanOrEqual(0)
+        expect(delay).toBeLessThanOrEqual(150)
+      }
     })
 
     it('adds jitter (delay is not exactly baseDelayMs * 2^i)', async () => {

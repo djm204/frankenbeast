@@ -5,6 +5,7 @@ import type {
   ChannelType
 } from '../../core/types.js';
 import { isoNow } from '@franken/types';
+import { formatHttpErrorMessage } from '../http-error-context.js';
 
 export interface DiscordAdapterOptions {
   token: string;
@@ -52,8 +53,7 @@ export class DiscordAdapter implements ChannelAdapter {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Discord API error: ${response.status} ${error}`);
+      throw new Error(await formatHttpErrorMessage('Discord API error', response, targetUrl));
     }
   }
 

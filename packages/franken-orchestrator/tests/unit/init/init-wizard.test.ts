@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 import type { ISecretStore, SecretStoreDetection } from '../../../src/network/secret-store.js';
 import { runInitWizard, type InitWizardScope } from '../../../src/init/init-wizard.js';
@@ -71,6 +71,19 @@ describe('runInitWizard – backward compatibility (no secretStore)', () => {
     expect(result.state).toBeDefined();
     // No secret-backend-selection in completedSteps (no secretStore)
     expect(result.state.completedSteps).not.toContain('secret-backend-selection');
+  });
+
+  it('re-prompts when the security mode answer is invalid before continuing', async () => {
+    const io = makeIO(['y', 'y', 'n', 'claude', 'high', 'insecure']);
+    const state = createEmptyInitState('/tmp/test-config.json');
+
+    const result = await runInitWizard({ io, initialState: state });
+
+    expect(result.config.network.mode).toBe('insecure');
+    expect(result.state.securityMode).toBe('insecure');
+    expect(io.display).toHaveBeenCalledWith('Invalid security mode. Enter "secure" or "insecure".');
+    expect(io.ask).toHaveBeenNthCalledWith(5, 'Security mode [secure/insecure] (default: secure)');
+    expect(io.ask).toHaveBeenNthCalledWith(6, 'Security mode [secure/insecure] (default: secure)');
   });
 });
 

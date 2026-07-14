@@ -469,6 +469,59 @@ const gateway = new ApprovalGateway({
 
 When `requireSignedApprovals` is `true`, the gateway throws `SignatureVerificationError` if a response has an invalid or missing signature.
 
+### Signed Approval Policy Manifests
+
+Operators can ship approval policy order/config as a signed manifest instead of constructing evaluator arrays inline. Manifest loading fails closed by default: unsigned manifests are rejected unless the caller sets `allowUnsignedPolicyManifest: true`, and signed manifests require a configured `SignatureVerifier`. Secrets are never included in manifest payloads, errors, or audit output.
+
+```typescript
+import {
+  createGovernor,
+  formatApprovalPolicyManifestPayload,
+  SignatureVerifier,
+  type ApprovalPolicyManifest,
+} from '@franken/governor';
+
+const verifier = new SignatureVerifier(process.env.FRANKEN_GOVERNOR_POLICY_SECRET!);
+const unsigned = {
+  schemaVersion: 1,
+  manifestId: 'approval-policy/production',
+  issuedAt: '2026-07-13T00:00:00.000Z',
+  policies: [
+    { triggerId: 'skill' },
+    { triggerId: 'budget' },
+    { triggerId: 'confidence', config: { threshold: 0.8 } },
+    { triggerId: 'ambiguity' },
+  ],
+} satisfies Omit<ApprovalPolicyManifest, 'signature'>;
+
+const signatureMetadata = {
+  algorithm: 'hmac-sha256' as const,
+  keyId: 'ops-2026-07',
+  value: '',
+};
+const manifest: ApprovalPolicyManifest = {
+  ...unsigned,
+  signature: {
+    ...signatureMetadata,
+    value: verifier.sign(formatApprovalPolicyManifestPayload({
+      ...unsigned,
+      signature: signatureMetadata,
+    })),
+  },
+};
+
+const governor = createGovernor({
+  readline: readlineAdapter,
+  memoryPort,
+  approvalPolicyManifest: manifest,
+  policyManifestSignatureVerifier: verifier,
+  skillMetadata,
+  budgetState,
+});
+```
+
+The canonical policy-manifest payload is stable JSON with sorted object keys and the signature `value` removed (signature `algorithm` and `keyId` metadata remain authenticated). Policy array order is preserved because evaluator order can be security-significant. Supported built-in policy IDs are `skill`, `budget`, `confidence`, and `ambiguity`; only `confidence` accepts `config.threshold` (0–1). Use `allowUnsignedPolicyManifest` only for local fixtures or one-off operator overrides, not production.
+
 ### Session Tokens
 
 On APPROVE, the gateway can issue a scoped, time-limited `SessionToken`. A `GovernorCritiqueAdapter` that is wired with the same `SessionTokenStore` accepts `rationale.approvalSessionTokenId` for later risky actions, but only while the token is unexpired and scoped to the selected tool (or task when no tool is selected). Expired, missing, or wrong-scope tokens fail closed to a fresh operator prompt without printing token values:

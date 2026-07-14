@@ -12,6 +12,7 @@ The beast harness is split across two CLIs. This guide covers both.
 ## Prerequisites
 
 - Node.js `>=22.13.0 <23 || >=24.0.0 <26`
+- Corepack-enabled npm matching the root `packageManager` pin (`npm@11.5.1`)
 - For API-backed `frankenbeast` provider registry runs, an API key for at least one supported provider: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or either `GOOGLE_API_KEY` / `GEMINI_API_KEY` for `gemini-api`
 - For `fbeast mcp beast` preset activation, one of the supported Beast provider paths: `anthropic-api` with `ANTHROPIC_API_KEY`, or an installed/logged-in `claude` / `codex` CLI for `claude-cli` / `codex-cli`
 
@@ -196,43 +197,104 @@ A franken-governor pre-deploy hook should be integrated at the dispatch/API laye
 
 ---
 
-## 6. Supported CLI flags
+## 6. Supported flags
 
-The parser accepts global flags before or after a subcommand. Use `frankenbeast --help` for the live help text; the reference below calls out the flags that are easy to miss.
+The orchestrator CLI accepts global flags before or after the subcommand unless a command note below narrows the scope. Prefer the long `--flag value` form in scripts; `--flag=value` is also accepted for string options.
 
-### Core run and planning flags
+### Core run/config flags
 
-```bash
---base-dir /absolute/project     # Project root for CLI-managed paths (default: cwd)
---base-branch main               # Git base branch for PR creation (default: main)
---budget 5                       # Spend limit in USD (default: 10)
---provider claude                # Primary CLI provider (default: claude)
---providers claude,gemini,aider  # Fallback chain tried on provider failures
---trust-provider-command-overrides
-                                  # Explicitly approve trusted repo-configured provider command overrides
---design-doc path/to/design.md   # Design doc for plan/full-flow starts
---plan-dir .fbeast/plans/x/chunks
-                                  # Chunk directory for run starts
---plan-name plan-name            # Explicit plan name instead of date-derived default
---output-dir .fbeast/out         # Output directory for generated artifacts where supported
---goal "Build feature"           # Seed goal for interview-style runs
---output design.md               # Interview output path
---config .fbeast/config.json     # Explicit JSON config file
---no-pr                          # Skip PR creation
---verbose                        # Debug logs + trace viewer
---reset                          # Clear checkpoint and traces
---resume                         # Preserve checkpoint/chunk-session state and resume from the last run
---cleanup                        # Remove build logs, checkpoints, traces without following symlinked entries
---help                           # Show the live CLI help
-```
+| Flag | Applies to | Behavior |
+|------|------------|----------|
+| `--base-dir <path>` | all orchestrator commands | Project root for CLI-managed files and services; defaults to the current working directory. |
+| `--base-branch <name>` | Beast issue/PR flows | Git base branch for PR creation; defaults to `main`. |
+| `--budget <usd>` | Beast run/session flows | Spend limit in USD; defaults to `10`. |
+| `--provider <name>` | Beast run/session flows | Primary CLI provider name; defaults to `claude`. Accepted CLI selector values are `claude`, `codex`, `gemini`, and `aider`; provider types such as `anthropic-api`, `openai-api`, and `gemini-api` are config surfaces, not direct `--provider` values for run/chat paths. |
+| `--providers <list>` | Beast run/session flows | Comma-separated fallback chain, for example `--providers claude,codex,gemini`. Values are trimmed and lowercased. |
+| `--trust-provider-command-overrides` | provider config loading | Explicitly permits trusted repo-configured provider command overrides. Leave unset for the safer default. |
+| `--config <path>` | commands that load CLI config | JSON config file override. Explicit config paths fail closed when missing or invalid. |
+| `--no-pr` | run/issues PR flows | Skip automated PR creation. |
+| `--verbose` | all orchestrator commands | Enable debug logging and trace-viewer output. |
+| `--help` | all orchestrator commands | Show the current CLI help surface. |
+
+### Phase-selection and run-state flags
+
+| Flag | Applies to | Behavior |
+|------|------------|----------|
+| `--design-doc <path>` | `plan`, full flow | Start from an existing design document instead of the interview output. |
+| `--plan-dir <path>` | `run`, full flow | Execute chunks from an existing chunk-plan directory. |
+| `--plan-name <name>` | `plan`, full flow | Override the generated plan name. |
+| `--output-dir <path>` | full flow and artifact-producing steps | Directory for generated artifacts where supported. |
+| `--goal <text>` | `interview`, full flow | Seed the interview-style flow with an initial objective. |
+| `--output <path>` | `interview` | Write the generated design document to an explicit path. |
+| `--reset` | `run` | Clear checkpoint and trace state before executing. |
+| `--resume` | `run` | Preserve checkpoint/chunk-session state and resume from the last run. |
+| `--cleanup` | `run` | Remove build logs, checkpoints, and traces without following symlinked cleanup entries. |
 
 `--provider` selects the initial provider, while `--providers` supplies the comma-separated fallback order used by the managed provider flow. `--trust-provider-command-overrides` is intentionally explicit because it allows trusted repository config to override provider commands.
 
 Cold `frankenbeast run` starts from a clean execution checkpoint by default. Use `--resume` only when continuing an interrupted run; use `--reset` when you also want to clear memory, traces, and other build artifacts. `--cleanup` refuses to clean a symlinked `.build/` root or symlinked `.fbeast` cleanup component by default and unlinks symlinks found inside `.build/` instead of traversing them, so cleanup cannot delete files outside the project through a symlink. Symlinked workspace parents are allowed; replace symlinked `.fbeast`/`.build` cleanup path components with real disposable directories before cleaning.
 
+### Init flags
+
+| Flag | Applies to | Behavior |
+|------|------------|----------|
+| `--verify` | `init` | Verify init config/readiness without running the full wizard. |
+| `--repair` | `init` | Re-run only missing or failed setup steps. |
+| `--non-interactive` | `init` | Disable prompts for headless setup. Required HITL approvals still fail closed unless explicitly allowed by environment. |
+| `--backend <name>` | `init` | Secret backend: `local-encrypted`, `os-keychain`, `1password`, or `bitwarden`. |
+
+### Chat and Beast service flags
+
+| Flag | Applies to | Behavior |
+|------|------------|----------|
+| `--host <host>` | `chat-server`, `beasts-daemon` | Bind host; defaults to `127.0.0.1`. |
+| `--port <port>` | `chat-server`, `beasts-daemon` | Bind port; defaults to `3737` for `chat-server` and `4050` for `beasts-daemon`. |
+| `--allow-origin <url>` | `chat-server` | Allow one additional websocket Origin beyond configured dashboard origins. The standalone `beasts-daemon` command currently forwards only host and port. |
+
+### Beast dispatch/module flags
+
+These flags are for `frankenbeast beasts create|spawn|status|logs` unless otherwise noted.
+
+| Flag | Applies to | Behavior |
+|------|------------|----------|
+| `--mode <mode>` | `beasts create`, `beasts spawn`, `beasts status`, `beasts logs` | Beast execution mode: `process` or `container`. |
+| `--no-firewall` | `beasts create`, `beasts spawn` | Disable the firewall module for the spawned Beast config. |
+| `--no-skills` | `beasts create`, `beasts spawn` | Disable skills module wiring. |
+| `--no-memory` | `beasts create`, `beasts spawn` | Disable memory module wiring. |
+| `--no-planner` | `beasts create`, `beasts spawn` | Disable planner module wiring. |
+| `--no-critique` | `beasts create`, `beasts spawn` | Disable critique module wiring. |
+| `--no-governor` | `beasts create`, `beasts spawn` | Disable governor module wiring. |
+| `--no-heartbeat` | `beasts create`, `beasts spawn` | Disable heartbeat module wiring. |
+
+### Issues mode flags
+
+| Flag | Applies to | Behavior |
+|------|------------|----------|
+| `--label <labels>` | `issues` | Comma-separated label filter, for example `critical,high`. |
+| `--milestone <name>` | `issues` | Filter by milestone. |
+| `--search <query>` | `issues` | Search issues by text. |
+| `--assignee <user>` | `issues` | Filter by assignee. |
+| `--limit <n>` | `issues` | Maximum issues to fetch; defaults to `30`. |
+| `--repo <owner/repo>` | `issues` | Explicit target repository. Cannot be combined with `--target-upstream`. |
+| `--target-upstream` | `issues` | Derive the canonical issue/PR repo from the fork upstream remote. |
+| `--dry-run` | `issues` | Preview without executing fixes. |
+
+### Network and MCP shim flags
+
+| Flag | Applies to | Behavior |
+|------|------------|----------|
+| `-d`, `--detached` | `network up` | Start configured network services in daemon mode. |
+| `--set <path=value>` | `network config` | Set an operator config value; may be repeated. |
+| `--client=<claude|gemini|codex>` | `fbeast mcp init`, `fbeast mcp uninstall` | Target a specific MCP client config. |
+| `--pick[=<servers>]` | `fbeast mcp init` | Choose which MCP servers to install. |
+| `--mode=standard|proxy` | `fbeast mcp init` | Register individual MCP servers or the lower-context proxy server. |
+| `--hooks` | `fbeast mcp init` | Install pre/post-tool hook scripts. |
+| `--purge` | `fbeast mcp uninstall` | Remove stored fbeast data as well as MCP config. |
+| `--provider=<anthropic-api|codex-cli|claude-cli>` | `fbeast mcp beast` | Activate the fbeast Beast-mode preset provider. |
+
 Verbose and build-log output redacts secret-like environment/config keys such as `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, and `*_API_KEY` by default. The logger exposes an explicit local diagnostic override (`redactSecrets: false`) for trusted development-only callers, but normal CLI/runtime paths keep redaction enabled so environment dumps do not leak provider tokens or credentials. Redaction helpers also expose provenance-aware variants (`redactSensitiveTextWithProvenance` and `redactLogDataWithProvenance`) for audit paths that need to explain why a value was replaced; provenance records include only the matched key, source, and path, never the secret value itself.
 
-### Init flags
+### Init flag examples
 
 ```bash
 frankenbeast init --verify                       # Verify config/readiness without changing setup
@@ -241,7 +303,7 @@ frankenbeast init --non-interactive              # Disable interactive prompts
 frankenbeast init --backend os-keychain          # Secret backend: local-encrypted, os-keychain, 1password, bitwarden
 ```
 
-### Chat and daemon flags
+### Chat and daemon flag examples
 
 ```bash
 frankenbeast chat-server --host 127.0.0.1 --port 3737
@@ -251,7 +313,7 @@ frankenbeast beasts-daemon --host 127.0.0.1 --port 4050
 
 `chat-server` defaults to port `3737`; `beasts-daemon` defaults to port `4050`. Both default to `127.0.0.1`. Use `--allow-origin` to allow one additional websocket Origin for local browser or preview tooling.
 
-### Beast dispatch flags
+### Beast dispatch flag examples
 
 ```bash
 frankenbeast beasts spawn martin-loop --mode process
@@ -273,7 +335,7 @@ Module toggles apply to `beasts create` / `beasts spawn` run configs:
 --no-heartbeat   # Disable heartbeat module
 ```
 
-### Issues flags
+### Issues flag examples
 
 ```bash
 frankenbeast issues --repo owner/repo            # Explicit GitHub repo

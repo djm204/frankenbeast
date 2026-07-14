@@ -20,7 +20,20 @@ packages/
 └── live-bench/              # @franken/live-bench: Live CLI benchmark tooling
 ```
 
-Historical packages `frankenfirewall` (MOD-01), `franken-skills` (MOD-02), `franken-heartbeat` (MOD-08), `franken-mcp`, and `franken-comms` are not standalone workspaces anymore; they were consolidated into `@franken/orchestrator` and `@franken/mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md), with their capabilities retained as internal adapters.
+The repository currently contains the following 10 active packages:
+
+- `franken-brain` – @franken/brain: MOD-03 SQLite-backed memory (working + episodic)
+- `franken-critique` – @franken/critique: MOD-06 self-critique evaluators + reviewer loop
+- `franken-governor` – @franken/governor: MOD-07 HITL governance, triggers, approval gateway
+- `franken-mcp-suite` – @franken/mcp-suite: fbeast CLI, MCP servers, hooks, proxy
+- `franken-observer` – @franken/observer: MOD-05 tracing, token/cost tracking, circuit breaker
+- `franken-orchestrator` – @franken/orchestrator: Beast Loop, CLI, chat/network servers
+- `franken-planner` – @franken/planner: MOD-04 DAG planning, strategies, recovery primitives
+- `franken-types` – @franken/types: Shared types + runtime Zod schemas
+- `franken-web` – @franken/web: React dashboard
+- `live-bench` – @franken/live-bench: Live CLI benchmark tooling
+
+Historical packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms` are not standalone workspaces anymore; they have been consolidated into `@franken/orchestrator` and `@franken/mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md).
 
 **Build commands** (all via Turborepo):
 - `npm run build` — runs `turbo run build` (dependency-ordered)
