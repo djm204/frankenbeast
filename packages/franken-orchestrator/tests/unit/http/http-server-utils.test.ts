@@ -32,18 +32,24 @@ describe('http-server-utils', () => {
       throw new Error('server did not bind to a TCP address');
     }
 
-    const request = await import('node:http').then(({ get }) => get(`http://127.0.0.1:${address.port}/stream`));
-    request.on('error', () => {
-      // Expected after destroying the client side of the long-lived request.
-    });
-    await handlerReady;
-    request.destroy();
+    try {
+      const request = await import('node:http').then(({ get }) => get(`http://127.0.0.1:${address.port}/stream`));
+      request.on('error', () => {
+        // Expected after destroying the client side of the long-lived request.
+      });
 
-    await expect(Promise.race([
-      aborted.then(() => 'aborted'),
-      new Promise((resolve) => setTimeout(() => resolve('timeout'), 5_000)),
-    ])).resolves.toBe('aborted');
-    server.closeAllConnections();
-    await closeHttpServer(server);
+      // Wait until the Hono handler has attached the abort listener before destroying
+      // the request. This avoids relying on wall-clock disconnect timing in slow CI.
+      await handlerReady;
+      request.destroy();
+
+      await expect(Promise.race([
+        aborted.then(() => 'aborted'),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 5_000)),
+      ])).resolves.toBe('aborted');
+    } finally {
+      server.closeAllConnections();
+      await closeHttpServer(server);
+    }
   });
 });

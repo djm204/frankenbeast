@@ -67,11 +67,14 @@ export type {
   IRecoveryMemory,
   EpisodicEventType,
   EpisodicEvent,
+  LearningCooldownOptions,
+  LearningRecordResult,
   ExecutionState,
   BrainSnapshot,
 } from './brain.js';
 export {
   EpisodicEventSchema,
+  LearningCooldownOptionsSchema,
   ExecutionStateSchema,
   BrainSnapshotSchema,
 } from './brain.js';
@@ -106,6 +109,9 @@ export {
 
 // Web/API contract DTOs
 export * from './api-contracts.js';
+
+// Safe JSON Pointer helpers
+export * from './json-pointer.js';
 
 // Deterministic utilities
 export * from './utils/index.js';

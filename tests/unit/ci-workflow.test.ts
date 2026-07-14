@@ -51,14 +51,49 @@ function expectSteps(job: Record<string, unknown>): Array<Record<string, unknown
   return job.steps as Array<Record<string, unknown>>;
 }
 
-function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
+function expectCiJob(workflow: Record<string, unknown>): Record<string, unknown> {
   const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-  const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-  const step = expectSteps(buildTestLint).find(
-    (candidate) => candidate.run === 'npx turbo run build typecheck',
-  );
-  expect(step, 'CI should explicitly gate build and typecheck through Turbo').toBeTruthy();
+  return expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
+}
+
+function expectSetupNodeUsesPinnedNvmrc(step: Record<string, unknown>, label: string): void {
+  const setupNodeWith = expectRecord(step.with, `${label}.actions/setup-node.with`);
+  expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
+  expect(setupNodeWith['node-version']).toBeUndefined();
+
+  for (const key of Object.keys(setupNodeWith)) {
+    expect(key, `${label} should not configure malformed Node version inputs`).not.toMatch(
+      /^node-version(?:$|-(?!file$))/,
+    );
+  }
+}
+
+function expectStepByRun(
+  steps: Array<Record<string, unknown>>,
+  run: string,
+  label: string,
+): Record<string, unknown> {
+  const step = steps.find((candidate) => candidate.run === run);
+  expect(step, `CI should include ${label}`).toBeTruthy();
   return step as Record<string, unknown>;
+}
+
+function expectStepByName(
+  steps: Array<Record<string, unknown>>,
+  name: string,
+  label: string,
+): Record<string, unknown> {
+  const step = steps.find((candidate) => candidate.name === name);
+  expect(step, `CI should include ${label}`).toBeTruthy();
+  return step as Record<string, unknown>;
+}
+
+function expectBuildTypecheckStep(workflow: Record<string, unknown>): Record<string, unknown> {
+  return expectStepByRun(
+    expectSteps(expectCiJob(workflow)),
+    'npx turbo run build typecheck',
+    'a Turbo build/typecheck step',
+  );
 }
 
 describe('CI Workflow (.github/workflows/ci.yml)', () => {
@@ -89,36 +124,32 @@ on:
       expect(() => parseWorkflowYaml(content)).not.toThrow();
     });
 
+    it('has required top-level workflow keys', () => {
+      expect(workflow).toHaveProperty('name');
+      expect(workflow).toHaveProperty('on');
+      expect(workflow).toHaveProperty('jobs');
+    });
+
     it('has a workflow name', () => {
       expect(workflow.name).toBe('CI');
     });
 
-    it('triggers on push to main', () => {
+    it('explicitly limits CI push and pull_request triggers to the main branch', () => {
       const triggers = expectRecord(workflow.on, 'workflow.on');
-      const push = expectRecord(triggers.push, 'workflow.on.push');
-      expect(push.branches).toEqual(['main']);
-    });
 
-    it('triggers on pull_request to main', () => {
-      const triggers = expectRecord(workflow.on, 'workflow.on');
-      const pullRequest = expectRecord(triggers.pull_request, 'workflow.on.pull_request');
-      expect(pullRequest.branches).toEqual(['main']);
+      expect(Object.keys(triggers).sort()).toEqual(['pull_request', 'push']);
+      expect(expectRecord(triggers.push, 'workflow.on.push')).toEqual({ branches: ['main'] });
+      expect(expectRecord(triggers.pull_request, 'workflow.on.pull_request')).toEqual({ branches: ['main'] });
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v6');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v6');
       expect(setupNode).toBeTruthy();
-      const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
-      expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
-      expect(setupNodeWith['node-version']).toBeUndefined();
+      expectSetupNodeUsesPinnedNvmrc(setupNode as Record<string, unknown>, 'build-test-lint');
     });
 
     it('runs npm ci for deterministic installs', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      expect(expectSteps(buildTestLint).some((step) => step.run === 'npm ci')).toBe(true);
+      expectStepByRun(expectSteps(expectCiJob(workflow)), 'npm ci', 'a deterministic npm install step');
     });
 
     it('runs the guarded security audit after deterministic installs', () => {
@@ -136,12 +167,16 @@ on:
     });
 
     it('explicitly gates build, typecheck, and the root lint coverage check before running the shared CI test target', () => {
+      const steps = expectSteps(expectCiJob(workflow));
       const buildTypecheckStep = expectBuildTypecheckStep(workflow);
+      const workspaceLintStep = expectStepByRun(steps, 'npm run lint', 'a workspace lint gate step');
+      const ciTestStep = expectStepByRun(steps, 'npm run test:ci', 'the shared root/package CI test target');
+
       expect(buildTypecheckStep.name).toBe('Run package build and typecheck');
-      expect(content).toMatch(/npx turbo run build typecheck[\s\S]*npm run lint[\s\S]*npm run test:ci/);
-      const workspaceLintStep = '\n        run: npm run lint\n';
-      expect(content.indexOf('npx turbo run build typecheck')).toBeLessThan(content.indexOf(workspaceLintStep));
-      expect(content.indexOf(workspaceLintStep)).toBeLessThan(content.indexOf('npm run test:ci'));
+      expect(workspaceLintStep.name).toBe('Run workspace lint gate');
+      expect(ciTestStep.name).toBe('Run root and package CI test suite');
+      expect(steps.indexOf(buildTypecheckStep)).toBeLessThan(steps.indexOf(workspaceLintStep));
+      expect(steps.indexOf(workspaceLintStep)).toBeLessThan(steps.indexOf(ciTestStep));
       expect(content).not.toMatch(/turbo run.*build\s+test\s+lint/);
       expect(content).not.toContain('npx turbo run build typecheck lint');
     });
@@ -150,13 +185,29 @@ on:
       const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')) as {
         scripts?: Record<string, string>;
       };
-
-      expect(content).toMatch(/name:\s*Run CI test suite/);
-      expect(packageJson.scripts?.['test:ci']).toContain('npm run ci:test:root');
-      expect(content).not.toMatch(/npm run test:root --/);
-      expect(packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:root')).toBeLessThan(
-        packageJson.scripts?.['test:ci']?.indexOf('npm run ci:test:packages') ?? -1,
+      const steps = expectSteps(expectCiJob(workflow));
+      const ciTestStep = expectStepByName(
+        steps,
+        'Run root and package CI test suite',
+        'the shared root/package CI test target',
       );
+      const testCiScript = packageJson.scripts?.['test:ci'] ?? '';
+
+      expect(ciTestStep.run).toBe('npm run test:ci');
+      const e2eStep = expectStepByName(
+        steps,
+        'Run orchestrator E2E smoke CI suite',
+        'the orchestrator E2E smoke gate',
+      );
+      expect(e2eStep.run).toBe('npm run ci:test:e2e');
+      expect(packageJson.scripts?.['ci:test:root']).toBe('node scripts/retry-ci-command.mjs -- npm run test:root');
+      expect(packageJson.scripts?.['ci:test:e2e']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts',
+      );
+      expect(testCiScript).toContain('npm run ci:test:root');
+      expect(testCiScript.indexOf('npm run ci:test:root')).toBeLessThan(testCiScript.indexOf('npm run ci:test:packages'));
+      expect(content.indexOf('npm run test:ci')).toBeLessThan(content.indexOf('npm run ci:test:e2e'));
+      expect(content).not.toMatch(/npm run test:root --/);
     });
 
     it('runs a bootstrap dry-run after deterministic install and fails the workflow on prerequisite errors', () => {
@@ -185,28 +236,37 @@ on:
       expect(packageJson.scripts?.['ci:test:planner-integration']).toBe(
         'node scripts/retry-ci-command.mjs -- npm run test:integration --workspace @franken/planner',
       );
+      expect(packageJson.scripts?.['ci:test:observer-eval']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:eval --workspace @franken/observer',
+      );
+      expect(packageJson.scripts?.['ci:test:e2e']).toBe(
+        'node scripts/retry-ci-command.mjs -- npm run test:e2e -- tests/e2e/smoke.test.ts tests/e2e/chat/chat-e2e.test.ts',
+      );
       expect(packageJson.scripts?.['test:ci']).toBe(
-        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration',
+        'npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval',
       );
       expect(content).toContain('npm run test:ci');
+      expect(content).toContain('run: npm run ci:test:e2e');
       expect(content).not.toContain('run: npm run ci:test:root');
       expect(content).not.toContain('run: npm run ci:test:packages');
       expect(content).not.toContain('run: npm run ci:test:planner-integration');
+      expect(content).not.toContain('run: npm run ci:test:observer-eval');
       expect(content).not.toContain('run: npm run test:root');
       expect(content).not.toContain('run: npx turbo run test');
     });
 
-    it('documents the package build, typecheck, workspace lint, and shared CI test targets in step names', () => {
+    it('documents the package build, typecheck, workspace lint, and shared root/package CI test targets in step names', () => {
       expect(content).toMatch(/name:\s*Run package build and typecheck/);
       expect(content).toMatch(/name:\s*Run workspace lint gate/);
-      expect(content).toMatch(/name:\s*Run CI test suite/);
+      expect(content).toMatch(/name:\s*Run root and package CI test suite/);
+      expect(content).toMatch(/name:\s*Run orchestrator E2E smoke CI suite/);
     });
 
     it('keeps workflow linting in a dedicated workflow so broken ci.yml syntax can be reported', () => {
       expect(existsSync(WORKFLOW_LINT_PATH)).toBe(true);
       const workflowLint = readFileSync(WORKFLOW_LINT_PATH, 'utf-8');
       expect(workflowLint).toContain('Lint GitHub Actions workflows');
-      expect(workflowLint).toContain('raven-actions/actionlint@v2.1.2');
+      expect(workflowLint).toContain('raven-actions/actionlint@v2.2.0');
       expect(workflowLint).toContain('version: 1.7.12');
       expect(workflowLint).toContain("'.github/workflows/**'");
       expect(content).not.toContain('actions/bin/check-yaml');
@@ -214,9 +274,7 @@ on:
     });
 
     it('uses actions/setup-node with npm cache', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const setupNode = expectSteps(buildTestLint).find((step) => step.uses === 'actions/setup-node@v6');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v6');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith.cache).toBe('npm');
@@ -225,13 +283,12 @@ on:
     it('uses the pinned minimum Node.js version in every CI setup-node step', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const nvmrc = readFileSync(resolve(ROOT, '.nvmrc'), 'utf-8').trim();
+      expect(nvmrc).toMatch(/^\d+\.\d+\.\d+$/);
 
       for (const [jobName, jobConfig] of Object.entries(jobs)) {
         const job = expectRecord(jobConfig, `jobs.${jobName}`);
         for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v6')) {
-          const setupNodeWith = expectRecord(step.with, `${jobName}.actions/setup-node.with`);
-          expect(setupNodeWith['node-version-file']).toBe('.nvmrc');
-          expect(setupNodeWith['node-version']).toBeUndefined();
+          expectSetupNodeUsesPinnedNvmrc(step, jobName);
         }
       }
 
@@ -262,16 +319,14 @@ on:
     it('uses actions/checkout with full history for root verification tests', () => {
       const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
       const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      const checkout = expectSteps(buildTestLint).find((step) => step.uses === 'actions/checkout@v4');
+      const checkout = expectSteps(buildTestLint).find((step) => step.uses === 'actions/checkout@v7');
       expect(checkout).toBeTruthy();
       const checkoutWith = expectRecord(checkout?.with, 'actions/checkout.with');
       expect(checkoutWith['fetch-depth']).toBe(0);
     });
 
     it('runs on ubuntu-latest', () => {
-      const jobs = expectRecord(workflow.jobs, 'workflow.jobs');
-      const buildTestLint = expectRecord(jobs['build-test-lint'], 'jobs.build-test-lint');
-      expect(buildTestLint['runs-on']).toBe('ubuntu-latest');
+      expect(expectCiJob(workflow)['runs-on']).toBe('ubuntu-latest');
     });
   });
 });
@@ -377,7 +432,9 @@ jobs:
     const validationRun = String(validationStep?.run ?? '');
     expect(validationRun).toContain('turbo run build typecheck lint');
     expect(validationRun).toContain('turbo run test');
+    expect(validationRun).toContain('npm run ci:test:observer-eval');
     expect(validationRun.indexOf('turbo run build typecheck lint')).toBeLessThan(validationRun.indexOf('turbo run test'));
+    expect(validationRun.indexOf('turbo run test')).toBeLessThan(validationRun.indexOf('npm run ci:test:observer-eval'));
     expect(validationRun).not.toMatch(/turbo run.*build\s+typecheck\s+test\s+lint/);
   });
 
@@ -398,6 +455,31 @@ jobs:
     );
   });
 
+  it('does not demote component-only latest releases unless a root release exists to promote', () => {
+    const releaseLatestStep = expectSteps(releasePlease).find(
+      (step) => step.name === 'Ensure only root release is marked latest',
+    );
+    expect(releaseLatestStep).toBeTruthy();
+    const releaseLatestRun = String(releaseLatestStep?.run ?? '');
+
+    const rootLookupIndex = releaseLatestRun.indexOf('root_tag=$(gh release list');
+    const emptyRootNormalizationIndex = releaseLatestRun.indexOf('.tagName // empty');
+    const noRootGuardIndex = releaseLatestRun.indexOf(
+      'No root release found; leaving component latest unchanged',
+    );
+    const demoteIndex = releaseLatestRun.indexOf('gh release edit "$latest_tag" --latest=false');
+    const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
+
+    expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(releaseLatestRun).toContain('gh release list --limit 1000 --json tagName');
+    expect(emptyRootNormalizationIndex).toBeGreaterThan(rootLookupIndex);
+    expect(noRootGuardIndex).toBeGreaterThan(emptyRootNormalizationIndex);
+    expect(demoteIndex).toBeGreaterThan(noRootGuardIndex);
+    expect(promoteIndex).toBeGreaterThan(demoteIndex);
+    expect(releaseLatestRun).toContain('if [ -z "$root_tag" ]; then');
+    expect(releaseLatestRun).toContain('exit 0');
+  });
+
   it('defers npm token enforcement until a public package needs publishing', () => {
     const publishStep = expectSteps(publishNpm).find((step) => step.name === 'Publish released npm packages');
     const publishRun = String(publishStep?.run ?? '');
@@ -405,6 +487,24 @@ jobs:
     const privateSkipIndex = publishRun.indexOf('Skipping $package_path: package is private');
     expect(tokenCheckIndex).toBeGreaterThan(privateSkipIndex);
     expect(publishRun).toContain('npm publish "$package_path" --access public --provenance');
+  });
+
+  it('does not demote a component latest release unless a root release can be promoted', () => {
+    const latestStep = expectSteps(releasePlease).find((step) => step.name === 'Ensure only root release is marked latest');
+    expect(latestStep).toBeTruthy();
+
+    const latestRun = String(latestStep?.run ?? '');
+    const rootLookupIndex = latestRun.indexOf('root_tag=$(gh release list');
+    const missingRootGuardIndex = latestRun.indexOf('No root release found; leaving component latest unchanged');
+    const demoteIndex = latestRun.indexOf('gh release edit "$latest_tag" --latest=false');
+    const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
+
+    expect(rootLookupIndex).toBeGreaterThan(-1);
+    expect(latestRun).toContain('gh release list --limit 1000 --json tagName');
+    expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
+    expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
+    expect(promoteIndex).toBeGreaterThan(demoteIndex);
+    expect(latestRun).toContain('[0].tagName // empty');
   });
 });
 

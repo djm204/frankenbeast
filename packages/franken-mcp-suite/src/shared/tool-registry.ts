@@ -5,6 +5,7 @@ import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governo
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
 import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
+import { parseObserverCostArgs } from './observer-cost-validation.js';
 import type { ToolDef, ToolInputSchema, ToolResult } from './server-factory.js';
 
 export interface AdapterSet {
@@ -51,41 +52,8 @@ function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { 
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
   }
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > MAX_MEMORY_QUERY_LIMIT) {
+  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_MEMORY_QUERY_LIMIT) {
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
-  }
-  return { ok: true, value: parsed };
-}
-
-function parseNonNegativeIntegerArg(name: string, value: unknown): { ok: true; value: number } | { ok: false; message: string } {
-  if (typeof value !== 'number' && typeof value !== 'string') {
-    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
-  }
-  const raw = typeof value === 'string' ? value.trim() : String(value);
-  if (raw.length === 0) {
-    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
-  }
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 0) {
-    return { ok: false, message: `${name} must be a finite safe non-negative integer` };
-  }
-  return { ok: true, value: parsed };
-}
-
-function parseOptionalNonNegativeNumberArg(name: string, value: unknown): { ok: true; value: number | undefined } | { ok: false; message: string } {
-  if (value == null) {
-    return { ok: true, value: undefined };
-  }
-  if (typeof value !== 'number' && typeof value !== 'string') {
-    return { ok: false, message: `${name} must be a finite non-negative number` };
-  }
-  const raw = typeof value === 'string' ? value.trim() : String(value);
-  if (raw.length === 0) {
-    return { ok: false, message: `${name} must be a finite non-negative number` };
-  }
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return { ok: false, message: `${name} must be a finite non-negative number` };
   }
   return { ok: true, value: parsed };
 }
@@ -432,23 +400,12 @@ const TOOLS: ToolFull[] = [
       required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],
     },
     makeHandler: ({ observer }) => async (args) => {
-      const sessionId = String(args['sessionId']);
-      const model = String(args['model']);
-      const promptTokensArg = parseNonNegativeIntegerArg('promptTokens', args['promptTokens']);
-      if (!promptTokensArg.ok) {
-        return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${promptTokensArg.message}` }], isError: true };
+      const parsedArgs = parseObserverCostArgs(args);
+      if (!parsedArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${parsedArgs.message}` }], isError: true };
       }
-      const completionTokensArg = parseNonNegativeIntegerArg('completionTokens', args['completionTokens']);
-      if (!completionTokensArg.ok) {
-        return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${completionTokensArg.message}` }], isError: true };
-      }
-      const costUsdArg = parseOptionalNonNegativeNumberArg('costUsd', args['costUsd']);
-      if (!costUsdArg.ok) {
-        return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${costUsdArg.message}` }], isError: true };
-      }
-      const promptTokens = promptTokensArg.value;
-      const completionTokens = completionTokensArg.value;
-      const result = await observer.logCost({ sessionId, model, promptTokens, completionTokens, ...(costUsdArg.value !== undefined ? { costUsd: costUsdArg.value } : {}) });
+      const { sessionId, model, promptTokens, completionTokens } = parsedArgs.value;
+      const result = await observer.logCost(parsedArgs.value);
       const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
       return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };
     },

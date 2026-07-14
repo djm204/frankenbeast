@@ -60,6 +60,28 @@ describe('AnalyticsApiClient', () => {
     await expect(client.fetchEventDetail('missing-event-id')).rejects.toThrow('Analytics event not found');
   });
 
+  it('accepts flat analytics error messages before falling back to HTTP status', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'Analytics filter is invalid' }),
+    });
+
+    const client = new AnalyticsApiClient(BASE_URL);
+    await expect(client.fetchEvents({ outcome: 'failed' })).rejects.toThrow('Analytics filter is invalid');
+  });
+
+  it('falls back to HTTP status when failed responses have no error message', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: { code: 'ANALYTICS_UNAVAILABLE' } }),
+    });
+
+    const client = new AnalyticsApiClient(BASE_URL);
+    await expect(client.fetchSummary({})).rejects.toThrow('HTTP 503');
+  });
+
   it('falls back to HTTP status when failed responses have malformed JSON', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,

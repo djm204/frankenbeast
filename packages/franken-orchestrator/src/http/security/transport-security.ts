@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { wallClockNow } from '@franken/types';
+import { constantTimeTokenEqual } from './constant-time.js';
 export interface IssueSignedTokenOptions {
   expiresInMs?: number;
   secret: string;
@@ -38,12 +39,6 @@ function isCanonicalBase64Url(input: string): boolean {
 
 function signatureFor(payload: string, secret: string): Buffer {
   return createHmac('sha256', secret).update(payload).digest();
-}
-
-function timingSafeStringMatch(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 export class TransportSecurityService {
@@ -95,7 +90,7 @@ export class TransportSecurityService {
     if (!providedToken) {
       return false;
     }
-    return timingSafeStringMatch(providedToken, expectedToken);
+    return constantTimeTokenEqual(providedToken, expectedToken);
   }
 
   verifySocketRequest(options: VerifySocketRequestOptions) {

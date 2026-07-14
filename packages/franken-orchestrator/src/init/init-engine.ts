@@ -129,8 +129,19 @@ export async function runRepairInit(options: RunRepairInitOptions): Promise<Init
     };
   }
 
+  const invalidJsonIssues = verification.issues.filter((issue) =>
+    issue.code === 'invalid-config-json');
+  if (invalidJsonIssues.length > 0) {
+    return runInteractiveInit({
+      ...options,
+      baseConfig: options.baseConfig ?? defaultConfig(),
+    });
+  }
+
   const needsFullWizard = verification.issues.some((issue) =>
-    issue.code === 'missing-config' || issue.code === 'missing-init-state');
+    issue.code === 'missing-config'
+    || issue.code === 'missing-init-state'
+    || issue.code === 'invalid-init-state-json');
   if (needsFullWizard) {
     return runInteractiveInit(options);
   }

@@ -62,22 +62,24 @@ describe('ConcisenessEvaluator', () => {
     ).toBe(true);
   });
 
-  it('flags unresolved marker comments', async () => {
+  it('flags unresolved marker comments with tracked source locations', async () => {
     const evaluator = new ConcisenessEvaluator();
     const pendingMarker = ['TO', 'DO'].join('');
     const trackedMarker = ['FIX', 'ME'].join('');
     const hackMarker = ['HA', 'CK'].join('');
-    const content = `// ${pendingMarker}: fix this later\n// ${trackedMarker}: tracked follow-up\n// ${hackMarker}: temporary workaround\nconst x = 1;`;
+    const content = `// ${pendingMarker}: fix this later\nconst x = 1;\n// ${trackedMarker}: tracked follow-up\n// ${hackMarker}: temporary workaround`;
     const result = await evaluator.evaluate(createInput(content));
 
-    expect(
-      result.findings.some(
-        (f) =>
-          f.message.includes(pendingMarker) &&
-          f.message.includes(trackedMarker) &&
-          f.message.includes(hackMarker),
-      ),
-    ).toBe(true);
+    const finding = result.findings.find(
+      (f) =>
+        f.message.includes(pendingMarker) &&
+        f.message.includes(trackedMarker) &&
+        f.message.includes(hackMarker),
+    );
+
+    expect(finding).toBeTruthy();
+    expect(finding?.location).toBe('lines 1, 3-4');
+    expect(finding?.suggestion).toContain('tracked issues');
   });
 
   it('flags unresolved markers in block comments without matching strings', async () => {

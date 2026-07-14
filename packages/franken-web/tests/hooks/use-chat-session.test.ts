@@ -564,6 +564,34 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('idle');
   });
 
+  it('falls back to HTTP when an open websocket throws during send', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+    });
+    socket.send = vi.fn(() => {
+      throw new Error('socket closed during send');
+    });
+
+    await act(async () => {
+      await result.current.send('fallback after websocket race');
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledWith('chat-1', 'fallback after websocket race');
+    expect(result.current.status).toBe('idle');
+    expect(result.current.messages).not.toContainEqual(expect.objectContaining({
+      content: 'fallback after websocket race',
+      receipt: 'failed',
+    }));
+    expect(result.current.errorBanners).toHaveLength(0);
+  });
+
   it('removes stale failed drafts when retrying the same prompt', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 

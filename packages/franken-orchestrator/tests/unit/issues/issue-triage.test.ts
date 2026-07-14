@@ -170,6 +170,30 @@ describe('IssueTriage', () => {
       expect(results[0]!.complexity).toBe('one-shot');
     });
 
+    it('rejects triage entries with missing issueNumber instead of defaulting to 0', async () => {
+      const completeFn = vi.fn<CompleteFn>(async () =>
+        JSON.stringify([
+          { complexity: 'one-shot', rationale: 'Missing number', estimatedScope: '1 file' },
+        ]),
+      );
+      const triage = new IssueTriage(completeFn);
+
+      await expect(triage.triage([makeIssue({ number: 1 })])).rejects.toThrow('Invalid triage issueNumber');
+      expect(completeFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects triage entries with non-integer issueNumber values', async () => {
+      const completeFn = vi.fn<CompleteFn>(async () =>
+        JSON.stringify([
+          { issueNumber: '1', complexity: 'one-shot', rationale: 'Wrong type', estimatedScope: '1 file' },
+        ]),
+      );
+      const triage = new IssueTriage(completeFn);
+
+      await expect(triage.triage([makeIssue({ number: 1 })])).rejects.toThrow('Invalid triage issueNumber');
+      expect(completeFn).toHaveBeenCalledTimes(2);
+    });
+
     it('retries once on malformed JSON then succeeds', async () => {
       let callCount = 0;
       const completeFn = vi.fn<CompleteFn>(async () => {

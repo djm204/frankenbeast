@@ -51,7 +51,17 @@ Consistent with ADR-034, the gate is conditional on an operator token being
 configured; `startChatServer` independently fails closed by refusing to expose
 a server (managed mode or non-loopback host) when no token is set. Requests
 that present no token or an incorrect token are rejected with `401` via
-`TransportSecurityService.verifyOperatorToken` (constant-time comparison).
+`TransportSecurityService.verifyOperatorToken` (constant-time comparison). When
+browser clients authenticate through the HttpOnly operator cookie, unsafe
+methods (`POST`/`PATCH`/`PUT`/`DELETE`) also require a same-origin `Origin`
+header and reject non-`same-origin` Fetch Metadata signals such as
+`Sec-Fetch-Site: cross-site`, `same-site`, or `none`. For TLS-terminated
+reverse proxies, `x-forwarded-proto` and `x-forwarded-host` are honored when
+checking the external same-origin URL so legitimate HTTPS dashboard posts are
+not downgraded to the internal Node `http://` adapter origin. Bearer-token
+clients keep
+working for CLI/API automation; the extra browser-cookie check is a CSRF-style
+mutation guard, not a replacement for operator tokens.
 
 ## Consequences
 

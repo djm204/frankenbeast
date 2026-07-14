@@ -1,4 +1,5 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { constantTimeTokenEqual } from '../../http/security/constant-time.js';
 interface TicketEntry {
   token: string;
   scope?: string | undefined;
@@ -104,13 +105,7 @@ export class SseConnectionTicketStore {
       return 'invalid';
     }
 
-    const bufA = Buffer.from(entry.token);
-    const bufB = Buffer.from(operatorToken);
-    if (bufA.length !== bufB.length) {
-      return 'invalid';
-    }
-
-    if (!timingSafeEqual(bufA, bufB)) {
+    if (!constantTimeTokenEqual(operatorToken, entry.token)) {
       return 'invalid';
     }
 

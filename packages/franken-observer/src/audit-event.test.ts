@@ -328,6 +328,25 @@ describe('AuditTrail', () => {
     });
   });
 
+  it('verify() reports every missing hashed content entry', () => {
+    const trail = new AuditTrail();
+    const event = createAuditEvent('test', {}, {
+      phase: 'p',
+      provider: 'pr',
+      input: 'hello',
+      output: 'result',
+    });
+    trail.append(event);
+
+    expect(trail.verify(new Map())).toEqual({
+      valid: false,
+      mismatches: [
+        `${event.eventId}: input content missing`,
+        `${event.eventId}: output content missing`,
+      ],
+    });
+  });
+
   it('verify() checks empty string content against hash', () => {
     const trail = new AuditTrail();
     const event = createAuditEvent('test', {}, { phase: 'p', provider: 'pr', input: '' });

@@ -29,7 +29,7 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "INTEGRATION=true vitest run",
     "test:e2e": "E2E=true vitest run",
-    "lint": "eslint src/ tests/",
+    "lint": "eslint src/ tests/ test/",
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "keywords": [

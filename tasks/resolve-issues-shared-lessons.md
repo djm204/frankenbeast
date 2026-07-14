@@ -1,5 +1,38 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-13 — Lesson contradiction detector Codex edge cases
+- For lesson-contradiction heuristics, compare negation per corrective/directive guidance fragment rather than across a whole lesson blob; multi-finding lessons can otherwise mask one reversed clause with an unrelated negated clause.
+- Keep high-signal short technical tokens such as `log`, `PII`, `JWT`, `API`, `CLI`, `SQL`, `URL`, and `env` in overlap matching, but avoid ambiguous negation words such as standalone `block` that also appear in affirmative guidance like code blocks.
+- When detector comparison uses reviewer finding/suggestion text, also include that guidance in `searchLessons` queries and stable fallback IDs; otherwise runtime retrieval and PM handles drift from the detector semantics.
+
+## 2026-07-13 — Langfuse docs and env-var DX
+- For docs that include links from published package pages, prefer links to files that are shipped in the package (e.g., README, changelog). In `@franken/observer`, avoid package-relative links to `docs/` if that directory is not published.
+- For local secret setup guidance, recommend `.env`/ignored secret files that match repo policy to reduce accidental staging of keys like `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`.
+- When running Codex review on a refreshed commit, resolve all `chatgpt-codex-connector` inline findings and verify `reviewThreads.isResolved` is true for the relevant threads before treating a second `@codex review` cycle as complete.
+
+## 2026-07-13 — Operator session-token review hardening
+- Approval-session tokens must be scoped to the policy actually approved: skill triggers can use selected tool scope, but budget/custom/non-skill approvals should stay task-scoped even when a tool is selected so same-tool actions in other tasks do not bypass prompts.
+- Never reuse an approval-session token for fail-closed trigger-evaluation errors; even a valid same-scope token must fall back to a fresh operator prompt when evaluator context/logic throws.
+- When a gateway returns an issued approval token, the planner/CoT path needs an explicit state handoff into later rationales; otherwise adapter-level token issuance is documented but not usable by normal planner executions.
+- Multi-policy approval prompts must surface every fired policy reason, not just a preferred non-skill trigger, so operators see destructive/HITL skill risk alongside budget or other policy risk.
+- If a CoT rationale can carry reusable approval tokens, keep candidate token IDs per prior approval rather than a single overwrite slot; the governor can validate candidates against the current scope and ignore non-matching tokens.
+- Built-in typed triggers need explicit context construction. Do not feed rationale-shaped objects into typed triggers such as confidence/ambiguity just because they appear later in the evaluator list.
+- Avoid mutable "last generated task" state in CoT approval-token handoff; concurrent planner execution must pass the verified task/rationale scope into token remembrance so tokens are stored under the task that actually produced the approval.
+- When a replacement approval token arrives for an expired token, put the new token before the old one for that scope so future rationales recover token reuse instead of repeatedly presenting the stale token first.
+
+## 2026-07-12 — Runtime tool manifest security defaults
+- Default new/runtime skill tools to `requiresHitl: true` after schema validation, and preserve explicit `requiresHitl: false` only for reviewed safe tools.
+- Validate catalog `toolDefinitions` before creating/writing skill install files; otherwise a failed install can leave a partial MCP skill on disk and accidentally expose unknown runtime tools.
+- Regression tests should cover omitted HITL defaulting, explicit safe-tool opt-outs, manifest readback, stale-manifest removal on catalog reinstall and custom install replacement, no-tools MCP alias behavior, and invalid tool manifests leaving no partial install.
+
+## 2026-07-10 — Root test entrypoint filters
+- For root Turbo entrypoints that expose package-local optional suites, filter to workspaces with real scripts/tests so `turbo run <task>` does not schedule `<NONEXISTENT>` package tasks. Verify both `--dry=json` task selection and at least one actual root command run; dry-run alone can hide package-local no-test failures.
+- If eval/LLM-judge tests are named by directory (for example `src/evals/**/*.test.ts`) rather than `*.eval.test.ts`, update Vitest include/exclude rules so `EVAL=true` discovers them and default `npm test` keeps them opt-in.
+
+## 2026-07-11 — Approval replay command extraction guardrails
+- Approval replay commands are model-derived state, not fresh operator input. Keep the replay helper narrow: accept only trimmed single-line printable non-slash command descriptions, fail closed on multiline/control-command payloads, preserve the pending approval, and make operators reject/re-submit an explicit `/run` for overrides.
+- Regression coverage should include the low-level replay helper and the HTTP approval route so unsafe payloads do not reach the runtime/LLM and error responses do not echo injected command text.
+
 ## 2026-07-11 — Vitest config env-flag regression tests
 - For Vitest suite-flag fixes, assert false-like env values (`0`, `false`, `no`, blank) preserve the default unit-test include set in package configs, not just helper return values.
 - In Vitest tests, avoid cache-busting variable dynamic imports such as `import(`../vitest.config.ts?case=${...}`)`: Vite cannot statically analyze them. Use a static config import and reset env/argv around each assertion instead.
@@ -129,3 +162,13 @@
 
 ## 2026-07-11 — Vite Beast proxy documentation examples
 - For docs with copyable foreground service recipes, split long-running services into clearly labeled terminals, quote placeholder env values so Bash does not parse `<...>` as redirection, and repeat server-side token exports in every process that needs to inject Beast proxy auth (daemon, chat-server, and Vite dev server).
+
+- 2026-07-12 — Web prompt attachment security: when adding restricted wrappers for untrusted markdown, fence both the file content and any user-controlled metadata such as filenames; sanitized names can still contain markdown/instructions and must not be emitted as trusted prompt text. Detect markdown suffixes after control-character normalization as well as on raw first-line names.
+- 2026-07-12 — Franken-web dashboard provider refresh: when a wizard temporarily reuses global dashboard provider store state, hide cached providers during loading/error refresh states and clear the global loading flag if the wizard closes before the refresh settles. Add regressions for stale cached options and cancelled refreshes before re-triggering Codex.
+
+## 2026-07-13 — Governor multi-trigger review regressions
+- When a typed trigger context source throws after an earlier promptable policy fired, keep the earlier operator prompt, add the context failure as an additional critical policy, and avoid reusing session tokens for mixed/failure batches. Ambiguity trigger context should default omitted optional flags to false only when at least one ambiguity flag is present, and combined trigger prompts must preserve the maximum severity across all fired policies.
+
+## 2026-07-13 — HTTP error-body safety
+- When adding response bodies to thrown/logged HTTP errors, treat the body as untrusted output: redact echoed auth/API-key headers, redact secret-bearing URLs, and cap body reads before buffering or rendering. Include regressions for JSON-style quoted secrets, non-Web stream fallbacks, and exact-at-cap stream bodies before re-triggering Codex.
+- For webhook failure diagnostics, add explicit regressions for truncated/unterminated quoted auth fields, short opaque webhook path segments, non-Web body objects, and stalled streams so Codex follow-up rounds have current-head evidence for security-sensitive fixes.

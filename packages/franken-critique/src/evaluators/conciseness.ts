@@ -27,6 +27,11 @@ const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
 );
 const MAX_COMMENT_RATIO = 0.5;
 
+interface UnresolvedMarkerOccurrence {
+  readonly label: string;
+  readonly index: number;
+}
+
 function skipQuotedLiteral(content: string, start: number): number {
   const quote = content[start];
   let index = start + 1;
@@ -455,42 +460,59 @@ function isLikelyJsxTagStart(content: string, index: number): boolean {
   return true;
 }
 
-function extractMarkerLabels(pattern: RegExp, comment: string): string[] {
+function extractMarkerOccurrences(
+  pattern: RegExp,
+  comment: string,
+  offset: number,
+): UnresolvedMarkerOccurrence[] {
   pattern.lastIndex = 0;
   return [...comment.matchAll(pattern)].flatMap((match) =>
-    match[1] ? [match[1]] : [],
+    match[1]
+      ? [
+          {
+            label: match[1],
+            index: offset + (match.index ?? 0) + match[0].indexOf(match[1]),
+          },
+        ]
+      : [],
   );
 }
 
-function collectLineCommentLabels(
+function collectLineCommentMarkers(
   content: string,
   start: number,
-): [string[], number] {
+): [UnresolvedMarkerOccurrence[], number] {
   const end = content.indexOf('\n', start + 2);
   const commentEnd = end === -1 ? content.length : end;
   const comment = content.slice(start, commentEnd);
-  return [extractMarkerLabels(UNRESOLVED_COMMENT_PATTERN, comment), commentEnd];
+  return [
+    extractMarkerOccurrences(UNRESOLVED_COMMENT_PATTERN, comment, start),
+    commentEnd,
+  ];
 }
 
-function collectBlockCommentLabels(
+function collectBlockCommentMarkers(
   content: string,
   start: number,
-): [string[], number] {
+): [UnresolvedMarkerOccurrence[], number] {
   const end = content.indexOf('*/', start + 2);
   const commentEnd = end === -1 ? content.length : end + 2;
+  const commentStart = start + 2;
   const comment = content
-    .slice(start, commentEnd)
-    .replace(/^\/\*/, '')
+    .slice(commentStart, commentEnd)
     .replace(/\*\/$/, '');
-  return [extractMarkerLabels(UNRESOLVED_MARKER_PATTERN, comment), commentEnd];
+  return [
+    extractMarkerOccurrences(UNRESOLVED_MARKER_PATTERN, comment, commentStart),
+    commentEnd,
+  ];
 }
 
-function collectJsxTagExpressionLabels(
+function collectJsxTagExpressionMarkers(
   content: string,
   start: number,
   end: number,
-): string[] {
-  const labels: string[] = [];
+): UnresolvedMarkerOccurrence[] {
+  const markers: UnresolvedMarkerOccurrence[] = [];
   let index = start + 1;
 
   while (index < end - 1) {
@@ -500,28 +522,28 @@ function collectJsxTagExpressionLabels(
       continue;
     }
     if (current === '/' && content[index + 1] === '*') {
-      const [commentLabels, commentEnd] = collectBlockCommentLabels(
+      const [commentMarkers, commentEnd] = collectBlockCommentMarkers(
         content,
         index,
       );
-      labels.push(...commentLabels);
+      markers.push(...commentMarkers);
       index = commentEnd;
       continue;
     }
     if (current === '{') {
-      const [expressionLabels, expressionEnd] = collectCodeLabels(
+      const [expressionMarkers, expressionEnd] = collectCodeMarkers(
         content,
         index + 1,
         '}',
       );
-      labels.push(...expressionLabels);
+      markers.push(...expressionMarkers);
       index = expressionEnd;
       continue;
     }
     index += 1;
   }
 
-  return labels;
+  return markers;
 }
 
 function skipJsxTag(content: string, start: number, limit = content.length): number {
@@ -811,11 +833,11 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
   return isOpeningTag;
 }
 
-function collectTemplateLiteralLabels(
+function collectTemplateLiteralMarkers(
   content: string,
   start: number,
-): [string[], number] {
-  const labels: string[] = [];
+): [UnresolvedMarkerOccurrence[], number] {
+  const markers: UnresolvedMarkerOccurrence[] = [];
   let index = start + 1;
 
   while (index < content.length) {
@@ -826,30 +848,30 @@ function collectTemplateLiteralLabels(
       continue;
     }
     if (current === '`') {
-      return [labels, index + 1];
+      return [markers, index + 1];
     }
     if (current === '$' && next === '{') {
-      const [expressionLabels, expressionEnd] = collectCodeLabels(
+      const [expressionMarkers, expressionEnd] = collectCodeMarkers(
         content,
         index + 2,
         '}',
       );
-      labels.push(...expressionLabels);
+      markers.push(...expressionMarkers);
       index = expressionEnd;
       continue;
     }
     index += 1;
   }
 
-  return [labels, index];
+  return [markers, index];
 }
 
-function collectCodeLabels(
+function collectCodeMarkers(
   content: string,
   start = 0,
   endCharacter?: string,
-): [string[], number] {
-  const labels: string[] = [];
+): [UnresolvedMarkerOccurrence[], number] {
+  const markers: UnresolvedMarkerOccurrence[] = [];
   let index = start;
   let braceDepth = endCharacter === '}' ? 1 : 0;
 
@@ -867,13 +889,13 @@ function collectCodeLabels(
       braceDepth -= 1;
       index += 1;
       if (braceDepth === 0) {
-        return [labels, index];
+        return [markers, index];
       }
       continue;
     }
 
     if (endCharacter && endCharacter !== '}' && current === endCharacter) {
-      return [labels, index + 1];
+      return [markers, index + 1];
     }
 
     if (current === "'" && /[$\w]/.test(content[index - 1] ?? '')) {
@@ -899,32 +921,32 @@ function collectCodeLabels(
     }
 
     if (current === '`') {
-      const [templateLabels, templateEnd] = collectTemplateLiteralLabels(
+      const [templateMarkers, templateEnd] = collectTemplateLiteralMarkers(
         content,
         index,
       );
-      labels.push(...templateLabels);
+      markers.push(...templateMarkers);
       index = templateEnd;
       continue;
     }
 
     if (current === '/' && next === '/') {
-      const [commentLabels, commentEnd] = collectLineCommentLabels(
+      const [commentMarkers, commentEnd] = collectLineCommentMarkers(
         content,
         index,
       );
-      labels.push(...commentLabels);
+      markers.push(...commentMarkers);
       index = commentEnd;
       continue;
     }
 
     if (current === '/' && next === '*') {
-      const [commentLabels, commentEnd] = collectBlockCommentLabels(
+      const [commentMarkers, commentEnd] = collectBlockCommentMarkers(
         content,
         index,
       );
       if (!isJsxTextBlockComment(content, index, commentEnd)) {
-        labels.push(...commentLabels);
+        markers.push(...commentMarkers);
       }
       index = commentEnd;
       continue;
@@ -933,7 +955,7 @@ function collectCodeLabels(
     if (current === '<' && isLikelyJsxTagStart(content, index)) {
       const tagEnd = skipJsxTag(content, index);
       if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
-        labels.push(...collectJsxTagExpressionLabels(content, index, tagEnd));
+        markers.push(...collectJsxTagExpressionMarkers(content, index, tagEnd));
         index = tagEnd;
         continue;
       }
@@ -947,11 +969,34 @@ function collectCodeLabels(
     index += 1;
   }
 
-  return [labels, index];
+  return [markers, index];
 }
 
-function collectUnresolvedCommentMarkerLabels(content: string): string[] {
-  return collectCodeLabels(content)[0];
+function collectUnresolvedCommentMarkers(
+  content: string,
+): UnresolvedMarkerOccurrence[] {
+  return collectCodeMarkers(content)[0];
+}
+
+function lineNumberAt(content: string, index: number): number {
+  return content.slice(0, index).split('\n').length;
+}
+
+function formatLineRanges(lineNumbers: readonly number[]): string {
+  const uniqueLines = [...new Set(lineNumbers)].sort((a, b) => a - b);
+  const ranges: string[] = [];
+
+  for (let index = 0; index < uniqueLines.length; index += 1) {
+    const start = uniqueLines[index] ?? 0;
+    let end = start;
+    while (uniqueLines[index + 1] === end + 1) {
+      index += 1;
+      end = uniqueLines[index] ?? end;
+    }
+    ranges.push(start === end ? `${start}` : `${start}-${end}`);
+  }
+
+  return `lines ${ranges.join(', ')}`;
 }
 
 export class ConcisenessEvaluator implements Evaluator {
@@ -1017,11 +1062,15 @@ export class ConcisenessEvaluator implements Evaluator {
     content: string,
     findings: EvaluationFinding[],
   ): void {
-    const labels = collectUnresolvedCommentMarkerLabels(content);
-    if (labels.length > 0) {
+    const markers = collectUnresolvedCommentMarkers(content);
+    if (markers.length > 0) {
+      const labels = markers.map((marker) => marker.label);
       findings.push({
         message: `Found ${labels.length} unresolved marker comment(s): ${labels.join(', ')}. Address or track these as issues.`,
         severity: 'info',
+        location: formatLineRanges(
+          markers.map((marker) => lineNumberAt(content, marker.index)),
+        ),
         suggestion:
           'Resolve deferred-work items or convert them to tracked issues',
       });

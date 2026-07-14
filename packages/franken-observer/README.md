@@ -283,11 +283,15 @@ Zero-dependency, in-process store. Good for tests and prototyping.
 ```ts
 import { InMemoryAdapter } from '@franken/observer'
 
-const adapter = new InMemoryAdapter()
+// Retains the most recent 1000 traces by default. Older traces are evicted
+// from queryByTraceId() / listTraceIds(); use maxTraces: Infinity only for
+// legacy test fixtures that intentionally need unbounded retention.
+const adapter = new InMemoryAdapter({ maxTraces: 1000 })
 await adapter.flush(trace)
 
 const retrieved = await adapter.queryByTraceId(trace.id)
 const allIds    = await adapter.listTraceIds()
+adapter.clear() // explicit cleanup hook for long-lived processes/tests
 ```
 
 ### `SQLiteAdapter`
@@ -588,9 +592,25 @@ const adapter = new LangfuseAdapter({
 await adapter.flush(trace)
 ```
 
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are caller-managed credentials; `LangfuseAdapter` does not read them automatically and has no default key values. `publicKey` identifies the Langfuse project, while `secretKey` is sent with it in the Basic Authorization header. Keep the secret key in local/CI secret stores, never commit it or expose it to browser bundles, and fail fast before constructing the adapter if a live-export job is missing either value. For local development, prefer an ignored `.env` file or shell profile and use placeholder values only with a mocked `fetch`. CI should inject masked `LANGFUSE_*` secrets only into jobs that intentionally test live Langfuse export wiring; unit and documentation checks should continue to run without real credentials.
+
+See the repository copy of [`packages/franken-observer/docs/adapters.md`](https://github.com/djm204/frankenbeast/blob/main/packages/franken-observer/docs/adapters.md#langfuseadapter) for the full environment-variable reference, local development example, and CI snippet.
+
 ### `TempoAdapter`
 
 Posts OTEL payloads to [Grafana Tempo](https://grafana.com/oss/tempo/) over OTLP/HTTP.
+
+`GRAFANA_INSTANCE_ID` and `GRAFANA_API_KEY` are only needed when exporting traces
+to Grafana Cloud Tempo. `GRAFANA_INSTANCE_ID` is the numeric Grafana Cloud stack
+or Tempo instance ID used as the Basic auth username, and `GRAFANA_API_KEY` is a
+Grafana Cloud access policy token/API key with permission to write traces. Local
+Tempo and OpenTelemetry Collector endpoints do not use either variable; omit
+`basicAuth` entirely and the adapter sends unauthenticated OTLP/HTTP requests.
+
+Keep `GRAFANA_API_KEY` out of source control. Store it in a local `.env`, shell
+secret manager, or CI secret store, and mask it in logs. Rotate the key if it is
+printed or committed. A missing value should fail fast in your own wiring before
+constructing a Grafana Cloud adapter.
 
 ```ts
 import { TempoAdapter } from '@franken/observer'
@@ -598,18 +618,45 @@ import { TempoAdapter } from '@franken/observer'
 // Local Tempo / OpenTelemetry Collector
 const local = new TempoAdapter({ endpoint: 'http://localhost:4318' })
 
+// CI example: export these from the CI secret store, not from repository files.
+if (!process.env.GRAFANA_INSTANCE_ID || !process.env.GRAFANA_API_KEY) {
+  throw new Error('Grafana Cloud export requires GRAFANA_INSTANCE_ID and GRAFANA_API_KEY')
+}
+
 // Grafana Cloud Tempo
+function requireEnv(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`${name} is required for Grafana Cloud Tempo exports`)
+  }
+  return value
+}
+
 const cloud = new TempoAdapter({
-  endpoint: 'https://tempo-us-central1.grafana.net/tempo',
+  // Copy the OTLP gateway host from your Grafana Cloud stack's OpenTelemetry tile.
+  // Do not use the Tempo query endpoint (tempo-<region>.grafana.net/tempo).
+  endpoint: 'https://otlp-gateway-<REGION>.grafana.net',
   otlpPath: '/otlp/v1/traces',
   basicAuth: {
-    user: process.env.GRAFANA_INSTANCE_ID!,
-    password: process.env.GRAFANA_API_KEY!,
+    user: requireEnv('GRAFANA_INSTANCE_ID'),
+    password: requireEnv('GRAFANA_API_KEY'),
   },
 })
 
 await cloud.flush(trace)
 ```
+
+`TempoAdapter` does not read environment variables by itself; the Grafana Cloud example above passes them into `basicAuth` from the caller. `GRAFANA_INSTANCE_ID` is the Grafana Cloud Tempo instance/user ID used as the Basic auth username, and `GRAFANA_API_KEY` is the Grafana Cloud token/API key used as the Basic auth password. Neither variable has a package default: omit `basicAuth` for unauthenticated local Tempo, or fail fast in your application/CI if either value is missing for a Grafana Cloud export.
+
+Keep `GRAFANA_API_KEY` in a secret store, never commit it to `.env` files or logs, and scope/rotate it like any other production credential. Local development and tests should prefer the unauthenticated `http://localhost:4318` endpoint with injectable `fetch` mocks; CI pipelines that exercise Grafana Cloud wiring should inject masked secrets only for those jobs:
+
+```yaml
+env:
+  GRAFANA_INSTANCE_ID: ${{ secrets.GRAFANA_INSTANCE_ID }}
+  GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+```
+
+See the repository copy of [`packages/franken-observer/docs/adapters.md`](https://github.com/djm204/frankenbeast/blob/main/packages/franken-observer/docs/adapters.md#tempoadapter) for the full Grafana Cloud environment-variable reference, local-development example, and CI notes.
 
 ### `PrometheusAdapter`
 
@@ -655,6 +702,8 @@ import { WebhookNotifier, CircuitBreaker, LoopDetector } from '@franken/observer
 
 const notifier = new WebhookNotifier({
   url: process.env.SLACK_WEBHOOK_URL!,
+  // Required allowlist: the configured target URL must resolve to one of these origins.
+  allowedTargetOrigins: ['https://hooks.slack.com'],
   // Optional extra headers (auth, custom content-type, etc.)
   headers: { 'X-Source': 'frankenbeast' },
 })
@@ -675,6 +724,8 @@ detector.on('loop-detected', result => {
 ```
 
 `send()` throws on non-2xx responses and network errors. For fire-and-forget use inside event handlers, handle rejections with `.catch()` or `void`.
+
+Webhook targets are deny-by-default: configure `allowedTargetOrigins` with the trusted webhook origins that may receive HITL payloads. The configured `url` must resolve to one of those origins before any network request is attempted, and redirects are not followed automatically so an allowlisted endpoint cannot forward the POST body to an unlisted origin. Legacy deployments can set `allowUnlistedTarget: true` as an explicit unsafe opt-out while they migrate to an allowlist.
 
 ---
 
@@ -753,7 +804,7 @@ npm test
 # Integration tests (real SQLite, real HTTP)
 INTEGRATION=true npm run test:integration
 
-# LLM-judge evals (requires real LLM; not run in CI)
+# Eval suite (included in CI via the root test:ci script)
 EVAL=true npm run test:eval
 
 # Watch mode

@@ -1,5 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import type { BrainSnapshot, LlmMessage, LlmStreamEvent, ToolDefinition } from '@franken/types';
+
+const googleGenAIConstructorOptions = vi.hoisted(() => ({
+  values: [] as Array<{ apiKey?: string }>,
+}));
+
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: vi.fn(function (this: object, options: { apiKey?: string }) {
+    googleGenAIConstructorOptions.values.push(options);
+    return { models: { generateContentStream: vi.fn() } };
+  }),
+}));
+
 import { GeminiApiAdapter } from '../../../src/providers/gemini-api-adapter.js';
 
 async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
@@ -9,6 +21,10 @@ async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<L
 }
 
 describe('GeminiApiAdapter', () => {
+  beforeEach(() => {
+    googleGenAIConstructorOptions.values = [];
+  });
+
   describe('properties', () => {
     it('has correct name and type', () => {
       const adapter = new GeminiApiAdapter({ apiKey: 'test-key' });
@@ -43,6 +59,57 @@ describe('GeminiApiAdapter', () => {
       const adapter = new GeminiApiAdapter();
       expect(await adapter.isAvailable()).toBe(true);
       delete process.env['GEMINI_API_KEY'];
+    });
+
+    it('falls back to GOOGLE_API_KEY for blank option keys consistently', async () => {
+      const origG = process.env['GOOGLE_API_KEY'];
+      const origGm = process.env['GEMINI_API_KEY'];
+      process.env['GOOGLE_API_KEY'] = 'gk-env';
+      delete process.env['GEMINI_API_KEY'];
+      try {
+        const adapter = new GeminiApiAdapter({ apiKey: '' });
+        expect(await adapter.isAvailable()).toBe(true);
+        expect(googleGenAIConstructorOptions.values.at(-1)).toEqual({ apiKey: 'gk-env' });
+      } finally {
+        if (origG === undefined) delete process.env['GOOGLE_API_KEY'];
+        else process.env['GOOGLE_API_KEY'] = origG;
+        if (origGm === undefined) delete process.env['GEMINI_API_KEY'];
+        else process.env['GEMINI_API_KEY'] = origGm;
+      }
+    });
+
+    it('falls back to GEMINI_API_KEY for whitespace-only option keys consistently', async () => {
+      const origG = process.env['GOOGLE_API_KEY'];
+      const origGm = process.env['GEMINI_API_KEY'];
+      delete process.env['GOOGLE_API_KEY'];
+      process.env['GEMINI_API_KEY'] = 'gm-env';
+      try {
+        const adapter = new GeminiApiAdapter({ apiKey: '  \t\n  ' });
+        expect(await adapter.isAvailable()).toBe(true);
+        expect(googleGenAIConstructorOptions.values.at(-1)).toEqual({ apiKey: 'gm-env' });
+      } finally {
+        if (origG === undefined) delete process.env['GOOGLE_API_KEY'];
+        else process.env['GOOGLE_API_KEY'] = origG;
+        if (origGm === undefined) delete process.env['GEMINI_API_KEY'];
+        else process.env['GEMINI_API_KEY'] = origGm;
+      }
+    });
+
+    it('returns false for whitespace-only keys when no env fallback is set', async () => {
+      const origG = process.env['GOOGLE_API_KEY'];
+      const origGm = process.env['GEMINI_API_KEY'];
+      delete process.env['GOOGLE_API_KEY'];
+      delete process.env['GEMINI_API_KEY'];
+      try {
+        const adapter = new GeminiApiAdapter({ apiKey: '   ' });
+        expect(await adapter.isAvailable()).toBe(false);
+        expect(googleGenAIConstructorOptions.values.at(-1)).toEqual({ apiKey: '' });
+      } finally {
+        if (origG === undefined) delete process.env['GOOGLE_API_KEY'];
+        else process.env['GOOGLE_API_KEY'] = origG;
+        if (origGm === undefined) delete process.env['GEMINI_API_KEY'];
+        else process.env['GEMINI_API_KEY'] = origGm;
+      }
     });
 
     it('returns false when no API key', async () => {

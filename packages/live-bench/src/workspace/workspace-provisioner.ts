@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, parse, relative, resolve, sep } from 'node:path';
 import { serializeToolCallEvidence } from '../evidence/tool-call-evidence.js';
@@ -162,12 +163,18 @@ function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
+const MAX_MODEL_PATH_SEGMENT_BYTES = 255;
+
 function modelPathSegment(model: string): string {
   const codeUnits = Buffer.alloc(model.length * 2);
   for (let index = 0; index < model.length; index += 1) {
     codeUnits.writeUInt16BE(model.charCodeAt(index), index * 2);
   }
-  return `model-${codeUnits.toString('hex')}`;
+  const encoded = `model-${codeUnits.toString('hex')}`;
+  if (Buffer.byteLength(encoded) <= MAX_MODEL_PATH_SEGMENT_BYTES) {
+    return encoded;
+  }
+  return `model-sha256-${createHash('sha256').update(codeUnits).digest('hex')}`;
 }
 
 function assertSafePathSegment(value: string, label: string): void {
