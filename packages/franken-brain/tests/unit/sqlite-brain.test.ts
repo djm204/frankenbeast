@@ -299,6 +299,12 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('long-contact', `${'x'.repeat(5000)}secret-token`)).toThrow(/right-to-forget/);
     });
 
+    it('guards short query substrings embedded deep in long working-memory tokens', () => {
+      brain.rightToForget({ query: 'abc' });
+
+      expect(() => brain.working.set('long-short-query', `${'x'.repeat(5000)}abc`)).toThrow(/right-to-forget/);
+    });
+
     it('deletes episodic sourceScope markers with optional spacing', () => {
       brain.episodic.record({
         type: 'observation',
@@ -311,6 +317,23 @@ describe('SqliteBrain', () => {
 
       expect(report.deleted).toEqual({ working: 0, episodic: 1, derived: 1 });
       expect(brain.episodic.recall('scoped record', 5)).toEqual([]);
+    });
+
+    it('deletes working and checkpoint sourceScope markers with optional spacing', () => {
+      brain.working.set('plain-scoped-record', 'sourceScope: import-1');
+      brain.recovery.checkpoint({
+        runId: 'run-spaced-source-marker',
+        phase: 'execution',
+        step: 1,
+        context: { note: 'sourceScope: import-1 marker' },
+        timestamp: '2026-07-13T00:03:10.000Z',
+      });
+
+      const report = brain.rightToForget({ sourceScope: 'import-1' });
+
+      expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 1 });
+      expect(brain.working.has('plain-scoped-record')).toBe(false);
+      expect(brain.recovery.lastCheckpoint()).toBeNull();
     });
 
     it('expires forgotten rows from other live working-memory instances', () => {

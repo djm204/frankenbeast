@@ -2221,7 +2221,7 @@ function readQueryGuardIndex(db: Database.Database, scope: 'working' | 'episodic
 function* iterateSizedGuardMatchCandidates(value: string | undefined, lengths: Set<number>): Iterable<string> {
   const tokens = guardTokens(value).sort((a, b) => a.length - b.length);
   yield* tokens;
-  const relevantLengths = Array.from(lengths).filter(length => length >= MIN_QUERY_GUARD_CHUNK_LENGTH).sort((a, b) => a - b);
+  const relevantLengths = Array.from(lengths).filter(length => length > 0).sort((a, b) => a - b);
   if (relevantLengths.length === 0) return;
   for (const token of tokens) {
     for (const length of relevantLengths) {
@@ -2280,6 +2280,7 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
     const metadata = normalizeForMatch(objectMetadataString(value, ['sourceScope', 'source', 'scope', 'sourceId']));
     if (
       metadata.split(/\s+/).includes(sourceScope)
+      || extractStructuredMarkerValues(text, 'sourceScope').some(candidate => normalizeForMatch(candidate) === sourceScope)
       || lowerKey.startsWith(`${sourceScope}:`)
       || lowerKey.includes(`:${sourceScope}:`)
       || lowerKey.endsWith(`:${sourceScope}`)
@@ -2470,7 +2471,10 @@ function checkpointStateMatchesSelector(value: unknown, selector: NormalizedRigh
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
     const metadata = normalizeForMatch(objectMetadataString(context, ['sourceScope', 'source', 'scope', 'sourceId']));
-    if (metadata.split(/\s+/).includes(sourceScope) || text.includes(`sourcescope:${sourceScope}`)) return true;
+    if (
+      metadata.split(/\s+/).includes(sourceScope)
+      || extractStructuredMarkerValues(text, 'sourceScope').some(candidate => normalizeForMatch(candidate) === sourceScope)
+    ) return true;
   }
   return false;
 }
