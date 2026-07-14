@@ -77,7 +77,7 @@ describe('PrCreator argv subprocess safety', () => {
       '- preserve webhook URL https://hooks.example.test/a?token=$(cat ~/.ssh/id_rsa)',
       '- keep body text with semicolons; pipes | and backticks `uname` literal',
       '',
-      'Closes #1711',
+      'References #1711',
     ].join('\n');
     const llm = { complete: async () => `TITLE: ${hostileTitle}\nBODY:\n${hostileBody}` };
     const creator = new PrCreator(

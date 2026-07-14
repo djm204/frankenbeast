@@ -584,6 +584,7 @@ describe('GitBranchIsolator', () => {
       cwdIsolator.isolate('03_my_chunk');
 
       expectGit(['checkout', '-b', 'chunk/03_my_chunk'], cwd);
+      expect(mockExecFileSync.mock.calls.every(([, , opts]) => (opts as { cwd?: string } | undefined)?.cwd === cwd)).toBe(true);
       expect(mockExecSync.mock.calls.every(([cmd]) => !String(cmd).includes('touch /tmp/pwned'))).toBe(true);
     });
   });
