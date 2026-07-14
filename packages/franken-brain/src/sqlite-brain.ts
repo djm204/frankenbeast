@@ -670,6 +670,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   ) {}
 
   record(event: EpisodicEvent): void {
+    assertEpisodicNotDeletionGuarded(this.db, event);
     this.db
       .prepare(
         `INSERT INTO episodic_events (type, step, summary, details, created_at, schema_version)
@@ -1098,21 +1099,23 @@ export class SqliteBrain implements IBrain {
           }
         }
         writeDeletionGuards(this.db, normalizedSelector, selectorHash);
+        const auditSummary = 'Right-to-forget deletion completed';
+        const auditDetails = JSON.stringify({
+          selectorHash,
+          deleted: {
+            working: workingMatches.length,
+            episodic: episodicMatches.length,
+            derived: episodicMatches.length,
+          },
+        });
         const result = this.db.prepare(
           `INSERT INTO episodic_events (type, step, summary, details, created_at, schema_version)
            VALUES (?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
         ).run(
           'observation',
           'right-to-forget',
-          'Right-to-forget deletion completed',
-          JSON.stringify({
-            selectorHash,
-            deleted: {
-              working: workingMatches.length,
-              episodic: episodicMatches.length,
-              derived: episodicMatches.length,
-            },
-          }),
+          this.encryption?.encrypt(auditSummary) ?? auditSummary,
+          this.encryption?.encrypt(auditDetails) ?? auditDetails,
           isoNow(),
         );
         return Number(result.lastInsertRowid);
@@ -1150,7 +1153,11 @@ export class SqliteBrain implements IBrain {
       details: string | null;
     }>;
     return rows
-      .filter(row => episodicRowMatchesSelector(row.summary, row.details, selector))
+      .filter((row) => episodicRowMatchesSelector(
+        this.encryption?.decrypt(row.summary) ?? row.summary,
+        row.details ? (this.encryption?.decrypt(row.details) ?? row.details) : null,
+        selector,
+      ))
       .map(row => row.id);
   }
 
@@ -1883,7 +1890,6 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
 function episodicRowMatchesSelector(summary: string, details: string | null, selector: NormalizedRightToForgetSelector): boolean {
   const parsedDetails = details ? safeJsonParse(details) : undefined;
   const text = normalizeForMatch(`${summary} ${details ?? ''}`);
-  if (selector.key && text.includes(normalizeForMatch(selector.key))) return true;
   if (selector.query && text.includes(normalizeForMatch(selector.query))) return true;
   if (selector.category) {
     const category = normalizeForMatch(selector.category);
@@ -1893,7 +1899,7 @@ function episodicRowMatchesSelector(summary: string, details: string | null, sel
   if (selector.sourceScope) {
     const sourceScope = normalizeForMatch(selector.sourceScope);
     const metadata = normalizeForMatch(objectMetadataString(parsedDetails, ['sourceScope', 'source', 'scope', 'sourceId']));
-    if (metadata === sourceScope || text.includes(sourceScope)) return true;
+    if (metadata.split(/\s+/).includes(sourceScope) || text.includes(sourceScope)) return true;
   }
   return false;
 }
@@ -1904,6 +1910,11 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
     `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version)
      VALUES (?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
   );
+  const scopes = selector.type === 'working'
+    ? ['working']
+    : selector.type === 'episodic'
+      ? ['episodic']
+      : ['working', 'episodic'];
   for (const [kind, value] of [
     ['key', selector.key],
     ['category', selector.category],
@@ -1913,28 +1924,58 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
     if (!value) continue;
     const values = kind === 'query' ? guardTokens(value) : [value];
     for (const guardValue of values) {
-      insert.run(selectorHash, kind, hashGuardValue(guardValue), now);
+      for (const scope of scopes) {
+        if (kind === 'key' && scope !== 'working') continue;
+        insert.run(selectorHash, `${scope}:${kind}`, hashGuardValue(guardValue), now);
+      }
     }
   }
 }
 
 function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string): void {
   const parsed = safeJsonParse(serializedValue);
+  const keyPrefix = key.includes(':') ? key.split(':', 1)[0] : undefined;
   const candidates: Array<[string, string | undefined]> = [
     ['key', key],
     ['category', objectMetadataString(parsed, ['category', 'categories', 'kind'])],
+    ['category', keyPrefix],
     ['sourceScope', objectMetadataString(parsed, ['sourceScope', 'source', 'scope', 'sourceId'])],
+    ['sourceScope', keyPrefix],
   ];
   const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
   for (const [kind, value] of candidates) {
     if (!value) continue;
-    if (stmt.get(kind, hashGuardValue(value))) {
-      throw new MemoryDeletionGuardError(`Refusing to store memory because it matches a prior right-to-forget ${kind} guard`);
+    for (const candidate of value.split(/\s+/).filter(Boolean)) {
+      if (stmt.get(`working:${kind}`, hashGuardValue(candidate))) {
+        throw new MemoryDeletionGuardError(`Refusing to store memory because it matches a prior right-to-forget ${kind} guard`);
+      }
     }
   }
   for (const value of guardTokens(typeof parsed === 'string' ? parsed : valueToSearchText(parsed))) {
-    if (stmt.get('query', hashGuardValue(value))) {
+    if (stmt.get('working:query', hashGuardValue(value))) {
       throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior right-to-forget query guard');
+    }
+  }
+}
+
+function assertEpisodicNotDeletionGuarded(db: Database.Database, event: EpisodicEvent): void {
+  const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
+  const candidates: Array<[string, string | undefined]> = [
+    ['category', objectMetadataString(event.details, ['category', 'categories', 'kind'])],
+    ['sourceScope', objectMetadataString(event.details, ['sourceScope', 'source', 'scope', 'sourceId'])],
+  ];
+  for (const [kind, value] of candidates) {
+    if (!value) continue;
+    for (const candidate of value.split(/\s+/).filter(Boolean)) {
+      if (stmt.get(`episodic:${kind}`, hashGuardValue(candidate))) {
+        throw new MemoryDeletionGuardError(`Refusing to store episodic memory because it matches a prior right-to-forget ${kind} guard`);
+      }
+    }
+  }
+  const text = `${event.summary} ${event.details ? valueToSearchText(event.details) : ''}`;
+  for (const value of guardTokens(text)) {
+    if (stmt.get('episodic:query', hashGuardValue(value))) {
+      throw new MemoryDeletionGuardError('Refusing to store episodic memory because it matches a prior right-to-forget query guard');
     }
   }
 }

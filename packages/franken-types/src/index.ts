@@ -69,6 +69,9 @@ export type {
   EpisodicEvent,
   ExecutionState,
   BrainSnapshot,
+  RightToForgetMemoryType,
+  RightToForgetSelector,
+  RightToForgetReport,
 } from './brain.js';
 export {
   EpisodicEventSchema,

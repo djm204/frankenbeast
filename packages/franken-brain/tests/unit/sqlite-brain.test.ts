@@ -145,6 +145,36 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('contact', { value: 'alice@example.test' })).toThrow(/right-to-forget/);
     });
 
+    it('guards forgotten working prefixes and episodic writes without over-scoping episodic-only deletions', () => {
+      brain.working.set('pii:email', { value: 'alice@example.test', category: 'pii' });
+      brain.rightToForget({ category: 'pii' });
+
+      expect(() => brain.working.set('pii:new', 'another secret')).toThrow(/right-to-forget/);
+      expect(() => brain.episodic.record({
+        type: 'observation',
+        summary: 'alice@example.test returned',
+        details: { category: 'pii' },
+        createdAt: new Date().toISOString(),
+      })).toThrow(/right-to-forget/);
+
+      brain.rightToForget({ query: 'episodic-only-secret', type: 'episodic' });
+      expect(() => brain.working.set('safe-working', { value: 'episodic-only-secret' })).not.toThrow();
+    });
+
+    it('does not match working-memory key selectors against episodic text when type is all', () => {
+      brain.working.set('user', 'alice');
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'unrelated text mentions user as a common word',
+        createdAt: new Date().toISOString(),
+      });
+
+      const report = brain.rightToForget({ key: 'user' });
+
+      expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 0 });
+      expect(brain.episodic.recall('common word', 5)).toHaveLength(1);
+    });
+
     it('requires at least one selector', () => {
       expect(() => brain.rightToForget({})).toThrow(/requires at least one/);
     });
@@ -698,6 +728,43 @@ describe('SqliteBrain', () => {
         expect(reopened.recovery.lastCheckpoint()?.context).toEqual({
           secret: 'checkpoint payload',
         });
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('deletes and audits encrypted right-to-forget matches without leaving plaintext rows', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-encrypted-rtf-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const encrypted = new SqliteBrain(dbPath, undefined, { encryption });
+        encrypted.working.set('pii:email', { value: 'alice@example.test', category: 'pii' });
+        encrypted.episodic.record({
+          type: 'observation',
+          summary: 'User email alice@example.test was imported',
+          details: { category: 'pii', sourceScope: ['import-1', 'import-2'] },
+          createdAt: '2026-07-13T00:00:00.000Z',
+        });
+
+        const report = encrypted.rightToForget({ sourceScope: 'import-1' });
+
+        expect(report.deleted).toEqual({ working: 0, episodic: 1, derived: 1 });
+        expect(encrypted.episodic.recall('alice@example.test', 5)).toEqual([]);
+        encrypted.close();
+
+        const raw = new Database(dbPath, { readonly: true });
+        const auditRow = raw
+          .prepare(`SELECT summary, details FROM episodic_events WHERE step = ?`)
+          .get('right-to-forget') as { summary: string; details: string };
+        expect(auditRow.summary).toMatch(/^enc:v1:/);
+        expect(auditRow.details).toMatch(/^enc:v1:/);
+        expect(auditRow.details).not.toContain('selectorHash');
+        raw.close();
+
+        const reopened = new SqliteBrain(dbPath, undefined, { encryption });
+        expect(reopened.episodic.recent(1)[0]?.step).toBe('right-to-forget');
         reopened.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });

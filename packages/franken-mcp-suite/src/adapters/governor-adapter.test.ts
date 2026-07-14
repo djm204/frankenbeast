@@ -33,15 +33,17 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('approved');
   });
 
-  it('denies destructive fbeast memory tools on the SHARED path', async () => {
+  it('denies destructive fbeast memory forget but permits governed right-to-forget calls', async () => {
     // The word heuristic does not catch "forget"; classification lives in the
     // shared governor so every caller (hook, fbeast_governor_check, central
     // gate, governor_log) gets the same 'denied' decision for a benign key.
+    // Right-to-forget is the explicit deletion path and must remain callable
+    // through the central MCP dispatch gate.
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     await expect(governor.check({ action: 'fbeast_memory_forget', context: '{"key":"note"}' }))
       .resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({ action: 'fbeast_memory_right_to_forget', context: '{"category":"pii"}' }))
-      .resolves.toMatchObject({ decision: 'denied' });
+      .resolves.toMatchObject({ decision: 'approved' });
   });
 
   it('denies raw destructive patterns (rm -rf)', async () => {
