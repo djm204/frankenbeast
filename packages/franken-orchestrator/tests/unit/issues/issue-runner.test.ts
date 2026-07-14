@@ -566,6 +566,40 @@ describe('IssueRunner', () => {
       expect(mockRun).not.toHaveBeenCalled();
     });
 
+    it('contains issue-runtime checkpoint read failures to one issue outcome', async () => {
+      const throwingCheckpoint = {
+        ...mockCheckpoint(),
+        readAll: vi.fn(() => {
+          throw new Error('checkpoint unreadable');
+        }),
+      };
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockImplementation((issueNumber: number) =>
+        issueNumber === 21 ? throwingCheckpoint : mockCheckpoint(),
+      );
+      vi.mocked(issueRuntime.artifactsForIssue).mockImplementation((issueNumber: number): IssueRuntimeArtifacts => ({
+        planName: `issue-${issueNumber}`,
+        planDir: `.tmp/test-issue-${issueNumber}`,
+        checkpointFile: `.tmp/test-issue-${issueNumber}.checkpoint`,
+        logFile: `.tmp/test-issue-${issueNumber}.log`,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 21 }), makeIssue({ number: 22 })],
+        triageResults: [makeTriage(21), makeTriage(22)],
+        issueRuntime,
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({
+        issueNumber: 21,
+        status: 'failed',
+        error: 'checkpoint unreadable',
+      });
+      expect(outcomes[1]).toMatchObject({ issueNumber: 22, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
     it('contains failing signal sources to a failed issue outcome', async () => {
       const config = makeConfig({
         issues: [makeIssue({ number: 18 }), makeIssue({ number: 19 })],
