@@ -433,14 +433,68 @@ describe('SqliteBrain', () => {
 
       expect(neverStored.status).toBe('never_store');
       expect(brain.working.has('env.secret.api-token')).toBe(false);
-      expect(
-        brain.memoryReview.propose({
+      expect(brain.memoryReview.propose({
           targetStore: 'working',
           key: 'env.secret.api-token',
-          value: 'sk-test-redacted',
+          value: '«redacted:sk-…»',
           source: 'later-terminal-output',
           confidence: 0.99,
           reason: 'Same secret appeared again.',
+        }),
+      ).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+      });
+    });
+
+    it('suppresses already-pending duplicates before they can be approved', () => {
+      const proposal = {
+        targetStore: 'working' as const,
+        key: 'env.secret.api-token',
+        value: 'duplicate-secret',
+        source: 'terminal-output',
+        confidence: 0.99,
+        reason: 'Sensitive token should not persist without consent.',
+      };
+      const first = brain.memoryReview.propose(proposal);
+      const duplicate = brain.memoryReview.propose({
+        ...proposal,
+        source: 'later-terminal-output',
+        reason: 'Same secret appeared again.',
+      });
+
+      brain.memoryReview.neverStore(first.id, { reviewer: 'operator' });
+      const suppressedDuplicate = brain.memoryReview.list('suppressed')[0];
+
+      expect(suppressedDuplicate).toMatchObject({
+        id: duplicate.id,
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+      });
+      expect(brain.working.has('env.secret.api-token')).toBe(false);
+    });
+
+    it('uses persisted value normalization when signing suppressions', () => {
+      const value = { seenAt: new Date('2026-07-14T00:00:00.000Z') };
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.timestamped',
+        value,
+        source: 'chat:turn-10',
+        confidence: 0.8,
+        reason: 'Timestamped preference candidate.',
+      });
+
+      brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+
+      expect(
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.timestamped',
+          value,
+          source: 'chat:turn-11',
+          confidence: 0.8,
+          reason: 'Same timestamped preference candidate.',
         }),
       ).toMatchObject({
         status: 'suppressed',
@@ -483,6 +537,21 @@ describe('SqliteBrain', () => {
           store: 'checkpoints',
           version: CURRENT_MEMORY_SCHEMA_VERSION,
           recordCount: 1,
+        },
+        {
+          store: 'memory_review_candidates',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 0,
+        },
+        {
+          store: 'memory_review_provenance',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 0,
+        },
+        {
+          store: 'memory_review_suppressions',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 0,
         },
       ]);
 
@@ -595,6 +664,21 @@ describe('SqliteBrain', () => {
           },
           {
             store: 'checkpoints',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_review_candidates',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_review_provenance',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_review_suppressions',
             version: CURRENT_MEMORY_SCHEMA_VERSION,
             recordCount: 0,
           },
@@ -810,6 +894,31 @@ describe('SqliteBrain', () => {
           details: { body: 'legacy details' },
           createdAt: '2026-07-13T00:00:00.000Z',
         });
+        const approved = plaintext.memoryReview.propose({
+          targetStore: 'working',
+          key: 'review.approved',
+          value: { secret: 'approved review payload' },
+          source: 'legacy review source',
+          evidenceId: 'legacy-evidence',
+          confidence: 0.9,
+          reason: 'legacy review reason',
+        });
+        plaintext.memoryReview.approve(approved.id, {
+          reviewer: 'legacy reviewer',
+          note: 'legacy approval note',
+        });
+        const rejected = plaintext.memoryReview.propose({
+          targetStore: 'working',
+          key: 'review.rejected',
+          value: 'rejected review payload',
+          source: 'legacy rejection source',
+          confidence: 0.4,
+          reason: 'legacy rejection reason',
+        });
+        plaintext.memoryReview.reject(rejected.id, {
+          reviewer: 'legacy reviewer',
+          note: 'legacy rejection note',
+        });
         plaintext.flush();
         plaintext.close();
 
@@ -822,6 +931,9 @@ describe('SqliteBrain', () => {
         expect(dryRun.operations.map((op) => op.table)).toEqual([
           'working_memory',
           'episodic_events',
+          'memory_review_candidates',
+          'memory_review_provenance',
+          'memory_review_suppressions',
         ]);
 
         const migrated = SqliteBrain.migrateMemoryEncryption(dbPath, {
@@ -875,7 +987,7 @@ describe('SqliteBrain', () => {
               context: { restoredSecret: 'checkpoint secret' },
               timestamp: '2026-07-13T00:00:00.000Z',
             },
-            metadata: { lastProvider: '', switchReason: '' },
+            metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
           },
           dbPath,
           undefined,
