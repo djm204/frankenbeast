@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.46.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.46.0...@franken/orchestrator-v0.46.1) (2026-07-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.7.18 to 0.8.0
+
 ## [0.46.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.45.0...@franken/orchestrator-v0.46.0) (2026-07-14)
 
 

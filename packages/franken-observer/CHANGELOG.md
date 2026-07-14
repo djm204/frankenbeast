@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.18...franken-observer-v0.8.0) (2026-07-14)
+
+
+### Features
+
+* **observer:** classify runtime artifacts ([#2235](https://github.com/djm204/frankenbeast/issues/2235)) ([ed2f803](https://github.com/djm204/frankenbeast/commit/ed2f803fec0aa19837c51a779c418135b947bed5))
+
 ## [0.7.18](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.7.17...franken-observer-v0.7.18) (2026-07-14)
 
 
