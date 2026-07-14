@@ -32,6 +32,11 @@ export type {
   LessonContradiction,
   LessonContradictionReport,
   LessonRollbackWorkflow,
+  LessonLifecycleStatus,
+  LessonQuarantineEvidence,
+  LessonQuarantineReviewItem,
+  LessonQuarantineMetadata,
+  LessonUnquarantineMetadata,
   LessonCooldownMetadata,
   LessonCooldownSuppression,
   CrossTaskBlockerPattern,
@@ -42,6 +47,7 @@ export type {
   LessonRecordingResult,
   ReviewerFeedbackLessonEntry,
   ReviewerFeedbackLessonCapture,
+  FailedTestSkillCandidate,
   PostPrLessonExtractionTemplate,
   CritiqueLesson,
   TokenSpend,
@@ -82,11 +88,22 @@ export type { CritiqueErrorOptions } from './errors/index.js';
 // Core components
 export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
-export { LessonRecorder, detectLessonContradictions } from './memory/lesson-recorder.js';
+export {
+  LessonRecorder,
+  detectLessonContradictions,
+  isLessonApplicable,
+  quarantineLesson,
+  quarantineLessonForRepeatedFailures,
+  unquarantineLesson,
+} from './memory/lesson-recorder.js';
 export type {
   BlockerPatternObservation,
   BlockerPatternState,
   LessonRecorderOptions,
+  LessonQuarantineRequest,
+  LessonFailureSignal,
+  RepeatedFailureQuarantineRequest,
+  LessonUnquarantineRequest,
 } from './memory/lesson-recorder.js';
 
 // Evaluators

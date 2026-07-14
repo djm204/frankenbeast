@@ -5,6 +5,7 @@ import type {
   ChannelType
 } from '../../core/types.js';
 import { redactTelegramBotTokenUrls } from '../../../security/telegram-redaction.js';
+import { formatHttpErrorMessage } from '../http-error-context.js';
 
 export interface TelegramAdapterOptions {
   token: string;
@@ -63,9 +64,12 @@ export class TelegramAdapter implements ChannelAdapter {
     });
 
     if (!response.ok) {
-      const error = redactTelegramBotTokenUrls(await response.text());
-      const redactedUrl = redactTelegramBotTokenUrls(targetUrl);
-      throw new Error(`Telegram API error: ${response.status} ${redactedUrl} ${error}`);
+      throw new Error(await formatHttpErrorMessage(
+        'Telegram API error',
+        response,
+        targetUrl,
+        redactTelegramBotTokenUrls,
+      ));
     }
   }
 

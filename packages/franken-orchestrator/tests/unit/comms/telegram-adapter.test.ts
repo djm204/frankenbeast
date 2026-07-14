@@ -50,11 +50,9 @@ describe('TelegramAdapter', () => {
     const token = '123456789:AAExampleTelegramBotTokenSecretValue';
     const adapter = new TelegramAdapter({ token });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue({
-      ok: false,
+    mockFetch.mockResolvedValue(new Response(`upstream failed for https://api.telegram.org/bot${token}/sendMessage`, {
       status: 500,
-      text: async () => `upstream failed for https://api.telegram.org/bot${token}/sendMessage`,
-    } as Response);
+    }));
 
     await expect(adapter.send('session-123', {
       text: 'hello telegram',
@@ -62,16 +60,32 @@ describe('TelegramAdapter', () => {
       metadata: { chatId: '12345' },
     })).rejects.toThrow('https://api.telegram.org/bot[REDACTED]/sendMessage');
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
+    mockFetch.mockResolvedValueOnce(new Response(`upstream failed for https://api.telegram.org/bot${token}/sendMessage`, {
       status: 500,
-      text: async () => `upstream failed for https://api.telegram.org/bot${token}/sendMessage`,
-    } as Response);
+    }));
 
     await expect(adapter.send('session-123', {
       text: 'hello telegram',
       status: 'reply',
       metadata: { chatId: '12345' },
     })).rejects.not.toThrow(token);
+  });
+
+  it('includes redacted endpoint and response body when Telegram returns HTTP errors', async () => {
+    const token = '123456789:abcdefghijklmnopqrstuvwxyz';
+    const adapter = new TelegramAdapter({ token });
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValue(new Response('{"description":"chat not found"}', {
+      status: 400,
+      statusText: 'Bad Request',
+    }));
+
+    await expect(adapter.send('session-123', {
+      text: 'hello telegram',
+      status: 'reply',
+      metadata: { chatId: '12345' },
+    })).rejects.toThrow(
+      'Telegram API error: 400 Bad Request for https://api.telegram.org/bot[REDACTED]/sendMessage: {"description":"chat not found"}',
+    );
   });
 });

@@ -15,8 +15,8 @@ describe('governor Vitest suite selection', () => {
   it('keeps default and coverage runs scoped to unit tests', () => {
     const unitConfig = readFileSync(unitConfigPath, 'utf8');
 
-    expect(unitConfig).toContain("include: ['tests/unit/**/*.test.ts']");
-    expect(unitConfig).not.toContain('tests/integration');
+    expect(unitConfig).toContain("['tests/unit/**/*.test.ts']");
+    expect(unitConfig).toContain("exclude: isIntegration ? [] : ['tests/integration/**/*.test.ts', 'tests/**/*.integration.test.ts']");
   });
 
   it('exposes a dedicated integration test script, config, and suite', () => {

@@ -19,4 +19,10 @@ describe('public API exports', () => {
     expect(publicApi.SignatureVerificationError).toBeDefined();
     expect(publicApi.TriggerEvaluationError).toBeDefined();
   });
+
+  it('re-exports signed policy manifest helpers from the package root', () => {
+    expect(publicApi.formatApprovalPolicyManifestPayload).toBeDefined();
+    expect(publicApi.verifySignedApprovalPolicyManifest).toBeDefined();
+    expect(publicApi.createEvaluatorsFromApprovalPolicyManifest).toBeDefined();
+  });
 });

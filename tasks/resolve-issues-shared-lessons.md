@@ -5,6 +5,11 @@
 - Keep high-signal short technical tokens such as `log`, `PII`, `JWT`, `API`, `CLI`, `SQL`, `URL`, and `env` in overlap matching, but avoid ambiguous negation words such as standalone `block` that also appear in affirmative guidance like code blocks.
 - When detector comparison uses reviewer finding/suggestion text, also include that guidance in `searchLessons` queries and stable fallback IDs; otherwise runtime retrieval and PM handles drift from the detector semantics.
 
+## 2026-07-13 — Langfuse docs and env-var DX
+- For docs that include links from published package pages, prefer links to files that are shipped in the package (e.g., README, changelog). In `@franken/observer`, avoid package-relative links to `docs/` if that directory is not published.
+- For local secret setup guidance, recommend `.env`/ignored secret files that match repo policy to reduce accidental staging of keys like `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`.
+- When running Codex review on a refreshed commit, resolve all `chatgpt-codex-connector` inline findings and verify `reviewThreads.isResolved` is true for the relevant threads before treating a second `@codex review` cycle as complete.
+
 ## 2026-07-13 — Operator session-token review hardening
 - Approval-session tokens must be scoped to the policy actually approved: skill triggers can use selected tool scope, but budget/custom/non-skill approvals should stay task-scoped even when a tool is selected so same-tool actions in other tasks do not bypass prompts.
 - Never reuse an approval-session token for fail-closed trigger-evaluation errors; even a valid same-scope token must fall back to a fresh operator prompt when evaluator context/logic throws.
@@ -19,6 +24,10 @@
 - Default new/runtime skill tools to `requiresHitl: true` after schema validation, and preserve explicit `requiresHitl: false` only for reviewed safe tools.
 - Validate catalog `toolDefinitions` before creating/writing skill install files; otherwise a failed install can leave a partial MCP skill on disk and accidentally expose unknown runtime tools.
 - Regression tests should cover omitted HITL defaulting, explicit safe-tool opt-outs, manifest readback, stale-manifest removal on catalog reinstall and custom install replacement, no-tools MCP alias behavior, and invalid tool manifests leaving no partial install.
+
+## 2026-07-10 — Root test entrypoint filters
+- For root Turbo entrypoints that expose package-local optional suites, filter to workspaces with real scripts/tests so `turbo run <task>` does not schedule `<NONEXISTENT>` package tasks. Verify both `--dry=json` task selection and at least one actual root command run; dry-run alone can hide package-local no-test failures.
+- If eval/LLM-judge tests are named by directory (for example `src/evals/**/*.test.ts`) rather than `*.eval.test.ts`, update Vitest include/exclude rules so `EVAL=true` discovers them and default `npm test` keeps them opt-in.
 
 ## 2026-07-11 — Approval replay command extraction guardrails
 - Approval replay commands are model-derived state, not fresh operator input. Keep the replay helper narrow: accept only trimmed single-line printable non-slash command descriptions, fail closed on multiline/control-command payloads, preserve the pending approval, and make operators reject/re-submit an explicit `/run` for overrides.
@@ -159,3 +168,7 @@
 
 ## 2026-07-13 — Governor multi-trigger review regressions
 - When a typed trigger context source throws after an earlier promptable policy fired, keep the earlier operator prompt, add the context failure as an additional critical policy, and avoid reusing session tokens for mixed/failure batches. Ambiguity trigger context should default omitted optional flags to false only when at least one ambiguity flag is present, and combined trigger prompts must preserve the maximum severity across all fired policies.
+
+## 2026-07-13 — HTTP error-body safety
+- When adding response bodies to thrown/logged HTTP errors, treat the body as untrusted output: redact echoed auth/API-key headers, redact secret-bearing URLs, and cap body reads before buffering or rendering. Include regressions for JSON-style quoted secrets, non-Web stream fallbacks, and exact-at-cap stream bodies before re-triggering Codex.
+- For webhook failure diagnostics, add explicit regressions for truncated/unterminated quoted auth fields, short opaque webhook path segments, non-Web body objects, and stalled streams so Codex follow-up rounds have current-head evidence for security-sensitive fixes.

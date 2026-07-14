@@ -27,6 +27,8 @@
     "local:verify-cli": "fbeast --help && fbeast mcp --help && frankenbeast --help",
     "local:verify-setup": "tsx scripts/verify-setup.ts",
     "test": "turbo run test",
+    "test:integration": "turbo run test:integration --filter=@franken/brain --filter=@franken/critique --filter=@franken/governor --filter=@franken/observer",
+    "test:eval": "turbo run test:eval --filter=@franken/observer",
     "test:ci": "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:planner-integration && npm run ci:test:observer-eval",
     "test:e2e": "npm run test:e2e --workspace @franken/orchestrator --",
     "test:live:bench": "turbo run test:live --filter=@franken/live-bench",

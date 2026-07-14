@@ -75,6 +75,16 @@ async function askText(io: InterviewIO, prompt: string, defaultValue: string): P
   return trimmed.length > 0 ? trimmed : defaultValue;
 }
 
+async function askSecurityMode(io: InterviewIO, defaultValue: 'secure' | 'insecure'): Promise<'secure' | 'insecure'> {
+  while (true) {
+    const answer = (await askText(io, 'Security mode [secure/insecure] (default: secure)', defaultValue)).toLowerCase();
+    if (answer === 'secure' || answer === 'insecure') {
+      return answer;
+    }
+    io.display('Invalid security mode. Enter "secure" or "insecure".');
+  }
+}
+
 function buildConfig(
   baseConfig: OrchestratorConfig,
   state: InitState,
@@ -172,7 +182,7 @@ export async function runInitWizard(options: RunInitWizardOptions): Promise<Init
     : currentProviderDefault;
 
   const securityMode = (!secretBackendOnly && scope.has('security'))
-    ? await askText(options.io, 'Security mode [secure/insecure] (default: secure)', options.initialState.securityMode) as 'secure' | 'insecure'
+    ? await askSecurityMode(options.io, options.initialState.securityMode)
     : options.initialState.securityMode;
 
   // Secret backend detection

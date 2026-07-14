@@ -3,6 +3,7 @@ import {
   BrainSnapshotSchema,
   EpisodicEventSchema,
   ExecutionStateSchema,
+  LearningCooldownOptionsSchema,
   type BrainSnapshot,
   type EpisodicEvent,
   type ExecutionState,
@@ -182,6 +183,16 @@ describe('ExecutionState schema', () => {
   });
 });
 
+describe('LearningCooldownOptions schema', () => {
+  it('trims cooldown keys and rejects whitespace-only values', () => {
+    expect(LearningCooldownOptionsSchema.parse({ key: ' Lesson Key ', cooldownMs: 1 })).toEqual({
+      key: 'Lesson Key',
+      cooldownMs: 1,
+    });
+    expect(() => LearningCooldownOptionsSchema.parse({ key: '   ' })).toThrow();
+  });
+});
+
 describe('Brain interfaces (type-level)', () => {
   it('IBrain has required shape', () => {
     const brain: IBrain = {
@@ -210,6 +221,11 @@ describe('Brain interfaces (type-level)', () => {
   it('IEpisodicMemory has required methods', () => {
     const em: IEpisodicMemory = {
       record: (_event: EpisodicEvent) => {},
+      recordLearning: (_event: EpisodicEvent) => ({
+        recorded: true,
+        key: 'lesson',
+        cooldownMs: 86_400_000,
+      }),
       recall: (_query: string, _limit?: number) => [],
       recentFailures: (_n?: number) => [],
       recent: (_n?: number) => [],

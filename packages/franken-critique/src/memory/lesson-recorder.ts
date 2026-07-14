@@ -2,6 +2,7 @@ import type {
   MemoryPort,
   CritiqueLesson,
   LessonContradictionReport,
+  FailedTestSkillCandidate,
   LessonCooldownSuppression,
   LessonRecordingResult,
   ReviewerFeedbackLessonCapture,
@@ -10,6 +11,9 @@ import type {
   CrossTaskBlockerPattern,
   LearningBacklogPrioritizationItem,
   AgentImprovementScorecard,
+  LessonQuarantineEvidence,
+  LessonQuarantineMetadata,
+  LessonUnquarantineMetadata,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -112,6 +116,60 @@ const LESSON_ROLLBACK_WORKFLOW: LessonRollbackWorkflow = {
 const MISSING_REVIEWER_SUGGESTION_GUIDANCE =
   'Reviewer feedback did not include suggestions for every finding; PM handoffs should preserve the original message and ask a reviewer to attach remediation guidance before promotion.';
 
+const FAILED_TEST_SKILL_CANDIDATE_GUIDANCE =
+  'This recovered critique failure looks like a concrete failed test. PM handoffs should consider creating or updating a skill only after the failure recurs or the regression exposes a reusable workflow gap; keep one-off product bugs in the issue/PR instead of promoting them as durable skill guidance.';
+
+const FAILED_TEST_SIGNAL_PATTERNS: readonly {
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly strength: 'strong' | 'supporting';
+}[] = [
+  {
+    label: 'failed-test wording',
+    pattern:
+      /\b(?:(?:failed|failing|broken)\s+tests?|tests?\s+(?:failed|failing|broken))\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test-failure wording',
+    pattern: /\btest\s+fail(?:ure|ed|ing)?\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'assertion error',
+    pattern: /\bassertionerror\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'assertion expected-received',
+    pattern:
+      /\b(?:expected[\s\S]{0,120}(?:received|got)|(?:received|got)[\s\S]{0,120}expected)\b/i,
+    strength: 'supporting',
+  },
+  {
+    label: 'test runner output',
+    pattern:
+      /\b(?:vitest|jest|mocha|playwright)\b[\s\S]{0,240}\b(?:fail|failed|failing)\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'fail-prefixed runner output',
+    pattern: /\bFAIL\b[\s\S]{0,240}\b[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?\b/i,
+    strength: 'strong',
+  },
+  {
+    label: 'test file path',
+    pattern:
+      /(?:^|[/\s])(?:tests?\/[^\s]+|[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?)\b/i,
+    strength: 'supporting',
+  },
+  {
+    label: 'test command',
+    pattern: /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b/i,
+    strength: 'supporting',
+  },
+];
+
 const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
   templateId: 'post-pr-lesson-extraction-v1',
   trigger: 'after-pr-review-or-merge',
@@ -139,6 +197,149 @@ const POST_PR_LESSON_EXTRACTION_TEMPLATE: PostPrLessonExtractionTemplate = {
   insufficientEvidenceGuidance:
     'Do not promote a post-PR lesson until the issue/PR, source finding, correction, and verification evidence are all available.',
 };
+
+const LESSON_QUARANTINE_REVIEW_ACTION =
+  'Review rollback evidence, decide whether to retire or supersede the lesson, and keep it out of prompt injection until explicitly unquarantined.';
+
+export interface LessonQuarantineRequest {
+  readonly trigger: LessonQuarantineMetadata['trigger'];
+  readonly reason: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  readonly quarantinedAt: string;
+  readonly threshold?: number;
+}
+
+export interface LessonFailureSignal {
+  readonly taskId: TaskId;
+  readonly reason: string;
+  readonly evidenceUrl: string;
+}
+
+export interface RepeatedFailureQuarantineRequest {
+  readonly threshold: number;
+  readonly observedAt: string;
+  readonly failures: readonly LessonFailureSignal[];
+}
+
+export type LessonUnquarantineRequest = LessonUnquarantineMetadata;
+
+export function isLessonApplicable(lesson: CritiqueLesson): boolean {
+  if (lesson.quarantine !== undefined) {
+    return false;
+  }
+  if (lesson.experimentSandbox?.promotionBlocked === true) {
+    return false;
+  }
+  return (
+    lesson.lifecycleStatus === undefined || lesson.lifecycleStatus === 'active'
+  );
+}
+
+export function quarantineLesson(
+  lesson: CritiqueLesson,
+  request: LessonQuarantineRequest,
+): CritiqueLesson {
+  const reason = requireNonEmptyString(request.reason, 'quarantine reason');
+  const quarantinedAt = normalizeTimestamp(request.quarantinedAt);
+  if (request.evidence.length === 0) {
+    throw new RangeError(
+      'Lesson quarantine requires at least one evidence item.',
+    );
+  }
+  const evidence = request.evidence.map(normalizeQuarantineEvidence);
+  const previousQuarantine = lesson.quarantine;
+  const combinedEvidence = [
+    ...(previousQuarantine?.evidence ?? []),
+    ...evidence,
+  ];
+  const reviewItem = createLessonQuarantineReviewItem(
+    lesson,
+    reason,
+    combinedEvidence,
+    quarantinedAt,
+  );
+  const previousLifecycleStatus =
+    previousQuarantine?.previousLifecycleStatus ??
+    (lesson.lifecycleStatus === 'quarantined'
+      ? undefined
+      : lesson.lifecycleStatus);
+  const threshold = request.threshold ?? previousQuarantine?.threshold;
+  const quarantine: LessonQuarantineMetadata = {
+    trigger: request.trigger,
+    reason: previousQuarantine
+      ? `${previousQuarantine.reason}; ${reason}`
+      : reason,
+    quarantinedAt,
+    evidence: combinedEvidence,
+    ...(threshold !== undefined ? { threshold } : {}),
+    ...(previousLifecycleStatus !== undefined
+      ? { previousLifecycleStatus }
+      : {}),
+    reviewItem,
+  };
+  const { unquarantine, ...lessonWithoutUnquarantine } = lesson;
+  void unquarantine;
+  return {
+    ...lessonWithoutUnquarantine,
+    lifecycleStatus: 'quarantined',
+    quarantine,
+  };
+}
+
+export function quarantineLessonForRepeatedFailures(
+  lesson: CritiqueLesson,
+  request: RepeatedFailureQuarantineRequest,
+): CritiqueLesson {
+  if (!Number.isSafeInteger(request.threshold) || request.threshold < 1) {
+    throw new RangeError(
+      'Repeated failure quarantine threshold must be a positive integer.',
+    );
+  }
+  const distinctFailures = dedupeFailureSignals(request.failures);
+  if (distinctFailures.length < request.threshold) {
+    return lesson;
+  }
+  return quarantineLesson(lesson, {
+    trigger: 'repeated-failure-threshold',
+    reason: `Lesson caused ${distinctFailures.length} distinct failure signals, meeting the quarantine threshold of ${request.threshold}.`,
+    evidence: distinctFailures.map((failure) => ({
+      kind: 'failed-regression',
+      reference: failure.evidenceUrl,
+      note: `${failure.taskId}: ${failure.reason}`,
+    })),
+    quarantinedAt: request.observedAt,
+    threshold: request.threshold,
+  });
+}
+
+export function unquarantineLesson(
+  lesson: CritiqueLesson,
+  request: LessonUnquarantineRequest,
+): CritiqueLesson {
+  if (
+    lesson.lifecycleStatus !== 'quarantined' ||
+    lesson.quarantine === undefined
+  ) {
+    throw new RangeError('Only quarantined lessons can be unquarantined.');
+  }
+  requireNonEmptyString(request.reviewer, 'unquarantine reviewer');
+  requireNonEmptyString(request.reason, 'unquarantine reason');
+  requireNonEmptyString(request.evidenceUrl, 'unquarantine evidenceUrl');
+  const unquarantine: LessonUnquarantineMetadata = {
+    reviewedAt: normalizeTimestamp(request.reviewedAt),
+    reviewer: request.reviewer,
+    evidenceUrl: request.evidenceUrl,
+    reason: request.reason,
+  };
+  const { quarantine, ...lessonWithoutQuarantine } = lesson;
+  const restoredLifecycleStatus =
+    quarantine.previousLifecycleStatus ?? 'active';
+  return {
+    ...lessonWithoutQuarantine,
+    lifecycleStatus: restoredLifecycleStatus,
+    unquarantine,
+  };
+}
 
 export class LessonRecorder {
   private readonly memory: MemoryPort;
@@ -382,6 +583,11 @@ export class LessonRecorder {
           critiqueFindings,
           recordedAt,
         );
+        const failedTestSkillCandidate = createFailedTestSkillCandidate(
+          failingIteration.index,
+          evalResult.evaluatorName,
+          critiqueFindings,
+        );
 
         const lesson: CritiqueLesson = {
           evaluatorName: evalResult.evaluatorName,
@@ -391,6 +597,7 @@ export class LessonRecorder {
             : 'Unknown correction',
           taskId,
           timestamp: recordedAt,
+          lifecycleStatus: 'candidate',
           experimentSandbox: {
             state: 'experimental',
             promotionBlocked: true,
@@ -421,6 +628,7 @@ export class LessonRecorder {
             evalResult.evaluatorName,
             critiqueFindings,
           ),
+          ...(failedTestSkillCandidate ? { failedTestSkillCandidate } : {}),
           postPrLessonExtractionTemplate:
             createPostPrLessonExtractionTemplate(),
           ...(this.agentId
@@ -1127,6 +1335,68 @@ function createLessonRollbackWorkflow(): LessonRollbackWorkflow {
   };
 }
 
+function createFailedTestSkillCandidate(
+  sourceIteration: number,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): FailedTestSkillCandidate | undefined {
+  const matched = new Set<string>();
+  const sourceFindingMessages: string[] = [];
+
+  for (const finding of findings) {
+    const primaryText = [finding.message, finding.location]
+      .filter((value): value is string => Boolean(value))
+      .join('\n');
+    const suggestionText = finding.suggestion ?? '';
+    const primarySignals = collectFailedTestSignals(primaryText);
+    const suggestionSignals = collectFailedTestSignals(suggestionText);
+    const allSignals = [...primarySignals, ...suggestionSignals];
+    const hasPrimarySignal = primarySignals.length > 0;
+    const hasStrongSignal = primarySignals.some(
+      (signal) => signal.strength === 'strong',
+    );
+    const distinctSignals = new Set(allSignals.map((signal) => signal.label));
+
+    if (hasPrimarySignal && hasStrongSignal && distinctSignals.size > 0) {
+      sourceFindingMessages.push(finding.message);
+      for (const signal of distinctSignals) {
+        matched.add(signal);
+      }
+    }
+  }
+
+  if (matched.size === 0) {
+    return undefined;
+  }
+
+  return {
+    detector: 'failed-test-to-skill-candidate',
+    candidate: true,
+    sourceIteration,
+    evaluatorName,
+    matchedSignals: [...matched].sort(),
+    sourceFindingMessages,
+    operatorGuidance: FAILED_TEST_SKILL_CANDIDATE_GUIDANCE,
+  };
+}
+
+function collectFailedTestSignals(text: string): {
+  label: string;
+  strength: 'strong' | 'supporting';
+}[] {
+  return FAILED_TEST_SIGNAL_PATTERNS.filter((signal) =>
+    signal.pattern.test(text),
+  ).map((signal) => ({
+    label: signal.label,
+    strength: signal.strength,
+  }));
+}
+
 function createReviewerFeedbackCapture(
   sourceIteration: number,
   evaluatorName: string,
@@ -1201,6 +1471,71 @@ function addCooldownWindowMs(baseMs: number, cooldownMs: number): number {
     );
   }
   return suppressUntilMs;
+}
+
+function createLessonQuarantineReviewItem(
+  lesson: CritiqueLesson,
+  reason: string,
+  evidence: readonly LessonQuarantineEvidence[],
+  createdAt: string,
+): LessonQuarantineMetadata['reviewItem'] {
+  const lessonId =
+    lesson.testTraceability?.[0]?.lessonId ??
+    `${sanitizeLessonIdPart(lesson.taskId)}:${sanitizeLessonIdPart(lesson.evaluatorName)}`;
+  return {
+    id: `lesson-quarantine:${stableHash(`${lessonId}:${reason}:${createdAt}`)}`,
+    status: 'open',
+    lessonId,
+    createdAt,
+    reason,
+    evidence,
+    recommendedAction: LESSON_QUARANTINE_REVIEW_ACTION,
+  };
+}
+
+function normalizeQuarantineEvidence(
+  evidence: LessonQuarantineEvidence,
+): LessonQuarantineEvidence {
+  const reference = requireNonEmptyString(
+    evidence.reference,
+    'quarantine evidence reference',
+  );
+  return {
+    kind: evidence.kind,
+    reference,
+    ...(evidence.note ? { note: evidence.note } : {}),
+  };
+}
+
+function requireNonEmptyString(value: string, fieldName: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new RangeError(`Lesson ${fieldName} must be a non-empty string.`);
+  }
+  return normalized;
+}
+
+function dedupeFailureSignals(
+  failures: readonly LessonFailureSignal[],
+): LessonFailureSignal[] {
+  const seenTaskIds = new Set<string>();
+  const uniqueFailures: LessonFailureSignal[] = [];
+  for (const failure of failures) {
+    const taskIdText = requireNonEmptyString(failure.taskId, 'failure taskId');
+    if (seenTaskIds.has(taskIdText)) {
+      continue;
+    }
+    seenTaskIds.add(taskIdText);
+    uniqueFailures.push({
+      taskId: failure.taskId,
+      reason: requireNonEmptyString(failure.reason, 'failure reason'),
+      evidenceUrl: requireNonEmptyString(
+        failure.evidenceUrl,
+        'failure evidenceUrl',
+      ),
+    });
+  }
+  return uniqueFailures;
 }
 
 function stableHash(value: string): string {
@@ -1331,8 +1666,34 @@ function hasAuthenticationScopeConflictInOrder(
       maybeRequirement.text,
     ) &&
     /\bunauthenticated\b/.test(maybeAllowance.text) &&
+    !hasDivergentScopeQualifiers(maybeRequirement.text, maybeAllowance.text) &&
     sharedTextTerms(maybeRequirement.text, maybeAllowance.text).length >=
       MIN_CONTRADICTION_SHARED_TERMS
+  );
+}
+
+const SCOPE_QUALIFIER_OPPOSITES: Record<string, readonly string[]> = {
+  private: ['public'],
+  public: ['private', 'internal', 'admin', 'secret', 'sensitive'],
+  internal: ['public', 'external'],
+  external: ['internal'],
+  admin: ['public'],
+  secret: ['public'],
+  sensitive: ['public', 'non_sensitive'],
+  non_sensitive: ['sensitive'],
+};
+
+function hasDivergentScopeQualifiers(a: string, b: string): boolean {
+  const aScopes = extractScopeQualifiers(a);
+  const bScopes = extractScopeQualifiers(b);
+  return aScopes.some((scope) =>
+    SCOPE_QUALIFIER_OPPOSITES[scope]?.some((opposite) => bScopes.includes(opposite)),
+  );
+}
+
+function extractScopeQualifiers(text: string): string[] {
+  return extractComparableTerms(text).filter(
+    (term) => SCOPE_QUALIFIER_OPPOSITES[term] !== undefined,
   );
 }
 
@@ -1544,7 +1905,8 @@ function opposedConditionalGuardSharedTerms(
   if (
     a.conditionalProhibition &&
     a.guardCondition &&
-    hasOpposedGuardOutcome(a.guardCondition, b.text)
+    hasOpposedGuardOutcome(a.guardCondition, b.text) &&
+    hasSharedGuardSubject(a.guardCondition, b)
   ) {
     return sharedTerms;
   }
@@ -1552,7 +1914,8 @@ function opposedConditionalGuardSharedTerms(
   if (
     b.conditionalProhibition &&
     b.guardCondition &&
-    hasOpposedGuardOutcome(b.guardCondition, a.text)
+    hasOpposedGuardOutcome(b.guardCondition, a.text) &&
+    hasSharedGuardSubject(b.guardCondition, a)
   ) {
     return sharedTerms;
   }
@@ -1592,6 +1955,7 @@ function hasCompatibleConditionalGuard(
   return (
     hasCompatibleConditionalGuardPair(a, b) ||
     hasCompatibleConditionalGuardPair(b, a) ||
+    hasDivergentConditionalGuardPair(a, b) ||
     hasCompatibleEmbeddedNegationPair(a, b) ||
     hasCompatibleEmbeddedNegationPair(b, a) ||
     hasCompatibleQualifiedExclusionPair(a, b) ||
@@ -1604,6 +1968,29 @@ function hasCompatibleConditionalGuard(
     hasCompatibleValidityQualifierPair(b, a) ||
     hasCompatibleValidatedScopePair(a, b) ||
     hasCompatibleValidatedScopePair(b, a)
+  );
+}
+
+function hasDivergentConditionalGuardPair(
+  a: LessonDirectiveClause,
+  b: LessonDirectiveClause,
+): boolean {
+  if (!a.guardCondition || !b.guardCondition || a.polarity === b.polarity) {
+    return false;
+  }
+  if (!hasGuardOutcomeWord(a.guardCondition) || !hasGuardOutcomeWord(b.guardCondition)) {
+    return false;
+  }
+
+  return (
+    sharedTextTerms(a.text, b.text).length >= MIN_CONTRADICTION_SHARED_TERMS &&
+    !hasSharedGuardSubject(a.guardCondition, b)
+  );
+}
+
+function hasGuardOutcomeWord(text: string): boolean {
+  return /\b(?:pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted|fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/.test(
+    text,
   );
 }
 
@@ -1636,7 +2023,7 @@ function hasComplementaryValidatedQualifierScope(
 ): boolean {
   return (
     /\bunvalidated\b/.test(maybeScopedProhibition.text) &&
-    /\bvalidated\b/.test(maybeValidatedAllowance.text) &&
+    /\b(?:validated|after\s+validation)\b/.test(maybeValidatedAllowance.text) &&
     sharedTextTerms(
       stripValidationQualifier(maybeScopedProhibition.text),
       stripValidationQualifier(maybeValidatedAllowance.text),
@@ -1645,7 +2032,7 @@ function hasComplementaryValidatedQualifierScope(
 }
 
 function stripValidationQualifier(text: string): string {
-  return text.replace(/\b(?:unvalidated|validated)\b/g, '');
+  return text.replace(/\b(?:unvalidated|validated|after\s+validation)\b/g, '');
 }
 
 function hasCompatibleConditionalGuardPair(
@@ -1736,15 +2123,43 @@ function hasCompatibleQualifiedExclusionPair(
   }
 
   const allowanceTerms = extractComparableTerms(maybeAllowance.text);
-  const prohibitedTerms = new Set(
-    extractComparableTerms(maybeProhibition.text),
+  const prohibitedTerms = extractComparableTerms(maybeProhibition.text);
+  const prohibitedTermSet = new Set(prohibitedTerms);
+  const allowanceTermSet = new Set(allowanceTerms);
+  return (
+    allowanceTerms.some((term) => {
+      if (!term.startsWith('non_')) {
+        return false;
+      }
+      return prohibitedTermSet.has(term.slice('non_'.length));
+    }) ||
+    prohibitedTerms.some((term) => {
+      if (!term.startsWith('non_')) {
+        return false;
+      }
+      return allowanceTermSet.has(term.slice('non_'.length));
+    })
   );
-  return allowanceTerms.some((term) => {
-    if (!term.startsWith('non_')) {
-      return false;
-    }
-    return prohibitedTerms.has(term.slice('non_'.length));
-  });
+}
+
+function hasSharedGuardSubject(
+  guardCondition: string,
+  comparedDirective: LessonDirectiveClause,
+): boolean {
+  const comparedGuard = comparedDirective.guardCondition ?? comparedDirective.text;
+  return (
+    sharedTextTerms(
+      stripGuardOutcomeWords(guardCondition),
+      stripGuardOutcomeWords(comparedGuard),
+    ).length >= 1
+  );
+}
+
+function stripGuardOutcomeWords(text: string): string {
+  return text.replace(
+    /\b(?:pass|passes|passed|passing|success|succeed|succeeds|valid|validated|approved|granted|fail|fails|failed|failing|failure|invalid|missing|absent|lack|lacks|lacked|deny|denies|denied|reject|rejects|rejected|unapproved|unverified|not\s+approved|not\s+granted)\b/g,
+    '',
+  );
 }
 
 
