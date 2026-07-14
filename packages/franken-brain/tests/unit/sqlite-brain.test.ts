@@ -590,8 +590,40 @@ describe('SqliteBrain', () => {
         id: duplicate.id,
         status: 'suppressed',
         suppressionReason: 'never_store',
+        value: '[never-store-redacted]',
       });
       expect(brain.working.has('env.secret.api-token')).toBe(false);
+    });
+
+    it('purges approved working memory and provenance when a key is marked never-store', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.sensitive',
+        value: 'approved value',
+        source: 'chat:turn-14',
+        confidence: 0.9,
+        reason: 'Initially approved memory.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+      expect(brain.working.get('user.preference.sensitive')).toBe('approved value');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'user.preference.sensitive'),
+      ).not.toBeNull();
+
+      const neverStored = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.sensitive',
+        value: 'do not keep this key',
+        source: 'chat:turn-15',
+        confidence: 0.99,
+        reason: 'Operator opted this key out of memory.',
+      });
+      brain.memoryReview.neverStore(neverStored.id, { reviewer: 'operator' });
+
+      expect(brain.working.has('user.preference.sensitive')).toBe(false);
+      expect(
+        brain.memoryReview.provenanceFor('working', 'user.preference.sensitive'),
+      ).toBeNull();
     });
 
     it('uses persisted value normalization when signing suppressions', () => {

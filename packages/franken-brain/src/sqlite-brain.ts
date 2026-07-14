@@ -1207,19 +1207,24 @@ export class SqliteMemoryReviewQueue {
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
-    const candidate = this.requireCandidate(id);
-    if (candidate.status === 'suppressed') return candidate;
-    if (candidate.status !== 'pending') {
-      throw new Error(
-        `Memory candidate ${id} is ${candidate.status}, expected pending`,
-      );
-    }
     const now = isoNow();
     let finalizeWorkingFlush: (() => void) | undefined;
+    let approvedCandidate: MemoryCandidate | undefined;
     const approveTx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id);
+      if (candidate.status === 'suppressed') {
+        approvedCandidate = candidate;
+        return;
+      }
+      if (candidate.status !== 'pending') {
+        throw new Error(
+          `Memory candidate ${id} is ${candidate.status}, expected pending`,
+        );
+      }
       const suppressionReason = this.findCandidateSuppression(candidate);
       if (suppressionReason) {
         this.markSuppressed(id, suppressionReason, now, options);
+        approvedCandidate = this.requireCandidate(id);
         return;
       }
       this.working.set(candidate.key, candidate.value);
@@ -1256,40 +1261,54 @@ export class SqliteMemoryReviewQueue {
           now,
         );
       this.markDecision(id, 'approved', now, options);
+      approvedCandidate = this.requireCandidate(id);
     });
     approveTx.immediate();
     finalizeWorkingFlush?.();
-    return this.requireCandidate(id);
+    return approvedCandidate ?? this.requireCandidate(id);
   }
 
   reject(
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
-    const candidate = this.requireCandidate(id, 'pending');
     const now = isoNow();
+    let rejectedCandidate: MemoryCandidate | undefined;
     const tx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id, 'pending');
       this.insertSuppression(candidate, 'rejected', now, options);
       this.markDecision(id, 'rejected', now, options);
+      rejectedCandidate = this.requireCandidate(id);
     });
     tx.immediate();
-    return this.requireCandidate(id, 'rejected');
+    return rejectedCandidate ?? this.requireCandidate(id, 'rejected');
   }
 
   neverStore(
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
-    const candidate = this.requireCandidate(id, 'pending');
     const now = isoNow();
+    let finalizeWorkingFlush: (() => void) | undefined;
+    let neverStoredCandidate: MemoryCandidate | undefined;
     const tx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id, 'pending');
       this.insertSuppression(candidate, 'never_store', now, options);
+      this.working.delete(candidate.key);
+      finalizeWorkingFlush = this.working.flushToDb() ?? undefined;
+      this.db
+        .prepare(
+          `DELETE FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
+        )
+        .run(candidate.targetStore, candidate.key);
       this.markDecision(id, 'never_store', now, options, {
         value: NEVER_STORE_REDACTED_VALUE,
       });
+      neverStoredCandidate = this.requireCandidate(id);
     });
     tx.immediate();
-    return this.requireCandidate(id, 'never_store');
+    finalizeWorkingFlush?.();
+    return neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
   }
 
   provenanceFor(
@@ -1380,11 +1399,14 @@ export class SqliteMemoryReviewQueue {
     this.db
       .prepare(
         `UPDATE memory_review_candidates
-         SET status = 'suppressed', suppression_reason = ?, reviewer = ?, note = ?, updated_at = ?, decided_at = ?
+         SET status = 'suppressed', suppression_reason = ?, value = COALESCE(?, value), reviewer = ?, note = ?, updated_at = ?, decided_at = ?
          WHERE id = ? AND status = 'pending'`,
       )
       .run(
         suppressionReason,
+        suppressionReason === 'never_store'
+          ? this.encodeValue(NEVER_STORE_REDACTED_VALUE)
+          : null,
         options.reviewer ? this.encodeText(options.reviewer) : null,
         options.note ? this.encodeText(options.note) : null,
         decidedAt,
