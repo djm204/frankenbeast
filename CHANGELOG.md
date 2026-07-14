@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.0](https://github.com/djm204/frankenbeast/compare/v0.49.0...v0.50.0) (2026-07-14)
+
+
+### Features
+
+* **availability:** add issue runner backpressure ([#2223](https://github.com/djm204/frankenbeast/issues/2223)) ([f61855e](https://github.com/djm204/frankenbeast/commit/f61855e62766f812c6f92e2814a4ec51f2b9f2b1))
+
 ## [0.49.0](https://github.com/djm204/frankenbeast/compare/v0.48.2...v0.49.0) (2026-07-14)
 
 
