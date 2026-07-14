@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { IssueRunner } from '../../../src/issues/issue-runner.js';
 import type { IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
@@ -12,6 +14,7 @@ import type { ChunkDefinition } from '../../../src/cli/file-writer.js';
 // ── Mocks ──
 
 const mockLoopConstructions: Array<{ deps: BeastLoopDeps; config: unknown }> = [];
+const tempPlanDirs: string[] = [];
 
 const mockRun = vi.fn(async (deps?: BeastLoopDeps) => {
   // Default mock behavior: success with some tokens used
@@ -146,6 +149,23 @@ function mockCheckpoint(completed: Set<string> = new Set()): ICheckpointStore {
   };
 }
 
+function writePlanChunks(planName: string, chunkIds: readonly string[]): string {
+  const planDir = resolve(process.cwd(), '.fbeast', 'plans', planName);
+  mkdirSync(planDir, { recursive: true });
+  tempPlanDirs.push(planDir);
+
+  chunkIds.forEach((chunkId, index) => {
+    const chunkNumber = String(index + 1).padStart(2, '0');
+    writeFileSync(
+      resolve(planDir, `${chunkNumber}_${chunkId}.md`),
+      `# Chunk ${chunkNumber}: ${chunkId}\n\n## Objective\n\nResume ${chunkId}\n\n## Files\n\n- test.ts\n\n## Success Criteria\n\nDone\n\n## Verification Command\n\n\`\`\`bash\nnpm test\n\`\`\`\n`,
+      'utf8',
+    );
+  });
+
+  return planDir;
+}
+
 function makeConfig(overrides: Partial<IssueRunnerConfig> = {}): IssueRunnerConfig {
   return {
     issues: [],
@@ -193,6 +213,12 @@ describe('IssueRunner', () => {
       return result;
     });
     runner = new IssueRunner();
+  });
+
+  afterEach(() => {
+    for (const dir of tempPlanDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   describe('run() basic contract', () => {
@@ -463,6 +489,8 @@ describe('IssueRunner', () => {
       vi.mocked(issueRuntime.artifactsForIssue).mockReturnValue({
         planName: 'issue-15',
         planDir: '.tmp/test-issue-15',
+        checkpointFile: '.tmp/test-issue-15.checkpoint',
+        logFile: '.tmp/test-issue-15.log',
       });
       const signals = vi.fn(() => ({
         activeProcesses: 1,
@@ -513,6 +541,35 @@ describe('IssueRunner', () => {
       expect(mockRun).not.toHaveBeenCalled();
     });
 
+    it('recognizes shared-checkpoint progress from existing arbitrary chunk plans before pausing', async () => {
+      writePlanChunks('issue-15', ['api', 'ui']);
+      const checkpoint = mockCheckpoint(new Set(['impl:01_api:done', 'harden:01_api:done']));
+      const graphBuilder = mockGraphBuilder();
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 15 })],
+        triageResults: [makeTriage(15, 'chunked')],
+        checkpoint,
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).toHaveBeenCalledOnce();
+    });
+
     it('does not treat unrelated shared checkpoint entries as progress for fresh starts', async () => {
       const checkpoint = mockCheckpoint(new Set(['impl:01_issue-150:done', 'harden:01_issue-150:done']));
       const graphBuilder = mockGraphBuilder();
@@ -540,9 +597,11 @@ describe('IssueRunner', () => {
     });
 
     it('stops iteration after queue depth backpressure to avoid priority inversion', async () => {
+      const graphBuilder = mockGraphBuilder();
       const config = makeConfig({
         issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
         triageResults: [makeTriage(16), makeTriage(17)],
+        graphBuilder,
         backpressure: {
           thresholds: { maxPendingIssueCount: 1 },
         },
@@ -564,6 +623,34 @@ describe('IssueRunner', () => {
         }),
       ]);
       expect(mockRun).not.toHaveBeenCalled();
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+    });
+
+    it('resumes partially checkpointed issueRuntime work after queue-depth stops fresh starts', async () => {
+      const issueRuntime = makeIssueRuntimeSupport();
+      vi.mocked(issueRuntime.checkpointForIssue).mockImplementation((issueNumber: number) =>
+        issueNumber === 17 ? mockCheckpoint(new Set(['impl:01_issue-17:done'])) : mockCheckpoint(),
+      );
+      vi.mocked(issueRuntime.artifactsForIssue).mockImplementation((issueNumber: number): IssueRuntimeArtifacts => ({
+        planName: `issue-${issueNumber}`,
+        planDir: `.tmp/test-issue-${issueNumber}`,
+        checkpointFile: `.tmp/test-issue-${issueNumber}.checkpoint`,
+        logFile: `.tmp/test-issue-${issueNumber}.log`,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
+        triageResults: [makeTriage(16), makeTriage(17)],
+        issueRuntime,
+        backpressure: {
+          thresholds: { maxPendingIssueCount: 1 },
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 16, status: 'skipped' });
+      expect(outcomes[1]).toMatchObject({ issueNumber: 17, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
     });
 
     it('contains issue-runtime checkpoint read failures to one issue outcome', async () => {

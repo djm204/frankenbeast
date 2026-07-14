@@ -1,6 +1,6 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { loadavg } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
@@ -203,10 +203,37 @@ function issueCompletionKey(taskId: string): string {
   return `${taskId}:done`;
 }
 
+function listPlanChunkPaths(planDir: string): string[] {
+  try {
+    if (!existsSync(planDir)) return [];
+    return readdirSync(planDir)
+      .filter((fileName) => fileName.endsWith('.md') && !fileName.startsWith('00_') && /^\d{2}/.test(fileName))
+      .sort()
+      .map((fileName) => join(planDir, fileName));
+  } catch {
+    return [];
+  }
+}
+
+function checkpointEntriesHavePlanProgress(entries: ReadonlySet<string>, planDir: string): boolean {
+  for (const chunkPath of listPlanChunkPaths(planDir)) {
+    const chunkId = basename(chunkPath, '.md');
+    if (
+      entries.has(issueCompletionKey(`impl:${chunkId}`)) ||
+      entries.has(issueCompletionKey(`harden:${chunkId}`))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function checkpointEntriesHaveIssueProgress(
   entries: ReadonlySet<string> | undefined,
   issueNumber: number,
   issueSpecificCheckpoint: boolean,
+  planDir: string,
 ): boolean {
   if (!entries) return false;
   if (issueSpecificCheckpoint) return entries.size > 0;
@@ -223,7 +250,7 @@ function checkpointEntriesHaveIssueProgress(
     if (!hasNumericPrefix && !hasNumericSuffix) return true;
   }
 
-  return false;
+  return checkpointEntriesHavePlanProgress(entries, planDir);
 }
 
 function issueSkillDescriptor(id: string): SkillDescriptor {
@@ -417,7 +444,9 @@ export class IssueRunner {
       checkpointEntries,
       issue.number,
       issueRuntime !== undefined,
+      planDir,
     );
+    const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
 
     const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
       const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
@@ -446,7 +475,7 @@ export class IssueRunner {
       };
     };
 
-    if (backpressureContext.stopRemainingReason && issueRuntime !== undefined && !checkpointHasIssueProgress) {
+    if (backpressureContext.stopRemainingReason && !checkpointHasIssueProgress) {
       return {
         issueNumber: issue.number,
         issueTitle: issue.title,
@@ -468,9 +497,10 @@ export class IssueRunner {
     let refreshPlanTasks: BeastLoopDeps['refreshPlanTasks'];
     let skillIds: readonly string[];
     try {
-      const chunks = await graphBuilder.buildChunkDefinitionsForIssue(issue, triage);
-      const chunkPaths = new ChunkFileWriter(planDir).write(chunks);
       const realGraphBuilder = new ChunkFileGraphBuilder(planDir);
+      const chunkPaths = checkpointedPlanChunkPaths.length > 0
+        ? checkpointedPlanChunkPaths
+        : new ChunkFileWriter(planDir).write(await graphBuilder.buildChunkDefinitionsForIssue(issue, triage));
       graph = await realGraphBuilder.build({ goal: `Process issue #${issue.number}` });
       executionGraphBuilder = realGraphBuilder;
       skillIds = chunkPaths.map((chunkPath) => `cli:${basename(chunkPath, '.md')}`);
@@ -485,6 +515,9 @@ export class IssueRunner {
       };
     }
 
+    const graphHasCheckpointProgress =
+      issueCheckpoint !== undefined && graph.tasks.some((task) => issueCheckpoint.has(issueCompletionKey(task.id)));
+
     if (issueCheckpoint && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)))) {
       logger?.info(`[issues] Issue #${issue.number} already completed (checkpoint)`, undefined, 'issues');
       appendIssueLog(logFile, `Issue #${issue.number} already complete from checkpoint`);
@@ -496,7 +529,7 @@ export class IssueRunner {
       };
     }
 
-    if (backpressureContext.stopRemainingReason) {
+    if (backpressureContext.stopRemainingReason && !graphHasCheckpointProgress) {
       return {
         issueNumber: issue.number,
         issueTitle: issue.title,
@@ -506,7 +539,7 @@ export class IssueRunner {
       };
     }
 
-    if (requiresCheckpointCompletionCheckBeforeBackpressure) {
+    if (requiresCheckpointCompletionCheckBeforeBackpressure && !graphHasCheckpointProgress) {
       const paused = await pauseForBackpressure();
       if (paused) return paused;
     }
