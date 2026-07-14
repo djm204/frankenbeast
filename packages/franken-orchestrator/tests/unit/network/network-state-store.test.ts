@@ -99,6 +99,7 @@ describe('NetworkStateStore', () => {
     ['duplicate service ids', 'duplicate-service-ids.json', /duplicate service id/i],
     ['unknown schema version', 'unknown-schema-version.json', /schemaVersion is unsupported/i],
     ['invalid enum values', 'invalid-enum-values.json', /mode must be/i],
+    ['malformed behavioral optional fields', 'malformed-in-process.json', /inProcess must be a boolean/i],
   ])('quarantines corrupt-state fixture: %s', async (_name, fixtureName, reasonPattern) => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-state-fixture-'));
     const statePath = join(workDir, 'network-state.json');

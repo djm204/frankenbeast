@@ -56,6 +56,50 @@ function requireBoolean(value: Record<string, unknown>, field: string, context: 
   return current;
 }
 
+function readOptionalBoolean(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): boolean | undefined {
+  const current = value[field];
+  if (current === undefined) return undefined;
+  if (typeof current !== 'boolean') {
+    throw new Error(`${context}.${field} must be a boolean when present`);
+  }
+  return current;
+}
+
+function readOptionalString(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): string | undefined {
+  const current = value[field];
+  if (current === undefined) return undefined;
+  if (typeof current !== 'string') {
+    throw new Error(`${context}.${field} must be a string when present`);
+  }
+  return current;
+}
+
+function readOptionalBooleanMap(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): Record<string, boolean> | undefined {
+  const current = value[field];
+  if (current === undefined) return undefined;
+  if (!isRecord(current)) {
+    throw new Error(`${context}.${field} must be an object of booleans when present`);
+  }
+  for (const [key, channelValue] of Object.entries(current)) {
+    if (typeof channelValue !== 'boolean') {
+      throw new Error(`${context}.${field}.${key} must be a boolean`);
+    }
+  }
+  return current as Record<string, boolean>;
+}
+
 function validateManagedNetworkService(value: unknown, index: number): ManagedNetworkServiceState {
   const context = `network state services[${index}]`;
   if (!isRecord(value)) {
@@ -82,19 +126,23 @@ function validateManagedNetworkService(value: unknown, index: number): ManagedNe
     dependsOn,
     startedAt: requireString(value, 'startedAt', context),
   };
-  if (typeof value.detached === 'boolean') service.detached = value.detached;
+  const detached = readOptionalBoolean(value, 'detached', context);
+  const inProcess = readOptionalBoolean(value, 'inProcess', context);
+  const logFile = readOptionalString(value, 'logFile', context);
+  const url = readOptionalString(value, 'url', context);
+  const healthUrl = readOptionalString(value, 'healthUrl', context);
+  const serviceIdentity = readOptionalString(value, 'serviceIdentity', context);
+  const hostServiceId = readOptionalString(value, 'hostServiceId', context);
+  const channels = readOptionalBooleanMap(value, 'channels', context);
+  if (detached !== undefined) service.detached = detached;
   if (status !== undefined) service.status = status;
-  if (typeof value.inProcess === 'boolean') service.inProcess = value.inProcess;
-  if (typeof value.logFile === 'string') service.logFile = value.logFile;
-  if (typeof value.url === 'string') service.url = value.url;
-  if (typeof value.healthUrl === 'string') service.healthUrl = value.healthUrl;
-  if (typeof value.serviceIdentity === 'string') service.serviceIdentity = value.serviceIdentity;
-  if (typeof value.hostServiceId === 'string') service.hostServiceId = value.hostServiceId;
-  if (isRecord(value.channels)) {
-    service.channels = Object.fromEntries(
-      Object.entries(value.channels).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'),
-    );
-  }
+  if (inProcess !== undefined) service.inProcess = inProcess;
+  if (logFile !== undefined) service.logFile = logFile;
+  if (url !== undefined) service.url = url;
+  if (healthUrl !== undefined) service.healthUrl = healthUrl;
+  if (serviceIdentity !== undefined) service.serviceIdentity = serviceIdentity;
+  if (hostServiceId !== undefined) service.hostServiceId = hostServiceId;
+  if (channels !== undefined) service.channels = channels;
   return service;
 }
 
