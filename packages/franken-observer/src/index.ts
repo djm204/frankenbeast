@@ -35,6 +35,14 @@ export { LangfuseAdapter } from './adapters/langfuse/LangfuseAdapter.js'
 export { PrometheusAdapter } from './adapters/prometheus/PrometheusAdapter.js'
 export { TempoAdapter } from './adapters/tempo/TempoAdapter.js'
 export { WebhookNotifier } from './notify/WebhookNotifier.js'
+export {
+  ClassificationGuardAdapter,
+  RUNTIME_ARTIFACT_CLASSIFICATIONS,
+  classifyRuntimeArtifact,
+  classificationAtLeast,
+  enforceRuntimeArtifactExportPolicy,
+  isHighSensitivityClassification,
+} from './security/data-classification.js'
 export { TraceServer } from './ui/TraceServer.js'
 export { generateGrafanaDashboard } from './grafana/GrafanaDashboard.js'
 
@@ -52,6 +60,13 @@ export type { SQLiteAdapterOptions } from './adapters/sqlite/SQLiteAdapter.js'
 export type { PrometheusAdapterOptions } from './adapters/prometheus/PrometheusAdapter.js'
 export type { TempoAdapterOptions, TempoBasicAuth } from './adapters/tempo/TempoAdapter.js'
 export type { WebhookNotifierOptions, WebhookRetryOptions } from './notify/WebhookNotifier.js'
+export type {
+  ClassificationGuardAdapterOptions,
+  DataClassification,
+  RuntimeArtifactClassification,
+  RuntimeArtifactExportPolicyOptions,
+  RuntimeArtifactType,
+} from './security/data-classification.js'
 export type { TraceServerOptions } from './ui/TraceServer.js'
 export type {
   GrafanaDashboard,
