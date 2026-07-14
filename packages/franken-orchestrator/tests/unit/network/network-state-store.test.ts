@@ -140,6 +140,24 @@ describe('NetworkStateStore', () => {
     warn.mockRestore();
   });
 
+  it('clears stale corruption diagnostics after saving replacement state', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-network-state-repair-'));
+    const statePath = join(workDir, 'network-state.json');
+    const store = new NetworkStateStore(statePath);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await writeFile(statePath, JSON.stringify({ ...validState(), mode: 'unknown' }), 'utf-8');
+
+    await expect(store.load()).resolves.toBeUndefined();
+    expect(store.listCorruptions()).toHaveLength(1);
+
+    await store.save(validState());
+
+    expect(store.listCorruptions()).toEqual([]);
+    await expect(store.load()).resolves.toEqual(validState());
+
+    warn.mockRestore();
+  });
+
   it('clears persisted state', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-network-state-'));
     const store = new NetworkStateStore(join(workDir, 'network-state.json'));

@@ -211,6 +211,7 @@ export class NetworkStateStore {
   async save(state: NetworkOperatorState): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     atomicWriteFileSync(this.filePath, JSON.stringify(state, null, 2));
+    this.corruption = undefined;
   }
 
   async clear(): Promise<void> {
