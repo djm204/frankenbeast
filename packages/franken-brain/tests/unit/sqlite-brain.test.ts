@@ -298,6 +298,29 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('contact', 'mysecretvalue')).toThrow(/right-to-forget/);
     });
 
+    it('deletes and guards checkpoints for all-memory query deletions', () => {
+      brain.recovery.checkpoint({
+        runId: 'run-right-to-forget',
+        phase: 'execution',
+        step: 1,
+        context: { note: 'alice@example.test checkpoint payload' },
+        timestamp: '2026-07-13T00:00:00.000Z',
+      });
+
+      const report = brain.rightToForget({ query: 'alice@example.test' });
+
+      expect(report.deleted).toEqual({ working: 0, episodic: 0, derived: 1 });
+      expect(report.remainingReferences).toBe(0);
+      expect(brain.recovery.lastCheckpoint()).toBeNull();
+      expect(() => brain.recovery.checkpoint({
+        runId: 'run-right-to-forget-reinsert',
+        phase: 'execution',
+        step: 2,
+        context: { note: 'xalice@example.testy' },
+        timestamp: '2026-07-13T00:01:00.000Z',
+      })).toThrow(/right-to-forget/);
+    });
+
     it('matches terminal sourceScope key segments', () => {
       brain.working.set('project:import-1', 'secret');
       const report = brain.rightToForget({ sourceScope: 'import-1' });

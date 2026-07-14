@@ -2331,7 +2331,7 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
     }
   }
   const text = valueToSearchText(state);
-  for (const value of guardTokens(text)) {
+  for (const value of guardMatchCandidates(text)) {
     if (hasDeletionGuard(db, 'checkpoint', 'query', value)) {
       throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
     }

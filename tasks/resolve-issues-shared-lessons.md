@@ -4,7 +4,7 @@
 - For deletion/right-to-forget flows, compare selectors against both persisted storage rows and the current in-memory overlay; avoid broad stale-instance flushes that can delete unrelated external rows, and keep persisted/runtime deletion finalization rollback-safe.
 - Redact destructive privacy selectors before every audit/governance sink, including proxy/envelope validation failures and governor logs; if a tool is destructive, route it through the same governance path as sibling deletion tools rather than exempting it as non-executing data.
 - Deletion guards should cover source-scope key segments and replay/hydrate should install guards before restoring user data, while allowing the tool’s own right-to-forget audit event to round-trip without blocking hydration.
-- After Codex review on right-to-forget flows, regression-test every reinsertion path it names: stale multi-instance flush, learning-event writes, key-only query matches, episodic step text, substring query semantics, terminal source-scope key segments, and forged audit-event hydration.
+- After Codex review on right-to-forget flows, regression-test every reinsertion path it names: stale multi-instance flush, learning-event writes, key-only query matches, episodic step text, substring query semantics, terminal source-scope key segments, checkpoint deletion/guards, and forged audit-event hydration.
 
 ## 2026-07-13 — Lesson contradiction detector Codex edge cases
 - For lesson-contradiction heuristics, compare negation per corrective/directive guidance fragment rather than across a whole lesson blob; multi-finding lessons can otherwise mask one reversed clause with an unrelated negated clause.
