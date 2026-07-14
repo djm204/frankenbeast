@@ -14,7 +14,7 @@ import type { ChunkDefinition } from '../../../src/cli/file-writer.js';
 // ── Mocks ──
 
 const mockLoopConstructions: Array<{ deps: BeastLoopDeps; config: unknown }> = [];
-const tempPlanDirs: string[] = [];
+const tempPlanFiles: string[] = [];
 
 const mockRun = vi.fn(async (deps?: BeastLoopDeps) => {
   // Default mock behavior: success with some tokens used
@@ -152,15 +152,16 @@ function mockCheckpoint(completed: Set<string> = new Set()): ICheckpointStore {
 function writePlanChunks(planName: string, chunkIds: readonly string[]): string {
   const planDir = resolve(process.cwd(), '.fbeast', 'plans', planName);
   mkdirSync(planDir, { recursive: true });
-  tempPlanDirs.push(planDir);
 
   chunkIds.forEach((chunkId, index) => {
     const chunkNumber = String(index + 1).padStart(2, '0');
+    const filePath = resolve(planDir, `${chunkNumber}_${chunkId}.md`);
     writeFileSync(
-      resolve(planDir, `${chunkNumber}_${chunkId}.md`),
+      filePath,
       `# Chunk ${chunkNumber}: ${chunkId}\n\n## Objective\n\nResume ${chunkId}\n\n## Files\n\n- test.ts\n\n## Success Criteria\n\nDone\n\n## Verification Command\n\n\`\`\`bash\nnpm test\n\`\`\`\n`,
       'utf8',
     );
+    tempPlanFiles.push(filePath);
   });
 
   return planDir;
@@ -216,8 +217,8 @@ describe('IssueRunner', () => {
   });
 
   afterEach(() => {
-    for (const dir of tempPlanDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
+    for (const file of tempPlanFiles.splice(0)) {
+      rmSync(file, { force: true });
     }
   });
 
@@ -541,9 +542,14 @@ describe('IssueRunner', () => {
       expect(mockRun).not.toHaveBeenCalled();
     });
 
-    it('recognizes shared-checkpoint progress from existing arbitrary chunk plans before pausing', async () => {
-      writePlanChunks('issue-15', ['api', 'ui']);
-      const checkpoint = mockCheckpoint(new Set(['impl:01_api:done', 'harden:01_api:done']));
+    it('recognizes issue-scoped shared-checkpoint progress from existing arbitrary chunk plans before pausing', async () => {
+      writePlanChunks('issue-9915', ['checkpointed-api', 'checkpointed-ui']);
+      const checkpoint = mockCheckpoint(new Set([
+        'issue:9915:impl:01_checkpointed-api',
+        'issue:9915:harden:01_checkpointed-api',
+        'impl:01_checkpointed-api:done',
+        'harden:01_checkpointed-api:done',
+      ]));
       const graphBuilder = mockGraphBuilder();
       const signals = vi.fn(() => ({
         activeProcesses: 1,
@@ -552,8 +558,8 @@ describe('IssueRunner', () => {
         oldestQueueAgeMs: 0,
       }));
       const config = makeConfig({
-        issues: [makeIssue({ number: 15 })],
-        triageResults: [makeTriage(15, 'chunked')],
+        issues: [makeIssue({ number: 9915 })],
+        triageResults: [makeTriage(9915, 'chunked')],
         checkpoint,
         graphBuilder,
         backpressure: {
@@ -564,7 +570,7 @@ describe('IssueRunner', () => {
 
       const outcomes = await runner.run(config);
 
-      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
+      expect(outcomes[0]).toMatchObject({ issueNumber: 9915, status: 'fixed' });
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(signals).not.toHaveBeenCalled();
       expect(mockRun).toHaveBeenCalledOnce();

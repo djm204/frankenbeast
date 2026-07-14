@@ -203,6 +203,14 @@ function issueCompletionKey(taskId: string): string {
   return `${taskId}:done`;
 }
 
+function issueTaskProgressKey(issueNumber: number, taskId: string): string {
+  return `issue:${issueNumber}:${taskId}`;
+}
+
+function taskRecoveryStage(taskId: string): 'impl' | 'harden' {
+  return taskId.startsWith('harden:') || taskId.startsWith('fix-harden:') ? 'harden' : 'impl';
+}
+
 function listPlanChunkPaths(planDir: string): string[] {
   try {
     if (!existsSync(planDir)) return [];
@@ -215,15 +223,39 @@ function listPlanChunkPaths(planDir: string): string[] {
   }
 }
 
-function checkpointEntriesHavePlanProgress(entries: ReadonlySet<string>, planDir: string): boolean {
+function checkpointEntriesHavePlanProgress(
+  entries: ReadonlySet<string>,
+  issueNumber: number,
+  planDir: string,
+): boolean {
   for (const chunkPath of listPlanChunkPaths(planDir)) {
     const chunkId = basename(chunkPath, '.md');
     if (
-      entries.has(issueCompletionKey(`impl:${chunkId}`)) ||
-      entries.has(issueCompletionKey(`harden:${chunkId}`))
+      entries.has(issueTaskProgressKey(issueNumber, `impl:${chunkId}`)) ||
+      entries.has(issueTaskProgressKey(issueNumber, `harden:${chunkId}`))
     ) {
       return true;
     }
+  }
+
+  return false;
+}
+
+function checkpointEntryTaskId(entry: string): string | undefined {
+  const match = /^(?:impl|harden):(.+):done$/.exec(entry);
+  return match?.[1];
+}
+
+function taskIdContainsIssueToken(taskId: string): boolean {
+  return /(?:^|[^\d])issue-\d+(?:$|[^\d])/.test(taskId);
+}
+
+function checkpointEntriesMayHaveUnscopedPlanProgress(entries: ReadonlySet<string> | undefined): boolean {
+  if (!entries) return false;
+
+  for (const entry of entries) {
+    const taskId = checkpointEntryTaskId(entry);
+    if (taskId !== undefined && !taskIdContainsIssueToken(taskId)) return true;
   }
 
   return false;
@@ -250,7 +282,14 @@ function checkpointEntriesHaveIssueProgress(
     if (!hasNumericPrefix && !hasNumericSuffix) return true;
   }
 
-  return checkpointEntriesHavePlanProgress(entries, planDir);
+  return checkpointEntriesHavePlanProgress(entries, issueNumber, planDir);
+}
+
+function checkpointHasTaskProgress(issueCheckpoint: ICheckpointStore, taskId: string): boolean {
+  return (
+    issueCheckpoint.has(issueCompletionKey(taskId)) ||
+    issueCheckpoint.lastCommit(taskId, taskRecoveryStage(taskId)) !== undefined
+  );
 }
 
 function issueSkillDescriptor(id: string): SkillDescriptor {
@@ -446,6 +485,9 @@ export class IssueRunner {
       issueRuntime !== undefined,
       planDir,
     );
+    const checkpointMayHaveIssueProgress =
+      checkpointHasIssueProgress ||
+      (issueRuntime === undefined && checkpointEntriesMayHaveUnscopedPlanProgress(checkpointEntries));
     const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
 
     const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
@@ -475,7 +517,7 @@ export class IssueRunner {
       };
     };
 
-    if (backpressureContext.stopRemainingReason && !checkpointHasIssueProgress) {
+    if (backpressureContext.stopRemainingReason && !checkpointMayHaveIssueProgress) {
       return {
         issueNumber: issue.number,
         issueTitle: issue.title,
@@ -486,8 +528,8 @@ export class IssueRunner {
     }
 
     const requiresCheckpointCompletionCheckBeforeBackpressure =
-      issueRuntime === undefined && issueCheckpoint !== undefined && checkpointHasIssueProgress;
-    if (!checkpointHasIssueProgress && !requiresCheckpointCompletionCheckBeforeBackpressure) {
+      issueRuntime === undefined && issueCheckpoint !== undefined && checkpointMayHaveIssueProgress;
+    if (!checkpointMayHaveIssueProgress && !requiresCheckpointCompletionCheckBeforeBackpressure) {
       const paused = await pauseForBackpressure();
       if (paused) return paused;
     }
@@ -505,6 +547,11 @@ export class IssueRunner {
       executionGraphBuilder = realGraphBuilder;
       skillIds = chunkPaths.map((chunkPath) => `cli:${basename(chunkPath, '.md')}`);
       refreshPlanTasks = async () => (await realGraphBuilder.build({ goal: 'refresh issue tasks' })).tasks;
+      if (issueCheckpoint && issueRuntime === undefined) {
+        for (const task of graph.tasks) {
+          issueCheckpoint.write(issueTaskProgressKey(issue.number, task.id));
+        }
+      }
     } catch (err) {
       return {
         issueNumber: issue.number,
@@ -516,7 +563,7 @@ export class IssueRunner {
     }
 
     const graphHasCheckpointProgress =
-      issueCheckpoint !== undefined && graph.tasks.some((task) => issueCheckpoint.has(issueCompletionKey(task.id)));
+      issueCheckpoint !== undefined && graph.tasks.some((task) => checkpointHasTaskProgress(issueCheckpoint, task.id));
 
     if (issueCheckpoint && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)))) {
       logger?.info(`[issues] Issue #${issue.number} already completed (checkpoint)`, undefined, 'issues');
