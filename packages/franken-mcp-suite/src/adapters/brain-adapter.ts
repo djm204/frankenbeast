@@ -1,4 +1,4 @@
-import { SqliteBrain } from '@franken/brain';
+import { SqliteBrain, type RightToForgetReport, type RightToForgetSelector } from '@franken/brain';
 import Database from 'better-sqlite3';
 import { isoNow } from '@franken/types';
 
@@ -30,6 +30,7 @@ export interface BrainAdapter {
   store(input: { key: string; value: string; type: string }): Promise<void>;
   frontload(): Promise<BrainFrontloadSection[]>;
   forget(key: string): Promise<boolean>;
+  rightToForget(input: RightToForgetSelector): Promise<RightToForgetReport>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ['working', 'episodic'] as const;
@@ -160,6 +161,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         return true;
       }
       return false;
+    },
+
+    async rightToForget(input) {
+      return brain.rightToForget(input);
     },
   };
 }

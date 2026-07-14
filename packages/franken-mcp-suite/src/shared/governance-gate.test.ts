@@ -87,6 +87,27 @@ describe('createGovernanceGate', () => {
     expect(seen).toHaveLength(1);
   });
 
+  it('routes right-to-forget through governance with redacted selector context', async () => {
+    const { governor, seen } = spyGovernor('denied');
+    const gate = createGovernanceGate(governor);
+    const result = await gate.check({
+      tool: 'fbeast_memory_right_to_forget',
+      args: { query: 'alice@example.test', category: 'pii', dryRun: false },
+    });
+    expect(result.decision).toBe('denied');
+    expect(seen).toEqual([
+      {
+        action: 'fbeast_memory_right_to_forget',
+        context: JSON.stringify({
+          query: '[right-to-forget-selector-redacted]',
+          category: '[right-to-forget-selector-redacted]',
+          dryRun: false,
+        }),
+      },
+    ]);
+    expect(seen[0]!.context).not.toContain('alice@example.test');
+  });
+
   it('routes a destructive tool through the shared governor without a gate-level override', async () => {
     // Classification now lives in the governor adapter, not the gate. The gate
     // must NOT exempt or re-decide fbeast_memory_forget: it passes the call to

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createMcpServer, sanitizeToolArgumentsForAudit, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef, type ToolResult } from '../shared/server-factory.js';
+import { createMcpServer, sanitizeToolArgumentsForAuditTrail, validateToolArguments, type AuditSink, type FbeastMcpServer, type GovernanceGate, type ToolDef, type ToolResult } from '../shared/server-factory.js';
 import { isMain } from '../shared/is-main.js';
 import { handleStartupFailure } from '../shared/shutdown.js';
 import { searchTools, TOOL_REGISTRY, createAdapterSet, type AdapterSet } from '../shared/tool-registry.js';
@@ -90,7 +90,7 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
         // fails the call.
         const recordAudit = async (input: { ok: boolean; decision?: string }): Promise<void> => {
           try {
-            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAudit(toolArgs) });
+            await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAuditTrail(toolName, toolArgs) });
           } catch (err) {
             process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
           }

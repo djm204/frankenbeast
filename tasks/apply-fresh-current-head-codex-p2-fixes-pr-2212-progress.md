@@ -1,0 +1,40 @@
+# Apply fresh current-head Codex P2 fixes on PR #2212
+
+- [x] Orient on Kanban task and PR branch/worktree.
+- [x] Inspect sqlite-brain right-to-forget/encryption implementation and related tests.
+- [x] Add regression coverage for the current-head Codex P2 findings.
+- [x] Implement fixes in `packages/franken-brain/src/sqlite-brain.ts` and `packages/franken-mcp-suite/src/shared/server-factory.ts`.
+- [x] Run targeted franken-brain/franken-mcp-suite verification.
+  - [x] `npm run test --workspace @franken/brain -- tests/unit/sqlite-brain.test.ts` (141 passed).
+  - [x] `npm run typecheck --workspace @franken/brain`.
+  - [x] `npm run lint --workspace @franken/brain`.
+  - [x] `npm run build --workspace @franken/brain`.
+  - [x] `npm run test --workspace @franken/mcp-suite -- src/shared/server-factory.test.ts` (36 passed).
+  - [x] `npm run typecheck --workspace @franken/mcp-suite`.
+  - [x] `npm run lint --workspace @franken/mcp-suite` (0 errors, existing warnings only).
+  - [x] `npm run build --workspace @franken/mcp-suite`.
+- [x] Push PR branch.
+  - [x] Commit `818c13f5 fix(memory): address current-head review findings` pushed to PR #2212.
+- [x] Reply to and resolve current Codex threads.
+  - [x] Historical threads 3581527897, 3581527901, 3581527905, 3581527906 were already resolved.
+  - [x] Replied/resolved current threads 3581822370, 3581822374, 3581822378, 3581822384.
+  - [x] GraphQL audit confirmed `unresolved_codex_threads=0`.
+- [x] Attempt fresh current-head Codex review.
+  - [x] `codex-review-loop.sh trigger` refused because invocation cap is reached (26/5); no explicit approval to override.
+  - [x] PR checks query reports no checks on the branch; PR merge state remains `DIRTY`.
+- [x] Resolve live PR merge conflict after `origin/main` advanced to `c410dd1a54bc1346aad48b47d6d30a56e9a0a499`.
+  - [x] Created isolated worktree `/home/pfkagent/.hermes/kanban/workspaces/t_4cc33ad8/pr2212`.
+  - [x] Merged `origin/main` into old PR head `cb37e38a78fbbb9fead15a07982bed79072ca769`.
+  - [x] Resolved the single conflict in `tasks/resolve-issues-shared-lessons.md` by keeping both the right-to-forget and observer-classification lessons.
+  - [x] `git diff --check` passed.
+  - [x] `npm run test --workspace @franken/brain -- tests/unit/sqlite-brain.test.ts` passed (141 tests).
+  - [x] `npm run test --workspace @franken/mcp-suite -- src/shared/server-factory.test.ts` passed (36 tests).
+  - [x] Built workspace dependencies, then reran `typecheck`, `build`, and `lint` for `@franken/brain` and `@franken/mcp-suite`; all passed (`@franken/mcp-suite` lint has existing warnings only, 0 errors).
+- [x] Push resolved head to PR #2212 and verify live PR merge/check/Codex state.
+  - [x] Commit `be8cc9b4 fix(memory): close right-to-forget review gaps` pushed to PR #2212.
+  - [x] `npm run test --workspace @franken/brain -- tests/unit/sqlite-brain.test.ts` passed (143 tests).
+  - [x] `npm run typecheck --workspace @franken/brain` passed.
+  - [x] GraphQL review-thread audit found no unresolved review threads after push.
+  - [x] Fresh Codex trigger refused because invocation cap is reached (28/5); no explicit approval to override.
+  - [x] PR #2212 head is `be8cc9b4d1a37dd02d93b2d777dbc6b66d7fa69b`; CI checks are in progress.
+- [ ] Leave Kanban handoff and block/complete appropriately.

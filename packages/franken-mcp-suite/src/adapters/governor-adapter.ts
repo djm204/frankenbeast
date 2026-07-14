@@ -14,6 +14,7 @@ import { createSqliteStore } from '../shared/sqlite-store.js';
  */
 const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_forget',
+  'fbeast_memory_right_to_forget',
 ]);
 
 /**
@@ -132,6 +133,24 @@ function matchesDangerousPattern(action: string, context: string): boolean {
   return matchesDangerousActionName(action) || DANGEROUS_CONTEXT_PATTERNS.some((p) => p.test(combined));
 }
 
+function redactRightToForgetGovernanceContext(action: string, context: string): string {
+  if (action !== 'fbeast_memory_right_to_forget') return context;
+  return '[right-to-forget-context-redacted]';
+}
+
+function isRightToForgetDryRun(action: string, context: string): boolean {
+  if (action !== 'fbeast_memory_right_to_forget') return false;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    return parsed !== null
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && (parsed as { dryRun?: unknown }).dryRun === true;
+  } catch {
+    return false;
+  }
+}
+
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -150,6 +169,13 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     return {
       decision: 'approved',
       reason: `Tool "${action}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
+    };
+  }
+
+  if (action === 'fbeast_memory_right_to_forget') {
+    return {
+      decision: 'approved',
+      reason: 'Tool "fbeast_memory_right_to_forget" is an explicit privacy deletion workflow; execution is allowed through the central gate while audit context remains redacted.',
     };
   }
 
@@ -185,12 +211,19 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
 
   return {
     async check(input) {
-      const result = assessAction(input.action, input.context);
+      const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
+      const context = redactRightToForgetGovernanceContext(input.action, input.context);
+      const result = isDryRunForget
+        ? {
+            decision: 'approved' as const,
+            reason: 'Right-to-forget dryRun is non-mutating and allowed so users can inspect deletion counts before approval.',
+          }
+        : assessAction(input.action, context);
 
       store.db.prepare(`
         INSERT INTO governor_log (action, context, decision, reason)
         VALUES (?, ?, ?, ?)
-      `).run(input.action, input.context, result.decision, result.reason);
+      `).run(input.action, context, result.decision, result.reason);
 
       return result;
     },

@@ -71,11 +71,16 @@ export type {
   LearningRecordResult,
   ExecutionState,
   BrainSnapshot,
+  MemoryDeletionGuardSnapshot,
+  RightToForgetMemoryType,
+  RightToForgetSelector,
+  RightToForgetReport,
 } from './brain.js';
 export {
   EpisodicEventSchema,
   LearningCooldownOptionsSchema,
   ExecutionStateSchema,
+  MemoryDeletionGuardSnapshotSchema,
   BrainSnapshotSchema,
 } from './brain.js';
 
