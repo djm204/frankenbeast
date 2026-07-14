@@ -488,6 +488,57 @@ describe('IssueRunner', () => {
       expect(mockRun).not.toHaveBeenCalled();
     });
 
+    it('preserves shared-checkpoint completions before evaluating backpressure', async () => {
+      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 15 })],
+        triageResults: [makeTriage(15)],
+        checkpoint,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('does not treat unrelated shared checkpoint entries as progress for fresh starts', async () => {
+      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-150:done', 'harden:01_issue-150:done']));
+      const graphBuilder = mockGraphBuilder();
+      const config = makeConfig({
+        issues: [makeIssue({ number: 15 })],
+        triageResults: [makeTriage(15)],
+        checkpoint,
+        graphBuilder,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals: () => ({
+            activeProcesses: 1,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'skipped' });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
     it('stops iteration after queue depth backpressure to avoid priority inversion', async () => {
       const config = makeConfig({
         issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],

@@ -203,6 +203,29 @@ function issueCompletionKey(taskId: string): string {
   return `${taskId}:done`;
 }
 
+function checkpointEntriesHaveIssueProgress(
+  entries: ReadonlySet<string> | undefined,
+  issueNumber: number,
+  issueSpecificCheckpoint: boolean,
+): boolean {
+  if (!entries) return false;
+  if (issueSpecificCheckpoint) return entries.size > 0;
+
+  const issueToken = `issue-${issueNumber}`;
+  for (const entry of entries) {
+    const index = entry.indexOf(issueToken);
+    if (index < 0) continue;
+
+    const before = entry[index - 1];
+    const after = entry[index + issueToken.length];
+    const hasNumericPrefix = before !== undefined && /\d/.test(before);
+    const hasNumericSuffix = after !== undefined && /\d/.test(after);
+    if (!hasNumericPrefix && !hasNumericSuffix) return true;
+  }
+
+  return false;
+}
+
 function issueSkillDescriptor(id: string): SkillDescriptor {
   return {
     id,
@@ -309,16 +332,12 @@ export class IssueRunner {
       const issue = sorted[i]!;
       const position = `${i + 1}/${sorted.length}`;
 
-      const hasIssueSpecificCheckpointProgress =
-        (config.issueRuntime?.checkpointForIssue(issue.number).readAll().size ?? 0) > 0;
-
-      if (budgetExceeded || (stopRemainingReason && !hasIssueSpecificCheckpointProgress)) {
+      if (budgetExceeded) {
         outcomes.push({
           issueNumber: issue.number,
           issueTitle: issue.title,
           status: 'skipped',
           tokensUsed: 0,
-          ...(stopRemainingReason ? { error: stopRemainingReason } : {}),
         });
         continue;
       }
@@ -345,6 +364,7 @@ export class IssueRunner {
           cumulativeTokens,
           budgetTokens,
           providerBudgetTokensRemaining: Math.max(0, budgetTokens - cumulativeTokens),
+          stopRemainingReason,
         });
         cumulativeTokens += outcome.tokensUsed;
         outcomes.push(outcome);
@@ -374,7 +394,9 @@ export class IssueRunner {
     issue: GithubIssue,
     triage: TriageResult,
     config: IssueRunnerConfig,
-    backpressureContext: Omit<IssueBackpressureSignalContext, 'issue'>,
+    backpressureContext: Omit<IssueBackpressureSignalContext, 'issue'> & {
+      readonly stopRemainingReason?: string | undefined;
+    },
   ): Promise<IssueOutcome> {
     const {
       graphBuilder,
@@ -390,7 +412,12 @@ export class IssueRunner {
     const planName = runtimeArtifacts?.planName ?? issueRuntime?.planNameForIssue(issue.number) ?? `issue-${issue.number}`;
     const logFile = runtimeArtifacts?.logFile;
     const planDir = runtimeArtifacts?.planDir ?? resolve(getProjectPaths('.').plansDir, planName);
-    const checkpointHasProgress = issueRuntime !== undefined && (issueCheckpoint?.readAll().size ?? 0) > 0;
+    const checkpointEntries = issueCheckpoint?.readAll();
+    const checkpointHasIssueProgress = checkpointEntriesHaveIssueProgress(
+      checkpointEntries,
+      issue.number,
+      issueRuntime !== undefined,
+    );
 
     const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
       const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
@@ -419,7 +446,19 @@ export class IssueRunner {
       };
     };
 
-    if (!checkpointHasProgress) {
+    if (backpressureContext.stopRemainingReason && issueRuntime !== undefined && !checkpointHasIssueProgress) {
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: backpressureContext.stopRemainingReason,
+      };
+    }
+
+    const requiresCheckpointCompletionCheckBeforeBackpressure =
+      issueRuntime === undefined && issueCheckpoint !== undefined && checkpointHasIssueProgress;
+    if (!checkpointHasIssueProgress && !requiresCheckpointCompletionCheckBeforeBackpressure) {
       const paused = await pauseForBackpressure();
       if (paused) return paused;
     }
@@ -455,6 +494,21 @@ export class IssueRunner {
         status: 'fixed',
         tokensUsed: 0,
       };
+    }
+
+    if (backpressureContext.stopRemainingReason) {
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: backpressureContext.stopRemainingReason,
+      };
+    }
+
+    if (requiresCheckpointCompletionCheckBeforeBackpressure) {
+      const paused = await pauseForBackpressure();
+      if (paused) return paused;
     }
 
     git.isolate(`issue-${issue.number}`);
