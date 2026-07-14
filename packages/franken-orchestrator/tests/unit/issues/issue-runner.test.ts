@@ -577,7 +577,8 @@ describe('IssueRunner', () => {
     });
 
     it('does not treat unrelated shared checkpoint entries as progress for fresh starts', async () => {
-      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-150:done', 'harden:01_issue-150:done']));
+      writePlanChunks('issue-15', ['api']);
+      const checkpoint = mockCheckpoint(new Set(['impl:01_api:done', 'harden:01_api:done']));
       const graphBuilder = mockGraphBuilder();
       const config = makeConfig({
         issues: [makeIssue({ number: 15 })],
@@ -600,6 +601,37 @@ describe('IssueRunner', () => {
       expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'skipped' });
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('resumes issue-scoped shared-checkpoint commit recovery under backpressure', async () => {
+      writePlanChunks('issue-9916', ['checkpointed-api']);
+      const checkpoint = {
+        ...mockCheckpoint(new Set(['issue:9916:impl:01_checkpointed-api'])),
+        lastCommit: vi.fn((taskId: string, stage: string) =>
+          taskId === 'impl:01_checkpointed-api' && stage === 'impl' ? 'abc123' : undefined,
+        ),
+      };
+      const signals = vi.fn(() => ({
+        activeProcesses: 1,
+        failedStarts: 0,
+        inFlightBacklog: 0,
+        oldestQueueAgeMs: 0,
+      }));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 9916 })],
+        triageResults: [makeTriage(9916, 'chunked')],
+        checkpoint,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 1 },
+          signals,
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 9916, status: 'fixed' });
+      expect(signals).not.toHaveBeenCalled();
+      expect(mockRun).toHaveBeenCalledOnce();
     });
 
     it('stops iteration after queue depth backpressure to avoid priority inversion', async () => {

@@ -241,26 +241,6 @@ function checkpointEntriesHavePlanProgress(
   return false;
 }
 
-function checkpointEntryTaskId(entry: string): string | undefined {
-  const match = /^(?:impl|harden):(.+):done$/.exec(entry);
-  return match?.[1];
-}
-
-function taskIdContainsIssueToken(taskId: string): boolean {
-  return /(?:^|[^\d])issue-\d+(?:$|[^\d])/.test(taskId);
-}
-
-function checkpointEntriesMayHaveUnscopedPlanProgress(entries: ReadonlySet<string> | undefined): boolean {
-  if (!entries) return false;
-
-  for (const entry of entries) {
-    const taskId = checkpointEntryTaskId(entry);
-    if (taskId !== undefined && !taskIdContainsIssueToken(taskId)) return true;
-  }
-
-  return false;
-}
-
 function checkpointEntriesHaveIssueProgress(
   entries: ReadonlySet<string> | undefined,
   issueNumber: number,
@@ -485,9 +465,6 @@ export class IssueRunner {
       issueRuntime !== undefined,
       planDir,
     );
-    const checkpointMayHaveIssueProgress =
-      checkpointHasIssueProgress ||
-      (issueRuntime === undefined && checkpointEntriesMayHaveUnscopedPlanProgress(checkpointEntries));
     const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
 
     const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
@@ -517,7 +494,7 @@ export class IssueRunner {
       };
     };
 
-    if (backpressureContext.stopRemainingReason && !checkpointMayHaveIssueProgress) {
+    if (backpressureContext.stopRemainingReason && !checkpointHasIssueProgress) {
       return {
         issueNumber: issue.number,
         issueTitle: issue.title,
@@ -528,8 +505,8 @@ export class IssueRunner {
     }
 
     const requiresCheckpointCompletionCheckBeforeBackpressure =
-      issueRuntime === undefined && issueCheckpoint !== undefined && checkpointMayHaveIssueProgress;
-    if (!checkpointMayHaveIssueProgress && !requiresCheckpointCompletionCheckBeforeBackpressure) {
+      issueRuntime === undefined && issueCheckpoint !== undefined && checkpointHasIssueProgress;
+    if (!checkpointHasIssueProgress && !requiresCheckpointCompletionCheckBeforeBackpressure) {
       const paused = await pauseForBackpressure();
       if (paused) return paused;
     }
