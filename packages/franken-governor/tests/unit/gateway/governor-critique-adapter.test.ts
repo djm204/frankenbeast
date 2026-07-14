@@ -491,6 +491,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
       decision: 'APPROVE',
       respondedBy: 'operator-session-token',
     }));
+    expect(tokenStore.isValid(token.tokenId, makeScope())).toBe(false);
   });
 
   it('fails closed to a fresh operator prompt when the risky-action session token is expired', async () => {
@@ -584,7 +585,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
 
   it('fails closed to a fresh operator prompt when token validation storage throws', async () => {
     const tokenStore = {
-      isValid: vi.fn(() => {
+      consume: vi.fn(() => {
         throw new Error('corrupt token store');
       }),
       store: vi.fn(),
@@ -613,7 +614,7 @@ describe('GovernorCritiqueAdapter per-trigger context construction (issue #490)'
 
   it('approves without issuing a replacement token when token persistence fails after fresh approval', async () => {
     const tokenStore = {
-      get: vi.fn(() => {
+      consume: vi.fn(() => {
         throw new Error('corrupt token store');
       }),
       store: vi.fn(() => {

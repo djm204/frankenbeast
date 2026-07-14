@@ -32,6 +32,12 @@ export interface SweepExpiredSessionTokenOptions {
   readonly nowMs?: number;
 }
 
+export type ConsumeSessionTokenResult =
+  | { readonly status: 'consumed'; readonly token: SessionToken }
+  | { readonly status: 'missing' }
+  | { readonly status: 'expired' }
+  | { readonly status: 'scope_mismatch' };
+
 interface SerializedSessionToken {
   readonly tokenId: string;
   readonly approvalId: string;
@@ -116,6 +122,38 @@ export class SessionTokenStore {
     const token = this.get(tokenId);
     if (!token) return false;
     return scope === undefined || token.scope === scope;
+  }
+
+  consume(tokenId: string, scope?: string): ConsumeSessionTokenResult {
+    const consumeLoadedToken = (): ConsumeSessionTokenResult => {
+      const token = this.tokens.get(tokenId);
+      if (token === undefined) return { status: 'missing' };
+
+      if (this.isExpired(token)) {
+        this.tokens.delete(tokenId);
+        return { status: 'expired' };
+      }
+
+      if (scope !== undefined && token.scope !== scope) {
+        return { status: 'scope_mismatch' };
+      }
+
+      this.tokens.delete(tokenId);
+      return { status: 'consumed', token };
+    };
+
+    if (!this.persistenceFile) {
+      return consumeLoadedToken();
+    }
+
+    return this.withFileLock(() => {
+      this.loadPersistedTokens();
+      const result = consumeLoadedToken();
+      if (result.status === 'consumed' || result.status === 'expired') {
+        this.persist();
+      }
+      return result;
+    });
   }
 
   private pruneExpiredTokens(nowMs: number = wallClockNow()): number {

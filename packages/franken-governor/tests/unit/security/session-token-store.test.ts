@@ -125,6 +125,58 @@ describe('SessionTokenStore', () => {
     expect(store.isValid('unknown')).toBe(false);
   });
 
+  it('consume() returns the token once and removes it from the in-memory store', () => {
+    const store = new SessionTokenStore();
+    const token = makeToken(10_000);
+
+    store.store(token);
+
+    expect(store.consume(token.tokenId, 'deploy')).toEqual({ status: 'consumed', token });
+    expect(store.consume(token.tokenId, 'deploy')).toEqual({ status: 'missing' });
+    expect(store.isValid(token.tokenId, 'deploy')).toBe(false);
+  });
+
+  it('consume() preserves a valid token when the requested scope does not match', () => {
+    const store = new SessionTokenStore();
+    const token = makeToken(10_000);
+
+    store.store(token);
+
+    expect(store.consume(token.tokenId, 'other-scope')).toEqual({ status: 'scope_mismatch' });
+    expect(store.isValid(token.tokenId, 'deploy')).toBe(true);
+  });
+
+  it('consume() prunes expired tokens and reports the expired state', () => {
+    const store = new SessionTokenStore();
+    const token = makeToken(1000);
+
+    store.store(token);
+    vi.advanceTimersByTime(2000);
+
+    expect(store.consume(token.tokenId, 'deploy')).toEqual({ status: 'expired' });
+    expect(store.consume(token.tokenId, 'deploy')).toEqual({ status: 'missing' });
+  });
+
+  it('consume() atomically allows one persisted store instance to claim a token', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
+    const persistenceFile = join(dir, 'tokens.json');
+    try {
+      const issuer = new SessionTokenStore({ persistenceFile });
+      const token = makeToken(10_000);
+      issuer.store(token);
+
+      const contenders = Array.from({ length: 8 }, () => new SessionTokenStore({ persistenceFile }));
+      const results = await Promise.all(contenders.map((store) => Promise.resolve().then(() => store.consume(token.tokenId, 'deploy'))));
+
+      expect(results.filter((result) => result.status === 'consumed')).toHaveLength(1);
+      expect(results.filter((result) => result.status === 'missing')).toHaveLength(7);
+      expect(new SessionTokenStore({ persistenceFile }).isValid(token.tokenId, 'deploy')).toBe(false);
+      expect(JSON.parse(readFileSync(persistenceFile, 'utf8'))).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('persists tokens so a new store instance can validate them', () => {
     const dir = mkdtempSync(join(tmpdir(), 'governor-session-token-store-'));
     const persistenceFile = join(dir, 'tokens.json');
