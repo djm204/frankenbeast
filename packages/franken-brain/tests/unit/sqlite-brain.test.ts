@@ -299,10 +299,8 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('long-contact', `${'x'.repeat(5000)}secret-token`)).toThrow(/right-to-forget/);
     });
 
-    it('guards short query substrings embedded deep in long working-memory tokens', () => {
-      brain.rightToForget({ query: 'abc' });
-
-      expect(() => brain.working.set('long-short-query', `${'x'.repeat(5000)}abc`)).toThrow(/right-to-forget/);
+    it('rejects short query selectors instead of installing incomplete substring guards', () => {
+      expect(() => brain.rightToForget({ query: 'abc' })).toThrow(/at least 8/);
     });
 
     it('deletes episodic sourceScope markers with optional spacing', () => {
@@ -354,6 +352,58 @@ describe('SqliteBrain', () => {
         forgetter.close();
         stale.close();
       } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('normalizes live database paths when expiring forgotten rows', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-path-'));
+      const dbPath = join(dir, 'brain.db');
+      const cwd = process.cwd();
+      let stale: SqliteBrain | undefined;
+      let forgetter: SqliteBrain | undefined;
+
+      try {
+        process.chdir(dir);
+        stale = new SqliteBrain('./brain.db');
+        stale.working.set('contact', 'alice@example.test');
+        stale.flush();
+
+        forgetter = new SqliteBrain(dbPath);
+        forgetter.rightToForget({ query: 'alice@example.test' });
+
+        expect(stale.working.get('contact')).toBeUndefined();
+      } finally {
+        forgetter?.close();
+        stale?.close();
+        process.chdir(cwd);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('restores safe persisted rows when expiring matching live overlays', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-live-safe-overlay-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let forgetter: SqliteBrain | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'safe persisted value');
+        stale.flush();
+        stale.working.set('contact', 'alice@example.test transient overwrite');
+
+        forgetter = new SqliteBrain(dbPath);
+        forgetter.rightToForget({ query: 'alice@example.test' });
+
+        expect(stale.working.get('contact')).toBe('safe persisted value');
+        stale.flush();
+        forgetter.close();
+        forgetter = new SqliteBrain(dbPath);
+        expect(forgetter.working.get('contact')).toBe('safe persisted value');
+      } finally {
+        forgetter?.close();
+        stale?.close();
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -495,7 +545,7 @@ describe('SqliteBrain', () => {
     });
 
     it('rejects short query selectors that cannot be safely guarded', () => {
-      expect(() => brain.rightToForget({ query: 'ab' })).toThrow(/at least 3/);
+      expect(() => brain.rightToForget({ query: '1234567' })).toThrow(/at least 8/);
     });
   });
 
@@ -2128,7 +2178,7 @@ describe('SqliteBrain', () => {
     it('hydrate() preserves serialized right-to-forget audit events that mention guarded words', () => {
       const source = new SqliteBrain(':memory:');
       source.working.set('task', 'delete project note');
-      source.rightToForget({ query: 'delete' });
+      source.rightToForget({ query: 'delete project' });
       const snapshot = source.serialize();
 
       const hydrated = SqliteBrain.hydrate(snapshot);

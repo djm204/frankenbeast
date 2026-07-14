@@ -232,7 +232,11 @@ const RIGHT_TO_FORGET_SAFE_AUDIT_KEYS = new Set(['type', 'dryRun']);
 
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
-  const auditedTool = typeof sanitized['tool'] === 'string' ? sanitized['tool'] : toolName;
+  const auditedTool = toolName === 'fbeast_memory_right_to_forget'
+    ? toolName
+    : typeof sanitized['tool'] === 'string'
+      ? sanitized['tool']
+      : toolName;
   const auditedAction = typeof sanitized['action'] === 'string' ? sanitized['action'] : undefined;
   if (auditedTool !== 'fbeast_memory_right_to_forget' && auditedAction !== 'fbeast_memory_right_to_forget') return sanitized;
   if (auditedAction === 'fbeast_memory_right_to_forget' && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
