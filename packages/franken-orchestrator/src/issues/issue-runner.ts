@@ -387,6 +387,7 @@ export class IssueRunner {
     const planName = runtimeArtifacts?.planName ?? issueRuntime?.planNameForIssue(issue.number) ?? `issue-${issue.number}`;
     const logFile = runtimeArtifacts?.logFile;
     const planDir = runtimeArtifacts?.planDir ?? resolve(getProjectPaths('.').plansDir, planName);
+    const checkpointHasProgress = (issueCheckpoint?.readAll().size ?? 0) > 0;
 
     const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
       const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
@@ -415,7 +416,7 @@ export class IssueRunner {
       };
     };
 
-    if (!issueCheckpoint) {
+    if (!checkpointHasProgress) {
       const paused = await pauseForBackpressure();
       if (paused) return paused;
     }
@@ -452,9 +453,6 @@ export class IssueRunner {
         tokensUsed: 0,
       };
     }
-
-    const paused = await pauseForBackpressure();
-    if (paused) return paused;
 
     git.isolate(`issue-${issue.number}`);
 
