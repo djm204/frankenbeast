@@ -54,7 +54,7 @@ npm --workspace @franken/web run dev:chat
 
 That proxies same-origin browser requests to `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://` and `wss://` endpoints.
 
-The dashboard scopes chat history by project id. If `VITE_PROJECT_ID` is unset, the frontend uses the shared `default` project. Set a stable, non-secret project id when you run multiple local checkouts or want dashboard chat sessions isolated by project:
+The dashboard scopes chat history by project id. If `VITE_PROJECT_ID` is unset, the frontend uses the shared `default` project. Set a stable, non-secret project id when you run multiple local checkouts or want dashboard chat sessions isolated by project. Export it in the shell that starts Vite, or put it in `packages/franken-web/.env.local`; the repo-root `.env` is server-side and will not populate Vite's browser bundle:
 
 ```bash
 VITE_PROJECT_ID=my-project npm --workspace @franken/web run dev:chat

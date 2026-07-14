@@ -79,7 +79,7 @@ export FRANKENBEAST_BEAST_OPERATOR_TOKEN="$OPERATOR_TOKEN"
 npm --workspace @franken/web run dev:chat
 ```
 
-Optionally set `VITE_PROJECT_ID` for the dashboard frontend when this checkout should use its own chat-session namespace. It defaults to `default`; use a stable, non-secret value such as a repo or workspace slug to avoid mixing chat history across local projects:
+Optionally set `VITE_PROJECT_ID` for the dashboard frontend when this checkout should use its own chat-session namespace. It defaults to `default`; use a stable, non-secret value such as a repo or workspace slug to avoid mixing chat history across local projects. Export it in the same shell that starts Vite, or put it in `packages/franken-web/.env.local`; the repo-root `.env` is reserved for server-side values and does not populate browser-bundled Vite env:
 
 ```bash
 export VITE_PROJECT_ID=my-project
