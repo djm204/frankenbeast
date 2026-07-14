@@ -22,6 +22,19 @@ export interface ISessionStore {
   delete(id: string): void;
 }
 
+function formatCorruptSessionReason(error: unknown): string {
+  if (error instanceof Error && error.name === 'ZodError') {
+    const issues = (error as { issues?: Array<{ code?: string; received?: string; message?: string }> }).issues;
+    if (Array.isArray(issues) && issues.some((issue) => (
+      issue.code === 'invalid_type'
+      && (issue.received === 'undefined' || issue.message?.includes('received undefined'))
+    ))) {
+      return 'Required';
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class FileSessionStore implements ISessionStore {
   private readonly storeDir: string;
   private readonly corruptions = new Map<string, CorruptChatSessionFile>();
@@ -176,7 +189,7 @@ export class FileSessionStore implements ISessionStore {
 
   private quarantineCorruptSession(id: string, path: string, raw: string, error: unknown): void {
     const quarantinePath = `${path}.corrupt-${deterministicNow()}-${randomBytes(3).toString('hex')}`;
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = formatCorruptSessionReason(error);
     const projectId = this.extractProjectId(raw);
     const diagnostic: CorruptChatSessionFile = {
       id,

@@ -143,10 +143,10 @@ export const CommsServiceConfigSchema = z.object({
   port: PortSchema.default(3200),
   orchestratorWsUrl: UrlSchema.default('ws://127.0.0.1:3737/v1/chat/ws'),
   orchestratorTokenRef: z.string().min(1).optional(),
-  slack: SlackChannelConfigSchema.default({}),
-  discord: DiscordChannelConfigSchema.default({}),
-  telegram: TelegramChannelConfigSchema.default({}),
-  whatsapp: WhatsAppChannelConfigSchema.default({}),
+  slack: SlackChannelConfigSchema.default(() => ({ enabled: false })),
+  discord: DiscordChannelConfigSchema.default(() => ({ enabled: false })),
+  telegram: TelegramChannelConfigSchema.default(() => ({ enabled: false })),
+  whatsapp: WhatsAppChannelConfigSchema.default(() => ({ enabled: false })),
 }).superRefine((value, ctx) => {
   if (!value.enabled) return;
   requireLoopbackServiceHost(ctx, value.host);
@@ -170,11 +170,37 @@ function hasEnabledCommsChannel(comms: z.infer<typeof CommsServiceConfigSchema>)
 const loopbackOnlyMessage = 'Managed service hosts must be loopback-only; terminate TLS in a separate reverse proxy for non-local deployments.';
 
 export const NetworkConfigFieldsSchema = z.object({
-  network: NetworkOperatorConfigSchema.default({}),
-  beastsDaemon: BeastDaemonServiceConfigSchema.default({}),
-  chat: ChatServiceConfigSchema.default({}),
-  dashboard: DashboardServiceConfigSchema.default({}),
-  comms: CommsServiceConfigSchema.default({}),
+  network: NetworkOperatorConfigSchema.default(() => ({
+    mode: 'secure' as const,
+    secureBackend: 'local-encrypted' as const,
+  })),
+  beastsDaemon: BeastDaemonServiceConfigSchema.default(() => ({
+    enabled: true,
+    host: '127.0.0.1',
+    port: 4050,
+  })),
+  chat: ChatServiceConfigSchema.default(() => ({
+    enabled: true,
+    host: '127.0.0.1',
+    port: 3737,
+    model: 'claude-sonnet-4-6',
+  })),
+  dashboard: DashboardServiceConfigSchema.default(() => ({
+    enabled: true,
+    host: '127.0.0.1',
+    port: 5173,
+    apiUrl: DASHBOARD_API_URL_DEFAULT,
+  })),
+  comms: CommsServiceConfigSchema.default(() => ({
+    enabled: false,
+    host: '127.0.0.1',
+    port: 3200,
+    orchestratorWsUrl: 'ws://127.0.0.1:3737/v1/chat/ws',
+    slack: { enabled: false },
+    discord: { enabled: false },
+    telegram: { enabled: false },
+    whatsapp: { enabled: false },
+  })),
 });
 
 export function validateNetworkConfig(value: z.infer<typeof NetworkConfigFieldsSchema>, ctx: z.RefinementCtx): void {

@@ -5,7 +5,7 @@ import { wallClockNow } from '@franken/types';
 
 const ReviewRequestSchema = z.object({
   code: z.string(),
-  context: z.record(z.unknown()).optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
   evaluators: z.array(z.string()).optional(),
 });
 

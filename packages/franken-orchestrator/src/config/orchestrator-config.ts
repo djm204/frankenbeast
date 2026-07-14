@@ -73,7 +73,7 @@ function createProvidersConfigSchema(options: OrchestratorConfigParseOptions = {
     /** Ordered fallback chain of provider names. */
     fallbackChain: z.array(z.string()).default(['claude', 'codex']),
     /** Per-provider overrides (command, model, extraArgs). */
-    overrides: z.record(z.string(), ProviderOverrideSchema).default({}),
+    overrides: z.record(z.string(), ProviderOverrideSchema).default(() => ({})),
   }).superRefine((providers, ctx) => {
     for (const [name, override] of Object.entries(providers.overrides)) {
       for (const message of validateProviderCommandOverride(name, override, {
@@ -129,7 +129,11 @@ const BaseOrchestratorConfigSchema = z.object({
     .default(0.7),
 
   /** Provider configuration. */
-  providers: ProvidersConfigSchema.default({}),
+  providers: ProvidersConfigSchema.default(() => ({
+    default: 'claude',
+    fallbackChain: ['claude', 'codex'],
+    overrides: {},
+  })),
 
   /** Consolidation: security middleware configuration. */
   security: SecurityConfigInputSchema.optional(),
@@ -146,7 +150,11 @@ const BaseOrchestratorConfigSchema = z.object({
 
 function createOrchestratorConfigSchema(options: OrchestratorConfigParseOptions = {}) {
   return BaseOrchestratorConfigSchema.extend({
-    providers: createProvidersConfigSchema(options).default({}),
+    providers: createProvidersConfigSchema(options).default(() => ({
+      default: 'claude',
+      fallbackChain: ['claude', 'codex'],
+      overrides: {},
+    })),
   }).extend(
     NetworkConfigFieldsSchema.shape,
   ).superRefine((config, ctx) => {
