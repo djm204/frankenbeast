@@ -172,6 +172,13 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     };
   }
 
+  if (action === 'fbeast_memory_right_to_forget') {
+    return {
+      decision: 'approved',
+      reason: 'Tool "fbeast_memory_right_to_forget" is an explicit privacy deletion workflow; execution is allowed through the central gate while audit context remains redacted.',
+    };
+  }
+
   const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(action, context);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness

@@ -1336,9 +1336,9 @@ export class SqliteBrain implements IBrain {
       });
       auditEventId = tx() as number;
       if (workingMatches.length > 0 || episodicMatches.length > 0 || checkpointMatches.length > 0) {
-        purgeDeletedSqliteContent(this.db, this.dbPath);
         finalizePersistedWorkingDelete?.();
         this.working.deleteRuntimeKeys(runtimeWorkingMatches);
+        purgeDeletedSqliteContent(this.db, this.dbPath);
       }
     }
 
@@ -1464,8 +1464,6 @@ export class SqliteBrain implements IBrain {
       const restoreSnapshot = brain.db.transaction(() => {
         brain.db.prepare(`DELETE FROM episodic_events`).run();
         brain.db.prepare(`DELETE FROM checkpoints`).run();
-        brain.db.prepare(`DELETE FROM memory_deletion_guards`).run();
-
         for (const guard of snapshot.deletionGuards ?? []) {
           insertDeletionGuard.run(
             guard.selectorHash,
@@ -2123,14 +2121,17 @@ function guardTokens(value: string | undefined): string[] {
 }
 
 const MAX_GUARD_MATCH_CANDIDATES = 4096;
+const MIN_QUERY_GUARD_CHUNK_LENGTH = 8;
+const MAX_QUERY_GUARD_CHUNK_LENGTH = 128;
 
 function guardMatchCandidates(value: string | undefined): string[] {
   const tokens = guardTokens(value).sort((a, b) => a.length - b.length);
   const values = new Set(tokens);
   for (const token of tokens) {
+    if (token.length <= MIN_QUERY_GUARD_CHUNK_LENGTH) continue;
     for (let start = 0; start < token.length && values.size < MAX_GUARD_MATCH_CANDIDATES; start += 1) {
-      const maxEnd = Math.min(token.length, start + 128);
-      for (let end = start + 3; end <= maxEnd && values.size < MAX_GUARD_MATCH_CANDIDATES; end += 1) {
+      const maxEnd = Math.min(token.length, start + MAX_QUERY_GUARD_CHUNK_LENGTH);
+      for (let end = start + MIN_QUERY_GUARD_CHUNK_LENGTH; end <= maxEnd && values.size < MAX_GUARD_MATCH_CANDIDATES; end += 1) {
         values.add(token.slice(start, end));
       }
     }
@@ -2268,15 +2269,25 @@ function keySegmentCandidates(key: string): string[] {
   return Array.from(candidates);
 }
 
+function keyPrefixCandidates(key: string): string[] {
+  const segments = key.split(':').map(segment => normalizeForMatch(segment)).filter(Boolean);
+  const candidates = new Set<string>();
+  for (let end = 1; end < segments.length; end += 1) {
+    candidates.add(segments.slice(0, end).join(':'));
+  }
+  return Array.from(candidates);
+}
+
 function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string): void {
   const parsed = safeJsonParse(serializedValue);
   const keyPrefix = key.includes(':') ? key.split(':', 1)[0] : undefined;
   const keySegments = keySegmentCandidates(key);
+  const keyPrefixes = keyPrefixCandidates(key);
   const candidates: Array<[string, string | undefined]> = [
     ['key', key],
     ['category', objectMetadataString(parsed, ['category', 'categories', 'kind'])],
     ['category', keyPrefix],
-    ...keySegments.map(segment => ['category', segment] as [string, string]),
+    ...keyPrefixes.map(segment => ['category', segment] as [string, string]),
     ['sourceScope', objectMetadataString(parsed, ['sourceScope', 'source', 'scope', 'sourceId'])],
     ...keySegments.map(segment => ['sourceScope', segment] as [string, string]),
   ];
@@ -2306,6 +2317,7 @@ function assertEpisodicNotDeletionGuarded(db: Database.Database, event: Episodic
     ['category', objectMetadataString(event.details, ['category', 'categories', 'kind'])],
     ...extractStructuredMarkerValues(text, 'category').map(value => ['category', value] as [string, string]),
     ['sourceScope', objectMetadataString(event.details, ['sourceScope', 'source', 'scope', 'sourceId'])],
+    ...extractStructuredMarkerValues(text, 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
   ];
   for (const [kind, value] of candidates) {
     if (!value) continue;

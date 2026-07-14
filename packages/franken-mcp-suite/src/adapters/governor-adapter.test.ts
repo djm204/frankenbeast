@@ -33,15 +33,16 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('approved');
   });
 
-  it('denies destructive fbeast memory deletion tools', async () => {
+  it('denies legacy memory forget but allows explicit right-to-forget privacy deletions', async () => {
     // The word heuristic does not catch "forget"; classification lives in the
     // shared governor so every caller (hook, fbeast_governor_check, central
-    // gate, governor_log) gets the same 'denied' decision for a benign key.
+    // gate, governor_log) gets the same decision for a benign key. The explicit
+    // privacy deletion workflow stays executable through the installed server.
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     await expect(governor.check({ action: 'fbeast_memory_forget', context: '{"key":"note"}' }))
       .resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({ action: 'fbeast_memory_right_to_forget', context: '{"category":"[right-to-forget-selector-redacted]"}' }))
-      .resolves.toMatchObject({ decision: 'denied' });
+      .resolves.toMatchObject({ decision: 'approved' });
   });
 
 
@@ -52,7 +53,7 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({
       action: 'fbeast_memory_right_to_forget',
       context: '{"query":"alice@example.test","key":"pii:email"}',
-    })).resolves.toMatchObject({ decision: 'denied' });
+    })).resolves.toMatchObject({ decision: 'approved' });
 
     const db = new Database(dbPath);
     const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_right_to_forget') as { context: string };

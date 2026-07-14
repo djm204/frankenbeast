@@ -294,8 +294,8 @@ describe('SqliteBrain', () => {
       brain.rightToForget({ query: 'alice@example.test' });
       expect(() => brain.working.set('alice@example.test', 'ok')).toThrow(/right-to-forget/);
 
-      brain.rightToForget({ query: 'secret' });
-      expect(() => brain.working.set('contact', 'mysecretvalue')).toThrow(/right-to-forget/);
+      brain.rightToForget({ query: 'secret-token' });
+      expect(() => brain.working.set('contact', 'mysecret-tokenvalue')).toThrow(/right-to-forget/);
     });
 
     it('deletes and guards checkpoints for all-memory query deletions', () => {
@@ -349,19 +349,20 @@ describe('SqliteBrain', () => {
     });
 
     it('guards composite category key prefixes and checkpoint markers', () => {
-      brain.working.set('tenant:123:item', 'secret');
+      brain.working.set('tenant:123:item', { value: 'pii' });
       brain.recovery.checkpoint({
-        runId: 'run-category-marker',
+        runId: 'run-category',
         phase: 'execution',
         step: 1,
-        context: { note: 'category:tenant:123 marker' },
-        timestamp: '2026-07-13T00:02:00.000Z',
+        context: { value: 'category:tenant:123' },
+        timestamp: new Date().toISOString(),
       });
 
-      const report = brain.rightToForget({ category: 'tenant:123' });
+      const result = brain.rightToForget({ category: 'tenant:123' });
 
-      expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 1 });
-      expect(() => brain.working.set('tenant:123:new', 'secret')).toThrow(/right-to-forget/);
+      expect(result.deleted).toMatchObject({ working: 1, derived: 1 });
+      expect(() => brain.working.set('tenant:123:new', { value: 'blocked' })).toThrow(/right-to-forget/);
+      expect(() => brain.working.set('project:tenant:123:task', { value: 'allowed' })).not.toThrow();
       expect(() => brain.recovery.checkpoint({
         runId: 'run-category-marker-reinsert',
         phase: 'execution',
@@ -384,6 +385,11 @@ describe('SqliteBrain', () => {
 
       expect(report.deleted).toEqual({ working: 0, episodic: 0, derived: 1 });
       expect(brain.recovery.lastCheckpoint()).toBeNull();
+      expect(() => brain.episodic.record({
+        type: 'observation',
+        step: 'replay',
+        summary: 'sourceScope:import-1 again',
+      })).toThrow(/right-to-forget/);
       expect(() => brain.recovery.checkpoint({
         runId: 'run-source-marker-reinsert',
         phase: 'execution',
@@ -2023,6 +2029,32 @@ describe('SqliteBrain', () => {
 
       expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/right-to-forget/);
       source.close();
+    });
+
+    it('hydrate() preserves existing database deletion guards before restoring a snapshot', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-'));
+      const dbPath = join(dir, 'brain.db');
+      const guarded = new SqliteBrain(dbPath);
+      guarded.working.set('pii:email', 'alice@example.test');
+      guarded.rightToForget({ query: 'alice@example.test' });
+      guarded.close();
+
+      const snapshot: BrainSnapshot = {
+        version: 1,
+        timestamp: '2026-07-14T00:00:00.000Z',
+        working: { 'pii:email': 'alice@example.test' },
+        episodic: [],
+        checkpoint: null,
+      };
+
+      try {
+        expect(() => SqliteBrain.hydrate(snapshot, dbPath)).toThrow(/right-to-forget/);
+        const reopened = new SqliteBrain(dbPath);
+        expect(() => reopened.working.set('other', 'alice@example.test')).toThrow(/right-to-forget/);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('hydrate() preserves serialized right-to-forget audit events that mention guarded words', () => {
