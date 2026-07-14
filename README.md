@@ -643,13 +643,14 @@ Use the default for the standard local compose stack:
 
 ```bash
 cp .env.example .env
+$EDITOR .env  # uncomment GRAFANA_USER=admin and set a unique GRAFANA_PASSWORD
 npm run bootstrap -- --services
 npm run local:seed
 npm run local:verify-setup
 ```
 
-Override it when ChromaDB is reachable somewhere else, and keep the same value
-for both seed and verification:
+Override it when ChromaDB is reachable somewhere else, and export the same
+value before seed and verification:
 
 ```bash
 # Alternate local port or host
