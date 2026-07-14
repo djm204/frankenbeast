@@ -137,6 +137,18 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recall('+15555550123', 5)).toHaveLength(1);
     });
 
+    it('keeps dry-run right-to-forget from creating deletion hash keys', () => {
+      const snapshotBefore = brain.serialize();
+
+      const report = brain.rightToForget({ query: 'alice@example.test', dryRun: true });
+      const snapshotAfter = brain.serialize();
+
+      expect(report.selectorHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(snapshotBefore.deletionGuardHashKey).toBeUndefined();
+      expect(snapshotAfter.deletionGuardHashKey).toBeUndefined();
+      expect(snapshotAfter.deletionGuards).toEqual([]);
+    });
+
     it('guards against reintroducing forgotten working memory', () => {
       brain.working.set('pii:ssn', { value: '123-45-6789', category: 'pii' });
       brain.rightToForget({ key: 'pii:ssn', category: 'pii' });
@@ -724,8 +736,18 @@ describe('SqliteBrain', () => {
     it('aligns category key guards with category deletion key-prefix scope', () => {
       brain.rightToForget({ category: 'prod' });
 
+      expect(() => brain.working.set('prod', 'secret')).toThrow(/right-to-forget/);
       expect(() => brain.working.set('prod:task', 'secret')).toThrow(/right-to-forget/);
       expect(() => brain.working.set('project:prod:task', 'allowed unrelated key segment')).not.toThrow();
+    });
+
+    it('guards exact multi-segment category key matches after deletion', () => {
+      brain.working.set('tenant:123', 'secret');
+
+      const report = brain.rightToForget({ category: 'tenant:123' });
+
+      expect(report.deleted.working).toBe(1);
+      expect(() => brain.working.set('tenant:123', 'secret again')).toThrow(/right-to-forget/);
     });
 
     it('counts dry-run matches from other live unflushed working-memory instances', () => {
@@ -1175,6 +1197,10 @@ describe('SqliteBrain', () => {
           },
         ]);
         reopened.close();
+
+        const noOpDryRunAfterMigration = SqliteBrain.migrateMemorySchema(dbPath, { dryRun: true });
+        expect(noOpDryRunAfterMigration.migrated).toBe(false);
+        expect(noOpDryRunAfterMigration.operations).toEqual([]);
 
         const staleRegistryDb = new Database(dbPath);
         staleRegistryDb
@@ -2379,6 +2405,29 @@ describe('SqliteBrain', () => {
         expect(second.recovery.listCheckpoints()).toHaveLength(1);
         expect(second.recovery.lastCheckpoint()?.runId).toBe('run-1');
         second.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects hydrating deletion guards with mismatched hash key material', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-guard-key-mismatch-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        brain.working.set('pii:email', 'alice@example.test');
+        brain.rightToForget({ key: 'pii:email' });
+        const snapshot = brain.serialize();
+        expect(snapshot.deletionGuardHashKey).toEqual(expect.any(String));
+
+        const existing = new SqliteBrain(dbPath);
+        existing.rightToForget({ query: 'bob@example.test' });
+        const existingSnapshot = existing.serialize();
+        expect(existingSnapshot.deletionGuardHashKey).toEqual(expect.any(String));
+        expect(existingSnapshot.deletionGuardHashKey).not.toBe(snapshot.deletionGuardHashKey);
+        existing.close();
+
+        expect(() => SqliteBrain.hydrate(snapshot, dbPath)).toThrow(/different right-to-forget hash key material/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

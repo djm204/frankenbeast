@@ -1376,8 +1376,8 @@ export class SqliteBrain implements IBrain {
 
   rightToForget(selector: RightToForgetSelector): RightToForgetReport {
     const normalizedSelector = normalizeRightToForgetSelector(selector);
-    const selectorHash = hashSelector(this.db, normalizedSelector);
     const dryRun = normalizedSelector.dryRun ?? false;
+    const selectorHash = hashSelector(this.db, normalizedSelector, { createKey: !dryRun });
     const memoryType = normalizedSelector.type ?? 'all';
 
     const workingMatches = memoryType === 'episodic'
@@ -1567,6 +1567,10 @@ export class SqliteBrain implements IBrain {
         `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version) VALUES (?, ?, ?, ?, ?)`,
       );
       if (snapshot.deletionGuardHashKey) {
+        const existingDeletionHashKey = readDeletionHashKey(brain.db);
+        if (existingDeletionHashKey && existingDeletionHashKey !== snapshot.deletionGuardHashKey) {
+          throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with deletion guards that use different right-to-forget hash key material');
+        }
         writeDeletionHashKey(brain.db, snapshot.deletionGuardHashKey);
       }
 
@@ -1783,7 +1787,7 @@ function migrateMemorySchemaDatabase(
       );
     `);
     for (const store of stores) {
-      if (!existingTables.has(store) && store !== 'memory_deletion_guards') continue;
+      if (!existingTables.has(store) && store !== 'memory_deletion_guards' && store !== 'memory_deletion_hash_keys') continue;
       const columnRows = db
         .prepare(`PRAGMA table_info(${store})`)
         .all() as Array<{ name: string }>;
@@ -2255,8 +2259,15 @@ function keyedDeletionHash(db: Database.Database, value: string): string {
   return createHmac('sha256', readOrCreateDeletionHashKey(db)).update(value).digest('hex');
 }
 
-function hashSelector(db: Database.Database, selector: NormalizedRightToForgetSelector): string {
-  return createHmac('sha256', readOrCreateDeletionHashKey(db))
+function hashSelector(
+  db: Database.Database,
+  selector: NormalizedRightToForgetSelector,
+  options: { createKey?: boolean } = {},
+): string {
+  const key = options.createKey === false
+    ? readDeletionHashKey(db) ?? 'right-to-forget-dry-run-hmac-v1'
+    : readOrCreateDeletionHashKey(db);
+  return createHmac('sha256', key)
     .update(JSON.stringify({
       key: selector.key,
       category: normalizeForMatch(selector.category),
@@ -2534,6 +2545,7 @@ function assertNotDeletionGuarded(db: Database.Database, key: string, serialized
     ['key', key],
     ...objectMetadataStrings(parsed, ['category', 'categories', 'kind']).map(value => ['category', value] as [string, string]),
     ...extractStructuredMarkerValues(text, 'category').map(value => ['category', value] as [string, string]),
+    ['category', key],
     ['category', keyPrefix],
     ...keyPrefixes.map(segment => ['category', segment] as [string, string]),
     ...objectMetadataStrings(parsed, ['sourceScope', 'source', 'scope', 'sourceId']).map(value => ['sourceScope', value] as [string, string]),
