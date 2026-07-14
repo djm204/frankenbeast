@@ -172,10 +172,12 @@ if (!process.env.GRAFANA_INSTANCE_ID || !process.env.GRAFANA_API_KEY) {
   throw new Error('Grafana Cloud export requires GRAFANA_INSTANCE_ID and GRAFANA_API_KEY')
 }
 
-// Grafana Cloud Tempo (Basic auth + cloud OTLP path)
+// Grafana Cloud Tempo (Basic auth + cloud OTLP gateway path)
 const cloud = new TempoAdapter({
-  endpoint: 'https://tempo-us-central1.grafana.net/tempo',
-  otlpPath: '/otlp/v1/traces',       // Grafana Cloud uses this path
+  // Copy the OTLP gateway host from your Grafana Cloud stack's OpenTelemetry tile.
+  // Do not use the Tempo query endpoint (tempo-<region>.grafana.net/tempo).
+  endpoint: 'https://otlp-gateway-<REGION>.grafana.net',
+  otlpPath: '/otlp/v1/traces',       // Grafana Cloud OTLP gateway traces path
   basicAuth: {
     user: process.env.GRAFANA_INSTANCE_ID!,   // numeric instance ID
     password: process.env.GRAFANA_API_KEY!,
