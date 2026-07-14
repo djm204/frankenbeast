@@ -210,7 +210,9 @@ describe('GhostDependencyEvaluator', () => {
       interface Cfg { name: string; plugin: import('ghost-package').Plugin }
       type InlineObject = { name: string; plugin: import('ghost-package').Plugin };
       declare namespace N { type T = import('ghost-package').T }
+      namespace ExportedTypeNamespace { export type T = import('ghost-package').T }
       type TemplateKey = \`\${import('ghost-package').Name}\`;
+      type NestedTemplateKey = \`\${\`\${string}\`} \${import('ghost-package').Name}\`;
       const url = 'http://example.invalid'; loader.import('ghost-package');
       const plugin = loader.import('unknown-lib');
       loader./* generated */import('unknown-lib');
@@ -260,12 +262,14 @@ describe('GhostDependencyEvaluator', () => {
       const lessThanRuntime = count < import('less-than-ghost');
       const compactLessThanRuntime = count<import('compact-less-than-ghost');
       const bitwiseRuntime = flags | import('bitwise-or-ghost');
+      const bitwiseAfterAnnotation: number = flags | import('bitwise-after-annotation-ghost');
       const chainedAfterTypeValue = import('chained-type-value-ghost').then(load);
       type DoneAlias = string
       load(import('after-type-alias-call-ghost'));
       const typeNamedObject = { type: import('type-named-object-ghost') };
       class TypeNamedField { type = import('type-named-field-ghost') }
       schema.as(import('as-call-ghost'));
+      as(import('keyword-helper-ghost'));
       Plugin<import('uppercase-less-than-ghost');
       let dep: SomeType
       load(import('after-typed-var-ghost'));
@@ -273,7 +277,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(34);
+    expect(result.findings).toHaveLength(36);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -302,11 +306,13 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('less-than-ghost'),
         expect.stringContaining('compact-less-than-ghost'),
         expect.stringContaining('bitwise-or-ghost'),
+        expect.stringContaining('bitwise-after-annotation-ghost'),
         expect.stringContaining('chained-type-value-ghost'),
         expect.stringContaining('after-type-alias-call-ghost'),
         expect.stringContaining('type-named-object-ghost'),
         expect.stringContaining('type-named-field-ghost'),
         expect.stringContaining('as-call-ghost'),
+        expect.stringContaining('keyword-helper-ghost'),
         expect.stringContaining('uppercase-less-than-ghost'),
         expect.stringContaining('after-typed-var-ghost'),
       ]),

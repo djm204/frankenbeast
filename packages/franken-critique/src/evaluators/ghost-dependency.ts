@@ -108,7 +108,7 @@ function extractDependencySpecifiers(content: string): string[] {
 
     if (ch === '`') {
       if (isTypeOnlyTemplateString(content, i)) {
-        i = skipStringLiteral(content, i);
+        i = readTemplateString(content, i).endIndex;
         continue;
       }
       const template = readTemplateString(content, i);
@@ -344,6 +344,10 @@ function canStartNativeDynamicImport(
 
   const statementStart = findDynamicImportStatementStart(content, importIndex);
   const prefix = content.slice(statementStart + 1, importIndex);
+  const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
+  if (/\b(?:as|satisfies)$/.test(prefixWithoutTrailingTrivia)) {
+    return false;
+  }
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
   const isNestedTypeReference = endsInsideNestedTypeReference(prefix);
 
@@ -412,13 +416,13 @@ function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boo
 
 function endsInsideNestedTypeReference(prefix: string): boolean {
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
-  if (/(?:^|[^.])(?:\bas\s*|\bsatisfies\s*|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
+  if (/(?:^|[^.])(?:\bas\s+|\bsatisfies\s+|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
-  if (/(?:\bas\s*|\bsatisfies\s*)\(\s*\)\s*=>\s*$/.test(prefixWithoutTrailingTrivia)) {
+  if (/(?:\bas\s+|\bsatisfies\s+)\(\s*\)\s*=>\s*$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
-  if (/(?:\bas\s*|\bsatisfies\s*)\s*(?:readonly\s*)?(?:\[\s*)?$/.test(prefixWithoutTrailingTrivia)) {
+  if (/(?:\bas\s+|\bsatisfies\s+)(?:readonly\s*)?(?:\[\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
   }
 
@@ -435,6 +439,11 @@ function endsInsideNestedTypeReference(prefix: string): boolean {
   if (operator === '<') return /(?:[>\]])<$/.test(trimmed);
 
   if (operator !== '|' && operator !== '&') return false;
+
+  const colonIndex = trimmed.lastIndexOf(':');
+  if (colonIndex !== -1 && /[=;]/.test(trimmed.slice(colonIndex + 1))) {
+    return false;
+  }
 
   return (
     trimmed.at(-2) !== operator &&
@@ -470,7 +479,10 @@ function isInsideGenericTypeArgument(
     i = skipImportTrivia(content, i + 2);
   }
 
-  return content[i] === '>';
+  if (content[i] !== '>') return false;
+
+  const afterClose = skipImportTrivia(content, i + 1);
+  return !isIdentifierCharacter(content[afterClose] ?? '');
 }
 
 function isTypeOnlyImportReferenceUse(
@@ -501,13 +513,13 @@ function isTypeOnlyImportReferenceUse(
   if (/(?:^|[;\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(trimmed)) {
     return true;
   }
-  if (/\bdeclare\s+namespace\b[\s\S]*\{\s*type\b[\s\S]*$/.test(trimmed)) {
+  if (/\b(?:declare\s+)?namespace\b[\s\S]*\{\s*(?:export\s+)?type\b[\s\S]*$/.test(trimmed)) {
     return true;
   }
   if (/(?:^|[^.])(?:\bimplements\b|\bkeyof\b|\btypeof\b)\s*(?:\([^)]*)?$/.test(trimmed)) {
     return true;
   }
-  if (/(?:^|[^.])(?:\bas\b|\bsatisfies\b)[\s\S]*$/.test(trimmed)) {
+  if (/(?:^|[^.])(?:\bas\b|\bsatisfies\b)\s+[\s\S]*$/.test(trimmed)) {
     return true;
   }
 
