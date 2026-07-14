@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.0](https://github.com/djm204/frankenbeast/compare/v0.48.2...v0.49.0) (2026-07-14)
+
+
+### Features
+
+* **dr:** add restore preview conflict detector ([#2231](https://github.com/djm204/frankenbeast/issues/2231)) ([0d6f9ed](https://github.com/djm204/frankenbeast/commit/0d6f9ed5c4de89b4e3c50bd3db73a34772d81836))
+
 ## [0.48.2](https://github.com/djm204/frankenbeast/compare/v0.48.1...v0.48.2) (2026-07-14)
 
 
