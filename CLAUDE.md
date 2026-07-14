@@ -33,7 +33,7 @@ The repository currently contains the following 10 active packages:
 - `franken-web` – @franken/web: React dashboard
 - `live-bench` – @franken/live-bench: Live CLI benchmark tooling
 
-Historical packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms` have been consolidated into `@franken/orchestrator` and `@franken/mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md).
+Historical packages such as `frankenfirewall`, `franken-skills`, `franken-heartbeat`, `franken-mcp`, and `franken-comms` have been consolidated into `@franken/orchestrator` and `@franken/mcp-suite` per [ADR-031](docs/adr/031-architecture-consolidation-provider-agnostic.md); they are not standalone workspaces anymore.
 
 **Build commands** (all via Turborepo):
 - `npm run build` — runs `turbo run build` (dependency-ordered)
