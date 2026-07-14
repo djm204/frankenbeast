@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+const SHA256_HEX_REF = /^[a-f0-9]{64}$/;
+
 export type ReplayRecordKind = 'llm.request' | 'llm.response' | 'tool.call' | 'tool.result' | 'environment.snapshot';
 
 export interface ReplayRecord {
@@ -35,6 +37,10 @@ export class ReplayContentStore implements ReplayContentStoreLike {
   }
 
   get(contentRef: string): string {
+    if (!SHA256_HEX_REF.test(contentRef)) {
+      throw new Error('Replay content ref must be exactly 64 lowercase sha256 hex characters');
+    }
+
     return readFileSync(join(this.blobsDir, contentRef), 'utf8');
   }
 }

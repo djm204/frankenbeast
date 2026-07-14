@@ -4,6 +4,7 @@ import type {
   ChannelCapabilities,
   ChannelType
 } from '../../core/types.js';
+import { formatHttpErrorMessage } from '../http-error-context.js';
 
 export interface SlackAdapterOptions {
   token: string;
@@ -34,7 +35,8 @@ export class SlackAdapter implements ChannelAdapter {
 
     const blocks = this.formatBlocks(message);
 
-    const response = await fetch('https://slack.com/api/chat.postMessage', {
+    const targetUrl = 'https://slack.com/api/chat.postMessage';
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -49,8 +51,7 @@ export class SlackAdapter implements ChannelAdapter {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Slack API error: ${response.status} ${error}`);
+      throw new Error(await formatHttpErrorMessage('Slack API error', response, targetUrl));
     }
 
     const result = await response.json() as { ok: boolean; error?: string };
