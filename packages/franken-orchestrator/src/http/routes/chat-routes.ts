@@ -19,7 +19,7 @@ import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
-import { chatClientKey } from '../chat-rate-limit.js';
+import { ChatMutationAdmission, chatClientKey } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -43,6 +43,7 @@ export interface ChatRoutesDeps {
   operatorToken?: string | undefined;
   streamTicketStore?: SseConnectionTicketStore | undefined;
   chatRateLimiter: InMemoryRateLimiter;
+  chatMutationAdmission?: ChatMutationAdmission | undefined;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -79,38 +80,31 @@ function requestAddress(c: Context): string {
     || 'unknown';
 }
 
-function chatMutationKey(sessionId: string): string {
-  return `session:${sessionId}`;
-}
 
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
   const { sessionStore, runtime, turnRunner, issueSocketTicket, operatorToken, streamTicketStore } = deps;
   const app = new Hono();
-  const limiter = deps.chatRateLimiter;
-  const inFlightMutations = new Set<string>();
+  const admission = deps.chatMutationAdmission ?? new ChatMutationAdmission(deps.chatRateLimiter);
 
   async function withChatMutationAdmission<T>(
     c: Context,
     sessionId: string,
     run: () => Promise<T>,
   ): Promise<T> {
-    const mutationKey = chatMutationKey(sessionId);
-    const result = limiter.take(chatClientKey({
+    if (!admission.takeRateLimit(chatClientKey({
       action: 'message',
       operatorToken,
       remoteAddress: requestAddress(c),
-    }));
-    if (!result.allowed) {
+    }))) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
-    if (inFlightMutations.has(mutationKey)) {
+    if (!admission.begin(sessionId)) {
       throw new HttpError(429, 'RATE_LIMITED', 'Chat mutation already in progress');
     }
-    inFlightMutations.add(mutationKey);
     try {
       return await run();
     } finally {
-      inFlightMutations.delete(mutationKey);
+      admission.end(sessionId);
     }
   }
 
