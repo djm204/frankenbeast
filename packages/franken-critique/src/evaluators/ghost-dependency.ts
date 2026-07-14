@@ -41,10 +41,12 @@ export class GhostDependencyEvaluator implements Evaluator {
       // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
       if (isNodeBuiltinSpecifier(specifier)) continue;
 
+      const packageSpecifier = normalizePackageUrlSpecifier(specifier);
+
       // Extract package name (handle scoped packages and subpath imports)
-      const packageName = specifier.startsWith('@')
-        ? specifier.split('/').slice(0, 2).join('/')
-        : specifier.split('/')[0]!;
+      const packageName = packageSpecifier.startsWith('@')
+        ? packageSpecifier.split('/').slice(0, 2).join('/')
+        : packageSpecifier.split('/')[0]!;
 
       if (seen.has(packageName)) continue;
       seen.add(packageName);
@@ -73,7 +75,16 @@ function isNodeBuiltinSpecifier(specifier: string): boolean {
   return isBuiltin(specifier);
 }
 
+function normalizePackageUrlSpecifier(specifier: string): string {
+  return specifier
+    .replace(/^(?:npm|jsr):/, '')
+    .replace(/^(@[^/]+\/[^/@]+)@[^/]+/, '$1')
+    .replace(/^([^/@]+)@[^/]+/, '$1');
+}
+
 function isLocalImportSpecifier(specifier: string): boolean {
+  if (/^(?:npm|jsr):/.test(specifier)) return false;
+
   return (
     specifier.startsWith('.') ||
     specifier.startsWith('/') ||
@@ -378,11 +389,58 @@ function isSpreadOperand(content: string, dotIndex: number): boolean {
 
 function findDynamicImportStatementStart(content: string, importIndex: number): number {
   let statementStart = content.lastIndexOf(';', importIndex - 1);
-  while (statementStart !== -1 && isSemicolonInsideTypeBody(content, statementStart)) {
+  while (
+    statementStart !== -1 &&
+    (isSemicolonInsideTypeBody(content, statementStart) ||
+      isIndexInsideStringOrComment(content, statementStart))
+  ) {
     statementStart = content.lastIndexOf(';', statementStart - 1);
   }
 
   return statementStart;
+}
+
+function isIndexInsideStringOrComment(content: string, index: number): boolean {
+  let quote: string | null = null;
+  let blockComment = false;
+  let lineComment = false;
+
+  for (let i = 0; i < index; i += 1) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+    if (lineComment) {
+      if (ch === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (ch === '*' && next === '/') {
+        blockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      lineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      blockComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+  }
+
+  return quote !== null || blockComment || lineComment;
 }
 
 function isTypeOnlyTemplateString(content: string, templateIndex: number): boolean {
@@ -475,7 +533,7 @@ function endsInsideNestedTypeReference(
   }
 
   const operator = trimmed.at(-1);
-  if (operator === '<') return /(?:[>\]])<$/.test(trimmed);
+  if (operator === '<') return /(?:[>\]])<$/.test(trimmed) || /^\s*(?:const|let|var)?\s*[A-Za-z_$][\w$]*\s*=\s*<$/.test(trimmed);
 
   if (operator !== '|' && operator !== '&') return false;
   if (isObjectLiteralValue) return false;
@@ -493,14 +551,58 @@ function endsInsideNestedTypeReference(
 }
 
 function hasUnclosedGenericTypeArgument(trimmed: string): boolean {
-  const lastOpen = trimmed.lastIndexOf('<');
-  if (lastOpen === -1 || lastOpen < trimmed.lastIndexOf('>')) return false;
+  const lastOpen = findUnclosedAngleBracketIndex(trimmed);
+  if (lastOpen === -1) return false;
 
   // Runtime less-than expressions such as `load(count < limit, import('x'))`
   // also leave an earlier `<` in the prefix.  Treat it as a generic/type
   // context only when the `<` is attached to the preceding type/callee token.
+  const typeArgumentPrefix = trimmed.slice(lastOpen + 1).trim();
+  if (/^[A-Za-z_$][\w$]*\s*,\s*$/.test(typeArgumentPrefix)) {
+    const tokenStart = findIdentifierStartBefore(trimmed, lastOpen - 1);
+    const previousIndex = tokenStart === -1 ? null : previousNonTriviaIndex(trimmed, tokenStart - 1);
+    if (previousIndex !== null && trimmed[previousIndex] === '(') return false;
+  }
+
   const beforeOpen = trimmed[lastOpen - 1];
-  return beforeOpen !== undefined && !/\s/.test(beforeOpen);
+  if (beforeOpen === undefined) return false;
+  if (/\s/.test(beforeOpen)) {
+    const previousIndex = previousNonTriviaIndex(trimmed, lastOpen - 1);
+    return previousIndex !== null && /[=({[,]/.test(trimmed[previousIndex]!);
+  }
+
+  const tokenStart = findIdentifierStartBefore(trimmed, lastOpen - 1);
+  if (tokenStart === -1) return false;
+  const token = trimmed.slice(tokenStart, lastOpen);
+  if (token.length > 0) return true;
+
+  const previousIndex = previousNonTriviaIndex(trimmed, tokenStart - 1);
+  return previousIndex !== null && /[.>\]]/.test(trimmed[previousIndex]!);
+}
+
+function findIdentifierStartBefore(content: string, index: number): number {
+  let i = index;
+  if (!isIdentifierCharacter(content[i] ?? '')) return -1;
+  while (i >= 0 && isIdentifierCharacter(content[i] ?? '')) i -= 1;
+  return i + 1;
+}
+
+function findUnclosedAngleBracketIndex(trimmed: string): number {
+  let depth = 0;
+
+  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+    const ch = trimmed[i]!;
+    if (ch === '>') {
+      if (trimmed[i - 1] === '=') continue;
+      depth += 1;
+      continue;
+    }
+    if (ch !== '<') continue;
+    if (depth === 0) return i;
+    depth -= 1;
+  }
+
+  return -1;
 }
 
 function isInsideGenericTypeArgument(
@@ -509,8 +611,7 @@ function isInsideGenericTypeArgument(
   importIndex: number,
 ): boolean {
   const trimmed = prefix.trimEnd();
-  if (!/[A-Za-z_$][\w$]*<$/.test(trimmed)) return false;
-  if (trimmed.lastIndexOf('<') < trimmed.lastIndexOf('>')) return false;
+  if (!hasUnclosedGenericTypeArgument(trimmed)) return false;
 
   const dynamicImport = readDynamicImportSpecifierForTypeContext(
     content,
@@ -600,11 +701,18 @@ function isTypeOnlyImportReferenceUse(
   if (/(?:^|[^.])(?:\bimplements\b|\bkeyof\b)\s*(?:\([^)]*)?$/.test(trimmed)) {
     return true;
   }
+  if (/\bimplements\b[\s\S]*,\s*$/.test(trimmed)) {
+    return true;
+  }
   if (/(?:^|[^.])\bkeyof\s+typeof\s*(?:\([^)]*)?$/.test(trimmed)) {
     return true;
   }
   if (/(?:^|[^.])\btypeof\s*(?:\([^)]*)?$/.test(trimmed)) {
-    return isInsideTypeDeclaration(prefix) || isInsideTypeAnnotation(prefix, content, importIndex, false);
+    return (
+      isInsideGenericTypeArgument(prefix, content, importIndex) ||
+      isInsideTypeDeclaration(prefix) ||
+      isInsideTypeAnnotation(prefix, content, importIndex, false)
+    );
   }
   if (isInsideOpenTypeAssertion(trimmed)) {
     return true;
@@ -646,7 +754,12 @@ function isInsideOpenTypeAssertion(trimmedPrefix: string): boolean {
   const lastComma = suffix.lastIndexOf(',');
   const lastEquals = suffix.lastIndexOf('=');
   const lastArrow = suffix.lastIndexOf('=>');
+  if (hasUnclosedAssertionTypeContainer(suffix)) return lastArrow === -1;
   return lastComma === -1 && lastEquals === -1 && lastArrow === -1;
+}
+
+function hasUnclosedAssertionTypeContainer(suffix: string): boolean {
+  return findUnclosedAngleBracketIndex(suffix) !== -1 || suffix.lastIndexOf('[') > suffix.lastIndexOf(']');
 }
 
 function readDynamicImportSpecifierForTypeContext(
@@ -670,6 +783,13 @@ function stripTrailingTrivia(content: string): string {
 }
 
 function isInsideTypeDeclaration(prefix: string): boolean {
+  if (/(?:^|[;{}\n])\s*(?:type|interface)\s*[:=]\s*(?:await\s+)?$/.test(prefix.trimEnd())) {
+    return false;
+  }
+  if (/}\s*(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\(|\[)|module\.exports\s*=)[\s\S]*$/.test(prefix)) {
+    return false;
+  }
+
   return (
     /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
@@ -680,7 +800,7 @@ function isInsideTypeDeclaration(prefix: string): boolean {
       prefix,
     ) &&
     !/\}\s*(?:export\s+)?$/.test(prefix) &&
-    !/\}\s*\n\s*(?:export\s+)?(?:void\s*$|\(|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
+    !/\}\s*\n\s*(?:export\s+)?(?:void\s*$|[!~+\-\[(@]|using\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
       prefix,
     )
   );
@@ -693,7 +813,7 @@ function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
   const suffix = prefix.slice(newlineIndex + 1);
   if (
     !/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix) &&
-    !/^\s*(?:export\s+)?(?:default\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\(|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
+    !/^\s*(?:export\s+)?(?:default\b|[!~+\-\[(@]|using\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\(|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
       suffix,
     )
   ) {
@@ -712,7 +832,7 @@ function isInsideTypeAnnotation(
 ): boolean {
   if (isTernaryBranch && !isInsideConditionalType(prefix)) return false;
 
-  const annotationIndex = prefix.lastIndexOf(':');
+  const annotationIndex = findActiveTypeAnnotationIndex(prefix);
   if (annotationIndex === -1) return false;
   if (hasCompletedStatementBeforeImport(prefix)) return false;
 
@@ -756,13 +876,13 @@ function isInsideTypeAnnotation(
   if (hasRuntimeAfterClosedTypeContext(annotationSuffix)) return false;
   if (/=>/.test(annotationSuffix)) {
     if (/\)\s*:\s*[^=]*=>\s*$/.test(prefix)) return false;
-    return /^\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*(?:\[\])?)\s*=>\s*$/.test(
+    return /^\s*(?:new\s*)?(?:\([\s\S]*\)|<[^>]*>\s*\([\s\S]*\)|[A-Za-z_$][\w$]*(?:\[\])?)\s*=>\s*$/.test(
       annotationSuffix,
     );
   }
   if (/[=;]/.test(annotationSuffix)) return false;
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
-  if (/\n\s*(?:void\s*)?$|\n\s*(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(annotationSuffix)) {
+  if (/\n\s*(?:void\s*)?$|\n\s*(?:[!~+\-\[(@]|using\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(annotationSuffix)) {
     return false;
   }
   if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {
@@ -775,12 +895,26 @@ function isInsideTypeAnnotation(
   return !isLikelyObjectLiteralValue(content, importIndex);
 }
 
+function findActiveTypeAnnotationIndex(prefix: string): number {
+  const annotationIndex = prefix.lastIndexOf(':');
+  if (annotationIndex === -1) return -1;
+
+  const annotationSuffix = prefix.slice(annotationIndex + 1);
+  if (!/=>\s*$/.test(annotationSuffix)) return annotationIndex;
+
+  const outerAnnotationIndex = prefix.slice(0, annotationIndex).lastIndexOf(':');
+  if (outerAnnotationIndex === -1) return annotationIndex;
+
+  const outerSuffix = prefix.slice(outerAnnotationIndex + 1);
+  return /=>\s*$/.test(outerSuffix) ? outerAnnotationIndex : annotationIndex;
+}
+
 function hasRuntimeAfterAnnotation(prefix: string, annotationIndex: number): boolean {
   return hasRuntimeAfterClosedTypeContext(prefix.slice(annotationIndex + 1));
 }
 
 function hasRuntimeAfterClosedTypeContext(annotationSuffix: string): boolean {
-  return /}\s*\)?(?:\s*\{\s*(?:return|throw|void|await|yield|case|default)\b|[^\S\n]*\n\s*(?:void\s*$|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
+  return /}\s*\)?(?:\s*\{\s*(?:return|throw|void|await|yield|case|default)\b|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|using\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
     annotationSuffix,
   );
 }

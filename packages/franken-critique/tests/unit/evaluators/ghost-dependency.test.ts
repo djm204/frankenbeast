@@ -159,6 +159,23 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
+
+  it('checks external package URL specifiers', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const known = await evaluator.evaluate(
+      createInput(`await import('npm:zod@3.24.0'); import path from 'jsr:@franken/brain@1';`),
+    );
+    const unknown = await evaluator.evaluate(
+      createInput(`import helper from 'npm:ghost-package/subpath';`),
+    );
+
+    expect(known.verdict).toBe('pass');
+    expect(known.findings).toHaveLength(0);
+    expect(unknown.verdict).toBe('fail');
+    expect(unknown.findings).toHaveLength(1);
+    expect(unknown.findings[0]!.message).toContain('ghost-package');
+  });
+
   it('detects no-substitution template literal dynamic imports', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = 'const plugin = await import(`ghost-package`);';
@@ -196,18 +213,30 @@ describe('GhostDependencyEvaluator', () => {
       const keyofCast = value as keyof import('ghost-package').Shape;
       function keyed<T extends keyof typeof import('ghost-package')>() {}
       class Plugin implements import('ghost-package').Plugin {}
+      class MultiPlugin implements KnownPlugin, import('ghost-package').Plugin {}
       const commentedCast = value as /* generated */ import('ghost-package').Shape;
+      const angleImportAssertion = <import('ghost-package').Shape>value;
       class CommentedPlugin implements /* generated */ import('ghost-package').Plugin {}
       const parenthesizedCast = value as (import('ghost-package').Plugin);
       const parenthesizedSatisfies = value satisfies (import('ghost-package').Plugin);
       const objectTypeAssertion = value as { loader: import('ghost-package').Loader };
       const tupleAssertion = value as [import('ghost-package').Tuple];
+      const tupleAssertionWithComma = value as [string, import('ghost-package').Tuple];
+      const tupleSatisfiesWithComma = value satisfies [string, import('ghost-package').Tuple];
       const readonlyAssertion = value as readonly import('ghost-package').Readonly[];
       const genericCall = createPlugin<import('ghost-package').Options>();
       const indexedGenericCall = createPlugin<import('ghost-package')['Options']>();
       const nonFinalGenericCall = createPlugin<import('ghost-package').Options, Other>();
       const unionGenericCall = createPlugin<import('ghost-package').Options | Other>();
       const nestedGenericCall = createPlugin<Readonly<import('ghost-package').Options>, Other>();
+      const nestedTypeArgument = createPlugin<Foo<Bar>, import('ghost-package').Options>();
+      const functionTypeArgument = createPlugin<() => void, import('ghost-package').Options>();
+      const genericArrow = <T extends import('ghost-package').Options>() => undefined;
+      function f<T extends import('ghost-package').Foo>() {}
+      class C { f<T extends import('ghost-package').Foo>() {} }
+      type SemicolonLiteral = ";" | import('ghost-package').T;
+      function typeofGeneric<T extends typeof import('ghost-package')>() {}
+      const typeofCall = createPlugin<typeof import('ghost-package')>();
       const ambientModule = declare module "ambient" { export type T = import('ghost-package').T };
       declare global { type GlobalGhost = import('ghost-package').T }
       declare module "nested-ambient" {
@@ -221,6 +250,11 @@ describe('GhostDependencyEvaluator', () => {
       const unionAssertion = value as string | import('ghost-package').Shape;
       const functionType = (() => {}) as () => import('ghost-package').Factory;
       const typedFunctionValue: () => import('ghost-package').Factory = () => ({}) as never;
+      const typedParamFunctionValue: (x: string) => import('ghost-package').Factory = () => ({}) as never;
+      const typedConstructorValue: new () => import('ghost-package').Factory = Impl;
+      const typedGenericFunctionValue: <T>() => import('ghost-package').Factory = impl;
+      const typedNestedFunctionValue: (cb: () => void) => import('ghost-package').Factory = impl;
+      const typedImportParamFunctionValue: (x: import('ghost-package').Input) => import('ghost-package').Factory = impl;
       interface Cfg { name: string; plugin: import('ghost-package').Plugin }
       type InlineObject = { name: string; plugin: import('ghost-package').Plugin };
       type NestedInlineObject = { nested: { ok: string }; plugin: typeof import('ghost-package') };
@@ -260,6 +294,15 @@ describe('GhostDependencyEvaluator', () => {
       import('simple-type-after-ghost');
       type VoidAlias = string
       void import('void-simple-type-after-ghost');
+      type PunctuationArrayAlias = {}
+      [import('punctuation-array-after-type-ghost')].forEach(load);
+      type PunctuationBangAlias = {}
+      !import('punctuation-bang-after-type-ghost');
+      type DecoratorAlias = {}
+      @dec(import('decorator-after-type-ghost'))
+      class DecoratedAfterType {}
+      type UsingAlias = {}
+      using dep = import('using-after-type-ghost');
       interface NewAfterType {}
       new Loader(import('new-after-type-ghost'));
       interface SameLine {} import('same-line-interface-ghost');
@@ -278,8 +321,12 @@ describe('GhostDependencyEvaluator', () => {
       const runtimeTernary = kind === 'extends' ? fallback : import('ternary-ghost');
       const lessThanRuntime = count < import('less-than-ghost');
       const compactLessThanRuntime = count<import('compact-less-than-ghost');
-      load(count < limit, import('less-than-argument-ghost'));
-      load(count < limit ? a : b, import('comparison-argument-ghost'));
+      const compactLessThan = a<b, y = import('compact-less-than-ghost');
+      const lessThanArgument = load(count < limit, import('less-than-argument-ghost'));
+      const compactLessThanArgument = load(a<b, import('compact-comparison-argument-ghost'));
+      const compactNamedLessThanArgument = load(count<limit, import('compact-named-comparison-argument-ghost'));
+      const compactUpperLessThanArgument = load(Foo<Bar, import('compact-uppercase-comparison-argument-ghost'), baz);
+      const comparisonArgument = load(count <= limit, import('comparison-argument-ghost'));
       const bitwiseRuntime = flags | import('bitwise-or-ghost');
       const bitwiseAfterAnnotation: number = flags | import('bitwise-after-annotation-ghost');
       const bitwiseObjectValue = { loader: flags | import('bitwise-object-value-ghost') };
@@ -308,24 +355,35 @@ describe('GhostDependencyEvaluator', () => {
       import('bare-after-object-assertion-ghost');
       const cfg3 = value as { dep: string } /* generated */
       import('bare-after-commented-object-assertion-ghost');
+      const cfg4 = value as { dep: string }
+      [import('punctuation-array-after-assertion-ghost')].forEach(load);
+      const cfg5 = value satisfies { dep: string }
+      !import('punctuation-bang-after-assertion-ghost');
       const annotatedArrow = (): any => import('annotated-arrow-body-ghost');
       type DefaultExportAlias = string
       export default async function defaultLoader() { return import('export-default-after-type-ghost'); }
       type DefaultExportExpressionAlias = string
       export default import('export-default-expression-after-type-ghost');
+      interface ModuleExportsAfterType {}
+      module.exports = { loader: import('module-exports-after-type-ghost') };
+      interface CallAfterType {}
+      foo(import('call-after-type-ghost'));
       function typedObjectParam(opts: { path: string }) { return import('object-param-body-ghost'); }
       const url = 'http://example.invalid'
       import('chained-after-colon-ghost').then(load);
       type ChainAfterAlias = Foo
       import('chained-after-type-alias-ghost').then(load);
       const runtimeTypeofProperty = typeof import('runtime-typeof-property-ghost').then;
+      const objectTypeKey = { type: import('object-type-key-ghost') };
+      await import('zod', { with: { type: await import('nested-type-attribute-ghost') } });
+      function objectReturn(): { type: string } { return import('object-return-type-key-ghost'); }
       function templateAfterTypedParam(opts: { path: string }) { return \`\${require('template-after-typed-param-ghost')}\`; }
       const assertedPair = value as Foo, chained = import('chained-after-assertion-ghost').then(load);
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(59);
+    expect(result.findings).toHaveLength(73);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -339,6 +397,10 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('bare-after-type-ghost'),
         expect.stringContaining('simple-type-after-ghost'),
         expect.stringContaining('void-simple-type-after-ghost'),
+        expect.stringContaining('punctuation-array-after-type-ghost'),
+        expect.stringContaining('punctuation-bang-after-type-ghost'),
+        expect.stringContaining('decorator-after-type-ghost'),
+        expect.stringContaining('using-after-type-ghost'),
         expect.stringContaining('new-after-type-ghost'),
         expect.stringContaining('awaited-function-ghost'),
         expect.stringContaining('arrow-body-ghost'),
@@ -356,6 +418,9 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('less-than-ghost'),
         expect.stringContaining('compact-less-than-ghost'),
         expect.stringContaining('less-than-argument-ghost'),
+        expect.stringContaining('compact-comparison-argument-ghost'),
+        expect.stringContaining('compact-named-comparison-argument-ghost'),
+        expect.stringContaining('compact-uppercase-comparison-argument-ghost'),
         expect.stringContaining('comparison-argument-ghost'),
         expect.stringContaining('bitwise-or-ghost'),
         expect.stringContaining('bitwise-after-annotation-ghost'),
@@ -377,13 +442,20 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('after-object-assertion-ghost'),
         expect.stringContaining('bare-after-object-assertion-ghost'),
         expect.stringContaining('bare-after-commented-object-assertion-ghost'),
+        expect.stringContaining('punctuation-array-after-assertion-ghost'),
+        expect.stringContaining('punctuation-bang-after-assertion-ghost'),
         expect.stringContaining('annotated-arrow-body-ghost'),
         expect.stringContaining('export-default-after-type-ghost'),
         expect.stringContaining('export-default-expression-after-type-ghost'),
+        expect.stringContaining('module-exports-after-type-ghost'),
+        expect.stringContaining('call-after-type-ghost'),
         expect.stringContaining('object-param-body-ghost'),
         expect.stringContaining('chained-after-colon-ghost'),
         expect.stringContaining('chained-after-type-alias-ghost'),
         expect.stringContaining('runtime-typeof-property-ghost'),
+        expect.stringContaining('object-type-key-ghost'),
+        expect.stringContaining('nested-type-attribute-ghost'),
+        expect.stringContaining('object-return-type-key-ghost'),
         expect.stringContaining('template-after-typed-param-ghost'),
         expect.stringContaining('chained-after-assertion-ghost'),
       ]),
