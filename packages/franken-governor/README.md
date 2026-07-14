@@ -817,12 +817,15 @@ All I/O is injected — tests use fakes/mocks, no real network or terminal requi
 
 ## Architecture Decision Records
 
-The earlier package-local governor ADR files were not retained in this monorepo. Current governor context lives in the repository-level architecture docs instead:
-
-| Document | Scope |
+| ADR | Title |
 |-----|-------|
-| [ADR-031: Architecture consolidation](../../docs/adr/031-architecture-consolidation-provider-agnostic.md) | Canonical consolidation decision that keeps governor HITL triggers and approval gateways as a first-party package. |
-| [Architecture overview](../../docs/ARCHITECTURE.md) | Current package role, approval flow, trigger evaluation, and signed-response behavior. |
+| [ADR-001](docs/adr/ADR-001-typescript-strict-nodenext.md) | TypeScript Strict + NodeNext Resolution |
+| [ADR-002](docs/adr/ADR-002-approval-channel-strategy.md) | Approval Channel Strategy Pattern |
+| [ADR-003](docs/adr/ADR-003-composable-trigger-evaluators.md) | Composable Trigger Evaluators |
+| [ADR-004](docs/adr/ADR-004-audit-trail-episodic-trace.md) | Audit Trail via EpisodicTrace to MOD-03 |
+| [ADR-005](docs/adr/ADR-005-signed-approvals-hmac.md) | Signed Approvals with HMAC-SHA256 |
+| [ADR-006](docs/adr/ADR-006-custom-error-hierarchy.md) | Custom Error Hierarchy |
+| [ADR-007](docs/adr/ADR-007-session-token-activation.md) | Session Token Activation Model |
 
 ## License
 
