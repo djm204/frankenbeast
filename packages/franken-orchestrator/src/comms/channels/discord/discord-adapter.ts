@@ -6,8 +6,11 @@ import type {
 } from '../../core/types.js';
 import { isoNow } from '@franken/types';
 import { formatHttpErrorMessage } from '../http-error-context.js';
+import { createEgressGuardedFetch, type EgressPolicyConfig } from '../../../network/egress-policy.js';
 
 export interface DiscordAdapterOptions {
+  egressPolicy?: EgressPolicyConfig | undefined;
+  fetchImpl?: typeof fetch | undefined;
   token: string;
 }
 
@@ -24,8 +27,11 @@ export class DiscordAdapter implements ChannelAdapter {
 
   private readonly token: string;
 
+  private readonly fetchImpl: typeof fetch;
+
   constructor(options: DiscordAdapterOptions) {
     this.token = options.token;
+    this.fetchImpl = options.fetchImpl ?? createEgressGuardedFetch({ lane: 'operator', policy: options.egressPolicy });
   }
 
   async send(sessionId: string, message: ChannelOutboundMessage): Promise<void> {
@@ -43,7 +49,7 @@ export class DiscordAdapter implements ChannelAdapter {
       ? `https://discord.com/api/v10/channels/${threadId}/messages`
       : `https://discord.com/api/v10/channels/${channelId}/messages`;
 
-    const response = await fetch(targetUrl, {
+    const response = await this.fetchImpl(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

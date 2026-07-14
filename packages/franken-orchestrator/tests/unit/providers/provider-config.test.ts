@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AnthropicApiAdapter } from '../../../src/providers/anthropic-api-adapter.js';
 import { ClaudeCliAdapter } from '../../../src/providers/claude-cli-adapter.js';
 import { CodexCliAdapter } from '../../../src/providers/codex-cli-adapter.js';
@@ -125,7 +125,7 @@ describe('createLlmProvider', () => {
       { name: 'gemini-api', type: 'gemini-api', model: 'gemini-2.5-pro' },
     ];
 
-    const [anthropic, openai, gemini] = configs.map(createLlmProvider);
+    const [anthropic, openai, gemini] = configs.map((config) => createLlmProvider(config));
 
     expect(anthropic).toBeInstanceOf(AnthropicApiAdapter);
     expect(optionsOf<{ model?: string }>(anthropic).model).toBe('claude-opus-4');
@@ -135,5 +135,29 @@ describe('createLlmProvider', () => {
 
     expect(gemini).toBeInstanceOf(GeminiApiAdapter);
     expect(optionsOf<{ model?: string }>(gemini).model).toBe('gemini-2.5-pro');
+  });
+
+  it('passes runtime egress policies and audit sinks into API adapters', () => {
+    const egressPolicy = { enabled: true, lanes: {} };
+    const egressAudit = vi.fn();
+    const anthropic = createLlmProvider(
+      { name: 'anthropic', type: 'anthropic-api' },
+      { egressPolicy, egressAudit },
+    );
+    const openai = createLlmProvider(
+      { name: 'openai', type: 'openai-api' },
+      { egressPolicy, egressAudit },
+    );
+    const gemini = createLlmProvider(
+      { name: 'gemini-api', type: 'gemini-api' },
+      { egressPolicy, egressAudit },
+    );
+
+    expect(optionsOf<{ egressPolicy?: unknown }>(anthropic).egressPolicy).toBe(egressPolicy);
+    expect(optionsOf<{ egressPolicy?: unknown }>(openai).egressPolicy).toBe(egressPolicy);
+    expect(optionsOf<{ egressPolicy?: unknown }>(gemini).egressPolicy).toBe(egressPolicy);
+    expect(optionsOf<{ egressAudit?: unknown }>(anthropic).egressAudit).toBe(egressAudit);
+    expect(optionsOf<{ egressAudit?: unknown }>(openai).egressAudit).toBe(egressAudit);
+    expect(optionsOf<{ egressAudit?: unknown }>(gemini).egressAudit).toBe(egressAudit);
   });
 });

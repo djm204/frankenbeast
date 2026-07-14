@@ -46,6 +46,31 @@ describe('OpenAiApiAdapter', () => {
     });
   });
 
+  describe('egress audit', () => {
+    it('audits redacted provider egress denials', async () => {
+      const audit = vi.fn();
+      const adapter = new OpenAiApiAdapter({
+        apiKey: 'test-secure',
+        egressPolicy: { lanes: { implementation: { allowedDestinationClasses: ['github'] } } },
+        egressAudit: audit,
+      });
+      const guardedFetch = (adapter as unknown as { createProviderFetch(): typeof fetch }).createProviderFetch();
+
+      await expect(guardedFetch('https://api.openai.com/v1/chat/completions', { method: 'POST' })).rejects.toThrow(
+        /Egress denied/u,
+      );
+
+      expect(audit).toHaveBeenCalledWith({
+        lane: 'implementation',
+        destinationClass: 'provider',
+        host: 'api.openai.com',
+        method: 'POST',
+        allowed: false,
+        reason: 'destination-class-not-allowed',
+      });
+    });
+  });
+
   describe('translateMessages()', () => {
     it('prepends system message', () => {
       const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });

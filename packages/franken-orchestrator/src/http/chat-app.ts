@@ -296,6 +296,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       config: opts.commsConfig,
       runtime: opts.commsRuntime,
       security: operatorSecurity,
+      egressPolicy: opts.networkControl?.getConfig().network.egressPolicy,
       ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
     };
     if (opts.securityConfig) {

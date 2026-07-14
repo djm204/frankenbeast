@@ -5,6 +5,30 @@ const NETWORK_CONFIG_PATH_DEFINITIONS = {
     values: ['1password', 'bitwarden', 'os-keychain', 'local-encrypted'],
   },
   'network.operatorTokenRef': { type: 'string', sensitive: true },
+  'network.egressPolicy': { type: 'json' },
+  'network.egressPolicy.enabled': { type: 'boolean' },
+  'network.egressPolicy.lanes': { type: 'json' },
+  'network.egressPolicy.lanes.docs.allowedDestinationClasses': { type: 'json' },
+  'network.egressPolicy.lanes.docs.allowedDomains': { type: 'json' },
+  'network.egressPolicy.lanes.docs.allowedMethods': { type: 'json' },
+  'network.egressPolicy.lanes.triage.allowedDestinationClasses': { type: 'json' },
+  'network.egressPolicy.lanes.triage.allowedDomains': { type: 'json' },
+  'network.egressPolicy.lanes.triage.allowedMethods': { type: 'json' },
+  'network.egressPolicy.lanes.test.allowedDestinationClasses': { type: 'json' },
+  'network.egressPolicy.lanes.test.allowedDomains': { type: 'json' },
+  'network.egressPolicy.lanes.test.allowedMethods': { type: 'json' },
+  'network.egressPolicy.lanes.fallback.allowedDestinationClasses': { type: 'json' },
+  'network.egressPolicy.lanes.fallback.allowedDomains': { type: 'json' },
+  'network.egressPolicy.lanes.fallback.allowedMethods': { type: 'json' },
+  'network.egressPolicy.lanes.implementation.allowedDestinationClasses': { type: 'json' },
+  'network.egressPolicy.lanes.implementation.allowedDomains': { type: 'json' },
+  'network.egressPolicy.lanes.implementation.allowedMethods': { type: 'json' },
+  'network.egressPolicy.lanes.operator.allowedDestinationClasses': { type: 'json' },
+  'network.egressPolicy.lanes.operator.allowedDomains': { type: 'json' },
+  'network.egressPolicy.lanes.operator.allowedMethods': { type: 'json' },
+  'network.egressPolicy.lanes.unrestricted.allowedDestinationClasses': { type: 'json' },
+  'network.egressPolicy.lanes.unrestricted.allowedDomains': { type: 'json' },
+  'network.egressPolicy.lanes.unrestricted.allowedMethods': { type: 'json' },
   'chat.enabled': { type: 'boolean' },
   'chat.host': { type: 'string' },
   'chat.port': { type: 'number' },
@@ -43,7 +67,7 @@ const NETWORK_CONFIG_PATH_DEFINITIONS = {
   'comms.whatsapp.verifyTokenRef': { type: 'string', sensitive: true },
 } as const;
 
-type ConfigValueType = 'boolean' | 'number' | 'string' | 'enum';
+type ConfigValueType = 'boolean' | 'number' | 'string' | 'enum' | 'json';
 type ConfigPathDefinition = {
   type: ConfigValueType;
   values?: readonly string[];
@@ -76,7 +100,7 @@ export function isSensitiveConfigPath(path: string): boolean {
   return getPathDefinition(path).sensitive ?? false;
 }
 
-export function coerceNetworkConfigValue(path: string, rawValue: string): boolean | number | string {
+export function coerceNetworkConfigValue(path: string, rawValue: string): unknown {
   const definition = getPathDefinition(path);
 
   switch (definition.type) {
@@ -98,6 +122,12 @@ export function coerceNetworkConfigValue(path: string, rawValue: string): boolea
       return rawValue;
     case 'string':
       return rawValue;
+    case 'json':
+      try {
+        return JSON.parse(rawValue) as boolean | number | string;
+      } catch {
+        throw new Error(`Expected JSON for ${path}, received: ${rawValue}`);
+      }
     default:
       throw new Error(`Unsupported config type for ${path}`);
   }

@@ -34,6 +34,18 @@ describe('network-config-paths', () => {
     expect(next.comms.slack.allowSensitiveDelivery).toBe(true);
   });
 
+  it('coerces egress policy config updates through setNetworkConfigValue', () => {
+    const disabled = setNetworkConfigValue(defaultConfig(), 'network.egressPolicy.enabled', 'false');
+    expect(disabled.network.egressPolicy.enabled).toBe(false);
+
+    const next = setNetworkConfigValue(
+      defaultConfig(),
+      'network.egressPolicy.lanes.docs.allowedDomains',
+      '["docs.example.org"]',
+    );
+    expect(next.network.egressPolicy.lanes?.docs?.allowedDomains).toEqual(['docs.example.org']);
+  });
+
   it('applies multiple --set assignments', () => {
     const next = applyNetworkConfigSets(defaultConfig(), [
       'chat.model=gpt-5',

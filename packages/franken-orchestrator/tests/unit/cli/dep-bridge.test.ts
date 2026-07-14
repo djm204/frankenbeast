@@ -332,6 +332,13 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.brain?.dbPath).toBe('/custom/brain.db');
     });
 
+    it('passes network egress policy into runtime config', () => {
+      const egressPolicy = { enabled: true, lanes: { triage: { allowedDomains: ['api.github.com'] } } };
+      const orchestratorConfig = { network: { egressPolicy } } as any;
+      const config = bridgeToBeastConfig(makeOptions({}), orchestratorConfig);
+      expect(config.network?.egressPolicy).toBe(egressPolicy);
+    });
+
     it('uses config.consolidatedProviders when provided', () => {
       const orchestratorConfig = {
         consolidatedProviders: [

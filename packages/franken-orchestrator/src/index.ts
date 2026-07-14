@@ -63,6 +63,23 @@ export type {
 // Config
 export { OrchestratorConfigSchema, defaultConfig, parseOrchestratorConfig } from './config/orchestrator-config.js';
 export type { OrchestratorConfig, OrchestratorConfigParseOptions } from './config/orchestrator-config.js';
+export {
+  EgressPolicyViolation,
+  classifyEgressDestination,
+  createEgressGuardedFetch,
+  defaultLaneEgressPolicies,
+  evaluateEgressPolicy,
+  redactEgressDecisionForLog,
+} from './network/egress-policy.js';
+export type {
+  EgressAuditSink,
+  EgressDecision,
+  EgressDestinationClass,
+  EgressLane,
+  EgressOverride,
+  EgressPolicyConfig,
+  EgressPolicyRequest,
+} from './network/egress-policy.js';
 
 // Context
 export { BeastContext } from './context/franken-context.js';

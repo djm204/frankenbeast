@@ -215,6 +215,44 @@ describe('GeminiApiAdapter', () => {
       }));
       expect(events[0]).toEqual({ type: 'error', error: 'RESOURCE_EXHAUSTED', retryable: true });
     });
+
+
+    it('wraps SDK requests with the egress-guarded fetch and restores the global fetch', async () => {
+      const originalFetch = vi.fn() as unknown as typeof fetch;
+      vi.stubGlobal('fetch', originalFetch);
+      const adapter = new GeminiApiAdapter({
+        apiKey: 'gk-test',
+        egressPolicy: {
+          enabled: true,
+          lanes: {
+            implementation: {
+              allowedDestinationClasses: ['provider'],
+              allowedMethods: ['POST'],
+            },
+          },
+        },
+      });
+      let fetchAtSdkCall: typeof fetch | undefined;
+      (adapter as any).client = {
+        models: {
+          generateContentStream: vi.fn().mockImplementation(async () => {
+            fetchAtSdkCall = globalThis.fetch;
+            return (async function* () {
+              yield { text: 'ok', functionCalls: null, usageMetadata: null };
+            })();
+          }),
+        },
+      };
+
+      await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }));
+
+      expect(fetchAtSdkCall).toBeDefined();
+      expect(fetchAtSdkCall).not.toBe(originalFetch);
+      expect(globalThis.fetch).toBe(originalFetch);
+    });
   });
 
   describe('translateTools()', () => {

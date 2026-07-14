@@ -142,3 +142,38 @@ frankenbeast network config --set network.secureBackend=1password
 Choose the backend before running `frankenbeast init` when possible. Changing `network.secureBackend` later does not migrate existing secret refs or secret values; re-store or migrate referenced secrets such as `network.operatorTokenRef` into the newly selected backend before the next boot.
 
 Use `local-encrypted` for offline, CI/CD, or minimal deployments where a managed secret backend is not available.
+
+## Per-lane egress policy
+
+The network config also carries `network.egressPolicy`, a fail-closed policy map for code that wraps outbound HTTP clients or tool runners with `createEgressGuardedFetch` / `evaluateEgressPolicy`.
+
+Default lanes separate GitHub access from model/provider access and arbitrary web access:
+
+| Lane | Default egress classes | Default methods | Intended use |
+| --- | --- | --- | --- |
+| `docs` | `github`, `local` | `GET`, `HEAD` | Read-only docs/reference work. |
+| `triage` | `github`, `local` | `GET`, `HEAD` | Issue/PR inventory and classification. |
+| `test` | `local` | common HTTP verbs | Local fixtures, health checks, and loopback tests. |
+| `fallback` | `github`, `provider`, `local` | `GET`, `HEAD`, `POST` | Low-risk fallback lanes that may call approved model providers. |
+| `implementation` | `github`, `provider`, `local` | common HTTP verbs | Normal coding lanes. |
+| `operator` | `github`, `provider`, `messaging`, `local` | common HTTP verbs | Human/operator messaging and control-plane integrations. |
+| `unrestricted` | all classes / `*` domains | common HTTP verbs | Explicitly approved break-glass lane. |
+
+Use lane overrides for narrow exceptions instead of broadening low-risk lanes. The `network config --set` command accepts JSON values for array/object egress policy paths, for example `network.egressPolicy.lanes.docs.allowedDomains='["docs.example.org"]'`.
+
+```json
+{
+  "network": {
+    "egressPolicy": {
+      "lanes": {
+        "docs": {
+          "allowedDomains": ["docs.example.org"],
+          "allowedMethods": ["GET"]
+        }
+      }
+    }
+  }
+}
+```
+
+Denied egress audit records include only lane, destination class, host, method, and reason. They intentionally do not include URL paths, query strings, headers, or payloads because those fields may carry tokens or user data.

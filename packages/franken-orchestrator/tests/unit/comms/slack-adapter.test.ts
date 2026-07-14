@@ -9,6 +9,29 @@ describe('SlackAdapter', () => {
     vi.stubGlobal('fetch', vi.fn());
   });
 
+  it('enforces the configured egress policy before sending', async () => {
+    const adapter = new SlackAdapter({
+      token: TEST_SLACK_BOT_TOKEN,
+      egressPolicy: {
+        enabled: true,
+        lanes: {
+          operator: {
+            allowedDestinationClasses: ['local'],
+            allowedMethods: ['POST'],
+          },
+        },
+      },
+    });
+    const mockFetch = vi.mocked(fetch);
+
+    await expect(adapter.send('session-123', {
+      text: 'blocked',
+      status: 'reply',
+      metadata: { channelId: 'C1' },
+    })).rejects.toThrow('Egress denied for lane operator');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('sends a message with blocks', async () => {
     const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);

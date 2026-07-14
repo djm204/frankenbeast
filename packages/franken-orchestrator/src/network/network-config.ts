@@ -57,6 +57,18 @@ const UrlSchema = z.string().url();
 
 export const NetworkModeSchema = z.enum(['secure', 'insecure']);
 
+export const EgressLaneSchema = z.enum(['docs', 'triage', 'test', 'fallback', 'implementation', 'operator', 'unrestricted']);
+export const EgressDestinationClassSchema = z.enum(['github', 'provider', 'messaging', 'local', 'arbitrary']);
+export const LaneEgressPolicySchema = z.object({
+  allowedDestinationClasses: z.array(EgressDestinationClassSchema).optional(),
+  allowedDomains: z.array(z.string().min(1)).optional(),
+  allowedMethods: z.array(z.string().min(1)).optional(),
+});
+export const EgressPolicyConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  lanes: z.partialRecord(EgressLaneSchema, LaneEgressPolicySchema).optional(),
+}).default(() => ({ enabled: true }));
+
 const LEGACY_BACKEND_MAP: Record<string, string> = {
   'macos-keychain': 'os-keychain',
   'windows-credential-manager': 'os-keychain',
@@ -72,6 +84,7 @@ export const NetworkOperatorConfigSchema = z.object({
   mode: NetworkModeSchema.default('secure'),
   secureBackend: SecureBackendSchema.default('local-encrypted'),
   operatorTokenRef: z.string().min(1).optional(),
+  egressPolicy: EgressPolicyConfigSchema,
 });
 
 export const ChatServiceConfigSchema = z.object({
@@ -177,6 +190,7 @@ export const NetworkConfigFieldsSchema = z.object({
   network: NetworkOperatorConfigSchema.default(() => ({
     mode: 'secure' as const,
     secureBackend: 'local-encrypted' as const,
+    egressPolicy: { enabled: true },
   })),
   beastsDaemon: BeastDaemonServiceConfigSchema.default(() => ({
     enabled: true,
@@ -252,6 +266,7 @@ export const NetworkConfigSchema = NetworkConfigFieldsSchema.superRefine(validat
 export type NetworkConfig = z.infer<typeof NetworkConfigSchema>;
 export type NetworkMode = z.infer<typeof NetworkModeSchema>;
 export type SecureBackend = z.infer<typeof SecureBackendSchema>;
+export type NetworkEgressPolicyConfig = z.infer<typeof EgressPolicyConfigSchema>;
 
 export function defaultNetworkConfig(): NetworkConfig {
   return NetworkConfigSchema.parse({});

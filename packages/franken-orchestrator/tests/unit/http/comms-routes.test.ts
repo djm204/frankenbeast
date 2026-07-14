@@ -16,6 +16,9 @@ vi.mock('../../../src/comms/channels/whatsapp/whatsapp-adapter.js', () => ({
 
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { commsRoutes } from '../../../src/http/routes/comms-routes.js';
+import { SlackAdapter } from '../../../src/comms/channels/slack/slack-adapter.js';
+import { DiscordAdapter } from '../../../src/comms/channels/discord/discord-adapter.js';
+import { WhatsAppAdapter } from '../../../src/comms/channels/whatsapp/whatsapp-adapter.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../../../src/middleware/security-profiles.js';
@@ -275,6 +278,20 @@ describe('commsRoutes', () => {
     const app = commsRoutes({ config: minimalConfig(), runtime: mockRuntime() });
     const res = await app.request('/webhooks/slack/events', { method: 'POST' });
     expect(res.status).toBe(404);
+  });
+
+
+  it('passes the configured egress policy into enabled outbound channel adapters', () => {
+    const egressPolicy = { enabled: true, lanes: {} };
+    commsRoutes({
+      config: enabledWebhookConfig(),
+      runtime: mockRuntime(),
+      egressPolicy,
+    });
+
+    expect(SlackAdapter).toHaveBeenCalledWith(expect.objectContaining({ egressPolicy }));
+    expect(DiscordAdapter).toHaveBeenCalledWith(expect.objectContaining({ egressPolicy }));
+    expect(WhatsAppAdapter).toHaveBeenCalledWith(expect.objectContaining({ egressPolicy }));
   });
 
   it('requires webhook signatures by default even when the security profile is permissive elsewhere', async () => {

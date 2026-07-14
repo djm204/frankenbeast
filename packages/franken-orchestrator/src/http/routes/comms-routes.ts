@@ -17,6 +17,7 @@ import type { ChannelInboundMessage } from '../../comms/core/types.js';
 import { errorHandler, HttpError, parseJsonBody, requestSizeLimit, validateBody } from '../middleware.js';
 import { requireOperatorAuth } from '../operator-auth.js';
 import { TransportSecurityService } from '../security/transport-security.js';
+import type { EgressPolicyConfig } from '../../network/egress-policy.js';
 
 import type { WebhookSignaturePolicy } from '../../middleware/security-profiles.js';
 
@@ -30,6 +31,7 @@ export interface CommsRoutesOptions {
   security?: TransportSecurityService | undefined;
   webhookSignaturePolicy?: WebhookSignaturePolicy;
   getWebhookSignaturePolicy?: () => WebhookSignaturePolicy;
+  egressPolicy?: EgressPolicyConfig | undefined;
 }
 
 const ChannelTypeSchema = z.enum(['slack', 'discord', 'telegram', 'whatsapp']);
@@ -99,7 +101,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const slack = config.channels.slack;
   if (slack?.enabled && slack.token && slack.signingSecret) {
-    const adapter = new SlackAdapter({ token: slack.token });
+    const adapter = new SlackAdapter({ token: slack.token, egressPolicy: options.egressPolicy });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/slack', slackRouter({
       gateway,
@@ -111,7 +113,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const discord = config.channels.discord;
   if (discord?.enabled && discord.token && discord.publicKey) {
-    const adapter = new DiscordAdapter({ token: discord.token });
+    const adapter = new DiscordAdapter({ token: discord.token, egressPolicy: options.egressPolicy });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/discord', discordRouter({
       gateway,
@@ -123,7 +125,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
 
   const telegram = config.channels.telegram;
   if (telegram?.enabled && telegram.botToken && telegram.webhookSecretToken) {
-    const adapter = new TelegramAdapter({ token: telegram.botToken });
+    const adapter = new TelegramAdapter({ token: telegram.botToken, egressPolicy: options.egressPolicy });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/telegram', telegramRouter({
       gateway,
@@ -138,6 +140,7 @@ export function commsRoutes(options: CommsRoutesOptions): Hono {
     const adapter = new WhatsAppAdapter({
       accessToken: whatsapp.accessToken,
       phoneNumberId: whatsapp.phoneNumberId,
+      egressPolicy: options.egressPolicy,
     });
     gateway.registerAdapter(adapter);
     app.route('/webhooks/whatsapp', whatsappRouter({
