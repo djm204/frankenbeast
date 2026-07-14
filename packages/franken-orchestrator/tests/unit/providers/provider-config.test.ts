@@ -137,23 +137,27 @@ describe('createLlmProvider', () => {
     expect(optionsOf<{ model?: string }>(gemini).model).toBe('gemini-2.5-pro');
   });
 
-  it('passes runtime egress policies into API adapters', () => {
+  it('passes runtime egress policies and audit sinks into API adapters', () => {
     const egressPolicy = { enabled: true, lanes: {} };
+    const egressAudit = vi.fn();
     const anthropic = createLlmProvider(
       { name: 'anthropic', type: 'anthropic-api' },
-      { egressPolicy },
+      { egressPolicy, egressAudit },
     );
     const openai = createLlmProvider(
       { name: 'openai', type: 'openai-api' },
-      { egressPolicy },
+      { egressPolicy, egressAudit },
     );
     const gemini = createLlmProvider(
       { name: 'gemini-api', type: 'gemini-api' },
-      { egressPolicy },
+      { egressPolicy, egressAudit },
     );
 
     expect(optionsOf<{ egressPolicy?: unknown }>(anthropic).egressPolicy).toBe(egressPolicy);
     expect(optionsOf<{ egressPolicy?: unknown }>(openai).egressPolicy).toBe(egressPolicy);
     expect(optionsOf<{ egressPolicy?: unknown }>(gemini).egressPolicy).toBe(egressPolicy);
+    expect(optionsOf<{ egressAudit?: unknown }>(anthropic).egressAudit).toBe(egressAudit);
+    expect(optionsOf<{ egressAudit?: unknown }>(openai).egressAudit).toBe(egressAudit);
+    expect(optionsOf<{ egressAudit?: unknown }>(gemini).egressAudit).toBe(egressAudit);
   });
 });

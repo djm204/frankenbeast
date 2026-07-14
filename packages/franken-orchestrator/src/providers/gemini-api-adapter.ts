@@ -12,13 +12,14 @@ import type {
 } from '@franken/types';
 import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
-import { createEgressGuardedFetch, type EgressPolicyConfig } from '../network/egress-policy.js';
+import { createEgressGuardedFetch, type EgressAuditSink, type EgressPolicyConfig } from '../network/egress-policy.js';
 
 export interface GeminiApiOptions {
   apiKey?: string;
   model?: string;
   maxTokens?: number;
   egressPolicy?: EgressPolicyConfig | undefined;
+  egressAudit?: EgressAuditSink | undefined;
 }
 
 function normalizeApiKey(value: string | undefined): string | undefined {
@@ -54,7 +55,11 @@ export class GeminiApiAdapter implements ILlmProvider {
 
   constructor(private options: GeminiApiOptions = {}) {
     this.apiKey = resolveGeminiApiKey(options);
-    this.guardedFetch = createEgressGuardedFetch({ lane: 'implementation', policy: options.egressPolicy });
+    this.guardedFetch = createEgressGuardedFetch({
+      lane: 'implementation',
+      policy: options.egressPolicy,
+      audit: options.egressAudit,
+    });
     this.client = new GoogleGenAI({ apiKey: this.apiKey });
   }
 

@@ -175,13 +175,19 @@ describe('lane egress policy', () => {
   it('honors redirect error mode by rejecting after a redirect response', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, {
       status: 302,
-      headers: { location: 'https://codeload.github.com/djm204/frankenbeast/zip/refs/heads/main' },
+      headers: { location: 'https://codeload.github.com/djm204/frankenbeast/zip/refs/heads/main?token=secret' },
     }));
     const guardedFetch = createEgressGuardedFetch({ lane: 'implementation', fetchImpl });
 
     await expect(guardedFetch('https://github.com/djm204/frankenbeast', { redirect: 'error' })).rejects.toBeInstanceOf(TypeError);
     await expect(guardedFetch(new Request('https://github.com/djm204/frankenbeast', { redirect: 'error' }))).rejects.toBeInstanceOf(TypeError);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await expect(guardedFetch('https://github.com/djm204/frankenbeast', { redirect: 'error' })).rejects.toThrow(
+      'GET github:codeload.github.com',
+    );
+    await expect(guardedFetch('https://github.com/djm204/frankenbeast', { redirect: 'error' })).rejects.not.toThrow(
+      /token|secret|zip\/refs/u,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
   it('accepts config-level lane overrides for approved services', () => {
