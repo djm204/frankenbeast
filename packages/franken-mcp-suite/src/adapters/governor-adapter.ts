@@ -36,7 +36,6 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_memory_store',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
-  'fbeast_memory_right_to_forget',
   'fbeast_plan_decompose',
   'fbeast_plan_status',
   'fbeast_plan_validate',
