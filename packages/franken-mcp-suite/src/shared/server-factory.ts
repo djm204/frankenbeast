@@ -231,7 +231,11 @@ const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope',
 
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
-  if (toolName !== 'fbeast_memory_right_to_forget') return sanitized;
+  const auditedTool = typeof sanitized['tool'] === 'string' ? sanitized['tool'] : toolName;
+  if (auditedTool !== 'fbeast_memory_right_to_forget') return sanitized;
+  if (toolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    sanitized['args'] = '[right-to-forget-args-redacted]';
+  }
   for (const key of RIGHT_TO_FORGET_SELECTOR_KEYS) {
     if (Object.prototype.hasOwnProperty.call(sanitized, key)) {
       sanitized[key] = '[right-to-forget-selector-redacted]';

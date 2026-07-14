@@ -199,6 +199,51 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('deletes persisted content hidden by an unflushed runtime overwrite without deleting the overwrite', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-overwrite-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const brainWithOverlay = new SqliteBrain(dbPath);
+        brainWithOverlay.working.set('contact', 'alice@example.test');
+        brainWithOverlay.flush();
+        brainWithOverlay.working.set('contact', 'bob@example.test');
+
+        const report = brainWithOverlay.rightToForget({ query: 'alice@example.test' });
+
+        expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 0 });
+        expect(brainWithOverlay.working.get('contact')).toBe('bob@example.test');
+        brainWithOverlay.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.has('contact')).toBe(false);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('guards sourceScope reinsertions using middle key segments', () => {
+      brain.working.set('project:import-1:item', 'secret');
+      brain.rightToForget({ sourceScope: 'import-1' });
+
+      expect(() => brain.working.set('project:import-1:new-item', 'secret')).toThrow(/right-to-forget/);
+    });
+
+    it('deletes episodic events whose step matches the query selector', () => {
+      brain.episodic.record({
+        type: 'observation',
+        step: 'alice@example.test',
+        summary: 'harmless summary',
+        createdAt: new Date().toISOString(),
+      });
+
+      const report = brain.rightToForget({ query: 'alice@example.test' });
+
+      expect(report.deleted).toEqual({ working: 0, episodic: 1, derived: 1 });
+      expect(brain.episodic.recent(5).filter(event => event.step === 'alice@example.test')).toEqual([]);
+    });
+
     it('requires at least one selector', () => {
       expect(() => brain.rightToForget({})).toThrow(/requires at least one/);
     });
@@ -1660,6 +1705,19 @@ describe('SqliteBrain', () => {
       snapshot.working = { 'pii:email': { value: 'alice@example.test', category: 'pii' } };
 
       expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/right-to-forget/);
+      source.close();
+    });
+
+    it('hydrate() preserves serialized right-to-forget audit events that mention guarded words', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('task', 'delete project note');
+      source.rightToForget({ query: 'delete' });
+      const snapshot = source.serialize();
+
+      const hydrated = SqliteBrain.hydrate(snapshot);
+
+      expect(hydrated.episodic.recent(1)[0]?.step).toBe('right-to-forget');
+      hydrated.close();
       source.close();
     });
 

@@ -563,30 +563,40 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return this.store.delete(key);
   }
 
-  snapshotIncludingPersisted(): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
+  snapshotIncludingPersistedEntries(): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
+    const result: Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> = [];
     for (const { key, value: serialized } of this.loadPersistedSerializedFromDb()) {
-      Object.defineProperty(result, key, {
+      result.push({
+        key,
         value: parseStoredWorkingMemoryValue(serialized),
-        enumerable: true,
-        configurable: true,
-        writable: true,
+        source: 'persisted',
       });
     }
     for (const [key, value] of Object.entries(this.snapshot())) {
-      Object.defineProperty(result, key, {
+      result.push({
+        key,
         value,
-        enumerable: true,
-        configurable: true,
-        writable: true,
+        source: 'runtime',
       });
     }
     return result;
   }
 
-  deleteKeysImmediately(keys: readonly string[]): void {
+  deletePersistedKeys(keys: readonly string[]): (() => void) | undefined {
     if (keys.length === 0) return;
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
+    for (const key of keys) {
+      deleteKey.run(key);
+    }
+    return () => {
+      for (const key of keys) {
+        this.persistedSerialized.delete(key);
+        this.deletedKeys.delete(key);
+      }
+    };
+  }
+
+  deleteRuntimeKeys(keys: readonly string[]): void {
     for (const key of keys) {
       if (this.store.has(key)) {
         this.totalBytes -= this.sizes.get(key) ?? 0;
@@ -596,8 +606,15 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
       this.dirtyKeys.delete(key);
       this.deletedKeys.delete(key);
-      this.persistedSerialized.delete(key);
-      deleteKey.run(key);
+      const persisted = this.persistedSerialized.get(key);
+      if (persisted !== undefined) {
+        const parsed = parseStoredWorkingMemoryValue(persisted);
+        const { normalized, serialized, size } = this.prepareEntry(key, parsed);
+        this.store.set(key, normalized);
+        this.sizes.set(key, size);
+        this.serialized.set(key, serialized);
+        this.totalBytes += size;
+      }
     }
   }
 
@@ -1119,6 +1136,9 @@ export class SqliteBrain implements IBrain {
     const workingMatches = memoryType === 'episodic'
       ? []
       : this.matchingWorkingKeys(normalizedSelector);
+    const persistedWorkingMatches = workingMatches.filter(match => match.source === 'persisted').map(match => match.key);
+    const runtimeWorkingMatches = workingMatches.filter(match => match.source === 'runtime').map(match => match.key);
+    const deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
     const episodicMatches = memoryType === 'working'
       ? []
       : this.matchingEpisodicIds(normalizedSelector);
@@ -1127,10 +1147,11 @@ export class SqliteBrain implements IBrain {
       : [];
 
     let auditEventId: number | undefined;
+    let finalizePersistedWorkingDelete: (() => void) | undefined;
 
     if (!dryRun && (workingMatches.length > 0 || episodicMatches.length > 0 || checkpointMatches.length > 0)) {
       const tx = this.db.transaction(() => {
-        this.working.deleteKeysImmediately(workingMatches);
+        finalizePersistedWorkingDelete = this.working.deletePersistedKeys(persistedWorkingMatches);
         if (episodicMatches.length > 0) {
           const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
           for (const id of episodicMatches) {
@@ -1148,7 +1169,7 @@ export class SqliteBrain implements IBrain {
         const auditDetails = JSON.stringify({
           selectorHash,
           deleted: {
-            working: workingMatches.length,
+            working: deletedWorkingKeys.size,
             episodic: episodicMatches.length,
             derived: episodicMatches.length + checkpointMatches.length,
           },
@@ -1166,6 +1187,8 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       auditEventId = tx() as number;
+      finalizePersistedWorkingDelete?.();
+      this.working.deleteRuntimeKeys(runtimeWorkingMatches);
     } else if (!dryRun) {
       writeDeletionGuards(this.db, normalizedSelector, selectorHash);
     }
@@ -1174,7 +1197,7 @@ export class SqliteBrain implements IBrain {
       selectorHash,
       dryRun,
       deleted: {
-        working: workingMatches.length,
+        working: deletedWorkingKeys.size,
         episodic: episodicMatches.length,
         derived: episodicMatches.length + checkpointMatches.length,
       },
@@ -1183,21 +1206,22 @@ export class SqliteBrain implements IBrain {
     };
   }
 
-  private matchingWorkingKeys(selector: NormalizedRightToForgetSelector): string[] {
-    const snapshot = this.working.snapshotIncludingPersisted();
-    return Object.entries(snapshot)
-      .filter(([key, value]) => workingEntryMatchesSelector(key, value, selector))
-      .map(([key]) => key);
+  private matchingWorkingKeys(selector: NormalizedRightToForgetSelector): Array<{ key: string; source: 'persisted' | 'runtime' }> {
+    return this.working.snapshotIncludingPersistedEntries()
+      .filter(({ key, value }) => workingEntryMatchesSelector(key, value, selector))
+      .map(({ key, source }) => ({ key, source }));
   }
 
   private matchingEpisodicIds(selector: NormalizedRightToForgetSelector): number[] {
-    const rows = this.db.prepare(`SELECT id, summary, details FROM episodic_events`).all() as Array<{
+    const rows = this.db.prepare(`SELECT id, step, summary, details FROM episodic_events`).all() as Array<{
       id: number;
+      step: string | null;
       summary: string;
       details: string | null;
     }>;
     return rows
       .filter((row) => episodicRowMatchesSelector(
+        row.step ?? '',
         this.encryption?.decrypt(row.summary) ?? row.summary,
         row.details ? (this.encryption?.decrypt(row.details) ?? row.details) : null,
         selector,
@@ -1222,7 +1246,7 @@ export class SqliteBrain implements IBrain {
     const memoryType = selector.type ?? 'all';
     let count = 0;
     if (memoryType !== 'episodic') {
-      count += this.matchingWorkingKeys(selector).length;
+      count += new Set(this.matchingWorkingKeys(selector).map(match => match.key)).size;
     }
     if (memoryType !== 'working') {
       count += this.matchingEpisodicIds(selector).length;
@@ -1295,7 +1319,9 @@ export class SqliteBrain implements IBrain {
           brain.working.flushToDb() ?? undefined;
 
         for (const event of snapshot.episodic) {
-          assertEpisodicNotDeletionGuarded(brain.db, event);
+          if (event.step !== 'right-to-forget') {
+            assertEpisodicNotDeletionGuarded(brain.db, event);
+          }
           insertEvent.run(
             event.id ?? null,
             event.type,
@@ -1964,9 +1990,9 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
   return false;
 }
 
-function episodicRowMatchesSelector(summary: string, details: string | null, selector: NormalizedRightToForgetSelector): boolean {
+function episodicRowMatchesSelector(step: string, summary: string, details: string | null, selector: NormalizedRightToForgetSelector): boolean {
   const parsedDetails = details ? safeJsonParse(details) : undefined;
-  const text = normalizeForMatch(`${summary} ${details ?? ''}`);
+  const text = normalizeForMatch(`${step} ${summary} ${details ?? ''}`);
   if (selector.query && text.includes(normalizeForMatch(selector.query))) return true;
   if (selector.category) {
     const category = normalizeForMatch(selector.category);
@@ -2012,12 +2038,13 @@ function writeDeletionGuards(db: Database.Database, selector: NormalizedRightToF
 function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string): void {
   const parsed = safeJsonParse(serializedValue);
   const keyPrefix = key.includes(':') ? key.split(':', 1)[0] : undefined;
+  const keySegments = key.split(':').filter(Boolean);
   const candidates: Array<[string, string | undefined]> = [
     ['key', key],
     ['category', objectMetadataString(parsed, ['category', 'categories', 'kind'])],
     ['category', keyPrefix],
     ['sourceScope', objectMetadataString(parsed, ['sourceScope', 'source', 'scope', 'sourceId'])],
-    ['sourceScope', keyPrefix],
+    ...keySegments.map(segment => ['sourceScope', segment] as [string, string]),
   ];
   const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
   for (const [kind, value] of candidates) {

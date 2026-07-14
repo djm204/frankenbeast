@@ -14,6 +14,7 @@ import { createSqliteStore } from '../shared/sqlite-store.js';
  */
 const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_forget',
+  'fbeast_memory_right_to_forget',
 ]);
 
 /**

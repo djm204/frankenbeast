@@ -9,6 +9,19 @@ function stringifyArgs(args: Record<string, unknown>): string {
   }
 }
 
+const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
+
+function stringifyArgsForGovernanceLog(tool: string, args: Record<string, unknown>): string {
+  if (tool !== 'fbeast_memory_right_to_forget') return stringifyArgs(args);
+  const redacted: Record<string, unknown> = { ...args };
+  for (const key of RIGHT_TO_FORGET_SELECTOR_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(redacted, key)) {
+      redacted[key] = '[right-to-forget-selector-redacted]';
+    }
+  }
+  return stringifyArgs(redacted);
+}
+
 /**
  * Builds the default central governance gate used by the MCP server dispatch
  * path. It reuses the same {@link GovernorAdapter} the client hook path uses
@@ -39,7 +52,7 @@ export function createGovernanceGate(source: string | GovernorAdapter): Governan
       }
       // Destructive-tool classification (e.g. `forget`) lives in the shared
       // governor adapter, so the decision here matches every other caller.
-      const result = await governor.check({ action: tool, context: stringifyArgs(args) });
+      const result = await governor.check({ action: tool, context: stringifyArgsForGovernanceLog(tool, args) });
       return { decision: result.decision, reason: result.reason };
     },
   };
