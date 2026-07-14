@@ -211,6 +211,7 @@ const MEMORY_REVIEW_PAYLOAD_COLUMNS = [
   'reviewer',
   'note',
 ] as const;
+const NEVER_STORE_REDACTED_VALUE = '[never-store-redacted]';
 
 type MemoryStoreName = (typeof MEMORY_STORES)[number];
 
@@ -1283,7 +1284,9 @@ export class SqliteMemoryReviewQueue {
     const now = isoNow();
     const tx = this.db.transaction(() => {
       this.insertSuppression(candidate, 'never_store', now, options);
-      this.markDecision(id, 'never_store', now, options);
+      this.markDecision(id, 'never_store', now, options, {
+        value: NEVER_STORE_REDACTED_VALUE,
+      });
     });
     tx.immediate();
     return this.requireCandidate(id, 'never_store');
@@ -1346,21 +1349,26 @@ export class SqliteMemoryReviewQueue {
     status: Exclude<MemoryCandidateStatus, 'pending' | 'suppressed'>,
     decidedAt: string,
     options: MemoryReviewDecisionOptions,
+    overrides: { value?: unknown } = {},
   ): void {
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE memory_review_candidates
-         SET status = ?, reviewer = ?, note = ?, updated_at = ?, decided_at = ?
-         WHERE id = ?`,
+         SET status = ?, value = COALESCE(?, value), reviewer = ?, note = ?, updated_at = ?, decided_at = ?
+         WHERE id = ? AND status = 'pending'`,
       )
       .run(
         status,
+        overrides.value === undefined ? null : this.encodeValue(overrides.value),
         options.reviewer ? this.encodeText(options.reviewer) : null,
         options.note ? this.encodeText(options.note) : null,
         decidedAt,
         decidedAt,
         id,
       );
+    if (result.changes !== 1) {
+      throw new Error(`Memory candidate ${id} is no longer pending`);
+    }
   }
 
   private markSuppressed(
@@ -1412,7 +1420,9 @@ export class SqliteMemoryReviewQueue {
         reason,
         candidate.targetStore,
         candidate.key,
-        this.encodeValue(candidate.value),
+        this.encodeValue(
+          reason === 'never_store' ? NEVER_STORE_REDACTED_VALUE : candidate.value,
+        ),
         this.encodeText(candidate.source),
         candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
         this.encodeText(candidate.reason),
@@ -1876,6 +1886,9 @@ export class SqliteBrain implements IBrain {
 
         brain.db.prepare(`DELETE FROM episodic_events`).run();
         brain.db.prepare(`DELETE FROM checkpoints`).run();
+        brain.db.prepare(`DELETE FROM memory_review_candidates`).run();
+        brain.db.prepare(`DELETE FROM memory_review_provenance`).run();
+        brain.db.prepare(`DELETE FROM memory_review_suppressions`).run();
 
         for (const event of snapshot.episodic) {
           insertEvent.run(

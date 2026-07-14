@@ -447,6 +447,126 @@ describe('SqliteBrain', () => {
       });
     });
 
+    it('redacts never-store candidate and suppression payloads at rest', () => {
+      const secret = 'sk-live-secret-that-must-not-persist';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.secret.api-token',
+        value: secret,
+        source: 'terminal-output',
+        confidence: 0.99,
+        reason: 'Sensitive token should not persist without consent.',
+      });
+
+      const neverStored = brain.memoryReview.neverStore(candidate.id, {
+        reviewer: 'operator',
+      });
+
+      expect(neverStored.value).toBe('[never-store-redacted]');
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const candidateRow = db
+        .prepare(`SELECT value FROM memory_review_candidates WHERE id = ?`)
+        .get(candidate.id) as { value: string };
+      const suppressionRow = db
+        .prepare(`SELECT value FROM memory_review_suppressions`)
+        .get() as { value: string };
+      expect(candidateRow.value).toBe(JSON.stringify('[never-store-redacted]'));
+      expect(suppressionRow.value).toBe(JSON.stringify('[never-store-redacted]'));
+      expect(candidateRow.value).not.toContain(secret);
+      expect(suppressionRow.value).not.toContain(secret);
+    });
+
+    it('does not let stale rejection decisions overwrite settled candidates', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-race-'));
+      const dbPath = join(dir, 'brain.db');
+      const reviewerA = new SqliteBrain(dbPath);
+      const reviewerB = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = reviewerA.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.review-race',
+          value: 'keep this memory',
+          source: 'chat:turn-12',
+          confidence: 0.8,
+          reason: 'Operator-visible review race regression.',
+        });
+
+        reviewerB.memoryReview.approve(candidate.id, { reviewer: 'reviewer-b' });
+
+        expect(() =>
+          reviewerA.memoryReview.reject(candidate.id, { reviewer: 'reviewer-a' }),
+        ).toThrow(/expected pending|no longer pending/);
+        const db = (reviewerA as unknown as { db: Database.Database }).db;
+        expect(
+          db
+            .prepare(`SELECT status FROM memory_review_candidates WHERE id = ?`)
+            .get(candidate.id),
+        ).toEqual({ status: 'approved' });
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_suppressions`).get(),
+        ).toEqual({ count: 0 });
+      } finally {
+        reviewerA.close();
+        reviewerB.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('clears review candidates, provenance, and suppressions when hydrating over an existing database', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-hydrate-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const existing = new SqliteBrain(dbPath);
+        const approved = existing.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.reviewed',
+          value: 'approved memory',
+          source: 'chat:turn-13',
+          confidence: 0.9,
+          reason: 'Hydrate should clear stale provenance.',
+        });
+        existing.memoryReview.approve(approved.id, { reviewer: 'operator' });
+        const neverStored = existing.memoryReview.propose({
+          targetStore: 'working',
+          key: 'env.secret.api-token',
+          value: 'stale-secret',
+          source: 'terminal-output',
+          confidence: 0.99,
+          reason: 'Hydrate should clear stale suppressions.',
+        });
+        existing.memoryReview.neverStore(neverStored.id, { reviewer: 'operator' });
+        const snapshot = existing.serialize();
+        existing.close();
+
+        const hydrated = SqliteBrain.hydrate(snapshot, dbPath);
+        const db = (hydrated as unknown as { db: Database.Database }).db;
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_candidates`).get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_provenance`).get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_suppressions`).get(),
+        ).toEqual({ count: 0 });
+        expect(
+          hydrated.memoryReview.propose({
+            targetStore: 'working',
+            key: 'env.secret.api-token',
+            value: 'stale-secret',
+            source: 'later-terminal-output',
+            confidence: 0.99,
+            reason: 'A hydrated snapshot should not inherit stale suppression.',
+          }).status,
+        ).toBe('pending');
+        hydrated.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('suppresses already-pending duplicates before they can be approved', () => {
       const proposal = {
         targetStore: 'working' as const,
