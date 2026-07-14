@@ -67,6 +67,57 @@ describe('restore preview conflict detector', () => {
     );
   });
 
+  it('treats backup-only approval tokens as blockers', () => {
+    const preview = detectRestorePreviewConflicts(
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-cleared-live', state: 'approved', digest: 'stale-token' }],
+        memory: [],
+        cron: [],
+      },
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+    );
+
+    expect(preview.safeToRestore).toBe(false);
+    expect(preview.conflicts).toContainEqual(
+      expect.objectContaining({
+        area: 'approvals',
+        id: 'approval-cleared-live',
+        type: 'backup-only',
+        severity: 'blocker',
+        recommendation: expect.stringContaining('re-approval'),
+      }),
+    );
+  });
+
+  it('compares digest, state, and timestamps so metadata drift is not hidden', () => {
+    const preview = detectRestorePreviewConflicts(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-1', digest: 'same-task-body', updatedAt: '2026-07-14T10:00:00.000Z' }],
+        approvals: [{ id: 'approval-1', state: 'pending', digest: 'same-token' }],
+        memory: [],
+        cron: [],
+      },
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-1', digest: 'same-task-body', updatedAt: '2026-07-14T11:00:00.000Z' }],
+        approvals: [{ id: 'approval-1', state: 'approved', digest: 'same-token' }],
+        memory: [],
+        cron: [],
+      },
+    );
+
+    expect(preview.safeToRestore).toBe(false);
+    expect(preview.conflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ area: 'tasks', id: 'task-1', type: 'newer-live' }),
+        expect.objectContaining({ area: 'approvals', id: 'approval-1', type: 'changed', severity: 'blocker' }),
+      ]),
+    );
+  });
+
   it('blocks preview when backup and live schema versions differ', () => {
     const preview = detectRestorePreviewConflicts(
       { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },

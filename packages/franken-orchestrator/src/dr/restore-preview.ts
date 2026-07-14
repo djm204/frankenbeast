@@ -123,7 +123,7 @@ function compareRecords(
         area,
         id,
         type: 'backup-only',
-        severity: 'info',
+        severity: area === 'approvals' ? 'blocker' : 'info',
         backup,
         recommendation: recommendationFor(area, 'backup-only'),
       });
@@ -162,9 +162,9 @@ function recordsEqual(backup: RestorePreviewRecord, live: RestorePreviewRecord):
 }
 
 function recordFingerprint(record: RestorePreviewRecord): string {
-  if (record.digest !== undefined) return `digest:${record.digest}`;
   return stableStringify({
     id: record.id,
+    digest: record.digest,
     state: record.state,
     updatedAt: record.updatedAt,
     value: record.value,
