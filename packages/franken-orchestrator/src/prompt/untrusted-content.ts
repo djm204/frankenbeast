@@ -37,7 +37,7 @@ export function quoteUntrustedPayload(content: string): string {
   }
 
   return content
-    .replace(/\r\n?/g, '\n')
+    .replace(/\r\n?|\u2028|\u2029/g, '\n')
     .split('\n')
     .map((line) => `| ${line}`)
     .join('\n');
