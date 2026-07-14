@@ -137,6 +137,29 @@ describe('LlmSkillHandler', () => {
     expect(memoryBlock).not.toContain('Stale rule: tiny but outdated.');
   });
 
+  it('honors very small memory context budgets by omitting untrusted memory payloads', async () => {
+    const llmClient = {
+      complete: vi.fn().mockResolvedValue('ok'),
+    };
+    const handler = new LlmSkillHandler(llmClient, { memoryContextBudgetChars: 180 });
+
+    await handler.execute('Respect tiny memory budget', {
+      rules: [
+        'User preference: critical preference should not overflow the budget.',
+        'Generic rule that should be omitted.',
+      ],
+      adrs: [],
+      knownErrors: [],
+    });
+
+    const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
+    const memoryBlock = prompt.slice(prompt.indexOf('Memory Context:'));
+    expect(memoryBlock.length).toBeLessThanOrEqual(180);
+    expect(memoryBlock).toContain('[memory truncated: 2 lower-priority entries omitted]');
+    expect(memoryBlock).not.toContain('critical preference should not overflow');
+    expect(memoryBlock).not.toContain('UNTRUSTED DATA from retrieval');
+  });
+
   it('preserves insertion order for same-priority known errors so newest failures stay first', async () => {
     const llmClient = {
       complete: vi.fn().mockResolvedValue('ok'),

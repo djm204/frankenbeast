@@ -13,7 +13,7 @@ export function wrapUntrustedContent(
   metadata: UntrustedContentSource,
   content: unknown,
 ): string {
-  const retrievedAt = metadata.retrievedAt ?? new Date().toISOString();
+  const retrievedAt = normalizeMetadataValue(metadata.retrievedAt ?? new Date().toISOString(), 'unknown');
   const source = normalizeMetadataValue(metadata.source, 'unknown');
   const kind = normalizeMetadataValue(metadata.kind, 'other');
   const markerId = createMarkerId(kind, source, retrievedAt);

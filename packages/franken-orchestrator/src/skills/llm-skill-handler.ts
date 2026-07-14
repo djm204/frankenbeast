@@ -20,7 +20,6 @@ type RankedMemoryEntry = {
 };
 
 const DEFAULT_MEMORY_CONTEXT_BUDGET_CHARS = 6_000;
-const MIN_MEMORY_CONTEXT_BUDGET_CHARS = 600;
 const MEMORY_CONTEXT_HEADER = 'Memory Context:';
 
 export class LlmSkillHandler {
@@ -29,10 +28,7 @@ export class LlmSkillHandler {
 
   constructor(llmClient: ILlmClient, options: LlmSkillHandlerOptions = {}) {
     this.llmClient = llmClient;
-    this.memoryContextBudgetChars = Math.max(
-      MIN_MEMORY_CONTEXT_BUDGET_CHARS,
-      options.memoryContextBudgetChars ?? DEFAULT_MEMORY_CONTEXT_BUDGET_CHARS,
-    );
+    this.memoryContextBudgetChars = Math.max(120, options.memoryContextBudgetChars ?? DEFAULT_MEMORY_CONTEXT_BUDGET_CHARS);
   }
 
   async execute(objective: string, context: MemoryContext): Promise<LlmSkillResult> {
@@ -92,7 +88,12 @@ export class LlmSkillHandler {
       break;
     }
 
-    return this.renderMemoryContextBlock(selectedLines, omitted);
+    const rendered = this.renderMemoryContextBlock(selectedLines, omitted);
+    if (rendered.length <= this.memoryContextBudgetChars) {
+      return rendered;
+    }
+
+    return this.renderCompactTruncatedMemoryContext(entries.length);
   }
 
   private rankMemoryEntries(context: MemoryContext): RankedMemoryEntry[] {
@@ -174,6 +175,10 @@ export class LlmSkillHandler {
 
   private truncationMarker(omitted: number): string {
     return `[memory truncated: ${omitted} lower-priority entr${omitted === 1 ? 'y' : 'ies'} omitted]`;
+  }
+
+  private renderCompactTruncatedMemoryContext(omitted: number): string {
+    return [MEMORY_CONTEXT_HEADER, this.truncationMarker(omitted)].join('\n');
   }
 
   private fitTruncatedLine(
