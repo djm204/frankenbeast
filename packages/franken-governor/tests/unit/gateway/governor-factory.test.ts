@@ -7,6 +7,7 @@ import {
   type ApprovalPolicyManifest,
 } from '../../../src/security/approval-policy-manifest.js';
 import { SignatureVerifier } from '../../../src/security/signature-verifier.js';
+import { ApprovalConfigurationError } from '../../../src/errors/index.js';
 import type { ReadlineAdapter } from '../../../src/channels/cli-channel.js';
 import type { EpisodicTraceRecord, GovernorMemoryPort } from '../../../src/audit/governor-memory-port.js';
 import type { RationaleBlock } from '@franken/types';
@@ -194,5 +195,16 @@ describe('createGovernor', () => {
       approvalPolicyManifest: unsignedManifest,
       allowUnsignedPolicyManifest: true,
     })).not.toThrow();
+  });
+
+  it.each([
+    ['timeoutMs', { timeoutMs: 0 }],
+    ['sessionTokenTtlMs', { sessionTokenTtlMs: Number.POSITIVE_INFINITY }],
+  ])('rejects invalid %s overrides before wiring the gateway', (_name: string, config) => {
+    expect(() => createGovernor({
+      readline: makeReadline(['a']),
+      memoryPort: makeMemoryPort(),
+      config,
+    })).toThrow(ApprovalConfigurationError);
   });
 });
