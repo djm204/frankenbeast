@@ -420,6 +420,14 @@ describe('SqliteBrain', () => {
 
       expect(report.deleted.working).toBe(1);
       expect(() => brain.working.set('long-token-2', `other ${longSecret} copy`)).toThrow(/right-to-forget/);
+      expect(() => brain.working.set('unrelated-short-fragment', 'ice test note')).not.toThrow();
+    });
+
+    it('aligns category key guards with category deletion key-prefix scope', () => {
+      brain.rightToForget({ category: 'prod' });
+
+      expect(() => brain.working.set('prod:task', 'secret')).toThrow(/right-to-forget/);
+      expect(() => brain.working.set('project:prod:task', 'allowed unrelated key segment')).not.toThrow();
     });
 
     it('requires at least one selector', () => {
