@@ -13,7 +13,13 @@
   - [x] `npm run typecheck --workspace @franken/mcp-suite`.
   - [x] `npm run lint --workspace @franken/mcp-suite` (0 errors, existing warnings only).
   - [x] `npm run build --workspace @franken/mcp-suite`.
-- [ ] Push PR branch.
-- [ ] Reply to and resolve Codex threads 3581527897, 3581527901, 3581527905, 3581527906.
-- [ ] Trigger and poll a fresh current-head Codex review.
+- [x] Push PR branch.
+  - [x] Commit `818c13f5 fix(memory): address current-head review findings` pushed to PR #2212.
+- [x] Reply to and resolve current Codex threads.
+  - [x] Historical threads 3581527897, 3581527901, 3581527905, 3581527906 were already resolved.
+  - [x] Replied/resolved current threads 3581822370, 3581822374, 3581822378, 3581822384.
+  - [x] GraphQL audit confirmed `unresolved_codex_threads=0`.
+- [x] Attempt fresh current-head Codex review.
+  - [x] `codex-review-loop.sh trigger` refused because invocation cap is reached (26/5); no explicit approval to override.
+  - [x] PR checks query reports no checks on the branch; PR merge state remains `DIRTY`.
 - [ ] Leave Kanban handoff and block/complete appropriately.
