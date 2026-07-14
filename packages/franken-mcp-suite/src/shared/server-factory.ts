@@ -227,6 +227,19 @@ export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unk
   return isObjectLike(value) && !Array.isArray(value) ? (value as Record<string, unknown>) : { invalid: value };
 }
 
+const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
+
+export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
+  const sanitized = sanitizeToolArgumentsForAudit(args);
+  if (toolName !== 'fbeast_memory_right_to_forget') return sanitized;
+  for (const key of RIGHT_TO_FORGET_SELECTOR_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(sanitized, key)) {
+      sanitized[key] = '[right-to-forget-selector-redacted]';
+    }
+  }
+  return sanitized;
+}
+
 export function validateToolArguments(
   tool: ToolSchemaDef,
   args: unknown,
@@ -289,14 +302,14 @@ async function dispatchTool(
   }): Promise<void> => {
     if (!audit) return;
     try {
-      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: input.args });
+      await audit.record({ tool: toolName, ok: input.ok, ...(input.decision !== undefined ? { decision: input.decision } : {}), args: sanitizeToolArgumentsForAuditTrail(toolName, input.args) });
     } catch (err) {
       process.stderr.write(`fbeast audit failed for ${toolName}: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   };
   // Normalize the raw payload to an object so a malformed (null/array/scalar)
   // probe is still captured in the audit record rather than dropped.
-  const rawArgs = sanitizeToolArgumentsForAudit(args);
+  const rawArgs = sanitizeToolArgumentsForAuditTrail(toolName, args);
 
   const tool = toolMap.get(toolName);
   if (!tool) {

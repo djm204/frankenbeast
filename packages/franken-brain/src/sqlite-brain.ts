@@ -563,6 +563,44 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return this.store.delete(key);
   }
 
+  snapshotIncludingPersisted(): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const { key, value: serialized } of this.loadPersistedSerializedFromDb()) {
+      Object.defineProperty(result, key, {
+        value: parseStoredWorkingMemoryValue(serialized),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    for (const [key, value] of Object.entries(this.snapshot())) {
+      Object.defineProperty(result, key, {
+        value,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    return result;
+  }
+
+  deleteKeysImmediately(keys: readonly string[]): void {
+    if (keys.length === 0) return;
+    const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
+    for (const key of keys) {
+      if (this.store.has(key)) {
+        this.totalBytes -= this.sizes.get(key) ?? 0;
+        this.store.delete(key);
+        this.sizes.delete(key);
+        this.serialized.delete(key);
+      }
+      this.dirtyKeys.delete(key);
+      this.deletedKeys.delete(key);
+      this.persistedSerialized.delete(key);
+      deleteKey.run(key);
+    }
+  }
+
   /** Current occupancy, for callers that want to react before limits are hit. */
   usage(): {
     entries: number;
@@ -1089,16 +1127,10 @@ export class SqliteBrain implements IBrain {
       : [];
 
     let auditEventId: number | undefined;
-    let finalizeWorkingMemoryFlush: (() => void) | undefined;
 
     if (!dryRun && (workingMatches.length > 0 || episodicMatches.length > 0 || checkpointMatches.length > 0)) {
       const tx = this.db.transaction(() => {
-        for (const key of workingMatches) {
-          this.working.delete(key);
-        }
-        if (workingMatches.length > 0) {
-          finalizeWorkingMemoryFlush = this.working.flushToDb() ?? undefined;
-        }
+        this.working.deleteKeysImmediately(workingMatches);
         if (episodicMatches.length > 0) {
           const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
           for (const id of episodicMatches) {
@@ -1134,7 +1166,6 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       auditEventId = tx() as number;
-      finalizeWorkingMemoryFlush?.();
     } else if (!dryRun) {
       writeDeletionGuards(this.db, normalizedSelector, selectorHash);
     }
@@ -1153,7 +1184,7 @@ export class SqliteBrain implements IBrain {
   }
 
   private matchingWorkingKeys(selector: NormalizedRightToForgetSelector): string[] {
-    const snapshot = this.working.snapshot();
+    const snapshot = this.working.snapshotIncludingPersisted();
     return Object.entries(snapshot)
       .filter(([key, value]) => workingEntryMatchesSelector(key, value, selector))
       .map(([key]) => key);
@@ -1245,10 +1276,6 @@ export class SqliteBrain implements IBrain {
       const finalizeWorkingMemoryFlush: { current: (() => void) | undefined } =
         { current: undefined };
       const restoreSnapshot = brain.db.transaction(() => {
-        brain.working.restore(snapshot.working);
-        finalizeWorkingMemoryFlush.current =
-          brain.working.flushToDb() ?? undefined;
-
         brain.db.prepare(`DELETE FROM episodic_events`).run();
         brain.db.prepare(`DELETE FROM checkpoints`).run();
         brain.db.prepare(`DELETE FROM memory_deletion_guards`).run();
@@ -1263,7 +1290,12 @@ export class SqliteBrain implements IBrain {
           );
         }
 
+        brain.working.restore(snapshot.working);
+        finalizeWorkingMemoryFlush.current =
+          brain.working.flushToDb() ?? undefined;
+
         for (const event of snapshot.episodic) {
+          assertEpisodicNotDeletionGuarded(brain.db, event);
           insertEvent.run(
             event.id ?? null,
             event.type,
@@ -1285,6 +1317,7 @@ export class SqliteBrain implements IBrain {
         }
 
         if (snapshot.checkpoint) {
+          assertCheckpointNotDeletionGuarded(brain.db, snapshot.checkpoint);
           insertCheckpoint.run(
             brain.encryption?.encrypt(JSON.stringify(snapshot.checkpoint)) ??
               JSON.stringify(snapshot.checkpoint),

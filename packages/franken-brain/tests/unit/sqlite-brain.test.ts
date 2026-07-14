@@ -175,6 +175,30 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recall('common word', 5)).toHaveLength(1);
     });
 
+    it('deletes matching persisted working memory rows that were not hydrated in this instance', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-persisted-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const writer = new SqliteBrain(dbPath);
+        writer.working.set('pii:email', { value: 'alice@example.test', category: 'pii' });
+        writer.flush();
+        writer.close();
+
+        const stale = new SqliteBrain(dbPath, undefined, { hydrateWorkingMemoryFromDb: false });
+        const report = stale.rightToForget({ query: 'alice@example.test' });
+
+        expect(report.deleted).toEqual({ working: 1, episodic: 0, derived: 0 });
+        stale.close();
+
+        const reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.has('pii:email')).toBe(false);
+        reopened.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('requires at least one selector', () => {
       expect(() => brain.rightToForget({})).toThrow(/requires at least one/);
     });
@@ -1626,6 +1650,17 @@ describe('SqliteBrain', () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    });
+
+    it('hydrate() rejects snapshot payloads that reintroduce forgotten content', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('pii:email', { value: 'alice@example.test', category: 'pii' });
+      source.rightToForget({ query: 'alice@example.test', category: 'pii' });
+      const snapshot = source.serialize();
+      snapshot.working = { 'pii:email': { value: 'alice@example.test', category: 'pii' } };
+
+      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/right-to-forget/);
+      source.close();
     });
 
     it('round-trips with null checkpoint', () => {
