@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/djm204/frankenbeast/compare/v0.50.0...v0.51.0) (2026-07-14)
+
+
+### Features
+
+* **observer:** classify runtime artifacts ([#2235](https://github.com/djm204/frankenbeast/issues/2235)) ([ed2f803](https://github.com/djm204/frankenbeast/commit/ed2f803fec0aa19837c51a779c418135b947bed5))
+
 ## [0.50.0](https://github.com/djm204/frankenbeast/compare/v0.49.0...v0.50.0) (2026-07-14)
 
 
