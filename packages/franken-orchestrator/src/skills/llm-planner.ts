@@ -1,5 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js';
+import { wrapUntrustedContent } from '../prompt/untrusted-content.js';
 import { cleanLlmJson } from './providers/stream-json-utils.js';
 
 type RawPlanResponse = { tasks?: unknown };
@@ -26,7 +27,15 @@ export class LlmPlanner implements IPlannerModule {
   }
 
   private buildPrompt(intent: PlanIntent): string {
-    const context = intent.context ? JSON.stringify(intent.context) : '{}';
+    const context = intent.context
+      ? wrapUntrustedContent(
+        { kind: 'planner-context', source: 'plan-intent.context' },
+        JSON.stringify(intent.context),
+      )
+      : wrapUntrustedContent(
+        { kind: 'planner-context', source: 'plan-intent.context' },
+        '{}',
+      );
 
     return [
       'You are a planner. Decompose the goal into a task DAG.',

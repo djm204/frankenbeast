@@ -1,5 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import type { MemoryContext } from '../deps.js';
+import { wrapUntrustedContent } from '../prompt/untrusted-content.js';
 
 type LlmSkillResult = { output: string; tokensUsed: number };
 
@@ -19,6 +20,7 @@ type RankedMemoryEntry = {
 };
 
 const DEFAULT_MEMORY_CONTEXT_BUDGET_CHARS = 6_000;
+const MIN_MEMORY_CONTEXT_BUDGET_CHARS = 600;
 const MEMORY_CONTEXT_HEADER = 'Memory Context:';
 
 export class LlmSkillHandler {
@@ -27,7 +29,10 @@ export class LlmSkillHandler {
 
   constructor(llmClient: ILlmClient, options: LlmSkillHandlerOptions = {}) {
     this.llmClient = llmClient;
-    this.memoryContextBudgetChars = Math.max(120, options.memoryContextBudgetChars ?? DEFAULT_MEMORY_CONTEXT_BUDGET_CHARS);
+    this.memoryContextBudgetChars = Math.max(
+      MIN_MEMORY_CONTEXT_BUDGET_CHARS,
+      options.memoryContextBudgetChars ?? DEFAULT_MEMORY_CONTEXT_BUDGET_CHARS,
+    );
   }
 
   async execute(objective: string, context: MemoryContext): Promise<LlmSkillResult> {
@@ -158,7 +163,13 @@ export class LlmSkillHandler {
 
   private renderMemoryContextBlock(lines: readonly string[], omitted: number): string {
     const body = omitted > 0 ? [...lines, this.truncationMarker(omitted)] : [...lines];
-    return [MEMORY_CONTEXT_HEADER, ...body].join('\n');
+    return [
+      MEMORY_CONTEXT_HEADER,
+      wrapUntrustedContent(
+        { kind: 'memory', source: 'memory.context' },
+        body.join('\n'),
+      ),
+    ].join('\n');
   }
 
   private truncationMarker(omitted: number): string {
