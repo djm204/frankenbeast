@@ -33,6 +33,7 @@ export const GitConfigSchema = z.object({
   prCreation: z.enum(['auto', 'manual', 'disabled']).optional(),
   disableBranding: z.boolean().optional(),
   mergeStrategy: z.enum(['merge', 'squash', 'rebase']).optional(),
+  commitConvention: z.string().optional(),
 }).strict();
 
 export const PromptConfigSchema = z.object({
@@ -41,7 +42,7 @@ export const PromptConfigSchema = z.object({
 }).strict();
 
 export const RunConfigSchema = z.object({
-  provider: z.string(),
+  provider: z.string().optional(),
   objective: z.string().optional(),
   chunkDirectory: z.string().optional(),
   model: z.string().optional(),

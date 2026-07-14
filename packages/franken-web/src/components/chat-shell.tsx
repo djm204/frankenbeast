@@ -14,6 +14,7 @@ import {
   type BeastCatalogEntry,
   type BeastRunDetail,
   type BeastRunSummary,
+  type ModuleConfig,
   type TrackedAgentDetail,
   type TrackedAgentInitAction,
   type TrackedAgentSummary,
@@ -1189,12 +1190,16 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               const executionMode = config.executionMode === 'container' ? 'container' : 'process';
               const launchChatSessionId = selectedSessionId ?? activeSessionId ?? undefined;
               const initAction = buildInitAction(definitionId, config, launchChatSessionId);
+              const moduleConfig = config.moduleConfig && typeof config.moduleConfig === 'object' && !Array.isArray(config.moduleConfig)
+                ? config.moduleConfig as ModuleConfig
+                : undefined;
               try {
                 await beastClient.createAgent({
                   definitionId,
                   initAction,
                   initConfig: config,
                   executionMode,
+                  ...(moduleConfig ? { moduleConfig } : {}),
                   ...(launchChatSessionId ? { chatSessionId: launchChatSessionId } : {}),
                 });
                 setBeastRefreshNonce((current) => current + 1);

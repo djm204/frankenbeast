@@ -75,6 +75,169 @@ describe('buildWizardLaunchConfig', () => {
     expect(config).not.toHaveProperty('prompts');
   });
 
+  it('splits module toggles into backend-consumed moduleConfig without deep module settings', () => {
+    const config = buildWizardLaunchConfig({
+      3: {
+        firewall: true,
+        skills: false,
+        firewallConfig: { ruleSet: 'strict' },
+        customFlag: true,
+      },
+    });
+
+    expect(config.moduleConfig).toEqual({
+      firewall: true,
+      skills: false,
+      memory: false,
+      planner: false,
+      critique: false,
+      governor: false,
+      heartbeat: false,
+    });
+    expect(config.modules).toEqual({
+      firewall: true,
+      skills: false,
+      firewallConfig: { ruleSet: 'strict' },
+      customFlag: true,
+    });
+  });
+
+  it('maps selected skills, llm targets, and git workflow settings into backend-consumed run config keys', () => {
+    expect(buildWizardLaunchConfig({
+      2: {
+        defaultProvider: 'openai',
+        defaultModel: 'gpt-5.3-codex-spark',
+        overrides: {
+          planning: { provider: 'anthropic', model: 'claude-sonnet-4-6', useDefault: false },
+          critique: { provider: 'openai', model: 'gpt-5.5', useDefault: true },
+        },
+      },
+      4: { selectedSkills: ['code-review', 'testing'] },
+      6: {
+        preset: 'feature-branch-worktree',
+        baseBranch: 'develop',
+        branchPattern: 'fix/{agent-name}/{id}',
+        prCreation: true,
+        commitConvention: 'conventional',
+        mergeStrategy: 'squash',
+      },
+    })).toMatchObject({
+      llmConfig: {
+        default: { provider: 'codex', model: 'gpt-5.3-codex-spark' },
+        overrides: {
+          'plan-build': { provider: 'claude', model: 'claude-sonnet-4-6' },
+          'issue-triage': { provider: 'claude', model: 'claude-sonnet-4-6' },
+          'issue-graph': { provider: 'claude', model: 'claude-sonnet-4-6' },
+        },
+      },
+      provider: 'codex',
+      model: 'gpt-5.3-codex-spark',
+      skills: ['code-review', 'testing'],
+      gitConfig: {
+        preset: 'feature-branch-worktree',
+        baseBranch: 'develop',
+        branchPattern: 'fix/',
+        prCreation: 'auto',
+        commitConvention: 'conventional',
+        mergeStrategy: 'squash',
+      },
+    });
+  });
+
+  it('emits compatible CLI providers for API, CLI, Aider, and custom wizard selections', () => {
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'openai-api', defaultModel: 'gpt-5.5' } })).toMatchObject({
+      provider: 'codex',
+      llmConfig: { default: { provider: 'codex', model: 'gpt-5.5' } },
+    });
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'anthropic-api', defaultModel: 'claude-sonnet-4-6' } })).toMatchObject({
+      provider: 'claude',
+      llmConfig: { default: { provider: 'claude', model: 'claude-sonnet-4-6' } },
+    });
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'aider', defaultModel: 'sonnet' } })).toMatchObject({
+      provider: 'aider',
+      llmConfig: { default: { provider: 'aider', model: 'sonnet' } },
+    });
+    expect(buildWizardLaunchConfig({ 2: { defaultProvider: 'prod-claude', defaultModel: 'sonnet' } })).toMatchObject({
+      provider: 'prod-claude',
+      llmConfig: { default: { provider: 'prod-claude', model: 'sonnet' } },
+    });
+  });
+
+  it('uses the execution override as the MartinLoop runtime provider', () => {
+    expect(buildWizardLaunchConfig({
+      1: { workflowType: 'martin-loop', provider: 'codex', objective: 'Implement chunks', chunkDirectory: 'tasks/chunks' },
+      2: {
+        defaultProvider: 'openai',
+        defaultModel: 'gpt-5.3-codex-spark',
+        overrides: {
+          execution: { provider: 'anthropic', model: 'claude-sonnet-4-6', useDefault: false },
+        },
+      },
+    })).toMatchObject({
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      llmConfig: {
+        default: { provider: 'codex', model: 'gpt-5.3-codex-spark' },
+        overrides: {
+          issues: { provider: 'claude', model: 'claude-sonnet-4-6' },
+          'cli-session': { provider: 'claude', model: 'claude-sonnet-4-6' },
+        },
+      },
+    });
+  });
+
+  it('does not emit critique LLM overrides because critique has its own reviewer wiring', () => {
+    expect(buildWizardLaunchConfig({
+      2: {
+        overrides: {
+          critique: { provider: 'openai', model: 'gpt-5.5', useDefault: false },
+        },
+      },
+    })).not.toHaveProperty('llmConfig.overrides.critique');
+  });
+
+  it('does not route reflection LLM targets to chunk-session compaction', () => {
+    const config = buildWizardLaunchConfig({
+      2: {
+        overrides: {
+          reflection: { provider: 'anthropic', model: 'claude-sonnet-4-6', useDefault: false },
+        },
+      },
+    });
+
+    expect(config).not.toHaveProperty('llmConfig.overrides.chunk-session-compaction');
+    expect(config).not.toHaveProperty('llmConfig.overrides.reflection');
+  });
+
+  it('expands selected git presets even when only the preset id is stored', () => {
+    expect(buildWizardLaunchConfig({
+      6: { preset: 'yolo-main' },
+    })).toMatchObject({
+      gitConfig: {
+        preset: 'yolo-main',
+        baseBranch: 'main',
+        branchPattern: '',
+        prCreation: 'disabled',
+        commitConvention: 'freeform',
+        mergeStrategy: 'merge',
+      },
+    });
+  });
+
+  it('preserves an intentionally blank branch pattern so users can clear the default prefix', () => {
+    expect(buildWizardLaunchConfig({
+      6: { branchPattern: '   ' },
+    })).toMatchObject({
+      gitConfig: { branchPattern: '' },
+    });
+  });
+
+  it('normalizes an emptied skills step to an empty run-config skills array', () => {
+    expect(buildWizardLaunchConfig({
+      4: { selectedSkills: [] },
+    })).toMatchObject({ skills: [] });
+  });
+
   it('wraps untrusted markdown attachments in restricted mode by default', () => {
     const config = buildWizardLaunchConfig({
       5: {

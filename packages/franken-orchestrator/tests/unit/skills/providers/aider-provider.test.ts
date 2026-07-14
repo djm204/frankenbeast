@@ -38,6 +38,13 @@ describe('AiderProvider', () => {
     expect(args).toContain('gpt-4');
   });
 
+  it('buildArgs includes the selected model', () => {
+    const args = provider.buildArgs({ model: 'sonnet' });
+    const idx = args.indexOf('--model');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe('sonnet');
+  });
+
   // -- supportsStreamJson --------------------------------------------------
 
   it('supportsStreamJson returns false', () => {

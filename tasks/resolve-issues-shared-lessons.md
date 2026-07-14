@@ -149,6 +149,9 @@
 - MCP stdio probes need stream-level `stdin` error handlers that defer EPIPE to the process close/timeout path, and Content-Length parsing must buffer bytes rather than UTF-16 strings. Add regressions for clean-exit EPIPE races, explicit initialize error responses before close(0), non-ASCII framed JSON bodies, and split `Content-Length` headers before retriggering Codex.
 - For SDK-backed stdio MCP servers, send newline-delimited JSON initialize requests while still accepting framed responses; on explicit initialize error responses, kill the still-running probe child instead of treating generic error status as a reason to skip cleanup.
 
+## 2026-07-10 — Doctor PR #1478 merge-conflict closeout
+- A guarded PR can regress from clean to `DIRTY` while waiting for an over-cap Codex decision. Before repeating the same approval blocker, re-check live `mergeStateStatus`; if it is dirty, fast-forward the local PR worktree to the remote head, merge `origin/main`, resolve only the actual conflict, run the narrow affected web/orchestrator checks, push the sync commit, then return to the same current-head Codex/bypass decision gate.
+
 ## 2026-07-10 — Network page stale refresh races
 - Network action/status refresh fixes need promise-order regressions: cover a superseded action refresh settling before the newer manual refresh, and a hung superseded action refresh where the newer manual refresh settles first.
 - Surface Network status refresh failures independently from selected-service log refreshes and initial config loads; slow/hung independent requests must not delay operator-facing status alerts.

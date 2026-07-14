@@ -31,8 +31,10 @@ export interface MartinLoopConfig {
   readonly staleMateLimit?: number | undefined;
   readonly maxTurns: number;
   readonly provider: string;
+  readonly model?: string | undefined;
   readonly command?: string | undefined;
   readonly providerCommands?: Readonly<Record<string, string>> | undefined;
+  readonly providerModels?: Readonly<Record<string, string>> | undefined;
   readonly timeoutMs: number;
   readonly workingDir?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
@@ -73,6 +75,7 @@ export interface MartinLoopResult {
 export interface GitIsolationConfig {
   readonly baseBranch: string;
   readonly branchPrefix: string;
+  readonly directCommit?: boolean | undefined;
   readonly autoCommit: boolean;
   readonly workingDir: string;
   readonly mergeStrategy?: 'merge' | 'squash' | 'rebase' | undefined;
