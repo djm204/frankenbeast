@@ -171,6 +171,32 @@ type VerifyCommandSpec = {
   readonly args: readonly string[];
 };
 
+
+type BudgetAbortWiring = {
+  readonly controller: AbortController;
+  readonly abortForBudget: (result: CircuitBreakerResult) => void;
+  readonly cleanup: () => void;
+  readonly getResult: () => CircuitBreakerResult | undefined;
+};
+
+type StaleMateState = {
+  lastSignature: string;
+  stalledIterations: number;
+};
+
+type BuildMartinConfigOptions = {
+  readonly chunkId: string;
+  readonly config: Partial<CliSkillConfig>;
+  readonly input: SkillInput;
+  readonly taskId: string | undefined;
+  readonly defaultPromiseTag: string;
+  readonly executionStage: string;
+  readonly budgetWiring: BudgetAbortWiring;
+  readonly checkpoint: ICheckpointStore | undefined;
+  readonly chunkSpan: Span;
+  readonly staleMateState: StaleMateState;
+};
+
 const ALLOWED_VERIFY_COMMANDS = new Map<string, VerifyCommandSpec>([
   ['npx tsc --noEmit', { command: process.platform === 'win32' ? 'npx.cmd' : 'npx', args: ['tsc', '--noEmit'] }],
   ['npm run typecheck', { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: ['run', 'typecheck'] }],
@@ -279,31 +305,10 @@ export class CliSkillExecutor {
     }
 
     const chunkId = this.extractChunkId(skillId);
-    const budgetAbortController = new AbortController();
-    let budgetAbortResult: CircuitBreakerResult | undefined;
-
-    const abortForBudget = (result: CircuitBreakerResult): void => {
-      budgetAbortResult = result;
-      if (!budgetAbortController.signal.aborted) {
-        budgetAbortController.abort(new BudgetExceededError(result.spendUsd, result.limitUsd));
-      }
-    };
-    const upstreamAbortSignal = config.martin?.abortSignal;
-    let upstreamAbortHandler: (() => void) | undefined;
-    const cleanupUpstreamAbortHandler = (): void => {
-      if (upstreamAbortSignal && upstreamAbortHandler) {
-        upstreamAbortSignal.removeEventListener('abort', upstreamAbortHandler);
-        upstreamAbortHandler = undefined;
-      }
-    };
-    if (upstreamAbortSignal?.aborted) {
-      budgetAbortController.abort(upstreamAbortSignal.reason);
-    } else if (upstreamAbortSignal) {
-      upstreamAbortHandler = () => {
-        budgetAbortController.abort(upstreamAbortSignal.reason);
-      };
-      upstreamAbortSignal.addEventListener('abort', upstreamAbortHandler, { once: true });
-    }
+    const isImpl = taskId ? !this.isHardenTaskId(taskId) : true;
+    const executionStage = isImpl ? 'impl' : 'harden';
+    const defaultPromiseTag = isImpl ? `IMPL_${chunkId}_DONE` : `HARDEN_${chunkId}_DONE`;
+    const budgetWiring = this.createBudgetAbortWiring(config.martin?.abortSignal);
 
     this.observer.recordReplay?.({
       kind: 'tool.call',
@@ -320,7 +325,7 @@ export class CliSkillExecutor {
     const preCost = this.computeCurrentCost();
     const preCheck = this.observer.breaker.check(preCost);
     if (preCheck.tripped) {
-      cleanupUpstreamAbortHandler();
+      budgetWiring.cleanup();
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
       return {
         output: `Budget exceeded: $${preCheck.spendUsd.toFixed(2)} / $${preCheck.limitUsd.toFixed(2)}`,
@@ -332,7 +337,7 @@ export class CliSkillExecutor {
     try {
       this.git.isolate(chunkId);
     } catch (err) {
-      cleanupUpstreamAbortHandler();
+      budgetWiring.cleanup();
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
       throw new Error(
         `Git isolation failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
@@ -341,187 +346,34 @@ export class CliSkillExecutor {
     const preMartinStatus = this.git.getStatus();
     const preMartinTrackedChanges = this.trackedChangesFromStatus(preMartinStatus);
     if (preMartinTrackedChanges.length > 0) {
-      cleanupUpstreamAbortHandler();
+      budgetWiring.cleanup();
       const errorMessage = 'git worktree has pre-existing tracked changes after isolation; refusing budget-managed execution';
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage });
       throw new Error(`${errorMessage}: ${preMartinTrackedChanges.join(', ')}`);
     }
     const preMartinUntrackedFiles = this.untrackedFilesFromStatus(preMartinStatus);
 
-    // Build martin config with defaults from input when not explicitly provided
-    const isImpl = taskId ? !this.isHardenTaskId(taskId) : true;
-    const executionStage = isImpl ? 'impl' : 'harden';
-    const defaultPromiseTag = isImpl ? `IMPL_${chunkId}_DONE` : `HARDEN_${chunkId}_DONE`;
-    const martinDefaults: MartinLoopConfig = {
-      prompt: input.objective,
-      promiseTag: defaultPromiseTag,
-      maxIterations: 10,
-      maxTurns: 25,
-      timeoutMs: 600_000,
-      workingDir: this.git.getWorkingDir(),
-      taskId,
+    const staleMateState: StaleMateState = { lastSignature: '', stalledIterations: 0 };
+    const wrappedConfig = this.buildMartinConfig({
       chunkId,
-      ...this.defaultMartinConfig,
-    };
-
-    // Wire onIteration for observer integration
-    const wrappedConfig: MartinLoopConfig = {
-      ...martinDefaults,
-      ...config.martin,
-      abortSignal: budgetAbortController.signal,
-      onRateLimit: (provider: string) => {
-        this.logger?.warn('MartinLoop: provider rate limited', { chunkId, provider }, 'martin');
-        return config.martin?.onRateLimit?.(provider);
-      },
-      onProviderAttempt: (provider: string, iteration: number, renderedPrompt?: string) => {
-        const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, provider, renderedPrompt);
-        const estimatedBudgetResult = this.observer.breaker.check(estimatedSpend);
-        if (estimatedBudgetResult.tripped) {
-          abortForBudget(estimatedBudgetResult);
-          throw new BudgetExceededError(estimatedBudgetResult.spendUsd, estimatedBudgetResult.limitUsd);
-        }
-
-        this.logger?.info('MartinLoop: provider attempt', { chunkId, provider, iteration }, 'martin');
-        // Show in-place progress line (overwritten by next update or final summary)
-        writeProgress(
-          formatIterationProgress({ chunkId, iteration, maxIterations: wrappedConfig.maxIterations }),
-          { final: false },
-        );
-        config.martin?.onProviderAttempt?.(provider, iteration, renderedPrompt);
-      },
-      onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset' | 'spawn-error') => {
-        this.logger?.warn('MartinLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'martin');
-        config.martin?.onProviderSwitch?.(fromProvider, toProvider, reason);
-      },
-      onSpawnError: (provider: string, error: string) => {
-        this.logger?.error('MartinLoop: provider spawn error', { chunkId, provider, error }, 'martin');
-        const currentCost = this.computeCurrentCost();
-        const budgetResult = this.observer.breaker.check(currentCost);
-        if (budgetResult.tripped) {
-          abortForBudget(budgetResult);
-        }
-        config.martin?.onSpawnError?.(provider, error);
-      },
-      onProviderTimeout: (provider: string, timeoutMs: number) => {
-        this.logger?.warn('MartinLoop: provider iteration timeout', { chunkId, provider, timeoutMs }, 'martin');
-        config.martin?.onProviderTimeout?.(provider, timeoutMs);
-      },
-      onSleep: (durationMs: number, source: string) => {
-        this.logger?.warn('MartinLoop: sleeping for rate limit reset', {
-          chunkId,
-          durationMs,
-          source,
-        }, 'martin');
-        config.martin?.onSleep?.(durationMs, source);
-      },
-      onIteration: (iteration: number, result: IterationResult) => {
-        // Print final summary line (not overwritten)
-        writeProgress(
-          formatIterationProgress({
-            chunkId,
-            iteration,
-            maxIterations: wrappedConfig.maxIterations,
-            durationMs: result.durationMs,
-            tokensEstimated: result.tokensEstimated,
-          }),
-          { final: true },
-        );
-        this.logger?.info('MartinLoop: iteration complete', {
-          chunkId,
-          iteration,
-          exitCode: result.exitCode,
-          rateLimited: result.rateLimited,
-          promiseDetected: result.promiseDetected,
-          ...(result.emittedPromiseTags && result.emittedPromiseTags.length > 0
-            ? { emittedPromiseTags: result.emittedPromiseTags }
-            : {}),
-          sleepMs: result.sleepMs,
-        }, 'martin');
-        // Full raw output -> build.log only (via debug, always captured)
-        // Embed as multi-line text (not JSON) so newlines are preserved in build.log
-        if (result.stderr) {
-          this.logger?.debug(`MartinLoop: iter ${iteration} stderr [${chunkId}]:\n${result.stderr}`, undefined, 'martin');
-        }
-        if (result.stdout) {
-          this.logger?.debug(`MartinLoop: iter ${iteration} stdout [${chunkId}] (${result.stdout.length} chars):\n${result.stdout.slice(0, 4000)}`, undefined, 'martin');
-        }
-        // Surface errors on terminal when iteration fails (non-rate-limit)
-        if (result.exitCode !== 0 && !result.rateLimited) {
-          this.logger?.error(
-            `MartinLoop: iter ${iteration} failed (exit ${result.exitCode})`,
-            result.failure ?? {
-              chunkId,
-              exitCode: result.exitCode,
-              stderr: result.stderr?.trim().split('\n').slice(-5).join('\n') ?? '',
-            },
-            'martin',
-          );
-        }
-        // Create iteration span
-        const iterSpan = this.observer.startSpan(this.observer.trace, {
-          name: `cli:${chunkId}:iter-${iteration}`,
-          parentSpanId: chunkSpan.id,
-        });
-
-        // Record token usage
-        this.observer.recordTokenUsage(
-          iterSpan,
-          {
-            model: result.provider,
-            promptTokens: Math.ceil((config.martin?.prompt?.length ?? 0) / 4),
-            completionTokens: result.tokensEstimated,
-          },
-          this.observer.counter,
-        );
-
-        // End iteration span
-        this.observer.endSpan(iterSpan, { status: 'completed' }, this.observer.loopDetector);
-
-        // Auto-commit + per-commit checkpoint recording
-        const committed = this.git.autoCommit(chunkId, executionStage, iteration);
-        if (committed && checkpoint && taskId) {
-          const commitHash = this.git.getCurrentHead();
-          checkpoint.recordCommit(taskId, executionStage, iteration, commitHash);
-        }
-
-        if (wrappedConfig.staleMateLimit !== undefined && !result.rateLimited) {
-          const signature = normalizeStaleMateSignature(result.stdout);
-          const outputChanged = signature.length > 0 && signature !== lastStaleMateSignature;
-          if (committed || outputChanged || result.promiseDetected) {
-            stalledIterations = 0;
-          } else {
-            stalledIterations++;
-          }
-          lastStaleMateSignature = signature;
-
-          if (stalledIterations >= wrappedConfig.staleMateLimit) {
-            throw new Error(
-              `MartinLoop stale mate for chunk "${chunkId}" after ${stalledIterations} non-progress iterations`,
-            );
-          }
-        }
-
-        // Budget check — stops before NEXT iteration
-        const currentCost = this.computeCurrentCost();
-        const budgetResult = this.observer.breaker.check(currentCost);
-        if (budgetResult.tripped) {
-          throw new BudgetExceededError(currentCost, budgetResult.limitUsd);
-        }
-
-        // Forward to original callback if provided
-        config.martin?.onIteration?.(iteration, result);
-      },
-    };
+      config,
+      input,
+      taskId,
+      defaultPromiseTag,
+      executionStage,
+      budgetWiring,
+      checkpoint,
+      chunkSpan,
+      staleMateState,
+    });
 
     // Run Martin loop
     let martinResult: MartinLoopResult;
-    let lastStaleMateSignature = '';
-    let stalledIterations = 0;
     const budgetPoll = setInterval(() => {
       const currentCost = this.computeCurrentCost();
       const budgetResult = this.observer.breaker.check(currentCost);
       if (budgetResult.tripped) {
-        abortForBudget(budgetResult);
+        budgetWiring.abortForBudget(budgetResult);
       }
     }, BUDGET_POLL_INTERVAL_MS);
     budgetPoll.unref?.();
@@ -531,8 +383,8 @@ export class CliSkillExecutor {
     } catch (err) {
       const budgetError = err instanceof BudgetExceededError
         ? err
-        : budgetAbortResult
-          ? new BudgetExceededError(budgetAbortResult.spendUsd, budgetAbortResult.limitUsd)
+        : budgetWiring.getResult()
+          ? new BudgetExceededError(budgetWiring.getResult()!.spendUsd, budgetWiring.getResult()!.limitUsd)
           : undefined;
 
       if (budgetError) {
@@ -551,9 +403,10 @@ export class CliSkillExecutor {
       );
     } finally {
       clearInterval(budgetPoll);
-      cleanupUpstreamAbortHandler();
+      budgetWiring.cleanup();
     }
 
+    const budgetAbortResult = budgetWiring.getResult();
     if (budgetAbortResult) {
       this.resetBudgetAbortedWorktree(preMartinUntrackedFiles);
       this.observer.setMetadata(chunkSpan, {
@@ -654,6 +507,241 @@ export class CliSkillExecutor {
       output: martinResult.output,
       tokensUsed: chunkTokensUsed,
     };
+  }
+
+
+  private createBudgetAbortWiring(upstreamAbortSignal?: AbortSignal): BudgetAbortWiring {
+    const controller = new AbortController();
+    let budgetAbortResult: CircuitBreakerResult | undefined;
+    let upstreamAbortHandler: (() => void) | undefined;
+
+    const abortForBudget = (result: CircuitBreakerResult): void => {
+      budgetAbortResult = result;
+      if (!controller.signal.aborted) {
+        controller.abort(new BudgetExceededError(result.spendUsd, result.limitUsd));
+      }
+    };
+
+    const cleanup = (): void => {
+      if (upstreamAbortSignal && upstreamAbortHandler) {
+        upstreamAbortSignal.removeEventListener('abort', upstreamAbortHandler);
+        upstreamAbortHandler = undefined;
+      }
+    };
+
+    if (upstreamAbortSignal?.aborted) {
+      controller.abort(upstreamAbortSignal.reason);
+    } else if (upstreamAbortSignal) {
+      upstreamAbortHandler = () => {
+        controller.abort(upstreamAbortSignal.reason);
+      };
+      upstreamAbortSignal.addEventListener('abort', upstreamAbortHandler, { once: true });
+    }
+
+    return {
+      controller,
+      abortForBudget,
+      cleanup,
+      getResult: () => budgetAbortResult,
+    };
+  }
+
+  private buildMartinConfig(options: BuildMartinConfigOptions): MartinLoopConfig {
+    const {
+      chunkId,
+      config,
+      input,
+      taskId,
+      defaultPromiseTag,
+      executionStage,
+      budgetWiring,
+      checkpoint,
+      chunkSpan,
+      staleMateState,
+    } = options;
+    const martinDefaults: MartinLoopConfig = {
+      prompt: input.objective,
+      promiseTag: defaultPromiseTag,
+      maxIterations: 10,
+      maxTurns: 25,
+      timeoutMs: 600_000,
+      workingDir: this.git.getWorkingDir(),
+      taskId,
+      chunkId,
+      ...this.defaultMartinConfig,
+    };
+
+    const wrappedConfig: MartinLoopConfig = {
+      ...martinDefaults,
+      ...config.martin,
+      abortSignal: budgetWiring.controller.signal,
+      onRateLimit: (provider: string) => {
+        this.logger?.warn('MartinLoop: provider rate limited', { chunkId, provider }, 'martin');
+        return config.martin?.onRateLimit?.(provider);
+      },
+      onProviderAttempt: (provider: string, iteration: number, renderedPrompt?: string) => {
+        const estimatedSpend = this.computeCurrentCost() + this.estimateUpcomingIterationCost(wrappedConfig, provider, renderedPrompt);
+        const estimatedBudgetResult = this.observer.breaker.check(estimatedSpend);
+        if (estimatedBudgetResult.tripped) {
+          budgetWiring.abortForBudget(estimatedBudgetResult);
+          throw new BudgetExceededError(estimatedBudgetResult.spendUsd, estimatedBudgetResult.limitUsd);
+        }
+
+        this.logger?.info('MartinLoop: provider attempt', { chunkId, provider, iteration }, 'martin');
+        writeProgress(
+          formatIterationProgress({ chunkId, iteration, maxIterations: wrappedConfig.maxIterations }),
+          { final: false },
+        );
+        config.martin?.onProviderAttempt?.(provider, iteration, renderedPrompt);
+      },
+      onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset' | 'spawn-error') => {
+        this.logger?.warn('MartinLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'martin');
+        config.martin?.onProviderSwitch?.(fromProvider, toProvider, reason);
+      },
+      onSpawnError: (provider: string, error: string) => {
+        this.logger?.error('MartinLoop: provider spawn error', { chunkId, provider, error }, 'martin');
+        const currentCost = this.computeCurrentCost();
+        const budgetResult = this.observer.breaker.check(currentCost);
+        if (budgetResult.tripped) {
+          budgetWiring.abortForBudget(budgetResult);
+        }
+        config.martin?.onSpawnError?.(provider, error);
+      },
+      onProviderTimeout: (provider: string, timeoutMs: number) => {
+        this.logger?.warn('MartinLoop: provider iteration timeout', { chunkId, provider, timeoutMs }, 'martin');
+        config.martin?.onProviderTimeout?.(provider, timeoutMs);
+      },
+      onSleep: (durationMs: number, source: string) => {
+        this.logger?.warn('MartinLoop: sleeping for rate limit reset', { chunkId, durationMs, source }, 'martin');
+        config.martin?.onSleep?.(durationMs, source);
+      },
+      onIteration: (iteration: number, result: IterationResult) => {
+        this.recordMartinIteration({
+          chunkId,
+          iteration,
+          result,
+          wrappedConfig,
+          config,
+          executionStage,
+          checkpoint,
+          taskId,
+          chunkSpan,
+          staleMateState,
+        });
+      },
+    };
+
+    return wrappedConfig;
+  }
+
+  private recordMartinIteration(options: {
+    readonly chunkId: string;
+    readonly iteration: number;
+    readonly result: IterationResult;
+    readonly wrappedConfig: MartinLoopConfig;
+    readonly config: Partial<CliSkillConfig>;
+    readonly executionStage: string;
+    readonly checkpoint: ICheckpointStore | undefined;
+    readonly taskId: string | undefined;
+    readonly chunkSpan: Span;
+    readonly staleMateState: StaleMateState;
+  }): void {
+    const { chunkId, iteration, result, wrappedConfig, config, executionStage, checkpoint, taskId, chunkSpan, staleMateState } = options;
+    writeProgress(
+      formatIterationProgress({
+        chunkId,
+        iteration,
+        maxIterations: wrappedConfig.maxIterations,
+        durationMs: result.durationMs,
+        tokensEstimated: result.tokensEstimated,
+      }),
+      { final: true },
+    );
+    this.logger?.info('MartinLoop: iteration complete', {
+      chunkId,
+      iteration,
+      exitCode: result.exitCode,
+      rateLimited: result.rateLimited,
+      promiseDetected: result.promiseDetected,
+      ...(result.emittedPromiseTags && result.emittedPromiseTags.length > 0
+        ? { emittedPromiseTags: result.emittedPromiseTags }
+        : {}),
+      sleepMs: result.sleepMs,
+    }, 'martin');
+    if (result.stderr) {
+      this.logger?.debug(`MartinLoop: iter ${iteration} stderr [${chunkId}]:\n${result.stderr}`, undefined, 'martin');
+    }
+    if (result.stdout) {
+      this.logger?.debug(`MartinLoop: iter ${iteration} stdout [${chunkId}] (${result.stdout.length} chars):\n${result.stdout.slice(0, 4000)}`, undefined, 'martin');
+    }
+    if (result.exitCode !== 0 && !result.rateLimited) {
+      this.logger?.error(
+        `MartinLoop: iter ${iteration} failed (exit ${result.exitCode})`,
+        result.failure ?? {
+          chunkId,
+          exitCode: result.exitCode,
+          stderr: result.stderr?.trim().split('\n').slice(-5).join('\n') ?? '',
+        },
+        'martin',
+      );
+    }
+
+    const iterSpan = this.observer.startSpan(this.observer.trace, {
+      name: `cli:${chunkId}:iter-${iteration}`,
+      parentSpanId: chunkSpan.id,
+    });
+    this.observer.recordTokenUsage(
+      iterSpan,
+      {
+        model: result.provider,
+        promptTokens: Math.ceil((config.martin?.prompt?.length ?? 0) / 4),
+        completionTokens: result.tokensEstimated,
+      },
+      this.observer.counter,
+    );
+    this.observer.endSpan(iterSpan, { status: 'completed' }, this.observer.loopDetector);
+
+    const committed = this.git.autoCommit(chunkId, executionStage, iteration);
+    if (committed && checkpoint && taskId) {
+      const commitHash = this.git.getCurrentHead();
+      checkpoint.recordCommit(taskId, executionStage, iteration, commitHash);
+    }
+
+    this.checkStaleMate({ chunkId, result, wrappedConfig, committed, staleMateState });
+
+    const currentCost = this.computeCurrentCost();
+    const budgetResult = this.observer.breaker.check(currentCost);
+    if (budgetResult.tripped) {
+      throw new BudgetExceededError(currentCost, budgetResult.limitUsd);
+    }
+
+    config.martin?.onIteration?.(iteration, result);
+  }
+
+  private checkStaleMate(options: {
+    readonly chunkId: string;
+    readonly result: IterationResult;
+    readonly wrappedConfig: MartinLoopConfig;
+    readonly committed: boolean;
+    readonly staleMateState: StaleMateState;
+  }): void {
+    const { chunkId, result, wrappedConfig, committed, staleMateState } = options;
+    if (wrappedConfig.staleMateLimit === undefined || result.rateLimited) return;
+
+    const signature = normalizeStaleMateSignature(result.stdout);
+    const outputChanged = signature.length > 0 && signature !== staleMateState.lastSignature;
+    if (committed || outputChanged || result.promiseDetected) {
+      staleMateState.stalledIterations = 0;
+    } else {
+      staleMateState.stalledIterations++;
+    }
+    staleMateState.lastSignature = signature;
+
+    if (staleMateState.stalledIterations >= wrappedConfig.staleMateLimit) {
+      throw new Error(
+        `MartinLoop stale mate for chunk "${chunkId}" after ${staleMateState.stalledIterations} non-progress iterations`,
+      );
+    }
   }
 
   private async attemptConflictResolution(

@@ -981,6 +981,266 @@ async function createChatSurfaceDeps(
   };
 }
 
+
+
+async function runNonSessionCommandIfRequested(options: {
+  readonly args: CliArgs;
+  readonly config: OrchestratorConfig;
+  readonly configLoadFallback: boolean;
+  readonly root: string;
+  readonly paths: ReturnType<typeof getProjectPaths>;
+}): Promise<boolean> {
+  const { args, config, configLoadFallback, root, paths } = options;
+  if (args.subcommand === 'beasts-daemon') {
+  await runBeastDaemonCommand(args, config, root, paths);
+  return true;
+  }
+
+  if (args.subcommand === 'network') {
+  await runNetworkCommand(args, config, root, paths);
+  return true;
+  }
+
+  if (args.subcommand === 'beasts') {
+  const io = createStdinIO();
+  try {
+    await handleBeastCommand({
+      args,
+      io,
+      paths,
+      print: printLine,
+    });
+  } finally {
+    io.close();
+  }
+  return true;
+  }
+
+  if (args.subcommand === 'init') {
+  const io = createStdinIO();
+  try {
+    await handleInitCommand({
+      args,
+      config,
+      configLoadFallback,
+      io,
+      paths,
+      print: printLine,
+    });
+  } finally {
+    io.close();
+  }
+  return true;
+  }
+
+  if (args.subcommand === 'skill') {
+  try {
+    const { SkillManager } = await import('../skills/skill-manager.js');
+    const skillsDir = join(paths.frankenbeastDir, 'skills');
+    const skillManager = new SkillManager(skillsDir, new Set());
+    await handleSkillCommand({
+      skillManager,
+      action: args.skillAction,
+      target: args.skillTarget,
+      command: args.skillCommand,
+      commandArgs: args.skillCommandArgs,
+      print: printLine,
+    });
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  }
+  return true;
+  }
+
+  if (args.subcommand === 'security') {
+  try {
+    await handleSecurityCommand({
+      action: args.securityAction,
+      target: args.securityTarget,
+      configPath: args.config ?? paths.configFile,
+      ...(config.security?.profile ? { currentProfile: config.security.profile } : {}),
+      ...(config.security ? { currentSecurity: config.security } : {}),
+      print: printLine,
+    });
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  }
+  return true;
+  }
+
+  return false;
+}
+
+async function runChatCommandIfRequested(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  root: string,
+  paths: ReturnType<typeof getProjectPaths>,
+  logger: BeastLogger,
+): Promise<boolean> {
+  if (args.subcommand !== 'chat' && args.subcommand !== 'chat-server') {
+    return false;
+  }
+  if (args.subcommand === 'chat') {
+    // Resolve the operator token so the attach client can authenticate
+    // when the managed chat-server has it configured (which it must, when
+    // exposed). Mirror chat-server's boot: try the configured secret
+    // store first (so deployments that keep the token only in the secure
+    // backend still work), then fall through to env / .env via
+    // resolveBeastOperatorToken.
+    let attachSecretStore: ISecretStore | undefined;
+    try {
+      const secureBackend = config.network.secureBackend ?? 'local-encrypted';
+      attachSecretStore = createSecretStore(secureBackend, {
+        projectRoot: root,
+        passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+      });
+    } catch {
+      attachSecretStore = undefined;
+    }
+    const attachOperatorToken = await resolveBeastOperatorToken(root, {
+      ...(attachSecretStore ? { secretStore: attachSecretStore } : {}),
+      config,
+    }).catch(() => undefined);
+    const managedAttachment = await resolveManagedChatAttachment({
+      config,
+      frankenbeastDir: paths.frankenbeastDir,
+      ...(attachOperatorToken ? { operatorToken: attachOperatorToken } : {}),
+    });
+    if (managedAttachment) {
+      await runManagedChatRepl({
+        attachment: managedAttachment,
+        projectId: paths.root.split('/').pop() ?? 'unknown',
+        verbose: args.verbose,
+      });
+      return true;
+    }
+  }
+
+  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = await createChatSurfaceDeps(args, config, paths);
+
+  if (args.subcommand === 'chat-server') {
+    let mutableConfig = config;
+    // Attempt to create a secret store for operator token resolution.
+    // Only succeeds when a passphrase is available (non-interactive boot path).
+    let bootSecretStore: import('../network/secret-store.js').ISecretStore | undefined;
+    try {
+      const secureBackend = config.network.secureBackend ?? 'local-encrypted';
+      bootSecretStore = createSecretStore(secureBackend, {
+        projectRoot: root,
+        passphrase: process.env.FRANKENBEAST_PASSPHRASE,
+      });
+    } catch {
+      // No passphrase available — fall through to env var / .env file resolution
+      bootSecretStore = undefined;
+    }
+    const beastOperatorToken = await resolveBeastOperatorToken(root, {
+      secretStore: bootSecretStore,
+      config,
+    });
+    const analytics = createSqliteAnalyticsService({
+      dbPath: join(paths.frankenbeastDir, 'beast.db'),
+    });
+    const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore, root);
+    const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL
+      ? assertLocalPlaintextOrSecureHttpUrl(
+          process.env.FRANKENBEAST_BEAST_DAEMON_URL,
+          'FRANKENBEAST_BEAST_DAEMON_URL',
+        )
+      : undefined;
+    const detectedBeastDaemonUrl = !explicitBeastDaemonUrl && beastOperatorToken
+      ? await resolveDetectedBeastsDaemonUrl(root, config, logger)
+      : undefined;
+    const beastDaemonUrl = explicitBeastDaemonUrl ?? detectedBeastDaemonUrl;
+    const localBeastServices = beastOperatorToken && !beastDaemonUrl
+      ? createBeastServices({
+          beastsDb: join(paths.frankenbeastDir, 'beast.db'),
+          beastLogsDir: paths.beastLogsDir,
+          root,
+        })
+      : undefined;
+    const allowedOrigins = Array.from(new Set([
+      ...(args.allowOrigin ? [args.allowOrigin] : []),
+      ...resolveDashboardAllowedOrigins(config),
+    ]));
+    const server = await startChatServer({
+      sessionStoreDir,
+      llm: chatLlm,
+      executionLlm: execLlm,
+      projectName: projectId,
+      ...(beastOperatorToken ? { operatorToken: beastOperatorToken } : {}),
+      ...(localBeastServices && beastOperatorToken
+        ? {
+            beastControl: {
+              ...localBeastServices,
+              operatorToken: beastOperatorToken,
+              security: new TransportSecurityService(),
+              rateLimit: { windowMs: 60_000, max: 20 },
+            },
+            disposeBeastControl: localBeastServices.dispose,
+          }
+        : {}),
+      ...(beastOperatorToken && beastDaemonUrl
+        ? {
+            beastDaemon: {
+              baseUrl: beastDaemonUrl,
+              operatorToken: beastOperatorToken,
+            },
+          }
+        : {}),
+      networkControl: {
+        root,
+        frankenbeastDir: paths.frankenbeastDir,
+        configFile: paths.configFile,
+        allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+        getConfig: () => mutableConfig,
+        setConfig: (nextConfig) => {
+          mutableConfig = nextConfig;
+        },
+      },
+      ...(commsConfig ? { commsConfig } : {}),
+      ...(args.host ? { host: args.host } : {}),
+      ...(args.port !== undefined ? { port: args.port } : {}),
+      ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
+      // Consolidated deps — skill/dashboard routes activate when providers are configured
+      ...(skillManager ? { skillManager } : {}),
+      ...(providerRegistry ? { providerRegistry } : {}),
+      ...(skillManager && providerRegistry
+        ? {
+            dashboardDeps: {
+              skillManager,
+              getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
+              getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
+            },
+          }
+        : {}),
+      analyticsDeps: { analytics },
+    });
+    printLine(`Chat server listening on ${server.url}`);
+    return true;
+  }
+
+  const sessionStore = new FileSessionStore(sessionStoreDir);
+  const runtime = createChatRuntime({
+    chatLlm,
+    executionLlm: execLlm,
+    projectName: projectId,
+    sessionContinuation: true,
+  });
+  const repl = new ChatRepl({
+    engine: runtime.engine,
+    turnRunner: runtime.turnRunner,
+    projectId,
+    sessionStore,
+    verbose: args.verbose,
+  });
+  await repl.start();
+  await finalize();
+  return true;
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs();
 
@@ -1094,241 +1354,11 @@ export async function main(): Promise<void> {
   validateStateDirBeforeScaffold(config, scaffoldPaths);
   scaffoldFrankenbeast(scaffoldPaths);
 
-  if (args.subcommand === 'beasts-daemon') {
-    await runBeastDaemonCommand(args, config, root, paths);
+  if (await runNonSessionCommandIfRequested({ args, config, configLoadFallback, root, paths })) {
     return;
   }
 
-  if (args.subcommand === 'network') {
-    await runNetworkCommand(args, config, root, paths);
-    return;
-  }
-
-  if (args.subcommand === 'beasts') {
-    const io = createStdinIO();
-    try {
-      await handleBeastCommand({
-        args,
-        io,
-        paths,
-        print: printLine,
-      });
-    } finally {
-      io.close();
-    }
-    return;
-  }
-
-  if (args.subcommand === 'init') {
-    const io = createStdinIO();
-    try {
-      await handleInitCommand({
-        args,
-        config,
-        configLoadFallback,
-        io,
-        paths,
-        print: printLine,
-      });
-    } finally {
-      io.close();
-    }
-    return;
-  }
-
-  if (args.subcommand === 'skill') {
-    try {
-      const { SkillManager } = await import('../skills/skill-manager.js');
-      const skillsDir = join(paths.frankenbeastDir, 'skills');
-      const skillManager = new SkillManager(skillsDir, new Set());
-      await handleSkillCommand({
-        skillManager,
-        action: args.skillAction,
-        target: args.skillTarget,
-        command: args.skillCommand,
-        commandArgs: args.skillCommandArgs,
-        print: printLine,
-      });
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  if (args.subcommand === 'security') {
-    try {
-      await handleSecurityCommand({
-        action: args.securityAction,
-        target: args.securityTarget,
-        configPath: args.config ?? paths.configFile,
-        ...(config.security?.profile ? { currentProfile: config.security.profile } : {}),
-        ...(config.security ? { currentSecurity: config.security } : {}),
-        print: printLine,
-      });
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  if (args.subcommand === 'chat' || args.subcommand === 'chat-server') {
-    if (args.subcommand === 'chat') {
-      // Resolve the operator token so the attach client can authenticate
-      // when the managed chat-server has it configured (which it must, when
-      // exposed). Mirror chat-server's boot: try the configured secret
-      // store first (so deployments that keep the token only in the secure
-      // backend still work), then fall through to env / .env via
-      // resolveBeastOperatorToken.
-      let attachSecretStore: ISecretStore | undefined;
-      try {
-        const secureBackend = config.network.secureBackend ?? 'local-encrypted';
-        attachSecretStore = createSecretStore(secureBackend, {
-          projectRoot: root,
-          passphrase: process.env.FRANKENBEAST_PASSPHRASE,
-        });
-      } catch {
-        attachSecretStore = undefined;
-      }
-      const attachOperatorToken = await resolveBeastOperatorToken(root, {
-        ...(attachSecretStore ? { secretStore: attachSecretStore } : {}),
-        config,
-      }).catch(() => undefined);
-      const managedAttachment = await resolveManagedChatAttachment({
-        config,
-        frankenbeastDir: paths.frankenbeastDir,
-        ...(attachOperatorToken ? { operatorToken: attachOperatorToken } : {}),
-      });
-      if (managedAttachment) {
-        await runManagedChatRepl({
-          attachment: managedAttachment,
-          projectId: paths.root.split('/').pop() ?? 'unknown',
-          verbose: args.verbose,
-        });
-        return;
-      }
-    }
-
-    const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = await createChatSurfaceDeps(args, config, paths);
-
-    if (args.subcommand === 'chat-server') {
-      let mutableConfig = config;
-      // Attempt to create a secret store for operator token resolution.
-      // Only succeeds when a passphrase is available (non-interactive boot path).
-      let bootSecretStore: import('../network/secret-store.js').ISecretStore | undefined;
-      try {
-        const secureBackend = config.network.secureBackend ?? 'local-encrypted';
-        bootSecretStore = createSecretStore(secureBackend, {
-          projectRoot: root,
-          passphrase: process.env.FRANKENBEAST_PASSPHRASE,
-        });
-      } catch {
-        // No passphrase available — fall through to env var / .env file resolution
-        bootSecretStore = undefined;
-      }
-      const beastOperatorToken = await resolveBeastOperatorToken(root, {
-        secretStore: bootSecretStore,
-        config,
-      });
-      const analytics = createSqliteAnalyticsService({
-        dbPath: join(paths.frankenbeastDir, 'beast.db'),
-      });
-      const commsConfig = await buildChatServerCommsConfig(config, bootSecretStore, root);
-      const explicitBeastDaemonUrl = process.env.FRANKENBEAST_BEAST_DAEMON_URL
-        ? assertLocalPlaintextOrSecureHttpUrl(
-            process.env.FRANKENBEAST_BEAST_DAEMON_URL,
-            'FRANKENBEAST_BEAST_DAEMON_URL',
-          )
-        : undefined;
-      const detectedBeastDaemonUrl = !explicitBeastDaemonUrl && beastOperatorToken
-        ? await resolveDetectedBeastsDaemonUrl(root, config, logger)
-        : undefined;
-      const beastDaemonUrl = explicitBeastDaemonUrl ?? detectedBeastDaemonUrl;
-      const localBeastServices = beastOperatorToken && !beastDaemonUrl
-        ? createBeastServices({
-            beastsDb: join(paths.frankenbeastDir, 'beast.db'),
-            beastLogsDir: paths.beastLogsDir,
-            root,
-          })
-        : undefined;
-      const allowedOrigins = Array.from(new Set([
-        ...(args.allowOrigin ? [args.allowOrigin] : []),
-        ...resolveDashboardAllowedOrigins(config),
-      ]));
-      const server = await startChatServer({
-        sessionStoreDir,
-        llm: chatLlm,
-        executionLlm: execLlm,
-        projectName: projectId,
-        ...(beastOperatorToken ? { operatorToken: beastOperatorToken } : {}),
-        ...(localBeastServices && beastOperatorToken
-          ? {
-              beastControl: {
-                ...localBeastServices,
-                operatorToken: beastOperatorToken,
-                security: new TransportSecurityService(),
-                rateLimit: { windowMs: 60_000, max: 20 },
-              },
-              disposeBeastControl: localBeastServices.dispose,
-            }
-          : {}),
-        ...(beastOperatorToken && beastDaemonUrl
-          ? {
-              beastDaemon: {
-                baseUrl: beastDaemonUrl,
-                operatorToken: beastOperatorToken,
-              },
-            }
-          : {}),
-        networkControl: {
-          root,
-          frankenbeastDir: paths.frankenbeastDir,
-          configFile: paths.configFile,
-          allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
-          getConfig: () => mutableConfig,
-          setConfig: (nextConfig) => {
-            mutableConfig = nextConfig;
-          },
-        },
-        ...(commsConfig ? { commsConfig } : {}),
-        ...(args.host ? { host: args.host } : {}),
-        ...(args.port !== undefined ? { port: args.port } : {}),
-        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
-        // Consolidated deps — skill/dashboard routes activate when providers are configured
-        ...(skillManager ? { skillManager } : {}),
-        ...(providerRegistry ? { providerRegistry } : {}),
-        ...(skillManager && providerRegistry
-          ? {
-              dashboardDeps: {
-                skillManager,
-                getSecurityConfig: () => resolveConfigSecurity(mutableConfig),
-                getProviders: () => buildDashboardProviderSnapshot(mutableConfig, providerRegistry, [resolveSelectedProvider(args, mutableConfig), ...(args.providers ?? [])]),
-              },
-            }
-          : {}),
-        analyticsDeps: { analytics },
-      });
-      printLine(`Chat server listening on ${server.url}`);
-      return;
-    }
-
-    const sessionStore = new FileSessionStore(sessionStoreDir);
-    const runtime = createChatRuntime({
-      chatLlm,
-      executionLlm: execLlm,
-      projectName: projectId,
-      sessionContinuation: true,
-    });
-    const repl = new ChatRepl({
-      engine: runtime.engine,
-      turnRunner: runtime.turnRunner,
-      projectId,
-      sessionStore,
-      verbose: args.verbose,
-    });
-    await repl.start();
-    await finalize();
+  if (await runChatCommandIfRequested(args, config, root, paths, logger)) {
     return;
   }
 

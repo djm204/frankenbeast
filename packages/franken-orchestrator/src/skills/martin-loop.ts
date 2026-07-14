@@ -25,6 +25,12 @@ import { tryExtractTextFromNode } from './providers/index.js';
 import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
 import { classifyCommandFailure, commandFailureFromExecError, parseResetTimeText, type CommandFailure } from '../errors/command-failure.js';
 
+type RunLoopRateLimitState = {
+  readonly activeProvider: string;
+  readonly pendingSleepMs: number;
+  readonly chunkSession: ChunkSession | undefined;
+};
+
 export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: number; source: string } {
   return parseResetTimeText(`${stderr}\n${stdout}`);
 }
@@ -623,151 +629,45 @@ export class MartinLoop {
 
       config.onIteration?.(iteration, iterResult);
 
-      if (chunkSession) {
-        chunkSession = this.appendIterationOutput(chunkSession, activeProvider, normalizedStdout, iteration);
-
-        if (config.contextUsage) {
-          const usage = config.contextUsage(renderedPrompt, activeProvider, resolved.defaultContextWindowTokens());
-          chunkSession = {
-            ...chunkSession,
-            contextWindow: {
-              ...chunkSession.contextWindow,
-              provider: activeProvider,
-              usedTokens: usage.usedTokens,
-              maxTokens: usage.maxTokens,
-              usageRatio: usage.usageRatio,
-              compactThreshold: usage.threshold,
-            },
-            updatedAt: isoNow(),
-          };
-        }
-
-        config.sessionStore?.save(chunkSession);
-
-        if (
-          config.contextUsage &&
-          config.snapshotStore &&
-          config.compactor &&
-          chunkSession.contextWindow.usageRatio >= chunkSession.contextWindow.compactThreshold
-        ) {
-          config.snapshotStore.writeSnapshot(chunkSession, 'pre-compaction');
-          chunkSession = await config.compactor.compact(chunkSession);
-          config.sessionStore?.save(chunkSession);
-        }
-      }
+      chunkSession = await this.persistIterationSession({
+        chunkSession,
+        activeProvider,
+        normalizedStdout,
+        iteration,
+        renderedPrompt,
+        resolved,
+        config,
+      });
 
       // Rate limit: provider fallback chain
       if (rateLimited) {
         iteration--;
-
-        // Notify via legacy callback (non-controlling)
-        config.onRateLimit?.(activeProvider);
-
-        // Track this provider as exhausted
-        exhaustedProviders.set(activeProvider, failure!);
-
-        // Find next non-exhausted provider
-        const nextProvider = providers.find(p => !exhaustedProviders.has(p));
-
-        if (nextProvider) {
-          // Switch to next provider, retry immediately
-          config.onProviderSwitch?.(activeProvider, nextProvider, 'rate-limit');
-          activeProvider = nextProvider;
-          if (chunkSession) {
-            chunkSession = {
-              ...chunkSession,
-              activeProvider,
-              updatedAt: isoNow(),
-            };
-            config.sessionStore?.save(chunkSession);
-          }
-          continue;
-        }
-
-        // All providers exhausted — parse reset times and sleep
-        let shortestSleep = Infinity;
-        let shortestSource = 'unknown';
-
-        for (const [providerName, data] of exhaustedProviders) {
-          if (data.retryAfterMs !== undefined) {
-            const sleepSeconds = data.retryAfterMs / 1000;
-            if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
-              shortestSleep = sleepSeconds;
-              shortestSource = `${providerName} parseRetryAfter`;
-            }
-            continue;
-          }
-
-          const parsed = parseResetTime(data.stderr, data.stdout);
-          if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
-            shortestSleep = parsed.sleepSeconds;
-            shortestSource = parsed.source;
-          }
-        }
-
-        let sleepMs: number;
-        let sleepSource: string;
-
-        if (shortestSleep === Infinity) {
-          // No parseable reset time — fallback to 120s
-          sleepMs = 120_000;
-          sleepSource = 'unknown';
-          // Log warning with raw stderr so user can see what the API said
-          const rawStderrs = [...exhaustedProviders.entries()]
-            .map(([p, d]) => `${p}: ${d.stderr}`)
-            .join(' | ');
-          console.warn(`[MartinLoop] Rate limit reset time could not be determined. Raw stderr: ${rawStderrs}`);
-        } else {
-          sleepMs = shortestSleep * 1000;
-          sleepSource = shortestSource;
-        }
-
-        // Fire onSleep before sleeping
-        config.onSleep?.(sleepMs, sleepSource);
-
-        // Sleep until reset (abort-aware so SIGINT can interrupt long waits)
-        await sleepWithAbort(sleepMs, sleepFn, config.abortSignal);
-
-        // Track the sleep duration for the next iteration's report
-        pendingSleepMs = sleepMs;
-
-        // Clear exhausted state, reset to original provider
-        exhaustedProviders.clear();
-        if (activeProvider !== initialProvider) {
-          config.onProviderSwitch?.(activeProvider, initialProvider, 'post-sleep-reset');
-        }
-        activeProvider = initialProvider;
-        if (chunkSession) {
-          chunkSession = {
-            ...chunkSession,
-            activeProvider,
-            updatedAt: isoNow(),
-          };
-          config.sessionStore?.save(chunkSession);
-        }
+        const nextState = await this.handleRateLimitedIteration({
+          config,
+          providers,
+          initialProvider,
+          activeProvider,
+          failure: failure!,
+          exhaustedProviders,
+          chunkSession,
+          sleepFn,
+        });
+        activeProvider = nextState.activeProvider;
+        pendingSleepMs = nextState.pendingSleepMs;
+        chunkSession = nextState.chunkSession;
         continue;
       }
 
       // Promise detected — verify meaningful output
       if (promiseDetected) {
-        const stripped = normalizedStdout.replace(promiseRegex, '').trim();
-        if (stripped.length === 0) {
-          // Promise without meaningful changes — reject
-          return {
-            completed: false,
-            iterations: iteration,
-            output: lastOutput,
-            tokensUsed: totalTokens,
-            emittedPromiseTags: lastEmittedPromiseTags,
-          };
-        }
-        return {
-          completed: true,
-          iterations: iteration,
-          output: lastOutput,
-          tokensUsed: totalTokens,
-          emittedPromiseTags: lastEmittedPromiseTags,
-        };
+        return this.finalizePromiseDetectedIteration({
+          normalizedStdout,
+          promiseRegex,
+          iteration,
+          lastOutput,
+          totalTokens,
+          lastEmittedPromiseTags,
+        });
       }
     }
 
@@ -778,6 +678,183 @@ export class MartinLoop {
       tokensUsed: totalTokens,
       emittedPromiseTags: lastEmittedPromiseTags,
     };
+  }
+
+
+
+
+  private finalizePromiseDetectedIteration(options: {
+    readonly normalizedStdout: string;
+    readonly promiseRegex: RegExp;
+    readonly iteration: number;
+    readonly lastOutput: string;
+    readonly totalTokens: number;
+    readonly lastEmittedPromiseTags: readonly string[];
+  }): MartinLoopResult {
+    const { normalizedStdout, promiseRegex, iteration, lastOutput, totalTokens, lastEmittedPromiseTags } = options;
+    const stripped = normalizedStdout.replace(promiseRegex, '').trim();
+    if (stripped.length === 0) {
+      return {
+        completed: false,
+        iterations: iteration,
+        output: lastOutput,
+        tokensUsed: totalTokens,
+        emittedPromiseTags: lastEmittedPromiseTags,
+      };
+    }
+    return {
+      completed: true,
+      iterations: iteration,
+      output: lastOutput,
+      tokensUsed: totalTokens,
+      emittedPromiseTags: lastEmittedPromiseTags,
+    };
+  }
+
+  private async persistIterationSession(options: {
+    readonly chunkSession: ChunkSession | undefined;
+    readonly activeProvider: string;
+    readonly normalizedStdout: string;
+    readonly iteration: number;
+    readonly renderedPrompt: string;
+    readonly resolved: ICliProvider;
+    readonly config: MartinLoopConfig;
+  }): Promise<ChunkSession | undefined> {
+    const { chunkSession, activeProvider, normalizedStdout, iteration, renderedPrompt, resolved, config } = options;
+    if (!chunkSession) return undefined;
+
+    let nextSession = this.appendIterationOutput(chunkSession, activeProvider, normalizedStdout, iteration);
+
+    if (config.contextUsage) {
+      const usage = config.contextUsage(renderedPrompt, activeProvider, resolved.defaultContextWindowTokens());
+      nextSession = {
+        ...nextSession,
+        contextWindow: {
+          ...nextSession.contextWindow,
+          provider: activeProvider,
+          usedTokens: usage.usedTokens,
+          maxTokens: usage.maxTokens,
+          usageRatio: usage.usageRatio,
+          compactThreshold: usage.threshold,
+        },
+        updatedAt: isoNow(),
+      };
+    }
+
+    config.sessionStore?.save(nextSession);
+
+    if (
+      config.contextUsage &&
+      config.snapshotStore &&
+      config.compactor &&
+      nextSession.contextWindow.usageRatio >= nextSession.contextWindow.compactThreshold
+    ) {
+      config.snapshotStore.writeSnapshot(nextSession, 'pre-compaction');
+      nextSession = await config.compactor.compact(nextSession);
+      config.sessionStore?.save(nextSession);
+    }
+
+    return nextSession;
+  }
+
+  private async handleRateLimitedIteration(options: {
+    readonly config: MartinLoopConfig;
+    readonly providers: readonly string[];
+    readonly initialProvider: string;
+    readonly activeProvider: string;
+    readonly failure: CommandFailure;
+    readonly exhaustedProviders: Map<string, CommandFailure>;
+    readonly chunkSession: ChunkSession | undefined;
+    readonly sleepFn: (durationMs: number) => Promise<void>;
+  }): Promise<RunLoopRateLimitState> {
+    const {
+      config,
+      providers,
+      initialProvider,
+      activeProvider,
+      failure,
+      exhaustedProviders,
+      chunkSession,
+      sleepFn,
+    } = options;
+
+    config.onRateLimit?.(activeProvider);
+    exhaustedProviders.set(activeProvider, failure);
+
+    const nextProvider = providers.find(p => !exhaustedProviders.has(p));
+    if (nextProvider) {
+      config.onProviderSwitch?.(activeProvider, nextProvider, 'rate-limit');
+      return {
+        activeProvider: nextProvider,
+        pendingSleepMs: 0,
+        chunkSession: this.updateChunkSessionProvider(chunkSession, nextProvider, config),
+      };
+    }
+
+    const { sleepMs, sleepSource } = this.resolveProviderExhaustionSleep(exhaustedProviders);
+    config.onSleep?.(sleepMs, sleepSource);
+    await sleepWithAbort(sleepMs, sleepFn, config.abortSignal);
+
+    exhaustedProviders.clear();
+    if (activeProvider !== initialProvider) {
+      config.onProviderSwitch?.(activeProvider, initialProvider, 'post-sleep-reset');
+    }
+
+    return {
+      activeProvider: initialProvider,
+      pendingSleepMs: sleepMs,
+      chunkSession: this.updateChunkSessionProvider(chunkSession, initialProvider, config),
+    };
+  }
+
+  private resolveProviderExhaustionSleep(exhaustedProviders: Map<string, CommandFailure>): {
+    readonly sleepMs: number;
+    readonly sleepSource: string;
+  } {
+    let shortestSleep = Infinity;
+    let shortestSource = 'unknown';
+
+    for (const [providerName, data] of exhaustedProviders) {
+      if (data.retryAfterMs !== undefined) {
+        const sleepSeconds = data.retryAfterMs / 1000;
+        if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
+          shortestSleep = sleepSeconds;
+          shortestSource = `${providerName} parseRetryAfter`;
+        }
+        continue;
+      }
+
+      const parsed = parseResetTime(data.stderr, data.stdout);
+      if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
+        shortestSleep = parsed.sleepSeconds;
+        shortestSource = parsed.source;
+      }
+    }
+
+    if (shortestSleep !== Infinity) {
+      return { sleepMs: shortestSleep * 1000, sleepSource: shortestSource };
+    }
+
+    const rawStderrs = [...exhaustedProviders.entries()]
+      .map(([p, d]) => `${p}: ${d.stderr}`)
+      .join(' | ');
+    console.warn(`[MartinLoop] Rate limit reset time could not be determined. Raw stderr: ${rawStderrs}`);
+    return { sleepMs: 120_000, sleepSource: 'unknown' };
+  }
+
+  private updateChunkSessionProvider(
+    chunkSession: ChunkSession | undefined,
+    activeProvider: string,
+    config: MartinLoopConfig,
+  ): ChunkSession | undefined {
+    if (!chunkSession) return undefined;
+    const updated = {
+      ...chunkSession,
+      activeProvider,
+      updatedAt: isoNow(),
+    };
+    config.sessionStore?.save(updated);
+    return updated;
   }
 
   private loadOrCreateChunkSession(config: MartinLoopConfig, providerName: string): ChunkSession | undefined {
