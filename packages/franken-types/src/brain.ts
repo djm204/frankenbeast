@@ -116,6 +116,7 @@ export interface BrainSnapshot {
   episodic: EpisodicEvent[];
   checkpoint: ExecutionState | null;
   deletionGuards?: MemoryDeletionGuardSnapshot[];
+  deletionGuardHashKey?: string;
   metadata: {
     lastProvider: string;
     switchReason: string;
@@ -162,6 +163,7 @@ export const BrainSnapshotSchema = z.object({
   episodic: z.array(EpisodicEventSchema),
   checkpoint: ExecutionStateSchema.nullable(),
   deletionGuards: z.array(MemoryDeletionGuardSnapshotSchema).optional(),
+  deletionGuardHashKey: z.string().min(1).optional(),
   metadata: z.object({
     lastProvider: z.string(),
     switchReason: z.string(),

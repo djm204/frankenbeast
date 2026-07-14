@@ -676,6 +676,54 @@ describe('SqliteBrain', () => {
       expect(() => brain.working.set('project:prod:task', 'allowed unrelated key segment')).not.toThrow();
     });
 
+    it('counts dry-run matches from other live unflushed working-memory instances', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-rtf-dry-live-count-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const stale = new SqliteBrain(dbPath);
+        stale.working.set('contact', 'alice@example.test');
+
+        const forgetter = new SqliteBrain(dbPath);
+        const report = forgetter.rightToForget({ query: 'alice@example.test', dryRun: true });
+
+        expect(report.deleted.working).toBe(1);
+        expect(report.remainingReferences).toBeGreaterThanOrEqual(1);
+        expect(stale.working.get('contact')).toBe('alice@example.test');
+
+        forgetter.close();
+        stale.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('deletes and guards working rows that contain spaced category markers', () => {
+      brain.working.set('marker-only', 'category: pii');
+
+      const report = brain.rightToForget({ category: 'pii' });
+
+      expect(report.deleted.working).toBe(1);
+      expect(brain.working.has('marker-only')).toBe(false);
+      expect(() => brain.working.set('marker-again', 'category: pii')).toThrow(/right-to-forget/);
+    });
+
+    it('uses keyed deletion hashes instead of deterministic unsalted selector and guard hashes', () => {
+      const selector = { category: 'pii', query: 'alice@example.test', type: 'all' };
+      const report = brain.rightToForget(selector);
+      const snapshot = brain.serialize();
+
+      const deterministicSelectorHash = createHash('sha256')
+        .update(JSON.stringify(selector))
+        .digest('hex');
+      const deterministicGuardHash = queryGuardHash('alice@example.test');
+
+      expect(report.selectorHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(report.selectorHash).not.toBe(deterministicSelectorHash);
+      expect(snapshot.deletionGuards?.some((guard) => guard.valueHash === deterministicGuardHash)).toBe(false);
+      expect(snapshot.deletionGuardHashKey).toEqual(expect.any(String));
+    });
+
     it('requires at least one selector', () => {
       expect(() => brain.rightToForget({})).toThrow(/requires at least one/);
     });
@@ -944,6 +992,11 @@ describe('SqliteBrain', () => {
           version: CURRENT_MEMORY_SCHEMA_VERSION,
           recordCount: 0,
         },
+        {
+          store: 'memory_deletion_hash_keys',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 1,
+        },
       ]);
 
       const db = (
@@ -1060,6 +1113,11 @@ describe('SqliteBrain', () => {
           },
           {
             store: 'memory_deletion_guards',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_deletion_hash_keys',
             version: CURRENT_MEMORY_SCHEMA_VERSION,
             recordCount: 0,
           },
@@ -2282,6 +2340,20 @@ describe('SqliteBrain', () => {
       snapshot.working = { 'pii:email': { value: 'alice@example.test', category: 'pii' } };
 
       expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/right-to-forget/);
+      source.close();
+    });
+
+    it('hydrate() rejects serialized deletion guards with unsupported future schema versions', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('pii:email', 'alice@example.test');
+      source.rightToForget({ query: 'alice@example.test' });
+      const snapshot = source.serialize();
+      snapshot.deletionGuards = snapshot.deletionGuards?.map((guard) => ({
+        ...guard,
+        schemaVersion: CURRENT_MEMORY_SCHEMA_VERSION + 1,
+      }));
+
+      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(UnsupportedMemorySchemaVersionError);
       source.close();
     });
 
