@@ -40,7 +40,7 @@ describe('LlmPlanner', () => {
     const prompt = llmClient.complete.mock.calls[0]?.[0] as string;
     expect(prompt).toContain('{ "tasks": [{ "id": "t1", "objective": "...", "requiredSkills": ["llm-generate"], "dependsOn": [] }] }');
     expect(prompt).toContain('Source kind: planner-context');
-    expect(prompt).toContain('Source: plan-intent.context');
+    expect(prompt).toContain('Source: "plan-intent.context"');
     expect(prompt).toContain('UNTRUSTED DATA from retrieval');
     expect(prompt).toContain('| {"repo":"frankenbeast"}');
   });

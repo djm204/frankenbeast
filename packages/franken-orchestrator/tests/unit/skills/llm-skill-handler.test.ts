@@ -21,7 +21,7 @@ describe('LlmSkillHandler', () => {
     expect(prompt).toContain('Summarize the plan');
     expect(prompt).toContain('ADR-001: Prefer deterministic outputs');
     expect(prompt).toContain('Source kind: memory');
-    expect(prompt).toContain('Source: memory.context');
+    expect(prompt).toContain('Source: "memory.context"');
     expect(prompt).toContain('UNTRUSTED DATA from retrieval');
     expect(prompt).toContain('| - [ADRs] ADR-001: Prefer deterministic outputs');
     expect(prompt).toContain('Always validate inputs');
