@@ -76,15 +76,50 @@ export function cleanLlmJson(raw: string, options: CleanLlmJsonOptions = {}): st
   const extracted = extractJsonStructure(text);
   if (extracted !== null) {
     // Strip trailing commas before } or ] (common LLM artifact)
-    return extracted.replace(/,\s*([}\]])/g, '$1');
+    return stripTrailingJsonCommas(extracted);
   }
 
   // Last resort: strip fences and trailing commas, hope for the best
   text = text.replace(/^`{3,}\w*\s*\n?/, '');
   text = text.replace(/\n?\s*`{3,}\s*$/, '');
   text = text.trim();
-  text = text.replace(/,\s*([}\]])/g, '$1');
+  text = stripTrailingJsonCommas(text);
   return text;
+}
+
+function stripTrailingJsonCommas(text: string): string {
+  let result = '';
+  let inStr = false;
+  let esc = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (esc) {
+      esc = false;
+      result += ch;
+      continue;
+    }
+    if (ch === '\\' && inStr) {
+      esc = true;
+      result += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      result += ch;
+      continue;
+    }
+    if (!inStr && ch === ',') {
+      let j = i + 1;
+      while (j < text.length && /\s/u.test(text[j]!)) j++;
+      if (text[j] === '}' || text[j] === ']') {
+        continue;
+      }
+    }
+    result += ch;
+  }
+
+  return result;
 }
 
 /**

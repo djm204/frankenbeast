@@ -2,7 +2,7 @@ import type { PlanGraph, PlanTask } from '../deps.js';
 import type { GithubIssue, TriageResult } from './types.js';
 import type { ChunkDefinition } from '../cli/file-writer.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
-import { parseSafeJson } from '../utils/safe-json.js';
+import { assertSafeJsonText, parseSafeJson } from '../utils/safe-json.js';
 
 type CompleteFn = (prompt: string, hint?: {
   operation?: string;
@@ -110,6 +110,10 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
   }
 
   private parseResponse(raw: string): ChunkDefinition[] {
+    assertSafeJsonText(raw, {
+      context: 'Raw LLM issue decomposition response',
+      maxBytes: 262_144,
+    });
     const text = cleanLlmJson(raw, { parseFastPath: false });
 
     let parsed: unknown;

@@ -15,10 +15,10 @@ interface RawGithubIssue {
 }
 
 export class IssueFetcher implements IIssueFetcher {
-  private readonly execFn: ExecFn;
+  private readonly execFn: ExecFn | undefined;
 
   constructor(execFn?: ExecFn) {
-    this.execFn = execFn ?? defaultExecFile;
+    this.execFn = execFn;
   }
 
   async fetch(options: IssueFetchOptions): Promise<GithubIssue[]> {
@@ -49,7 +49,7 @@ export class IssueFetcher implements IIssueFetcher {
     const limit = options.limit ?? 30;
     args.push('--limit', String(limit));
 
-    const stdout = await this.run('gh', args);
+    const stdout = await this.run('gh', args, 2_097_152);
     const raw = parseSafeJson(stdout, {
       context: 'GitHub issue list payload',
       maxBytes: 2_097_152,
@@ -70,7 +70,7 @@ export class IssueFetcher implements IIssueFetcher {
   }
 
   async inferRepo(): Promise<string> {
-    const stdout = await this.run('gh', ['repo', 'view', '--json', 'nameWithOwner']);
+    const stdout = await this.run('gh', ['repo', 'view', '--json', 'nameWithOwner'], 16_384);
     const parsed = parseSafeJson(stdout, {
       context: 'GitHub repository payload',
       maxBytes: 16_384,
@@ -82,16 +82,23 @@ export class IssueFetcher implements IIssueFetcher {
     return parsed.nameWithOwner;
   }
 
-  private run(file: string, args: string[]): Promise<string> {
+  private run(file: string, args: string[], maxBuffer: number): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.execFn(file, args, (error, stdout, stderr) => {
+      const callback = (error: Error | null, stdout: string, stderr: string): void => {
         if (error) {
           const message = this.describeError(stderr);
           reject(new Error(message, { cause: error }));
           return;
         }
         resolve(stdout);
-      });
+      };
+
+      if (this.execFn) {
+        this.execFn(file, args, callback);
+        return;
+      }
+
+      defaultExecFile(file, args, { maxBuffer }, callback);
     });
   }
 

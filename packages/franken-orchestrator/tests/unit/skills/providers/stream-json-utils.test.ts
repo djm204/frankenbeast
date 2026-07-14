@@ -162,6 +162,12 @@ describe('cleanLlmJson', () => {
     expect(result).toEqual([{ id: 'setup', objective: 'Set up project' }]);
   });
 
+  it('preserves comma-bracket text inside valid JSON strings when fast path is skipped', () => {
+    const input = '[{"id":"chunk1","objective":"Keep literal ,] and ,} text"}]';
+    const cleaned = cleanLlmJson(input, { parseFastPath: false });
+    expect(JSON.parse(cleaned)).toEqual([{ id: 'chunk1', objective: 'Keep literal ,] and ,} text' }]);
+  });
+
   it('can skip the JSON.parse fast path for callers that must enforce limits first', () => {
     const input = '[{"id":"chunk1"}]';
     const originalParse = JSON.parse;
