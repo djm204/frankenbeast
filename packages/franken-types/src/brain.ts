@@ -82,12 +82,21 @@ export interface ExecutionState {
 
 // --- BrainSnapshot (cross-provider handoff) ---
 
+export interface MemoryDeletionGuardSnapshot {
+  selectorHash: string;
+  guardKind: string;
+  valueHash: string;
+  createdAt: string;
+  schemaVersion: number;
+}
+
 export interface BrainSnapshot {
   version: 1;
   timestamp: string;
   working: Record<string, unknown>;
   episodic: EpisodicEvent[];
   checkpoint: ExecutionState | null;
+  deletionGuards?: MemoryDeletionGuardSnapshot[];
   metadata: {
     lastProvider: string;
     switchReason: string;
@@ -114,12 +123,21 @@ export const ExecutionStateSchema = z.object({
   timestamp: z.string().datetime(),
 });
 
+export const MemoryDeletionGuardSnapshotSchema = z.object({
+  selectorHash: z.string().min(1),
+  guardKind: z.string().min(1),
+  valueHash: z.string().min(1),
+  createdAt: z.string().datetime(),
+  schemaVersion: z.number().int().nonnegative(),
+});
+
 export const BrainSnapshotSchema = z.object({
   version: z.literal(1),
   timestamp: z.string().datetime(),
   working: z.record(z.unknown()),
   episodic: z.array(EpisodicEventSchema),
   checkpoint: ExecutionStateSchema.nullable(),
+  deletionGuards: z.array(MemoryDeletionGuardSnapshotSchema).optional(),
   metadata: z.object({
     lastProvider: z.string(),
     switchReason: z.string(),
