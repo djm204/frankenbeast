@@ -407,4 +407,58 @@ describe('transcript retention controls', () => {
     expect(retained.spans[0].metadata['pattern']).toBe(pattern)
     expect(retained.spans[0].metadata['bytes']).toEqual(bytes)
   })
+
+  it('reapplies the active policy to backend traces and summaries', async () => {
+    const inner = new InMemoryAdapter()
+    await inner.flush(makeTrace())
+    const adapter = new TranscriptRetentionAdapter({ adapter: inner, now: () => 3 })
+
+    const trace = await adapter.queryByTraceId('trace-1')
+    const summaries = await adapter.listTraceSummaries()
+
+    expect(trace?.goal).toBe('[REDACTED_TRANSCRIPT]')
+    expect(trace?.spans[0].metadata['prompt']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(summaries).toEqual([
+      {
+        id: 'trace-1',
+        goal: '[REDACTED_TRANSCRIPT]',
+        status: 'completed',
+        spanCount: 1,
+        startedAt: 1,
+      },
+    ])
+  })
+
+  it('keeps token counters numeric while redacting chat transcript shapes', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          promptTokens: 12,
+          completionTokens: 3,
+          messages: [{ role: 'user', content: 'private chat prompt' }],
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['promptTokens']).toBe(12)
+    expect(retained.spans[0].metadata['completionTokens']).toBe(3)
+    expect(retained.spans[0].metadata['messages']).toBe('[REDACTED_TRANSCRIPT]')
+  })
+
+  it('preserves own __proto__ metadata keys as data properties', () => {
+    const metadata: Record<string, unknown> = { safeCounter: 1 }
+    Object.defineProperty(metadata, '__proto__', {
+      value: { tool_output: 'private output' },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+
+    const retained = applyRetentionPolicy(makeTrace({ spans: [makeSpan({ metadata })] }))
+    const retainedMetadata = retained.spans[0].metadata
+
+    expect(Object.prototype.hasOwnProperty.call(retainedMetadata, '__proto__')).toBe(true)
+    expect(retainedMetadata['__proto__']).toEqual({ tool_output: '[REDACTED_TRANSCRIPT]' })
+    expect(Object.getPrototypeOf(retainedMetadata)).toBe(Object.prototype)
+  })
 })

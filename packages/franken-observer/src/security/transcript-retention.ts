@@ -74,6 +74,8 @@ const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'input', 'inputs', '
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
 const SUMMARY_KEYS = new Set(['summary', 'summaries'])
+const NON_TRANSCRIPT_TOKEN_KEYS = new Set(['prompttokens', 'completiontokens', 'totaltokens'])
+const CHAT_TRANSCRIPT_KEYS = new Set(['message', 'messages', 'content', 'contents'])
 
 export class TranscriptRetentionAdapter implements ExportAdapter {
   private readonly inner: ExportAdapter
@@ -109,7 +111,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
       await this.markExpired(traceId)
       return null
     }
-    return trace
+    return applyRetentionPolicy(trace, this.policy)
   }
 
   async listTraceIds(): Promise<string[]> {
@@ -138,7 +140,16 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
         const trace = await this.queryByTraceId(summary.id)
         if (!trace) continue
       }
-      if (!(await this.expireStoredTraceIfNeeded(summary.id))) result.push(summary)
+      if (await this.expireStoredTraceIfNeeded(summary.id)) continue
+      const trace = await this.queryByTraceId(summary.id)
+      if (!trace) continue
+      result.push({
+        id: trace.id,
+        goal: trace.goal,
+        status: trace.status,
+        spanCount: trace.spans.length,
+        startedAt: trace.startedAt,
+      })
     }
     return result
   }
@@ -155,6 +166,15 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
       expired.push(traceId)
       await this.markExpired(traceId)
     }
+
+    for (const traceId of await this.inner.listTraceIds()) {
+      if (this.expiredTraceIds.has(traceId)) continue
+      const trace = await this.inner.queryByTraceId(traceId)
+      if (!trace || !this.isExpired(trace)) continue
+      expired.push(traceId)
+      await this.markExpired(traceId)
+    }
+
     return expired
   }
 
@@ -271,7 +291,7 @@ function retainMetadata(
   for (const [key, value] of Object.entries(metadata)) {
     const field = classifyTranscriptField(key)
     if (field && !policy.retainedFields[field]) continue
-    retained[key] = field ? redactValue(value, policy) : redactNestedTranscriptValues(value, policy, seen)
+    setRecordValue(retained, key, field ? redactValue(value, policy) : redactNestedTranscriptValues(value, policy, seen))
   }
   return retained
 }
@@ -302,13 +322,15 @@ function redactNestedTranscriptValues(
   for (const [key, nestedValue] of Object.entries(value)) {
     const field = classifyTranscriptField(key)
     if (field && !policy.retainedFields[field]) continue
-    retained[key] = field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen)
+    setRecordValue(retained, key, field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen))
   }
   return retained
 }
 
 function classifyTranscriptField(key: string): TranscriptField | undefined {
   const normalized = key.replace(/[_-]/g, '').toLowerCase()
+  if (NON_TRANSCRIPT_TOKEN_KEYS.has(normalized)) return undefined
+  if (CHAT_TRANSCRIPT_KEYS.has(normalized)) return 'prompts'
   if (PROMPT_KEYS.has(normalized) || normalized.includes('prompt') || normalized.endsWith('goal') || normalized.endsWith('goals')) return 'prompts'
   if (
     TOOL_INPUT_KEYS.has(normalized) ||
@@ -351,9 +373,18 @@ function redactEnumerableObject(
   for (const [key, nestedValue] of Object.entries(value)) {
     const field = classifyTranscriptField(key)
     if (field && !policy.retainedFields[field]) continue
-    retained[key] = field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen)
+    setRecordValue(retained, key, field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen))
   }
   return retained
+}
+
+function setRecordValue(record: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  })
 }
 
 function shouldRedactEnumerableObject(value: object): boolean {
@@ -455,7 +486,7 @@ function cloneValue(value: unknown, seen = new WeakMap<object, unknown>()): unkn
 
   const cloned: Record<string, unknown> = {}
   seen.set(value, cloned)
-  for (const [key, nested] of Object.entries(value)) cloned[key] = cloneValue(nested, seen)
+  for (const [key, nested] of Object.entries(value)) setRecordValue(cloned, key, cloneValue(nested, seen))
   return cloned
 }
 
