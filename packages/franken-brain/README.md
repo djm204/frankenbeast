@@ -49,6 +49,23 @@ brain.episodic.record({
 });
 const related = brain.episodic.recall('package inventory', 5);
 
+// Agent learning capture can opt into a cooldown so retrospectives or PM
+// handoffs do not churn the same lesson repeatedly. The key is stored in
+// details.learningKey; duplicate attempts return a structured cooldown result
+// instead of silently inserting another episodic row.
+const learningResult = brain.episodic.recordLearning({
+  type: 'observation',
+  step: 'worker-retrospective',
+  summary: 'Run targeted package tests before broad verification',
+  createdAt: new Date().toISOString(),
+}, {
+  key: 'targeted-package-tests',
+  cooldownMs: 24 * 60 * 60 * 1000,
+});
+if (!learningResult.recorded) {
+  console.log(`Learning still cooling down until ${learningResult.cooldownUntil}`);
+}
+
 // Recovery memory stores execution checkpoints and flushes working memory.
 const checkpoint = brain.recovery.checkpoint({
   runId: 'run-001',
