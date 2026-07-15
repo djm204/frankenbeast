@@ -64,7 +64,7 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
-import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
+import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
 
@@ -538,21 +538,60 @@ function resolveDashboardProviderType(nameOrType: string, fallbackType?: string)
   }
 }
 
-function resolveDashboardProviderCommand(name: string, type: string, config: OrchestratorConfig): string | undefined {
-  const consolidatedProvider = config.consolidatedProviders?.find((provider) => provider.name === name || provider.type === type);
-  const overrideCommand = config.providers.overrides?.[name]?.command;
-  if (consolidatedProvider?.cliPath) return consolidatedProvider.cliPath;
-  if (overrideCommand) return overrideCommand;
+function findDashboardConsolidatedProvider(
+  name: string,
+  type: string,
+  config: OrchestratorConfig,
+): ProviderConfig | undefined {
+  return config.consolidatedProviders?.find((provider) => provider.name === name)
+    ?? config.consolidatedProviders?.find((provider) => provider.name === type)
+    ?? config.consolidatedProviders?.find((provider) => provider.type === name)
+    ?? config.consolidatedProviders?.find((provider) => provider.type === type);
+}
 
+function resolveDashboardProviderRegistryName(name: string, type: string): string | undefined {
+  if (name === 'aider') return 'aider';
   try {
-    return resolveProviderCatalogEntry(type).defaultCommand;
+    return resolveProviderCatalogEntry(name).cliRegistryName;
   } catch {
     try {
-      return resolveProviderCatalogEntry(name).defaultCommand;
+      return resolveProviderCatalogEntry(type).cliRegistryName;
     } catch {
       return undefined;
     }
   }
+}
+
+function resolveDashboardProviderDefaultCommand(name: string, type: string): string | undefined {
+  if (name === 'aider') return 'aider';
+  for (const key of [type, name]) {
+    try {
+      return resolveProviderCatalogEntry(key).defaultCommand;
+    } catch {
+      // Keep probing fallbacks below.
+    }
+  }
+  return undefined;
+}
+
+function firstNonEmptyEnv(...names: readonly string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function resolveDashboardProviderCommand(name: string, type: string, config: OrchestratorConfig): string | undefined {
+  const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
+  const registryName = resolveDashboardProviderRegistryName(name, type);
+  const overrideCommand = config.providers.overrides?.[name]?.command
+    ?? (registryName ? config.providers.overrides?.[registryName]?.command : undefined)
+    ?? config.providers.overrides?.[type]?.command;
+
+  return overrideCommand
+    ?? consolidatedProvider?.cliPath
+    ?? resolveDashboardProviderDefaultCommand(name, type);
 }
 
 function resolveDashboardProviderAvailability(name: string, type: string, config: OrchestratorConfig): boolean {
@@ -561,12 +600,12 @@ function resolveDashboardProviderAvailability(name: string, type: string, config
     return Boolean(command && isCommandAvailable(command));
   }
 
-  const consolidatedProvider = config.consolidatedProviders?.find((provider) => provider.name === name || provider.type === type);
+  const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
   if (consolidatedProvider?.apiKey) return true;
 
-  if (type === 'anthropic-api') return Boolean(process.env['ANTHROPIC_API_KEY']);
-  if (type === 'openai-api') return Boolean(process.env['OPENAI_API_KEY']);
-  if (type === 'gemini-api') return Boolean(process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY']);
+  if (type === 'anthropic-api') return Boolean(firstNonEmptyEnv('ANTHROPIC_API_KEY'));
+  if (type === 'openai-api') return Boolean(firstNonEmptyEnv('OPENAI_API_KEY'));
+  if (type === 'gemini-api') return Boolean(firstNonEmptyEnv('GEMINI_API_KEY', 'GOOGLE_API_KEY'));
 
   return true;
 }
