@@ -128,8 +128,32 @@ async function walkFiles(root: string): Promise<string[]> {
   return files.sort();
 }
 
-async function buildPayload(stateDir: string, generatedAt: string, excludePath?: string): Promise<StateBackupPayload> {
+async function pathIsFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function resolveBackupRoot(stateDir: string): Promise<string> {
   const root = resolve(stateDir);
+  if (basename(root) === 'state' && await pathIsFile(join(dirname(root), 'beast.db'))) {
+    return dirname(root);
+  }
+  return root;
+}
+
+function assertNoLiveSqliteSidecars(relativePaths: readonly string[]): void {
+  const sidecar = relativePaths.find((path) => path.endsWith('-wal') || path.endsWith('-shm'));
+  if (sidecar) {
+    throw new Error(`Refusing to back up live SQLite sidecar ${sidecar}; checkpoint or quiesce SQLite state before DR backup`);
+  }
+}
+
+async function buildPayload(stateDir: string, generatedAt: string, excludePath?: string): Promise<StateBackupPayload> {
+  const root = await resolveBackupRoot(stateDir);
   const excluded = excludePath === undefined ? undefined : resolve(excludePath);
   const rootStats = await stat(root);
   if (!rootStats.isDirectory()) {
@@ -138,6 +162,8 @@ async function buildPayload(stateDir: string, generatedAt: string, excludePath?:
 
   const categories = emptyCategoryCounts();
   const sourceFiles = (await walkFiles(root)).filter((absolutePath) => resolve(absolutePath) !== excluded);
+  const relativeSourcePaths = sourceFiles.map((absolutePath) => relative(root, absolutePath).split(sep).join('/'));
+  assertNoLiveSqliteSidecars(relativeSourcePaths);
   const files = await Promise.all(sourceFiles.map(async (absolutePath) => {
     const rel = relative(root, absolutePath).split(sep).join('/');
     assertSafeRelativePath(rel);
@@ -284,12 +310,35 @@ async function assertNoSymlinkParents(targetDir: string, targetPath: string): Pr
       if (stats.isSymbolicLink()) {
         throw new Error(`Refusing to restore through symlinked directory: ${current}`);
       }
+      if (!stats.isDirectory()) {
+        throw new Error(`Refusing to restore through non-directory path: ${current}`);
+      }
     } catch (error: unknown) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-        return;
+        await mkdir(current, { mode: 0o700 });
+        continue;
       }
       throw error;
     }
+  }
+}
+
+async function assertEmptyRestoreTarget(targetDir: string): Promise<void> {
+  try {
+    const stats = await lstat(targetDir);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error(`DR restore target must be a real directory: ${targetDir}`);
+    }
+    const entries = await readdir(targetDir);
+    if (entries.length > 0) {
+      throw new Error(`Refusing to restore into non-empty target directory: ${targetDir}`);
+    }
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      await mkdir(targetDir, { recursive: true, mode: 0o700 });
+      return;
+    }
+    throw error;
   }
 }
 
@@ -313,13 +362,12 @@ export async function restoreEncryptedStateBackup(options: RestoreStateBackupOpt
   const dryRun = options.dryRun === true;
   const targetDir = resolve(options.targetDir);
   if (!dryRun) {
-    await mkdir(targetDir, { recursive: true });
+    await assertEmptyRestoreTarget(targetDir);
     for (const file of payload.files) {
       const targetPath = resolve(targetDir, file.path);
       if (!targetPath.startsWith(`${targetDir}${sep}`)) {
         throw new Error(`Unsafe backup entry path: ${file.path}`);
       }
-      await mkdir(dirname(targetPath), { recursive: true });
       await assertNoSymlinkParents(targetDir, targetPath);
       const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
       await writeFile(tmpPath, Buffer.from(file.data, 'base64'), { mode: 0o600 });

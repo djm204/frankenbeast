@@ -101,20 +101,24 @@ describe('encrypted DR state backups', () => {
     }
   });
 
-  it('excludes an in-tree output artifact and refuses restore through symlinked parents', async () => {
+  it('excludes an in-tree output artifact, includes sibling project DB, and refuses unsafe restore targets', async () => {
     const { dir, keyFile } = await makeFixtureState();
     const inTreeBackupPath = join(dir, 'state', 'backup.franken-dr.json');
     const restoreDir = join(dir, 'restore-symlink');
     const outsideDir = join(dir, 'outside-approvals');
 
     try {
+      await writeFile(join(dir, 'beast.db'), 'project sqlite bytes', 'utf8');
       await writeFile(inTreeBackupPath, 'stale previous backup', 'utf8');
       const envelope = await createEncryptedStateBackup({
         stateDir: join(dir, 'state'),
         outputPath: inTreeBackupPath,
         keyFilePath: keyFile,
       });
-      expect(envelope.manifest.files.map((file) => file.path)).not.toContain('backup.franken-dr.json');
+      const paths = envelope.manifest.files.map((file) => file.path);
+      expect(paths).not.toContain('state/backup.franken-dr.json');
+      expect(paths).toContain('beast.db');
+      expect(paths).toContain('state/kanban.db');
 
       await mkdir(outsideDir, { recursive: true });
       await mkdir(restoreDir, { recursive: true });
@@ -123,8 +127,22 @@ describe('encrypted DR state backups', () => {
         backupPath: inTreeBackupPath,
         targetDir: restoreDir,
         keyFilePath: keyFile,
-      })).rejects.toThrow(/symlinked directory/);
+      })).rejects.toThrow(/non-empty target/);
       await expect(stat(join(outsideDir, 'ledger.json'))).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses live SQLite WAL/SHM sidecars until state is quiesced', async () => {
+    const { dir, keyFile } = await makeFixtureState();
+    try {
+      await writeFile(join(dir, 'state', 'kanban.db-wal'), 'live wal bytes', 'utf8');
+      await expect(createEncryptedStateBackup({
+        stateDir: join(dir, 'state'),
+        outputPath: join(dir, 'backup.franken-dr.json'),
+        keyFilePath: keyFile,
+      })).rejects.toThrow(/quiesce SQLite state/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
