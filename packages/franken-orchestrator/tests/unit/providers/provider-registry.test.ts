@@ -597,6 +597,75 @@ describe('ProviderRegistry', () => {
       });
     });
 
+    it('probes recovered providers after cooldown even when fallback is current', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      let primaryShouldFail = true;
+      const p1: ILlmProvider = {
+        ...mockProvider('primary'),
+        execute: vi.fn(async function* () {
+          if (primaryShouldFail) throw new Error('transient outage');
+          yield { type: 'text' as const, content: 'primary recovered' };
+          yield { type: 'done' as const, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+        }),
+      };
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      expect(registry.currentProvider.name).toBe('fallback');
+
+      now += 10_001;
+      primaryShouldFail = false;
+      const events = await collectEvents(registry.execute(makeRequest()));
+
+      expect(events[0]).toEqual({ type: 'text', content: 'primary recovered' });
+      expect(p1.execute).toHaveBeenCalledTimes(2);
+      expect(registry.currentProvider.name).toBe('primary');
+      expect(registry.getProviderHealth('primary')?.state).toBe('closed');
+    });
+
+    it('keeps circuit breaker state isolated for duplicate provider names', async () => {
+      const p1 = mockProvider('openai-api', { failOnExecute: new Error('credential A exhausted') });
+      const p2 = mockProvider('openai-api');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => Date.UTC(2026, 0, 1),
+      });
+
+      const events = await collectEvents(registry.execute(makeRequest()));
+      const states = registry.listProviderHealth().map((health) => health.state).sort();
+
+      expect(events[0]).toEqual({ type: 'text', content: 'Hello from openai-api' });
+      expect(p1.execute).toHaveBeenCalledTimes(1);
+      expect(p2.execute).toHaveBeenCalledTimes(1);
+      expect(states).toEqual(['closed', 'open']);
+    });
+
+    it('reports open breaker cooldowns instead of credential guidance when all providers are skipped', async () => {
+      const p1 = mockProvider('primary', { failOnExecute: new Error('outage') });
+      const registry = new ProviderRegistry([p1], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => Date.UTC(2026, 0, 1),
+      });
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('All providers exhausted');
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('provider circuit breakers are open');
+    });
+
     it('reopens the breaker when a half-open probe fails without retry storms', async () => {
       let now = Date.UTC(2026, 0, 1);
       const p1: ILlmProvider = {
