@@ -4,6 +4,11 @@ import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
 import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
+import {
+  checkGitHubTokenCapabilities,
+  type GitHubLowRiskCapabilityPolicy,
+  type GitHubRequiredCapabilities,
+} from './github-token-capability-check.js';
 
 export interface PrCreationRequiredActionErrorOptions {
   readonly message: string;
@@ -33,6 +38,11 @@ export interface PrCreatorConfig {
   readonly remote: string;
   readonly disableBranding?: boolean;
   readonly commitConvention?: 'conventional' | 'freeform';
+  readonly githubCapabilityCheck?: {
+    readonly disabled?: boolean;
+    readonly required?: GitHubRequiredCapabilities;
+    readonly lowRiskPolicy?: GitHubLowRiskCapabilityPolicy;
+  } | undefined;
 }
 
 export interface PrCreateOptions {
@@ -113,6 +123,7 @@ export class PrCreator {
       remote: config.remote ?? 'origin',
       disableBranding: config.disableBranding ?? false,
       commitConvention: config.commitConvention ?? 'conventional',
+      githubCapabilityCheck: config.githubCapabilityCheck,
     };
     this.exec = exec;
     this.llm = llm;
@@ -276,6 +287,8 @@ export class PrCreator {
       targetBranch = 'main';
     }
 
+    this.assertGitHubCapabilities(branch, options?.issueNumber, logger);
+
     if (!this.pushBranch(branch, logger)) {
       return null;
     }
@@ -359,6 +372,60 @@ export class PrCreator {
       logger?.error('PrCreator: failed to push branch', this.commandFailure('git', formatCommand('git', args), error, { branch }));
       return false;
     }
+  }
+
+  private assertGitHubCapabilities(branch: string, issueNumber?: number, logger?: ILogger): void {
+    if (this.config.githubCapabilityCheck?.disabled === true) {
+      return;
+    }
+
+    const repo = this.resolveGitHubRepo(logger);
+    if (!repo) {
+      logger?.warn('PrCreator: skipped GitHub token capability preflight because the GitHub repo could not be resolved');
+      return;
+    }
+
+    const required: GitHubRequiredCapabilities = {
+      repo: 'read',
+      contents: 'write',
+      pullRequests: 'write',
+      ...(issueNumber != null ? { issues: 'write' as const } : {}),
+      ...this.config.githubCapabilityCheck?.required,
+    };
+    const result = checkGitHubTokenCapabilities({
+      repo,
+      exec: this.exec,
+      required,
+      lowRiskPolicy: this.config.githubCapabilityCheck?.lowRiskPolicy,
+    });
+
+    for (const warning of result.warnings) {
+      logger?.warn('PrCreator: GitHub token capability preflight warning', warning);
+    }
+
+    if (!result.ok) {
+      throw new PrCreationRequiredActionError({
+        message: 'GitHub token capability preflight failed before push/PR creation.',
+        action: [
+          'Update the GitHub token or lane policy before retrying',
+          'required capabilities: repo read, contents write, pull-requests write',
+          issueNumber != null ? 'issues write' : undefined,
+        ].filter(Boolean).join('; '),
+        branch,
+        details: result,
+      });
+    }
+
+    logger?.info('PrCreator: GitHub token capability preflight passed', {
+      repo,
+      evidence: result.evidence,
+    });
+  }
+
+  private resolveGitHubRepo(logger?: ILogger): string | null {
+    const remoteUrl = this.safeExec('git', ['remote', 'get-url', this.config.remote], logger)?.trim();
+    if (!remoteUrl) return null;
+    return parseGitHubOwnerRepo(remoteUrl);
   }
 
   private findExistingPr(branch: string, logger?: ILogger): Array<{ url?: string }> | null {
@@ -447,6 +514,12 @@ function formatCaughtError(error: unknown): { error: string; name?: string | und
     return { error: error.message, name: error.name };
   }
   return { error: String(error) };
+}
+
+function parseGitHubOwnerRepo(remoteUrl: string): string | null {
+  const match = remoteUrl.match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+  if (!match) return null;
+  return `${match[1]}/${match[2]}`;
 }
 
 interface GitContext {

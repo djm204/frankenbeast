@@ -422,6 +422,65 @@ describe('PrCreator argv subprocess safety', () => {
     expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
   });
 
+  it('runs GitHub token capability preflight before pushing to a GitHub remote', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/capability-check\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'https://github.com/djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: repo\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult(), undefined, { issueNumber: 1706 });
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const remoteIndex = calls.findIndex(c => c.command === 'git' && c.args.join(' ') === 'remote get-url origin');
+    const userIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api -i /user');
+    const repoIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api repos/djm204/frankenbeast');
+    const pushIndex = calls.findIndex(c => c.command === 'git' && c.args.includes('push'));
+    expect(remoteIndex).toBeGreaterThanOrEqual(0);
+    expect(userIndex).toBeGreaterThan(remoteIndex);
+    expect(repoIndex).toBeGreaterThan(userIndex);
+    expect(pushIndex).toBeGreaterThan(repoIndex);
+  });
+
+  it('fails capability preflight before push when required GitHub permissions are missing', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/missing-capability\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'git@github.com:djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: read:org\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ permissions: { pull: true, push: false, triage: false, maintain: false, admin: false } });
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('capability preflight failed'),
+      action: expect.stringContaining('pull-requests write'),
+      branch: 'feature/missing-capability',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
+    expect(calls.some(c => c.command === 'gh' && c.args.includes('create'))).toBe(false);
+  });
+
   // Argument-injection and invalid-ref guards must still hold.
   it.each([
     '-evil',
