@@ -587,40 +587,40 @@ export class WebhookNotifier {
     let timedOut = false
     const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
 
-    try {
-      while (totalBytes < MAX_ERROR_BODY_CHARS) {
-        const remainingMs = deadlineMs - Date.now()
-        if (remainingMs <= 0) {
-          timedOut = true
-          break
-        }
-        let timeoutId: ReturnType<typeof setTimeout> | undefined
-        const result = await Promise.race<IteratorResult<Uint8Array | Buffer | string> | 'timeout'>([
-          iterator.next(),
-          new Promise<'timeout'>(resolve => {
-            timeoutId = setTimeout(() => resolve('timeout'), remainingMs)
-          }),
-        ]).finally(() => {
-          if (timeoutId) clearTimeout(timeoutId)
-        })
-        if (result === 'timeout') {
-          timedOut = true
-          break
-        }
-        if (result.done || result.value === undefined) {
-          break
-        }
-        const bytes = typeof result.value === 'string' ? Buffer.from(result.value) : Buffer.from(result.value)
-        const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
-        if (bytes.byteLength > remainingBytes) {
-          chunks.push(bytes.subarray(0, remainingBytes))
-          totalBytes += remainingBytes
-          truncated = true
-          break
-        }
-        chunks.push(bytes)
-        totalBytes += bytes.byteLength
+    while (totalBytes < MAX_ERROR_BODY_CHARS) {
+      const remainingMs = deadlineMs - Date.now()
+      if (remainingMs <= 0) {
+        timedOut = true
+        break
       }
+      let timeoutId: ReturnType<typeof setTimeout> | undefined
+      const result = await Promise.race<IteratorResult<Uint8Array | Buffer | string> | 'timeout'>([
+        iterator.next(),
+        new Promise<'timeout'>(resolve => {
+          timeoutId = setTimeout(() => resolve('timeout'), remainingMs)
+        }),
+      ]).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId)
+      })
+      if (result === 'timeout') {
+        timedOut = true
+        break
+      }
+      if (result.done || result.value === undefined) {
+        break
+      }
+      const bytes = typeof result.value === 'string' ? Buffer.from(result.value) : Buffer.from(result.value)
+      const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
+      if (bytes.byteLength > remainingBytes) {
+        chunks.push(bytes.subarray(0, remainingBytes))
+        totalBytes += remainingBytes
+        truncated = true
+        break
+      }
+      chunks.push(bytes)
+      totalBytes += bytes.byteLength
+    }
+
     if (truncated || timedOut) {
       ;(body as { destroy?: () => void })?.destroy?.()
       const cleanup = iterator.return?.(undefined)
