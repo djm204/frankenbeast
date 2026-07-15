@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Skill installer path hardening review fixes
+- For installer path hardening, guard every public surface that can surface unsafe-path errors, not just install routes; context/read/write routes should return generic unsafe-path messages and tests should assert absolute roots/targets are not leaked.
+- If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly: revalidate the missing root's parent before `mkdir`, reject symlinked/repointed parents, then recheck the recreated root before creating child directories.
+- When Codex reaches the configured review-invocation cap with new findings, fix/reply/resolve and stop for explicit approval before triggering another review; do not merge on stale clean signals after the head changed.
+
 ## 2026-07-15 — Beast process cleanup review fixes
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
@@ -221,3 +226,4 @@
 - 2026-07-15 — Codex-cap cleanup rounds: when Codex findings arrive at the review-trigger cap, fix/reply/resolve every actionable thread and verify CI/unresolved-thread state, but do not fire an over-cap `@codex review` without explicit human approval; block with the exact refused trigger command and latest passing commit so the next worker can resume cleanly.
 
 - 2026-07-15 — Webhook egress allowlists: match exact public HTTPS targets, reject credentials/query/fragment/path traversal, mirror private-host aliases from the orchestrator egress policy, resolve DNS before every network attempt including retries, and add regression tests for DNS rebinding-style private answers.
+- 2026-07-15 — MCP memory scoping: avoid encoding agent scope solely in user-visible keys or summaries. Store explicit scope metadata, use reversible internal key encoding for physical storage, keep logical keys in query/frontload output, and fetch/filter uncapped episodic rows before applying visible result limits so other agents' rows cannot starve the requested scope.

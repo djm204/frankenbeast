@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
-import type { SkillManager } from '../../skills/skill-manager.js';
+import { isUnsafeSkillPathError, type SkillManager } from '../../skills/skill-manager.js';
 import { SkillHealthChecker } from '../../skills/skill-health-checker.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
 import { HttpError, parseJsonBody } from '../middleware.js';
 
 function isSkillInstallValidationError(err: unknown): boolean {
   return err instanceof ZodError
+    || isUnsafeSkillPathError(err)
     || (err instanceof Error && err.message.startsWith('Invalid skill name '));
 }
 
@@ -15,6 +16,9 @@ function skillInstallErrorMessage(err: unknown): string {
     return err.issues
       .map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`)
       .join('; ');
+  }
+  if (isUnsafeSkillPathError(err)) {
+    return 'Unsafe skill install path';
   }
   return err instanceof Error ? err.message : 'Failed to install skill';
 }
@@ -147,7 +151,15 @@ export function createSkillRoutes(deps: {
   // Context read/write routes (Chunk 5.11)
   app.get('/:name/context', (c) => {
     const name = c.req.param('name');
-    const content = deps.skillManager.readContext(name);
+    let content: string | null;
+    try {
+      content = deps.skillManager.readContext(name);
+    } catch (err) {
+      return c.json(
+        { error: isUnsafeSkillPathError(err) ? 'Unsafe skill path' : err instanceof Error ? err.message : 'Failed' },
+        400,
+      );
+    }
     if (content === null) {
       return c.json({ content: null, exists: false });
     }
@@ -170,7 +182,7 @@ export function createSkillRoutes(deps: {
       return c.json({ updated: true });
     } catch (err) {
       return c.json(
-        { error: err instanceof Error ? err.message : 'Failed' },
+        { error: isUnsafeSkillPathError(err) ? 'Unsafe skill path' : err instanceof Error ? err.message : 'Failed' },
         400,
       );
     }
