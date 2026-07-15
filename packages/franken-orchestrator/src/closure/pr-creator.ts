@@ -287,6 +287,8 @@ export class PrCreator {
       targetBranch = 'main';
     }
 
+    this.assertGitHubCapabilities(branch, logger);
+
     if (!this.pushBranch(branch, logger)) {
       return null;
     }
@@ -299,8 +301,6 @@ export class PrCreator {
       logger?.info('PrCreator: PR already exists', { branch, url: existing[0]?.url });
       return null;
     }
-
-    this.assertGitHubCapabilities(branch, logger);
 
     // Gather git context for PR description
     const gitContext = this.gatherGitContext(targetBranch, logger);

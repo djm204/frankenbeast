@@ -450,10 +450,10 @@ describe('PrCreator argv subprocess safety', () => {
     const pushIndex = calls.findIndex(c => c.command === 'git' && c.args.includes('push'));
     const createIndex = calls.findIndex(c => c.command === 'gh' && c.args.includes('create'));
     expect(remoteIndex).toBeGreaterThanOrEqual(0);
-    expect(pushIndex).toBeGreaterThanOrEqual(0);
     expect(userIndex).toBeGreaterThan(remoteIndex);
     expect(repoIndex).toBeGreaterThan(userIndex);
-    expect(createIndex).toBeGreaterThan(repoIndex);
+    expect(pushIndex).toBeGreaterThan(repoIndex);
+    expect(createIndex).toBeGreaterThan(pushIndex);
   });
 
   it('fails capability preflight before PR creation when required GitHub permissions are missing', async () => {
@@ -480,7 +480,7 @@ describe('PrCreator argv subprocess safety', () => {
       action: expect.stringContaining('pull-requests write'),
       branch: 'feature/missing-capability',
     });
-    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
     expect(calls.some(c => c.command === 'gh' && c.args.includes('create'))).toBe(false);
   });
 

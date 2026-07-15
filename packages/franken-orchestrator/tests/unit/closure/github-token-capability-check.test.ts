@@ -97,7 +97,13 @@ describe('GitHub token capability check', () => {
         throw error;
       }
       if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
-        return JSON.stringify({ permissions: { pull: true, push: true, admin: false, maintain: false, triage: true } });
+        return JSON.stringify({ node_id: 'R_test', permissions: { pull: true, push: true, admin: false, maintain: false, triage: true } });
+      }
+      if (command === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
+        const error = new Error('Command failed: gh api graphql') as Error & { stderr: string; status: number };
+        error.stderr = 'Validation Failed: Head ref must exist';
+        error.status = 1;
+        throw error;
       }
       throw new Error(`unexpected args ${args.join(' ')}`);
     };

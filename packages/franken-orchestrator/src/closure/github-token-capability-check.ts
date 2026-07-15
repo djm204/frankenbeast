@@ -60,6 +60,11 @@ interface RepositoryPermissions {
   readonly admin?: boolean | undefined;
 }
 
+interface RepositoryInfo {
+  readonly nodeId?: string | undefined;
+  readonly permissions: RepositoryPermissions;
+}
+
 interface OAuthScopeReadResult {
   readonly scopes: readonly string[];
   readonly warning?: GitHubCapabilityIssue | undefined;
@@ -85,8 +90,12 @@ const TOKEN_RE = /\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,
 export function checkGitHubTokenCapabilities(options: GitHubTokenCapabilityCheckOptions): GitHubTokenCapabilityCheckResult {
   try {
     const scopeRead = readOauthScopes(options.exec);
-    const repoPermissions = readRepositoryPermissions(options.exec, options.repo);
-    const evidence = buildEvidence(scopeRead.scopes, repoPermissions);
+    const repoInfo = readRepositoryInfo(options.exec, options.repo);
+    const evidence = maybeProbeRequiredCapabilities(
+      buildEvidence(scopeRead.scopes, repoInfo.permissions),
+      options,
+      repoInfo,
+    );
     const missingIssues = collectMissingRequiredCapabilities(evidence, options.required ?? {});
     const excessiveIssues = collectExcessiveWriteCapabilities(evidence, options.lowRiskPolicy);
     const warnings = [
@@ -149,10 +158,10 @@ function readOauthScopes(exec: GitHubCapabilityExec): OAuthScopeReadResult {
   return { scopes: [] };
 }
 
-function readRepositoryPermissions(exec: GitHubCapabilityExec, repo: string): RepositoryPermissions {
+function readRepositoryInfo(exec: GitHubCapabilityExec, repo: string): RepositoryInfo {
   const output = exec('gh', ['api', `repos/${repo}`]);
-  const parsed = JSON.parse(output) as { permissions?: RepositoryPermissions | undefined };
-  return parsed.permissions ?? {};
+  const parsed = JSON.parse(output) as { node_id?: string | undefined; permissions?: RepositoryPermissions | undefined };
+  return { nodeId: parsed.node_id, permissions: parsed.permissions ?? {} };
 }
 
 function buildEvidence(scopes: readonly string[], permissions: RepositoryPermissions): GitHubTokenCapabilityEvidence {
@@ -232,6 +241,45 @@ function tokenAwareItem(options: {
   return { available: false, level: 'none', source: options.source, tokenSpecific: false };
 }
 
+function maybeProbeRequiredCapabilities(
+  evidence: GitHubTokenCapabilityEvidence,
+  options: GitHubTokenCapabilityCheckOptions,
+  repoInfo: RepositoryInfo,
+): GitHubTokenCapabilityEvidence {
+  if (options.required?.pullRequests !== 'write' || evidence.pullRequests.tokenSpecific) {
+    return evidence;
+  }
+  const probe = probePullRequestWrite(options.exec, repoInfo.nodeId);
+  return {
+    ...evidence,
+    pullRequests: probe
+      ? { available: true, level: 'write', source: 'GraphQL createPullRequest validation probe', tokenSpecific: true }
+      : { available: false, level: 'none', source: 'GraphQL createPullRequest permission probe failed', tokenSpecific: true },
+  };
+}
+
+function probePullRequestWrite(exec: GitHubCapabilityExec, repositoryId?: string): boolean {
+  if (!repositoryId) return false;
+  const query = 'mutation($repositoryId:ID!){createPullRequest(input:{repositoryId:$repositoryId,baseRefName:"__franken_capability_preflight_base__",headRefName:"__franken_capability_preflight_head__",title:"franken capability preflight",body:"preflight"}){pullRequest{id}}}';
+  try {
+    exec('gh', ['api', 'graphql', '-f', `query=${query}`, '-f', `repositoryId=${repositoryId}`]);
+    return true;
+  } catch (error) {
+    const message = sanitizeErrorMessage(error).toLowerCase();
+    if (message.includes('resource not accessible')
+      || message.includes('not permitted')
+      || message.includes('permission')
+      || message.includes('forbidden')) {
+      return false;
+    }
+    return message.includes('could not resolve')
+      || message.includes('not exist')
+      || message.includes('validation')
+      || message.includes('base')
+      || message.includes('head');
+  }
+}
+
 function collectMissingRequiredCapabilities(
   evidence: GitHubTokenCapabilityEvidence,
   required: GitHubRequiredCapabilities,
@@ -269,6 +317,7 @@ function isDefinitivelyMissing(
   required: Exclude<GitHubCapabilityLevel, 'none'>,
 ): boolean {
   if (levelSatisfies(evidence.level, required)) return false;
+  if (required === 'write' && evidence.level === 'read') return true;
   return evidence.tokenSpecific || evidence.level === 'none';
 }
 
