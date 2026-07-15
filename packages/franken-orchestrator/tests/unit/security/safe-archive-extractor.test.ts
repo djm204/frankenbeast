@@ -175,7 +175,7 @@ describe('safe archive extraction', () => {
   it('rejects nested archives and path traversal entries before writing', async () => {
     const traversalArchive = createZip([{ name: '../outside.txt', body: Buffer.from('owned') }]);
 
-    for (const archiveName of ['nested.zip', 'lib.jar', 'plugin.war', 'android.apk', 'package.whl', 'bundle.7z']) {
+    for (const archiveName of ['nested.zip', 'lib.jar', 'plugin.war', 'android.apk', 'package.whl', 'bundle.7z', '.tgz']) {
       const nestedDestination = await tempDir();
       await expect(
         extractZipArchive(createZip([{ name: archiveName, body: Buffer.from('x') }]), nestedDestination, {
@@ -271,6 +271,17 @@ describe('safe archive extraction', () => {
     await expect(readdir(destination)).resolves.toEqual([]);
   });
 
+  it('rejects excessive implicit directories before recursive mkdir', async () => {
+    const destination = await tempDir();
+    const archive = createZip([
+      { name: 'one/file.txt', body: Buffer.from('1') },
+      { name: 'two/file.txt', body: Buffer.from('2') },
+    ]);
+
+    await expect(extractZipArchive(archive, destination, { maxDirectoryCount: 1 })).rejects.toThrow(/directory count/i);
+    await expect(readdir(destination)).resolves.toEqual([]);
+  });
+
   it('wraps corrupt deflate payloads as safe archive errors', async () => {
     const destination = await tempDir();
     const originalPayload = Buffer.from('valid deflate data');
@@ -316,6 +327,7 @@ describe('safe archive extraction', () => {
       maxTotalUncompressedBytes: 250 * 1024 * 1024,
       maxFileBytes: 25 * 1024 * 1024,
       maxFileCount: 10_000,
+      maxDirectoryCount: 10_000,
       maxNestingDepth: 0,
     });
   });

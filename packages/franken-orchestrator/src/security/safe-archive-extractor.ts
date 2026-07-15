@@ -11,6 +11,8 @@ export interface SafeArchiveLimits {
   readonly maxFileBytes: number;
   /** Maximum number of regular file entries. */
   readonly maxFileCount: number;
+  /** Maximum number of explicit or implicit directory entries created while extracting. */
+  readonly maxDirectoryCount: number;
   /** Maximum nested archive depth. Zero rejects archive-looking entries. */
   readonly maxNestingDepth: number;
 }
@@ -34,6 +36,7 @@ export const DEFAULT_SAFE_ARCHIVE_LIMITS: SafeArchiveLimits = Object.freeze({
   maxTotalUncompressedBytes: 250 * 1024 * 1024,
   maxFileBytes: 25 * 1024 * 1024,
   maxFileCount: 10_000,
+  maxDirectoryCount: 10_000,
   maxNestingDepth: 0,
 });
 
@@ -68,7 +71,7 @@ const FILE_TYPE_MASK = 0o170000;
 const MAX_ARCHIVE_PATH_SEGMENTS = 256;
 
 const ARCHIVE_ENTRY_PATTERN =
-  /(?:^|[/\\])[^/\\]+\.(?:zip|jar|war|ear|apk|whl|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz|gz|bz2|xz|zst|7z|rar)$/iu;
+  /(?:^|[/\\])[^/\\]*\.(?:zip|jar|war|ear|apk|whl|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz|gz|bz2|xz|zst|7z|rar)$/iu;
 const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/iu;
 const CRC32_TABLE = makeCrc32Table();
 
@@ -244,6 +247,12 @@ function preflightEntries(entries: readonly ZipCentralDirectoryEntry[], limits: 
     files,
     entries.filter((entry) => entry.isDirectory).map((entry) => entry.path),
   );
+  const directoryCount = countDirectoryPaths(files, entries.filter((entry) => entry.isDirectory).map((entry) => entry.path));
+  if (directoryCount > limits.maxDirectoryCount) {
+    throw new SafeArchiveExtractionError(
+      `Archive directory count ${directoryCount} exceeds maxDirectoryCount ${limits.maxDirectoryCount}`,
+    );
+  }
   for (const entry of files) {
     if (entry.flags & 0x1) {
       throw new SafeArchiveExtractionError(`Encrypted ZIP entries are not supported: ${entry.path}`);
@@ -311,6 +320,19 @@ function rejectPathCollisions(files: readonly ZipCentralDirectoryEntry[], explic
 
 function collisionKey(path: string): string {
   return path.toLocaleLowerCase('en-US');
+}
+
+function countDirectoryPaths(files: readonly ZipCentralDirectoryEntry[], explicitDirectories: readonly string[]): number {
+  const directories = new Set(explicitDirectories.map((path) => collisionKey(path)));
+  for (const entry of files) {
+    const parts = entry.path.split('/');
+    let ancestor = '';
+    for (const part of parts.slice(0, -1)) {
+      ancestor = ancestor.length === 0 ? part : `${ancestor}/${part}`;
+      directories.add(collisionKey(ancestor));
+    }
+  }
+  return directories.size;
 }
 
 async function rejectSymlinkedPathComponents(destinationRoot: string, targetPath: string): Promise<void> {

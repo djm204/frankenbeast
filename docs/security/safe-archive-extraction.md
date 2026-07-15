@@ -19,8 +19,9 @@ The default limits are intentionally conservative for operator-supplied artifact
 | `maxArchiveBytes` | 50 MiB | Bounds compressed input accepted into the extractor. |
 | `maxTotalUncompressedBytes` | 250 MiB | Bounds zip-bomb expansion across all extracted files. |
 | `maxFileBytes` | 25 MiB | Bounds any single extracted file. |
-| `maxFileCount` | 10,000 files | Bounds path-count and inode exhaustion. |
-| `maxNestingDepth` | 0 | Rejects archive-looking entries such as `.zip`, `.tar`, `.tgz`, `.gz`, `.bz2`, and `.xz`. |
+| `maxFileCount` | 10,000 files | Bounds regular file count. |
+| `maxDirectoryCount` | 10,000 directories | Bounds explicit and implicit directory/inode creation. |
+| `maxNestingDepth` | 0 | Rejects archive-looking entries such as `.zip`, `.jar`, `.war`, `.apk`, `.whl`, `.tar`, `.tgz`, `.gz`, `.bz2`, `.xz`, `.zst`, `.7z`, and `.rar`, including leading-dot names. |
 
 ## Override policy
 
@@ -44,6 +45,7 @@ await extractZipArchive(uploadBuffer, stagingDir, {
   maxTotalUncompressedBytes: 50 * 1024 * 1024,
   maxFileBytes: 5 * 1024 * 1024,
   maxFileCount: 1_000,
+  maxDirectoryCount: 1_000,
   maxNestingDepth: 0,
 });
 ```
