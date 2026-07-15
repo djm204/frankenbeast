@@ -54,6 +54,8 @@ const PID_FILE_DECIMAL_PATTERN = /^\d+$/;
 class MutableBeastDaemonDrainState implements BeastDaemonDrainState {
   enteredAt?: string | undefined;
   reason?: string | undefined;
+  private activeMutations = 0;
+  private mutationWaiters: Array<() => void> = [];
 
   isDraining(): boolean {
     return this.enteredAt !== undefined;
@@ -64,6 +66,32 @@ class MutableBeastDaemonDrainState implements BeastDaemonDrainState {
       this.enteredAt = new Date().toISOString();
       this.reason = reason;
     }
+  }
+
+  beginMutation(): () => void {
+    this.activeMutations += 1;
+    let finished = false;
+    return () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      this.activeMutations -= 1;
+      if (this.activeMutations === 0) {
+        for (const waiter of this.mutationWaiters.splice(0)) {
+          waiter();
+        }
+      }
+    };
+  }
+
+  async waitForMutations(): Promise<void> {
+    if (this.activeMutations === 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.mutationWaiters.push(resolve);
+    });
   }
 }
 
@@ -139,6 +167,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
       }
       closed = true;
       drainState.enter('shutdown');
+      await drainState.waitForMutations();
       const shutdownFailures = await stopLiveRuns(services);
       services.dispose();
       if (listening) {

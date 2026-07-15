@@ -722,18 +722,19 @@ async function isHealthyBeastsDaemonEndpoint(baseUrl: string, expected: { root: 
   try {
     const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
     const response = await guardedFetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
-    if (!response.ok) {
-      return false;
-    }
     const body: unknown = await response.json();
     if (!body || typeof body !== 'object') {
       return false;
     }
     const record = body as Record<string, unknown>;
-    return record.ok === true
-      && record.service === 'beasts-daemon'
+    const identifiesExpectedDaemon = record.service === 'beasts-daemon'
       && record.root === expected.root
       && record.pid === expected.pid;
+    if (!identifiesExpectedDaemon) {
+      return false;
+    }
+    return (response.ok && record.ok === true)
+      || (response.status === 503 && record.status === 'draining' && record.ok === false);
   } catch {
     return false;
   }

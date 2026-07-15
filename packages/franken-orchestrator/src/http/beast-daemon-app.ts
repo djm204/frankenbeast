@@ -9,6 +9,7 @@ import { isoNow } from '@franken/types';
 
 export interface BeastDaemonDrainState {
   isDraining(): boolean;
+  beginMutation?(): () => void;
   enteredAt?: string | undefined;
   reason?: string | undefined;
 }
@@ -57,13 +58,19 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     }, draining ? 503 : 200);
   });
 
-  const requireNotDraining = (): void => {
+  const drainMutatingRequest = async (next: () => Promise<void>): Promise<void> => {
     if (options.drainState?.isDraining()) {
       throw new HttpError(503, 'BEAST_DAEMON_DRAINING', 'Beast daemon is draining for shutdown and is not accepting new work', {
         status: 'draining',
         enteredAt: options.drainState.enteredAt,
         reason: options.drainState.reason ?? 'shutdown',
       });
+    }
+    const finishMutation = options.drainState?.beginMutation?.();
+    try {
+      await next();
+    } finally {
+      finishMutation?.();
     }
   };
 
@@ -72,7 +79,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     security,
     operatorToken: options.operatorToken,
     rateLimit,
-    requireNotDraining,
+    drainMutatingRequest,
   };
 
   app.route('/', createBeastSseRoutes({
@@ -96,7 +103,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     operatorToken: options.operatorToken,
     security,
     rateLimit,
-    requireNotDraining,
+    drainMutatingRequest,
   }));
 
   return app;

@@ -136,7 +136,7 @@ export interface BeastRoutesDeps {
   rateLimit: BeastRateLimitOptions;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
-  requireNotDraining?: (() => void) | undefined;
+  drainMutatingRequest?: ((next: () => Promise<void>) => Promise<void>) | undefined;
 }
 
 export function beastRoutes(deps: BeastRoutesDeps): Hono {
@@ -154,7 +154,10 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
   app.use('/v1/beasts/*', auth);
   app.use('/v1/beasts/*', async (c, next) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method)) {
-      deps.requireNotDraining?.();
+      if (deps.drainMutatingRequest) {
+        await deps.drainMutatingRequest(next);
+        return;
+      }
     }
     await next();
   });

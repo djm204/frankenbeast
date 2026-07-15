@@ -53,7 +53,7 @@ export interface AgentRoutesDeps {
   operatorToken: string;
   security: TransportSecurityService;
   rateLimit?: BeastRateLimitOptions;
-  requireNotDraining?: (() => void) | undefined;
+  drainMutatingRequest?: ((next: () => Promise<void>) => Promise<void>) | undefined;
 }
 
 export function agentRoutes(deps: AgentRoutesDeps): Hono {
@@ -67,13 +67,19 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
   app.use('/v1/beasts/agents/*', auth);
   app.use('/v1/beasts/agents', async (c, next) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method)) {
-      deps.requireNotDraining?.();
+      if (deps.drainMutatingRequest) {
+        await deps.drainMutatingRequest(next);
+        return;
+      }
     }
     await next();
   });
   app.use('/v1/beasts/agents/*', async (c, next) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method)) {
-      deps.requireNotDraining?.();
+      if (deps.drainMutatingRequest) {
+        await deps.drainMutatingRequest(next);
+        return;
+      }
     }
     await next();
   });

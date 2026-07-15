@@ -341,6 +341,53 @@ describe('beast daemon', () => {
     expect(existsSync(paths.pidFile)).toBe(false);
   });
 
+  it('waits for in-flight mutating beast requests before stopping live runs', async () => {
+    const paths = await makePaths();
+    const runs: BeastRun[] = [];
+    const run = makeRun('run-in-flight', 'running');
+    let releaseDispatch!: () => void;
+    let markDispatchStarted!: () => void;
+    const dispatchStarted = new Promise<void>((resolve) => { markDispatchStarted = resolve; });
+    const { services, stop } = makeDaemonServices(runs);
+    services.dispatch = {
+      createRun: vi.fn(async () => {
+        markDispatchStarted();
+        await new Promise<void>((release) => { releaseDispatch = release; });
+        runs.push(run);
+        return run;
+      }),
+    } as unknown as BeastServiceBundle['dispatch'];
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+      services,
+    });
+    const createRun = fetch(`${daemon.url}/v1/beasts/runs`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        config: { provider: 'codex', objective: 'Ship it', chunkDirectory: 'chunks' },
+        startNow: true,
+      }),
+    });
+
+    await dispatchStarted;
+    const closePromise = daemon.close();
+    const health = await fetch(`${daemon.url}/health`);
+    expect(health.status).toBe(503);
+    expect(stop).not.toHaveBeenCalled();
+
+    releaseDispatch();
+    await createRun.catch(() => undefined);
+    await closePromise;
+    expect(stop).toHaveBeenCalledWith('run-in-flight', 'beasts-daemon-shutdown');
+  });
+
   it('falls back to killing live child runs when graceful stop fails', async () => {
     const paths = await makePaths();
     const run = makeRun('run-kill', 'pending_approval');
