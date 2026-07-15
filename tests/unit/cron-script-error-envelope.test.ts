@@ -513,6 +513,63 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE');
   });
 
+  it('redacts non-string JSON secret values', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'numeric-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"token":123456,"password":false,"safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"token":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"password":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('123456');
+    expect(envelope.stderrTail).not.toContain('false');
+  });
+
+  it('redacts split Authorization header argv tokens', () => {
+    const result = runCronScript([
+      '--name',
+      'split-authorization-header-argv',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(9)',
+      'Authorization:',
+      'Bearer',
+      'argv-bearer-secret',
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('Authorization:');
+    expect(JSON.stringify(envelope)).not.toContain('Bearer');
+    expect(JSON.stringify(envelope)).not.toContain('argv-bearer-secret');
+  });
+
+  it('carries JSON escape state across stderr chunks', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'split-escaped-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      String.raw`const fs = require('node:fs'); fs.writeSync(2, '{"password":"abc\\'); fs.writeSync(2, '"def","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"password":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('abc');
+    expect(JSON.stringify(envelope)).not.toContain('def');
+  });
+
   it('preserves buffered stderr for successful cron runs', () => {
     const result = runCronScriptWithEnv([
       '--name',
@@ -600,6 +657,52 @@ describe('cron script error envelope runner', () => {
         process.kill(childPid, 'SIGKILL');
       }
       expect(childAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not send duplicate graceful signals to descendants already in the child process group', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-single-signal-'));
+    const markerFile = join(tempDir, 'cleanup.txt');
+    const readyFile = join(tempDir, 'helper.ready');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'single-descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', ${JSON.stringify(`const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready'); process.once('SIGTERM', () => { fs.appendFileSync(${JSON.stringify(markerFile)}, 'first\\n'); setTimeout(() => { fs.appendFileSync(${JSON.stringify(markerFile)}, 'cleanup\\n'); process.exit(0); }, 150); }); setInterval(() => {}, 1000);`)}], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(join(tempDir, 'helper.pid'))}, String(helper.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '500' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          if (existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() - started > 1_000) {
+            resolve();
+            return;
+          }
+          setTimeout(poll, 20);
+        };
+        poll();
+      });
+
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      const marker = readFileSync(markerFile, 'utf8');
+      expect(marker).toContain('first');
+      expect(marker).toContain('cleanup');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

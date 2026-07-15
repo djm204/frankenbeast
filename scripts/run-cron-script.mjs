@@ -56,6 +56,14 @@ function appendRedactedTail(current, chunk) {
   return appendTail('', redactSensitiveText(`${current}${chunk}`));
 }
 
+function countTrailingBackslashes(value, carry = 0) {
+  let count = 0;
+  for (let index = value.length - 1; index >= 0 && value[index] === '\\'; index -= 1) {
+    count += 1;
+  }
+  return count === value.length ? carry + count : count;
+}
+
 function processGroupAlive(pid) {
   if (!pid || process.platform === 'win32') {
     return false;
@@ -65,6 +73,20 @@ function processGroupAlive(pid) {
     return true;
   } catch (error) {
     return error?.code === 'EPERM';
+  }
+}
+
+function processGroupId(pid) {
+  if (!pid || process.platform === 'win32') {
+    return null;
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const pgrp = Number.parseInt(fields[2] ?? '', 10);
+    return Number.isFinite(pgrp) ? pgrp : null;
+  } catch {
+    return null;
   }
 }
 
@@ -154,6 +176,9 @@ function signalChildTree(child, signal) {
   }
 
   for (const pid of collectDescendantPids(child.pid).reverse()) {
+    if (signaledProcessGroup && processGroupId(pid) === child.pid) {
+      continue;
+    }
     try {
       process.kill(pid, signal);
       signaledPids.push(pid);
@@ -191,8 +216,10 @@ function redactSensitiveText(value) {
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/-----BEGIN PRIVATE [\s\S]*?-----END PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(?!["'\[])([^,}\]\s][^,}\]]*)/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(["'])([^"']*)$/gi, '$1$2[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*\\["'])(.*?)(\\["'])/gi, '$1[REDACTED]$3')
+    .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*)(?!\\["']|\[)([^,}\]\s][^,}\]]*)/gi, '$1[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*\\["'])([\s\S]*)$/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+([^\s"']+)/gi, '$1$2 [REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)([^\n\r,;]+)/gi, '$1[REDACTED]')
@@ -230,6 +257,19 @@ function redactCommand(command) {
       if (part.startsWith('-') && !part.includes('=')) {
         redactNextParts = 1;
       }
+      continue;
+    }
+
+    if (/^authorization:\s*$/i.test(part)) {
+      redacted.push(part.endsWith(':') ? 'Authorization:' : '[REDACTED]');
+      redactNextParts = 2;
+      continue;
+    }
+
+    const authorizationHeaderMatch = /^(Authorization\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)$/i.exec(part);
+    if (authorizationHeaderMatch) {
+      redacted.push(`${authorizationHeaderMatch[1]}[REDACTED]`);
+      redactNextParts = 1;
       continue;
     }
 
@@ -280,14 +320,18 @@ function writeEnvelope({ script, command, exitCode, signal = null, failureKind =
   process.stderr.write(`${JSON.stringify(envelope)}\n`);
 }
 
-function findJsonStringEnd(text, start, delimiter) {
+function findJsonStringEnd(text, start, delimiter, initialBackslashes = 0) {
   for (let index = start; index < text.length; index += 1) {
     if (text[index] !== delimiter) {
       continue;
     }
     let backslashes = 0;
-    for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) {
+    let cursor = index - 1;
+    for (; cursor >= start && text[cursor] === '\\'; cursor -= 1) {
       backslashes += 1;
+    }
+    if (cursor < start) {
+      backslashes += initialBackslashes;
     }
     if (backslashes % 2 === 0) {
       return index;
@@ -310,7 +354,7 @@ async function runCronScript({ name, recoverable, command }) {
   let parentTerminationPids = [];
   let parentTerminationProcessGroup = null;
   let stderrTailSecretContinuation = null;
-    let stderrPemPrefixBuffer = '';
+  let stderrPemPrefixBuffer = '';
 
   return await new Promise((resolve) => {
     let child;
@@ -484,8 +528,9 @@ async function runCronScript({ name, recoverable, command }) {
       let trimStderrTailChars = 0;
       if (stderrTailSecretContinuation) {
         if (stderrTailSecretContinuation.kind === 'json') {
-          const closingQuoteIndex = findJsonStringEnd(text, 0, stderrTailSecretContinuation.delimiter);
+          const closingQuoteIndex = findJsonStringEnd(text, 0, stderrTailSecretContinuation.delimiter, stderrTailSecretContinuation.trailingBackslashes ?? 0);
           if (closingQuoteIndex === -1) {
+            stderrTailSecretContinuation.trailingBackslashes = countTrailingBackslashes(text, stderrTailSecretContinuation.trailingBackslashes ?? 0);
             redactedTailChunk = '[REDACTED]';
           } else {
             const delimiter = stderrTailSecretContinuation.delimiter;
@@ -526,7 +571,7 @@ async function runCronScript({ name, recoverable, command }) {
             const delimiter = secretJsonMatch[2];
             const closingQuoteIndex = findJsonStringEnd(text, valueStart, delimiter);
             if (closingQuoteIndex === -1) {
-              stderrTailSecretContinuation = { kind: 'json', delimiter };
+              stderrTailSecretContinuation = { kind: 'json', delimiter, trailingBackslashes: countTrailingBackslashes(text.slice(valueStart)) };
               redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]`;
             } else {
               const end = closingQuoteIndex + delimiter.length;
