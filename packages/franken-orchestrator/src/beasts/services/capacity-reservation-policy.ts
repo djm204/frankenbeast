@@ -145,25 +145,22 @@ export class CapacityReservationPolicy {
     }>,
   ): CapacityReservationState {
 
-    const matchingBuckets = buckets.map((bucket) => ({
-      ...bucket,
-      free: Math.max(0, bucket.slots - bucket.used),
-    }));
-    const totalReservedSlots = matchingBuckets.reduce((sum, bucket) => sum + bucket.slots, 0);
-    const matchingReservedUsed = matchingBuckets.reduce((sum, bucket) => sum + bucket.used, 0);
+    const totalReservedSlots = buckets.reduce((sum, bucket) => sum + bucket.slots, 0);
+    const reservedUsed = buckets.reduce((sum, bucket) => sum + bucket.used, 0);
     const normalTotal = this.totalSlots - totalReservedSlots;
-    const normalUsed = Math.max(0, usedSlots - matchingReservedUsed);
-    let releasedOverflowUsed = Math.max(0, normalUsed - normalTotal);
-    const bucketsWithFree = matchingBuckets.map((bucket) => {
-      const overflowUsed = bucket.released ? Math.min(bucket.free, releasedOverflowUsed) : 0;
-      releasedOverflowUsed -= overflowUsed;
-      const used = bucket.used + overflowUsed;
+    let normalOverflowUsed = Math.max(0, usedSlots - reservedUsed - normalTotal);
+    const bucketsWithFree = buckets.map((bucket) => {
+      const releasedOverflowUsed = bucket.released ? Math.min(normalOverflowUsed, Math.max(0, bucket.slots - bucket.used)) : 0;
+      normalOverflowUsed -= releasedOverflowUsed;
+      const used = bucket.used + releasedOverflowUsed;
       return {
         ...bucket,
         used,
         free: Math.max(0, bucket.slots - used),
       };
     });
+    const adjustedReservedUsed = bucketsWithFree.reduce((sum, bucket) => sum + bucket.used, 0);
+    const normalUsed = Math.max(0, usedSlots - adjustedReservedUsed);
 
     return {
       totalSlots: this.totalSlots,
