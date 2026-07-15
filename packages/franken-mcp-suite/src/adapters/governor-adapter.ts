@@ -483,12 +483,6 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     if (reviewAction === 'approve') {
       return {
         decision: 'approved',
-        reason: 'Memory review approve is the operator approval signal for a queued candidate; allowed after proposal governance while audit metadata remains redacted.',
-      };
-    }
-    if (reviewAction === 'approve') {
-      return {
-        decision: 'approved',
         reason: 'Memory review approval is the explicit operator promotion decision; candidate content remains governed by the review queue.',
       };
     }
@@ -509,7 +503,7 @@ function assessAction(action: string, context: string): GovernorCheckResult {
       return { decision: 'review_recommended', reason: `High-risk policy requires approval for memory review never-store: ${result.reason}` };
     }
     if (reviewAction === 'reject') {
-
+      return {
         decision: 'approved',
         reason: 'Memory review reject decision does not persist or delete candidate content; allowed while audit metadata remains redacted.',
       };
