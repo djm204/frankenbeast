@@ -530,7 +530,7 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
-    it('pins custom fetch delivery to the DNS-validated address', async () => {
+    it('fails closed when custom fetches opt into DNS validation because they cannot pin the connection address', async () => {
       const dnsLookup = vi.fn(async () => ['203.0.113.10'])
       const notifier = new WebhookNotifier({
         url: 'https://webhooks.example.com:8443/api/webhooks/123/secret',
@@ -539,14 +539,10 @@ describe('WebhookNotifier', () => {
         dnsLookup,
       })
 
-      await notifier.send({ type: 'test' })
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://203.0.113.10:8443/api/webhooks/123/secret',
-        expect.objectContaining({
-          headers: expect.objectContaining({ Host: 'webhooks.example.com:8443' }),
-        }),
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Injected fetch cannot safely pin DNS-validated webhook addresses',
       )
+      expect(mockFetch).not.toHaveBeenCalled()
     })
 
     it('preserves response bodies from the default pinned HTTPS transport', async () => {
@@ -561,6 +557,42 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
         'Webhook delivery failed: 500 Internal Server Error for https://webhooks.example.com/[REDACTED]/[REDACTED]/[REDACTED]/[REDACTED]: provider diagnostic',
       )
+    })
+
+    it('stops waiting on stalled async-iterable response bodies from the default pinned HTTPS transport', async () => {
+      const request = new EventEmitter() as EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
+      request.write = vi.fn()
+      request.end = vi.fn(() => {
+        const response = new EventEmitter() as EventEmitter & {
+          statusCode: number
+          statusMessage: string
+          [Symbol.asyncIterator]: () => AsyncIterator<Buffer>
+          destroyed?: boolean
+          destroy: ReturnType<typeof vi.fn>
+        }
+        response.statusCode = 500
+        response.statusMessage = 'Internal Server Error'
+        response.destroy = vi.fn(() => { response.destroyed = true })
+        response[Symbol.asyncIterator] = async function * () {
+          yield Buffer.from('partial diagnostic')
+          await new Promise(() => undefined)
+        }
+        const callback = vi.mocked(httpsRequest).mock.calls.at(-1)?.[1]
+        callback?.(response as never)
+      })
+      vi.mocked(httpsRequest).mockReturnValue(request as never)
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+      const startedAt = Date.now()
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://webhooks.example.com/[REDACTED]/[REDACTED]/[REDACTED]/[REDACTED]: partial diagnostic',
+      )
+      expect(Date.now() - startedAt).toBeLessThan(750)
     })
 
     it('tries later validated DNS addresses when the first pinned address fails', async () => {
@@ -603,7 +635,10 @@ describe('WebhookNotifier', () => {
           path: '/api/webhooks/123/secret',
           method: 'POST',
           servername: 'webhooks.example.com',
-          headers: expect.objectContaining({ Host: 'webhooks.example.com:8443' }),
+          headers: expect.objectContaining({
+            Host: 'webhooks.example.com:8443',
+            'Content-Length': Buffer.byteLength(JSON.stringify({ type: 'test' })),
+          }),
         }),
         expect.any(Function),
       )
