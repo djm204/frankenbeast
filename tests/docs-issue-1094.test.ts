@@ -92,7 +92,7 @@ const markdownLinkIssues = (): string[] =>
     return issues;
   });
 
-describe("issue #1094, #1447, #1791, and #2089 local docs links", () => {
+describe("issue #1094, #1447, #1791, #2089, and #2104 local docs links", () => {
   it("keeps root docs, docs/**, and package READMEs free of broken or unsafe local Markdown links", () => {
     expect(markdownLinkIssues()).toEqual([]);
   });
