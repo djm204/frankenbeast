@@ -261,6 +261,9 @@ export class BeastRunService {
       if (cleanedPendingRun) {
         return this.stop(runId, _actor);
       }
+      if (run.status === 'completed' || run.status === 'failed' || run.status === 'stopped') {
+        return run;
+      }
       return this.stop(runId, _actor);
     }
     await this.executorFor(run).kill(run.id, attemptId);

@@ -118,6 +118,48 @@ describe('ProcessBeastExecutor', () => {
     ]);
   });
 
+  it('merges process-group ownership metadata into custom attempt metadata', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      attemptMetadata: () => ({ backend: 'container', containerName: 'beast-run-1' }),
+    });
+    const run = createTestRun(repo);
+
+    const attempt = await executor.start(run, martinLoopDefinition);
+
+    expect(attempt.executorMetadata).toMatchObject({
+      backend: 'container',
+      containerName: 'beast-run-1',
+      processGroupOwned: process.platform !== 'win32',
+      processGroupLeaderPid: 4242,
+    });
+  });
+
+  it('sweeps a recovered process group when the original leader already exited', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+    const attempt = await executor.start(run, martinLoopDefinition);
+    repo.updateAttempt(attempt.id, {
+      executorMetadata: {
+        ...attempt.executorMetadata,
+        processGroupOwned: true,
+        processGroupLeaderPid: attempt.pid,
+        processStartTimeTicks: '123456',
+      },
+    });
+
+    await executor.kill(run.id, attempt.id);
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: true });
+  });
+
   it('kills a spawned process when attempt creation fails', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

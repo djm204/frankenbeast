@@ -285,7 +285,7 @@ function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
     return false;
   }
   const actualStartTime = processStartTimeTicks(pid);
-  return actualStartTime === expectedStartTime;
+  return actualStartTime === undefined || actualStartTime === expectedStartTime;
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
@@ -449,31 +449,37 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     const startedAt = new Date(wallClockNow()).toISOString();
     const processStartTime = processStartTimeTicks(handle.pid);
+    const processGroupMetadata = {
+      processGroupOwned: process.platform !== 'win32',
+      processGroupLeaderPid: handle.pid,
+      ...(processStartTime ? { processStartTimeTicks: processStartTime } : {}),
+    };
+    const customAttemptMetadata = this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle);
     let attempt: BeastRunAttempt;
     try {
       attempt = this.repository.createAttempt(run.id, {
         status: 'running',
         pid: handle.pid,
         startedAt,
-        executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
-          backend: 'process',
-          processGroupOwned: process.platform !== 'win32',
-          processGroupLeaderPid: handle.pid,
-          ...(processStartTime ? { processStartTimeTicks: processStartTime } : {}),
-          command: processSpec.command,
-          args: [...processSpec.args],
-          ...(worktree
-            ? {
-                worktreeIsolation: true,
-                worktreePath: worktree.worktreePath,
-                worktreeBranch: worktree.branchName,
-                worktreeCreated: worktree.created,
-                worktreeAgentId: worktree.agentId,
-                worktreeExecutionCwd: worktree.executionCwd,
-                worktreeProjectRoot: worktree.projectRoot,
-              }
-            : {}),
-        },
+        executorMetadata: customAttemptMetadata
+          ? { ...customAttemptMetadata, ...processGroupMetadata }
+          : {
+              backend: 'process',
+              ...processGroupMetadata,
+              command: processSpec.command,
+              args: [...processSpec.args],
+              ...(worktree
+                ? {
+                    worktreeIsolation: true,
+                    worktreePath: worktree.worktreePath,
+                    worktreeBranch: worktree.branchName,
+                    worktreeCreated: worktree.created,
+                    worktreeAgentId: worktree.agentId,
+                    worktreeExecutionCwd: worktree.executionCwd,
+                    worktreeProjectRoot: worktree.projectRoot,
+                  }
+                : {}),
+            },
       });
     } catch (error) {
       try {
