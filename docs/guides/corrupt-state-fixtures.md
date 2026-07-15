@@ -11,3 +11,5 @@ When adding a new corrupt-state case:
 5. Cover at least these failure classes across disaster-recovery state readers: truncated JSON, wrong top-level type, missing required fields, duplicate ids, unknown schema versions, and invalid enum values.
 
 For approval, memory, chat/Kanban-adjacent, and other state domains, prefer colocated fixtures beside the owning reader tests rather than a global fixture directory. Colocation keeps the fixture schema close to the parser contract and prevents unrelated readers from silently drifting.
+
+Approval dashboard markdown fixtures live under `packages/franken-web/tests/fixtures/corrupt-approval-dashboard-markdown/` and must be rendered as inert text by dashboard components. Use these fixtures for truncated fences, marker-looking content, and HTML/button-looking fragments so tests prove corrupted approval copy cannot create forged controls or trusted prompt boundaries.
