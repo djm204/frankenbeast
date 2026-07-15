@@ -180,13 +180,19 @@ function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boo
   }
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function cleanupStaleJournalTempFiles(filePath: string): void {
   const journalPath = stateWriteJournalPath(filePath);
-  const journalTempPrefix = `${basename(journalPath)}.tmp.`;
+  const journalTempPattern = new RegExp(
+    `^${escapeRegExp(basename(journalPath))}\\.tmp\\.[0-9]+\\.[0-9a-f-]{8,}$`,
+  );
   let removed = false;
   try {
     for (const entry of readdirSync(dirname(journalPath))) {
-      if (!entry.startsWith(journalTempPrefix)) {
+      if (!journalTempPattern.test(entry)) {
         continue;
       }
       const tempPath = join(dirname(journalPath), entry);
@@ -204,14 +210,6 @@ function cleanupStaleJournalTempFiles(filePath: string): void {
   }
   if (removed) {
     fsyncDir(dirname(filePath));
-  }
-}
-
-function journalTempFileWasCreatedAfterJournal(tempPath: string, journal: StateWriteTransactionJournal): boolean {
-  try {
-    return statSync(tempPath).mtimeMs >= Date.parse(journal.updatedAt);
-  } catch {
-    return false;
   }
 }
 
@@ -275,7 +273,7 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
     };
   }
 
-  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath);
+  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath) || journalPath === stateWriteJournalPath(filePath);
   if (targetMatches && !journalTempPathBelongsToTarget(journal.tempPath, filePath)) {
     const quarantinePath = quarantineFile(journalPath);
     return {
@@ -296,18 +294,6 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
         tempPath: journal.tempPath,
         action: 'retained-active-journal',
         reason: `State write journal ${journalPath} is still preparing; refusing to remove live journal for ${journal.tempPath}.`,
-      };
-    }
-    if (existsSync(journal.tempPath) && journalTempFileWasCreatedAfterJournal(journal.tempPath, journal)) {
-      rmSync(journal.tempPath, { force: true });
-      rmSync(journalPath, { force: true });
-      fsyncDir(dirname(filePath));
-      return {
-        journalPath,
-        targetPath: journal.targetPath,
-        tempPath: journal.tempPath,
-        action: 'removed-stale-temp',
-        reason: `Removed stale preparing state write journal and temp file because the temp appears to have been created after the journal was recorded.`,
       };
     }
     rmSync(journalPath, { force: true });

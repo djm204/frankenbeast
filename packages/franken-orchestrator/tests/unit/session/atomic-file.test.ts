@@ -229,39 +229,10 @@ describe('atomic-file', () => {
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
     });
 
-    it('removes temp files from stale preparing journals when the temp was created after the journal', () => {
-      const dir = makeTmpDir('state-write-journal-owned-preparing-');
-      const filePath = join(dir, 'state.json');
-      const tempPath = `${filePath}.tmp.owned`;
-      writeFileSync(filePath, '{"old":true}');
-      writeFileSync(
-        stateWriteJournalPath(filePath),
-        JSON.stringify({
-          schemaVersion: 1,
-          targetPath: filePath,
-          tempPath,
-          phase: 'preparing',
-          startedAt: '1970-01-01T00:00:00.000Z',
-          updatedAt: '1970-01-01T00:00:01.000Z',
-        }),
-        'utf8',
-      );
-      writeFileSync(tempPath, '{"new":');
-
-      const recovery = recoverStateWriteTransaction(filePath);
-
-      expect(recovery).toMatchObject({
-        action: 'removed-stale-temp',
-        tempPath,
-      });
-      expect(existsSync(tempPath)).toBe(false);
-      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
-    });
-
     it('removes stale journal temp files that never reached the final journal rename', () => {
       const dir = makeTmpDir('state-write-journal-temp-orphan-');
       const filePath = join(dir, 'state.json');
-      const orphanJournalTempPath = `${stateWriteJournalPath(filePath)}.tmp.orphan`;
+      const orphanJournalTempPath = `${stateWriteJournalPath(filePath)}.tmp.123.00000000-0000-0000-0000-000000000000`;
       writeFileSync(filePath, '{"old":true}');
       writeFileSync(orphanJournalTempPath, '{"schemaVersion":1');
       utimesSync(
@@ -273,6 +244,19 @@ describe('atomic-file', () => {
       recoverStateWriteTransaction(filePath);
 
       expect(existsSync(orphanJournalTempPath)).toBe(false);
+    });
+
+    it('does not remove non-journal siblings that merely share the journal temp prefix', () => {
+      const dir = makeTmpDir('state-write-journal-temp-sibling-');
+      const filePath = join(dir, 'state.json');
+      const siblingPath = `${stateWriteJournalPath(filePath)}.tmp.sibling.json`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(siblingPath, '{"real":true}');
+      utimesSync(siblingPath, new Date('1970-01-01T00:00:00.000Z'), new Date('1970-01-01T00:00:00.000Z'));
+
+      recoverStateWriteTransaction(filePath);
+
+      expect(readFileSync(siblingPath, 'utf-8')).toBe('{"real":true}');
     });
 
     it('retains active journals so concurrent writers do not remove live temp files', () => {
