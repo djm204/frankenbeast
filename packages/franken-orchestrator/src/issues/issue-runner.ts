@@ -95,6 +95,32 @@ export interface IssueBackpressureDecision {
   readonly alerts: readonly IssueCapacityWatermarkAlert[];
 }
 
+export type IssueDegradedModeWorkerRouteAction =
+  | 'start-fresh'
+  | 'resume-checkpointed'
+  | 'complete-checkpointed'
+  | 'defer-fresh-start';
+
+export interface IssueDegradedModeWorkerRoute {
+  readonly mode: 'normal' | 'degraded';
+  readonly action: IssueDegradedModeWorkerRouteAction;
+  readonly issueNumber: number;
+  readonly reason?: string | undefined;
+  readonly guidance: string;
+  readonly checkpointHasIssueProgress: boolean;
+  readonly graphHasCheckpointProgress: boolean;
+  readonly graphComplete: boolean;
+}
+
+export interface IssueDegradedModeWorkerRouteInput {
+  readonly issue: GithubIssue;
+  readonly checkpointHasIssueProgress: boolean;
+  readonly graphHasCheckpointProgress?: boolean | undefined;
+  readonly graphComplete?: boolean | undefined;
+  readonly backpressureDecision?: IssueBackpressureDecision | undefined;
+  readonly stopRemainingReason?: string | undefined;
+}
+
 export interface IssueSchedulerFairnessBucket {
   readonly severity: 'critical' | 'high' | 'medium' | 'low' | 'unprioritized';
   readonly issueNumbers: readonly number[];
@@ -180,6 +206,69 @@ function defaultBackpressureSignals(context: IssueBackpressureSignalContext): Is
     pendingIssueCount: context.pendingIssueCount,
     providerBudgetTokensRemaining: context.providerBudgetTokensRemaining,
     systemLoadAverage: loadavg()[0],
+  };
+}
+
+export function routeIssueWorkerForDegradedMode(
+  input: IssueDegradedModeWorkerRouteInput,
+): IssueDegradedModeWorkerRoute {
+  const graphHasCheckpointProgress = input.graphHasCheckpointProgress ?? false;
+  const graphComplete = input.graphComplete ?? false;
+  const backpressureReason = input.backpressureDecision && !input.backpressureDecision.allowed
+    ? `backpressure: ${input.backpressureDecision.reasons.join('; ')}`
+    : undefined;
+  const degradedReason = input.stopRemainingReason ?? backpressureReason;
+  const hasProgress = input.checkpointHasIssueProgress || graphHasCheckpointProgress;
+
+  if (graphComplete) {
+    return {
+      mode: degradedReason ? 'degraded' : 'normal',
+      action: 'complete-checkpointed',
+      issueNumber: input.issue.number,
+      reason: degradedReason,
+      guidance: 'Treat this issue as already complete from checkpoint; do not start a duplicate worker.',
+      checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+      graphHasCheckpointProgress,
+      graphComplete,
+    };
+  }
+
+  if (hasProgress) {
+    return {
+      mode: degradedReason ? 'degraded' : 'normal',
+      action: 'resume-checkpointed',
+      issueNumber: input.issue.number,
+      reason: degradedReason,
+      guidance: degradedReason
+        ? 'Resume checkpointed work during degraded mode; avoid opening a new fresh worker while capacity is constrained.'
+        : 'Route the worker to resume checkpointed work before considering fresh-start policy.',
+      checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+      graphHasCheckpointProgress,
+      graphComplete,
+    };
+  }
+
+  if (degradedReason) {
+    return {
+      mode: 'degraded',
+      action: 'defer-fresh-start',
+      issueNumber: input.issue.number,
+      reason: degradedReason,
+      guidance: 'Defer this fresh worker start until capacity/dependency signals recover; keep the skip reason in liveness output.',
+      checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+      graphHasCheckpointProgress,
+      graphComplete,
+    };
+  }
+
+  return {
+    mode: 'normal',
+    action: 'start-fresh',
+    issueNumber: input.issue.number,
+    guidance: 'Start a fresh worker; no degraded-mode routing condition is active.',
+    checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+    graphHasCheckpointProgress,
+    graphComplete,
   };
 }
 
@@ -643,13 +732,18 @@ export class IssueRunner {
         return undefined;
       }
 
-      const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
+      const route = routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        backpressureDecision,
+      });
       logger?.warn(
         `[issues] Backpressure paused issue #${issue.number}: ${backpressureDecision.reasons.join('; ')}`,
         {
           issueNumber: issue.number,
           reasons: backpressureDecision.reasons,
           signals: backpressureDecision.signals,
+          workerRoute: route,
         },
         'issues',
       );
@@ -658,7 +752,7 @@ export class IssueRunner {
         issueTitle: issue.title,
         status: 'skipped',
         tokensUsed: 0,
-        error: reason,
+        error: route.reason ?? `backpressure: ${backpressureDecision.reasons.join('; ')}`,
       };
     };
 

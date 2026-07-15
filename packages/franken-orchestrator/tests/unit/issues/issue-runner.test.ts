@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -220,6 +220,73 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
     })),
   };
 }
+
+describe('degraded-mode worker routing policy', () => {
+  it('defers fresh worker starts during degraded backpressure with operator guidance', () => {
+    const issue = makeIssue({ number: 1818 });
+    const route = routeIssueWorkerForDegradedMode({
+      issue,
+      checkpointHasIssueProgress: false,
+      backpressureDecision: {
+        allowed: false,
+        reasons: ['active processes 8 reached limit 8'],
+        signals: { activeProcesses: 8, failedStarts: 0, inFlightBacklog: 0 },
+        alerts: [],
+      },
+    });
+
+    expect(route).toEqual({
+      mode: 'degraded',
+      action: 'defer-fresh-start',
+      issueNumber: 1818,
+      reason: 'backpressure: active processes 8 reached limit 8',
+      guidance: 'Defer this fresh worker start until capacity/dependency signals recover; keep the skip reason in liveness output.',
+      checkpointHasIssueProgress: false,
+      graphHasCheckpointProgress: false,
+      graphComplete: false,
+    });
+  });
+
+  it('routes checkpointed work to resume during degraded mode instead of starting a duplicate worker', () => {
+    const issue = makeIssue({ number: 1818 });
+    const route = routeIssueWorkerForDegradedMode({
+      issue,
+      checkpointHasIssueProgress: true,
+      graphHasCheckpointProgress: true,
+      stopRemainingReason: 'backpressure: queue depth 12 exceeds limit 10',
+    });
+
+    expect(route).toMatchObject({
+      mode: 'degraded',
+      action: 'resume-checkpointed',
+      issueNumber: 1818,
+      reason: 'backpressure: queue depth 12 exceeds limit 10',
+      checkpointHasIssueProgress: true,
+      graphHasCheckpointProgress: true,
+      graphComplete: false,
+    });
+    expect(route.guidance).toContain('Resume checkpointed work during degraded mode');
+  });
+
+  it('keeps the normal route explicit when no degradation signal is active', () => {
+    const route = routeIssueWorkerForDegradedMode({
+      issue: makeIssue({ number: 1818 }),
+      checkpointHasIssueProgress: false,
+      backpressureDecision: {
+        allowed: true,
+        reasons: [],
+        signals: { activeProcesses: 0, failedStarts: 0, inFlightBacklog: 0 },
+        alerts: [],
+      },
+    });
+
+    expect(route).toMatchObject({
+      mode: 'normal',
+      action: 'start-fresh',
+      issueNumber: 1818,
+    });
+  });
+});
 
 describe('IssueRunner', () => {
   let runner: IssueRunner;
