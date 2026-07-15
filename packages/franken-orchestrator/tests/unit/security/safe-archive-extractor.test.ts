@@ -126,6 +126,17 @@ describe('safe archive extraction', () => {
     expect(result.files).toEqual([{ path: 'nested/readme.txt', compressedBytes: expect.any(Number), uncompressedBytes: 5 }]);
   });
 
+  it('extracts empty deflated files without relaxing output bounds', async () => {
+    const destination = await tempDir();
+
+    const result = await extractZipArchive(createZip([{ name: 'empty.txt', body: Buffer.alloc(0), method: 8 }]), destination, {
+      maxFileBytes: 0,
+    });
+
+    await expect(readFile(join(destination, 'empty.txt'))).resolves.toHaveLength(0);
+    expect(result.files).toEqual([{ path: 'empty.txt', compressedBytes: expect.any(Number), uncompressedBytes: 0 }]);
+  });
+
   it('rejects archives that exceed the compressed byte limit before writing', async () => {
     const destination = await tempDir();
     const archive = createZip([{ name: 'safe.txt', body: Buffer.from('content'), method: 0 }]);
@@ -162,14 +173,17 @@ describe('safe archive extraction', () => {
   });
 
   it('rejects nested archives and path traversal entries before writing', async () => {
-    const nestedArchive = createZip([{ name: 'nested.zip', body: createZip([{ name: 'inside.txt', body: Buffer.from('x') }]) }]);
     const traversalArchive = createZip([{ name: '../outside.txt', body: Buffer.from('owned') }]);
 
-    const nestedDestination = await tempDir();
-    await expect(extractZipArchive(nestedArchive, nestedDestination, { maxNestingDepth: 0 })).rejects.toThrow(
-      /nested archive/i,
-    );
-    await expect(readdir(nestedDestination)).resolves.toEqual([]);
+    for (const archiveName of ['nested.zip', 'lib.jar', 'plugin.war', 'android.apk', 'package.whl', 'bundle.7z']) {
+      const nestedDestination = await tempDir();
+      await expect(
+        extractZipArchive(createZip([{ name: archiveName, body: Buffer.from('x') }]), nestedDestination, {
+          maxNestingDepth: 0,
+        }),
+      ).rejects.toThrow(/nested archive/i);
+      await expect(readdir(nestedDestination)).resolves.toEqual([]);
+    }
 
     const traversalDestination = await tempDir();
     await expect(extractZipArchive(traversalArchive, traversalDestination)).rejects.toThrow(/path traversal/i);
@@ -277,6 +291,22 @@ describe('safe archive extraction', () => {
     archive[payloadOffset] = 'z'.charCodeAt(0);
 
     await expect(extractZipArchive(archive, destination)).rejects.toThrow(/CRC/i);
+    await expect(readdir(destination)).resolves.toEqual([]);
+  });
+
+  it('validates all payloads before writing any files', async () => {
+    const destination = await tempDir();
+    const archive = Buffer.from(
+      createZip([
+        { name: 'valid-first.txt', body: Buffer.from('safe') },
+        { name: 'corrupt-second.txt', body: Buffer.from('bad') },
+      ]),
+    );
+    const corruptIndex = archive.indexOf(deflateRawSync(Buffer.from('bad')));
+    expect(corruptIndex).toBeGreaterThanOrEqual(0);
+    archive[corruptIndex] = 0xff;
+
+    await expect(extractZipArchive(archive, destination)).rejects.toThrow(SafeArchiveExtractionError);
     await expect(readdir(destination)).resolves.toEqual([]);
   });
 

@@ -67,7 +67,8 @@ const SYMLINK_FILE_TYPE = 0o120000;
 const FILE_TYPE_MASK = 0o170000;
 const MAX_ARCHIVE_PATH_SEGMENTS = 256;
 
-const ARCHIVE_ENTRY_PATTERN = /(?:^|[/\\])[^/\\]+\.(?:zip|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz|gz|bz2|xz)$/iu;
+const ARCHIVE_ENTRY_PATTERN =
+  /(?:^|[/\\])[^/\\]+\.(?:zip|jar|war|ear|apk|whl|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz|gz|bz2|xz|zst|7z|rar)$/iu;
 const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/iu;
 const CRC32_TABLE = makeCrc32Table();
 
@@ -88,10 +89,10 @@ export async function extractZipArchive(
   await rejectSymlinkedExistingAncestors(destinationRoot);
   const entries = parseZipCentralDirectory(buffer, destinationRoot);
   const files = preflightEntries(entries, limits);
+  const decodedFiles = files.map((entry) => ({ entry, data: readZipEntry(buffer, entry, limits) }));
 
   await mkdir(destinationRoot, { recursive: true });
-  for (const entry of files) {
-    const data = readZipEntry(buffer, entry, limits);
+  for (const { entry, data } of decodedFiles) {
     await rejectSymlinkedPathComponents(destinationRoot, entry.targetPath);
     await mkdir(dirname(entry.targetPath), { recursive: true });
     await rejectSymlinkedPathComponents(destinationRoot, entry.targetPath);
@@ -369,7 +370,7 @@ function readZipEntry(buffer: Buffer, entry: ZipCentralDirectoryEntry, limits: S
     data =
       entry.method === 0
         ? Buffer.from(compressed)
-        : inflateRawSync(compressed, { maxOutputLength: Math.min(entry.uncompressedBytes, limits.maxFileBytes) });
+        : inflateRawSync(compressed, { maxOutputLength: Math.max(1, Math.min(entry.uncompressedBytes, limits.maxFileBytes)) });
   } catch (cause) {
     throw new SafeArchiveExtractionError(`Unable to inflate ZIP entry ${entry.path}: ${(cause as Error).message}`);
   }
