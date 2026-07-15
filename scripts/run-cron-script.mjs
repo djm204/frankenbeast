@@ -54,11 +54,27 @@ function appendTail(current, chunk, limit = STDERR_TAIL_LIMIT) {
 }
 
 function appendRedactedTail(currentRaw, chunk) {
+  const combined = `${currentRaw}${chunk}`;
   const rawTail = appendTail(currentRaw, chunk, STDERR_REDACTION_CONTEXT_LIMIT);
+  const discarded = combined.length > STDERR_REDACTION_CONTEXT_LIMIT ? combined.slice(0, combined.length - STDERR_REDACTION_CONTEXT_LIMIT) : '';
+  const redactionInput = isTruncatedSecretContinuation(discarded, rawTail) ? `TRUNCATED_SECRET=${rawTail}` : rawTail;
   return {
     rawTail,
-    redactedTail: appendTail('', redactSensitiveText(rawTail)),
+    redactedTail: appendTail('', redactSensitiveText(redactionInput)),
   };
+}
+
+function isTruncatedSecretContinuation(discarded, rawTail) {
+  if (!discarded || !rawTail) {
+    return false;
+  }
+  const secretStart = /(?:^|[\s,;])(?:[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*|[a-z0-9_-]*(?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)[a-z0-9_-]*)\s*[:=]\s*[^\n\r,;]*$/i;
+  const lastLine = discarded.slice(Math.max(0, discarded.length - STDERR_REDACTION_CONTEXT_LIMIT));
+  if (!secretStart.test(lastLine)) {
+    return false;
+  }
+  const firstBoundary = rawTail.search(/[\n\r,;)}\]'"`]/);
+  return firstBoundary !== 0;
 }
 
 function countTrailingBackslashes(value, carry = 0) {
@@ -255,14 +271,69 @@ function isSecretHeaderName(value) {
   return /(?:authorization|token|secret|password|passwd|credential|api-key|access-key|private-key|ssh-key|gpg-key|signing-key)/i.test(normalized);
 }
 
+function findBalancedValueEnd(text, start, openChar, closeChar) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === openChar) {
+      depth += 1;
+      continue;
+    }
+    if (char === closeChar) {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+  }
+  return text.length;
+}
+
+function redactCompositeJsonSecretValues(value, escaped = false) {
+  const quotePattern = escaped ? "\\\\[\"']" : "[\"']";
+  const keyPattern = `${quotePattern}[a-z0-9_.-]*(?:token|secret|password|passwd|credential|authorization|api[-_.]?key|access[-_.]?key|private[-_.]?key|ssh[-_.]?key|gpg[-_.]?key|signing[-_.]?key|access_token)[a-z0-9_.-]*${quotePattern}\\s*:\\s*`;
+  const pattern = new RegExp(keyPattern, 'gi');
+  let output = '';
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(value)) !== null) {
+    const valueStart = pattern.lastIndex;
+    const firstValueChar = value[valueStart];
+    if (firstValueChar !== '{' && firstValueChar !== '[') {
+      continue;
+    }
+    const end = findBalancedValueEnd(value, valueStart, firstValueChar, firstValueChar === '{' ? '}' : ']');
+    output += value.slice(cursor, valueStart) + '[REDACTED]';
+    cursor = end;
+    pattern.lastIndex = end;
+  }
+  return output ? output + value.slice(cursor) : value;
+}
+
 function redactEscapedJsonSecretValues(value) {
-  return value
+  return redactCompositeJsonSecretValues(value, true)
     .replace(/(\\["'][a-z0-9_.-]*(?:token|secret|password|passwd|credential|authorization|api[-_.]?key|access[-_.]?key|private[-_.]?key|ssh[-_.]?key|gpg[-_.]?key|signing[-_.]?key|access_token)[a-z0-9_.-]*\\["']\s*:\s*)\[[^\]]*(?:\]|$)/gi, '$1[REDACTED]')
     .replace(/(\\["'][a-z0-9_.-]*(?:token|secret|password|passwd|credential|authorization|api[-_.]?key|access[-_.]?key|private[-_.]?key|ssh[-_.]?key|gpg[-_.]?key|signing[-_.]?key|access_token)[a-z0-9_.-]*\\["']\s*:\s*\\["'])(?:\\\\.|(?!\\["'])[\s\S])*(\\["'](?=\s*(?:[,}\]]|$))|$)/gi, '$1[REDACTED]$2');
 }
 
 function redactJsonSecretValues(value) {
-  return redactEscapedJsonSecretValues(value)
+  return redactCompositeJsonSecretValues(redactEscapedJsonSecretValues(value))
     .replace(/(["'][a-z0-9_.-]*(?:token|secret|password|passwd|credential|authorization|api[-_.]?key|access[-_.]?key|private[-_.]?key|ssh[-_.]?key|gpg[-_.]?key|signing[-_.]?key|access_token)[a-z0-9_.-]*["']\s*:\s*)\[[^\]]*(?:\]|$)/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_.-]*(?:token|secret|password|passwd|credential|authorization|api[-_.]?key|access[-_.]?key|private[-_.]?key|ssh[-_.]?key|gpg[-_.]?key|signing[-_.]?key|access_token)[a-z0-9_.-]*["']\s*:\s*["'])(?:\\.|(?!["'])[\s\S])*(["'](?=\s*(?:[,}\]]|$))|$)/gi, '$1[REDACTED]$2');
 }
@@ -287,10 +358,10 @@ function redactSensitiveText(value) {
     .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)\\(["'])(.*?)\\\2/gi, '$1\\$2[REDACTED]\\$2')
     .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)(\\["'])(.*?)(\\["'])/gi, '$1$2[REDACTED]$4')
     .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
-    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)([^\s"']+)/gi, '$1[REDACTED]')
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)(?!\[REDACTED\])([^\s"']+)/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=\\(["'])(.*?)\\\2/gi, '$1=\\$2[REDACTED]\\$2')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=(["'])(.*?)\2/gi, '$1=$2[REDACTED]$2')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=([^\s"',;]+)([\s,;]|$)/gi, '$1=[REDACTED]$3');
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=(?!\[REDACTED\])([^\s"',;)}\]]+)([\s"',;)}\]]|$)/gi, '$1=[REDACTED]$3');
 }
 
 function redactCommand(command) {
@@ -418,6 +489,7 @@ async function runCronScript({ name, recoverable, command }) {
   return await new Promise((resolve) => {
     let child;
     let exitDrainTimer;
+    let parentTerminationRecheckTimer;
     let exitResult = null;
 
     const signalHandlers = {
@@ -440,6 +512,10 @@ async function runCronScript({ name, recoverable, command }) {
       if (exitDrainTimer) {
         clearTimeout(exitDrainTimer);
         exitDrainTimer = null;
+      }
+      if (parentTerminationRecheckTimer) {
+        clearTimeout(parentTerminationRecheckTimer);
+        parentTerminationRecheckTimer = null;
       }
       resolve(exitCode);
     };
@@ -529,7 +605,8 @@ async function runCronScript({ name, recoverable, command }) {
       parentTerminationSignal = signal;
       parentTerminationMessage = `cron wrapper received ${signal} and terminated child script`;
       if (child && !child.killed) {
-        parentTerminationProcessGroup = child.pid ?? null;
+        const childProcessGroup = processGroupId(child.pid);
+        parentTerminationProcessGroup = childProcessGroup === child.pid ? childProcessGroup : null;
         parentTerminationPids = signalChildTree(child, signal);
         forceKillTimer = setTimeout(() => {
           forceKillTimer = null;
@@ -559,6 +636,13 @@ async function runCronScript({ name, recoverable, command }) {
         emitParentTerminationEnvelope();
         if (forceKillTimer) {
           if (processGroupAlive(parentTerminationProcessGroup) || trackedParentTerminationPids().some(processAlive)) {
+            if (!parentTerminationRecheckTimer) {
+              parentTerminationRecheckTimer = setTimeout(() => {
+                parentTerminationRecheckTimer = null;
+                finishChildResult(code, signal);
+              }, Math.min(50, Math.max(10, KILL_GRACE_MS)));
+              parentTerminationRecheckTimer.unref?.();
+            }
             return;
           }
           clearTimeout(forceKillTimer);

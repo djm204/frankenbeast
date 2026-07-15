@@ -194,6 +194,61 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('secret-value');
   });
 
+  it('redacts prefixed token assignments before shell punctuation', () => {
+    const result = runCronScript([
+      '--name',
+      'punctuated-prefixed-token',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write(\"access_token=stderr-secret') oauthToken=oauth-secret')\"); process.exit(9)",
+      "access_token=argv-secret')",
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain("access_token=[REDACTED]')");
+    expect(envelope.stderrTail).toContain("oauthToken=[REDACTED]')");
+    expect(JSON.stringify(envelope)).not.toContain('stderr-secret');
+    expect(JSON.stringify(envelope)).not.toContain('oauth-secret');
+    expect(JSON.stringify(envelope)).not.toContain('argv-secret');
+  });
+
+  it('redacts object-valued JSON secrets in stderr envelopes', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'object-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"token":{"a":"secret","b":"leak"},"safe":{"b":"kept"}}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"token":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"safe":{"b":"kept"}');
+    expect(JSON.stringify(envelope)).not.toContain('"a":"secret"');
+    expect(JSON.stringify(envelope)).not.toContain('"b":"leak"');
+  });
+
+  it('redacts secret assignment continuations after stderr context truncation', () => {
+    const leakedSuffix = 'oversized-secret-tail-fragment';
+    const result = runCronScriptWithEnv([
+      '--name',
+      'oversized-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('API_KEY=${'x'.repeat(80 * 1024)}${leakedSuffix}'); process.exit(13)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(13);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain(leakedSuffix);
+    expect(envelope.stderrTail).toContain('TRUNCATED_SECRET=[REDACTED]');
+  });
+
   it('fails with an explicit envelope when the cron command is missing', () => {
     const result = runCronScript(['--name', 'missing-command']);
 
@@ -1134,6 +1189,57 @@ describe('cron script error envelope runner', () => {
 
       expect(status).toBe(128 + osConstants.signals.SIGTERM);
       expect(readFileSync(cleanupFile, 'utf8')).toBe('done');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('finishes promptly when descendants exit before the shutdown grace timer expires', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-prompt-recheck-'));
+    const readyFile = join(tempDir, 'helper.ready');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-prompt-recheck-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(readyFile)}, "ready"); process.on("SIGTERM", () => setTimeout(() => process.exit(0), 120)); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.stderr.write('helper-started\\n'); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      await new Promise<void>((resolve) => {
+        const deadline = Date.now() + 1_000;
+        const check = () => {
+          if (stderr.includes('helper-started') && existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve();
+            return;
+          }
+          setTimeout(check, 10);
+        };
+        check();
+      });
+      const started = Date.now();
+      child.kill('SIGTERM');
+      const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+      expect(status).toBe(128 + osConstants.signals.SIGTERM);
+      expect(Date.now() - started).toBeLessThan(1_500);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
