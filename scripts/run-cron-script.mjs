@@ -91,7 +91,15 @@ function processGroupAlive(pid) {
         }
       }
     }
-    return sawPermissionDenied;
+    if (sawPermissionDenied) {
+      try {
+        process.kill(-pid, 0);
+        return true;
+      } catch (error) {
+        return error?.code === 'EPERM';
+      }
+    }
+    return false;
   } catch {
     try {
       process.kill(-pid, 0);
@@ -241,8 +249,20 @@ function isSecretHeaderName(value) {
   return /(?:authorization|token|secret|password|passwd|credential|api-key|access-key|private-key|ssh-key|gpg-key|signing-key)/i.test(normalized);
 }
 
+function redactEscapedJsonSecretValues(value) {
+  return value
+    .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*)\[[^\]]*(?:\]|$)/gi, '$1[REDACTED]')
+    .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*\\["'])(?:\\\\.|(?!\\["'])[\s\S])*(\\["'](?=\s*(?:[,}\]]|$))|$)/gi, '$1[REDACTED]$2');
+}
+
+function redactJsonSecretValues(value) {
+  return redactEscapedJsonSecretValues(value)
+    .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)\[[^\]]*(?:\]|$)/gi, '$1[REDACTED]')
+    .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*["'])(?:\\.|(?!["'])[\s\S])*(["'](?=\s*(?:[,}\]]|$))|$)/gi, '$1[REDACTED]$2');
+}
+
 function redactSensitiveText(value) {
-  const raw = typeof value === 'string' ? value : String(value ?? '');
+  const raw = redactJsonSecretValues(typeof value === 'string' ? value : String(value ?? ''));
   return raw
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/-----BEGIN PRIVATE [\s\S]*?-----END PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
@@ -449,6 +469,11 @@ async function runCronScript({ name, recoverable, command }) {
       const tracked = new Set(parentTerminationPids.filter((pid) => pid > 0));
       for (const pid of collectDescendantPids(parentTerminationProcessGroup)) {
         tracked.add(pid);
+      }
+      for (const pid of [...tracked]) {
+        for (const descendantPid of collectDescendantPids(pid)) {
+          tracked.add(descendantPid);
+        }
       }
       return [...tracked];
     };
@@ -664,7 +689,10 @@ async function runCronScript({ name, recoverable, command }) {
       stderrTail = appendTail(stderrTail, redactedTailChunk);
       stderrNeedsBoundary = !text.endsWith('\n');
       stderrPemPrefixBuffer = `${stderrPemPrefixBuffer}${text}`.slice(-80);
-      process.stderr.write(chunk);
+      if (!process.stderr.write(chunk)) {
+        child.stderr.pause();
+        process.stderr.once('drain', () => child.stderr.resume());
+      }
     });
 
     child.on('error', (error) => {

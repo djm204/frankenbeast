@@ -552,6 +552,39 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('two');
   });
 
+  it('redacts escaped JSON string secrets after earlier secrets', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'escaped-json-secret-after-secret',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('API_KEY=first-secret {\\"password\\":\\"x\\",\\"token\\":\\"tok\\\\\\"suffix\\"} safe-tail'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('safe-tail');
+    expect(JSON.stringify(envelope)).not.toContain('first-secret');
+    expect(JSON.stringify(envelope)).not.toContain('suffix');
+  });
+
+  it('redacts truncated array-valued JSON secrets in stderr envelopes', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'truncated-array-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"tokens":["truncated-array-secret"'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"tokens":[REDACTED]');
+    expect(JSON.stringify(envelope)).not.toContain('truncated-array-secret');
+  });
+
   it('redacts split Authorization header argv tokens', () => {
     const result = runCronScript([
       '--name',
