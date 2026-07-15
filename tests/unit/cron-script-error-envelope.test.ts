@@ -92,6 +92,26 @@ describe('cron script error envelope runner', () => {
     });
   });
 
+  it('keeps the envelope parseable when progress stderr ends with a carriage return', () => {
+    const result = runCronScript([
+      '--name',
+      'progress-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('progress\\r'); process.exit(9)",
+    ]);
+
+    expect(result.status).toBe(9);
+    expect(result.stderr).toContain('progress\r\n{');
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'progress-stderr',
+      failureKind: 'exit',
+      exitCode: 9,
+    });
+  });
+
   it('emits one spawn envelope when the child command cannot start', () => {
     const result = runCronScript(['--name', 'bad-binary', '--', 'definitely-not-a-real-command-frankenbeast']);
 
@@ -117,7 +137,15 @@ describe('cron script error envelope runner', () => {
   });
 
   it('forwards parent termination signals to the child and reports signal-specific status', async () => {
-    const child = spawn(process.execPath, [SCRIPT, '--name', 'signal-test', '--', process.execPath, '-e', 'setInterval(() => {}, 1000)'], {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'signal-test',
+      '--',
+      process.execPath,
+      '-e',
+      "process.on('SIGTERM', () => { process.stderr.write('cleanup after signal'); process.exit(0); }); setInterval(() => {}, 1000)",
+    ], {
       cwd: ROOT,
       env: { ...process.env, TZ: 'UTC' },
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -144,6 +172,7 @@ describe('cron script error envelope runner', () => {
       signal: 'SIGTERM',
       exitCode: 128 + osConstants.signals.SIGTERM,
     });
+    expect(envelope.stderrTail).toContain('cleanup after signal');
   });
 
   it('documents the envelope schema for operators and liveness tooling', () => {
