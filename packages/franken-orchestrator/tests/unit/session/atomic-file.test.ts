@@ -198,6 +198,36 @@ describe('atomic-file', () => {
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(true);
     });
 
+    it('does not delete temp files from stale preparing journals because ownership is unproven', () => {
+      const dir = makeTmpDir('state-write-journal-stale-preparing-');
+      const filePath = join(dir, 'state.json');
+      const tempPath = `${filePath}.tmp.preexisting`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"belongs":"elsewhere"}');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'preparing',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery).toMatchObject({
+        action: 'removed-completed-journal',
+        tempPath,
+      });
+      expect(existsSync(tempPath)).toBe(true);
+      expect(readFileSync(tempPath, 'utf-8')).toBe('{"belongs":"elsewhere"}');
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+    });
+
     it('retains active journals so concurrent writers do not remove live temp files', () => {
       const dir = makeTmpDir('state-write-journal-active-');
       const filePath = join(dir, 'state.json');

@@ -251,6 +251,27 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
     };
   }
 
+  if (targetMatches && journal.phase === 'preparing') {
+    if (!isStaleJournal(journal)) {
+      return {
+        journalPath,
+        targetPath: journal.targetPath,
+        tempPath: journal.tempPath,
+        action: 'retained-active-journal',
+        reason: `State write journal ${journalPath} is still preparing; refusing to remove live journal for ${journal.tempPath}.`,
+      };
+    }
+    rmSync(journalPath, { force: true });
+    fsyncDir(dirname(filePath));
+    return {
+      journalPath,
+      targetPath: journal.targetPath,
+      tempPath: journal.tempPath,
+      action: 'removed-completed-journal',
+      reason: `Removed stale preparing state write journal without deleting ${journal.tempPath}; preparing journals do not prove ownership of an existing temp file.`,
+    };
+  }
+
   if (targetMatches && existsSync(journal.tempPath)) {
     if (!isStaleJournal(journal)) {
       return {
@@ -270,16 +291,6 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
       tempPath: journal.tempPath,
       action: 'removed-stale-temp',
       reason: `Recovered interrupted ${journal.phase} state write by removing the journaled temp file; target remains the last complete file or the already-renamed replacement.`,
-    };
-  }
-
-  if (targetMatches && journal.phase === 'preparing' && !isStaleJournal(journal)) {
-    return {
-      journalPath,
-      targetPath: journal.targetPath,
-      tempPath: journal.tempPath,
-      action: 'retained-active-journal',
-      reason: `State write journal ${journalPath} is still preparing; refusing to remove live journal for ${journal.tempPath}.`,
     };
   }
 
