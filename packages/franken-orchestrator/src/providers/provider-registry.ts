@@ -99,6 +99,7 @@ export class ProviderRegistry {
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     let lastError: Error | undefined;
+    let lastFailedProviderName: string | undefined;
     const unavailableProviders: string[] = [];
     let attemptedProviders = 0;
 
@@ -109,6 +110,8 @@ export class ProviderRegistry {
 
       if (!(await provider.isAvailable())) {
         unavailableProviders.push(provider.name);
+        lastFailedProviderName = provider.name;
+        lastError = new Error(`Provider ${provider.name} is unavailable`);
         continue;
       }
       attemptedProviders++;
@@ -116,8 +119,8 @@ export class ProviderRegistry {
       let effectiveRequest = request;
       if (i > 0) {
         const snapshot = this.brain.serialize();
-        const previousProvider = this.providers[this.currentProviderIndex]!;
-        snapshot.metadata.lastProvider = previousProvider.name;
+        const failedProviderName = lastFailedProviderName ?? this.providers[this.currentProviderIndex]!.name;
+        snapshot.metadata.lastProvider = failedProviderName;
         snapshot.metadata.switchReason = lastError?.message ?? 'unknown';
 
         if (this.opts.onProviderSwitch) {
@@ -125,7 +128,7 @@ export class ProviderRegistry {
           const hash =
             'sha256:' + createHash('sha256').update(json).digest('hex');
           this.opts.onProviderSwitch({
-            from: previousProvider.name,
+            from: failedProviderName,
             to: provider.name,
             reason: lastError?.message ?? 'unknown',
             brainSnapshotHash: hash,
@@ -169,6 +172,7 @@ export class ProviderRegistry {
             }
             if (event.type === 'error' && !event.retryable) {
               lastError = new Error(event.error);
+              lastFailedProviderName = provider.name;
               throw lastError; // discard buffer, failover
             }
             buffer.push(event);
@@ -188,10 +192,13 @@ export class ProviderRegistry {
             }
           }
 
+          lastError = new Error('stream ended without done');
+          lastFailedProviderName = provider.name;
           break; // stream ended without done — failover
         } catch (error) {
           lastError =
             error instanceof Error ? error : new Error(String(error));
+          lastFailedProviderName = provider.name;
           break; // failover to next provider
         }
       }

@@ -296,6 +296,35 @@ describe('ProviderRegistry', () => {
       );
     });
 
+    it('reports the actual failed provider during chained failover', async () => {
+      const p1 = mockProvider('primary', { failOnExecute: new Error('primary crashed') });
+      const p2 = mockProvider('secondary', { failOnExecute: new Error('secondary crashed') });
+      const p3 = mockProvider('tertiary');
+      const onSwitch = vi.fn();
+
+      const registry = new ProviderRegistry([p1, p2, p3], mockBrain(), {
+        onProviderSwitch: onSwitch,
+      });
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(onSwitch).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          from: 'primary',
+          to: 'secondary',
+          reason: 'primary crashed',
+        }),
+      );
+      expect(onSwitch).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          from: 'secondary',
+          to: 'tertiary',
+          reason: 'secondary crashed',
+        }),
+      );
+    });
+
     it('checkpoints brain when all providers exhausted', async () => {
       const p1 = mockProvider('p1', { failOnExecute: new Error('err1') });
       const p2 = mockProvider('p2', { failOnExecute: new Error('err2') });

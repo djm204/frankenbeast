@@ -120,6 +120,15 @@ export {
   assessPmHandoffQuality,
   formatHandoff,
 } from './providers/format-handoff.js';
+export {
+  createModelProviderFailoverAuditPayload,
+  ProviderRegistry as LlmProviderRegistry,
+} from './providers/provider-registry.js';
+export type {
+  ModelProviderFailoverAuditPayload,
+  ProviderRegistryOptions as LlmProviderRegistryOptions,
+  ProviderSwitchEvent,
+} from './providers/provider-registry.js';
 export type {
   PmHandoffQualityAssessment,
   PmHandoffRubricCriterion,
