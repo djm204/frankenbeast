@@ -67,6 +67,7 @@ interface InternalLessonPrivacyFilterDecision
 
 interface LessonCandidatePrivacyFilterResult {
   readonly decision: InternalLessonPrivacyFilterDecision;
+  readonly rejectedDecisions: readonly InternalLessonPrivacyFilterDecision[];
   readonly findings: readonly SanitizedLessonFinding[];
 }
 
@@ -684,6 +685,11 @@ export class LessonRecorder {
         if (privacyFilterResult.decision.action === 'reject') {
           recordingResult.rejectedByPrivacy.push(privacyDecision);
           continue;
+        }
+        for (const rejectedDecision of privacyFilterResult.rejectedDecisions) {
+          recordingResult.rejectedByPrivacy.push(
+            toPublicPrivacyDecision(rejectedDecision),
+          );
         }
         const filteredFindings = privacyFilterResult.findings;
         const resolvedIteration =
@@ -1678,30 +1684,145 @@ function createLessonPrivacyFilterResult(
     readonly suggestion?: string | undefined;
   }[],
 ): LessonCandidatePrivacyFilterResult {
-  const rawText = [
-    taskId,
-    evaluatorName,
-    ...findings.flatMap((finding) => [
+  const metadataText = [taskId, evaluatorName].join('\n');
+  const metadataDecision = createPrivacyDecision(metadataText, {
+    flagCustomerData: false,
+  });
+  if (metadataDecision.sensitive) {
+    return {
+      decision: {
+        ...metadataDecision,
+        action: 'reject',
+        approvalRequired: false,
+        reason:
+          'Lesson candidate metadata contained sensitive data and is rejected before durable learning.',
+      },
+      rejectedDecisions: [],
+      findings: [],
+    };
+  }
+
+  const admittedFindings: SanitizedLessonFinding[] = [];
+  const rejectedDecisions: InternalLessonPrivacyFilterDecision[] = [];
+  const admittedDecisions: InternalLessonPrivacyFilterDecision[] = [];
+
+  for (const finding of findings) {
+    const findingText = [
       finding.message,
       finding.location ?? '',
       finding.suggestion ?? '',
-    ]),
-  ].join('\n');
+    ].join('\n');
+    const findingDecision = createPrivacyDecision(findingText);
+    if (findingDecision.action === 'reject') {
+      rejectedDecisions.push(findingDecision);
+      continue;
+    }
+    admittedDecisions.push(findingDecision);
+    admittedFindings.push({
+      message: redactSensitiveText(finding.message, findingDecision.redactions),
+      severity: finding.severity,
+      ...(finding.location
+        ? {
+            location: redactSensitiveText(
+              finding.location,
+              findingDecision.redactions,
+            ),
+          }
+        : {}),
+      ...(finding.suggestion
+        ? {
+            suggestion: redactSensitiveText(
+              finding.suggestion,
+              findingDecision.redactions,
+            ),
+          }
+        : {}),
+    });
+  }
+
+  const rawText = [metadataText, ...findings.map((finding) => finding.message)].join(
+    '\n',
+  );
+  if (admittedFindings.length === 0) {
+    return {
+      decision: {
+        ...createPrivacyDecision(rawText),
+        action: 'reject',
+        approvalRequired: false,
+        reason: PRIVACY_FILTER_TASK_STATE_REASON,
+      },
+      rejectedDecisions,
+      findings: [],
+    };
+  }
+
+  const redactions = mergePrivacyRedactions(
+    admittedDecisions.flatMap((decision) => decision.redactions),
+  );
+  const flags = new Set<string>();
+  for (const decision of admittedDecisions) {
+    for (const flag of decision.flags) {
+      flags.add(flag);
+    }
+  }
+  const category = combineLessonCandidateCategories(
+    admittedDecisions.map((decision) => decision.category),
+  );
+  const sensitive = admittedDecisions.some((decision) => decision.sensitive);
+  const decision: InternalLessonPrivacyFilterDecision = {
+    schemaVersion: 'lesson-privacy-filter-v1',
+    category,
+    action: 'admit',
+    sensitive,
+    approvalRequired: sensitive,
+    flags: Array.from(flags).sort(),
+    redactions,
+    originalHash: stableHash(rawText),
+    reason: sensitive ? PRIVACY_FILTER_SENSITIVE_REASON : PRIVACY_FILTER_ADMIT_REASON,
+  };
+
+  return {
+    decision,
+    rejectedDecisions,
+    findings: admittedFindings,
+  };
+}
+
+function createPrivacyDecision(
+  rawText: string,
+  options: { readonly flagCustomerData?: boolean } = {},
+): InternalLessonPrivacyFilterDecision {
   const redactions = collectPrivacyRedactions(rawText);
   const flags = new Set<string>();
   for (const redaction of redactions) {
     flags.add(redaction.kind);
     flags.add(redaction.label);
   }
-  if (CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText))) {
+  const containsCustomerData =
+    options.flagCustomerData !== false &&
+    CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText));
+  if (containsCustomerData) {
     flags.add('customer-data');
+    if (redactions.length === 0) {
+      for (const segment of rawText.split('\n')) {
+        if (!CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(segment))) {
+          continue;
+        }
+        redactions.push({
+          kind: 'customer-data',
+          label: 'customer-context',
+          replacement:
+            'Customer data redacted [REDACTED_CUSTOMER_DATA]; validate privacy boundaries before recording lessons',
+          original: segment,
+        });
+      }
+    }
   }
-
   const category = classifyLessonCandidate(rawText);
   const sensitive = redactions.length > 0 || flags.has('customer-data');
   const action =
     category === 'task-state' || category === 'discard' ? 'reject' : 'admit';
-  const decision: InternalLessonPrivacyFilterDecision = {
+  return {
     schemaVersion: 'lesson-privacy-filter-v1',
     category,
     action,
@@ -1717,20 +1838,37 @@ function createLessonPrivacyFilterResult(
           ? PRIVACY_FILTER_SENSITIVE_REASON
           : PRIVACY_FILTER_ADMIT_REASON,
   };
+}
 
-  return {
-    decision,
-    findings: findings.map((finding) => ({
-      message: redactSensitiveText(finding.message, redactions),
-      severity: finding.severity,
-      ...(finding.location
-        ? { location: redactSensitiveText(finding.location, redactions) }
-        : {}),
-      ...(finding.suggestion
-        ? { suggestion: redactSensitiveText(finding.suggestion, redactions) }
-        : {}),
-    })),
-  };
+function mergePrivacyRedactions(
+  redactions: readonly InternalLessonPrivacyRedaction[],
+): InternalLessonPrivacyRedaction[] {
+  const merged: InternalLessonPrivacyRedaction[] = [];
+  const seen = new Set<string>();
+  for (const redaction of redactions) {
+    const key = `${redaction.kind}:${redaction.label}:${redaction.original}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(redaction);
+  }
+  return merged;
+}
+
+function combineLessonCandidateCategories(
+  categories: readonly LessonCandidateCategory[],
+): LessonCandidateCategory {
+  if (categories.includes('procedure')) {
+    return 'procedure';
+  }
+  if (categories.includes('environment-fact')) {
+    return 'environment-fact';
+  }
+  if (categories.includes('preference')) {
+    return 'preference';
+  }
+  return categories[0] ?? 'discard';
 }
 
 function toPublicPrivacyDecision(
