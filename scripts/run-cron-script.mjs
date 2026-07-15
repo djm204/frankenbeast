@@ -4,6 +4,7 @@ import { constants as osConstants } from 'node:os';
 
 const USAGE = 'Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]';
 const STDERR_TAIL_LIMIT = 4_096;
+const KILL_GRACE_MS = Number.parseInt(process.env.CRON_SCRIPT_KILL_GRACE_MS ?? '5000', 10);
 
 function nowIso() {
   return new Date().toISOString();
@@ -74,13 +75,48 @@ function signalChildTree(child, signal) {
   child.kill(signal);
 }
 
+function isSecretKey(value) {
+  return /(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key)/i.test(value);
+}
+
+function redactCommand(command) {
+  const redacted = [];
+  let redactNext = false;
+
+  for (const part of command) {
+    if (redactNext) {
+      redacted.push('[REDACTED]');
+      redactNext = false;
+      continue;
+    }
+
+    const equalsIndex = part.indexOf('=');
+    if (equalsIndex > 0 && isSecretKey(part.slice(0, equalsIndex))) {
+      redacted.push(`${part.slice(0, equalsIndex + 1)}[REDACTED]`);
+      continue;
+    }
+
+    if (isSecretKey(part)) {
+      redacted.push('[REDACTED]');
+      if (part.startsWith('-') && !part.includes('=')) {
+        redactNext = true;
+      }
+      continue;
+    }
+
+    redacted.push(part);
+  }
+
+  return redacted;
+}
+
 function writeEnvelope({ script, command, exitCode, signal = null, failureKind = 'exit', message, stderrTail = '', durationMs, recoverable = false }) {
   const envelope = {
     schemaVersion: 1,
     type: 'franken.cron.script.error',
     timestamp: nowIso(),
     script,
-    command,
+    command: redactCommand(command),
     failureKind,
     exitCode,
     signal,
@@ -109,6 +145,7 @@ async function runCronScript({ name, recoverable, command }) {
     const signalHandlers = {
       SIGINT: () => handleParentSignal('SIGINT'),
       SIGTERM: () => handleParentSignal('SIGTERM'),
+      SIGHUP: () => handleParentSignal('SIGHUP'),
     };
 
     const finish = (exitCode) => {
@@ -145,8 +182,8 @@ async function runCronScript({ name, recoverable, command }) {
         signalChildTree(child, signal);
         forceKillTimer = setTimeout(() => {
           signalChildTree(child, 'SIGKILL');
-        }, 5_000);
-        forceKillTimer.unref?.();
+          finish(parentTerminationExitCode);
+        }, KILL_GRACE_MS);
       }
     }
 
@@ -166,7 +203,12 @@ async function runCronScript({ name, recoverable, command }) {
       const text = chunk.toString('utf8');
       stderrTail = appendTail(stderrTail, text);
       stderrNeedsBoundary = !text.endsWith('\n');
-      process.stderr.write(chunk);
+      if (!process.stderr.write(chunk)) {
+        child.stderr.pause();
+        process.stderr.once('drain', () => {
+          child.stderr.resume();
+        });
+      }
     });
 
     child.on('error', (error) => {
@@ -201,6 +243,9 @@ async function runCronScript({ name, recoverable, command }) {
           durationMs,
           recoverable,
         });
+        if (forceKillTimer) {
+          return;
+        }
         finish(parentTerminationExitCode);
         return;
       }

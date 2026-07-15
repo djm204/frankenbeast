@@ -56,6 +56,28 @@ describe('cron script error envelope runner', () => {
     expect(envelope.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it('redacts secret-looking argv before emitting envelopes', () => {
+    const result = runCronScript([
+      '--name',
+      'secret-job',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(3)',
+      '--',
+      '--token',
+      'super-secret-token',
+      '--api-key=abc123',
+    ]);
+
+    expect(result.status).toBe(3);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('[REDACTED]');
+    expect(envelope.command).toContain('--api-key=[REDACTED]');
+    expect(JSON.stringify(envelope.command)).not.toContain('super-secret-token');
+    expect(JSON.stringify(envelope.command)).not.toContain('abc123');
+  });
+
   it('fails with an explicit envelope when the cron command is missing', () => {
     const result = runCronScript(['--name', 'missing-command']);
 
@@ -147,7 +169,7 @@ describe('cron script error envelope runner', () => {
       "process.on('SIGTERM', () => { process.stderr.write('cleanup after signal'); process.exit(0); }); process.stderr.write('ready for signal\\n'); setInterval(() => {}, 1000)",
     ], {
       cwd: ROOT,
-      env: { ...process.env, TZ: 'UTC' },
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
 
