@@ -30,6 +30,17 @@ export interface GovernorAppOptions {
   sessionTokenStore?: SessionTokenStore;
   /** JSON file used to share session tokens across governor processes. */
   sessionTokenStorePath?: string;
+  /**
+   * Optional backpressure guard for the approval queue. When configured,
+   * new unique approval requests are rejected with HTTP 429 once the pending
+   * queue reaches `maxPendingApprovals`; refreshing an existing requestId is
+   * still allowed so operators can update visible request metadata without
+   * growing the queue.
+   */
+  approvalQueueBackpressure?: {
+    readonly maxPendingApprovals: number;
+    readonly retryAfterSeconds?: number;
+  };
 }
 
 /** Maximum age (seconds) for a Slack request timestamp before it is rejected as a replay. */
@@ -101,6 +112,22 @@ function parseJsonBody(rawBody: Buffer): ParsedJsonBody | null {
   }
 }
 
+function normalizeApprovalQueueBackpressure(
+  options: GovernorAppOptions['approvalQueueBackpressure'],
+): { maxPendingApprovals: number; retryAfterSeconds?: number } | undefined {
+  if (!options) return undefined;
+  if (!Number.isSafeInteger(options.maxPendingApprovals) || options.maxPendingApprovals < 1) {
+    throw new Error('approvalQueueBackpressure.maxPendingApprovals must be a positive safe integer');
+  }
+  if (
+    options.retryAfterSeconds !== undefined
+    && (!Number.isSafeInteger(options.retryAfterSeconds) || options.retryAfterSeconds < 1)
+  ) {
+    throw new Error('approvalQueueBackpressure.retryAfterSeconds must be a positive safe integer when provided');
+  }
+  return options;
+}
+
 /**
  * Produce a signature for a resolved `ApprovalResponse` matching the format
  * `ApprovalGateway.verifySignature` expects (HMAC-SHA256 hex digest of
@@ -154,6 +181,7 @@ function normalizeSlackDecision(actionId: unknown): ResponseCode | null {
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
   const registry = options.registry ?? new ApprovalWaiterRegistry();
+  const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
     try {
@@ -165,10 +193,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
 
   // Health check
   app.get('/health', (c) => {
+    const remainingCapacity = approvalQueueBackpressure
+      ? Math.max(approvalQueueBackpressure.maxPendingApprovals - registry.size, 0)
+      : undefined;
     return c.json({
       status: 'ok',
       service: 'franken-governor',
       pendingApprovals: registry.size,
+      approvalQueueBackpressure: approvalQueueBackpressure
+        ? {
+            enabled: true,
+            atCapacity: remainingCapacity === 0,
+            maxPendingApprovals: approvalQueueBackpressure.maxPendingApprovals,
+            remainingCapacity,
+          }
+        : { enabled: false },
     });
   });
 
@@ -214,6 +253,24 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         { error: { message: 'Missing required fields: requestId, taskId, summary' } },
         400,
       );
+    }
+
+    if (
+      approvalQueueBackpressure
+      && !registry.has(body.requestId)
+      && registry.size >= approvalQueueBackpressure.maxPendingApprovals
+    ) {
+      if (approvalQueueBackpressure.retryAfterSeconds) {
+        c.header('Retry-After', String(approvalQueueBackpressure.retryAfterSeconds));
+      }
+      return c.json({
+        error: {
+          code: 'approval_queue_backpressure',
+          message: 'Approval queue is at capacity; retry after operators resolve pending approvals.',
+          pendingApprovals: registry.size,
+          maxPendingApprovals: approvalQueueBackpressure.maxPendingApprovals,
+        },
+      }, 429);
     }
 
     registry.register(body.requestId, body.taskId, body.summary);

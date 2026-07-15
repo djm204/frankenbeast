@@ -46,6 +46,14 @@ npm --workspace @franken/orchestrator run chat-server -- --port 3737
 
 The integrated Hono app always mounts chat (WebSocket at `/v1/chat/ws`), network, and analytics routes. The `chat-server` CLI mounts Beast agents/SSE only when an operator token resolves, and skills/dashboard routes only when a provider registry is configured. When comms channels are enabled, the CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/inbound`, `/v1/comms/action`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) is mounted by `createChatApp()` when `securityConfig` is supplied.
 
+Approval automation can probe a chat session before approving a pending action:
+
+```text
+GET /v1/chat/sessions/:id/approval/health
+```
+
+The response is a JSON envelope with `data.ready`, `data.status`, `data.pendingApproval`, and a human-readable `data.reason`. `status: "ready"` means approval metadata exists and the stored command is single-line/safe for the HTTP approval path; `status: "not_ready"` means there is no actionable pending approval metadata; `status: "unsafe"` means the pending command must be rejected or recovered manually instead of replayed by approval-cop. The endpoint is read-only and preserves the session state.
+
 ## Option 3: Implement BeastLoop dependencies around your agent
 
 For deeper integration, wire your agent components into the orchestrator's ports instead of routing through a standalone proxy:

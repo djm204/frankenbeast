@@ -209,6 +209,10 @@ export interface McpToolInfo {
 export interface CheckpointTaskOutput {
   readonly found: boolean;
   readonly output?: unknown;
+  /** True when the primary output sidecar was unavailable and a previous known-good value was used. */
+  readonly stale?: boolean | undefined;
+  /** Operator-facing reason a stale dependency output had to be used. */
+  readonly staleReason?: 'missing-primary' | 'corrupt-primary' | undefined;
 }
 
 export interface ICheckpointStore {

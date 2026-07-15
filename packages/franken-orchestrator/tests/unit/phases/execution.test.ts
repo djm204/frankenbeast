@@ -450,6 +450,60 @@ describe('runExecution', () => {
     expect(outcomes[1]!.output).toEqual({ message: 'persisted-alpha-output' });
   });
 
+  it('warns and audits when a checkpointed dependency output uses the stale cache fallback', async () => {
+    const execute = vi.fn(async (_skillId: string, input: SkillInput) => ({
+      output: input.dependencyOutputs.get('t1'),
+      tokensUsed: 1,
+    }));
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const checkpointEntries = new Set<string>(['t1:done']);
+    const checkpoint = {
+      checkpointPath: '/tmp/franken-checkpoint.txt',
+      has: vi.fn((key: string) => checkpointEntries.has(key)),
+      write: vi.fn((key: string) => checkpointEntries.add(key)),
+      readAll: vi.fn(() => new Set(checkpointEntries)),
+      clear: vi.fn(),
+      recordCommit: vi.fn(),
+      lastCommit: vi.fn(),
+      readTaskOutput: vi.fn(() => ({
+        found: true,
+        output: { message: 'stale-alpha-output' },
+        stale: true,
+        staleReason: 'corrupt-primary' as const,
+      })),
+      writeTaskOutput: vi.fn(),
+    };
+    const logger = makeLogger();
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['beta'], dependsOn: ['t1'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, logger, undefined, checkpoint);
+
+    expect(outcomes[1]!.output).toEqual({ message: 'stale-alpha-output' });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Execution: using stale dependency output cache for checkpointed task',
+      {
+        taskId: 't1',
+        reason: 'corrupt-primary',
+        checkpointPath: '/tmp/franken-checkpoint.txt',
+      },
+    );
+    expect(c.audit).toContainEqual(expect.objectContaining({
+      module: 'executor',
+      action: 'dependency-output-cache:stale-fallback',
+      detail: {
+        taskId: 't1',
+        reason: 'corrupt-primary',
+        checkpointPath: '/tmp/franken-checkpoint.txt',
+      },
+    }));
+  });
+
   it('passes through dependency output when no skills are required', async () => {
     const execute = vi.fn(async (skillId: string) => ({
       output: `${skillId}-output`,

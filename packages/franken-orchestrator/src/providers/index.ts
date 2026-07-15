@@ -1,5 +1,12 @@
-export { ProviderRegistry } from './provider-registry.js';
-export type { ProviderRegistryOptions } from './provider-registry.js';
+export {
+  createModelProviderFailoverAuditPayload,
+  ProviderRegistry,
+} from './provider-registry.js';
+export type {
+  ModelProviderFailoverAuditPayload,
+  ProviderRegistryOptions,
+  ProviderSwitchEvent,
+} from './provider-registry.js';
 export { TokenAggregator } from './token-aggregator.js';
 export type { AggregatedTokenUsage } from './token-aggregator.js';
 export { formatHandoff, truncateSnapshot } from './format-handoff.js';
