@@ -1296,6 +1296,127 @@ describe('SqliteBrain', () => {
       });
     });
 
+    it('surfaces contradictory working-memory candidates before approval', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.location.city',
+        value: 'Paris',
+        source: 'chat:turn-1',
+        confidence: 0.9,
+        reason: 'User stated they live in Paris.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.location.city',
+        value: 'Berlin',
+        source: 'chat:turn-2',
+        confidence: 0.92,
+        reason: 'User stated they live in Berlin.',
+      });
+
+      expect(brain.memoryReview.conflictsFor(contradictory.id)).toEqual([
+        expect.objectContaining({
+          targetStore: 'working',
+          key: 'user.location.city',
+          conflictType: 'value_mismatch',
+          proposedCandidateId: contradictory.id,
+          existingValue: 'Paris',
+          proposedValue: 'Berlin',
+          existingProvenance: expect.objectContaining({
+            candidateId: initial.id,
+            source: 'chat:turn-1',
+          }),
+          guidance: expect.stringContaining('keep_existing, replace_existing, or reject_candidate'),
+        }),
+      ]);
+    });
+
+    it('resolves memory conflicts by keeping the existing fact', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.editor',
+        value: 'vim',
+        source: 'chat:turn-3',
+        confidence: 0.9,
+        reason: 'User stated their editor preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.editor',
+        value: 'emacs',
+        source: 'chat:turn-4',
+        confidence: 0.8,
+        reason: 'Later ambiguous editor mention.',
+      });
+
+      const resolved = brain.memoryReview.resolveConflict(contradictory.id, {
+        resolution: 'keep_existing',
+        reviewer: 'operator',
+      });
+
+      expect(resolved.status).toBe('rejected');
+      expect(resolved.note).toBe('Memory conflict resolved by keeping the existing value.');
+      expect(brain.working.get('user.preference.editor')).toBe('vim');
+      expect(brain.memoryReview.conflictsFor(contradictory.id)).toEqual([]);
+    });
+
+    it('resolves memory conflicts by replacing the existing fact', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'master',
+        source: 'legacy-config',
+        confidence: 0.7,
+        reason: 'Old repository metadata.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const corrected = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.95,
+        reason: 'Current GitHub repository metadata.',
+      });
+
+      const resolved = brain.memoryReview.resolveConflict(corrected.id, {
+        resolution: 'replace_existing',
+        reviewer: 'operator',
+      });
+
+      expect(resolved.status).toBe('approved');
+      expect(resolved.note).toBe('Memory conflict resolved by replacing the existing value.');
+      expect(brain.working.get('env.repo.default-branch')).toBe('main');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'env.repo.default-branch'),
+      ).toMatchObject({
+        candidateId: corrected.id,
+        value: 'main',
+        source: 'repo-config',
+      });
+    });
+
+    it('rejects conflict resolution when there is no contradictory current fact', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.shell',
+        value: 'zsh',
+        source: 'chat:turn-5',
+        confidence: 0.8,
+        reason: 'User stated shell preference.',
+      });
+
+      expect(() =>
+        brain.memoryReview.resolveConflict(candidate.id, {
+          resolution: 'keep_existing',
+          reviewer: 'operator',
+        }),
+      ).toThrow(/no unresolved conflict/);
+    });
+
     it('edits a candidate before approval and writes the edited memory', () => {
       const candidate = brain.memoryReview.propose({
         targetStore: 'working',

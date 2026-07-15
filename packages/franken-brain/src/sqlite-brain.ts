@@ -144,6 +144,26 @@ export interface MemoryProvenanceRecord {
   approvedAt: string;
 }
 
+export type MemoryConflictResolution =
+  | 'keep_existing'
+  | 'replace_existing'
+  | 'reject_candidate';
+
+export interface MemoryConflict {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  conflictType: 'value_mismatch';
+  proposedCandidateId: string;
+  existingValue: unknown;
+  proposedValue: unknown;
+  existingProvenance?: MemoryProvenanceRecord;
+  guidance: string;
+}
+
+export interface MemoryConflictResolutionOptions extends MemoryReviewDecisionOptions {
+  resolution: MemoryConflictResolution;
+}
+
 export interface MemoryEncryptionMetadata {
   algorithm: 'aes-256-gcm';
   stores: Array<{ store: string; encrypted: boolean }>;
@@ -1672,6 +1692,65 @@ export class SqliteMemoryReviewQueue {
     return row ? this.rowToProvenance(row) : null;
   }
 
+  conflictsFor(id: string): MemoryConflict[] {
+    const candidate = this.requireCandidate(id);
+    if (candidate.status !== 'pending') return [];
+    return this.detectConflicts(candidate);
+  }
+
+  resolveConflict(
+    id: string,
+    options: MemoryConflictResolutionOptions,
+  ): MemoryCandidate {
+    const candidate = this.requireCandidate(id, 'pending');
+    const conflicts = this.detectConflicts(candidate);
+    if (conflicts.length === 0) {
+      throw new Error(`Memory candidate ${id} has no unresolved conflict`);
+    }
+
+    const decisionOptions: MemoryReviewDecisionOptions = {
+      ...(options.reviewer ? { reviewer: options.reviewer } : {}),
+      ...(options.note ? { note: options.note } : {}),
+    };
+
+    if (options.resolution === 'replace_existing') {
+      return this.approve(id, {
+        ...decisionOptions,
+        note: decisionOptions.note ?? 'Memory conflict resolved by replacing the existing value.',
+      });
+    }
+
+    return this.reject(id, {
+      ...decisionOptions,
+      note: decisionOptions.note ?? (
+        options.resolution === 'keep_existing'
+          ? 'Memory conflict resolved by keeping the existing value.'
+          : 'Memory conflict resolved by rejecting the contradictory candidate.'
+      ),
+    });
+  }
+
+  private detectConflicts(candidate: MemoryCandidate): MemoryConflict[] {
+    if (candidate.targetStore !== 'working') return [];
+    if (!this.working.has(candidate.key)) return [];
+    const existingValue = this.working.get(candidate.key);
+    if (memoryValuesEqual(existingValue, candidate.value)) return [];
+    const existingProvenance = this.provenanceFor(candidate.targetStore, candidate.key) ?? undefined;
+    return [
+      {
+        targetStore: candidate.targetStore,
+        key: candidate.key,
+        conflictType: 'value_mismatch',
+        proposedCandidateId: candidate.id,
+        existingValue,
+        proposedValue: candidate.value,
+        ...(existingProvenance ? { existingProvenance } : {}),
+        guidance:
+          'A pending memory candidate contradicts the current value for the same key. Resolve with keep_existing, replace_existing, or reject_candidate before treating the fact as durable.',
+      },
+    ];
+  }
+
   private validateProposal(proposal: MemoryCandidateProposal): void {
     if (proposal.targetStore !== 'working') {
       throw new Error(`Unsupported memory review target store: ${proposal.targetStore}`);
@@ -2071,6 +2150,11 @@ function canonicalMemoryValue(value: unknown): unknown {
   return parseStoredWorkingMemoryValue(
     stringifyWorkingMemoryValue('memory candidate', value),
   );
+}
+
+function memoryValuesEqual(left: unknown, right: unknown): boolean {
+  return stableStringify(canonicalMemoryValue(left)) ===
+    stableStringify(canonicalMemoryValue(right));
 }
 
 function stableStringify(value: unknown): string {
