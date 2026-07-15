@@ -27,6 +27,29 @@ interface ReplayCaptureRecord {
   readonly content: string;
 }
 
+function createDisabledTrace(traceId: string): Trace {
+  return {
+    id: traceId,
+    goal: 'tracing-disabled',
+    status: 'completed',
+    startedAt: Date.now(),
+    spans: [],
+  };
+}
+
+function createDisabledSpan(traceId: string, opts: { name: string; parentSpanId?: string }): Span {
+  return {
+    id: `tracing-disabled:${opts.name}`,
+    traceId,
+    ...(opts.parentSpanId ? { parentSpanId: opts.parentSpanId } : {}),
+    name: opts.name,
+    status: 'completed',
+    startedAt: Date.now(),
+    metadata: {},
+    thoughtBlocks: [],
+  };
+}
+
 export class CliObserverBridge implements IObserverModule {
   private readonly counter: TokenCounter;
   private readonly costCalc: CostCalculator;
@@ -121,11 +144,8 @@ export class CliObserverBridge implements IObserverModule {
   }
 
   get disabledObserverDeps(): ObserverDeps {
-    const trace = {
-      id: this.activeSessionId ?? 'tracing-disabled',
-      sessionId: this.activeSessionId ?? 'tracing-disabled',
-      spans: [],
-    } as unknown as Trace;
+    const traceId = this.activeSessionId ?? 'tracing-disabled';
+    const trace = createDisabledTrace(traceId);
 
     return {
       trace,
@@ -134,10 +154,8 @@ export class CliObserverBridge implements IObserverModule {
       breaker: this.breaker,
       loopDetector: this.loopDet,
       estimateContextWindow: (input) => this.estimateContextWindow(input),
-      startSpan: (_t: Trace, opts: { name: string; parentSpanId?: string }) => ({
-        id: `tracing-disabled:${opts.name}`,
-        name: opts.name,
-      }) as unknown as Span,
+      startSpan: (_t: Trace, opts: { name: string; parentSpanId?: string }) =>
+        createDisabledSpan(traceId, opts),
       endSpan: () => {},
       recordTokenUsage: (_span: Span, usage: { promptTokens: number; completionTokens: number; model?: string }, counter?: TokenCounter) => {
         (counter ?? this.counter).record({
