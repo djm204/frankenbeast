@@ -1,4 +1,5 @@
 import { lookup as dnsLookup } from 'node:dns/promises'
+import { request as httpsRequest } from 'node:https'
 import { isIP } from 'node:net'
 
 import { seededRandom } from '@franken/types'
@@ -27,6 +28,10 @@ export interface WebhookAllowedTarget {
 }
 
 type WebhookDnsLookup = (hostname: string) => Promise<readonly string[]>
+type WebhookFetchInit = NonNullable<Parameters<FetchFn>[1]>
+type WebhookFetchResponse = Awaited<ReturnType<FetchFn>> & {
+  body?: { getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | null
+}
 
 export interface WebhookNotifierOptions {
   /** URL to POST the JSON payload to. */
@@ -209,7 +214,7 @@ function isPrivateIpv6(ip: string): boolean {
 }
 
 function validatePublicWebhookHost(url: URL, fieldName: string): void {
-  const hostname = url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/g, '').toLowerCase()
+  const hostname = normalizeHostnameForValidation(url.hostname)
   const shortcutIpv4 = extractShortcutIpv4Octets(hostname)
   if (hostname === 'localhost' ||
     hostname.endsWith('.localhost') ||
@@ -238,6 +243,18 @@ function validatePublicWebhookHost(url: URL, fieldName: string): void {
       throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
     }
   }
+}
+
+function normalizeHostnameForValidation(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').replace(/\.+$/g, '').toLowerCase()
+}
+
+function isTransientDnsError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  return code === 'EAI_AGAIN' || code === 'ETIMEOUT' || code === 'ETIMEDOUT' || code === 'ECONNRESET'
 }
 
 function parseUrlOrigin(value: string, fieldName: string): string {
@@ -372,6 +389,7 @@ export class WebhookNotifier {
   private readonly allowUnlistedTarget: boolean
   private readonly extraHeaders: Record<string, string>
   private readonly fetchFn: FetchFn
+  private readonly usePinnedDefaultFetch: boolean
   private readonly dnsLookupFn: WebhookDnsLookup | null
   private readonly retry: Required<WebhookRetryOptions> | null
   private readonly sleepFn: (ms: number) => Promise<void>
@@ -394,6 +412,7 @@ export class WebhookNotifier {
     }
     this.extraHeaders = options.headers ?? {}
     this.fetchFn = options.fetch ?? (globalThis.fetch as unknown as FetchFn)
+    this.usePinnedDefaultFetch = !options.fetch
     this.dnsLookupFn = options.dnsLookup ?? (options.fetch
       ? null
       : async hostname => (await dnsLookup(hostname, { all: true })).map(result => result.address))
@@ -424,11 +443,20 @@ export class WebhookNotifier {
         await this.sleepFn(delay)
       }
 
-      await this.assertResolvedTargetAddressesAllowed()
-
-      let response: Awaited<ReturnType<FetchFn>>
+      let resolvedAddresses: readonly string[] = []
       try {
-        response = await this.fetchFn(this.url, {
+        resolvedAddresses = await this.resolveAllowedTargetAddresses()
+      } catch (err) {
+        lastError = err
+        if (this.retry && isTransientDnsError(err) && attempt < maxAttempts - 1) {
+          continue
+        }
+        throw err
+      }
+
+      let response: WebhookFetchResponse
+      try {
+        response = await this.fetchWebhook(resolvedAddresses, {
           method: 'POST',
           redirect: 'manual',
           headers: {
@@ -460,7 +488,7 @@ export class WebhookNotifier {
     throw lastError
   }
 
-  private async readResponseBody(response: Awaited<ReturnType<FetchFn>>): Promise<string> {
+  private async readResponseBody(response: WebhookFetchResponse): Promise<string> {
     try {
       const readable = response as {
         body?: { getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | null
@@ -534,15 +562,57 @@ export class WebhookNotifier {
     return truncated || timedOut ? `${decoded}…` : decoded
   }
 
-  private async assertResolvedTargetAddressesAllowed(): Promise<void> {
-    if (!this.dnsLookupFn || isIP(this.parsedUrl.hostname.replace(/^\[|\]$/g, '')) !== 0) {
-      return
+  private async resolveAllowedTargetAddresses(): Promise<readonly string[]> {
+    const hostname = normalizeHostnameForValidation(this.parsedUrl.hostname)
+    if (!this.dnsLookupFn || isIP(hostname) !== 0) {
+      return []
     }
-    const addresses = await this.dnsLookupFn(this.parsedUrl.hostname)
+    const addresses = await this.dnsLookupFn(hostname)
+    if (addresses.length === 0) {
+      throw new TypeError('resolved webhook address lookup returned no addresses')
+    }
     for (const address of addresses) {
       const parsedAddress = parseAbsoluteUrl(`https://${isIP(address) === 6 ? `[${address}]` : address}/`, 'resolved webhook address')
       validatePublicWebhookHost(parsedAddress, 'resolved webhook address')
     }
+    return addresses
+  }
+
+  private async fetchWebhook(resolvedAddresses: readonly string[], init: WebhookFetchInit): Promise<WebhookFetchResponse> {
+    if (!this.usePinnedDefaultFetch || resolvedAddresses.length === 0) {
+      return this.fetchFn(this.url, init)
+    }
+
+    return this.fetchWithPinnedAddress(resolvedAddresses[0], init)
+  }
+
+  private async fetchWithPinnedAddress(address: string, init: WebhookFetchInit): Promise<WebhookFetchResponse> {
+    const originalHostname = normalizeHostnameForValidation(this.parsedUrl.hostname)
+    return new Promise((resolve, reject) => {
+      const request = httpsRequest({
+        hostname: address,
+        port: this.parsedUrl.port || 443,
+        path: `${this.parsedUrl.pathname}${this.parsedUrl.search}`,
+        method: init.method,
+        servername: originalHostname,
+        headers: {
+          ...init.headers,
+          Host: this.parsedUrl.host,
+        },
+      }, response => {
+        resolve({
+          ok: response.statusCode !== undefined && response.statusCode >= 200 && response.statusCode < 300,
+          status: response.statusCode ?? 0,
+          statusText: response.statusMessage,
+          body: response as unknown as WebhookFetchResponse['body'],
+        })
+      })
+      request.on('error', reject)
+      if (init.body) {
+        request.write(init.body)
+      }
+      request.end()
+    })
   }
 
   private assertTargetAllowed(): void {
