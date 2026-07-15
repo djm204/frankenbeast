@@ -1043,6 +1043,7 @@ function compareRecords(
 function indexById(records: readonly RestorePreviewRecord[]): Map<string, RestorePreviewRecord> {
   const byId = new Map<string, RestorePreviewRecord>();
   for (const record of records) {
+    if (typeof record.id !== 'string' || record.id.trim().length === 0) continue;
     byId.set(record.id, record);
   }
   return byId;

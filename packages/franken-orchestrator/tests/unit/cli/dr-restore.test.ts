@@ -86,48 +86,76 @@ describe('dr restore-dry-run CLI', () => {
     }
   });
 
-  it('fails closed when a manifest has duplicate record IDs', async () => {
+  it('routes duplicate and malformed record IDs into structured consistency JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
     const backupPath = join(dir, 'backup.json');
     const livePath = join(dir, 'live.json');
     await writeFile(backupPath, JSON.stringify({
       schemaVersion: 1,
-      tasks: [{ id: 'task-1', digest: 'old' }, { id: 'task-1', digest: 'new' }],
+      tasks: [{ id: 'task-1', digest: 'old' }, { id: 'task-1', digest: 'new' }, { id: { leaked: 'object' } }],
       approvals: [],
       memory: [],
       cron: [],
     }), 'utf8');
     await writeFile(livePath, JSON.stringify({ schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
+    const output: string[] = [];
 
     try {
-      await expect(handleDrCommand({
+      await handleDrCommand({
         action: 'restore-dry-run',
         backupManifestPath: backupPath,
         liveManifestPath: livePath,
-        print: () => undefined,
-      })).rejects.toThrow(/duplicate id 'task-1'/);
+        print: (message) => output.push(message),
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+
+    const report = JSON.parse(output.join('\n')) as {
+      summary: { safeToRestore: boolean; consistencyBlockerCount: number };
+      consistency: { backup: { findings: Array<{ code: string; id: string; jsonPath: string }> } };
+    };
+    expect(report.summary.safeToRestore).toBe(false);
+    expect(report.summary.consistencyBlockerCount).toBeGreaterThanOrEqual(2);
+    expect(report.consistency.backup.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'duplicate-record-id-within-area', id: 'task-1' }),
+        expect.objectContaining({ code: 'malformed-record-id', id: '<missing>', jsonPath: '$.tasks[2].id' }),
+      ]),
+    );
+    expect(output.join('\n')).not.toContain('leaked');
   });
 
-  it('fails closed for unsupported schema versions', async () => {
+  it('routes unsupported schema versions into structured consistency JSON', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
     const backupPath = join(dir, 'backup.json');
     const livePath = join(dir, 'live.json');
     await writeFile(backupPath, JSON.stringify({ schemaVersion: 2, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
     await writeFile(livePath, JSON.stringify({ schemaVersion: 2, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
+    const output: string[] = [];
 
     try {
-      await expect(handleDrCommand({
+      await handleDrCommand({
         action: 'restore-dry-run',
         backupManifestPath: backupPath,
         liveManifestPath: livePath,
-        print: () => undefined,
-      })).rejects.toThrow(/unsupported schemaVersion 2/);
+        print: (message) => output.push(message),
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+
+    const report = JSON.parse(output.join('\n')) as {
+      summary: { safeToRestore: boolean; consistencyBlockerCount: number };
+      consistency: { backup: { findings: Array<{ code: string; jsonPath: string }> } };
+    };
+    expect(report.summary.safeToRestore).toBe(false);
+    expect(report.summary.consistencyBlockerCount).toBe(2);
+    expect(report.consistency.backup.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'unsupported-schema-version', jsonPath: '$.schemaVersion' }),
+      ]),
+    );
   });
 
   it('fails closed for unsupported record fields and malformed summary fields', async () => {
