@@ -507,6 +507,16 @@ describe('createMcpServer', () => {
           note: '[memory-review-decision-metadata-redacted]',
         },
       });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
+        id: 'memcand_1',
+        action: 'candidate text token abc123',
+        note: 'Rejected because candidate contains token abc123 and rm -rf /',
+      })).toEqual({
+        id: '[memory-review-decision-metadata-redacted]',
+        action: '[memory-review-decision-metadata-redacted]',
+        note: '[memory-review-decision-metadata-redacted]',
+      });
     });
 
 

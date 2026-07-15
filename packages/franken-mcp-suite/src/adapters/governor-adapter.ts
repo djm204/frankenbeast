@@ -183,8 +183,7 @@ function contextTargetsTool(context: string, toolName: string): boolean {
   return false;
 }
 
-
-function memoryReviewDecisionArgsFromContext(context: string): Record<string, unknown> | undefined {
+function memoryReviewDecisionArgsFromContext(context: string, options: { requireExplicitTarget?: boolean } = {}): Record<string, unknown> | undefined {
   try {
     const parsed = JSON.parse(context) as unknown;
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
@@ -207,7 +206,7 @@ function memoryReviewDecisionArgsFromContext(context: string): Record<string, un
         return nestedArgs as Record<string, unknown>;
       }
     }
-    if (typeof record['id'] === 'string' && typeof record['action'] === 'string') return record;
+    if (options.requireExplicitTarget !== true && typeof record['id'] === 'string' && typeof record['action'] === 'string') return record;
   } catch {
     return undefined;
   }
@@ -231,7 +230,7 @@ function redactMemoryReviewProposalGovernanceContext(action: string, context: st
 
 function redactMemoryReviewDecisionGovernanceContext(action: string, context: string): string {
   const unqualified = unqualifyMcpActionName(action);
-  const decisionArgs = memoryReviewDecisionArgsFromContext(context);
+  const decisionArgs = memoryReviewDecisionArgsFromContext(context, { requireExplicitTarget: unqualified === 'execute_tool' });
   if (unqualified === 'execute_tool'
     && contextTargetsTool(context, 'fbeast_memory_review_decide')) {
     return JSON.stringify({

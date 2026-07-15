@@ -235,6 +235,7 @@ const MEMORY_REVIEW_PROPOSE_SAFE_AUDIT_KEYS = new Set(['type', 'confidence']);
 const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
 const MEMORY_REVIEW_DECIDE_TOOL = 'fbeast_memory_review_decide';
 const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action']);
+const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store']);
 
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
@@ -276,7 +277,9 @@ function redactMemoryReviewDecisionArgs(sanitized: Record<string, unknown>, reda
     return sanitized;
   }
   for (const key of Object.keys(sanitized)) {
-    if (!MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS.has(key)) {
+    if (key === 'action' && !MEMORY_REVIEW_DECIDE_SAFE_ACTIONS.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
+    } else if (!MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;
     }
   }
