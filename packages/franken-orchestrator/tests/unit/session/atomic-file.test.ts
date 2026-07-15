@@ -74,7 +74,7 @@ describe('atomic-file', () => {
     it('journals and recovers an interrupted temp-file write before the next save', () => {
       const dir = makeTmpDir('atomic-write-recover-');
       const filePath = join(dir, 'session.json');
-      const tempPath = `${filePath}.tmp.interrupted`;
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000010`;
       writeFileSync(filePath, '{"old":true}');
       writeFileSync(tempPath, '{"new":');
       writeFileSync(
@@ -102,7 +102,7 @@ describe('atomic-file', () => {
     it('reports stale temp-file cleanup from a valid journal', () => {
       const dir = makeTmpDir('state-write-journal-recover-');
       const filePath = join(dir, 'state.json');
-      const tempPath = `${filePath}.tmp.stale`;
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000001`;
       writeFileSync(filePath, '{"old":true}');
       writeFileSync(tempPath, '{"new":');
       writeFileSync(
@@ -173,7 +173,7 @@ describe('atomic-file', () => {
     it('retains active preparing journals even before the temp file exists', () => {
       const dir = makeTmpDir('state-write-journal-active-preparing-');
       const filePath = join(dir, 'state.json');
-      const tempPath = `${filePath}.tmp.pending`;
+      const tempPath = `${filePath}.tmp.124.00000000-0000-0000-0000-000000000002`;
       writeFileSync(filePath, '{"old":true}');
       writeFileSync(
         stateWriteJournalPath(filePath),
@@ -198,7 +198,7 @@ describe('atomic-file', () => {
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(true);
     });
 
-    it('does not delete temp files from stale preparing journals because ownership is unproven', () => {
+    it('quarantines stale preparing journals that name non-generated temp files without deleting the temp', () => {
       const dir = makeTmpDir('state-write-journal-stale-preparing-');
       const filePath = join(dir, 'state.json');
       const tempPath = `${filePath}.tmp.preexisting`;
@@ -221,7 +221,7 @@ describe('atomic-file', () => {
       const recovery = recoverStateWriteTransaction(filePath);
 
       expect(recovery).toMatchObject({
-        action: 'removed-completed-journal',
+        action: 'quarantined-invalid-journal',
         tempPath,
       });
       expect(existsSync(tempPath)).toBe(true);
@@ -296,7 +296,7 @@ describe('atomic-file', () => {
       symlinkSync(realDir, symlinkDir, 'dir');
       const realFilePath = join(realDir, 'state.json');
       const symlinkFilePath = join(symlinkDir, 'state.json');
-      const tempPath = `${realFilePath}.tmp.live`;
+      const tempPath = `${realFilePath}.tmp.125.00000000-0000-0000-0000-000000000003`;
       writeFileSync(realFilePath, '{"old":true}');
       writeFileSync(tempPath, '{"new":');
       writeFileSync(
@@ -325,7 +325,7 @@ describe('atomic-file', () => {
     it('retains active journals so concurrent writers do not remove live temp files', () => {
       const dir = makeTmpDir('state-write-journal-active-');
       const filePath = join(dir, 'state.json');
-      const tempPath = `${filePath}.tmp.live`;
+      const tempPath = `${filePath}.tmp.126.00000000-0000-0000-0000-000000000004`;
       writeFileSync(filePath, '{"old":true}');
       writeFileSync(tempPath, '{"new":');
       writeFileSync(
@@ -438,7 +438,7 @@ describe('atomic-file', () => {
     it('normalizes target paths before deciding whether a journal belongs to the file', () => {
       const dir = makeTmpDir('state-write-journal-normalized-target-');
       const filePath = join(dir, 'state.json');
-      const tempPath = `${filePath}.tmp.stale`;
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000001`;
       writeFileSync(filePath, '{"old":true}');
       writeFileSync(tempPath, '{"new":');
       writeFileSync(

@@ -196,7 +196,7 @@ function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boo
   if (dirname(canonicalTempPath) !== dirname(canonicalTargetPath)) {
     return false;
   }
-  if (!canonicalTempPath.startsWith(`${canonicalTargetPath}.tmp.`)) {
+  if (!generatedStateTempPattern(canonicalTargetPath).test(basename(canonicalTempPath))) {
     return false;
   }
   try {
