@@ -145,10 +145,10 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('token abc123');
   });
 
-  it('requires HITL for memory review decisions on the shared path', async () => {
+  it('allows memory review decisions through the shared path so queued candidates can be resolved', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"approve"}' }))
-      .resolves.toMatchObject({ decision: 'review_recommended' });
+      .resolves.toMatchObject({ decision: 'approved' });
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {

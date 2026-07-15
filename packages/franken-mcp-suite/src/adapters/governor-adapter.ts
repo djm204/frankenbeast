@@ -17,10 +17,6 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_right_to_forget',
 ]);
 
-const HITL_ACTIONS = new Set([
-  'fbeast_memory_review_decide',
-]);
-
 const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
 
 /**
@@ -192,13 +188,6 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     return {
       decision: 'approved',
       reason: 'Tool "fbeast_memory_right_to_forget" is an explicit privacy deletion workflow; execution is allowed through the central gate while audit context remains redacted.',
-    };
-  }
-
-  if (HITL_ACTIONS.has(action)) {
-    return {
-      decision: 'review_recommended',
-      reason: `Tool "${action}" requires explicit operator approval before applying a memory promotion decision.`,
     };
   }
 
