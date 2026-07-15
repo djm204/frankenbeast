@@ -824,7 +824,7 @@ export class IssueRunner {
     );
     const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
 
-    const skipForDegradedRoute = (route: IssueDegradedModeWorkerRoute): IssueOutcome => {
+    const logDegradedRoute = (route: IssueDegradedModeWorkerRoute): void => {
       logger?.warn(
         `[issues] Degraded-mode route for issue #${issue.number}: ${route.action}`,
         {
@@ -833,6 +833,10 @@ export class IssueRunner {
         },
         'issues',
       );
+    };
+
+    const skipForDegradedRoute = (route: IssueDegradedModeWorkerRoute): IssueOutcome => {
+      logDegradedRoute(route);
       return {
         issueNumber: issue.number,
         issueTitle: issue.title,
@@ -968,6 +972,16 @@ export class IssueRunner {
 
     if (backpressureContext.stopRemainingReason && !graphHasCheckpointProgress) {
       return skipForDegradedRoute(routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        graphHasCheckpointProgress,
+        graphComplete,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      }));
+    }
+
+    if (backpressureContext.stopRemainingReason && graphHasCheckpointProgress) {
+      logDegradedRoute(routeIssueWorkerForDegradedMode({
         issue,
         checkpointHasIssueProgress,
         graphHasCheckpointProgress,

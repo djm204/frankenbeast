@@ -1108,6 +1108,7 @@ describe('IssueRunner', () => {
     });
 
     it('resumes partially checkpointed issueRuntime work after queue-depth stops fresh starts', async () => {
+      const logger = mockLogger();
       const issueRuntime = makeIssueRuntimeSupport();
       vi.mocked(issueRuntime.checkpointForIssue).mockImplementation((issueNumber: number) =>
         issueNumber === 17 ? mockCheckpoint(new Set(['impl:01_issue-17:done'])) : mockCheckpoint(),
@@ -1122,6 +1123,7 @@ describe('IssueRunner', () => {
         issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
         triageResults: [makeTriage(16), makeTriage(17)],
         issueRuntime,
+        logger,
         backpressure: {
           thresholds: { maxPendingIssueCount: 1 },
         },
@@ -1131,6 +1133,18 @@ describe('IssueRunner', () => {
 
       expect(outcomes[0]).toMatchObject({ issueNumber: 16, status: 'skipped' });
       expect(outcomes[1]).toMatchObject({ issueNumber: 17, status: 'fixed' });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Degraded-mode route for issue #17: resume-checkpointed'),
+        expect.objectContaining({
+          workerRoute: expect.objectContaining({
+            action: 'resume-checkpointed',
+            checkpointHasIssueProgress: true,
+            graphHasCheckpointProgress: true,
+            reason: expect.stringContaining('queue depth 2 exceeds limit 1'),
+          }),
+        }),
+        'issues',
+      );
       expect(mockRun).toHaveBeenCalledOnce();
     });
 
