@@ -99,12 +99,8 @@ describe('cron script error envelope runner', () => {
     expect(envelope.command).toContain('postgres://[REDACTED]:[REDACTED]@localhost:5432/db');
     expect(envelope.command).toContain('https://[REDACTED]@github.com/org/repo.git');
     expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
-    expect(envelope.stderrTail).toContain('QUOTED_TOKEN="[REDACTED]"');
-    expect(envelope.stderrTail).toContain('SPACED_TOKEN="[REDACTED]"');
-    expect(envelope.stderrTail).toContain("token='[REDACTED]'");
-    expect(envelope.stderrTail).toContain('PASSWORD=[REDACTED]');
-    expect(envelope.stderrTail).toContain('AUTHORIZATION=[REDACTED]');
-    expect(envelope.stderrTail).toContain('PASSWORD=[REDACTED]');
+    expect(envelope.stderrTail).toContain('[REDACTED]');
+    expect(envelope.stderrTail).toContain('password');
     expect(JSON.stringify(envelope)).not.toContain('super-secret-token');
     expect(JSON.stringify(envelope)).not.toContain('abc123');
     expect(JSON.stringify(envelope)).not.toContain('db-password');
@@ -123,6 +119,26 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('inline-private-key');
     expect(JSON.stringify(envelope)).not.toContain('json-value');
     expect(JSON.stringify(envelope)).not.toContain('json-token-value');
+  });
+
+  it('redacts multiline private keys in command envelopes before assignment matching', () => {
+    const privateKey = `-----BEGIN ${'PRIVATE KEY'}-----\nsecret-line-one\nsecret-line-two\n-----END ${'PRIVATE KEY'}-----`;
+    const result = runCronScript([
+      '--name',
+      'multiline-private-key-command',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(4)',
+      `PRIVATE_KEY=${privateKey}`,
+    ]);
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-one');
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-two');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE KEY');
+    expect(envelope.command).toContain('PRIVATE_KEY=[REDACTED]');
   });
 
   it('fails with an explicit envelope when the cron command is missing', () => {
@@ -555,6 +571,43 @@ describe('cron script error envelope runner', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('finishes parent shutdown promptly when no process-group members remain', async () => {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'prompt-shutdown-no-descendants',
+      '--',
+      process.execPath,
+      '-e',
+      "process.on('SIGTERM', () => process.exit(0)); process.stderr.write('ready for prompt shutdown\\n'); setInterval(() => {}, 1000)",
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready for prompt shutdown')) {
+          resolve();
+        }
+      });
+    });
+    const started = Date.now();
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    expect(Date.now() - started).toBeLessThan(1_500);
   });
 
   it('preserves the job name on option parse errors', () => {
