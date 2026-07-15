@@ -64,12 +64,16 @@ describe('runtime config rollback plan dry-run helper', () => {
       'rollback-evidence/runtime-run-123',
     ]));
     expect(plan.readOnlyCapture[0].join(' ')).toContain('Refusing symlinked evidence path component');
-    expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'install -m 600 snapshots/run-123.before.json rollback-evidence/runtime-run-123/rollback-config.json',
-    );
-    expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'install -m 600 snapshots/run-123.after.json rollback-evidence/runtime-run-123/after-config.json',
-    );
+    expect(plan.readOnlyCapture[1].join(' ')).toContain('copyFileNoFollow(process.argv[1], process.argv[2])');
+    expect(plan.readOnlyCapture[1]).toEqual(expect.arrayContaining([
+      'snapshots/run-123.before.json',
+      'rollback-evidence/runtime-run-123/rollback-config.json',
+    ]));
+    expect(plan.readOnlyCapture[2].join(' ')).toContain('copyFileNoFollow(process.argv[1], process.argv[2])');
+    expect(plan.readOnlyCapture[2]).toEqual(expect.arrayContaining([
+      'snapshots/run-123.after.json',
+      'rollback-evidence/runtime-run-123/after-config.json',
+    ]));
     expect(plan.readOnlyCapture[3]).toEqual(expect.arrayContaining([
       'rollback-evidence/runtime-run-123/runtime-config-changes.json',
       'snapshots/run-123.before.json',
@@ -85,7 +89,12 @@ describe('runtime config rollback plan dry-run helper', () => {
       '.fbeast/.build/run-configs/run-123.json',
       'rollback-evidence/runtime-run-123/after-config.json',
     ]));
+    expect(plan.approvalGatedActions[0].slice(-2)).toEqual([
+      expect.stringMatching(/^[a-f0-9]{64}$/u),
+      expect.stringMatching(/^[a-f0-9]{64}$/u),
+    ]);
     expect(plan.approvalGatedActions[0].join(' ')).toContain('lstat');
+    expect(plan.approvalGatedActions[0].join(' ')).toContain('rollback snapshot no longer matches approved before snapshot');
     expect(plan.approvalGatedActions[0].join(' ')).toContain('target runtime config no longer matches after snapshot');
     expect(plan.postRollbackVerification.map(command => command.join(' '))).toContain(
       'cmp -s rollback-evidence/runtime-run-123/rollback-config.json .fbeast/.build/run-configs/run-123.json',
@@ -166,8 +175,10 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(parsed.changedPaths).toEqual(['/provider']);
     expect(parsed.readOnlyCapture[0]).toEqual(expect.arrayContaining(['node', '--input-type=module', join(workDir, 'evidence')]));
     expect(parsed.readOnlyCapture[0].join(' ')).toContain('Refusing symlinked evidence path component');
-    expect(parsed.readOnlyCapture[1]).toEqual(['install', '-m', '600', before, join(workDir, 'evidence', 'rollback-config.json')]);
-    expect(parsed.readOnlyCapture[2]).toEqual(['install', '-m', '600', after, join(workDir, 'evidence', 'after-config.json')]);
+    expect(parsed.readOnlyCapture[1].join(' ')).toContain('copyFileNoFollow(process.argv[1], process.argv[2])');
+    expect(parsed.readOnlyCapture[1]).toEqual(expect.arrayContaining([before, join(workDir, 'evidence', 'rollback-config.json')]));
+    expect(parsed.readOnlyCapture[2].join(' ')).toContain('copyFileNoFollow(process.argv[1], process.argv[2])');
+    expect(parsed.readOnlyCapture[2]).toEqual(expect.arrayContaining([after, join(workDir, 'evidence', 'after-config.json')]));
     expect(parsed.approvalGatedActions[0]).toEqual(expect.arrayContaining([
       'node',
       '--input-type=module',

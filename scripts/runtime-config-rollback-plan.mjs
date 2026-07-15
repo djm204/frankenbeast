@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFile, stat } from 'node:fs/promises';
+import { chmod, open, readFile, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,25 @@ const SNAPSHOT_LIMITS = Object.freeze({
   maxObjectKeys: 20_000,
   maxArrayItems: 50_000,
 });
+
+
+export async function fileSha256(filePath) {
+  return createHash('sha256').update(await readFile(filePath)).digest('hex');
+}
+
+export async function writeFileNoFollow(filePath, data, mode = 0o600) {
+  const handle = await open(filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
+  try {
+    await handle.writeFile(data);
+  } finally {
+    await handle.close();
+  }
+  await chmod(filePath, mode);
+}
+
+export async function copyFileNoFollow(sourcePath, destinationPath, mode = 0o600) {
+  await writeFileNoFollow(destinationPath, await readFile(sourcePath), mode);
+}
 
 export async function loadRuntimeConfigSnapshot(filePath) {
   const info = await stat(filePath);
@@ -79,6 +99,8 @@ export function buildRuntimeConfigRollbackPlan(options) {
   const changesPath = `${evidenceDir}/runtime-config-changes.json`;
   const rollbackCommentPath = `${evidenceDir}/rollback-comment.md`;
   const changedPaths = changes.map(change => change.path);
+  const beforeSha256 = options.beforeSha256 ?? createHash('sha256').update(JSON.stringify(before)).digest('hex');
+  const afterSha256 = options.afterSha256 ?? createHash('sha256').update(JSON.stringify(after)).digest('hex');
 
   return {
     summary: `Dry-run runtime config rollback plan for ${targetPath}`,
@@ -96,13 +118,27 @@ export function buildRuntimeConfigRollbackPlan(options) {
         'import { chmod, lstat, mkdir } from "node:fs/promises"; import { parse, relative, resolve, sep } from "node:path"; const [dir]=process.argv.slice(1); async function assertNoSymlinkExisting(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); try { const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked evidence path component: ${current}`); } catch (error) { if (error && error.code === "ENOENT") break; throw error; } } } await assertNoSymlinkExisting(dir); await mkdir(dir, { recursive: true }); await assertNoSymlinkExisting(dir); await chmod(dir, 0o700);',
         evidenceDir,
       ],
-      ['install', '-m', '600', beforePath, rollbackConfigPath],
-      ['install', '-m', '600', afterPath, afterConfigPath],
       [
         'node',
         '--input-type=module',
         '-e',
-        'import { chmodSync, writeFileSync } from "node:fs"; import { buildRuntimeConfigRollbackPlan, loadRuntimeConfigSnapshot } from "./scripts/runtime-config-rollback-plan.mjs"; const [out,beforePath,afterPath,targetPath,evidenceDir]=process.argv.slice(1); const before=await loadRuntimeConfigSnapshot(beforePath); const after=await loadRuntimeConfigSnapshot(afterPath); const plan=buildRuntimeConfigRollbackPlan({ beforePath, afterPath, targetPath, evidenceDir, before, after }); writeFileSync(out, JSON.stringify(plan.changes, null, 2) + "\\n"); chmodSync(out, 0o600);',
+        'import { copyFileNoFollow } from "./scripts/runtime-config-rollback-plan.mjs"; await copyFileNoFollow(process.argv[1], process.argv[2]);',
+        beforePath,
+        rollbackConfigPath,
+      ],
+      [
+        'node',
+        '--input-type=module',
+        '-e',
+        'import { copyFileNoFollow } from "./scripts/runtime-config-rollback-plan.mjs"; await copyFileNoFollow(process.argv[1], process.argv[2]);',
+        afterPath,
+        afterConfigPath,
+      ],
+      [
+        'node',
+        '--input-type=module',
+        '-e',
+        'import { buildRuntimeConfigRollbackPlan, fileSha256, loadRuntimeConfigSnapshot, writeFileNoFollow } from "./scripts/runtime-config-rollback-plan.mjs"; const [out,beforePath,afterPath,targetPath,evidenceDir]=process.argv.slice(1); const before=await loadRuntimeConfigSnapshot(beforePath); const after=await loadRuntimeConfigSnapshot(afterPath); const [beforeSha256, afterSha256]=await Promise.all([fileSha256(beforePath), fileSha256(afterPath)]); const plan=buildRuntimeConfigRollbackPlan({ beforePath, afterPath, targetPath, evidenceDir, before, after, beforeSha256, afterSha256 }); await writeFileNoFollow(out, JSON.stringify(plan.changes, null, 2) + "\\n");',
         changesPath,
         beforePath,
         afterPath,
@@ -111,8 +147,9 @@ export function buildRuntimeConfigRollbackPlan(options) {
       ],
       [
         'node',
+        '--input-type=module',
         '-e',
-        'require("node:fs").writeFileSync(process.argv[1], `## Runtime config rollback postmortem\\n\\n- Target config: ${process.argv[2]}\\n- Before snapshot: ${process.argv[3]}\\n- After snapshot: ${process.argv[4]}\\n- Changed paths: ${process.argv[5]}\\n- Approval-cop outcome/token: <fill before posting>\\n- Verification: compare the target to rollback-config.json and rerun the affected beast/runtime config launch path before resuming.\\n`, { mode: 0o600 })',
+        'import { writeFileNoFollow } from "./scripts/runtime-config-rollback-plan.mjs"; await writeFileNoFollow(process.argv[1], `## Runtime config rollback postmortem\\n\\n- Target config: ${process.argv[2]}\\n- Before snapshot: ${process.argv[3]}\\n- After snapshot: ${process.argv[4]}\\n- Changed paths: ${process.argv[5]}\\n- Approval-cop outcome/token: <fill before posting>\\n- Verification: compare the target to rollback-config.json and rerun the affected beast/runtime config launch path before resuming.\\n`);',
         rollbackCommentPath,
         targetPath,
         beforePath,
@@ -132,10 +169,12 @@ export function buildRuntimeConfigRollbackPlan(options) {
         'node',
         '--input-type=module',
         '-e',
-        'import { copyFile, lstat, readFile } from "node:fs/promises"; import { dirname, parse, relative, resolve, sep } from "node:path"; const [rollback,target,after]=process.argv.slice(1); async function assertNoSymlink(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked runtime config path component: ${current}`); } } await assertNoSymlink(dirname(target)); await assertNoSymlink(target); const [targetRaw, afterRaw]=await Promise.all([readFile(target), readFile(after)]); if (!targetRaw.equals(afterRaw)) throw new Error("Refusing rollback: target runtime config no longer matches after snapshot"); await copyFile(rollback, target);',
+        'import { createHash } from "node:crypto"; import { lstat, readFile } from "node:fs/promises"; import { dirname, parse, relative, resolve, sep } from "node:path"; import { writeFileNoFollow } from "./scripts/runtime-config-rollback-plan.mjs"; const [rollback,target,after,expectedRollbackSha,expectedAfterSha]=process.argv.slice(1); const sha=data=>createHash("sha256").update(data).digest("hex"); async function assertNoSymlink(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked runtime config path component: ${current}`); } } await assertNoSymlink(dirname(target)); await assertNoSymlink(target); const [rollbackRaw,targetRaw,afterRaw]=await Promise.all([readFile(rollback), readFile(target), readFile(after)]); if (sha(rollbackRaw)!==expectedRollbackSha) throw new Error("Refusing rollback: rollback snapshot no longer matches approved before snapshot"); if (sha(afterRaw)!==expectedAfterSha) throw new Error("Refusing rollback: captured after snapshot no longer matches reviewed after snapshot"); if (!targetRaw.equals(afterRaw)) throw new Error("Refusing rollback: target runtime config no longer matches after snapshot"); await writeFileNoFollow(target, rollbackRaw);',
         rollbackConfigPath,
         targetPath,
         afterConfigPath,
+        beforeSha256,
+        afterSha256,
       ],
     ],
     postRollbackVerification: [
@@ -334,7 +373,8 @@ async function main(argv) {
   }
   const before = await loadRuntimeConfigSnapshot(options.beforePath);
   const after = await loadRuntimeConfigSnapshot(options.afterPath);
-  const plan = buildRuntimeConfigRollbackPlan({ ...options, before, after });
+  const [beforeSha256, afterSha256] = await Promise.all([fileSha256(options.beforePath), fileSha256(options.afterPath)]);
+  const plan = buildRuntimeConfigRollbackPlan({ ...options, before, after, beforeSha256, afterSha256 });
   console.info(options.format === 'json' ? JSON.stringify(plan, null, 2) : renderPlan(plan));
 }
 
