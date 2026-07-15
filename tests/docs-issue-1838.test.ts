@@ -45,10 +45,14 @@ describe('issue #1838 disaster tabletop exercise template', () => {
 
     expect(doc).toContain('Backup-only cron job');
     expect(doc).toContain('Corrupt backup manifest');
+    expect(doc).toContain('Live-only approval/session token');
+    expect(doc).toContain('skip token restore');
+    expect(doc).toContain('fresh approval');
     expect(doc).toContain('fails closed');
     expect(doc).toContain('No production restore, force-push, branch deletion, or secret export occurred during the tabletop.');
     expect(doc).toContain('no restore command will be executed');
     expect(doc).not.toContain('run the restore command against production');
+    expect(doc).not.toContain('revive');
   });
 
   it('links the template from the restore-preview disaster-recovery documentation', () => {
