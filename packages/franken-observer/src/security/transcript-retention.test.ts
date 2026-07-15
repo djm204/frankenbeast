@@ -748,6 +748,43 @@ describe('transcript retention controls', () => {
     })
   })
 
+  it('honors prompt opt-outs for standalone raw provider text blocks', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          message: { type: 'text', text: 'private standalone prompt', safeCounter: 1 },
+          system: 'private system prompt',
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false },
+    })
+
+    expect(retained.spans[0].metadata['message']).toEqual({ type: 'text', safeCounter: 1 })
+    expect(retained.spans[0].metadata).not.toHaveProperty('system')
+  })
+
+  it('honors tool output opt-outs for standalone raw tool result text blocks', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          payload: { type: 'tool_result', text: 'private standalone tool result', tool_call_id: 'call-1' },
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolOutputs: false },
+    })
+
+    expect(retained.spans[0].metadata['payload']).toEqual({
+      type: 'tool_result',
+      tool_call_id: 'call-1',
+    })
+  })
+
   it('honors tool output opt-outs for standalone raw tool result objects', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({

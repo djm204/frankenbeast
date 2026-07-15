@@ -363,7 +363,8 @@ function redactNestedTranscriptValues(
 function classifyContextualTranscriptField(record: Record<string, unknown>, key: string): TranscriptField | undefined {
   const recordType = typeof record['type'] === 'string' ? record['type'].replace(/[_-]/g, '').toLowerCase() : ''
   const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
-  if ((recordType === 'toolresult' || recordRole === 'tool') && key === 'content') return 'toolOutputs'
+  if ((recordType === 'toolresult' || recordRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
+  if (recordType === 'text' && key === 'text') return 'prompts'
   return classifyTranscriptField(key)
 }
 
@@ -374,6 +375,7 @@ function classifyTranscriptField(key: string): TranscriptField | undefined {
   if (
     PROMPT_KEYS.has(normalized) ||
     normalized.includes('prompt') ||
+    normalized === 'system' ||
     normalized.includes('instruction') ||
     normalized.includes('transcript') ||
     normalized.endsWith('goal') ||
