@@ -338,6 +338,8 @@ function isLocalHost(host: string): boolean {
     || normalized === '::1'
     || normalized === '0:0:0:0:0:0:0:1'
     || normalized.endsWith('.localhost')
+    || normalized === 'lvh.me'
+    || normalized.endsWith('.lvh.me')
     || isLoopbackIpv4Literal(normalized)
     || isLoopbackShortcutHostname(normalized);
 }
@@ -374,7 +376,7 @@ function isLoopbackShortcutHostname(host: string): boolean {
 }
 
 function extractShortcutIpv4Octets(host: string): [number, number, number, number] | undefined {
-  const suffixes = ['.nip.io', '.sslip.io', '.xip.io', '.lvh.me'];
+  const suffixes = ['.nip.io', '.sslip.io', '.xip.io'];
   const suffix = suffixes.find((candidate) => host.endsWith(candidate));
   if (!suffix) return undefined;
   const labels = host.slice(0, -suffix.length).split(/[.-]/u).filter(Boolean);
@@ -406,12 +408,30 @@ function isPrivateIpv4(ip: string): boolean {
 
 function isPrivateIpv6(ip: string): boolean {
   const normalized = ip.toLowerCase();
+  const mappedIpv4 = ipv4FromMappedIpv6(normalized);
+  if (mappedIpv4) return isPrivateIpv4(mappedIpv4);
+  const firstHextet = Number.parseInt(normalized.split(':', 1)[0] ?? '', 16);
   return normalized === '::'
     || normalized === '::1'
-    || normalized.startsWith('fe80:')
+    || (Number.isInteger(firstHextet) && firstHextet >= 0xfe80 && firstHextet <= 0xfebf)
     || normalized.startsWith('fc')
     || normalized.startsWith('fd')
     || normalized.startsWith('ff')
     || normalized.startsWith('0:0:0:0:0:ffff:127.')
     || normalized.startsWith('::ffff:127.');
+}
+
+function ipv4FromMappedIpv6(ip: string): string | undefined {
+  const dotted = /^(?:::ffff:|0:0:0:0:0:ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(ip);
+  if (dotted) return dotted[1];
+
+  const parts = ip.split(':');
+  const marker = parts.lastIndexOf('ffff');
+  if (marker < 0 || marker !== parts.length - 3) return undefined;
+  const high = Number.parseInt(parts[parts.length - 2] ?? '', 16);
+  const low = Number.parseInt(parts[parts.length - 1] ?? '', 16);
+  if (!Number.isInteger(high) || !Number.isInteger(low) || high < 0 || high > 0xffff || low < 0 || low > 0xffff) {
+    return undefined;
+  }
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
 }
