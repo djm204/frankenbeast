@@ -137,8 +137,20 @@ async function pathIsFile(path: string): Promise<boolean> {
   }
 }
 
+async function pathIsDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 async function resolveBackupRoot(stateDir: string): Promise<string> {
   const root = resolve(stateDir);
+  if (basename(root) === '.fbeast' && await pathIsDirectory(join(root, 'state'))) {
+    throw new Error('DR backup source must be the concrete .fbeast/state directory, not the parent .fbeast root');
+  }
   if (basename(root) === 'state' && await pathIsFile(join(dirname(root), 'beast.db'))) {
     return dirname(root);
   }
@@ -148,7 +160,14 @@ async function resolveBackupRoot(stateDir: string): Promise<string> {
 async function discoverBackupFiles(requestedStateDir: string, root: string): Promise<string[]> {
   const requestedRoot = resolve(requestedStateDir);
   if (root !== requestedRoot && basename(requestedRoot) === 'state') {
-    return [join(root, 'beast.db'), ...await walkFiles(requestedRoot)].sort();
+    const siblingDb = join(root, 'beast.db');
+    const siblingDbSidecars = await Promise.all(
+      ['-wal', '-shm', '-journal'].map(async (suffix) => {
+        const sidecar = `${siblingDb}${suffix}`;
+        return await pathIsFile(sidecar) ? sidecar : undefined;
+      }),
+    );
+    return [siblingDb, ...siblingDbSidecars.filter((path): path is string => path !== undefined), ...await walkFiles(requestedRoot)].sort();
   }
   return walkFiles(root);
 }
@@ -186,10 +205,13 @@ async function buildPayload(stateDir: string, generatedAt: string, outputPath: s
   if (discoveredFiles.some((absolutePath) => resolve(absolutePath) === output) && !await isExistingBackupArtifact(output)) {
     throw new Error('DR backup output path aliases a live input file; choose a separate backup artifact path');
   }
-  const sourceFiles = discoveredFiles.filter((absolutePath) => {
+  const sourceFiles: string[] = [];
+  for (const absolutePath of discoveredFiles) {
     const resolved = resolve(absolutePath);
-    return resolved !== output && resolved !== keyFile;
-  });
+    if (resolved === output || resolved === keyFile) continue;
+    if (await isExistingBackupArtifact(resolved)) continue;
+    sourceFiles.push(absolutePath);
+  }
   const relativeSourcePaths = sourceFiles.map((absolutePath) => relative(root, absolutePath).split(sep).join('/'));
   assertNoLiveSqliteSidecars(relativeSourcePaths);
   const files = await Promise.all(sourceFiles.map(async (absolutePath) => {
@@ -351,6 +373,25 @@ async function assertNoSymlinkParents(targetDir: string, targetPath: string): Pr
   }
 }
 
+async function ensureRealDirectory(path: string): Promise<void> {
+  const parent = dirname(path);
+  if (parent !== path) {
+    await ensureRealDirectory(parent);
+  }
+  try {
+    const stats = await lstat(path);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error(`DR restore target parent must be a real directory: ${path}`);
+    }
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      await mkdir(path, { mode: 0o700 });
+      return;
+    }
+    throw error;
+  }
+}
+
 async function assertRestoreTargetReady(targetDir: string, createIfMissing: boolean): Promise<void> {
   try {
     const stats = await lstat(targetDir);
@@ -363,7 +404,7 @@ async function assertRestoreTargetReady(targetDir: string, createIfMissing: bool
     }
   } catch (error: unknown) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      if (createIfMissing) await mkdir(targetDir, { recursive: true, mode: 0o700 });
+      if (createIfMissing) await ensureRealDirectory(targetDir);
       return;
     }
     throw error;

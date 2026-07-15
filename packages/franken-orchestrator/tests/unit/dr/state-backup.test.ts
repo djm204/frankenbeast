@@ -114,6 +114,7 @@ describe('encrypted DR state backups', () => {
       await writeFile(join(dir, '.cache', 'unrelated-secret.log'), 'not state', 'utf8');
       await writeFile(join(dir, 'dr.key'), 'embedded key should be excluded', 'utf8');
       await writeFile(inTreeBackupPath, JSON.stringify({ format: 'frankenbeast-dr-state-backup', schemaVersion: 1 }), 'utf8');
+      await writeFile(join(dir, 'state', 'old.franken-dr.json'), JSON.stringify({ format: 'frankenbeast-dr-state-backup', schemaVersion: 1 }), 'utf8');
       const envelope = await createEncryptedStateBackup({
         stateDir: join(dir, 'state'),
         outputPath: inTreeBackupPath,
@@ -121,6 +122,7 @@ describe('encrypted DR state backups', () => {
       });
       const paths = envelope.manifest.files.map((file) => file.path);
       expect(paths).not.toContain('state/backup.franken-dr.json');
+      expect(paths).not.toContain('state/old.franken-dr.json');
       expect(paths).not.toContain('dr.key');
       expect(paths).not.toContain('.cache/unrelated-secret.log');
       expect(paths).toContain('beast.db');
@@ -143,12 +145,44 @@ describe('encrypted DR state backups', () => {
   it('refuses live SQLite WAL/SHM sidecars until state is quiesced', async () => {
     const { dir, keyFile } = await makeFixtureState();
     try {
+      await writeFile(join(dir, 'beast.db'), 'project sqlite bytes', 'utf8');
+      await writeFile(join(dir, 'beast.db-wal'), 'live sibling wal bytes', 'utf8');
       await writeFile(join(dir, 'state', 'kanban.db-journal'), 'live journal bytes', 'utf8');
       await expect(createEncryptedStateBackup({
         stateDir: join(dir, 'state'),
         outputPath: join(dir, 'backup.franken-dr.json'),
         keyFilePath: keyFile,
       })).rejects.toThrow(/quiesce SQLite state/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects parent .fbeast roots and symlinked restore ancestors', async () => {
+    const { dir, keyFile } = await makeFixtureState();
+    const fbeastRoot = join(dir, '.fbeast');
+    const backupPath = join(dir, 'backup.franken-dr.json');
+    const outsideDir = join(dir, 'outside-restore');
+    const linkedParent = join(dir, 'restore-link');
+
+    try {
+      await mkdir(join(fbeastRoot, 'state'), { recursive: true });
+      await writeFile(join(fbeastRoot, 'state', 'kanban.db'), 'sqlite bytes', 'utf8');
+      await expect(createEncryptedStateBackup({
+        stateDir: fbeastRoot,
+        outputPath: backupPath,
+        keyFilePath: keyFile,
+      })).rejects.toThrow(/concrete \.fbeast\/state/);
+
+      await createEncryptedStateBackup({ stateDir: join(dir, 'state'), outputPath: backupPath, keyFilePath: keyFile });
+      await mkdir(outsideDir, { recursive: true });
+      await symlink(outsideDir, linkedParent);
+      await expect(restoreEncryptedStateBackup({
+        backupPath,
+        targetDir: join(linkedParent, 'new-target'),
+        keyFilePath: keyFile,
+      })).rejects.toThrow(/real directory/);
+      await expect(stat(join(outsideDir, 'new-target'))).rejects.toThrow();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
