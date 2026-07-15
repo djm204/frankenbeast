@@ -96,3 +96,7 @@ This guardrail keeps restore-preview output consumable by PM/liveness tooling: b
 ## Tabletop exercises
 
 Use `docs/dr/tabletop-exercise-template.md` when operators need to rehearse a restore-preview scenario before executing any recovery work. The template keeps disaster-recovery practice read-only, requires at least one fail-closed edge case such as corrupt backup input, and records explicit restore/merge/skip/quarantine decisions for every drift item.
+
+## Automation failure incident command
+
+Use `docs/dr/incident-command-checklist.md` when worker swarms, Codex gates, approval replay, cron monitors, backup jobs, or restore-preview automation starts failing ambiguously. The checklist assigns a single incident commander, freezes unsafe mutation paths, captures read-only evidence, and requires explicit decision-log rows before merges, force-pushes, restore commands, approval replays, or broad worker respawns.
