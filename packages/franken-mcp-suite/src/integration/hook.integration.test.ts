@@ -84,6 +84,22 @@ describe('fbeast-hook runtime', () => {
     });
   });
 
+  it('redacts memory review result payloads before post-tool audit logging', async () => {
+    const streamedPayload = JSON.stringify({ id: 'memcand_1', key: 'secret', value: 'token abc123' });
+    const result = await runHookForTest(['post-tool', '--stdin-payload', '--', 'fbeast_memory_review_propose'], {
+      streamedPayload,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.observerLogs).toHaveLength(1);
+    expect(JSON.parse(result.observerLogs[0]!.metadata)).toEqual({
+      toolName: 'fbeast_memory_review_propose',
+      payload: '[memory-review-result-redacted]',
+      phase: 'post-tool',
+    });
+    expect(result.observerLogs[0]!.metadata).not.toContain('token abc123');
+  });
+
   it('preserves empty payload behavior for legacy post-tool callers that omit stdin opt-in', async () => {
     const result = await runHookForTest(['post-tool', '--', 'read_file'], {
       streamedPayload: JSON.stringify({ shouldNotBeRead: true }),

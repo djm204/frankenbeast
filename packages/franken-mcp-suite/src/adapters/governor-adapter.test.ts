@@ -129,6 +129,28 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('approved');
   });
 
+  it('redacts proposed memory context before shared governor logging', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_review_propose',
+      context: '{"key":"secret","value":"token abc123","source":"chat","reason":"remember"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_review_propose') as { context: string };
+    db.close();
+    expect(row.context).toBe('[memory-review-proposal-context-redacted]');
+    expect(row.context).not.toContain('token abc123');
+  });
+
+  it('requires HITL for memory review decisions on the shared path', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"approve"}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
   it('reprices zero-cost known model rows in budget status', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

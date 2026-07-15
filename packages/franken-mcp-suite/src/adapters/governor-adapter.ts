@@ -17,6 +17,12 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_right_to_forget',
 ]);
 
+const HITL_ACTIONS = new Set([
+  'fbeast_memory_review_decide',
+]);
+
+const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
+
 /**
  * fbeast tools whose payload is *data to query/analyze/store/log*, not an
  * operation to authorize. Their input frequently contains dangerous words (the
@@ -139,6 +145,15 @@ function redactRightToForgetGovernanceContext(action: string, context: string): 
   return '[right-to-forget-context-redacted]';
 }
 
+function redactMemoryReviewProposalGovernanceContext(action: string, context: string): string {
+  if (action !== 'fbeast_memory_review_propose') return context;
+  return MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION;
+}
+
+function redactGovernanceContext(action: string, context: string): string {
+  return redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context));
+}
+
 function isRightToForgetDryRun(action: string, context: string): boolean {
   if (action !== 'fbeast_memory_right_to_forget') return false;
   try {
@@ -180,6 +195,13 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     };
   }
 
+  if (HITL_ACTIONS.has(action)) {
+    return {
+      decision: 'review_recommended',
+      reason: `Tool "${action}" requires explicit operator approval before applying a memory promotion decision.`,
+    };
+  }
+
   const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(action, context);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
@@ -213,7 +235,7 @@ export function createGovernorAdapter(dbPath: string): GovernorAdapter {
   return {
     async check(input) {
       const isDryRunForget = isRightToForgetDryRun(input.action, input.context);
-      const context = redactRightToForgetGovernanceContext(input.action, input.context);
+      const context = redactGovernanceContext(input.action, input.context);
       const result = isDryRunForget
         ? {
             decision: 'approved' as const,

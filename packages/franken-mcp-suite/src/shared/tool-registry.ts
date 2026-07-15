@@ -298,7 +298,17 @@ const TOOLS: ToolFull[] = [
         confidence: confidence.value,
         ...(evidenceId?.value ? { evidenceId: evidenceId.value } : {}),
       });
-      return { content: [{ type: 'text', text: JSON.stringify(candidate, null, 2) }] };
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            id: candidate.id,
+            status: candidate.status,
+            createdAt: candidate.createdAt,
+            updatedAt: candidate.updatedAt,
+          }, null, 2),
+        }],
+      };
     },
   },
   {

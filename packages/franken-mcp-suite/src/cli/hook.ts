@@ -68,6 +68,17 @@ async function readStdinPayload(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const MEMORY_REVIEW_RESULT_TOOLS = new Set([
+  'fbeast_memory_review_propose',
+  'fbeast_memory_review_list',
+  'fbeast_memory_review_decide',
+]);
+
+function redactPostToolPayload(toolName: string, payload: string): string {
+  if (!MEMORY_REVIEW_RESULT_TOOLS.has(toolName)) return payload;
+  return '[memory-review-result-redacted]';
+}
+
 export async function runHook(
   argv: string[] = process.argv.slice(2),
   deps?: HookDeps,
@@ -125,9 +136,10 @@ export async function runHook(
     const streamedPayload = payload === '' && streamPostToolPayload
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
+    const rawPostPayload = payload || streamedPayload;
     await resolvedDeps.observer.log({
       event: 'tool_call',
-      metadata: JSON.stringify({ toolName, payload: payload || streamedPayload, phase }),
+      metadata: JSON.stringify({ toolName, payload: redactPostToolPayload(toolName, rawPostPayload), phase }),
       sessionId: resolvedDeps.sessionId(),
     });
     process.stdout.write(JSON.stringify({ logged: true }) + '\n');
