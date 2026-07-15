@@ -784,6 +784,20 @@ button {
   padding: 1rem;
 }
 
+.provider-panel__incident-banner {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(255, 183, 77, 0.38);
+  border-radius: 0.9rem;
+  background: rgba(255, 183, 77, 0.12);
+  color: #ffe2b6;
+  line-height: 1.45;
+}
+
+.provider-panel__incident-banner strong {
+  color: #ffd182;
+}
+
 .rail-card__header {
   margin-bottom: 0.9rem;
 }

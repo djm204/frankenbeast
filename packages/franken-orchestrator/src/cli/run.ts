@@ -64,7 +64,7 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
-import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
+import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
 
@@ -538,6 +538,81 @@ function resolveDashboardProviderType(nameOrType: string, fallbackType?: string)
   }
 }
 
+function findDashboardConsolidatedProvider(
+  name: string,
+  type: string,
+  config: OrchestratorConfig,
+): ProviderConfig | undefined {
+  return config.consolidatedProviders?.find((provider) => provider.name === name)
+    ?? config.consolidatedProviders?.find((provider) => provider.name === type)
+    ?? config.consolidatedProviders?.find((provider) => provider.type === name)
+    ?? config.consolidatedProviders?.find((provider) => provider.type === type);
+}
+
+function resolveDashboardProviderRegistryName(name: string, type: string): string | undefined {
+  if (name === 'aider') return 'aider';
+  try {
+    return resolveProviderCatalogEntry(name).cliRegistryName;
+  } catch {
+    try {
+      return resolveProviderCatalogEntry(type).cliRegistryName;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function resolveDashboardProviderDefaultCommand(name: string, type: string): string | undefined {
+  if (name === 'aider') return 'aider';
+  for (const key of [type, name]) {
+    try {
+      return resolveProviderCatalogEntry(key).defaultCommand;
+    } catch {
+      // Keep probing fallbacks below.
+    }
+  }
+  return undefined;
+}
+
+function firstNonEmptyEnv(...names: readonly string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function resolveDashboardProviderCommand(name: string, type: string, config: OrchestratorConfig): string | undefined {
+  const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
+  if (consolidatedProvider) {
+    return consolidatedProvider.cliPath ?? resolveDashboardProviderDefaultCommand(name, type);
+  }
+
+  const providerRegistryName = resolveDashboardProviderRegistryName(name, type);
+  const overrideCommand = config.providers.overrides?.[name]?.command
+    ?? (providerRegistryName ? config.providers.overrides?.[providerRegistryName]?.command : undefined)
+    ?? config.providers.overrides?.[type]?.command;
+  if (overrideCommand) return overrideCommand;
+
+  return resolveDashboardProviderDefaultCommand(name, type);
+}
+
+function resolveDashboardProviderAvailability(name: string, type: string, config: OrchestratorConfig): boolean {
+  if (type.endsWith('-cli')) {
+    const command = resolveDashboardProviderCommand(name, type, config);
+    return Boolean(command && isCachedCommandHealthy(command));
+  }
+
+  const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
+  if (consolidatedProvider?.apiKey?.trim()) return true;
+
+  if (type === 'anthropic-api') return Boolean(firstNonEmptyEnv('ANTHROPIC_API_KEY'));
+  if (type === 'openai-api') return Boolean(firstNonEmptyEnv('OPENAI_API_KEY'));
+  if (type === 'gemini-api') return Boolean(firstNonEmptyEnv('GEMINI_API_KEY', 'GOOGLE_API_KEY'));
+
+  return true;
+}
+
 export function buildDashboardProviderSnapshot(
   config: OrchestratorConfig,
   providerRegistry?: LlmProviderRegistry | undefined,
@@ -547,7 +622,7 @@ export function buildDashboardProviderSnapshot(
     return config.consolidatedProviders.map((provider, index) => ({
       name: provider.name,
       type: provider.type,
-      available: true,
+      available: resolveDashboardProviderAvailability(provider.name, provider.type, config),
       failoverOrder: index,
       ...(provider.model ? { model: provider.model } : {}),
     }));
@@ -591,11 +666,51 @@ export function buildDashboardProviderSnapshot(
     return {
       name,
       type,
-      available: true,
+      available: resolveDashboardProviderAvailability(name, type, config),
       failoverOrder: index,
       ...(model ? { model } : {}),
     };
   });
+}
+
+const DASHBOARD_COMMAND_HEALTH_TTL_MS = 30_000;
+const dashboardCommandHealthCache = new Map<string, { available: boolean; checkedAt: number; checking: boolean }>();
+
+function isCachedCommandHealthy(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  const now = Date.now();
+  const cached = dashboardCommandHealthCache.get(trimmed);
+  if (!cached) {
+    const initialAvailable = isCommandAvailable(trimmed);
+    dashboardCommandHealthCache.set(trimmed, { available: initialAvailable, checkedAt: 0, checking: false });
+    scheduleDashboardCommandHealthProbe(trimmed);
+    return initialAvailable;
+  }
+  if (!cached.checking && now - cached.checkedAt > DASHBOARD_COMMAND_HEALTH_TTL_MS) {
+    scheduleDashboardCommandHealthProbe(trimmed);
+  }
+  return cached.available;
+}
+
+function scheduleDashboardCommandHealthProbe(command: string): void {
+  const cached = dashboardCommandHealthCache.get(command);
+  if (cached?.checking) return;
+  dashboardCommandHealthCache.set(command, {
+    available: cached?.available ?? false,
+    checkedAt: cached?.checkedAt ?? 0,
+    checking: true,
+  });
+  try {
+    const proc = spawn(command, ['--version'], { stdio: 'ignore', timeout: 5_000 });
+    const finish = (available: boolean) => {
+      dashboardCommandHealthCache.set(command, { available, checkedAt: Date.now(), checking: false });
+    };
+    proc.on('close', (code) => finish(code === 0));
+    proc.on('error', () => finish(false));
+  } catch {
+    dashboardCommandHealthCache.set(command, { available: false, checkedAt: Date.now(), checking: false });
+  }
 }
 
 function isCommandAvailable(command: string): boolean {
