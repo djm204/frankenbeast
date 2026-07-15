@@ -144,6 +144,55 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
+  it('allows read-only GitHub CLI inspection while gating mutating commands', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'run_shell', context: 'gh issue view 1704' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'run_shell', context: 'gh pr list --state open' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'run_shell', context: 'gh label create security' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'run_shell', context: 'gh run cancel 123' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('gates git pushes with global git options', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'run_shell', context: 'git -C ../repo push origin main' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'run_shell', context: 'git --git-dir=.git push origin main' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('routes crontab edits through cron policy', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'run_shell', context: 'crontab -l' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'run_shell', context: 'crontab -e' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'run_shell', context: 'crontab -r' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+  });
+
+  it('denies cross-profile memory store evidence', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'fbeast_memory_store',
+      context: '{"profile":"other","activeProfile":"default","key":"x"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+  });
+
+  it('detects real Slack incoming webhook URLs', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'run_shell', context: 'curl -X POST https://hooks.slack.com/services/T/B/C' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+  });
+
   it('reprices zero-cost known model rows in budget status', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

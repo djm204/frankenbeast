@@ -24,12 +24,12 @@ const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
 };
 
 const HIGH_RISK_ACTION_NAME_PATTERNS: ReadonlyArray<readonly [RegExp, HighRiskActionClass]> = [
-  [/\bgit\s+push\b/i, 'git-remote-write'],
-  [/\bgh\s+(?:api|issue|pr|workflow|repo|release)\b/i, 'github-mutation'],
+  [/\bgit\b(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*\s+push\b/i, 'git-remote-write'],
+  [/\bgh\s+(?:api|issue|pr|workflow|repo|release|label|run)\b/i, 'github-mutation'],
   [/\b(?:curl|fetch)\b[^\n]*api\.github\.com\b/i, 'github-mutation'],
-  [/\b(?:cron|cronjob|schedule|scheduled\s+job)\b/i, 'cron'],
+  [/\b(?:cron|crontab|cronjob|schedule|scheduled\s+job)\b/i, 'cron'],
   [/\b(?:profile|skill|plugin|credential|config)\b[^\n]*(?:write|edit|patch|create|delete|remove|install|set)\b/i, 'profile-write'],
-  [/\b(?:webhook|discord_webhook_url|slack_webhook_url)\b/i, 'webhook'],
+  [/\b(?:webhook|discord_webhook_url|slack_webhook_url)\b|https:\/\/hooks\.slack\.com\/services\//i, 'webhook'],
   [/\b(?:kill|pkill|killall|nohup|disown|systemctl|service|docker\s+(?:stop|kill|rm|restart)|process\s+(?:kill|start|stop))\b/i, 'shell-process-control'],
 ];
 
@@ -192,10 +192,6 @@ function optionalTarget(target: string | undefined): Pick<HighRiskActionEvidence
   return target !== undefined ? { target } : {};
 }
 
-function optionalDryRun(dryRun: boolean | undefined): Pick<HighRiskActionEvidence, 'dryRun'> | Record<string, never> {
-  return dryRun !== undefined ? { dryRun } : {};
-}
-
 function memoryTarget(context: Record<string, unknown>): string | undefined {
   const selectors = ['key', 'category', 'sourceScope', 'query']
     .map((key) => stringContext(context, key))
@@ -218,11 +214,29 @@ function contextCommand(action: string, context: string): string {
 }
 
 function extractGitPushTarget(command: string): string | undefined {
-  const match = /\bgit\s+push\b(?:\s+--[^\s]+)*(?:\s+(?<remote>[^\s]+))?(?:\s+(?<ref>[^\s]+))?/i.exec(command);
+  const match = /\bgit\b(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*\s+push\b(?:\s+--[^\s]+)*(?:\s+(?<remote>[^\s]+))?(?:\s+(?<ref>[^\s]+))?/i.exec(command);
   if (!match?.groups) return undefined;
   const remote = match.groups.remote;
   const ref = match.groups.ref;
   return [remote, ref].filter((part): part is string => part !== undefined && !part.startsWith('-')).join(' ') || undefined;
+}
+
+function inferGithubOperation(command: string, fallback: string): string {
+  const match = /\bgh\s+(?<resource>api|issue|pr|workflow|repo|release|label|run)\b(?:\s+(?<verb>[A-Za-z][\w-]*))?/i.exec(command);
+  const resource = match?.groups?.resource?.toLowerCase();
+  const verb = match?.groups?.verb?.toLowerCase();
+  if (resource === undefined) return fallback;
+  if (resource === 'api') return fallback;
+  if (verb === undefined || ['view', 'list', 'status', 'checks', 'diff'].includes(verb)) return 'read';
+  return verb;
+}
+
+function inferCronOperation(command: string, fallback: string): string {
+  if (/\bcrontab\s+-l\b/i.test(command)) return 'list';
+  if (/\bcrontab\s+-r\b/i.test(command)) return 'remove';
+  if (/\bcrontab\s+-e\b/i.test(command)) return 'update';
+  if (/\bcrontab\s+\S+/i.test(command)) return 'install';
+  return fallback;
 }
 
 function extractUrl(text: string): string | undefined {
@@ -238,24 +252,37 @@ function inferHighRiskActionClass(action: string, context: string): HighRiskActi
 
 function highRiskEvidence(action: string, context: string): HighRiskActionEvidence {
   const parsed = parseContextObject(context);
-  if (action === 'fbeast_memory_store') return { operation: 'store', ...optionalTarget(memoryTarget(parsed)) };
-  if (action === 'fbeast_memory_forget') return { operation: 'delete', ...optionalTarget(memoryTarget(parsed)) };
-  if (action === 'fbeast_memory_right_to_forget') {
-    return {
-      operation: 'right-to-forget',
-      ...optionalTarget(memoryTarget(parsed)),
-      ...optionalDryRun(booleanContext(parsed, 'dryRun')),
-    };
-  }
+  const memoryEvidence = (operation: string): HighRiskActionEvidence => {
+    const evidence: HighRiskActionEvidence = { operation };
+    const target = memoryTarget(parsed);
+    const profile = stringContext(parsed, 'profile');
+    const activeProfile = stringContext(parsed, 'activeProfile');
+    const crossProfile = booleanContext(parsed, 'crossProfile');
+    const dryRun = booleanContext(parsed, 'dryRun');
+    if (target !== undefined) Object.assign(evidence, { target });
+    if (profile !== undefined) Object.assign(evidence, { profile });
+    if (activeProfile !== undefined) Object.assign(evidence, { activeProfile });
+    if (crossProfile !== undefined) Object.assign(evidence, { crossProfile });
+    if (dryRun !== undefined) Object.assign(evidence, { dryRun });
+    return evidence;
+  };
+  if (action === 'fbeast_memory_store') return memoryEvidence('store');
+  if (action === 'fbeast_memory_forget') return memoryEvidence('delete');
+  if (action === 'fbeast_memory_right_to_forget') return memoryEvidence('right-to-forget');
   const command = contextCommand(action, context);
-  if (/\bgit\s+push\b/i.test(command)) {
+  if (/\bgit\b(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*\s+push\b/i.test(command)) {
     return {
       command,
       ...optionalTarget(extractGitPushTarget(command) ?? command),
       force: /(?:\s--force(?:-with-lease)?\b|\s-f\b)/i.test(command),
     };
   }
-  const operation = stringContext(parsed, 'operation') ?? action;
+  const actionClass = inferHighRiskActionClass(action, context);
+  const parsedOperation = stringContext(parsed, 'operation');
+  const operation = parsedOperation
+    ?? (actionClass === 'github-mutation' ? inferGithubOperation(command, action)
+      : actionClass === 'cron' ? inferCronOperation(command, action)
+        : action);
   const target = stringContext(parsed, 'target') ?? extractUrl(command) ?? command;
   const evidence: HighRiskActionEvidence = { command, operation, ...optionalTarget(target) };
   for (const [key, value] of [

@@ -3,6 +3,7 @@
 ## 2026-07-15 — High-risk governor policy review fixes
 - When adding policy-as-code for high-risk action classes, wire the class map into every shared governor path before non-executing exemptions; otherwise new classes can exist in the policy module but never gate hook/public/central checks.
 - For memory governance evidence, pass only selector/dry-run/profile fields into hook/governor context and redact selectors before logging; never serialize full memory tool payloads because schema-rejected extras or stored values can leak secrets into governor logs.
+- High-risk shell-command inference must parse common CLI variants, not just simple substrings: allow read-only GitHub inspection (`gh issue/pr view|list`), gate mutating GitHub subcommands such as labels/runs, recognize `git` global options before `push`, include `crontab` edits, and match real webhook hosts like `hooks.slack.com/services`.
 
 ## 2026-07-15 — Beast process cleanup review fixes
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
