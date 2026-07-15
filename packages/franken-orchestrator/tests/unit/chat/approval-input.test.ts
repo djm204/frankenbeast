@@ -44,4 +44,12 @@ describe('approvalRuntimeInput', () => {
       command: '/approve',
     })).toThrow(/unsafe pending approval command/i);
   });
+
+  it('rejects oversized model-output commands with parser and input-class context', () => {
+    expect(() => approvalRuntimeInput({
+      description: 'Deploy staging',
+      requestedAt: '2026-07-11T00:00:00.000Z',
+      command: 'deploy '.repeat(700),
+    })).toThrow(/approval-parser rejected pending-command input/i);
+  });
 });

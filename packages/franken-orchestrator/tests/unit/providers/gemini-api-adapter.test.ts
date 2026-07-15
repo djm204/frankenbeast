@@ -225,7 +225,7 @@ describe('GeminiApiAdapter', () => {
         egressPolicy: {
           enabled: true,
           lanes: {
-            implementation: {
+            provider: {
               allowedDestinationClasses: ['provider'],
               allowedMethods: ['POST'],
             },

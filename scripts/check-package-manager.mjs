@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const packageManager = manifest.packageManager;
+const quiet = process.argv.slice(2).includes('--quiet');
 
 if (typeof packageManager !== 'string') {
   console.error('package.json must declare packageManager, for example "npm@11.5.1".');
@@ -35,4 +36,6 @@ if (actual !== expected) {
   process.exit(1);
 }
 
-console.log(`npm ${actual} matches packageManager ${packageManager}.`);
+if (!quiet) {
+  console.log(`npm ${actual} matches packageManager ${packageManager}.`);
+}

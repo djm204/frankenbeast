@@ -164,6 +164,35 @@ export interface LessonUnquarantineMetadata {
   readonly reason: string;
 }
 
+/** Source classes used to weight lesson promotion, demotion, and quarantine decisions. */
+export type LessonFeedbackSignalSource =
+  | 'explicit-user-correction'
+  | 'explicit-user-approval'
+  | 'inferred-success'
+  | 'inferred-failure';
+
+/** One normalized feedback signal and its decision weight. */
+export interface LessonFeedbackWeight {
+  readonly source: LessonFeedbackSignalSource;
+  /** Relative importance of this source; explicit human signals are intentionally higher than inferred ones. */
+  readonly weight: number;
+  /** Signed contribution to the lesson score. Corrections/failures demote; approvals/successes promote. */
+  readonly scoreImpact: number;
+  readonly observedAt: string;
+  readonly rationale: string;
+  /** Optional audit evidence for explicit human feedback signals. */
+  readonly evidence?: readonly LessonQuarantineEvidence[];
+}
+
+/** Score model that explains which feedback sources influenced a lesson decision. */
+export interface LessonFeedbackWeighting {
+  readonly schemaVersion: 'lesson-feedback-weighting-v1';
+  readonly primarySource: LessonFeedbackSignalSource;
+  readonly totalScore: number;
+  readonly weights: readonly LessonFeedbackWeight[];
+  readonly guidance: string;
+}
+
 /** A normalized reviewer finding captured alongside a learned critique lesson. */
 export interface ReviewerFeedbackLessonEntry {
   /** Iteration where the reviewer feedback was emitted. */
@@ -335,6 +364,11 @@ export interface LearningBacklogPrioritizationItem {
   readonly title: string;
   /** Why this item received its priority. */
   readonly rationale: string;
+  /** Feedback sources and weights that influenced this routing decision. */
+  readonly feedbackSources?: readonly Pick<
+    LessonFeedbackWeight,
+    'source' | 'weight' | 'scoreImpact'
+  >[];
   /** Next action PM/liveness tooling should present. */
   readonly recommendedAction: string;
 }
@@ -426,6 +460,8 @@ export interface CritiqueLesson {
   readonly agentImprovementScorecard?: AgentImprovementScorecard;
   /** Privacy and learning-classification decision applied before durable recording. */
   readonly privacyFilter?: LessonPrivacyFilterDecision;
+  /** Human/inferred feedback weighting used for promotion, demotion, retirement, and quarantine decisions. */
+  readonly feedbackWeighting?: LessonFeedbackWeighting;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

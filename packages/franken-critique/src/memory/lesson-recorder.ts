@@ -17,6 +17,9 @@ import type {
   LessonCandidateCategory,
   LessonPrivacyFilterDecision,
   LessonPrivacyRedaction,
+  LessonFeedbackSignalSource,
+  LessonFeedbackWeight,
+  LessonFeedbackWeighting,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -163,6 +166,18 @@ const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
   /\b@franken\/[a-z0-9-]+\b/i,
   /\bfrankenbeast\b/i,
 ];
+
+const LESSON_FEEDBACK_WEIGHTING_GUIDANCE =
+  'Explicit user corrections and approvals are primary learning signals; inferred success or failure may inform routing but must not override direct human feedback.';
+const LESSON_FEEDBACK_WEIGHTS: Record<
+  LessonFeedbackSignalSource,
+  { readonly weight: number; readonly scoreImpact: number }
+> = {
+  'explicit-user-correction': { weight: 100, scoreImpact: -100 },
+  'explicit-user-approval': { weight: 80, scoreImpact: 80 },
+  'inferred-success': { weight: 25, scoreImpact: 25 },
+  'inferred-failure': { weight: 35, scoreImpact: -35 },
+};
 
 export interface BlockerPatternObservation {
   readonly taskId: TaskId;
@@ -339,6 +354,128 @@ export interface RepeatedFailureQuarantineRequest {
 }
 
 export type LessonUnquarantineRequest = LessonUnquarantineMetadata;
+
+export interface LessonHumanFeedbackRequest {
+  readonly source: 'explicit-user-correction' | 'explicit-user-approval';
+  readonly reason: string;
+  readonly observedAt: string;
+  readonly evidence: readonly LessonQuarantineEvidence[];
+  /** Optional replacement wording when a correction should immediately revise the learned guidance. */
+  readonly revisedCorrectionApplied?: string;
+}
+
+export function applyHumanFeedbackToLesson(
+  lesson: CritiqueLesson,
+  request: LessonHumanFeedbackRequest,
+): CritiqueLesson {
+  const observedAt = normalizeTimestamp(request.observedAt);
+  const feedbackReason = requireNonEmptyString(
+    request.reason,
+    'feedback reason',
+  );
+  const feedbackEvidence = request.evidence.map(normalizeQuarantineEvidence);
+  const revisedCorrectionApplied =
+    request.revisedCorrectionApplied !== undefined
+      ? requireNonEmptyString(
+          request.revisedCorrectionApplied,
+          'revised correctionApplied',
+        )
+      : undefined;
+  const feedbackWeighting = createLessonFeedbackWeighting([
+    ...(lesson.feedbackWeighting?.weights ?? []),
+    createLessonFeedbackWeight(
+      request.source,
+      observedAt,
+      feedbackReason,
+      feedbackEvidence,
+    ),
+  ]);
+
+  if (request.source === 'explicit-user-correction') {
+    const revisedLesson = revisedCorrectionApplied
+      ? {
+          ...lesson,
+          correctionApplied: revisedCorrectionApplied,
+          lifecycleStatus: 'candidate' as const,
+        }
+      : lesson;
+    const quarantinedLesson = quarantineLesson(revisedLesson, {
+      trigger: 'explicit-user-correction',
+      reason: feedbackReason,
+      evidence: feedbackEvidence,
+      quarantinedAt: observedAt,
+    });
+    return {
+      ...(revisedCorrectionApplied
+        ? removeStaleLessonValidation(quarantinedLesson)
+        : quarantinedLesson),
+      feedbackWeighting,
+    };
+  }
+
+  if (request.source !== 'explicit-user-approval') {
+    throw new RangeError(
+      'Lesson human feedback approval requires explicit-user-approval source.',
+    );
+  }
+  if (request.evidence.length === 0) {
+    throw new RangeError(
+      'Explicit lesson approval requires at least one evidence item.',
+    );
+  }
+  if (feedbackEvidence.length === 0) {
+    throw new RangeError(
+      'Explicit lesson approval requires at least one evidence item.',
+    );
+  }
+  const primaryApprovalEvidence = feedbackEvidence[0];
+  if (primaryApprovalEvidence === undefined) {
+    throw new RangeError(
+      'Explicit lesson approval requires at least one evidence item.',
+    );
+  }
+  if (lesson.lifecycleStatus === 'quarantined' && lesson.quarantine !== undefined) {
+    const unquarantinedLesson = unquarantineLesson(lesson, {
+      reviewedAt: observedAt,
+      reviewer: request.source,
+      evidenceUrl: primaryApprovalEvidence.reference,
+      reason: feedbackReason,
+    });
+    const shouldClearApprovedSandbox =
+      unquarantinedLesson.lifecycleStatus === undefined ||
+      unquarantinedLesson.lifecycleStatus === 'active';
+    const { experimentSandbox, ...unquarantinedLessonWithoutSandbox } =
+      unquarantinedLesson;
+    void experimentSandbox;
+    return {
+      ...(shouldClearApprovedSandbox
+        ? unquarantinedLessonWithoutSandbox
+        : unquarantinedLesson),
+      feedbackWeighting,
+    };
+  }
+  const shouldActivateApprovedLesson =
+    lesson.lifecycleStatus === undefined ||
+    lesson.lifecycleStatus === 'active' ||
+    lesson.lifecycleStatus === 'candidate';
+  const { experimentSandbox, ...lessonWithoutSandbox } = lesson;
+  void experimentSandbox;
+  return {
+    ...(shouldActivateApprovedLesson ? lessonWithoutSandbox : lesson),
+    lifecycleStatus: shouldActivateApprovedLesson
+      ? 'active'
+      : lesson.lifecycleStatus,
+    feedbackWeighting,
+  };
+}
+
+function removeStaleLessonValidation(lesson: CritiqueLesson): CritiqueLesson {
+  const { contradictionReport, testTraceability, ...lessonWithoutValidation } =
+    lesson;
+  void contradictionReport;
+  void testTraceability;
+  return lessonWithoutValidation;
+}
 
 export function isLessonApplicable(lesson: CritiqueLesson): boolean {
   if (lesson.quarantine !== undefined) {
@@ -785,6 +922,18 @@ export class LessonRecorder {
                 ),
               }
             : {}),
+          feedbackWeighting: createLessonFeedbackWeighting([
+            createLessonFeedbackWeight(
+              'inferred-failure',
+              recordedAt,
+              'A critique evaluator failed before the lesson was extracted.',
+            ),
+            createLessonFeedbackWeight(
+              'inferred-success',
+              recordedAt,
+              'A later critique iteration passed or warned after applying the correction.',
+            ),
+          ]),
           cooldown: {
             key: cooldownKey,
             windowMs: this.cooldownMs,
@@ -1231,6 +1380,75 @@ function addLessonBacklogItems(
   sortLearningBacklogItems(target);
 }
 
+function createLessonFeedbackWeight(
+  source: LessonFeedbackSignalSource,
+  observedAt: string,
+  rationale: string,
+  evidence: readonly LessonQuarantineEvidence[] = [],
+): LessonFeedbackWeight {
+  const configured = LESSON_FEEDBACK_WEIGHTS[source];
+  return {
+    source,
+    weight: configured.weight,
+    scoreImpact: configured.scoreImpact,
+    observedAt,
+    rationale,
+    ...(evidence.length > 0 ? { evidence } : {}),
+  };
+}
+
+function createLessonFeedbackWeighting(
+  weights: readonly LessonFeedbackWeight[],
+): LessonFeedbackWeighting {
+  const deduped = new Map<LessonFeedbackSignalSource, LessonFeedbackWeight>();
+  for (const weight of weights) {
+    deduped.set(weight.source, weight);
+  }
+  const sortedWeights = [...deduped.values()].sort(
+    (left, right) => right.weight - left.weight || left.source.localeCompare(right.source),
+  );
+  const primarySource = selectPrimaryFeedbackSource(sortedWeights);
+  return {
+    schemaVersion: 'lesson-feedback-weighting-v1',
+    primarySource,
+    totalScore: sortedWeights.reduce(
+      (total, weight) => total + weight.scoreImpact,
+      0,
+    ),
+    weights: sortedWeights,
+    guidance: LESSON_FEEDBACK_WEIGHTING_GUIDANCE,
+  };
+}
+
+function selectPrimaryFeedbackSource(
+  weights: readonly LessonFeedbackWeight[],
+): LessonFeedbackSignalSource {
+  const explicitSignals = weights.filter(
+    (weight) =>
+      weight.source === 'explicit-user-correction' ||
+      weight.source === 'explicit-user-approval',
+  );
+  const latestExplicitSignal = explicitSignals.sort(
+    (left, right) =>
+      Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
+      right.weight - left.weight,
+  )[0];
+  return latestExplicitSignal?.source ?? weights[0]?.source ?? 'inferred-success';
+}
+
+function summarizeFeedbackSources(
+  feedbackWeighting: LessonFeedbackWeighting,
+): readonly Pick<
+  LessonFeedbackWeight,
+  'source' | 'weight' | 'scoreImpact'
+>[] {
+  return feedbackWeighting.weights.map(({ source, weight, scoreImpact }) => ({
+    source,
+    weight,
+    scoreImpact,
+  }));
+}
+
 function createRecordedLessonBacklogItem(
   lesson: CritiqueLesson,
 ): LearningBacklogPrioritizationItem {
@@ -1242,16 +1460,27 @@ function createRecordedLessonBacklogItem(
     ) === true;
   const suggestionsIncomplete =
     lesson.reviewerFeedback?.suggestionsComplete === false;
-  const priority = hasCriticalFindings
+  const primaryFeedbackSource = lesson.feedbackWeighting?.primarySource;
+  const hasExplicitCorrection = primaryFeedbackSource === 'explicit-user-correction';
+  const hasExplicitApproval = primaryFeedbackSource === 'explicit-user-approval';
+  const priority = hasExplicitCorrection || hasExplicitApproval || hasCriticalFindings
     ? 'high'
     : suggestionsIncomplete
       ? 'medium'
       : 'low';
-  const score = priority === 'high' ? 80 : priority === 'medium' ? 50 : 30;
+  const score = hasExplicitCorrection
+    ? 120
+    : hasExplicitApproval
+      ? 90
+      : priority === 'high'
+        ? 80
+        : priority === 'medium'
+          ? 50
+          : 30;
   const title = lesson.reviewerFeedback?.summary ?? lesson.failureDescription;
   const traceabilityId = lesson.testTraceability?.[0]?.lessonId;
 
-  return {
+  const item: LearningBacklogPrioritizationItem = {
     id: `lesson:${traceabilityId ?? stableHash(`${lesson.taskId}:${lesson.evaluatorName}:${lesson.failureDescription}`)}`,
     source: 'recorded-lesson',
     priority,
@@ -1259,14 +1488,25 @@ function createRecordedLessonBacklogItem(
     taskId: lesson.taskId,
     evaluatorName: lesson.evaluatorName,
     title,
-    rationale: hasCriticalFindings
-      ? 'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.'
-      : suggestionsIncomplete
-        ? 'Recorded lesson is missing reviewer suggestions and needs PM follow-up before promotion.'
-        : 'Recorded lesson is ready for routine learning backlog review once verification evidence is attached.',
+    rationale: hasExplicitCorrection
+      ? 'Explicit user correction overrides inferred success and requires immediate quarantine or revision review.'
+      : hasExplicitApproval
+        ? 'Explicit user approval carries primary weight and boosts this lesson ahead of inferred learning signals.'
+        : hasCriticalFindings
+          ? 'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.'
+          : suggestionsIncomplete
+            ? 'Recorded lesson is missing reviewer suggestions and needs PM follow-up before promotion.'
+            : 'Recorded lesson is ready for routine learning backlog review once verification evidence is attached.',
     recommendedAction:
       'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
   };
+  if (lesson.feedbackWeighting) {
+    return {
+      ...item,
+      feedbackSources: summarizeFeedbackSources(lesson.feedbackWeighting),
+    };
+  }
+  return item;
 }
 
 function createCooldownSuppressionBacklogItem(

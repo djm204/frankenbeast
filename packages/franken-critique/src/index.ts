@@ -39,6 +39,9 @@ export type {
   LessonUnquarantineMetadata,
   LessonCooldownMetadata,
   LessonCooldownSuppression,
+  LessonFeedbackSignalSource,
+  LessonFeedbackWeight,
+  LessonFeedbackWeighting,
   CrossTaskBlockerPattern,
   LearningBacklogPriority,
   LearningBacklogPrioritizationItem,
@@ -93,6 +96,7 @@ export { CritiquePipeline } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
 export {
   LessonRecorder,
+  applyHumanFeedbackToLesson,
   detectLessonContradictions,
   isLessonApplicable,
   quarantineLesson,
@@ -107,6 +111,7 @@ export type {
   LessonFailureSignal,
   RepeatedFailureQuarantineRequest,
   LessonUnquarantineRequest,
+  LessonHumanFeedbackRequest,
 } from './memory/lesson-recorder.js';
 
 // Evaluators

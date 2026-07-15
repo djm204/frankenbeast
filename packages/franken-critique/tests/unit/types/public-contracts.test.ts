@@ -6,6 +6,7 @@ import type {
   CritiqueResult as DeprecatedCritiqueResult,
   LessonRollbackWorkflow,
   AgentImprovementScorecard,
+  LessonFeedbackWeighting,
   SessionId,
 } from '@franken/critique';
 
@@ -68,7 +69,7 @@ describe('public critique type contracts', () => {
     expect(workflow.workflowId).toBe('lesson-rollback-v1');
   });
 
-  it('exports per-agent improvement scorecards from the public barrel', () => {
+  it('exports per-agent improvement scorecards and feedback weighting from the public barrel', () => {
     const scorecard: AgentImprovementScorecard = {
       schemaVersion: 'agent-improvement-scorecard-v1',
       agentId: 'worker-alpha',
@@ -91,5 +92,30 @@ describe('public critique type contracts', () => {
     };
 
     expect(scorecard.schemaVersion).toBe('agent-improvement-scorecard-v1');
+
+    const feedbackWeighting: LessonFeedbackWeighting = {
+      schemaVersion: 'lesson-feedback-weighting-v1',
+      primarySource: 'explicit-user-correction',
+      totalScore: -75,
+      weights: [
+        {
+          source: 'explicit-user-correction',
+          weight: 100,
+          scoreImpact: -100,
+          observedAt: '2026-07-12T01:00:00.000Z',
+          rationale: 'User corrected stale learned guidance.',
+        },
+        {
+          source: 'inferred-success',
+          weight: 25,
+          scoreImpact: 25,
+          observedAt: '2026-07-12T00:00:00.000Z',
+          rationale: 'Lesson was inferred from a passing retry.',
+        },
+      ],
+      guidance: 'human feedback wins over inferred signals',
+    };
+
+    expect(feedbackWeighting.primarySource).toBe('explicit-user-correction');
   });
 });

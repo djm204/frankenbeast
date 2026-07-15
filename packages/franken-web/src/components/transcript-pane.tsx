@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../hooks/use-chat-session';
+import { SafeMarkdownText } from './safe-markdown-text';
 import { usePinnedScroll } from './use-pinned-scroll';
 
 export interface TranscriptPaneProps {
@@ -41,7 +42,7 @@ export function TranscriptPane({ messages, onRetryMessage, resetKey, retryDisabl
               {message.modelTier && <span className="message-card__tier">{message.modelTier}</span>}
               {message.receipt && <span className="message-card__receipt">{message.receipt}</span>}
             </div>
-            <p className="message-card__content">{message.content}</p>
+            <p className="message-card__content"><SafeMarkdownText text={message.content} /></p>
             {message.error && <p className="message-card__error">{message.error}</p>}
             {message.role === 'user' && message.receipt === 'failed' && message.canRetry !== false && onRetryMessage && (
               <button

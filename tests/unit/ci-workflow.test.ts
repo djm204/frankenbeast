@@ -144,7 +144,7 @@ on:
     });
 
     it('uses the repository-pinned minimum supported Node.js version', () => {
-      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v6');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v7');
       expect(setupNode).toBeTruthy();
       expectSetupNodeUsesPinnedNvmrc(setupNode as Record<string, unknown>, 'build-test-lint');
     });
@@ -275,7 +275,7 @@ on:
     });
 
     it('uses actions/setup-node with npm cache', () => {
-      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v6');
+      const setupNode = expectSteps(expectCiJob(workflow)).find((step) => step.uses === 'actions/setup-node@v7');
       expect(setupNode).toBeTruthy();
       const setupNodeWith = expectRecord(setupNode?.with, 'actions/setup-node.with');
       expect(setupNodeWith.cache).toBe('npm');
@@ -288,7 +288,7 @@ on:
 
       for (const [jobName, jobConfig] of Object.entries(jobs)) {
         const job = expectRecord(jobConfig, `jobs.${jobName}`);
-        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v6')) {
+        for (const step of expectSteps(job).filter((candidate) => candidate.uses === 'actions/setup-node@v7')) {
           expectSetupNodeUsesPinnedNvmrc(step, jobName);
         }
       }
@@ -408,7 +408,7 @@ jobs:
 
   it('authenticates npm only in the publish step with the NPM_TOKEN secret and registry auth', () => {
     const publishSteps = expectSteps(publishNpm);
-    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v6');
+    const setupNode = publishSteps.find((step) => step.uses === 'actions/setup-node@v7');
     expect(setupNode).toBeTruthy();
     expect(expectRecord(setupNode?.with, 'publish setup-node with')['registry-url']).toBe('https://registry.npmjs.org');
 
@@ -515,7 +515,7 @@ describe('daily-security-scan.yml security scan workflow', () => {
     const workflow = parseWorkflowYaml(content);
     const jobs = expectRecord(workflow.jobs, 'daily security scan jobs');
     const scan = expectRecord(jobs.scan, 'jobs.scan');
-    const setupNode = expectSteps(scan).find((step) => step.uses === 'actions/setup-node@v6');
+    const setupNode = expectSteps(scan).find((step) => step.uses === 'actions/setup-node@v7');
 
     expect(setupNode).toBeTruthy();
     expect(expectRecord(setupNode?.with, 'daily security scan setup-node with')['package-manager-cache']).toBe(

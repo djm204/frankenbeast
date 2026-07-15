@@ -1,4 +1,5 @@
 import type { ActivityEvent } from '../hooks/use-chat-session';
+import { SafeMarkdownText } from './safe-markdown-text';
 import { usePinnedScroll } from './use-pinned-scroll';
 
 export interface ActivityPaneProps {
@@ -233,7 +234,7 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
               </div>
               <h3 className="activity-event__title">{viewModel.title}</h3>
               <span className="activity-event__type">{event.type}</span>
-              <p className="activity-event__summary">{viewModel.summary}</p>
+              <p className="activity-event__summary"><SafeMarkdownText text={viewModel.summary} /></p>
               {(risk || viewModel.links.length > 0) && (
                 <div className="activity-event__context" aria-label={`${viewModel.title} context`}>
                   {risk && <span className="activity-event__risk">{risk}</span>}
@@ -246,7 +247,7 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
               )}
               <details className="activity-event__details">
                 <summary>Raw event details</summary>
-                <pre>{safeEventDataSummary(event.data ?? {})}</pre>
+                <pre><SafeMarkdownText text={safeEventDataSummary(event.data ?? {})} /></pre>
               </details>
             </li>
           );

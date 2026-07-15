@@ -9,6 +9,7 @@ import type {
   AnalyticsSessionOption,
   AnalyticsSummary,
 } from '../lib/analytics-api';
+import { SafeMarkdownText } from '../components/safe-markdown-text';
 
 interface AnalyticsPageProps {
   client: AnalyticsApiClient;
@@ -481,7 +482,7 @@ function AnalyticsTable({
                   <td>{event.sessionId ?? '-'}</td>
                   <td>{event.toolName ?? event.source}</td>
                   <td><span className={`analytics-outcome analytics-outcome--${event.severity}`}>{event.outcome}</span></td>
-                  <td>{event.summary}</td>
+                  <td><SafeMarkdownText text={event.summary} /></td>
                   <td>
                     <button
                       aria-label={`View details for ${event.summary}`}
@@ -584,7 +585,7 @@ function DetailDrawer({
               <div>
                 <p className="eyebrow">{detail.source}</p>
                 <Dialog.Title asChild>
-                  <h3>{detail.summary}</h3>
+                  <h3><SafeMarkdownText text={detail.summary} /></h3>
                 </Dialog.Title>
               </div>
               <Dialog.Close asChild>
@@ -669,7 +670,7 @@ function DetailDrawer({
 
             <pre className="analytics-raw">
               {rawJson.split('\n').map((line, index) => (
-                <span key={`${index}-${line}`}>{line}</span>
+                <span key={`${index}-${line}`}><SafeMarkdownText text={line} /></span>
               ))}
             </pre>
           </aside>
