@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -54,13 +55,20 @@ function assertNoSymlink(path: string, label: string): void {
   }
 }
 
-function writeFileNoFollow(path: string, content: string): void {
+function writeFileAtomicNoFollow(path: string, content: string): void {
   const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
-  const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollow, 0o600);
+  const tempPath = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+  let fd: number | undefined;
   try {
+    fd = openSync(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
     writeFileSync(fd, content);
-  } finally {
     closeSync(fd);
+    fd = undefined;
+    renameSync(tempPath, path);
+  } catch (err) {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(tempPath, { force: true });
+    throw err;
   }
 }
 
@@ -79,14 +87,14 @@ export class SkillManager {
   private readonly skillsDirReal: string;
 
   constructor(
-    private readonly skillsDir: string,
+    skillsDir: string,
     enabledSkills: Set<string>,
     private readonly configStore?: SkillConfigStore,
   ) {
     this.skillsDirRoot = resolve(skillsDir);
-    mkdirSync(skillsDir, { recursive: true });
-    assertNoSymlink(skillsDir, 'skills root');
-    this.skillsDirReal = realpathSync(skillsDir);
+    mkdirSync(this.skillsDirRoot, { recursive: true });
+    assertNoSymlink(this.skillsDirRoot, 'skills root');
+    this.skillsDirReal = realpathSync(this.skillsDirRoot);
     // Merge: constructor-provided set takes precedence, then persisted defaults
     if (configStore && enabledSkills.size === 0) {
       this.enabledSkills = configStore.getEnabledSkills();
@@ -109,7 +117,7 @@ export class SkillManager {
 
   private skillDirectoryPath(name: string): string {
     this.validateName(name);
-    const skillDir = resolve(this.skillsDir, name);
+    const skillDir = resolve(this.skillsDirRoot, name);
     assertContainedPath(skillDir, this.skillsDirRoot, 'skill directory');
     return skillDir;
   }
@@ -155,25 +163,29 @@ export class SkillManager {
   }
 
   private writeSkillFile(name: string, fileName: 'mcp.json' | 'tools.json' | 'context.md', content: string): void {
+    const filePath = this.validateSkillFileTarget(name, fileName);
+    writeFileAtomicNoFollow(filePath, content);
+    const realFilePath = realpathSync(filePath);
+    assertContainedPath(realFilePath, this.skillsDirReal, 'skill file');
+  }
+
+  private validateSkillFileTarget(name: string, fileName: 'mcp.json' | 'tools.json' | 'context.md'): string {
     const filePath = this.skillFilePath(name, fileName);
     assertNoSymlink(filePath, 'skill file');
     if (existsSync(filePath) && !lstatSync(filePath).isFile()) {
       throw unsafePathError(filePath, 'skill file target is not a regular file');
     }
-    writeFileNoFollow(filePath, content);
-    const realFilePath = realpathSync(filePath);
-    assertContainedPath(realFilePath, this.skillsDirReal, 'skill file');
+    return filePath;
   }
 
   private removeSkillFile(name: string, fileName: 'tools.json'): void {
-    const filePath = this.skillFilePath(name, fileName);
+    const filePath = this.validateSkillFileTarget(name, fileName);
     if (!existsSync(filePath)) return;
-    assertNoSymlink(filePath, 'skill file');
     rmSync(filePath);
   }
 
   listInstalled(): SkillInfo[] {
-    const entries = readdirSync(this.skillsDir, { withFileTypes: true });
+    const entries = readdirSync(this.skillsDirRoot, { withFileTypes: true });
     return entries
       .filter((e) => e.isDirectory())
       .map((e) => this.readSkillInfo(e.name))
@@ -192,21 +204,24 @@ export class SkillManager {
         SkillToolManifestSchema.parse(catalogEntry.toolDefinitions),
       )
       : undefined;
+    this.validateSkillFileTarget(catalogEntry.name, 'mcp.json');
+    const toolsPath = this.validateSkillFileTarget(catalogEntry.name, 'tools.json');
+    if (!tools && existsSync(toolsPath)) {
+      this.removeSkillFile(catalogEntry.name, 'tools.json');
+    }
+
     this.writeSkillFile(
       catalogEntry.name,
       'mcp.json',
       JSON.stringify(mcpConfig, null, 2),
     );
 
-    const toolsPath = this.skillFilePath(catalogEntry.name, 'tools.json');
     if (tools) {
       this.writeSkillFile(
         catalogEntry.name,
         'tools.json',
         JSON.stringify(tools, null, 2),
       );
-    } else if (existsSync(toolsPath)) {
-      this.removeSkillFile(catalogEntry.name, 'tools.json');
     }
   }
 
@@ -215,16 +230,16 @@ export class SkillManager {
     const mcpConfig = McpConfigSchema.parse({
       mcpServers: { [name]: serverConfig },
     });
+    this.validateSkillFileTarget(name, 'mcp.json');
+    const toolsPath = this.validateSkillFileTarget(name, 'tools.json');
+    if (existsSync(toolsPath)) {
+      this.removeSkillFile(name, 'tools.json');
+    }
     this.writeSkillFile(
       name,
       'mcp.json',
       JSON.stringify(mcpConfig, null, 2),
     );
-
-    const toolsPath = this.skillFilePath(name, 'tools.json');
-    if (existsSync(toolsPath)) {
-      this.removeSkillFile(name, 'tools.json');
-    }
   }
 
   enable(name: string): void {
@@ -244,7 +259,12 @@ export class SkillManager {
     this.validateName(name);
     const skillDir = this.skillDirectoryPath(name);
     if (existsSync(skillDir)) {
-      assertNoSymlink(skillDir, 'skill directory');
+      if (lstatSync(skillDir).isSymbolicLink()) {
+        rmSync(skillDir);
+        this.enabledSkills.delete(name);
+        this.configStore?.save(this.enabledSkills);
+        return;
+      }
       rmSync(skillDir, { recursive: true });
     }
     this.enabledSkills.delete(name);

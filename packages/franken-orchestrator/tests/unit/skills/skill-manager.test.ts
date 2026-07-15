@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, symlinkSync, linkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { McpConfigSchema } from '@franken/types';
@@ -424,6 +424,72 @@ describe('SkillManager', () => {
 
       await expect(manager.installCustom('file-skill', { command: 'node' }))
         .rejects.toThrow(/not a directory/);
+    });
+
+    it('replaces hard-linked skill files without truncating the linked target', async () => {
+      const outsideFile = join(tempDir, 'other-profile-mcp.json');
+      writeFileSync(outsideFile, 'do not overwrite');
+      mkdirSync(join(skillsDir, 'github'), { recursive: true });
+      linkSync(outsideFile, join(skillsDir, 'github', 'mcp.json'));
+
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      });
+
+      expect(readFileSync(outsideFile, 'utf-8')).toBe('do not overwrite');
+      expect(manager.exists('github')).toBe(true);
+    });
+
+    it('rejects stale unsafe tools manifests before changing mcp.json', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'old-server' },
+        authFields: [],
+      });
+      const before = readFileSync(join(skillsDir, 'github', 'mcp.json'), 'utf-8');
+      symlinkSync(join(tempDir, 'outside-tools.json'), join(skillsDir, 'github', 'tools.json'));
+
+      await expect(manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'new-server' },
+        authFields: [],
+      })).rejects.toThrow(/Unsafe skill path/);
+
+      expect(readFileSync(join(skillsDir, 'github', 'mcp.json'), 'utf-8')).toBe(before);
+    });
+
+    it('removes a symlinked skill entry without deleting its target', () => {
+      const outsideDir = join(tempDir, 'other-profile-skill');
+      mkdirSync(outsideDir, { recursive: true });
+      symlinkSync(outsideDir, join(skillsDir, 'escaped'), 'dir');
+
+      expect(() => manager.remove('escaped')).not.toThrow();
+      expect(existsSync(join(skillsDir, 'escaped'))).toBe(false);
+      expect(existsSync(outsideDir)).toBe(true);
+    });
+
+    it('resolves relative skills roots once at construction time', async () => {
+      const originalCwd = process.cwd();
+      try {
+        process.chdir(tempDir);
+        const relativeManager = new SkillManager('relative-skills', new Set());
+        process.chdir(tmpdir());
+
+        await relativeManager.installCustom('github', { command: 'node' });
+
+        expect(existsSync(join(tempDir, 'relative-skills', 'github', 'mcp.json'))).toBe(true);
+        expect(existsSync(join(tmpdir(), 'relative-skills', 'github', 'mcp.json'))).toBe(false);
+      } finally {
+        process.chdir(originalCwd);
+      }
     });
   });
 });
