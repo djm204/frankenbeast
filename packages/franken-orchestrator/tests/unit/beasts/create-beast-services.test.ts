@@ -77,4 +77,34 @@ describe('createBeastServices', () => {
       root: tempDir!,
     })).toThrow(/FBEAST_AGENT_CAPACITY_TOTAL is required/);
   });
+
+  it('honors total capacity even when no reservation rules are configured', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    process.env.FBEAST_AGENT_CAPACITY_TOTAL = '1';
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir!, 'beast.db'),
+      beastLogsDir: join(tempDir!, 'logs'),
+      root: tempDir!,
+    });
+
+    try {
+      const agent = services.agents.createAgent({
+        definitionId: 'martin-loop',
+        source: 'dashboard',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+        initConfig: { labels: ['feature'] },
+      });
+      services.agents.updateAgent(agent.id, { status: 'running' });
+
+      expect(services.agents.canStartInitConfig({ labels: ['feature'] })).toEqual({
+        allowed: false,
+        reason: 'capacity_full',
+        reservationId: undefined,
+      });
+    } finally {
+      services.dispose();
+    }
+  });
 });

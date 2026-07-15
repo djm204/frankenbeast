@@ -110,6 +110,28 @@ describe('CapacityReservationPolicy', () => {
     });
   });
 
+  it('uses matching allocation for overlapping reservation buckets', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 3,
+      reservations: [
+        { id: 'a', slots: 1, labels: ['a'] },
+        { id: 'b', slots: 1, labels: ['b'] },
+        { id: 'c', slots: 1, labels: ['c'] },
+      ],
+    });
+
+    const runningItems = [
+      { id: 'active-a', labels: ['a'] },
+      { id: 'active-b-or-c', labels: ['b', 'c'] },
+    ];
+
+    expect(policy.canStart({ id: 'candidate-a-or-b', labels: ['a', 'b'] }, runningItems)).toEqual({
+      allowed: true,
+      reason: 'reserved_capacity_available',
+      reservationId: 'b',
+    });
+  });
+
   it('renders operator-visible reservation state with used and free reserved capacity', () => {
     const policy = new CapacityReservationPolicy({
       totalSlots: 5,

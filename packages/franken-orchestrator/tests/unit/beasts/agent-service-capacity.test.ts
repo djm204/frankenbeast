@@ -26,20 +26,22 @@ describe('AgentService capacity reservations', () => {
       }),
     });
 
-    service.createAgent({
+    const normalAgent = service.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
       initConfig: { labels: ['feature'] },
     });
-    service.createAgent({
+    const securityAgent = service.createAgent({
       definitionId: 'martin-loop',
       source: 'dashboard',
       createdByUser: 'operator',
       initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
       initConfig: { labels: ['security'] },
     });
+    service.updateAgent(normalAgent.id, { status: 'running' });
+    service.updateAgent(securityAgent.id, { status: 'running' });
 
     expect(service.getCapacityReservationState()).toEqual({
       totalSlots: 3,

@@ -102,7 +102,7 @@ function createCapacityReservationPolicyFromEnv(): CapacityReservationPolicy | u
   if (reservations.length > 0 && totalSlots === undefined) {
     throw new RangeError('FBEAST_AGENT_CAPACITY_TOTAL is required when FBEAST_AGENT_CAPACITY_RESERVATIONS is set');
   }
-  if (totalSlots === undefined || reservations.length === 0) {
+  if (totalSlots === undefined) {
     return undefined;
   }
   return new CapacityReservationPolicy({

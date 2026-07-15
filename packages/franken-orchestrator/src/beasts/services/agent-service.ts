@@ -157,11 +157,13 @@ export class AgentService {
 
   private activeCapacityItems(): CapacityReservationWorkItem[] {
     return this.listAgents()
-      .filter((agent) => agent.status === 'initializing'
-        || agent.status === 'dispatching'
+      .filter((agent) => agent.status === 'dispatching'
         || agent.status === 'awaiting_approval'
         || agent.status === 'running')
-      .map(capacityItemFromAgent);
+      .map((agent) => {
+        const linkedRun = agent.dispatchRunId ? this.repository.getRun(agent.dispatchRunId) : undefined;
+        return capacityItemFromConfig(agent.id, linkedRun?.configSnapshot ?? agent.initConfig);
+      });
   }
 }
 

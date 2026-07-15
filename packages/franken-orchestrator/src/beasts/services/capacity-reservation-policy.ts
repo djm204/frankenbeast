@@ -105,7 +105,7 @@ export class CapacityReservationPolicy {
     }
 
     const candidateIndex = activeItems.length;
-    const candidateAllocation = this.allocateReservations([...activeItems, candidate]);
+    const candidateAllocation = this.allocateReservations([...activeItems, candidate], candidateIndex);
     const matchingReservationIndex = candidateAllocation.assignedBucketByItemIndex.get(candidateIndex);
     if (matchingReservationIndex !== undefined) {
       const reservation = this.reservations[matchingReservationIndex];
@@ -163,7 +163,10 @@ export class CapacityReservationPolicy {
     return Math.max(0, releasedFree - normalOverflowUsed);
   }
 
-  private allocateReservations(activeItems: readonly CapacityReservationWorkItem[]): {
+  private allocateReservations(
+    activeItems: readonly CapacityReservationWorkItem[],
+    priorityItemIndex?: number,
+  ): {
     buckets: Array<{
       id: string;
       slots: number;
@@ -182,31 +185,64 @@ export class CapacityReservationPolicy {
       labels: [...(reservation.labels ?? [])],
       categories: [...(reservation.categories ?? [])],
     }));
-    const assignedBucketByItemIndex = new Map<number, number>();
+    const bucketSlots = buckets.flatMap((bucket, bucketIndex) => (
+      Array.from({ length: bucket.slots }, () => bucketIndex)
+    ));
+    const assignedSlotByItemIndex = new Map<number, number>();
+    const assignedItemBySlotIndex = new Map<number, number>();
     const indexedActiveItems = activeItems
       .map((item, activeIndex) => ({
         activeIndex,
-        matchingIndexes: this.matchingReservationIndexes(item),
+        matchingSlotIndexes: bucketSlots.flatMap((bucketIndex, slotIndex) => {
+          const reservation = this.reservations[bucketIndex];
+          if (!reservation) return [];
+          return this.matches(reservation, item) ? [slotIndex] : [];
+        }),
       }))
-      .filter(({ matchingIndexes }) => matchingIndexes.length > 0)
+      .filter(({ matchingSlotIndexes }) => matchingSlotIndexes.length > 0)
       .sort((left, right) => {
-        if (left.matchingIndexes.length !== right.matchingIndexes.length) {
-          return left.matchingIndexes.length - right.matchingIndexes.length;
+        if (priorityItemIndex !== undefined && left.activeIndex !== right.activeIndex) {
+          if (left.activeIndex === priorityItemIndex) return -1;
+          if (right.activeIndex === priorityItemIndex) return 1;
+        }
+        if (left.matchingSlotIndexes.length !== right.matchingSlotIndexes.length) {
+          return left.matchingSlotIndexes.length - right.matchingSlotIndexes.length;
         }
         return left.activeIndex - right.activeIndex;
       });
 
-    for (const { activeIndex, matchingIndexes } of indexedActiveItems) {
-      const bucketIndex = matchingIndexes.find((index) => {
-        const bucket = buckets[index];
-        return bucket !== undefined && bucket.used < bucket.slots;
-      });
-      if (bucketIndex !== undefined) {
-        const bucket = buckets[bucketIndex];
-        if (bucket) {
-          bucket.used += 1;
-          assignedBucketByItemIndex.set(activeIndex, bucketIndex);
+    const tryAssign = (activeIndex: number, matchingSlotIndexes: readonly number[], seenSlots: Set<number>): boolean => {
+      for (const slotIndex of matchingSlotIndexes) {
+        if (seenSlots.has(slotIndex)) continue;
+        seenSlots.add(slotIndex);
+        const displacedItemIndex = assignedItemBySlotIndex.get(slotIndex);
+        if (displacedItemIndex === undefined) {
+          assignedItemBySlotIndex.set(slotIndex, activeIndex);
+          assignedSlotByItemIndex.set(activeIndex, slotIndex);
+          return true;
         }
+        const displacedItem = indexedActiveItems.find((item) => item.activeIndex === displacedItemIndex);
+        if (displacedItem && tryAssign(displacedItemIndex, displacedItem.matchingSlotIndexes, seenSlots)) {
+          assignedItemBySlotIndex.set(slotIndex, activeIndex);
+          assignedSlotByItemIndex.set(activeIndex, slotIndex);
+          return true;
+        }
+      }
+      return false;
+    };
+
+    for (const { activeIndex, matchingSlotIndexes } of indexedActiveItems) {
+      tryAssign(activeIndex, matchingSlotIndexes, new Set<number>());
+    }
+
+    const assignedBucketByItemIndex = new Map<number, number>();
+    for (const [activeIndex, slotIndex] of assignedSlotByItemIndex.entries()) {
+      const bucketIndex = bucketSlots[slotIndex];
+      if (bucketIndex === undefined) continue;
+      const bucket = buckets[bucketIndex];
+      if (bucket) {
+        bucket.used += 1;
+        assignedBucketByItemIndex.set(activeIndex, bucketIndex);
       }
     }
     return { buckets, assignedBucketByItemIndex };
