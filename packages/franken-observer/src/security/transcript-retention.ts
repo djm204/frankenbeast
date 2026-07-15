@@ -332,6 +332,7 @@ function redactNestedTranscriptValues(
   value: unknown,
   policy: ResolvedTranscriptRetentionPolicy,
   seen: WeakMap<object, unknown>,
+  parentType = '',
 ): unknown {
   if (value === null || typeof value !== 'object') return value
   if (value instanceof Error) return policy.retainedFields.errors ? redactValue(value, policy) : DROPPED
@@ -382,9 +383,10 @@ function redactNestedTranscriptValues(
       setRecordValue(retained, key, redactProviderStreamDeltaValue(nestedValue, policy, seen))
       continue
     }
-    const field = classifyContextualTranscriptField(value, key)
+    const field = classifyContextualTranscriptField(value, key, parentType)
     if (field && !policy.retainedFields[field]) continue
-    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
+    const nestedParentType = key.replace(/[_-]/g, '').toLowerCase() === 'delta' ? recordType : ''
+    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen, nestedParentType))
   }
   return retained
 }
@@ -392,8 +394,9 @@ function redactNestedTranscriptValues(
 function classifyContextualTranscriptField(record: Record<string, unknown>, key: string): TranscriptField | undefined {
   const recordType = typeof record['type'] === 'string' ? record['type'].replace(/[_-]/g, '').toLowerCase() : ''
   const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
-  if ((recordType === 'toolresult' || recordRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
-  if (recordType === 'inputjsondelta' && key.replace(/[_-]/g, '').toLowerCase() === 'partialjson') return 'toolInputs'
+  const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+  if ((recordType === 'toolresult' || recordRole === 'tool') && (normalizedKey === 'content' || normalizedKey === 'text')) return 'toolOutputs'
+  if (recordType === 'inputjsondelta' && normalizedKey === 'partialjson') return 'toolInputs'
   if (isPromptBlockContentField(recordType, key)) return 'prompts'
   return classifyTranscriptField(key)
 }
@@ -525,8 +528,8 @@ function redactProviderStreamDeltaValue(
 function classifyProviderStreamDeltaField(deltaType: string, key: string): TranscriptField | undefined {
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
   if ((deltaType === '' || deltaType === 'textdelta' || deltaType === 'outputtextdelta') && normalizedKey === 'text') return 'prompts'
-  if (deltaType === 'inputjsondelta' && normalizedKey === 'partialjson') return 'toolInputs'
-  if (deltaType === 'thinkingdelta' && normalizedKey === 'thinking') return 'prompts'
+  if ((deltaType === '' || deltaType === 'inputjsondelta') && normalizedKey === 'partialjson') return 'toolInputs'
+  if ((deltaType === '' || deltaType === 'thinkingdelta') && normalizedKey === 'thinking') return 'prompts'
   return classifyProviderMessageField(deltaType, '', key)
 }
 

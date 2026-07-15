@@ -1087,6 +1087,74 @@ describe('transcript retention controls', () => {
     expect([...records]).toEqual([{ transcript: '[REDACTED_TRANSCRIPT]' }, { safeCounter: 2 }])
   })
 
+  it('redacts untyped stream delta transcript fields using their content block parent', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          textDelta: {
+            type: 'content_block_delta',
+            delta: { text: 'private untyped stream text' },
+          },
+          toolDelta: {
+            type: 'content_block_delta',
+            delta: { partial_json: '{"private":"tool args"}' },
+          },
+          thinkingDelta: {
+            type: 'content_block_delta',
+            delta: { thinking: 'private chain of thought' },
+          },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['textDelta']).toEqual({
+      type: 'content_block_delta',
+      delta: { text: '[REDACTED_TRANSCRIPT]' },
+    })
+    expect(retained.spans[0].metadata['toolDelta']).toEqual({
+      type: 'content_block_delta',
+      delta: { partial_json: '[REDACTED_TRANSCRIPT]' },
+    })
+    expect(retained.spans[0].metadata['thinkingDelta']).toEqual({
+      type: 'content_block_delta',
+      delta: { thinking: '[REDACTED_TRANSCRIPT]' },
+    })
+  })
+
+  it('redacts output text blocks and injected operator context fields', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          payload: { type: 'output_text', text: 'private assistant transcript' },
+          hookSpecificOutput: { additionalContext: 'private operator context' },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['payload']).toEqual({
+      type: 'output_text',
+      text: '[REDACTED_TRANSCRIPT]',
+    })
+    expect(retained.spans[0].metadata['hookSpecificOutput']).toEqual({
+      additionalContext: '[REDACTED_TRANSCRIPT]',
+    })
+  })
+
+  it('reuses retained custom toJSON clones for repeated metadata references', () => {
+    class Payload {
+      toJSON(): Record<string, unknown> {
+        return { safeCounter: 1 }
+      }
+    }
+    const payload = new Payload()
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { first: payload, second: payload } })],
+    }))
+
+    expect(retained.spans[0].metadata['first']).toEqual({ safeCounter: 1 })
+    expect(retained.spans[0].metadata['second']).toBe(retained.spans[0].metadata['first'])
+  })
+
   it('preserves own __proto__ metadata keys as data properties', () => {
     const metadata: Record<string, unknown> = { safeCounter: 1 }
     Object.defineProperty(metadata, '__proto__', {
