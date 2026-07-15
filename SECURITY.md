@@ -26,6 +26,7 @@ Frankenbeast is pre-1.0 and evolves quickly. Security fixes are applied to `main
 - Dependabot is configured for npm workspace dependencies and GitHub Actions updates.
 - Keep npm dependencies on the repository-pinned package manager (`packageManager` in `package.json`).
 - Run `npm run audit:dependencies` and `npm run audit:security` before shipping security-sensitive changes.
+- Run `npm run deps:vulnerability-sla` to produce the dependency vulnerability SLA dashboard. The dashboard summarizes npm audit findings by severity, package, ecosystem, vulnerable/fixed version, age, transitive path, and linked issue/PR metadata when provided. Critical findings older than 7 days and high findings older than 30 days are blocking by default; moderate and low findings are retained as triage signals.
 - The CI workflow runs dependency vulnerability checks, major-version freshness checks, and SBOM generation on pull requests.
 - Dependabot must ignore first-party `@franken/*` workspace packages, including security updates, and exclude that scope from every npm update group; release automation owns internal package version changes so registry-driven dependency PRs cannot confuse workspace packages with public packages.
 - The daily deterministic security scan runs Semgrep, Gitleaks, and dependency audit jobs; treat its filed issues as active security work until closed.
@@ -45,6 +46,7 @@ Frankenbeast is pre-1.0 and evolves quickly. Security fixes are applied to `main
 - Keep dashboard and chat-server traffic same-origin through a trusted proxy/BFF when browser clients need protected routes.
 - Do not expose operator-token-protected endpoints directly to untrusted networks without TLS, authentication, and rate limiting.
 - Treat loopback development defaults as local-only conveniences, not production security settings.
+- Provider HTTP egress is deny-by-default for local, metadata, link-local, private-network, and malformed endpoint URLs. If an operator intentionally runs a private provider endpoint, add the exact trusted host to the provider egress-policy allowlist and treat that exception as a reviewed SSRF risk.
 
 ## Runtime hardening
 
@@ -67,6 +69,7 @@ Useful local checks before opening or merging security-sensitive changes:
 ```bash
 npm run audit:dependencies
 npm run audit:security
+npm run deps:vulnerability-sla
 npm run check:dependabot-supply-chain
 npm run lint:security
 ```

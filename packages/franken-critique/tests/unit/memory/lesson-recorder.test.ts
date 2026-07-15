@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   LessonRecorder,
+  applyHumanFeedbackToLesson,
   detectLessonContradictions,
   isLessonApplicable,
   quarantineLesson,
@@ -712,6 +713,10 @@ describe('LessonRecorder', () => {
           title: 'Codex blocker was left unresolved',
           rationale:
             'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.',
+          feedbackSources: [
+            { source: 'inferred-failure', weight: 35, scoreImpact: -35 },
+            { source: 'inferred-success', weight: 25, scoreImpact: 25 },
+          ],
           recommendedAction:
             'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
         },
@@ -728,6 +733,342 @@ describe('LessonRecorder', () => {
         ],
       },
     });
+  });
+
+  it('weights explicit human feedback higher than inferred lesson signals', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      now: (): Date => new Date('2026-07-12T00:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Lesson inferred too much from a green local test',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const summary = await recorder.record(result, 'feedback-weight-task');
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as CritiqueLesson;
+
+    expect(lesson.feedbackWeighting).toMatchObject({
+      schemaVersion: 'lesson-feedback-weighting-v1',
+      primarySource: 'inferred-failure',
+      totalScore: -10,
+      weights: [
+        expect.objectContaining({
+          source: 'inferred-failure',
+          weight: 35,
+          scoreImpact: -35,
+        }),
+        expect.objectContaining({
+          source: 'inferred-success',
+          weight: 25,
+          scoreImpact: 25,
+        }),
+      ],
+    });
+    expect(summary.learningBacklogPrioritizationReport.items[0]).toMatchObject({
+      score: 50,
+      feedbackSources: [
+        { source: 'inferred-failure', weight: 35, scoreImpact: -35 },
+        { source: 'inferred-success', weight: 25, scoreImpact: 25 },
+      ],
+    });
+
+    const corrected = applyHumanFeedbackToLesson(lesson, {
+      source: 'explicit-user-correction',
+      reason: 'User corrected the lesson after it caused a bad handoff.',
+      observedAt: '2026-07-12T01:00:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+      revisedCorrectionApplied:
+        'Require explicit human validation before promoting inferred learning signals.',
+    });
+
+    expect(corrected.lifecycleStatus).toBe('quarantined');
+    expect(corrected.correctionApplied).toBe(
+      'Require explicit human validation before promoting inferred learning signals.',
+    );
+    expect(corrected.contradictionReport).toBeUndefined();
+    expect(corrected.testTraceability).toBeUndefined();
+    expect(corrected.quarantine?.reviewItem.lessonId).toBe(
+      lesson.testTraceability?.[0]?.lessonId,
+    );
+    expect(corrected.feedbackWeighting).toMatchObject({
+      primarySource: 'explicit-user-correction',
+      totalScore: -110,
+      weights: [
+        expect.objectContaining({
+          source: 'explicit-user-correction',
+          weight: 100,
+          scoreImpact: -100,
+        }),
+        expect.objectContaining({ source: 'inferred-failure' }),
+        expect.objectContaining({ source: 'inferred-success' }),
+      ],
+    });
+    expect(isLessonApplicable(corrected)).toBe(false);
+
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-approval',
+        reason: 'Missing audit evidence must not promote a lesson.',
+        observedAt: '2026-07-12T01:30:00.000Z',
+        evidence: [],
+      }),
+    ).toThrow('Explicit lesson approval requires at least one evidence item.');
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-approval',
+        reason: 'Blank audit evidence must not promote a lesson.',
+        observedAt: '2026-07-12T01:35:00.000Z',
+        evidence: [{ kind: 'operator-report', reference: '   ' }],
+      }),
+    ).toThrow('Lesson quarantine evidence reference must be a non-empty string.');
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-approval',
+        reason: '   ',
+        observedAt: '2026-07-12T01:36:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#blank-reason',
+          },
+        ],
+      }),
+    ).toThrow('Lesson feedback reason must be a non-empty string.');
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'inferred-success' as never,
+        reason: 'Runtime input must not promote inferred signals.',
+        observedAt: '2026-07-12T01:37:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#inferred-runtime',
+          },
+        ],
+      }),
+    ).toThrow(
+      'Lesson human feedback approval requires explicit-user-approval source.',
+    );
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-correction',
+        reason: 'Blank revised guidance must not replace a lesson.',
+        observedAt: '2026-07-12T01:40:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#blank',
+          },
+        ],
+        revisedCorrectionApplied: '   ',
+      }),
+    ).toThrow('Lesson revised correctionApplied must be a non-empty string.');
+
+    const directlyApproved = applyHumanFeedbackToLesson(lesson, {
+      source: 'explicit-user-approval',
+      reason: 'User approved this candidate lesson after reviewing evidence.',
+      observedAt: '2026-07-12T01:42:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763#direct',
+        },
+      ],
+    });
+    expect(directlyApproved.lifecycleStatus).toBe('active');
+    expect(directlyApproved.experimentSandbox).toBeUndefined();
+    expect(directlyApproved.feedbackWeighting?.weights[0]).toMatchObject({
+      source: 'explicit-user-approval',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763#direct',
+        },
+      ],
+    });
+    expect(isLessonApplicable(directlyApproved)).toBe(true);
+
+    const approvedLegacySandboxed = applyHumanFeedbackToLesson(
+      { ...lesson, lifecycleStatus: 'active' },
+      {
+        source: 'explicit-user-approval',
+        reason: 'User approved legacy active sandboxed guidance.',
+        observedAt: '2026-07-12T01:43:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy-sandbox',
+          },
+        ],
+      },
+    );
+    expect(approvedLegacySandboxed.lifecycleStatus).toBe('active');
+    expect(approvedLegacySandboxed.experimentSandbox).toBeUndefined();
+    expect(isLessonApplicable(approvedLegacySandboxed)).toBe(true);
+
+    const approvedAfterCorrection = applyHumanFeedbackToLesson(corrected, {
+      source: 'explicit-user-approval',
+      reason: 'User approved the revised lesson after reviewing correction evidence.',
+      observedAt: '2026-07-12T01:45:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+    });
+    expect(approvedAfterCorrection.feedbackWeighting).toMatchObject({
+      primarySource: 'explicit-user-approval',
+      totalScore: -30,
+    });
+    expect(approvedAfterCorrection.quarantine).toBeUndefined();
+    expect(approvedAfterCorrection.unquarantine).toMatchObject({
+      reviewer: 'explicit-user-approval',
+      evidenceUrl: 'https://github.com/djm204/frankenbeast/issues/1763',
+    });
+    expect(approvedAfterCorrection.lifecycleStatus).toBe('candidate');
+    expect(isLessonApplicable(approvedAfterCorrection)).toBe(false);
+
+    const quarantinedCandidate = quarantineLesson(lesson, {
+      trigger: 'repeated-failure-threshold',
+      reason: 'Repeated failures paused this candidate before explicit approval.',
+      quarantinedAt: '2026-07-12T01:45:00.000Z',
+      evidence: [
+        {
+          kind: 'failed-regression',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+    });
+    const approved = applyHumanFeedbackToLesson(quarantinedCandidate, {
+      source: 'explicit-user-approval',
+      reason: 'User approved this lesson for reuse after reviewing the evidence.',
+      observedAt: '2026-07-12T02:00:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+    });
+
+    expect(approved.lifecycleStatus).toBe('candidate');
+    expect(approved.experimentSandbox).toBeDefined();
+    expect(approved.feedbackWeighting).toMatchObject({
+      primarySource: 'explicit-user-approval',
+      totalScore: 70,
+    });
+    expect(isLessonApplicable(approved)).toBe(false);
+
+    const legacyActiveQuarantine = quarantineLesson(
+      {
+        ...lesson,
+        lifecycleStatus: undefined,
+        experimentSandbox: undefined,
+      },
+      {
+        trigger: 'explicit-user-correction',
+        reason: 'Legacy quarantine before lifecycle metadata existed.',
+        quarantinedAt: '2026-07-12T02:30:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+          },
+        ],
+      },
+    );
+    const approvedLegacy = applyHumanFeedbackToLesson(legacyActiveQuarantine, {
+      source: 'explicit-user-approval',
+      reason: 'User approved this legacy active lesson after evidence review.',
+      observedAt: '2026-07-12T03:00:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy',
+        },
+      ],
+    });
+    expect(approvedLegacy.lifecycleStatus).toBe('active');
+    expect(approvedLegacy.unquarantine?.evidenceUrl).toBe(
+      'https://github.com/djm204/frankenbeast/issues/1763#legacy',
+    );
+    expect(isLessonApplicable(approvedLegacy)).toBe(true);
+
+    const legacySandboxedActiveQuarantine = quarantineLesson(
+      {
+        ...lesson,
+        lifecycleStatus: 'active',
+        experimentSandbox: {
+          state: 'experimental',
+          promotionBlocked: true,
+          requiredChecks: [],
+          promotionCriteria:
+            'Require independent verification before allowing lesson reuse.',
+        },
+      },
+      {
+        trigger: 'explicit-user-correction',
+        reason: 'Legacy active sandboxed lesson was quarantined for review.',
+        quarantinedAt: '2026-07-12T02:45:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy-sandboxed-quarantine',
+          },
+        ],
+      },
+    );
+    const approvedLegacySandboxedQuarantine = applyHumanFeedbackToLesson(
+      legacySandboxedActiveQuarantine,
+      {
+        source: 'explicit-user-approval',
+        reason: 'User approved restoring this legacy active sandboxed lesson.',
+        observedAt: '2026-07-12T03:10:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy-sandboxed-approval',
+          },
+        ],
+      },
+    );
+    expect(approvedLegacySandboxedQuarantine.lifecycleStatus).toBe('active');
+    expect(approvedLegacySandboxedQuarantine.quarantine).toBeUndefined();
+    expect(approvedLegacySandboxedQuarantine.experimentSandbox).toBeUndefined();
+    expect(isLessonApplicable(approvedLegacySandboxedQuarantine)).toBe(true);
+
+    const approvedRetired = applyHumanFeedbackToLesson(
+      { ...lesson, lifecycleStatus: 'retired', experimentSandbox: undefined },
+      {
+        source: 'explicit-user-approval',
+        reason: 'User acknowledged retired guidance for audit history only.',
+        observedAt: '2026-07-12T03:30:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#retired',
+          },
+        ],
+      },
+    );
+    expect(approvedRetired.lifecycleStatus).toBe('retired');
+    expect(isLessonApplicable(approvedRetired)).toBe(false);
   });
 
   it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {
