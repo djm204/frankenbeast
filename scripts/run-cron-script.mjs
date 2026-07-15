@@ -5,6 +5,7 @@ import { constants as osConstants } from 'node:os';
 
 const USAGE = 'Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]';
 const STDERR_TAIL_LIMIT = 4_096;
+const STDERR_REDACTION_CONTEXT_LIMIT = STDERR_TAIL_LIMIT * 16;
 const KILL_GRACE_MS = Number.parseInt(process.env.CRON_SCRIPT_KILL_GRACE_MS ?? '5000', 10);
 const EXIT_STDERR_DRAIN_MS = Number.parseInt(process.env.CRON_SCRIPT_EXIT_STDERR_DRAIN_MS ?? '50', 10);
 
@@ -44,16 +45,20 @@ function parseArgs(argv) {
   return { name, recoverable, command };
 }
 
-function appendTail(current, chunk) {
+function appendTail(current, chunk, limit = STDERR_TAIL_LIMIT) {
   const next = `${current}${chunk}`;
-  if (next.length <= STDERR_TAIL_LIMIT) {
+  if (next.length <= limit) {
     return next;
   }
-  return next.slice(next.length - STDERR_TAIL_LIMIT);
+  return next.slice(next.length - limit);
 }
 
-function appendRedactedTail(current, chunk) {
-  return appendTail('', redactSensitiveText(`${current}${chunk}`));
+function appendRedactedTail(currentRaw, chunk) {
+  const rawTail = appendTail(currentRaw, chunk, STDERR_REDACTION_CONTEXT_LIMIT);
+  return {
+    rawTail,
+    redactedTail: appendTail('', redactSensitiveText(rawTail)),
+  };
 }
 
 function countTrailingBackslashes(value, carry = 0) {
@@ -196,6 +201,7 @@ function signalChildTree(child, signal) {
   }
 
   const signaledPids = [];
+  const descendantPids = collectDescendantPids(child.pid).reverse();
   let signaledProcessGroup = false;
   if (process.platform !== 'win32') {
     try {
@@ -209,7 +215,7 @@ function signalChildTree(child, signal) {
     }
   }
 
-  for (const pid of collectDescendantPids(child.pid).reverse()) {
+  for (const pid of descendantPids) {
     if (signaledProcessGroup && processGroupId(pid) === child.pid) {
       continue;
     }
@@ -318,9 +324,9 @@ function redactCommand(command) {
       continue;
     }
 
-    const authorizationHeaderMatch = /^(Authorization\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)$/i.exec(part);
-    if (authorizationHeaderMatch) {
-      redacted.push(`${authorizationHeaderMatch[1]}[REDACTED]`);
+    const authHeaderMatch = /^([^:]+\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)$/i.exec(part);
+    if (authHeaderMatch && isSecretHeaderName(authHeaderMatch[1])) {
+      redacted.push(`${authHeaderMatch[1]}[REDACTED]`);
       redactNextParts = 1;
       continue;
     }
@@ -396,6 +402,7 @@ async function runCronScript({ name, recoverable, command }) {
   const started = Date.now();
   const [bin, ...args] = command;
   let stderrTail = '';
+  let stderrRawTail = '';
   let stderrNeedsBoundary = false;
   let settled = false;
   let forceKillTimer;
@@ -537,7 +544,6 @@ async function runCronScript({ name, recoverable, command }) {
       cwd: process.cwd(),
       env: process.env,
       shell: process.platform === 'win32',
-      detached: process.platform !== 'win32',
       stdio: ['inherit', 'inherit', 'pipe'],
     });
 
@@ -559,6 +565,7 @@ async function runCronScript({ name, recoverable, command }) {
           forceKillTimer = null;
         }
         child.stderr?.destroy();
+        child.unref();
         finish(parentTerminationExitCode);
         return;
       }
@@ -592,18 +599,32 @@ async function runCronScript({ name, recoverable, command }) {
           return;
         }
         child.stderr?.destroy();
+        child.unref();
         finishChildResult(exitResult.code, exitResult.signal);
       }, drainMs);
     };
 
     child.stderr?.on('data', (chunk) => {
       const text = chunk.toString('utf8');
-      stderrTail = appendRedactedTail(stderrTail, text);
+      const redacted = appendRedactedTail(stderrRawTail, text);
+      stderrRawTail = redacted.rawTail;
+      stderrTail = redacted.redactedTail;
       stderrNeedsBoundary = !text.endsWith('\n');
       stderrPemPrefixBuffer = `${stderrPemPrefixBuffer}${text}`.slice(-80);
       if (!process.stderr.write(chunk)) {
         child.stderr?.pause();
-        process.stderr.once('drain', () => child.stderr?.resume());
+        const resumeStderr = () => {
+          if (resumeTimer) {
+            clearTimeout(resumeTimer);
+          }
+          child.stderr?.resume();
+        };
+        const resumeTimer = setTimeout(() => {
+          process.stderr.off('drain', resumeStderr);
+          child.stderr?.resume();
+        }, 100);
+        resumeTimer.unref?.();
+        process.stderr.once('drain', resumeStderr);
       }
     });
 
