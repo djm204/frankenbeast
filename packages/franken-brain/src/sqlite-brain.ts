@@ -389,7 +389,13 @@ function workingMemoryStringField(value: unknown): string | undefined {
 
 function isTemporaryOperationalMarker(value: unknown): boolean {
   const normalized = workingMemoryStringField(value)?.trim().toLowerCase();
-  return normalized === 'temporary-operational' || normalized === 'transient-operational';
+  return (
+    normalized === 'temporary-operational'
+    || normalized === 'operational-temporary'
+    || normalized === 'temp-operational'
+    || normalized === 'operational-temp'
+    || normalized === 'transient-operational'
+  );
 }
 
 function isTemporaryOperationalWorkingMemoryValue(value: unknown): value is { expiresAt: string } {
@@ -472,7 +478,20 @@ class SqliteWorkingMemory implements IWorkingMemory {
       total += size;
       prepared.push([row.key, normalized, serialized, size]);
     }
-    this.deleteExpiredPersistedRows(expiredRows);
+    const preservedRows = this.deleteExpiredPersistedRows(expiredRows);
+    const preparedKeys = new Set(prepared.map(([key]) => key));
+    for (const row of preservedRows) {
+      if (preparedKeys.has(row.key)) continue;
+      const parsed = parseStoredWorkingMemoryValue(row.serialized);
+      if (isExpiredWorkingMemoryValue(parsed)) continue;
+      const { normalized, serialized, size } = this.prepareEntry(
+        row.key,
+        parsed,
+      );
+      total += size;
+      prepared.push([row.key, normalized, serialized, size]);
+      preparedKeys.add(row.key);
+    }
     if (prepared.length > this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
         `Persisted working memory has ${prepared.length} entries after TTL cleanup, exceeding maxEntries (${this.limits.maxEntries})`,
@@ -828,8 +847,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
-  private deleteExpiredPersistedRows(rows: ReadonlyArray<{ key: string; serialized: string | undefined }>): void {
-    if (rows.length === 0) return;
+  private deleteExpiredPersistedRows(
+    rows: ReadonlyArray<{ key: string; serialized: string | undefined }>,
+  ): Array<{ key: string; serialized: string }> {
+    const preservedRows: Array<{ key: string; serialized: string }> = [];
+    if (rows.length === 0) return preservedRows;
     const selectValue = this.db.prepare(`SELECT value FROM working_memory WHERE key = ?`);
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
     for (const { key, serialized } of rows) {
@@ -843,11 +865,13 @@ class SqliteWorkingMemory implements IWorkingMemory {
       const currentSerialized = this.encryption?.decrypt(row.value) ?? row.value;
       if (serialized !== undefined && currentSerialized !== serialized) {
         this.persistedSerialized.set(key, currentSerialized);
+        preservedRows.push({ key, serialized: currentSerialized });
         continue;
       }
       const parsed = parseStoredWorkingMemoryValue(currentSerialized);
       if (!isExpiredWorkingMemoryValue(parsed)) {
         this.persistedSerialized.set(key, currentSerialized);
+        preservedRows.push({ key, serialized: currentSerialized });
         continue;
       }
       deleteKey.run(key);
@@ -858,6 +882,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
         this.dirtyKeys.delete(key);
       }
     }
+    return preservedRows;
   }
 
   private expireRuntimeTtlKeys(): void {

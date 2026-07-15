@@ -158,6 +158,16 @@ describe('SqliteBrain', () => {
         scope: 'transient-operational',
         expiresAt: '2026-01-01T00:00:00.000Z',
       });
+      brain.working.set('category:operational-temp', {
+        value: 'short-lived category',
+        category: 'operational-temporary',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.working.set('kind:temp-alias', {
+        value: 'short-lived temp alias',
+        kind: 'temp-operational',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
 
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));

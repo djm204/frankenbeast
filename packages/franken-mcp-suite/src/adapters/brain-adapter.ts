@@ -77,7 +77,7 @@ function isTemporaryOperationalValue(record: Record<string, unknown>): boolean {
   return markers.some(
     (marker) =>
       typeof marker === "string" &&
-      /^(temporary[-_\s]?operational|operational[-_\s]?temporary|transient[-_\s]?operational)$/i.test(
+      /^(temporary[-_\s]?operational|operational[-_\s]?temporary|temp[-_\s]?operational|operational[-_\s]?temp|transient[-_\s]?operational)$/i.test(
         marker.trim(),
       ),
   );

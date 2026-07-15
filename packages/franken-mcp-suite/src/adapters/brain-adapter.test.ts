@@ -231,6 +231,7 @@ describe("createBrainAdapter", () => {
     mockBrain.working.snapshot.mockReturnValue({
       asset: { value: "certificate metadata", category: "asset", expiresAt: "2099-01-01T00:00:00.000Z" },
       tmp: { value: "runtime status", category: "temporary-operational", expiresAt: "2099-01-01T00:00:00.000Z" },
+      tmpAlias: { value: "aliased runtime status", category: "operational-temporary", expiresAt: "2099-01-01T00:00:00.000Z" },
     });
 
     const result = await brain.query({ query: "", type: "working", limit: 5 });
@@ -238,6 +239,7 @@ describe("createBrainAdapter", () => {
     expect(result).toEqual([
       { key: "asset", value: JSON.stringify({ value: "certificate metadata", category: "asset", expiresAt: "2099-01-01T00:00:00.000Z" }), type: "working" },
       { key: "tmp", value: "runtime status (expires 2099-01-01T00:00:00.000Z)", type: "working" },
+      { key: "tmpAlias", value: "aliased runtime status (expires 2099-01-01T00:00:00.000Z)", type: "working" },
     ]);
   });
 
