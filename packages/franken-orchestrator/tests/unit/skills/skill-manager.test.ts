@@ -493,6 +493,14 @@ describe('SkillManager', () => {
       }
     });
 
+    it('recreates a missing skills root before installing', async () => {
+      rmSync(skillsDir, { recursive: true, force: true });
+
+      await manager.installCustom('recreated-root', { command: 'node' });
+
+      expect(existsSync(join(skillsDir, 'recreated-root', 'mcp.json'))).toBe(true);
+    });
+
     it('rejects installs if the skills root is replaced with a symlink before directory creation', async () => {
       const outsideRoot = join(tempDir, 'outside-root');
       mkdirSync(outsideRoot, { recursive: true });

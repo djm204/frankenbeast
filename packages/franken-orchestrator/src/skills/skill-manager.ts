@@ -136,6 +136,9 @@ export class SkillManager {
   }
 
   private assertSkillsRootStable(): void {
+    if (!existsSync(this.skillsDirRoot)) {
+      mkdirSync(this.skillsDirRoot, { recursive: true });
+    }
     assertNoSymlink(this.skillsDirRoot, 'skills root');
     if (realpathSync(this.skillsDirRoot) !== this.skillsDirReal) {
       throw unsafePathError(this.skillsDirRoot, 'skills root changed after initialization');

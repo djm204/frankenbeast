@@ -397,5 +397,26 @@ describe('Skill API routes', () => {
       expect(await res.json()).toEqual({ error: 'Invalid JSON' });
       expect(writeContextSpy).not.toHaveBeenCalled();
     });
+
+    it('returns generic unsafe path errors for unsafe context writes', async () => {
+      mkdirSync(join(skillsDir, 'github'), { recursive: true });
+      writeFileSync(join(skillsDir, 'github', 'mcp.json'), JSON.stringify({
+        mcpServers: { github: { command: 'github-mcp' } },
+      }));
+      const outsideContext = join(tempDir, 'outside-context.md');
+      symlinkSync(outsideContext, join(skillsDir, 'github', 'context.md'));
+
+      const res = await app.request('/api/skills/github/context', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'new context' }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe('Unsafe skill path');
+      expect(JSON.stringify(body)).not.toContain(skillsDir);
+      expect(JSON.stringify(body)).not.toContain(outsideContext);
+    });
   });
 });

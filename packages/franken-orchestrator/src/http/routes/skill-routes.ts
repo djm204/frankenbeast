@@ -174,7 +174,7 @@ export function createSkillRoutes(deps: {
       return c.json({ updated: true });
     } catch (err) {
       return c.json(
-        { error: err instanceof Error ? err.message : 'Failed' },
+        { error: isUnsafeSkillPathError(err) ? 'Unsafe skill path' : err instanceof Error ? err.message : 'Failed' },
         400,
       );
     }
