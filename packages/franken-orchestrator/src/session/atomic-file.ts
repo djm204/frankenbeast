@@ -4,6 +4,7 @@ import {
   fsyncSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -11,7 +12,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 const STALE_JOURNAL_AGE_MS = 5 * 60_000;
 const JOURNAL_REFRESH_INTERVAL_MS = 5_000;
@@ -179,6 +180,41 @@ function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boo
   }
 }
 
+function cleanupStaleJournalTempFiles(filePath: string): void {
+  const journalPath = stateWriteJournalPath(filePath);
+  const journalTempPrefix = `${basename(journalPath)}.tmp.`;
+  let removed = false;
+  try {
+    for (const entry of readdirSync(dirname(journalPath))) {
+      if (!entry.startsWith(journalTempPrefix)) {
+        continue;
+      }
+      const tempPath = join(dirname(journalPath), entry);
+      try {
+        if (Date.now() - statSync(tempPath).mtimeMs >= STALE_JOURNAL_AGE_MS) {
+          rmSync(tempPath, { force: true });
+          removed = true;
+        }
+      } catch {
+        // The temp may have been renamed or removed by another recovery attempt.
+      }
+    }
+  } catch {
+    return;
+  }
+  if (removed) {
+    fsyncDir(dirname(filePath));
+  }
+}
+
+function journalTempFileWasCreatedAfterJournal(tempPath: string, journal: StateWriteTransactionJournal): boolean {
+  try {
+    return statSync(tempPath).mtimeMs >= Date.parse(journal.updatedAt);
+  } catch {
+    return false;
+  }
+}
+
 function isStaleJournal(journal: StateWriteTransactionJournal): boolean {
   const updatedAtMs = Date.parse(journal.updatedAt);
   return Date.now() - updatedAtMs >= STALE_JOURNAL_AGE_MS;
@@ -221,6 +257,7 @@ function removeStateWriteJournalIfCurrent(
  * the last complete state or has already been atomically replaced by rename().
  */
 export function recoverStateWriteTransaction(filePath: string): StateWriteJournalRecovery | undefined {
+  cleanupStaleJournalTempFiles(filePath);
   const journalPath = stateWriteJournalPath(filePath);
   let journal: StateWriteTransactionJournal;
   try {
@@ -259,6 +296,18 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
         tempPath: journal.tempPath,
         action: 'retained-active-journal',
         reason: `State write journal ${journalPath} is still preparing; refusing to remove live journal for ${journal.tempPath}.`,
+      };
+    }
+    if (existsSync(journal.tempPath) && journalTempFileWasCreatedAfterJournal(journal.tempPath, journal)) {
+      rmSync(journal.tempPath, { force: true });
+      rmSync(journalPath, { force: true });
+      fsyncDir(dirname(filePath));
+      return {
+        journalPath,
+        targetPath: journal.targetPath,
+        tempPath: journal.tempPath,
+        action: 'removed-stale-temp',
+        reason: `Removed stale preparing state write journal and temp file because the temp appears to have been created after the journal was recorded.`,
       };
     }
     rmSync(journalPath, { force: true });
@@ -366,6 +415,7 @@ export function atomicWriteFileSync(
     }
     writeStateWriteJournal(filePath, { ...journalBase, tempPath: resolve(tmpPath), phase: 'renaming' });
     renameSync(tmpPath, filePath);
+    fsyncDir(dirname(filePath));
     removeStateWriteJournalIfCurrent(filePath, { ...journalBase, tempPath: resolve(tmpPath) });
   } catch (error) {
     try {

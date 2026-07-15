@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -204,6 +204,7 @@ describe('atomic-file', () => {
       const tempPath = `${filePath}.tmp.preexisting`;
       writeFileSync(filePath, '{"old":true}');
       writeFileSync(tempPath, '{"belongs":"elsewhere"}');
+      utimesSync(tempPath, new Date('1970-01-01T00:00:00.000Z'), new Date('1970-01-01T00:00:00.000Z'));
       writeFileSync(
         stateWriteJournalPath(filePath),
         JSON.stringify({
@@ -226,6 +227,52 @@ describe('atomic-file', () => {
       expect(existsSync(tempPath)).toBe(true);
       expect(readFileSync(tempPath, 'utf-8')).toBe('{"belongs":"elsewhere"}');
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+    });
+
+    it('removes temp files from stale preparing journals when the temp was created after the journal', () => {
+      const dir = makeTmpDir('state-write-journal-owned-preparing-');
+      const filePath = join(dir, 'state.json');
+      const tempPath = `${filePath}.tmp.owned`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'preparing',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+      writeFileSync(tempPath, '{"new":');
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery).toMatchObject({
+        action: 'removed-stale-temp',
+        tempPath,
+      });
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+    });
+
+    it('removes stale journal temp files that never reached the final journal rename', () => {
+      const dir = makeTmpDir('state-write-journal-temp-orphan-');
+      const filePath = join(dir, 'state.json');
+      const orphanJournalTempPath = `${stateWriteJournalPath(filePath)}.tmp.orphan`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(orphanJournalTempPath, '{"schemaVersion":1');
+      utimesSync(
+        orphanJournalTempPath,
+        new Date('1970-01-01T00:00:00.000Z'),
+        new Date('1970-01-01T00:00:00.000Z'),
+      );
+
+      recoverStateWriteTransaction(filePath);
+
+      expect(existsSync(orphanJournalTempPath)).toBe(false);
     });
 
     it('retains active journals so concurrent writers do not remove live temp files', () => {
