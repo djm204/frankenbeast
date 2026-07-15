@@ -792,7 +792,7 @@ updates:
     expect(packageJson.scripts?.["check:dependabot-supply-chain"]).toBe(
       "node scripts/check-dependabot-supply-chain.mjs",
     );
-    expect(workflow).toContain("actions/cache/restore@v4");
+    expect(workflow).toContain("actions/cache/restore@v6");
     expect(workflow).toContain("dependency-vulnerability-sla-state.json");
     expect(workflow).toContain("scripts/dependency-vulnerability-sla.mjs");
     expect(workflow).toContain("--fail-on-new-critical-high");
