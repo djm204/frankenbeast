@@ -153,18 +153,18 @@ function signalChildTree(child, signal) {
     }
   }
 
-  if (!signaledProcessGroup) {
-    for (const pid of collectDescendantPids(child.pid).reverse()) {
-      try {
-        process.kill(pid, signal);
-        signaledPids.push(pid);
-      } catch (error) {
-        if (error?.code !== 'ESRCH') {
-          // Keep trying the rest of the tree even if one descendant refuses the signal.
-        }
+  for (const pid of collectDescendantPids(child.pid).reverse()) {
+    try {
+      process.kill(pid, signal);
+      signaledPids.push(pid);
+    } catch (error) {
+      if (error?.code !== 'ESRCH') {
+        // Keep trying the rest of the tree even if one descendant refuses the signal.
       }
     }
+  }
 
+  if (!signaledProcessGroup) {
     try {
       child.kill(signal);
       signaledPids.push(child.pid);
@@ -189,9 +189,10 @@ function redactSensitiveText(value) {
   const raw = typeof value === 'string' ? value : String(value ?? '');
   return raw
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
-    .replace(/(["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
-    .replace(/(["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)["']\s*:\s*)(["'])([\s\S]*)/gi, '$1$2[REDACTED]')
-    .replace(/(\\["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)\\["']\s*:\s*\\["'])(.*?)(\\["'])/gi, '$1[REDACTED]$3')
+    .replace(/(["'][a-z0-9_]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_]*["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/(["'][a-z0-9_]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_]*["']\s*:\s*)(["'])([^"']*)$/gi, '$1$2[REDACTED]')
+    .replace(/(\\["'][a-z0-9_]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_]*\\["']\s*:\s*\\["'])(.*?)(\\["'])/gi, '$1[REDACTED]$3')
+    .replace(/(\\["'][a-z0-9_]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_]*\\["']\s*:\s*\\["'])([\s\S]*)$/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+([^\s"']+)/gi, '$1$2 [REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)([^\n\r,;]+)/gi, '$1[REDACTED]')
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]:[REDACTED]@')
@@ -231,7 +232,9 @@ function redactCommand(command) {
       continue;
     }
 
-    redacted.push(redactSensitiveText(part));
+    const sanitizedPart = redactSensitiveText(part)
+      .replace(/(["'][a-z0-9_]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_]*["']\s*:\s*)(["'])([\s\S]*)/gi, '$1$2[REDACTED]');
+    redacted.push(sanitizedPart);
   }
 
   return redacted;
@@ -466,11 +469,21 @@ async function runCronScript({ name, recoverable, command }) {
           if (closingQuoteIndex === -1) {
             redactedTailChunk = '[REDACTED]';
           } else {
+            const delimiter = stderrTailSecretContinuation.delimiter;
+            const end = closingQuoteIndex + delimiter.length;
             stderrTailSecretContinuation = null;
-            redactedTailChunk = `[REDACTED]${redactSensitiveText(text.slice(closingQuoteIndex))}`;
+            redactedTailChunk = `[REDACTED]${delimiter}${redactSensitiveText(text.slice(end))}`;
+          }
+        } else if (stderrTailSecretContinuation.kind === 'pem') {
+          const endMatch = /-----END [A-Z ]*PRIVATE KEY-----/.exec(text);
+          if (endMatch) {
+            stderrTailSecretContinuation = null;
+            redactedTailChunk = `[REDACTED_PRIVATE_KEY]${redactSensitiveText(text.slice(endMatch.index + endMatch[0].length))}`;
+          } else {
+            redactedTailChunk = '[REDACTED_PRIVATE_KEY]';
           }
         } else {
-          const delimiterIndex = text.search(/[;,]/);
+          const delimiterIndex = text.search(/[;,\r\n]/);
           if (delimiterIndex === -1) {
             redactedTailChunk = '[REDACTED]';
           } else {
@@ -479,10 +492,12 @@ async function runCronScript({ name, recoverable, command }) {
           }
         }
       } else {
-        const secretJsonMatch = /(\\?["'](?:token|password|passwd|secret|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)\\?["']\s*:\s*(\\?["']))/i.exec(text);
+        const privateKeyStart = text.search(/-----BEGIN [A-Z ]*PRIVATE KEY-----/);
+        const secretJsonMatch = /(\\?["'][a-z0-9_]*(?:token|password|passwd|secret|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_]*\\?["']\s*:\s*(\\?["']))/i.exec(text);
         const secretAssignMatch = /(\b[A-Z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)/i.exec(text);
-        const useJson = secretJsonMatch && (!secretAssignMatch || secretJsonMatch.index <= secretAssignMatch.index);
-        const match = useJson ? secretJsonMatch : secretAssignMatch;
+        const usePem = privateKeyStart !== -1 && (!secretJsonMatch || privateKeyStart <= secretJsonMatch.index) && (!secretAssignMatch || privateKeyStart <= secretAssignMatch.index);
+        const useJson = !usePem && secretJsonMatch && (!secretAssignMatch || secretJsonMatch.index <= secretAssignMatch.index);
+        const match = usePem ? null : (useJson ? secretJsonMatch : secretAssignMatch);
         if (match) {
           const secretStart = match.index;
           const valueStart = secretStart + match[0].length;
@@ -493,11 +508,11 @@ async function runCronScript({ name, recoverable, command }) {
               stderrTailSecretContinuation = { kind: 'json', delimiter };
               redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]`;
             } else {
-              const end = valueStart + closingQuoteIndex;
-              redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]${redactSensitiveText(text.slice(end))}`;
+              const end = valueStart + closingQuoteIndex + delimiter.length;
+              redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]${delimiter}${redactSensitiveText(text.slice(end))}`;
             }
           } else {
-            const delimiterIndex = text.slice(valueStart).search(/[;,]/);
+            const delimiterIndex = text.slice(valueStart).search(/[;,\r\n]/);
             if (delimiterIndex === -1) {
               stderrTailSecretContinuation = { kind: 'assignment' };
               redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]`;
@@ -505,6 +520,15 @@ async function runCronScript({ name, recoverable, command }) {
               const end = valueStart + delimiterIndex;
               redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]${redactSensitiveText(text.slice(end))}`;
             }
+          }
+        } else if (usePem) {
+          const endMatch = /-----END [A-Z ]*PRIVATE KEY-----/.exec(text.slice(privateKeyStart));
+          if (endMatch) {
+            const end = privateKeyStart + endMatch.index + endMatch[0].length;
+            redactedTailChunk = `${redactSensitiveText(text.slice(0, privateKeyStart))}[REDACTED_PRIVATE_KEY]${redactSensitiveText(text.slice(end))}`;
+          } else {
+            stderrTailSecretContinuation = { kind: 'pem' };
+            redactedTailChunk = `${redactSensitiveText(text.slice(0, privateKeyStart))}[REDACTED_PRIVATE_KEY]`;
           }
         } else {
           redactedTailChunk = appendRedactedTail(stderrTail, text);

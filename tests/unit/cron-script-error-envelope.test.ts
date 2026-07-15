@@ -141,6 +141,59 @@ describe('cron script error envelope runner', () => {
     expect(envelope.command).toContain('PRIVATE_KEY=[REDACTED]');
   });
 
+  it('redacts prefixed JSON secret keys in stderr envelopes', () => {
+    const result = runCronScript([
+      '--name',
+      'prefixed-json-secrets',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write(JSON.stringify({ client_secret: 'oauth-value', aws_secret_access_key: 'cloud-value' })); process.exit(4)",
+    ]);
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('client_secret');
+    expect(envelope.stderrTail).toContain('aws_secret_access_key');
+    expect(JSON.stringify(envelope)).not.toContain('oauth-value');
+    expect(JSON.stringify(envelope)).not.toContain('cloud-value');
+  });
+
+  it('redacts private-key blocks split across stderr chunks', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'chunked-private-key-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\nsecret-line-one\\n'); fs.writeSync(2, 'secret-line-two\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(4)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('[REDACTED_PRIVATE_KEY]');
+    expect(envelope.stderrTail).toContain('real diagnostic');
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-one');
+    expect(JSON.stringify(envelope)).not.toContain('secret-line-two');
+  });
+
+  it('stops assignment redaction at newlines while preserving following diagnostics', () => {
+    const result = runCronScript([
+      '--name',
+      'newline-secret-diagnostic',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('API_KEY=secret-value\\nstack trace line'); process.exit(4)",
+    ]);
+
+    expect(result.status).toBe(4);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('stack trace line');
+    expect(JSON.stringify(envelope)).not.toContain('secret-value');
+  });
+
   it('fails with an explicit envelope when the cron command is missing', () => {
     const result = runCronScript(['--name', 'missing-command']);
 
@@ -314,6 +367,62 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('"password":"[REDACTED]');
   });
 
+  it('redacts prefixed JSON secret keys before truncating stderr tails', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'prefixed-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"client_secret":"oauth-secret-value","aws_secret_access_key":"cloud-secret-value","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"client_secret":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"aws_secret_access_key":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('oauth-secret-value');
+    expect(JSON.stringify(envelope)).not.toContain('cloud-secret-value');
+  });
+
+  it('redacts private key blocks split across stderr chunks', () => {
+    const keyBody = 'split-private-key-material-'.repeat(256);
+    const result = runCronScriptWithEnv([
+      '--name',
+      'split-pem-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE KEY-----\\n'); fs.writeSync(2, ${JSON.stringify(keyBody)}); fs.writeSync(2, '\\n-----END PRIVATE KEY-----\\nafter-key'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('[REDACTED_PRIVATE_KEY]');
+    expect(envelope.stderrTail).toContain('after-key');
+    expect(JSON.stringify(envelope)).not.toContain('split-private-key-material');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE KEY');
+    expect(JSON.stringify(envelope)).not.toContain('END PRIVATE KEY');
+  });
+
+  it('stops assignment redaction at newlines while preserving following diagnostics', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'newline-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('API_KEY=secret-value\\nstack trace line'); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('stack trace line');
+    expect(JSON.stringify(envelope)).not.toContain('secret-value');
+  });
+
   it('preserves buffered stderr for successful cron runs', () => {
     const result = runCronScriptWithEnv([
       '--name',
@@ -419,6 +528,64 @@ describe('cron script error envelope runner', () => {
         process.execPath,
         '-e',
         `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      const helperPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let helperAlive = true;
+      try {
+        process.kill(helperPid, 0);
+        helperAlive = readFileSync(`/proc/${helperPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        helperAlive = code !== 'ESRCH';
+      }
+      if (helperAlive) {
+        process.kill(helperPid, 'SIGKILL');
+      }
+      expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('terminates detached descendants outside the child process group during signal cleanup', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-detached-descendant-'));
+    const pidFile = join(tempDir, 'detached-helper.pid');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'detached-descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); helper.unref(); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
       ], {
         cwd: ROOT,
         env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
