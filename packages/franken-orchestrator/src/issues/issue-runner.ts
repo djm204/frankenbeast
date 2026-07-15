@@ -146,7 +146,7 @@ function capacityAlert(
   threshold: number | undefined,
   ratio: number | undefined,
 ): IssueCapacityWatermarkAlert | undefined {
-  if (threshold === undefined || !validWatermarkRatio(ratio) || value === undefined) return undefined;
+  if (threshold === undefined || threshold <= 0 || !validWatermarkRatio(ratio) || value === undefined) return undefined;
   const thresholdValue: number = threshold;
   const ratioValue: number = ratio;
   if (value < thresholdValue * ratioValue) return undefined;

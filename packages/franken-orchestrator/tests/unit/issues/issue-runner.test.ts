@@ -546,6 +546,30 @@ describe('IssueRunner', () => {
       expect(logger.warn).not.toHaveBeenCalled();
     });
 
+    it('keeps capacity watermark alerts quiet when hard thresholds are zero', async () => {
+      const logger = mockLogger();
+      const config = makeConfig({
+        issues: [makeIssue({ number: 20 })],
+        triageResults: [makeTriage(20)],
+        logger,
+        backpressure: {
+          thresholds: { maxInFlightBacklog: 0, capacityWatermarkRatio: 0.8 },
+          signals: () => ({
+            activeProcesses: 0,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 20, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
     it('preserves checkpoint-complete outcomes before evaluating backpressure', async () => {
       const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
       const issueRuntime = makeIssueRuntimeSupport();
