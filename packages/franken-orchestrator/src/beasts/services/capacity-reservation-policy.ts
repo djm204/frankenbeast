@@ -236,13 +236,18 @@ export class CapacityReservationPolicy {
     const tryAssign = (activeIndex: number, matchingSlotIndexes: readonly number[], seenSlots: Set<number>): boolean => {
       for (const slotIndex of matchingSlotIndexes) {
         if (seenSlots.has(slotIndex)) continue;
-        seenSlots.add(slotIndex);
-        const displacedItemIndex = assignedItemBySlotIndex.get(slotIndex);
-        if (displacedItemIndex === undefined) {
+        if (!assignedItemBySlotIndex.has(slotIndex)) {
           assignedItemBySlotIndex.set(slotIndex, activeIndex);
           assignedSlotByItemIndex.set(activeIndex, slotIndex);
           return true;
         }
+      }
+
+      for (const slotIndex of matchingSlotIndexes) {
+        if (seenSlots.has(slotIndex)) continue;
+        seenSlots.add(slotIndex);
+        const displacedItemIndex = assignedItemBySlotIndex.get(slotIndex);
+        if (displacedItemIndex === undefined) continue;
         const displacedItem = indexedActiveItems.find((item) => item.activeIndex === displacedItemIndex);
         if (displacedItem && tryAssign(displacedItemIndex, displacedItem.matchingSlotIndexes, seenSlots)) {
           assignedItemBySlotIndex.set(slotIndex, activeIndex);

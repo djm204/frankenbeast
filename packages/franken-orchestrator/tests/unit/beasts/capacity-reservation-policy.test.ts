@@ -175,6 +175,34 @@ describe('CapacityReservationPolicy', () => {
     });
   });
 
+  it('tries alternate unreleased slots before displacing work into released capacity', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 3,
+      releasedReservationIds: ['a-released'],
+      reservations: [
+        { id: 'a-released', slots: 1, labels: ['a'] },
+        { id: 'a-reserved', slots: 1, labels: ['a'] },
+        { id: 'b-reserved', slots: 1, labels: ['b'] },
+      ],
+    });
+
+    const runningItems = [
+      { id: 'active-a', labels: ['a'] },
+      { id: 'active-a-or-b', labels: ['a', 'b'] },
+    ];
+
+    expect(policy.describe(runningItems).reservations).toMatchObject([
+      { id: 'a-released', used: 0, free: 1, released: true },
+      { id: 'a-reserved', used: 1, free: 0, released: false },
+      { id: 'b-reserved', used: 1, free: 0, released: false },
+    ]);
+    expect(policy.canStart({ id: 'normal-1', labels: ['feature'] }, runningItems)).toEqual({
+      allowed: true,
+      reason: 'released_reserved_capacity_available',
+      reservationId: undefined,
+    });
+  });
+
   it('renders operator-visible reservation state with used and free reserved capacity', () => {
     const policy = new CapacityReservationPolicy({
       totalSlots: 5,

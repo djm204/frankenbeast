@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../../chat/approval-input.js';
+import { BeastDaemonRequestError } from '../../chat/beast-daemon-dispatch-adapter.js';
 import { isValidChatSessionId, type CorruptChatSessionFile, type ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import { ChatRuntime, pendingApprovalRuntimeState } from '../../chat/runtime.js';
@@ -170,6 +171,18 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           decision: error.decision,
           capacity: error.state,
         },
+      );
+    }
+    if (
+      error instanceof BeastDaemonRequestError
+      && error.status === 409
+      && error.code === 'AGENT_CAPACITY_RESERVED'
+    ) {
+      throw new HttpError(
+        409,
+        'AGENT_CAPACITY_RESERVED',
+        'Agent capacity is reserved for urgent matching work',
+        error.details,
       );
     }
     throw error;
@@ -400,7 +413,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           session.state = originalState;
           session.updatedAt = isoNow();
           sessionStore.save(session);
-          throw error;
+          throwKnownChatRuntimeError(error);
         }
 
         session.state = result.state === 'active' ? 'approved' : result.state;
