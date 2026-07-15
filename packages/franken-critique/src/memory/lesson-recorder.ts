@@ -261,18 +261,21 @@ export function applyHumanFeedbackToLesson(
 
   if (request.source === 'explicit-user-correction') {
     const revisedLesson = request.revisedCorrectionApplied
-      ? removeStaleLessonValidation({
+      ? {
           ...lesson,
           correctionApplied: request.revisedCorrectionApplied,
-        })
+        }
       : lesson;
+    const quarantinedLesson = quarantineLesson(revisedLesson, {
+      trigger: 'explicit-user-correction',
+      reason: request.reason,
+      evidence: request.evidence,
+      quarantinedAt: request.observedAt,
+    });
     return {
-      ...quarantineLesson(revisedLesson, {
-        trigger: 'explicit-user-correction',
-        reason: request.reason,
-        evidence: request.evidence,
-        quarantinedAt: request.observedAt,
-      }),
+      ...(request.revisedCorrectionApplied
+        ? removeStaleLessonValidation(quarantinedLesson)
+        : quarantinedLesson),
       feedbackWeighting,
     };
   }
@@ -288,18 +291,27 @@ export function applyHumanFeedbackToLesson(
       'Explicit lesson approval requires at least one evidence item.',
     );
   }
-  const { quarantine, ...lessonWithoutQuarantine } = lesson;
-  const restoredLifecycleStatus =
-    quarantine?.previousLifecycleStatus ??
-    (lesson.lifecycleStatus === 'quarantined'
-      ? 'candidate'
-      : lesson.lifecycleStatus);
-  const lifecycleStatus = lesson.experimentSandbox?.promotionBlocked
-    ? (restoredLifecycleStatus ?? 'candidate')
-    : 'active';
+  const primaryApprovalEvidence = approvalEvidence[0];
+  if (primaryApprovalEvidence === undefined) {
+    throw new RangeError(
+      'Explicit lesson approval requires at least one evidence item.',
+    );
+  }
+  if (lesson.lifecycleStatus === 'quarantined' && lesson.quarantine !== undefined) {
+    return {
+      ...unquarantineLesson(lesson, {
+        reviewedAt: request.observedAt,
+        reviewer: request.source,
+        evidenceUrl: primaryApprovalEvidence.reference,
+        reason: request.reason,
+      }),
+      feedbackWeighting,
+    };
+  }
   return {
-    ...lessonWithoutQuarantine,
-    lifecycleStatus,
+    ...lesson,
+    lifecycleStatus:
+      lesson.lifecycleStatus === undefined ? 'active' : lesson.lifecycleStatus,
     feedbackWeighting,
   };
 }

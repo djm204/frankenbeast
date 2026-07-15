@@ -802,6 +802,9 @@ describe('LessonRecorder', () => {
     );
     expect(corrected.contradictionReport).toBeUndefined();
     expect(corrected.testTraceability).toBeUndefined();
+    expect(corrected.quarantine?.reviewItem.lessonId).toBe(
+      lesson.testTraceability?.[0]?.lessonId,
+    );
     expect(corrected.feedbackWeighting).toMatchObject({
       primarySource: 'explicit-user-correction',
       totalScore: -110,
@@ -850,6 +853,10 @@ describe('LessonRecorder', () => {
       totalScore: -30,
     });
     expect(approvedAfterCorrection.quarantine).toBeUndefined();
+    expect(approvedAfterCorrection.unquarantine).toMatchObject({
+      reviewer: 'explicit-user-approval',
+      evidenceUrl: 'https://github.com/djm204/frankenbeast/issues/1763',
+    });
     expect(approvedAfterCorrection.lifecycleStatus).toBe('candidate');
     expect(isLessonApplicable(approvedAfterCorrection)).toBe(false);
 
@@ -883,6 +890,58 @@ describe('LessonRecorder', () => {
       totalScore: 70,
     });
     expect(isLessonApplicable(approved)).toBe(false);
+
+    const legacyActiveQuarantine = quarantineLesson(
+      {
+        ...lesson,
+        lifecycleStatus: undefined,
+        experimentSandbox: undefined,
+      },
+      {
+        trigger: 'explicit-user-correction',
+        reason: 'Legacy quarantine before lifecycle metadata existed.',
+        quarantinedAt: '2026-07-12T02:30:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+          },
+        ],
+      },
+    );
+    const approvedLegacy = applyHumanFeedbackToLesson(legacyActiveQuarantine, {
+      source: 'explicit-user-approval',
+      reason: 'User approved this legacy active lesson after evidence review.',
+      observedAt: '2026-07-12T03:00:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy',
+        },
+      ],
+    });
+    expect(approvedLegacy.lifecycleStatus).toBe('active');
+    expect(approvedLegacy.unquarantine?.evidenceUrl).toBe(
+      'https://github.com/djm204/frankenbeast/issues/1763#legacy',
+    );
+    expect(isLessonApplicable(approvedLegacy)).toBe(true);
+
+    const approvedRetired = applyHumanFeedbackToLesson(
+      { ...lesson, lifecycleStatus: 'retired', experimentSandbox: undefined },
+      {
+        source: 'explicit-user-approval',
+        reason: 'User acknowledged retired guidance for audit history only.',
+        observedAt: '2026-07-12T03:30:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#retired',
+          },
+        ],
+      },
+    );
+    expect(approvedRetired.lifecycleStatus).toBe('retired');
+    expect(isLessonApplicable(approvedRetired)).toBe(false);
   });
 
   it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {
