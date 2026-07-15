@@ -104,6 +104,25 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
   };
   const actor = process.env.USER ?? 'operator';
   let keepServicesAlive = false;
+  let signalCleanupStarted = false;
+  const disposeForSignal = (signal: NodeJS.Signals): void => {
+    if (signalCleanupStarted) {
+      return;
+    }
+    signalCleanupStarted = true;
+    try {
+      services.dispose();
+    } finally {
+      if (ownsControl) {
+        control?.dispose?.();
+      }
+      process.exit(signal === 'SIGINT' ? 130 : 143);
+    }
+  };
+  const onSigint = (): void => disposeForSignal('SIGINT');
+  const onSigterm = (): void => disposeForSignal('SIGTERM');
+  process.once('SIGINT', onSigint);
+  process.once('SIGTERM', onSigterm);
 
   try {
     switch (args.beastAction) {
@@ -210,6 +229,8 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         throw new Error('Unknown beasts command');
     }
   } finally {
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
     if (!keepServicesAlive) {
       services.dispose();
     }

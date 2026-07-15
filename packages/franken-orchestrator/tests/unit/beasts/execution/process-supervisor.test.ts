@@ -38,8 +38,24 @@ function isProcessGone(pid: number): boolean {
   }
 }
 
+async function isProcessGoneOrZombie(pid: number): Promise<boolean> {
+  if (isProcessGone(pid)) {
+    return true;
+  }
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
+    const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+    return state === 'Z';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return true;
+    }
+    return false;
+  }
+}
+
 async function killIfRunning(pid: number): Promise<void> {
-  if (pid <= 0 || isProcessGone(pid)) {
+  if (pid <= 0 || await isProcessGoneOrZombie(pid)) {
     return;
   }
   try {
@@ -361,8 +377,8 @@ process.stdout.write('parent done\\n');`,
 
         backgroundPid = Number(await readFile(pidFile, 'utf8'));
         expect(backgroundPid).toBeGreaterThan(0);
-        await vi.waitFor(() => {
-          expect(isProcessGone(backgroundPid)).toBe(true);
+        await vi.waitFor(async () => {
+          expect(await isProcessGoneOrZombie(backgroundPid)).toBe(true);
         }, { timeout: 5000 });
       } finally {
         await killIfRunning(backgroundPid);
@@ -385,6 +401,54 @@ process.stdout.write('parent done\\n');`,
         skippedReason: 'unsupported_platform',
       });
       expect(killProcess).not.toHaveBeenCalled();
+    });
+
+    it('treats process-group permission errors as skipped so exit handling remains safe', () => {
+      const permissionError = Object.assign(new Error('permission denied'), { code: 'EPERM' });
+      const killProcess = vi.fn(() => {
+        throw permissionError;
+      });
+      const restrictedSupervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      expect(restrictedSupervisor.sweepOrphanProcessGroup(12345)).toEqual({
+        pid: 12345,
+        signal: 'SIGTERM',
+        swept: false,
+        skippedReason: 'permission_denied',
+      });
+    });
+
+    it('tries a process-group sweep before direct PID signaling for recovered attempts', async () => {
+      const killProcess = vi.fn();
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      await supervisor.stop(12345);
+      await supervisor.kill(23456);
+
+      expect(killProcess).toHaveBeenNthCalledWith(1, -12345, 'SIGTERM');
+      expect(killProcess).toHaveBeenNthCalledWith(2, -23456, 'SIGKILL');
+    });
+
+    it('falls back to direct PID signaling when a recovered process group is gone', async () => {
+      const noGroup = Object.assign(new Error('no process group'), { code: 'ESRCH' });
+      const killProcess = vi.fn((pid: number, _signal?: string | number) => {
+        if (pid < 0) {
+          throw noGroup;
+        }
+        return true;
+      });
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      await supervisor.stop(34567);
+
+      expect(killProcess).toHaveBeenCalledWith(-34567, 'SIGTERM');
+      expect(killProcess).toHaveBeenCalledWith(34567, 'SIGTERM');
     });
 
     it('strips CLAUDE env vars from spawned process environment', async () => {

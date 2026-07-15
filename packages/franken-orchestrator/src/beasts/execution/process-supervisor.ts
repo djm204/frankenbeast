@@ -38,7 +38,7 @@ export interface OrphanProcessSweepResult {
   readonly pid: number;
   readonly signal: NodeJS.Signals;
   readonly swept: boolean;
-  readonly skippedReason?: 'disabled' | 'invalid_pid' | 'unsupported_platform' | 'no_process_group' | undefined;
+  readonly skippedReason?: 'disabled' | 'invalid_pid' | 'unsupported_platform' | 'no_process_group' | 'permission_denied' | undefined;
 }
 
 function allowlistedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
@@ -81,6 +81,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     return this.options.orphanSweeper?.signal ?? 'SIGTERM';
   }
 
+  private killProcess(): typeof process.kill {
+    return this.options.orphanSweeper?.killProcess ?? process.kill;
+  }
+
   private shouldUseProcessGroup(): boolean {
     return this.orphanSweeperEnabled() && this.orphanSweeperPlatform() !== 'win32';
   }
@@ -97,13 +101,15 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     }
 
     try {
-      const killProcess = this.options.orphanSweeper?.killProcess ?? process.kill;
-      killProcess(-pid, signal);
+      this.killProcess()(-pid, signal);
       return { pid, signal, swept: true };
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ESRCH') {
         return { pid, signal, swept: false, skippedReason: 'no_process_group' };
+      }
+      if (code === 'EPERM') {
+        return { pid, signal, swept: false, skippedReason: 'permission_denied' };
       }
       throw error;
     }
@@ -335,7 +341,9 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     // Fallback to PID-based kill for legacy/external processes
     try {
-      process.kill(pid, 'SIGTERM');
+      if (!this.sweepOrphanProcessGroup(pid, 'SIGTERM').swept) {
+        this.killProcess()(pid, 'SIGTERM');
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ESRCH') {
@@ -357,7 +365,9 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     // Fallback to PID-based kill for legacy/external processes
     try {
-      process.kill(pid, 'SIGKILL');
+      if (!this.sweepOrphanProcessGroup(pid, 'SIGKILL').swept) {
+        this.killProcess()(pid, 'SIGKILL');
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ESRCH') {

@@ -201,6 +201,42 @@ describe('handleBeastCommand() spawn', () => {
     expect(deps.print).toHaveBeenCalledWith('Spawned design-interview as run-1');
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
+
+  it('disposes in-process services when SIGINT arrives during a direct spawn command', async () => {
+    mockServices.catalog.getDefinition.mockReturnValue({
+      id: 'design-interview',
+      description: 'Design interview',
+      interviewPrompts: [],
+      configSchema: { parse: vi.fn(() => ({})) },
+    });
+    let resolveRun!: (run: unknown) => void;
+    mockServices.dispatch.createRun.mockReturnValue(new Promise((resolve) => {
+      resolveRun = resolve;
+    }));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit intercepted');
+    }) as never);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
+    });
+
+    const command = handleBeastCommand(deps);
+    expect(() => process.emit('SIGINT')).toThrow('process.exit intercepted');
+    resolveRun({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      status: 'running',
+      currentAttemptId: 'attempt-1',
+    });
+
+    try {
+      await command;
+    } finally {
+      exit.mockRestore();
+    }
+
+    expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('handleBeastCommand() status and logs', () => {
