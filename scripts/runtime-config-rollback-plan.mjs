@@ -19,6 +19,10 @@ export async function loadRuntimeConfigSnapshot(filePath) {
     throw new Error(`Runtime config snapshot ${filePath} exceeds maxBytes: ${info.size} > ${SNAPSHOT_LIMITS.maxBytes}`);
   }
   const raw = await readFile(filePath, 'utf8');
+  const rawBytes = Buffer.byteLength(raw, 'utf8');
+  if (rawBytes > SNAPSHOT_LIMITS.maxBytes) {
+    throw new Error(`Runtime config snapshot ${filePath} exceeds maxBytes: ${rawBytes} > ${SNAPSHOT_LIMITS.maxBytes}`);
+  }
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -64,7 +68,8 @@ export function buildRuntimeConfigRollbackPlan(options) {
     throw new Error('approvalCop must name the approval-cop/HITL command; blank overrides are not allowed');
   }
 
-  const changes = diffRuntimeConfig(before, after);
+  const detailedChanges = diffRuntimeConfig(before, after);
+  const changes = detailedChanges.map(({ path, type }) => ({ path, type }));
   if (changes.length === 0) {
     throw new Error('No runtime config changes detected; rollback plan would be a no-op');
   }
@@ -117,7 +122,13 @@ export function buildRuntimeConfigRollbackPlan(options) {
     approvalGatedActions: [
       [
         ...approvalPrefix,
-        'cp', rollbackConfigPath, targetPath,
+        'node',
+        '--input-type=module',
+        '-e',
+        'import { copyFile, lstat, readFile } from "node:fs/promises"; import { dirname, parse, relative, resolve, sep } from "node:path"; const [rollback,target,after]=process.argv.slice(1); async function assertNoSymlink(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked runtime config path component: ${current}`); } } await assertNoSymlink(dirname(target)); await assertNoSymlink(target); const [targetRaw, afterRaw]=await Promise.all([readFile(target), readFile(after)]); if (!targetRaw.equals(afterRaw)) throw new Error("Refusing rollback: target runtime config no longer matches after snapshot"); await copyFile(rollback, target);',
+        rollbackConfigPath,
+        targetPath,
+        afterPath,
       ],
     ],
     postRollbackVerification: [
@@ -145,7 +156,7 @@ export function renderPlan(plan) {
     `Target config: ${plan.targetPath}`,
     '',
     '## Changed runtime config paths',
-    ...plan.changes.map(change => `- \`${escapeMarkdownInlineCode(change.path)}\`: ${change.type}`),
+    ...plan.changes.map(change => `- ${formatChangedPath(change.path)}: ${change.type}`),
     '',
     '## 1. Capture read-only rollback evidence',
     ...plan.readOnlyCapture.map(command => `- ${quoteCommand(command)}`),
@@ -259,10 +270,8 @@ function assertSafePath(value, label) {
   }
 }
 
-function escapeMarkdownInlineCode(value) {
-  return String(value)
-    .replace(/`/gu, '\\`')
-    .replace(/[\r\n]+/gu, '\\n');
+function formatChangedPath(value) {
+  return JSON.stringify(String(value));
 }
 
 function quoteCommand(args) {

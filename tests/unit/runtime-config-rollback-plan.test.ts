@@ -75,16 +75,15 @@ describe('runtime config rollback plan dry-run helper', () => {
       'rollback-evidence/runtime-run-123',
     ]));
     expect(plan.readOnlyCapture[3].join(' ')).not.toContain('"provider":"openai"');
-    expect(plan.approvalGatedActions).toEqual([
-      [
-        'approval-cop',
-        'run',
-        '--',
-        'cp',
-        'rollback-evidence/runtime-run-123/rollback-config.json',
-        '.fbeast/.build/run-configs/run-123.json',
-      ],
-    ]);
+    expect(plan.approvalGatedActions[0]).toEqual(expect.arrayContaining([
+      'node',
+      '--input-type=module',
+      'rollback-evidence/runtime-run-123/rollback-config.json',
+      '.fbeast/.build/run-configs/run-123.json',
+      'snapshots/run-123.after.json',
+    ]));
+    expect(plan.approvalGatedActions[0].join(' ')).toContain('lstat');
+    expect(plan.approvalGatedActions[0].join(' ')).toContain('target runtime config no longer matches after snapshot');
     expect(plan.postRollbackVerification.map(command => command.join(' '))).toContain(
       'cmp -s rollback-evidence/runtime-run-123/rollback-config.json .fbeast/.build/run-configs/run-123.json',
     );
@@ -155,14 +154,14 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(parsed.readOnlyCapture[0]).toEqual(['mkdir', '-p', join(workDir, 'evidence')]);
     expect(parsed.readOnlyCapture[1]).toEqual(['chmod', '700', join(workDir, 'evidence')]);
     expect(parsed.readOnlyCapture[2]).toEqual(['install', '-m', '600', before, join(workDir, 'evidence', 'rollback-config.json')]);
-    expect(parsed.approvalGatedActions[0]).toEqual([
-      'approval-cop',
-      'run',
-      '--',
-      'cp',
+    expect(parsed.approvalGatedActions[0]).toEqual(expect.arrayContaining([
+      'node',
+      '--input-type=module',
       join(workDir, 'evidence', 'rollback-config.json'),
       target,
-    ]);
+      after,
+    ]));
+    expect(JSON.stringify(parsed.changes)).not.toContain('openai');
     await expect(readFile(target, 'utf8')).resolves.toContain('openai');
 
     const markdownResult = spawnSync(process.execPath, [
@@ -176,18 +175,18 @@ describe('runtime config rollback plan dry-run helper', () => {
 
     expect(markdownResult.status).toBe(0);
     expect(markdownResult.stdout).toContain('## 1. Capture read-only rollback evidence');
-    expect(markdownResult.stdout).toContain('approval-cop run -- cp');
+    expect(markdownResult.stdout).toContain('approval-cop run -- node');
     expect(markdownResult.stdout).toContain('mkdir -p');
   });
 
-  it('escapes markdown control characters in rendered changed paths', async () => {
+  it('encodes markdown control characters in rendered changed paths', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'runtime-config-rollback-markdown-'));
     const before = join(workDir, 'before.json');
     const after = join(workDir, 'after.json');
     const target = join(workDir, 'current.json');
-    await writeFile(before, JSON.stringify({ 'safe\n## fake': 'old' }));
-    await writeFile(after, JSON.stringify({ 'safe\n## fake': 'new' }));
-    await writeFile(target, JSON.stringify({ 'safe\n## fake': 'new' }));
+    await writeFile(before, JSON.stringify({ 'safe\n## fake`tick': 'old' }));
+    await writeFile(after, JSON.stringify({ 'safe\n## fake`tick': 'new' }));
+    await writeFile(target, JSON.stringify({ 'safe\n## fake`tick': 'new' }));
 
     const markdownResult = spawnSync(process.execPath, [
       SCRIPT,
@@ -198,7 +197,7 @@ describe('runtime config rollback plan dry-run helper', () => {
     ], { cwd: ROOT, encoding: 'utf8' });
 
     expect(markdownResult.status).toBe(0);
-    expect(markdownResult.stdout).toContain('`/safe\\n## fake`: changed');
-    expect(markdownResult.stdout).not.toContain('\n## fake`: changed');
+    expect(markdownResult.stdout).toContain('"/safe\\n## fake`tick": changed');
+    expect(markdownResult.stdout).not.toContain('\n## fake`tick": changed');
   });
 });
