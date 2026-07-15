@@ -45,7 +45,7 @@ jobs:
         run: npm run bootstrap:dry-run
 
       - name: Restore dependency vulnerability SLA state
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .cache/dependency-vulnerability-sla-state.json
           key: dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
@@ -79,7 +79,7 @@ jobs:
 
       - name: Save dependency vulnerability SLA state
         if: success()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .cache/dependency-vulnerability-sla-state.json
           key: dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
