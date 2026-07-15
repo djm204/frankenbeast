@@ -458,7 +458,7 @@ describe('PrCreator argv subprocess safety', () => {
     expect(createIndex).toBeGreaterThan(pushIndex);
   });
 
-  it('treats credentialed HTTPS GitHub remotes as token-backed before push', async () => {
+  it('honors explicitly required contents write before pushing to a credentialed HTTPS GitHub remote', async () => {
     const calls: ExecCall[] = [];
     const exec = (command: string, args: readonly string[] = []): string => {
       calls.push({ command, args });
@@ -472,7 +472,7 @@ describe('PrCreator argv subprocess safety', () => {
       return '';
     };
     const creator = new PrCreator(
-      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      { targetBranch: 'main', disabled: false, remote: 'origin', githubCapabilityCheck: { required: { contents: 'write' } } },
       exec,
     );
 
@@ -481,6 +481,35 @@ describe('PrCreator argv subprocess safety', () => {
       action: expect.stringContaining('contents write'),
     });
     expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
+  });
+
+  it('does not require contents write merely because a GitHub remote uses HTTPS', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/fine-grained-pat\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'https://github.com/djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: \n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ node_id: 'R_test', private: true, permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      if (command === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
+        const error = new Error('Command failed: gh api graphql') as Error & { stderr: string; status: number };
+        error.stderr = 'Validation Failed: Head ref must exist';
+        error.status = 1;
+        throw error;
+      }
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toEqual({ url: 'https://example.com/pr/1' });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
   });
 
   it.each([
@@ -507,6 +536,28 @@ describe('PrCreator argv subprocess safety', () => {
 
     await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toEqual({ url: 'https://example.com/pr/1' });
     expect(calls.some(c => c.command === 'gh' && c.args.join(' ') === 'api repos/djm204/frankenbeast')).toBe(true);
+  });
+
+  it('skips GitHub preflight for non-GitHub remotes whose path contains github.com', async () => {
+    const calls: ExecCall[] = [];
+    const remoteUrl = 'ssh://git@git.corp/github.com/djm204/frankenbeast.git';
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/internal-mirror\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return `${remoteUrl}\n`;
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      if (command === 'gh' && args.join(' ').startsWith('api repos/')) throw new Error(`unexpected ${command} ${args.join(' ')}`);
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toEqual({ url: 'https://example.com/pr/1' });
+    expect(calls.some(c => c.command === 'gh' && c.args.join(' ').startsWith('api repos/'))).toBe(false);
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
   });
 
   it('does not require pull-request write when reusing an existing PR', async () => {

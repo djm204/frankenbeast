@@ -402,7 +402,6 @@ export class PrCreator {
     }
 
     const required: GitHubRequiredCapabilities = {
-      ...(remoteInfo.tokenBackedPush ? { contents: 'write' as const } : {}),
       ...(options.requirePullRequestsWrite === false ? {} : { pullRequests: 'write' as const }),
       ...this.config.githubCapabilityCheck?.required,
     };
@@ -549,9 +548,20 @@ function formatCaughtError(error: unknown): { error: string; name?: string | und
 }
 
 function parseGitHubOwnerRepo(remoteUrl: string): string | null {
-  const match = remoteUrl.match(/github\.com(?::\d+)?[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
-  if (!match) return null;
-  return `${match[1]}/${match[2]}`;
+  const trimmed = remoteUrl.trim();
+  const scpLikeMatch = trimmed.match(/^(?:[^@/\s]+@)?github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpLikeMatch) return `${scpLikeMatch[1]}/${scpLikeMatch[2]}`;
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.hostname.toLowerCase() !== 'github.com') return null;
+  const pathMatch = url.pathname.match(/^\/([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+  if (!pathMatch) return null;
+  return `${pathMatch[1]}/${pathMatch[2]}`;
 }
 
 function isHttpsGitHubRemote(remoteUrl: string): boolean {

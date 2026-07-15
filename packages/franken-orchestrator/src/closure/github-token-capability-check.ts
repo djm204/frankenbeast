@@ -205,7 +205,7 @@ function buildEvidence(
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
-      roleTokenSpecific: repositoryPermissionsTokenSpecific,
+      roleTokenSpecific: false,
       source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
     }),
     pullRequests: tokenAwareItem({
@@ -213,7 +213,7 @@ function buildEvidence(
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
-      roleTokenSpecific: repositoryPermissionsTokenSpecific,
+      roleTokenSpecific: false,
       source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
     }),
     contents: tokenAwareItem({

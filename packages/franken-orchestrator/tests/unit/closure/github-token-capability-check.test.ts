@@ -158,4 +158,38 @@ describe('GitHub token capability check', () => {
     expect(JSON.stringify(result)).not.toContain('ghp_should_not_leak');
     expect(JSON.stringify(result)).toContain('<redacted>');
   });
+
+  it('probes pull-request write for installation tokens before trusting repository push permissions', () => {
+    const exec: GitHubCapabilityExec = (command, args) => {
+      if (command === 'gh' && args.join(' ') === 'api -i /user') {
+        const error = new Error('Command failed: gh api -i /user') as Error & { stderr: string; status: number };
+        error.stderr = 'HTTP 403: Resource not accessible by integration';
+        error.status = 1;
+        throw error;
+      }
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ node_id: 'R_test', permissions: { pull: true, push: true, admin: false, maintain: false, triage: true } });
+      }
+      if (command === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
+        const error = new Error('Command failed: gh api graphql') as Error & { stderr: string; status: number };
+        error.stderr = 'GraphQL: Resource not accessible by integration';
+        error.status = 1;
+        throw error;
+      }
+      throw new Error(`unexpected args ${args.join(' ')}`);
+    };
+
+    const result = checkGitHubTokenCapabilities({
+      repo: 'djm204/frankenbeast',
+      exec,
+      required: { pullRequests: 'write', contents: 'write' },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.evidence.contents).toEqual(expect.objectContaining({ level: 'write', tokenSpecific: true }));
+    expect(result.evidence.pullRequests).toEqual(expect.objectContaining({ level: 'none', tokenSpecific: true }));
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'missing-capability', capability: 'pullRequests' }),
+    ]));
+  });
 });
