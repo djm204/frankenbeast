@@ -52,6 +52,22 @@ function appendTail(current, chunk) {
   return next.slice(next.length - STDERR_TAIL_LIMIT);
 }
 
+function appendRedactedTail(current, chunk) {
+  return appendTail('', redactSensitiveText(`${current}${chunk}`));
+}
+
+function processGroupAlive(pid) {
+  if (!pid || process.platform === 'win32') {
+    return false;
+  }
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
 function signalExitCode(signal) {
   const signalNumber = osConstants.signals[signal];
   return typeof signalNumber === 'number' ? 128 + signalNumber : 128;
@@ -161,7 +177,8 @@ function redactSensitiveText(value) {
     .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)([^\s"']+)/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=\\(["'])(.*?)\\\2/gi, '$1=\\$2[REDACTED]\\$2')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=(["'])(.*?)\2/gi, '$1=$2[REDACTED]$2')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]');
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]');
 }
 
 function redactCommand(command) {
@@ -247,6 +264,7 @@ async function runCronScript({ name, recoverable, command }) {
   let parentTerminationEnvelopeEmitted = false;
   let parentTerminationPids = [];
   let parentTerminationProcessGroup = null;
+  let stderrTailSecretContinuation = false;
 
   return await new Promise((resolve) => {
     let child;
@@ -304,6 +322,23 @@ async function runCronScript({ name, recoverable, command }) {
       });
     };
 
+    const trackedParentTerminationPids = () => {
+      const tracked = new Set(parentTerminationPids.filter((pid) => pid > 0));
+      for (const pid of collectDescendantPids(parentTerminationProcessGroup)) {
+        tracked.add(pid);
+      }
+      return [...tracked];
+    };
+
+    const hasLiveProcess = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        return error?.code !== 'ESRCH';
+      }
+    };
+
     const killTrackedParentTerminationProcesses = (signal) => {
       if (parentTerminationProcessGroup && process.platform !== 'win32') {
         try {
@@ -314,7 +349,7 @@ async function runCronScript({ name, recoverable, command }) {
           }
         }
       }
-      for (const pid of parentTerminationPids) {
+      for (const pid of trackedParentTerminationPids()) {
         try {
           process.kill(pid, signal);
         } catch (error) {
@@ -367,10 +402,12 @@ async function runCronScript({ name, recoverable, command }) {
       if (parentTerminationExitCode !== null) {
         emitParentTerminationEnvelope();
         if (forceKillTimer) {
+          if (processGroupAlive(parentTerminationProcessGroup)) {
+            return;
+          }
           clearTimeout(forceKillTimer);
           forceKillTimer = null;
         }
-        killTrackedParentTerminationProcesses('SIGKILL');
         finish(parentTerminationExitCode);
         return;
       }
@@ -393,26 +430,40 @@ async function runCronScript({ name, recoverable, command }) {
     };
 
     const scheduleExitDrainFinish = () => {
-      if (stderrTail.length >= STDERR_TAIL_LIMIT) {
-        if (exitDrainTimer) {
-          clearTimeout(exitDrainTimer);
-          exitDrainTimer = null;
-        }
-        return;
-      }
       if (exitDrainTimer) {
         clearTimeout(exitDrainTimer);
       }
+      const drainMs = exitResult?.code === 0 && !exitResult?.signal ? Math.min(EXIT_STDERR_DRAIN_MS, 250) : EXIT_STDERR_DRAIN_MS;
       exitDrainTimer = setTimeout(() => {
         exitDrainTimer = null;
         child.stderr?.destroy();
         finishChildResult(exitResult.code, exitResult.signal);
-      }, EXIT_STDERR_DRAIN_MS);
+      }, drainMs);
     };
 
     child.stderr?.on('data', (chunk) => {
       const text = chunk.toString('utf8');
-      stderrTail = appendTail(stderrTail, text);
+      let redactedTailChunk;
+      if (stderrTailSecretContinuation) {
+        const delimiterIndex = text.search(/[;,]/);
+        if (delimiterIndex === -1) {
+          redactedTailChunk = '[REDACTED]';
+        } else {
+          stderrTailSecretContinuation = false;
+          redactedTailChunk = `[REDACTED]${redactSensitiveText(text.slice(delimiterIndex))}`;
+        }
+      } else {
+        const secretStart = text.search(/\b[A-Z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]/i);
+        if (secretStart !== -1 && text.slice(secretStart).search(/[;,]/) === -1) {
+          stderrTailSecretContinuation = true;
+          const redactedSecret = text.slice(secretStart).replace(/(\b[A-Z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)[\s\S]*/i, '$1[REDACTED]');
+          redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${redactedSecret}`;
+        } else {
+          redactedTailChunk = appendRedactedTail(stderrTail, text);
+          stderrTail = '';
+        }
+      }
+      stderrTail = appendTail(stderrTail, redactedTailChunk);
       stderrNeedsBoundary = !text.endsWith('\n');
       process.stderr.write(chunk);
       if (exitResult) {
@@ -437,11 +488,6 @@ async function runCronScript({ name, recoverable, command }) {
     });
 
     child.on('exit', (code, signal) => {
-      if (parentTerminationExitCode === null && code === 0 && !signal) {
-        child.stderr?.destroy();
-        finishChildResult(code, signal);
-        return;
-      }
       exitResult = { code, signal };
       scheduleExitDrainFinish();
     });
