@@ -160,7 +160,7 @@ export interface IssueWorkerCardProcessSnapshot {
   /** Operating-system process id observed by liveness tooling. */
   readonly pid: number;
   /** Optional run id for tools that distinguish multiple attempts on one card. */
-  readonly runId?: number | undefined;
+  readonly runId?: string | undefined;
   /** Optional linked GitHub issue for operator summaries. */
   readonly issueNumber?: number | undefined;
   /** Worker owner, profile, or host label that reported the process. */
@@ -178,7 +178,7 @@ export interface DuplicateWorkerCardProcessFinding {
   readonly severity: 'warning';
   readonly processCount: number;
   readonly pids: readonly number[];
-  readonly runIds: readonly number[];
+  readonly runIds: readonly string[];
   readonly issueNumbers: readonly number[];
   readonly owners: readonly string[];
   readonly statuses: readonly string[];
@@ -507,19 +507,20 @@ export async function evaluateIssueBackpressure(
 
 const TERMINAL_WORKER_CARD_STATUSES = new Set([
   'archived',
-  'blocked',
   'cancelled',
   'canceled',
   'closed',
   'complete',
   'completed',
   'crashed',
+  'deleted',
   'done',
   'exited',
   'failed',
   'merged',
   'removed',
   'skipped',
+  'stopped',
 ]);
 
 function activeWorkerCardProcess(snapshot: IssueWorkerCardProcessSnapshot): boolean {
@@ -591,7 +592,7 @@ export function detectDuplicateWorkerCardProcesses(
       severity: 'warning',
       processCount: pids.length,
       pids,
-      runIds: uniqueSortedNumbers(cardSnapshots.map(snapshot => snapshot.runId)),
+      runIds: uniqueSortedStrings(cardSnapshots.map(snapshot => snapshot.runId)),
       issueNumbers,
       owners: uniqueSortedStrings(cardSnapshots.map(snapshot => snapshot.owner)),
       statuses: uniqueSortedStrings(cardSnapshots.map(snapshot => snapshot.status)),
