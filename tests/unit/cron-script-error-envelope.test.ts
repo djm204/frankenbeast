@@ -71,12 +71,13 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "process.stderr.write('API_KEY=stderr-secret QUOTED_TOKEN=\\\"quoted-value\\\" token=\\'single-quoted-value\\' Authorization: Basic basic-value Authorization: Bearer bearer-value'); process.exit(3)",
+      "process.stderr.write('API_KEY=stderr-secret QUOTED_TOKEN=\\\"quoted-value\\\" SPACED_TOKEN=\\\"top secret\\\" token=\\'single quoted value\\' Authorization: Basic basic-value Authorization: Bearer bearer-value https://deploytoken@github.com/org/repo.git'); process.exit(3)",
       '--',
       '--token',
       'super-secret-token',
       '--api-key=abc123',
       'postgres://user:db-password@localhost:5432/db',
+      'https://commandtoken@github.com/org/repo.git',
     ]);
 
     expect(result.status).toBe(3);
@@ -84,8 +85,10 @@ describe('cron script error envelope runner', () => {
     expect(envelope.command).toContain('[REDACTED]');
     expect(envelope.command).toContain('--api-key=[REDACTED]');
     expect(envelope.command).toContain('postgres://[REDACTED]:[REDACTED]@localhost:5432/db');
+    expect(envelope.command).toContain('https://[REDACTED]@github.com/org/repo.git');
     expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
     expect(envelope.stderrTail).toContain('QUOTED_TOKEN="[REDACTED]"');
+    expect(envelope.stderrTail).toContain('SPACED_TOKEN="[REDACTED]"');
     expect(envelope.stderrTail).toContain("token='[REDACTED]'");
     expect(envelope.stderrTail).toContain('Authorization: Basic [REDACTED]');
     expect(envelope.stderrTail).toContain('Authorization: Bearer [REDACTED]');
@@ -95,9 +98,12 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('stderr-secret');
     expect(JSON.stringify(envelope)).not.toContain('stderr-token');
     expect(JSON.stringify(envelope)).not.toContain('quoted-value');
-    expect(JSON.stringify(envelope)).not.toContain('single-quoted-value');
+    expect(JSON.stringify(envelope)).not.toContain('top secret');
+    expect(JSON.stringify(envelope)).not.toContain('single quoted value');
     expect(JSON.stringify(envelope)).not.toContain('basic-value');
     expect(JSON.stringify(envelope)).not.toContain('bearer-value');
+    expect(JSON.stringify(envelope)).not.toContain('deploytoken');
+    expect(JSON.stringify(envelope)).not.toContain('commandtoken');
   });
 
   it('fails with an explicit envelope when the cron command is missing', () => {

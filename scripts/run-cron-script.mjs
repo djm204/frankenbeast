@@ -6,7 +6,6 @@ import { constants as osConstants } from 'node:os';
 const USAGE = 'Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]';
 const STDERR_TAIL_LIMIT = 4_096;
 const KILL_GRACE_MS = Number.parseInt(process.env.CRON_SCRIPT_KILL_GRACE_MS ?? '5000', 10);
-const PARENT_SIGNAL_KILL_GRACE_MS = Math.min(KILL_GRACE_MS, Number.parseInt(process.env.CRON_SCRIPT_PARENT_SIGNAL_KILL_GRACE_MS ?? '50', 10));
 const EXIT_STDERR_DRAIN_MS = Number.parseInt(process.env.CRON_SCRIPT_EXIT_STDERR_DRAIN_MS ?? '50', 10);
 
 function nowIso() {
@@ -65,17 +64,23 @@ function collectDescendantPids(rootPid) {
       if (!/^\d+$/.test(entry)) {
         continue;
       }
-      const pid = Number.parseInt(entry, 10);
-      const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
-      const endOfCommand = stat.lastIndexOf(')');
-      const fields = stat.slice(endOfCommand + 2).split(' ');
-      const parentPid = Number.parseInt(fields[1] ?? '', 10);
-      if (!Number.isFinite(parentPid)) {
-        continue;
+      try {
+        const pid = Number.parseInt(entry, 10);
+        const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
+        const endOfCommand = stat.lastIndexOf(')');
+        const fields = stat.slice(endOfCommand + 2).split(' ');
+        const parentPid = Number.parseInt(fields[1] ?? '', 10);
+        if (!Number.isFinite(parentPid)) {
+          continue;
+        }
+        const siblings = childrenByParent.get(parentPid) ?? [];
+        siblings.push(pid);
+        childrenByParent.set(parentPid, siblings);
+      } catch (error) {
+        if (error?.code !== 'ENOENT' && error?.code !== 'EACCES' && error?.code !== 'EPERM') {
+          throw error;
+        }
       }
-      const siblings = childrenByParent.get(parentPid) ?? [];
-      siblings.push(pid);
-      childrenByParent.set(parentPid, siblings);
     }
   } catch {
     return [];
@@ -122,14 +127,15 @@ function redactSensitiveText(value) {
   const raw = typeof value === 'string' ? value : String(value ?? '');
   return raw
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]:[REDACTED]@')
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+)@/gi, '$1[REDACTED]@')
     .replace(/\b(Authorization\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+(?:"[^"]*"|'[^']*'|[^\s"']+)/gi, '$1$2 [REDACTED]')
-    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)\\(["'])([^"'\s]+)\\\2/gi, '$1\\$2[REDACTED]\\$2')
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)\\(["'])(.*?)\\\2/gi, '$1\\$2[REDACTED]\\$2')
     .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)(\\["'])(.*?)(\\["'])/gi, '$1$2[REDACTED]$4')
-    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)(["'])([^"'\s]+)\2/gi, '$1$2[REDACTED]$2')
-    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)([^\\\s"']+)/gi, '$1[REDACTED]')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=\\(["'])([^"'\s]+)\\\2/gi, '$1=\\$2[REDACTED]\\$2')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=(["'])([^"'\s]+)\2/gi, '$1=$2[REDACTED]$2')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=([^\\\s"']+)/gi, '$1=[REDACTED]');
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)([^\s"']+)/gi, '$1[REDACTED]')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=\\(["'])(.*?)\\\2/gi, '$1=\\$2[REDACTED]\\$2')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=(["'])(.*?)\2/gi, '$1=$2[REDACTED]$2')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]');
 }
 
 function redactCommand(command) {
@@ -284,7 +290,7 @@ async function runCronScript({ name, recoverable, command }) {
           emitParentTerminationEnvelope();
           signalChildTree(child, 'SIGKILL');
           finish(parentTerminationExitCode);
-        }, PARENT_SIGNAL_KILL_GRACE_MS);
+        }, KILL_GRACE_MS);
       }
     }
 
