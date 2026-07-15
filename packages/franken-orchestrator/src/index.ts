@@ -174,7 +174,8 @@ export type { ICliProvider, ProviderOpts } from './skills/providers/index.js';
 export { ProviderRegistry, createDefaultRegistry } from './skills/providers/index.js';
 
 // Checkpoint
-export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
+export { FileCheckpointStore, detectCheckpointLock } from './checkpoint/file-checkpoint-store.js';
+export type { CheckpointLockDiagnostic, CheckpointLockStatus, DetectCheckpointLockOptions } from './checkpoint/file-checkpoint-store.js';
 
 // Beasts
 export type {
