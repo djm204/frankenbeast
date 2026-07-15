@@ -28,7 +28,13 @@ export interface WebhookAllowedTarget {
 }
 
 type WebhookDnsLookup = (hostname: string) => Promise<readonly string[]>
-type WebhookFetchInit = NonNullable<Parameters<FetchFn>[1]>
+type WebhookFetchInit = NonNullable<Parameters<FetchFn>[1]> & {
+  headers: Record<string, string>
+  body?: string
+  /** Validated DNS address for custom transports that can pin the connection while preserving URL authority. */
+  resolvedAddress?: string
+  originalHostname?: string
+}
 type WebhookFetchResponse = Awaited<ReturnType<FetchFn>> & {
   body?: ({ getReader?: () => ReadableStreamDefaultReader<Uint8Array> } & Partial<AsyncIterable<Uint8Array | Buffer | string>>) | null
 }
@@ -566,41 +572,65 @@ export class WebhookNotifier {
   }
 
   private async readBoundedAsyncIterable(body: unknown): Promise<string> {
-    const iterator = body && typeof body === 'object'
-      ? (body as Partial<AsyncIterable<Uint8Array | Buffer | string>>)[Symbol.asyncIterator]
+    const iterable = body && typeof body === 'object'
+      ? body as AsyncIterable<Uint8Array | Buffer | string>
       : undefined
-    if (typeof iterator !== 'function') {
+    const iteratorFactory = iterable?.[Symbol.asyncIterator]
+    if (typeof iteratorFactory !== 'function') {
       return ''
     }
 
+    const iterator = iteratorFactory.call(iterable)
     const chunks: Uint8Array[] = []
     let totalBytes = 0
     let truncated = false
+    let timedOut = false
     const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
 
-    for await (const chunk of body as AsyncIterable<Uint8Array | Buffer | string>) {
-      if (Date.now() >= deadlineMs) {
-        truncated = true
-        break
+    try {
+      while (totalBytes < MAX_ERROR_BODY_CHARS) {
+        const remainingMs = deadlineMs - Date.now()
+        if (remainingMs <= 0) {
+          timedOut = true
+          break
+        }
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
+        const result = await Promise.race<IteratorResult<Uint8Array | Buffer | string> | 'timeout'>([
+          iterator.next(),
+          new Promise<'timeout'>(resolve => {
+            timeoutId = setTimeout(() => resolve('timeout'), remainingMs)
+          }),
+        ]).finally(() => {
+          if (timeoutId) clearTimeout(timeoutId)
+        })
+        if (result === 'timeout') {
+          timedOut = true
+          break
+        }
+        if (result.done || result.value === undefined) {
+          break
+        }
+        const bytes = typeof result.value === 'string' ? Buffer.from(result.value) : Buffer.from(result.value)
+        const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
+        if (bytes.byteLength > remainingBytes) {
+          chunks.push(bytes.subarray(0, remainingBytes))
+          totalBytes += remainingBytes
+          truncated = true
+          break
+        }
+        chunks.push(bytes)
+        totalBytes += bytes.byteLength
       }
-      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk)
-      const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
-      if (bytes.byteLength > remainingBytes) {
-        chunks.push(bytes.subarray(0, remainingBytes))
-        totalBytes += remainingBytes
-        truncated = true
-        break
-      }
-      chunks.push(bytes)
-      totalBytes += bytes.byteLength
-      if (totalBytes >= MAX_ERROR_BODY_CHARS) {
-        truncated = true
-        break
+    if (truncated || timedOut) {
+      ;(body as { destroy?: () => void })?.destroy?.()
+      const cleanup = iterator.return?.(undefined)
+      if (cleanup && typeof (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch === 'function') {
+        void (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch(() => undefined)
       }
     }
 
     const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
-    return truncated ? `${decoded}…` : decoded
+    return truncated || timedOut ? `${decoded}…` : decoded
   }
 
   private async resolveAllowedTargetAddresses(): Promise<readonly string[]> {
@@ -623,13 +653,16 @@ export class WebhookNotifier {
     if (resolvedAddresses.length === 0) {
       return this.fetchFn(this.url, init)
     }
+    if (!this.usePinnedDefaultFetch) {
+      throw new Error(
+        'Injected fetch cannot safely pin DNS-validated webhook addresses; use the default HTTPS transport when dnsLookup is enabled',
+      )
+    }
 
     let lastError: unknown
     for (const address of resolvedAddresses) {
       try {
-        return this.usePinnedDefaultFetch
-          ? await this.fetchWithPinnedAddress(address, init)
-          : await this.fetchWithPinnedCustomFetch(address, init)
+        return await this.fetchWithPinnedAddress(address, init)
       } catch (err) {
         lastError = err
       }
@@ -638,20 +671,9 @@ export class WebhookNotifier {
     throw lastError
   }
 
-  private async fetchWithPinnedCustomFetch(address: string, init: WebhookFetchInit): Promise<WebhookFetchResponse> {
-    const pinnedUrl = new URL(this.url)
-    pinnedUrl.hostname = isIP(address) === 6 ? `[${address}]` : address
-    return this.fetchFn(pinnedUrl.toString(), {
-      ...init,
-      headers: {
-        ...(init.headers as Record<string, string>),
-        Host: this.parsedUrl.host,
-      },
-    })
-  }
-
   private async fetchWithPinnedAddress(address: string, init: WebhookFetchInit): Promise<WebhookFetchResponse> {
     const originalHostname = normalizeHostnameForValidation(this.parsedUrl.hostname)
+    const body = typeof init.body === 'string' ? init.body : init.body ? String(init.body) : undefined
     return new Promise((resolve, reject) => {
       const request = httpsRequest({
         hostname: address,
@@ -662,6 +684,7 @@ export class WebhookNotifier {
         headers: {
           ...init.headers,
           Host: this.parsedUrl.host,
+          ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}),
         },
       }, response => {
         resolve({
@@ -672,8 +695,8 @@ export class WebhookNotifier {
         })
       })
       request.on('error', reject)
-      if (init.body) {
-        request.write(init.body)
+      if (body) {
+        request.write(body)
       }
       request.end()
     })
