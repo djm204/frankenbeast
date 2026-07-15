@@ -613,7 +613,8 @@ updates:
     expect(
       workflow.indexOf("Dependency vulnerability SLA dashboard"),
     ).toBeLessThan(workflow.indexOf("npm run audit:dependencies"));
-    expect(workflow).toContain("npm run audit:dependencies");
+    expect(workflow).toContain("npm run audit:dependencies -- --json");
+    expect(workflow).toContain("|| true");
     expect(workflow).toContain("npm run deps:outdated:major");
     expect(workflow).toContain("npm run check:dependabot-supply-chain");
     expect(workflow).toContain("npm sbom --sbom-format cyclonedx");

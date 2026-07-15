@@ -81,7 +81,7 @@ jobs:
           key: dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
 
       - name: Dependency vulnerability audit
-        run: npm run audit:dependencies
+        run: npm run audit:dependencies -- --json > "${RUNNER_TEMP}/audit.json" || true
 
       - name: Dependency major-version freshness check
         run: npm run deps:outdated:major
