@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.49.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.48.0...@franken/orchestrator-v0.49.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add degraded worker routing policy ([#2272](https://github.com/djm204/frankenbeast/issues/2272)) ([a2d8f80](https://github.com/djm204/frankenbeast/commit/a2d8f800cbc1bddd0bb04b8d6f996984eb939b68))
+* **availability:** add provider outage incident banner ([#2270](https://github.com/djm204/frankenbeast/issues/2270)) ([3d37834](https://github.com/djm204/frankenbeast/commit/3d3783417ea57f9bea4d99c9b49cd62f42a9c160))
+
+
+### Bug Fixes
+
+* **orchestrator:** add dispatcher startup integrity checks ([#2271](https://github.com/djm204/frankenbeast/issues/2271)) ([d4c3947](https://github.com/djm204/frankenbeast/commit/d4c3947d2933276ce5ff763d5443ab86b46782d5))
+* **stability:** add stale checkpoint lock detector ([#2275](https://github.com/djm204/frankenbeast/issues/2275)) ([00e9e79](https://github.com/djm204/frankenbeast/commit/00e9e79805ef0b8c9d8db68c596fe72f53dbf1ed))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.10.0 to 0.10.1
+
 ## [0.48.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.47.1...@franken/orchestrator-v0.48.0) (2026-07-15)
 
 
