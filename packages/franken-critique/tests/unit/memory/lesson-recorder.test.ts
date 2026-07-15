@@ -838,6 +838,34 @@ describe('LessonRecorder', () => {
     ).toThrow('Lesson quarantine evidence reference must be a non-empty string.');
     expect(() =>
       applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-approval',
+        reason: '   ',
+        observedAt: '2026-07-12T01:36:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#blank-reason',
+          },
+        ],
+      }),
+    ).toThrow('Lesson feedback reason must be a non-empty string.');
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'inferred-success' as never,
+        reason: 'Runtime input must not promote inferred signals.',
+        observedAt: '2026-07-12T01:37:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#inferred-runtime',
+          },
+        ],
+      }),
+    ).toThrow(
+      'Lesson human feedback approval requires explicit-user-approval source.',
+    );
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
         source: 'explicit-user-correction',
         reason: 'Blank revised guidance must not replace a lesson.',
         observedAt: '2026-07-12T01:40:00.000Z',
@@ -981,6 +1009,49 @@ describe('LessonRecorder', () => {
       'https://github.com/djm204/frankenbeast/issues/1763#legacy',
     );
     expect(isLessonApplicable(approvedLegacy)).toBe(true);
+
+    const legacySandboxedActiveQuarantine = quarantineLesson(
+      {
+        ...lesson,
+        lifecycleStatus: 'active',
+        experimentSandbox: {
+          state: 'experimental',
+          promotionBlocked: true,
+          requiredChecks: [],
+          promotionCriteria:
+            'Require independent verification before allowing lesson reuse.',
+        },
+      },
+      {
+        trigger: 'explicit-user-correction',
+        reason: 'Legacy active sandboxed lesson was quarantined for review.',
+        quarantinedAt: '2026-07-12T02:45:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy-sandboxed-quarantine',
+          },
+        ],
+      },
+    );
+    const approvedLegacySandboxedQuarantine = applyHumanFeedbackToLesson(
+      legacySandboxedActiveQuarantine,
+      {
+        source: 'explicit-user-approval',
+        reason: 'User approved restoring this legacy active sandboxed lesson.',
+        observedAt: '2026-07-12T03:10:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy-sandboxed-approval',
+          },
+        ],
+      },
+    );
+    expect(approvedLegacySandboxedQuarantine.lifecycleStatus).toBe('active');
+    expect(approvedLegacySandboxedQuarantine.quarantine).toBeUndefined();
+    expect(approvedLegacySandboxedQuarantine.experimentSandbox).toBeUndefined();
+    expect(isLessonApplicable(approvedLegacySandboxedQuarantine)).toBe(true);
 
     const approvedRetired = applyHumanFeedbackToLesson(
       { ...lesson, lifecycleStatus: 'retired', experimentSandbox: undefined },

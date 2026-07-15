@@ -251,6 +251,10 @@ export function applyHumanFeedbackToLesson(
   request: LessonHumanFeedbackRequest,
 ): CritiqueLesson {
   const observedAt = normalizeTimestamp(request.observedAt);
+  const feedbackReason = requireNonEmptyString(
+    request.reason,
+    'feedback reason',
+  );
   const feedbackEvidence = request.evidence.map(normalizeQuarantineEvidence);
   const revisedCorrectionApplied =
     request.revisedCorrectionApplied !== undefined
@@ -264,7 +268,7 @@ export function applyHumanFeedbackToLesson(
     createLessonFeedbackWeight(
       request.source,
       observedAt,
-      request.reason,
+      feedbackReason,
       feedbackEvidence,
     ),
   ]);
@@ -279,7 +283,7 @@ export function applyHumanFeedbackToLesson(
       : lesson;
     const quarantinedLesson = quarantineLesson(revisedLesson, {
       trigger: 'explicit-user-correction',
-      reason: request.reason,
+      reason: feedbackReason,
       evidence: feedbackEvidence,
       quarantinedAt: observedAt,
     });
@@ -291,6 +295,11 @@ export function applyHumanFeedbackToLesson(
     };
   }
 
+  if (request.source !== 'explicit-user-approval') {
+    throw new RangeError(
+      'Lesson human feedback approval requires explicit-user-approval source.',
+    );
+  }
   if (request.evidence.length === 0) {
     throw new RangeError(
       'Explicit lesson approval requires at least one evidence item.',
@@ -308,13 +317,22 @@ export function applyHumanFeedbackToLesson(
     );
   }
   if (lesson.lifecycleStatus === 'quarantined' && lesson.quarantine !== undefined) {
+    const unquarantinedLesson = unquarantineLesson(lesson, {
+      reviewedAt: observedAt,
+      reviewer: request.source,
+      evidenceUrl: primaryApprovalEvidence.reference,
+      reason: feedbackReason,
+    });
+    const shouldClearApprovedSandbox =
+      unquarantinedLesson.lifecycleStatus === undefined ||
+      unquarantinedLesson.lifecycleStatus === 'active';
+    const { experimentSandbox, ...unquarantinedLessonWithoutSandbox } =
+      unquarantinedLesson;
+    void experimentSandbox;
     return {
-      ...unquarantineLesson(lesson, {
-        reviewedAt: observedAt,
-        reviewer: request.source,
-        evidenceUrl: primaryApprovalEvidence.reference,
-        reason: request.reason,
-      }),
+      ...(shouldClearApprovedSandbox
+        ? unquarantinedLessonWithoutSandbox
+        : unquarantinedLesson),
       feedbackWeighting,
     };
   }
