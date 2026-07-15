@@ -66,7 +66,7 @@ jobs:
 
           node scripts/check-package-manager.mjs
           set +e
-          node scripts/dependency-vulnerability-sla.mjs "${state_args[@]}" --format json > "$state.next"
+          node scripts/dependency-vulnerability-sla.mjs "${state_args[@]}" --format json --fail-on-new-critical-high > "$state.next"
           status=$?
           set -e
           node scripts/dependency-vulnerability-sla.mjs "${state_args[@]}" --format human --no-fail-on-sla

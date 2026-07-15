@@ -112,6 +112,26 @@ function runVulnerabilitySlaReport(audit: unknown, extraArgs: string[] = []) {
   );
 }
 
+function runVulnerabilitySlaNpmScript(audit: unknown, extraArgs: string[] = []) {
+  return spawnSync(
+    "npm",
+    [
+      "--silent",
+      "run",
+      "deps:vulnerability-sla",
+      "--",
+      "--audit-input",
+      writeSlaJson(audit),
+      ...extraArgs,
+    ],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    },
+  );
+}
+
 describe("dependency CI guards for issue #1414", () => {
   it("removes tracked temp fixture roots even when assertions fail before guard execution", () => {
     const outdatedFixture = writeFixtureFile(
@@ -560,6 +580,7 @@ updates:
         firstSeen: string;
         fixedVersion: string | null;
         overSla: boolean;
+        isNew: boolean;
       }>;
     };
     expect(report.ageSource).toBe("current-run");
@@ -568,7 +589,96 @@ updates:
       firstSeen: "2026-07-15",
       fixedVersion: null,
       overSla: false,
+      isNew: true,
     });
+  });
+
+  it("keeps npm-script JSON SLA output parseable", () => {
+    const result = runVulnerabilitySlaNpmScript(
+      {
+        metadata: { vulnerabilities: { total: 0 } },
+        vulnerabilities: {},
+      },
+      ["--format", "json"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+    expect(result.stdout).not.toContain("matches packageManager");
+  });
+
+  it("preserves SLA age across advisory severity changes", () => {
+    const state = writeSlaJson(
+      {
+        findings: [
+          {
+            key: "leftpad|high|<2.0.0|https://github.com/advisories/GHSA-leftpad",
+            package: "leftpad",
+            severity: "high",
+            advisoryKeys: ["https://github.com/advisories/GHSA-leftpad"],
+            firstSeen: "2026-06-01",
+          },
+        ],
+      },
+      "state.json",
+    );
+    const result = runVulnerabilitySlaReport(
+      {
+        metadata: { vulnerabilities: { critical: 1, total: 1 } },
+        vulnerabilities: {
+          leftpad: {
+            severity: "critical",
+            range: "<2.0.0",
+            nodes: ["node_modules/leftpad"],
+            fixAvailable: false,
+            via: [
+              {
+                url: "https://github.com/advisories/GHSA-leftpad",
+                severity: "critical",
+              },
+            ],
+          },
+        },
+      },
+      ["--state", state, "--now", "2026-07-15", "--format", "json"],
+    );
+
+    expect(result.status).toBe(1);
+    const report = JSON.parse(result.stdout) as {
+      findings: Array<{ ageDays: number; firstSeen: string; isNew: boolean }>;
+    };
+    expect(report.findings[0]).toMatchObject({
+      ageDays: 44,
+      firstSeen: "2026-06-01",
+      isNew: false,
+    });
+  });
+
+  it("can fail fresh critical/high dependency findings before SLA aging", () => {
+    const result = runVulnerabilitySlaReport(
+      {
+        metadata: { vulnerabilities: { high: 1, total: 1 } },
+        vulnerabilities: {
+          leftpad: {
+            severity: "high",
+            range: "<2.0.0",
+            nodes: ["node_modules/leftpad"],
+            fixAvailable: false,
+            via: [{ url: "https://github.com/advisories/GHSA-leftpad" }],
+          },
+        },
+      },
+      [
+        "--now",
+        "2026-07-15",
+        "--format",
+        "json",
+        "--fail-on-new-critical-high",
+      ],
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("New critical/high dependency vulnerability");
   });
 
   it("fails closed when a requested SLA state file is missing", () => {
@@ -621,7 +731,7 @@ updates:
       "node scripts/check-package-manager.mjs && npm audit",
     );
     expect(packageJson.scripts?.["deps:vulnerability-sla"]).toBe(
-      "node scripts/check-package-manager.mjs && node scripts/dependency-vulnerability-sla.mjs",
+      "node scripts/check-package-manager.mjs --quiet && node scripts/dependency-vulnerability-sla.mjs",
     );
     expect(packageJson.scripts?.["deps:outdated:major"]).toBe(
       "node scripts/check-major-outdated.mjs",
@@ -632,6 +742,7 @@ updates:
     expect(workflow).toContain("actions/cache/restore@v4");
     expect(workflow).toContain("dependency-vulnerability-sla-state.json");
     expect(workflow).toContain("scripts/dependency-vulnerability-sla.mjs");
+    expect(workflow).toContain("--fail-on-new-critical-high");
     expect(
       workflow.indexOf("Dependency vulnerability SLA dashboard"),
     ).toBeLessThan(workflow.indexOf("npm run audit:dependencies"));
