@@ -636,8 +636,9 @@ function hasDeleteTrace(adapter: ExportAdapter): adapter is DeletableAdapter {
 function hasDeleteTraceSupport(adapter: ExportAdapter, seen = new WeakSet<object>()): boolean {
   if (seen.has(adapter)) return false
   seen.add(adapter)
-  if (hasDeleteTrace(adapter)) return true
-  return childAdapters(adapter as AdapterWrapperShape).some(child => hasDeleteTraceSupport(child, seen))
+  const children = childAdapters(adapter as AdapterWrapperShape)
+  if (children.length > 0) return children.every(child => hasDeleteTraceSupport(child, seen))
+  return hasDeleteTrace(adapter)
 }
 
 async function deleteTraceFromAdapter(

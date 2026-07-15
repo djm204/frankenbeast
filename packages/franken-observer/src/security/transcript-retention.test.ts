@@ -229,6 +229,20 @@ describe('transcript retention controls', () => {
     })
   })
 
+  it('surfaces raw retention cleanup gaps when any fan-out backend cannot delete', () => {
+    const adapter = new TranscriptRetentionAdapter({
+      adapter: new MultiAdapter({ adapters: [new InMemoryAdapter(), new NonDeletingAdapter()] }),
+      mode: 'raw',
+      redactionLevel: 'none',
+    })
+
+    expect(adapter.describePolicy()).toMatchObject({
+      storesRawTranscriptContent: true,
+      cleanupRemovesStoredTraces: false,
+      cleanupWarning: expect.stringContaining('does not support deleteTrace'),
+    })
+  })
+
   it('reports access policy and retained transcript fields for operator visibility', () => {
     const report = describeTranscriptRetentionPolicy({
       ttlMs: 60_000,
