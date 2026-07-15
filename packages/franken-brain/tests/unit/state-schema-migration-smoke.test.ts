@@ -65,7 +65,12 @@ describe('state schema migration smoke tests', () => {
         storeNames.map((store) => ({
           store,
           version: CURRENT_MEMORY_SCHEMA_VERSION,
-          recordCount: store === 'working_memory' || store === 'episodic_events' || store === 'checkpoints' || store === 'memory_access_audit_events' ? 1 : 0,
+          recordCount:
+            store === 'memory_access_audit_events'
+              ? 3
+              : store === 'working_memory' || store === 'episodic_events' || store === 'checkpoints'
+                ? 1
+                : 0,
         })),
       );
       brain.close();
