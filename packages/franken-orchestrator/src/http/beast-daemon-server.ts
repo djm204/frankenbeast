@@ -48,6 +48,7 @@ function errorMessage(error: unknown): string {
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4050;
+const MUTATION_DRAIN_WAIT_TIMEOUT_MS = 5000;
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 const PID_FILE_DECIMAL_PATTERN = /^\d+$/;
 
@@ -85,12 +86,25 @@ class MutableBeastDaemonDrainState implements BeastDaemonDrainState {
     };
   }
 
-  async waitForMutations(): Promise<void> {
+  async waitForMutations(timeoutMs = MUTATION_DRAIN_WAIT_TIMEOUT_MS): Promise<boolean> {
     if (this.activeMutations === 0) {
-      return;
+      return true;
     }
-    await new Promise<void>((resolve) => {
-      this.mutationWaiters.push(resolve);
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(false);
+        }
+      }, timeoutMs);
+      this.mutationWaiters.push(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(true);
+        }
+      });
     });
   }
 }

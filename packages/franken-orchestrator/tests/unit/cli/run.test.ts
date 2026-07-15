@@ -2219,6 +2219,35 @@ describe('main() execution', () => {
     }));
   });
 
+  it('does not proxy or start local beast services while detected daemon is draining', async () => {
+    const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-daemon-draining`);
+    tempDirs.push(root);
+    mkdirSync(join(root, '.frankenbeast'), { recursive: true });
+    writeFileSync(join(root, '.frankenbeast', 'beasts-daemon.pid'), `${process.pid}\n`);
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ok: false,
+      status: 'draining',
+      service: 'beasts-daemon',
+      root,
+      pid: process.pid,
+    }, { status: 503 })));
+    mockParseArgs.mockReturnValue({
+      ...mockParseArgs(),
+      subcommand: 'chat-server',
+      baseDir: root,
+    });
+
+    await main();
+
+    expect(mockCreateBeastServices).not.toHaveBeenCalled();
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
+      beastDaemon: expect.anything(),
+    }));
+    expect(mockStartChatServer).toHaveBeenCalledWith(expect.not.objectContaining({
+      beastControl: expect.anything(),
+    }));
+  });
+
   it('keeps local beast services when the daemon pidfile is live but health is not reachable', async () => {
     const root = join(tmpdir(), `frankenbeast-run-test-${Date.now()}-daemon-stale`);
     tempDirs.push(root);
