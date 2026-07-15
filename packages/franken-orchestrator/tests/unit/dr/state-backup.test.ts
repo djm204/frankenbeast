@@ -95,7 +95,7 @@ describe('encrypted DR state backups', () => {
       const restored = await restoreEncryptedStateBackup({ backupPath, targetDir: restoreDir, keyFilePath: keyFile });
       expect(restored.wouldWrite).toBe(true);
       await expect(readFile(join(restoreDir, 'kanban.db'), 'utf8')).resolves.toBe('sqlite-kanban-bytes');
-      await expect(readFile(join(restoreDir, 'approvals', 'ledger.json'), 'utf8')).resolves.toContain('secret-approval-token');
+      await expect(readFile(join(restoreDir, '_quarantine', 'approvals', 'approvals', 'ledger.json'), 'utf8')).resolves.toContain('secret-approval-token');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -109,14 +109,16 @@ describe('encrypted DR state backups', () => {
 
     try {
       await writeFile(join(dir, 'beast.db'), 'project sqlite bytes', 'utf8');
-      await writeFile(inTreeBackupPath, 'stale previous backup', 'utf8');
+      await writeFile(join(dir, 'dr.key'), 'embedded key should be excluded', 'utf8');
+      await writeFile(inTreeBackupPath, JSON.stringify({ format: 'frankenbeast-dr-state-backup', schemaVersion: 1 }), 'utf8');
       const envelope = await createEncryptedStateBackup({
         stateDir: join(dir, 'state'),
         outputPath: inTreeBackupPath,
-        keyFilePath: keyFile,
+        keyFilePath: join(dir, 'dr.key'),
       });
       const paths = envelope.manifest.files.map((file) => file.path);
       expect(paths).not.toContain('state/backup.franken-dr.json');
+      expect(paths).not.toContain('dr.key');
       expect(paths).toContain('beast.db');
       expect(paths).toContain('state/kanban.db');
 
@@ -126,7 +128,7 @@ describe('encrypted DR state backups', () => {
       await expect(restoreEncryptedStateBackup({
         backupPath: inTreeBackupPath,
         targetDir: restoreDir,
-        keyFilePath: keyFile,
+        keyFilePath: join(dir, 'dr.key'),
       })).rejects.toThrow(/non-empty target/);
       await expect(stat(join(outsideDir, 'ledger.json'))).rejects.toThrow();
     } finally {
@@ -143,6 +145,25 @@ describe('encrypted DR state backups', () => {
         outputPath: join(dir, 'backup.franken-dr.json'),
         keyFilePath: keyFile,
       })).rejects.toThrow(/quiesce SQLite state/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects output paths that alias live input or key files', async () => {
+    const { dir, keyFile } = await makeFixtureState();
+    try {
+      await writeFile(join(dir, 'beast.db'), 'project sqlite bytes', 'utf8');
+      await expect(createEncryptedStateBackup({
+        stateDir: join(dir, 'state'),
+        outputPath: join(dir, 'beast.db'),
+        keyFilePath: keyFile,
+      })).rejects.toThrow(/aliases a live input/);
+      await expect(createEncryptedStateBackup({
+        stateDir: join(dir, 'state'),
+        outputPath: keyFile,
+        keyFilePath: keyFile,
+      })).rejects.toThrow(/must not be the key file/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

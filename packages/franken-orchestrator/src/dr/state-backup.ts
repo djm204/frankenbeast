@@ -152,16 +152,36 @@ function assertNoLiveSqliteSidecars(relativePaths: readonly string[]): void {
   }
 }
 
-async function buildPayload(stateDir: string, generatedAt: string, excludePath?: string): Promise<StateBackupPayload> {
+async function isExistingBackupArtifact(path: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as Partial<StateBackupEnvelope>;
+    return parsed.format === STATE_BACKUP_FORMAT && parsed.schemaVersion === STATE_BACKUP_SCHEMA_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+async function buildPayload(stateDir: string, generatedAt: string, outputPath: string, keyFilePath: string): Promise<StateBackupPayload> {
   const root = await resolveBackupRoot(stateDir);
-  const excluded = excludePath === undefined ? undefined : resolve(excludePath);
+  const output = resolve(outputPath);
+  const keyFile = resolve(keyFilePath);
+  if (output === keyFile) {
+    throw new Error('DR backup output path must not be the key file path');
+  }
   const rootStats = await stat(root);
   if (!rootStats.isDirectory()) {
     throw new Error(`DR backup source must be a directory: ${stateDir}`);
   }
 
   const categories = emptyCategoryCounts();
-  const sourceFiles = (await walkFiles(root)).filter((absolutePath) => resolve(absolutePath) !== excluded);
+  const discoveredFiles = await walkFiles(root);
+  if (discoveredFiles.some((absolutePath) => resolve(absolutePath) === output) && !await isExistingBackupArtifact(output)) {
+    throw new Error('DR backup output path aliases a live input file; choose a separate backup artifact path');
+  }
+  const sourceFiles = discoveredFiles.filter((absolutePath) => {
+    const resolved = resolve(absolutePath);
+    return resolved !== output && resolved !== keyFile;
+  });
   const relativeSourcePaths = sourceFiles.map((absolutePath) => relative(root, absolutePath).split(sep).join('/'));
   assertNoLiveSqliteSidecars(relativeSourcePaths);
   const files = await Promise.all(sourceFiles.map(async (absolutePath) => {
@@ -195,7 +215,7 @@ async function buildPayload(stateDir: string, generatedAt: string, excludePath?:
 export async function createEncryptedStateBackup(options: CreateStateBackupOptions): Promise<StateBackupEnvelope> {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const outputPath = resolve(options.outputPath);
-  const payload = await buildPayload(options.stateDir, generatedAt, outputPath);
+  const payload = await buildPayload(options.stateDir, generatedAt, outputPath, options.keyFilePath);
   const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
   const key = await deriveKey(options.keyFilePath);
   const iv = randomBytes(12);
@@ -364,7 +384,8 @@ export async function restoreEncryptedStateBackup(options: RestoreStateBackupOpt
   if (!dryRun) {
     await assertEmptyRestoreTarget(targetDir);
     for (const file of payload.files) {
-      const targetPath = resolve(targetDir, file.path);
+      const restorePath = file.category === 'approvals' ? join('_quarantine', 'approvals', file.path) : file.path;
+      const targetPath = resolve(targetDir, restorePath);
       if (!targetPath.startsWith(`${targetDir}${sep}`)) {
         throw new Error(`Unsafe backup entry path: ${file.path}`);
       }
