@@ -63,19 +63,26 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      'process.exit(3)',
+      "process.stderr.write('API_KEY=stderr-secret Authorization: Bearer stderr-token'); process.exit(3)",
       '--',
       '--token',
       'super-secret-token',
       '--api-key=abc123',
+      'postgres://user:db-password@localhost:5432/db',
     ]);
 
     expect(result.status).toBe(3);
     const envelope = parseEnvelope(result.stderr);
     expect(envelope.command).toContain('[REDACTED]');
     expect(envelope.command).toContain('--api-key=[REDACTED]');
-    expect(JSON.stringify(envelope.command)).not.toContain('super-secret-token');
-    expect(JSON.stringify(envelope.command)).not.toContain('abc123');
+    expect(envelope.command).toContain('postgres://[REDACTED]:[REDACTED]@localhost:5432/db');
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('Authorization: [REDACTED]');
+    expect(JSON.stringify(envelope)).not.toContain('super-secret-token');
+    expect(JSON.stringify(envelope)).not.toContain('abc123');
+    expect(JSON.stringify(envelope)).not.toContain('db-password');
+    expect(JSON.stringify(envelope)).not.toContain('stderr-secret');
+    expect(JSON.stringify(envelope)).not.toContain('stderr-token');
   });
 
   it('fails with an explicit envelope when the cron command is missing', () => {
@@ -197,6 +204,70 @@ describe('cron script error envelope runner', () => {
       exitCode: 7,
     });
     expect(envelope.durationMs).toBeLessThan(1_500);
+  });
+
+  it('keeps the cron child in the supervisor kill group', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-supervisor-'));
+    const pidFile = join(tempDir, 'child.pid');
+    try {
+      const supervisor = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'supervisor-kill-group',
+        '--',
+        process.execPath,
+        '-e',
+        `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        detached: true,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      expect(readFileSync(pidFile, 'utf8')).toMatch(/^\d+$/);
+      const childPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      process.kill(-supervisor.pid!, 'SIGTERM');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      process.kill(-supervisor.pid!, 'SIGKILL');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let childAlive = true;
+      try {
+        process.kill(childPid, 0);
+        try {
+          childAlive = readFileSync(`/proc/${childPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+        } catch {
+          childAlive = true;
+        }
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        childAlive = code !== 'ESRCH';
+      }
+      if (childAlive) {
+        process.kill(childPid, 'SIGKILL');
+      }
+      expect(childAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('preserves the job name on option parse errors', () => {

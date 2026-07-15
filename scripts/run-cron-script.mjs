@@ -68,7 +68,9 @@ function signalChildTree(child, signal) {
     } catch (error) {
       if (error?.code !== 'ESRCH') {
         child.kill(signal);
+        return;
       }
+      child.kill(signal);
       return;
     }
   }
@@ -77,7 +79,16 @@ function signalChildTree(child, signal) {
 }
 
 function isSecretKey(value) {
-  return /(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key)/i.test(value);
+  return /^--?[a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key)[a-z0-9_-]*$/i.test(value);
+}
+
+function redactSensitiveText(value) {
+  const raw = typeof value === 'string' ? value : String(value ?? '');
+  return raw
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]:[REDACTED]@')
+    .replace(/\b(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, '$1[REDACTED]')
+    .replace(/\b((?:authorization|token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)([^\s"']+)/gi, '$1[REDACTED]')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]');
 }
 
 function redactCommand(command) {
@@ -105,7 +116,7 @@ function redactCommand(command) {
       continue;
     }
 
-    redacted.push(part);
+    redacted.push(redactSensitiveText(part));
   }
 
   return redacted;
@@ -125,7 +136,7 @@ function redactMessage(message, command) {
     redacted = redacted.split(original).join(replacement);
   }
 
-  return redacted.replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]');
+  return redactSensitiveText(redacted);
 }
 
 function spawnFailureExitCode(error) {
@@ -145,7 +156,7 @@ function writeEnvelope({ script, command, exitCode, signal = null, failureKind =
     durationMs,
     recoverable,
     message: redactMessage(message, command),
-    stderrTail,
+    stderrTail: redactSensitiveText(stderrTail),
   };
   process.stderr.write(`${JSON.stringify(envelope)}\n`);
 }
@@ -235,7 +246,7 @@ async function runCronScript({ name, recoverable, command }) {
       cwd: process.cwd(),
       env: process.env,
       shell: process.platform === 'win32',
-      detached: process.platform !== 'win32',
+      detached: false,
       stdio: ['inherit', 'inherit', 'pipe'],
     });
 
