@@ -35,10 +35,11 @@ npm run deps:vulnerability-sla
 `deps:vulnerability-sla` turns the current `npm audit` data into a compact
 human-readable dashboard. For automation, run the underlying script with
 `--format json`; both modes include severity, package, ecosystem, vulnerable
-range/fixed version, age, transitive path, and any supplied issue/PR links. CI
-fails only when critical/high findings exceed the default SLA window, while the
-daily deterministic security scan publishes both Markdown and JSON report
-artifacts without failing the scheduled issue reconciliation.
+range/fixed version, age, transitive path, and any supplied issue/PR links. The
+SLA dashboard gate fails only when critical/high findings exceed the default SLA
+window; other CI security gates may still fail independently. The daily
+deterministic security scan publishes both Markdown and JSON report artifacts
+without failing the scheduled issue reconciliation.
 
 Dependency-update automation is fail-closed for first-party packages: Dependabot
 may update external npm and GitHub Actions dependencies, but it must ignore the

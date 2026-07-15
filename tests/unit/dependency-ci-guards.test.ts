@@ -387,7 +387,15 @@ updates:
 
   it("emits a human dependency vulnerability SLA dashboard with age, fixed version, path, and links", () => {
     const state = writeSlaJson(
-      { findings: [{ package: "vite", firstSeen: "2026-06-01" }] },
+      {
+        findings: [
+          {
+            key: "vite|high|<8.1.3|https://github.com/advisories/GHSA-test",
+            package: "vite",
+            firstSeen: "2026-06-01",
+          },
+        ],
+      },
       "state.json",
     );
     const links = writeSlaJson(
@@ -456,7 +464,15 @@ updates:
 
   it("fails critical and high dependency vulnerabilities that exceed the SLA in JSON mode", () => {
     const state = writeSlaJson(
-      { findings: [{ package: "protobufjs", firstSeen: "2026-07-01" }] },
+      {
+        findings: [
+          {
+            key: "protobufjs|critical|<7.6.5|no-advisory",
+            package: "protobufjs",
+            firstSeen: "2026-07-01",
+          },
+        ],
+      },
       "state.json",
     );
     const result = runVulnerabilitySlaReport(
