@@ -467,6 +467,7 @@ function redactFieldValue(
     if (value !== null && typeof value === 'object') return redactNestedTranscriptValues(value, policy, seen)
   }
   if ((policy.mode === 'raw' || policy.redactionLevel === 'none') && value !== null && typeof value === 'object') {
+    if (field === 'toolOutputs') return cloneValue(value)
     return redactNestedTranscriptValues(value, policy, seen)
   }
   return redactValue(value, policy)
@@ -532,8 +533,10 @@ function classifyProviderStreamDeltaField(deltaType: string, key: string): Trans
 }
 
 function classifyProviderMessageField(messageType: string, messageRole: string, key: string): TranscriptField | undefined {
-  if ((messageType === 'toolresult' || messageRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
+  const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+  if ((messageType === 'toolresult' || messageRole === 'tool') && (normalizedKey === 'content' || normalizedKey === 'text' || normalizedKey === 'parts')) return 'toolOutputs'
   if (messageType === 'inputjsondelta' && key.replace(/[_-]/g, '').toLowerCase() === 'partialjson') return 'toolInputs'
+  if ((messageRole === 'user' || messageRole === 'system' || messageRole === 'assistant' || messageRole === 'model') && normalizedKey === 'parts') return 'prompts'
   if (isPromptBlockContentField(messageType, key)) return 'prompts'
   return classifyTranscriptField(key)
 }

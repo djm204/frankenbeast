@@ -1019,7 +1019,9 @@ describe('transcript retention controls', () => {
         metadata: {
           messages: [
             { role: 'user', content: 'private prompt' },
+            { role: 'user', parts: [{ text: 'private gemini prompt' }] },
             { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
+            { role: 'tool', content: [{ type: 'text', text: 'private block tool result' }], tool_call_id: 'call-2' },
           ],
         },
       })],
@@ -1031,7 +1033,9 @@ describe('transcript retention controls', () => {
 
     expect(retained.spans[0].metadata['messages']).toEqual([
       { role: 'user' },
+      { role: 'user' },
       { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
+      { role: 'tool', content: [{ type: 'text', text: 'private block tool result' }], tool_call_id: 'call-2' },
     ])
   })
 
