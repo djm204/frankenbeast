@@ -1727,6 +1727,71 @@ describe('SqliteBrain', () => {
       expect(indexes.some(index => index.name === 'idx_memory_review_suppressions_target_key')).toBe(true);
     });
 
+    it('does not create deletion hash keys while only checking suppressions', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.new-candidate',
+        value: 'safe value',
+        source: 'chat:turn-no-suppression',
+        confidence: 0.8,
+        reason: 'Normal proposals should not create suppression signing keys.',
+      });
+
+      expect(
+        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
+      ).toEqual({ count: 0 });
+      expect(brain.serialize()).not.toHaveProperty('deletionGuardHashKey');
+    });
+
+    it('deletes approved working memory when matching review provenance by source scope', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Repository metadata.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+      expect(brain.working.get('env.repo.default-branch')).toBe('main');
+
+      const report = brain.rightToForget({ sourceScope: 'repo-config' });
+
+      expect(report.deleted.working).toBe(1);
+      expect(report.remainingReferences).toBe(0);
+      expect(brain.working.has('env.repo.default-branch')).toBe(false);
+      expect(
+        brain.memoryReview.provenanceFor('working', 'env.repo.default-branch'),
+      ).toBeNull();
+    });
+
+    it('does not expose approved memory in working state when approval transaction rolls back', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.exec(`
+        CREATE TRIGGER fail_review_provenance_insert
+        BEFORE INSERT ON memory_review_provenance
+        BEGIN
+          SELECT RAISE(FAIL, 'forced provenance failure');
+        END;
+      `);
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.rollback',
+        value: 'rolled back value',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Approval failure should remain atomic.',
+      });
+
+      expect(() => brain.memoryReview.approve(candidate.id, { reviewer: 'operator' })).toThrow(
+        /forced provenance failure/,
+      );
+      expect(brain.working.has('env.repo.rollback')).toBe(false);
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM working_memory WHERE key = ?`).get('env.repo.rollback')).toEqual({ count: 0 });
+    });
+
     it('uses persisted value normalization when signing suppressions', () => {
       const value = { seenAt: new Date('2026-07-14T00:00:00.000Z') };
       const candidate = brain.memoryReview.propose({

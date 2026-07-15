@@ -562,6 +562,61 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return finalize;
   }
 
+  persistKeyAfterCommit(key: string, value: unknown): (() => void) | void {
+    const { normalized, serialized, size } = this.prepareEntry(key, value);
+    assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+
+    if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
+      );
+    }
+    const previousSize = this.sizes.get(key) ?? 0;
+    const newTotal = this.totalBytes - previousSize + size;
+    if (
+      !Number.isSafeInteger(newTotal) ||
+      newTotal > this.limits.maxTotalBytes
+    ) {
+      throw new WorkingMemoryLimitError(
+        `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
+      );
+    }
+
+    let persistedValueMatches = false;
+    if (this.persistedSerialized.get(key) === serialized) {
+      const persistedRow = this.db
+        .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+        .get(key) as { value: string } | undefined;
+      const persistedValue = persistedRow
+        ? (this.encryption?.decrypt(persistedRow.value) ?? persistedRow.value)
+        : undefined;
+      persistedValueMatches = persistedValue === serialized;
+    }
+    if (!persistedValueMatches) {
+      this.db
+        .prepare(
+          `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
+           WHERE working_memory.value IS NOT excluded.value`,
+        )
+        .run(key, this.encryption?.encrypt(serialized) ?? serialized, isoNow());
+    }
+    const finalize = (): void => {
+      this.store.set(key, normalized);
+      this.sizes.set(key, size);
+      this.serialized.set(key, serialized);
+      this.totalBytes = newTotal;
+      this.persistedSerialized.set(key, serialized);
+      this.deletedKeys.delete(key);
+      this.dirtyKeys.delete(key);
+    };
+    if (!this.db.inTransaction) {
+      finalize();
+      return;
+    }
+    return finalize;
+  }
+
   purgeKey(key: string): (() => void) | void {
     if (this.store.has(key)) {
       this.totalBytes -= this.sizes.get(key) ?? 0;
@@ -1519,7 +1574,7 @@ export class SqliteMemoryReviewQueue {
         return;
       }
       finalizeWorkingFlush =
-        this.working.persistKey(candidate.key, candidate.value) ?? undefined;
+        this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
       this.db
         .prepare(
           `INSERT INTO memory_review_provenance (
@@ -1734,6 +1789,9 @@ export class SqliteMemoryReviewQueue {
       reason === 'never_store'
         ? this.neverStoreSignature(candidate)
         : this.rejectedSignature(candidate);
+    if (!signature) {
+      throw new Error('Unable to create memory review suppression signature');
+    }
     this.db
       .prepare(
         `INSERT INTO memory_review_suppressions (
@@ -1829,8 +1887,8 @@ export class SqliteMemoryReviewQueue {
     candidate: MemoryCandidateProposal,
   ): MemorySuppressionReason | null {
     return (
-      this.findSuppression(this.neverStoreSignature(candidate)) ??
-      this.findSuppression(this.rejectedSignature(candidate)) ??
+      this.findSuppression(this.neverStoreSignature(candidate, { createKey: false })) ??
+      this.findSuppression(this.rejectedSignature(candidate, { createKey: false })) ??
       this.findMatchingSuppression(candidate)
     );
   }
@@ -1865,7 +1923,8 @@ export class SqliteMemoryReviewQueue {
     return null;
   }
 
-  private findSuppression(signature: string): MemorySuppressionReason | null {
+  private findSuppression(signature: string | undefined): MemorySuppressionReason | null {
+    if (!signature) return null;
     const row = this.db
       .prepare(
         `SELECT suppression_reason FROM memory_review_suppressions WHERE signature = ?`,
@@ -1885,7 +1944,7 @@ export class SqliteMemoryReviewQueue {
     return {
       ...safeProposal,
       id: `memcand_suppressed_${createHash('sha256')
-        .update(this.suppressionSignature(proposal, suppressionReason))
+        .update(this.suppressionSignature(proposal, suppressionReason) ?? '')
         .digest('hex')
         .slice(0, 16)}`,
       status: 'suppressed',
@@ -1895,18 +1954,25 @@ export class SqliteMemoryReviewQueue {
     };
   }
 
-  private rejectedSignature(proposal: MemoryCandidateProposal): string {
-    return this.suppressionSignature(proposal, 'rejected');
+  private rejectedSignature(
+    proposal: MemoryCandidateProposal,
+    options: { createKey?: boolean } = {},
+  ): string | undefined {
+    return this.suppressionSignature(proposal, 'rejected', options);
   }
 
-  private neverStoreSignature(proposal: MemoryCandidateProposal): string {
-    return this.suppressionSignature(proposal, 'never_store');
+  private neverStoreSignature(
+    proposal: MemoryCandidateProposal,
+    options: { createKey?: boolean } = {},
+  ): string | undefined {
+    return this.suppressionSignature(proposal, 'never_store', options);
   }
 
   private suppressionSignature(
     proposal: MemoryCandidateProposal,
     suppressionReason: MemorySuppressionReason,
-  ): string {
+    options: { createKey?: boolean } = {},
+  ): string | undefined {
     const normalizedValue = canonicalMemoryValue(proposal.value);
     return keyedMemorySignature(
       this.db,
@@ -1925,6 +1991,7 @@ export class SqliteMemoryReviewQueue {
             stableStringify(normalizedValue),
           ],
       this.encryption,
+      options,
     );
   }
 
@@ -1987,8 +2054,17 @@ function stableMemorySignature(parts: unknown[]): string {
   return createHash('sha256').update(stableStringify(parts)).digest('hex');
 }
 
-function keyedMemorySignature(db: Database.Database, parts: unknown[], encryption?: MemoryCipher): string {
-  return keyedDeletionHash(db, stableStringify(parts), encryption);
+function keyedMemorySignature(
+  db: Database.Database,
+  parts: unknown[],
+  encryption?: MemoryCipher,
+  options: { createKey?: boolean } = {},
+): string | undefined {
+  const serialized = stableStringify(parts);
+  if (options.createKey === false) {
+    return existingKeyedDeletionHash(db, serialized, encryption);
+  }
+  return keyedDeletionHash(db, serialized, encryption);
 }
 
 function canonicalMemoryValue(value: unknown): unknown {
@@ -2291,6 +2367,12 @@ export class SqliteBrain implements IBrain {
         ? []
         : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: false });
       deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
+      const reviewMatches = memoryType === 'episodic'
+        ? []
+        : this.matchingReviewPayloads(normalizedSelector);
+      for (const key of this.reviewWorkingKeysToDelete(reviewMatches)) {
+        deletedWorkingKeys.add(key);
+      }
       for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: false })) {
         deletedWorkingKeys.add(key);
       }
@@ -2308,7 +2390,7 @@ export class SqliteBrain implements IBrain {
         const workingMatches = memoryType === 'episodic'
           ? []
           : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true });
-        const persistedWorkingMatches = workingMatches.filter(match => match.source === 'persisted').map(match => match.key);
+        const persistedWorkingMatches = new Set(workingMatches.filter(match => match.source === 'persisted').map(match => match.key));
         runtimeWorkingKeysToDelete = new Set(workingMatches.filter(match => match.source === 'runtime').map(match => match.key));
         deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
         for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: true })) {
@@ -2324,10 +2406,15 @@ export class SqliteBrain implements IBrain {
         const reviewMatches = memoryType === 'episodic'
           ? []
           : this.matchingReviewPayloads(normalizedSelector);
+        for (const key of this.reviewWorkingKeysToDelete(reviewMatches)) {
+          persistedWorkingMatches.add(key);
+          runtimeWorkingKeysToDelete.add(key);
+          deletedWorkingKeys.add(key);
+        }
         episodicMatchCount = episodicMatches.length;
         checkpointMatchCount = checkpointMatches.length;
         reviewMatchCount = reviewMatches.length;
-        finalizePersistedWorkingDelete = this.working.deletePersistedKeys(persistedWorkingMatches);
+        finalizePersistedWorkingDelete = this.working.deletePersistedKeys(Array.from(persistedWorkingMatches));
         if (episodicMatches.length > 0) {
           const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
           for (const id of episodicMatches) {
@@ -2468,6 +2555,14 @@ export class SqliteBrain implements IBrain {
       }
     }
     return matches;
+  }
+
+  private reviewWorkingKeysToDelete(matches: ReviewPayloadMatch[]): string[] {
+    return Array.from(new Set(matches
+      .filter((match): match is Extract<ReviewPayloadMatch, { table: 'memory_review_provenance' }> =>
+        match.table === 'memory_review_provenance' && match.targetStore === 'working',
+      )
+      .map(match => match.key)));
   }
 
   private reviewPayloadRowMatchesSelector(row: ReviewPayloadRow, selector: NormalizedRightToForgetSelector): boolean {
