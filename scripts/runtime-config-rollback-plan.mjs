@@ -83,7 +83,8 @@ export function buildRuntimeConfigRollbackPlan(options) {
     changedPaths,
     changes,
     readOnlyCapture: [
-      ['mkdir', '-m', '700', '-p', evidenceDir],
+      ['mkdir', '-p', evidenceDir],
+      ['chmod', '700', evidenceDir],
       ['install', '-m', '600', beforePath, rollbackConfigPath],
       [
         'node',
@@ -104,13 +105,13 @@ export function buildRuntimeConfigRollbackPlan(options) {
         targetPath,
         beforePath,
         afterPath,
-        changedPaths.join(', '),
+        changedPaths.map(path => JSON.stringify(path)).join(', '),
       ],
     ],
     requiredDecisions: [
       `Confirm ${beforePath} is the last-known-good runtime config snapshot.`,
       `Confirm ${afterPath} captures the currently deployed or failed runtime config state.`,
-      `Review changed paths before rollback: ${changedPaths.join(', ')}.`,
+      `Review changed paths before rollback: ${changedPaths.map(path => JSON.stringify(path)).join(', ')}.`,
       `Fill ${rollbackCommentPath} with the approval-cop outcome and verification results before posting it to a PR or Kanban card.`,
     ],
     approvalGatedActions: [
@@ -122,7 +123,7 @@ export function buildRuntimeConfigRollbackPlan(options) {
     postRollbackVerification: [
       ['cmp', '-s', rollbackConfigPath, targetPath],
       ['node', '-e', 'const fs=require("node:fs"); JSON.parse(fs.readFileSync(process.argv[1], "utf8")); JSON.parse(fs.readFileSync(process.argv[2], "utf8"));', rollbackConfigPath, targetPath],
-      ['bash', '-lc', '! grep -Eq "<(fill before posting)>" "$1"', '--', rollbackCommentPath],
+      ['bash', '-lc', '[ -f "$1" ] && ! grep -Eq "<(fill before posting)>" "$1"', '--', rollbackCommentPath],
     ],
     notes: [
       'This helper is dry-run only; it never writes the target runtime config or executes approval-gated commands.',
@@ -144,7 +145,7 @@ export function renderPlan(plan) {
     `Target config: ${plan.targetPath}`,
     '',
     '## Changed runtime config paths',
-    ...plan.changes.map(change => `- ${change.path}: ${change.type}`),
+    ...plan.changes.map(change => `- \`${escapeMarkdownInlineCode(change.path)}\`: ${change.type}`),
     '',
     '## 1. Capture read-only rollback evidence',
     ...plan.readOnlyCapture.map(command => `- ${quoteCommand(command)}`),
@@ -196,7 +197,7 @@ function buildChange(path, before, after) {
 }
 
 function validateSnapshotShape(value, filePath) {
-  const stack = [{ value, depth: 0 }];
+  const stack = [{ value, depth: 1 }];
   let containers = 0;
   let objectKeys = 0;
   let arrayItems = 0;
@@ -256,6 +257,12 @@ function assertSafePath(value, label) {
   if (value.startsWith('-') || /\x00/u.test(value)) {
     throw new Error(`${label} is not safe for argv usage: ${value}`);
   }
+}
+
+function escapeMarkdownInlineCode(value) {
+  return String(value)
+    .replace(/`/gu, '\\`')
+    .replace(/[\r\n]+/gu, '\\n');
 }
 
 function quoteCommand(args) {
