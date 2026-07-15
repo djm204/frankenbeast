@@ -128,6 +128,8 @@ async function createProxyResponse(
   const targetUrl = resolveProxyTargetUrl(apiTarget, sourceUrl);
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
+  headers.set('x-forwarded-host', sourceUrl.host);
+  headers.set('x-forwarded-proto', sourceUrl.protocol.replace(/:$/, ''));
   if (options.operatorToken) {
     headers.set('authorization', `Bearer ${options.operatorToken}`);
   }
@@ -367,7 +369,12 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
     }
 
     const targetUrl = resolveProxyTargetUrl(apiTarget, requestUrl);
-    const headers = { ...req.headers, host: targetUrl.host };
+    const headers = {
+      ...req.headers,
+      host: targetUrl.host,
+      'x-forwarded-host': requestUrl.host,
+      'x-forwarded-proto': requestUrl.protocol.replace(/:$/, ''),
+    };
     if (options.operatorToken) {
       headers.authorization = `Bearer ${options.operatorToken}`;
     }

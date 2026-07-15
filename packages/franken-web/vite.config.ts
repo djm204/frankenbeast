@@ -72,11 +72,10 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
       return undefined;
     },
     configure(proxy) {
-      if (!operatorToken) {
-        return;
-      }
       proxy.on('proxyReq', (proxyReq, req) => {
-        proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
+        if (operatorToken) {
+          proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
+        }
         if (req.headers.host) {
           proxyReq.setHeader('x-forwarded-host', req.headers.host);
           proxyReq.setHeader('x-forwarded-proto', requestProtocol(req));

@@ -144,7 +144,36 @@ describe('dashboard static server', () => {
     expect(proxied.status).toBe(200);
     const [targetUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(targetUrl.toString()).toBe('http://127.0.0.1:4242/base/api/dashboard?fresh=1');
-    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TEST_OPERATOR_TOKEN}`);
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe(`Bearer ${TEST_OPERATOR_TOKEN}`);
+    expect(headers.get('x-forwarded-host')).toBe('dashboard.local');
+    expect(headers.get('x-forwarded-proto')).toBe('http');
+  });
+
+  it('forwards the static dashboard origin headers without requiring an operator token', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    globalThis.fetch = fetchMock;
+
+    const proxied = await createDashboardStaticResponse(
+      new Request('https://dashboard.example.com/v1/chat/sessions', {
+        method: 'POST',
+        headers: { origin: 'https://dashboard.example.com' },
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242' },
+    );
+
+    expect(proxied.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('x-forwarded-host')).toBe('dashboard.example.com');
+    expect(headers.get('x-forwarded-proto')).toBe('https');
+    expect(headers.get('authorization')).toBeNull();
   });
 
   it('loads dashboard operator token from network config even when provider trust metadata is unapproved', async () => {
