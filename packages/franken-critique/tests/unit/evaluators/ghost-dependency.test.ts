@@ -244,13 +244,14 @@ describe('GhostDependencyEvaluator', () => {
       "const deps = [a<b, import('array-comparison-ghost')];\n" +
       "return a<b, import('return-comparison-ghost');\n" +
       "load('https://example.invalid', import('colon-string-ghost'));\n" +
-      "const el = <div>import('jsx-text-ghost'){import('jsx-expression-ghost')}</div>;\n" +
+      "const el = <div>import('jsx-text-ghost'){(foo({}), import('jsx-expression-ghost'))}</div>;\n" +
+      "const taggy = '<B>'; import('tag-string-ghost'); const close = '</B>';\n" +
       "await import('z\\\n" +
       "od');";
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(5);
+    expect(result.findings).toHaveLength(6);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('string-angle-ghost'),
@@ -258,11 +259,30 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('return-comparison-ghost'),
         expect.stringContaining('colon-string-ghost'),
         expect.stringContaining('jsx-expression-ghost'),
+        expect.stringContaining('tag-string-ghost'),
       ]),
     );
     expect(result.findings.map((finding) => finding.message)).not.toEqual(
       expect.arrayContaining([expect.stringContaining('jsx-text-ghost')]),
     );
+  });
+
+  it('handles template type and malformed escape Codex regressions', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const typeOnly = await evaluator.evaluate(
+      createInput(
+        "type Mapped<T> = { [K in `${import('mapped-key-ghost').Name}`]: T };\n" +
+          "type Conditional<T> = T extends `${import('conditional-template-ghost').Name}` ? true : false;",
+      ),
+    );
+    const malformedEscape = await evaluator.evaluate(
+      createInput("const plugin = await import('\\u{FFFFFF}');"),
+    );
+
+    expect(typeOnly.verdict).toBe('pass');
+    expect(typeOnly.findings).toHaveLength(0);
+    expect(malformedEscape.verdict).toBe('fail');
+    expect(malformedEscape.findings).toHaveLength(1);
   });
 
   it('ignores method calls and TypeScript import types', async () => {

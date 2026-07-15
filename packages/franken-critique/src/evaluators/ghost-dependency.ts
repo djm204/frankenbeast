@@ -208,7 +208,7 @@ function startsWithKeyword(
 }
 
 function isInsideJsxText(content: string, index: number): boolean {
-  const previousOpen = content.lastIndexOf('<', index);
+  const previousOpen = findPreviousJsxOpeningTag(content, index);
   if (previousOpen === -1 || content[previousOpen + 1] === '/' || content[previousOpen + 1] === '!') return false;
   if (isIdentifierCharacter(content[previousOpen - 1] ?? '') || content[previousOpen - 1] === ')') return false;
 
@@ -221,9 +221,66 @@ function isInsideJsxText(content: string, index: number): boolean {
   const nextClosingTag = content.indexOf(`</${tagMatch[1]}>`, index);
   if (nextClosingTag === -1) return false;
 
-  const previousExpressionOpen = content.lastIndexOf('{', index);
-  const previousExpressionClose = content.lastIndexOf('}', index);
-  return previousExpressionOpen <= previousClose || previousExpressionClose > previousExpressionOpen;
+  return !hasUnclosedJsxExpression(content, previousClose + 1, index);
+}
+
+function findPreviousJsxOpeningTag(content: string, index: number): number {
+  let previousOpen = -1;
+  for (let i = 0; i < index; i += 1) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '/' && next === '/') {
+      i = skipSingleLineComment(content, i + 2);
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i = skipMultiLineComment(content, i + 2);
+      continue;
+    }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+
+    if (
+      ch === '<' &&
+      next !== '/' &&
+      next !== '!' &&
+      !isIdentifierCharacter(content[i - 1] ?? '') &&
+      content[i - 1] !== ')'
+    ) {
+      previousOpen = i;
+    }
+  }
+
+  return previousOpen;
+}
+
+function hasUnclosedJsxExpression(content: string, startIndex: number, endIndex: number): boolean {
+  let depth = 0;
+  for (let i = startIndex; i < endIndex; i += 1) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '/' && next === '/') {
+      i = skipSingleLineComment(content, i + 2);
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i = skipMultiLineComment(content, i + 2);
+      continue;
+    }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+
+    if (ch === '{') depth += 1;
+    else if (ch === '}' && depth > 0) depth -= 1;
+  }
+
+  return depth > 0;
 }
 
 function readStaticImportSpecifier(
@@ -509,6 +566,14 @@ function isTypeOnlyTemplateString(content: string, templateIndex: number): boole
   if (/(?:^|[;{}\n])\s*(?:const|let|var)\b[\s\S]*=\s*$/.test(prefix)) return false;
   if (/(?:^|[;{}\n])\s*(?:static\s+)?(?:accessor\s+)?[#A-Za-z_$][\w$]*\s*=\s*$/.test(prefix)) return false;
   if (/(?:^|[;{}\n])\s*(?:export\s+)?type\b[\s\S]*=\s*$/.test(prefix)) return true;
+  if (
+    /(?:^|[^.])\b(?:in|extends|keyof)\s*$/.test(prefixWithoutTrailingTrivia) &&
+    (endsInsideNestedTypeReference(prefix) ||
+      isInsideTypeDeclaration(prefix) ||
+      isInsideTypeAnnotation(prefix, content, templateIndex, isTernaryBranch))
+  ) {
+    return true;
+  }
   const previousIndex = skipTriviaBackward(content, templateIndex - 1);
   if (previousIndex >= 0 && /[\w$)\]]/.test(content[previousIndex] ?? '')) return false;
   return (
@@ -1328,7 +1393,11 @@ function decodeStringEscape(content: string, slashIndex: number): { value: strin
       const closeIndex = content.indexOf('}', slashIndex + 3);
       const hex = closeIndex === -1 ? '' : content.slice(slashIndex + 3, closeIndex);
       if (/^[0-9A-Fa-f]{1,6}$/.test(hex)) {
-        return { value: String.fromCodePoint(parseInt(hex, 16)), endIndex: closeIndex };
+        const codePoint = parseInt(hex, 16);
+        return {
+          value: codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : content.slice(slashIndex, closeIndex + 1),
+          endIndex: closeIndex,
+        };
       }
     }
     const hex = content.slice(slashIndex + 2, slashIndex + 6);
