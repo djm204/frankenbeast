@@ -125,6 +125,9 @@ export type RestorePreviewSeverity = 'info' | 'warning' | 'blocker';
 export type CrossFileStateConsistencyStatus = 'clean' | 'warning' | 'blocked';
 
 export type CrossFileStateConsistencyFindingCode =
+  | 'unsupported-schema-version'
+  | 'malformed-record-id'
+  | 'duplicate-record-id-within-area'
   | 'duplicate-record-id-across-areas'
   | 'dangling-task-reference'
   | 'malformed-task-reference';
@@ -132,8 +135,10 @@ export type CrossFileStateConsistencyFindingCode =
 export interface CrossFileStateConsistencyFinding {
   readonly code: CrossFileStateConsistencyFindingCode;
   readonly severity: RestorePreviewSeverity;
-  readonly area: ComparableArea;
+  readonly area: RestorePreviewArea;
   readonly id: string;
+  readonly filePath?: string;
+  readonly jsonPath: string;
   readonly message: string;
   readonly recommendation: string;
   readonly relatedAreas?: readonly ComparableArea[];
@@ -153,6 +158,7 @@ export interface CrossFileStateConsistencyReport {
 
 export interface CrossFileStateConsistencyOptions {
   readonly checkedAt?: string;
+  readonly manifestPath?: string;
 }
 
 export interface RestorePreviewRecord {
@@ -266,6 +272,7 @@ const AREA_ACCESSORS = {
 } satisfies Record<ComparableArea, (manifest: RestorePreviewManifest) => readonly RestorePreviewRecord[]>;
 
 const DEFAULT_ALLOWED_BACKUP_ENCRYPTION_ALGORITHMS = ['aes-256-gcm', 'xchacha20-poly1305'] as const;
+const SUPPORTED_RESTORE_SCHEMA_VERSION = 1;
 
 export function buildPointInTimeBackupManifest(
   manifest: RestorePreviewManifest,
@@ -463,28 +470,83 @@ export function buildCrossFileStateConsistencyReport(
   options: CrossFileStateConsistencyOptions = {},
 ): CrossFileStateConsistencyReport {
   const checkedAt = options.checkedAt ?? new Date().toISOString();
+  const findingContext = options.manifestPath === undefined ? {} : { filePath: options.manifestPath };
   const findings: CrossFileStateConsistencyFinding[] = [];
   const hasTaskSnapshot = manifest.tasks !== undefined;
-  const taskIds = new Set(AREA_ACCESSORS.tasks(manifest).map((record) => record.id));
+  const taskIds = new Set(
+    AREA_ACCESSORS.tasks(manifest)
+      .map((record) => record.id)
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+  );
   const areasById = new Map<string, Set<ComparableArea>>();
 
+  if (manifest.schemaVersion !== SUPPORTED_RESTORE_SCHEMA_VERSION) {
+    findings.push({
+      code: 'unsupported-schema-version',
+      severity: 'blocker',
+      area: 'schema',
+      id: 'schema-version',
+      ...findingContext,
+      jsonPath: '$.schemaVersion',
+      message: `Manifest schema version ${String(manifest.schemaVersion)} is not supported by this restore checker.`,
+      recommendation:
+        'Do not restore this manifest until it has been migrated to the supported restore schema version or the checker has explicit compatibility support for that version.',
+    });
+  }
+
   for (const area of Object.keys(AREA_ACCESSORS) as ComparableArea[]) {
-    for (const record of AREA_ACCESSORS[area](manifest)) {
+    const idsInArea = new Map<string, number>();
+    AREA_ACCESSORS[area](manifest).forEach((record, index) => {
+      if (typeof record.id !== 'string' || record.id.trim().length === 0) {
+        findings.push({
+          code: 'malformed-record-id',
+          severity: 'blocker',
+          area,
+          id: '<missing>',
+          ...findingContext,
+          jsonPath: areaRecordJsonPath(area, index, 'id'),
+          message: `Record at ${area}[${index}] is missing a non-empty string id.`,
+          recommendation:
+            'Repair the manifest record id before restore so cross-file references can be checked deterministically.',
+        });
+        return;
+      }
+
+      const firstIndex = idsInArea.get(record.id);
+      if (firstIndex !== undefined) {
+        findings.push({
+          code: 'duplicate-record-id-within-area',
+          severity: 'blocker',
+          area,
+          id: record.id,
+          ...findingContext,
+          jsonPath: areaRecordJsonPath(area, index, 'id'),
+          message: `Record id '${record.id}' appears more than once in ${area}.`,
+          recommendation:
+            'Deduplicate or rename repeated records before restore; otherwise the restore plan cannot determine which record owns dependent state.',
+        });
+      } else {
+        idsInArea.set(record.id, index);
+      }
+
       const areas = areasById.get(record.id) ?? new Set<ComparableArea>();
       areas.add(area);
       areasById.set(record.id, areas);
-    }
+    });
   }
 
   for (const [id, areas] of [...areasById.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     if (areas.size <= 1) continue;
     const sortedAreas = [...areas].sort();
     for (const area of sortedAreas) {
+      const recordIndex = AREA_ACCESSORS[area](manifest).findIndex((record) => record.id === id);
       findings.push({
         code: 'duplicate-record-id-across-areas',
         severity: 'warning',
         area,
         id,
+        ...findingContext,
+        jsonPath: areaRecordJsonPath(area, recordIndex, 'id'),
         relatedAreas: sortedAreas.filter((candidate) => candidate !== area),
         message: `Record id '${id}' appears in multiple manifest areas: ${sortedAreas.join(', ')}.`,
         recommendation:
@@ -494,14 +556,16 @@ export function buildCrossFileStateConsistencyReport(
   }
 
   for (const area of ['approvals', 'memory', 'cron'] as const) {
-    for (const record of AREA_ACCESSORS[area](manifest)) {
-      for (const reference of taskReferencesFor(record)) {
+    AREA_ACCESSORS[area](manifest).forEach((record, index) => {
+      for (const reference of taskReferencesFor(record, area, index)) {
         if (reference.malformed) {
           findings.push({
             code: 'malformed-task-reference',
             severity: 'blocker',
             area,
             id: record.id,
+            ...findingContext,
+            jsonPath: reference.jsonPath,
             referenceField: reference.field,
             message: `Record '${record.id}' in ${area} has a malformed task reference in value.${reference.field}.`,
             recommendation:
@@ -516,6 +580,8 @@ export function buildCrossFileStateConsistencyReport(
             severity: 'blocker',
             area,
             id: record.id,
+            ...findingContext,
+            jsonPath: reference.jsonPath,
             referenceField: reference.field,
             message: `Record '${record.id}' in ${area} references a task that is missing from the manifest.`,
             recommendation:
@@ -523,7 +589,7 @@ export function buildCrossFileStateConsistencyReport(
           });
         }
       }
-    }
+    });
   }
 
   const status = statusForConsistencyFindings(findings);
@@ -545,9 +611,11 @@ export function buildRestoreDryRunReport(
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const backupConsistency = buildCrossFileStateConsistencyReport(backup, {
     checkedAt: generatedAt,
+    ...(options.backupPath === undefined ? {} : { manifestPath: options.backupPath }),
   });
   const liveConsistency = buildCrossFileStateConsistencyReport(live, {
     checkedAt: generatedAt,
+    ...(options.livePath === undefined ? {} : { manifestPath: options.livePath }),
   });
   const blockerCount = preview.conflicts.filter((conflict) => conflict.severity === 'blocker').length;
   const warningCount = preview.conflicts.filter((conflict) => conflict.severity === 'warning').length;
@@ -750,39 +818,51 @@ function operatorSummaryForApprovalLedgerReport(
 
 interface TaskReferenceCandidate {
   readonly field: string;
+  readonly jsonPath: string;
   readonly taskId?: string;
   readonly malformed?: boolean;
 }
 
-function taskReferencesFor(record: RestorePreviewRecord): readonly TaskReferenceCandidate[] {
+function taskReferencesFor(
+  record: RestorePreviewRecord,
+  area: ComparableArea,
+  recordIndex: number,
+): readonly TaskReferenceCandidate[] {
   if (!isRecord(record.value)) return [];
   const value = record.value;
   const references: TaskReferenceCandidate[] = [];
   for (const field of ['taskId', 'task_id'] as const) {
     if (!(field in value)) continue;
     const fieldValue = value[field];
+    const jsonPath = areaRecordJsonPath(area, recordIndex, `value.${field}`);
     if (typeof fieldValue === 'string' && fieldValue.trim().length > 0) {
-      references.push({ field, taskId: fieldValue });
+      references.push({ field, jsonPath, taskId: fieldValue });
     } else {
-      references.push({ field, malformed: true });
+      references.push({ field, jsonPath, malformed: true });
     }
   }
   for (const field of ['taskIds', 'task_ids'] as const) {
     if (!(field in value)) continue;
     const fieldValue = value[field];
     if (!Array.isArray(fieldValue)) {
-      references.push({ field, malformed: true });
+      references.push({ field, jsonPath: areaRecordJsonPath(area, recordIndex, `value.${field}`), malformed: true });
       continue;
     }
-    for (const item of fieldValue) {
+    fieldValue.forEach((item, itemIndex) => {
+      const jsonPath = areaRecordJsonPath(area, recordIndex, `value.${field}[${itemIndex}]`);
       if (typeof item === 'string' && item.trim().length > 0) {
-        references.push({ field, taskId: item });
+        references.push({ field, jsonPath, taskId: item });
       } else {
-        references.push({ field, malformed: true });
+        references.push({ field, jsonPath, malformed: true });
       }
-    }
+    });
   }
   return references;
+}
+
+function areaRecordJsonPath(area: ComparableArea, recordIndex: number, suffix: string): string {
+  const normalizedIndex = recordIndex >= 0 ? recordIndex : 0;
+  return `$.${area}[${normalizedIndex}].${suffix}`;
 }
 
 function statusForConsistencyFindings(

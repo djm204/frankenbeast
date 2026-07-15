@@ -117,16 +117,16 @@ Invalid timestamps fail explicitly, and `capturedAt` may not be later than `gene
 
 - `status`: `clean`, `warning`, or `blocked`
 - `wouldWrite`: always `false`
-- `findings`: machine-readable records with `code`, `severity`, `area`, `id`, and repair guidance
+- `findings`: machine-readable records with `code`, `severity`, `area`, `id`, `jsonPath`, optional `filePath`, and repair guidance
 - `operatorSummary`: a concise handoff for the restore operator
 
 The restore dry-run JSON includes separate consistency reports for the backup and live manifests plus `summary.consistencyFindingCount` and `summary.consistencyBlockerCount`.
 
 Interpretation guidance:
 
-- `clean`: cross-file IDs and task references are internally consistent.
+- `clean`: schema version, cross-file IDs, and task references are internally consistent.
 - `warning`: a record id appears in more than one state file. Confirm whether the overlap is intentional before restore.
-- `blocked`: an approval, memory, or cron record references a missing task/card, or its task reference is malformed. Repair, quarantine, or explicitly skip the dependent record before restore.
+- `blocked`: the manifest schema version is unsupported, a record has a missing/duplicate identifier within a state file, or an approval, memory, or cron record references a missing task/card or malformed task reference. Repair, quarantine, or explicitly skip the dependent record before restore.
 
 The checker only emits safe metadata; it does not echo record `value` payloads, approval tokens, memory content, cron command bodies, or unverified dangling task-reference values.
 

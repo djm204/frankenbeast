@@ -282,7 +282,7 @@ describe('restore preview conflict detector', () => {
         memory: [{ id: 'memory-bad', value: { taskIds: ['task-live', 42] } }],
         cron: [{ id: 'cron-bad', state: 'enabled', value: { taskId: { id: 'task-live' } } }],
       } as unknown as RestorePreviewManifest,
-      { checkedAt: '2026-07-14T12:30:00.000Z' },
+      { checkedAt: '2026-07-14T12:30:00.000Z', manifestPath: '/backups/dr/manifest.json' },
     );
 
     expect(report.status).toBe('blocked');
@@ -293,6 +293,8 @@ describe('restore preview conflict detector', () => {
           code: 'dangling-task-reference',
           area: 'approvals',
           id: 'approval-orphan',
+          filePath: '/backups/dr/manifest.json',
+          jsonPath: '$.approvals[0].value.taskId',
           severity: 'blocker',
         }),
         expect.objectContaining({
@@ -300,6 +302,7 @@ describe('restore preview conflict detector', () => {
           area: 'memory',
           id: 'memory-bad',
           referenceField: 'taskIds',
+          jsonPath: '$.memory[0].value.taskIds[1]',
           severity: 'blocker',
         }),
         expect.objectContaining({
@@ -307,6 +310,7 @@ describe('restore preview conflict detector', () => {
           area: 'cron',
           id: 'cron-bad',
           referenceField: 'taskId',
+          jsonPath: '$.cron[0].value.taskId',
           severity: 'blocker',
         }),
       ]),
@@ -482,6 +486,53 @@ describe('restore preview conflict detector', () => {
       expect.arrayContaining([
         expect.objectContaining({ code: 'duplicate-record-id-across-areas', area: 'approvals', relatedAreas: ['tasks'] }),
         expect.objectContaining({ code: 'duplicate-record-id-across-areas', area: 'tasks', relatedAreas: ['approvals'] }),
+      ]),
+    );
+  });
+
+  it('blocks malformed schema versions and inconsistent record identifiers with path context', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 2,
+        tasks: [
+          { id: '', digest: 'missing-id' },
+          { id: 'task-duplicate', digest: 'first' },
+          { id: 'task-duplicate', digest: 'second' },
+        ],
+        approvals: [{ id: 'approval-1', value: { taskId: 'task-duplicate' } }],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z', manifestPath: '/backups/dr/manifest.json' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsupported-schema-version',
+          area: 'schema',
+          id: 'schema-version',
+          filePath: '/backups/dr/manifest.json',
+          jsonPath: '$.schemaVersion',
+          severity: 'blocker',
+        }),
+        expect.objectContaining({
+          code: 'malformed-record-id',
+          area: 'tasks',
+          id: '<missing>',
+          filePath: '/backups/dr/manifest.json',
+          jsonPath: '$.tasks[0].id',
+          severity: 'blocker',
+        }),
+        expect.objectContaining({
+          code: 'duplicate-record-id-within-area',
+          area: 'tasks',
+          id: 'task-duplicate',
+          filePath: '/backups/dr/manifest.json',
+          jsonPath: '$.tasks[2].id',
+          severity: 'blocker',
+        }),
       ]),
     );
   });
