@@ -233,6 +233,8 @@ const RIGHT_TO_FORGET_SAFE_TYPES = new Set(['working', 'episodic', 'all']);
 const MEMORY_REVIEW_PROPOSE_TOOL = 'fbeast_memory_review_propose';
 const MEMORY_REVIEW_PROPOSE_SAFE_AUDIT_KEYS = new Set(['type', 'confidence']);
 const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
+const MEMORY_REVIEW_DECIDE_TOOL = 'fbeast_memory_review_decide';
+const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action']);
 
 function unqualifyMcpToolName(toolName: string): string {
   const marker = '__';
@@ -268,10 +270,42 @@ function redactMemoryReviewProposalEnvelope(sanitized: Record<string, unknown>, 
   return sanitized;
 }
 
+function redactMemoryReviewDecisionArgs(sanitized: Record<string, unknown>, redaction = '[memory-review-decision-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
+function redactMemoryReviewDecisionEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-review-decision-metadata-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactMemoryReviewDecisionArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!['tool', 'action', 'args', 'context'].includes(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
+  const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
   const auditedTool = unqualifiedToolName === 'fbeast_memory_right_to_forget'
     ? unqualifiedToolName
@@ -288,6 +322,30 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     }
     if (isMemoryReviewPropose) {
       return redactMemoryReviewProposalArgs(sanitized);
+    }
+    return sanitized;
+  }
+  if (auditedTool === MEMORY_REVIEW_DECIDE_TOOL || auditedAction === MEMORY_REVIEW_DECIDE_TOOL) {
+    if (unqualifiedToolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+      return redactMemoryReviewDecisionEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_REVIEW_DECIDE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-review-decision-metadata-redacted]';
+    }
+    if (isDirectMemoryReviewDecide) {
+      return redactMemoryReviewDecisionArgs(sanitized);
+    }
+    return sanitized;
+  }
+  if (auditedTool === MEMORY_REVIEW_DECIDE_TOOL || auditedAction === MEMORY_REVIEW_DECIDE_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemoryReviewDecisionEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_REVIEW_DECIDE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-review-decision-metadata-redacted]';
+    }
+    if (unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL) {
+      return redactMemoryReviewDecisionArgs(sanitized);
     }
     return sanitized;
   }

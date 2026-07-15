@@ -18,6 +18,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
 ]);
 
 const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
+const MEMORY_REVIEW_DECISION_CONTEXT_REDACTION = '[memory-review-decision-context-redacted]';
 
 /**
  * fbeast tools whose payload is *data to query/analyze/store/log*, not an
@@ -180,6 +181,19 @@ function contextLooksLikeMemoryReviewProposalArgs(context: string): boolean {
   }
 }
 
+function contextLooksLikeMemoryReviewDecisionArgs(context: string): boolean {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    return typeof record['id'] === 'string'
+      && typeof record['action'] === 'string'
+      && ['approve', 'reject', 'never_store'].includes(record['action']);
+  } catch {
+    return false;
+  }
+}
+
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
   if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return context;
   return '[right-to-forget-context-redacted]';
@@ -197,7 +211,13 @@ function redactMemoryReviewProposalGovernanceContext(action: string, context: st
 }
 
 function redactMemoryReviewDecisionGovernanceContext(action: string, context: string): string {
-  if (unqualifyMcpActionName(action) !== 'fbeast_memory_review_decide') return context;
+  const unqualified = unqualifyMcpActionName(action);
+  if (unqualified === 'execute_tool'
+    && (contextTargetsTool(context, 'fbeast_memory_review_decide')
+      || contextLooksLikeMemoryReviewDecisionArgs(context))) {
+    return MEMORY_REVIEW_DECISION_CONTEXT_REDACTION;
+  }
+  if (unqualified !== 'fbeast_memory_review_decide') return context;
   try {
     const parsed = JSON.parse(context) as unknown;
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return context;

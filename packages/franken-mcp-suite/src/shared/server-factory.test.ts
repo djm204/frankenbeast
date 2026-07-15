@@ -452,6 +452,38 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts memory review decision metadata in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
+        id: 'memcand_1',
+        action: 'reject',
+        reviewer: 'alice',
+        note: 'Rejected because candidate contains token abc123 and rm -rf /',
+      })).toEqual({
+        id: 'memcand_1',
+        action: 'reject',
+        reviewer: '[memory-review-decision-metadata-redacted]',
+        note: '[memory-review-decision-metadata-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          id: 'memcand_1',
+          action: 'reject',
+          reviewer: 'alice',
+          note: 'Rejected because candidate contains token abc123 and rm -rf /',
+        },
+      })).toEqual({
+        tool: 'fbeast_memory_review_decide',
+        args: {
+          id: 'memcand_1',
+          action: 'reject',
+          reviewer: '[memory-review-decision-metadata-redacted]',
+          note: '[memory-review-decision-metadata-redacted]',
+        },
+      });
+    });
+
 
     it('redacts invalid and unknown right-to-forget audit payloads wholesale', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', 'alice@example.test')).toEqual({

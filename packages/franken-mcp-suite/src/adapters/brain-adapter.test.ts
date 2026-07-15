@@ -21,6 +21,11 @@ const { databaseInstances, brainInstances } = vi.hoisted(() => {
       record: ReturnType<typeof vi.fn>;
     };
     rightToForget: ReturnType<typeof vi.fn>;
+    memoryReview: {
+      approve: ReturnType<typeof vi.fn>;
+      reject: ReturnType<typeof vi.fn>;
+      neverStore: ReturnType<typeof vi.fn>;
+    };
     flush: ReturnType<typeof vi.fn>;
   }> = [];
   return { databaseInstances, brainInstances };
@@ -107,6 +112,11 @@ vi.mock("@franken/brain", () => ({
         deleted: { working: 1, episodic: 0, derived: 0 },
         remainingReferences: 0,
       })),
+      memoryReview: {
+        approve: vi.fn(() => ({ id: "memcand_1", status: "approved" })),
+        reject: vi.fn(() => ({ id: "memcand_1", status: "rejected" })),
+        neverStore: vi.fn(() => ({ id: "memcand_1", status: "never_store" })),
+      },
       flush: vi.fn(),
     };
     brainInstances.push(brain);
@@ -324,6 +334,18 @@ describe("createBrainAdapter", () => {
     expect(brainInstances[0].rightToForget).toHaveBeenCalledWith({
       key: "__fbeast_agent_memory__/Alpha%20Team!/profile",
     });
+  });
+
+  it("fails closed for unsupported memory review actions at the adapter boundary", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    await expect(brain.decideMemoryReview({
+      id: "memcand_1",
+      action: "never-store" as "never_store",
+    })).rejects.toThrow("Unsupported memory review action: never-store");
+
+    expect(mockBrain.memoryReview.neverStore).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported memory type", async () => {

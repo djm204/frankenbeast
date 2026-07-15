@@ -208,6 +208,24 @@ describe('GovernorAdapter', () => {
     })).resolves.toMatchObject({ decision: 'approved' });
   });
 
+  it('redacts proxied memory review decision notes before shared governor scanning', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"reject","note":"Rejected because candidate contains rm -rf /"}}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('redacts stripped proxied memory review decision args before shared governor scanning', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate contains rm -rf /"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+  });
+
   it('reprices zero-cost known model rows in budget status', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

@@ -432,7 +432,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       if (input.action === 'reject') {
         return brain.memoryReview.reject(input.id, options);
       }
-      return brain.memoryReview.neverStore(input.id, options);
+      if (input.action === 'never_store') {
+        return brain.memoryReview.neverStore(input.id, options);
+      }
+      throw new Error(`Unsupported memory review action: ${String(input.action)}`);
     },
   };
 }
