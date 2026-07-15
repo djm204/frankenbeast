@@ -38,10 +38,10 @@ describe('GitHub token capability check', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.evidence.repo).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
-    expect(result.evidence.issues).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
-    expect(result.evidence.pullRequests).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
-    expect(result.evidence.contents).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
+    expect(result.evidence.repo).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo/public_repo + repository write access', tokenSpecific: true });
+    expect(result.evidence.issues).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo/public_repo + repository write access', tokenSpecific: true });
+    expect(result.evidence.pullRequests).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo/public_repo + repository write access', tokenSpecific: true });
+    expect(result.evidence.contents).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo/public_repo + repository write access', tokenSpecific: true });
     expect(result.evidence.oauthScopes).toEqual(['repo', 'workflow']);
     expect(JSON.stringify(result)).not.toContain('ghp_should_not_leak');
   });
@@ -85,6 +85,44 @@ describe('GitHub token capability check', () => {
       expect.objectContaining({ code: 'excessive-write-permission', capability: 'contents' }),
       expect.objectContaining({ code: 'excessive-write-permission', capability: 'issues' }),
       expect.objectContaining({ code: 'excessive-write-permission', capability: 'pullRequests' }),
+    ]));
+  });
+
+  it('treats public_repo on public repositories as token-specific write evidence for low-risk checks', () => {
+    const result = checkGitHubTokenCapabilities({
+      repo: 'djm204/frankenbeast',
+      exec: makeExec('HTTP/2 200\nx-oauth-scopes: public_repo', {
+        private: false,
+        permissions: { pull: true, push: true, admin: false, maintain: false, triage: true },
+      }),
+      required: { repo: 'read' },
+      lowRiskPolicy: {
+        mode: 'fail',
+        allowedWriteCapabilities: [],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.evidence.contents).toEqual(expect.objectContaining({ level: 'write', tokenSpecific: true }));
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'excessive-write-permission', capability: 'contents' }),
+    ]));
+  });
+
+  it('does not accept repository actor role as proof of required contents write', () => {
+    const result = checkGitHubTokenCapabilities({
+      repo: 'djm204/frankenbeast',
+      exec: makeExec('HTTP/2 200\nx-oauth-scopes: read:org', {
+        private: true,
+        permissions: { pull: true, push: true, admin: false, maintain: false, triage: true },
+      }),
+      required: { contents: 'write' },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.evidence.contents).toEqual(expect.objectContaining({ level: 'none', tokenSpecific: true }));
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'missing-capability', capability: 'contents' }),
     ]));
   });
 

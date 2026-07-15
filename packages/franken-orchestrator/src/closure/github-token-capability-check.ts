@@ -62,6 +62,7 @@ interface RepositoryPermissions {
 
 interface RepositoryInfo {
   readonly nodeId?: string | undefined;
+  readonly isPrivate?: boolean | undefined;
   readonly permissions: RepositoryPermissions;
 }
 
@@ -92,7 +93,7 @@ export function checkGitHubTokenCapabilities(options: GitHubTokenCapabilityCheck
     const scopeRead = readOauthScopes(options.exec);
     const repoInfo = readRepositoryInfo(options.exec, options.repo);
     const evidence = maybeProbeRequiredCapabilities(
-      buildEvidence(scopeRead.scopes, repoInfo.permissions),
+      buildEvidence(scopeRead.scopes, repoInfo),
       options,
       repoInfo,
     );
@@ -160,13 +161,19 @@ function readOauthScopes(exec: GitHubCapabilityExec): OAuthScopeReadResult {
 
 function readRepositoryInfo(exec: GitHubCapabilityExec, repo: string): RepositoryInfo {
   const output = exec('gh', ['api', `repos/${repo}`]);
-  const parsed = JSON.parse(output) as { node_id?: string | undefined; permissions?: RepositoryPermissions | undefined };
-  return { nodeId: parsed.node_id, permissions: parsed.permissions ?? {} };
+  const parsed = JSON.parse(output) as {
+    node_id?: string | undefined;
+    private?: boolean | undefined;
+    permissions?: RepositoryPermissions | undefined;
+  };
+  return { nodeId: parsed.node_id, isPrivate: parsed.private, permissions: parsed.permissions ?? {} };
 }
 
-function buildEvidence(scopes: readonly string[], permissions: RepositoryPermissions): GitHubTokenCapabilityEvidence {
+function buildEvidence(scopes: readonly string[], repoInfo: RepositoryInfo): GitHubTokenCapabilityEvidence {
+  const { permissions } = repoInfo;
   const hasClassicRepoScope = scopes.includes('repo');
   const hasClassicPublicRepoScope = scopes.includes('public_repo');
+  const hasClassicPublicRepoWriteScope = hasClassicPublicRepoScope && repoInfo.isPrivate !== true;
   const scopesObserved = scopes.length > 0;
   const repoRoleRead = permissions.admin === true
     || permissions.maintain === true
@@ -179,28 +186,28 @@ function buildEvidence(scopes: readonly string[], permissions: RepositoryPermiss
   return {
     oauthScopes: scopes,
     repo: tokenAwareItem({
-      scopeWrite: hasClassicRepoScope,
+      scopeWrite: hasClassicRepoScope || hasClassicPublicRepoWriteScope,
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope || repoRoleRead,
       scopesObserved,
       roleLevel: repoRoleLevel,
       source: repoRoleRead ? 'repository access check' : 'not exposed by GitHub API response',
     }),
     issues: tokenAwareItem({
-      scopeWrite: hasClassicRepoScope,
+      scopeWrite: hasClassicRepoScope || hasClassicPublicRepoWriteScope,
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
       source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
     }),
     pullRequests: tokenAwareItem({
-      scopeWrite: hasClassicRepoScope,
+      scopeWrite: hasClassicRepoScope || hasClassicPublicRepoWriteScope,
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
       source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
     }),
     contents: tokenAwareItem({
-      scopeWrite: hasClassicRepoScope,
+      scopeWrite: hasClassicRepoScope || hasClassicPublicRepoWriteScope,
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
@@ -218,7 +225,7 @@ function tokenAwareItem(options: {
 }): GitHubCapabilityEvidenceItem {
   if (options.scopeWrite) {
     if (options.roleLevel === 'write') {
-      return { available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true };
+      return { available: true, level: 'write', source: 'x-oauth-scopes: repo/public_repo + repository write access', tokenSpecific: true };
     }
     return { available: true, level: options.roleLevel === 'read' ? 'read' : 'none', source: 'x-oauth-scopes: repo without repository write access', tokenSpecific: true };
   }
@@ -319,8 +326,8 @@ function isDefinitivelyMissing(
   evidence: GitHubCapabilityEvidenceItem,
   required: Exclude<GitHubCapabilityLevel, 'none'>,
 ): boolean {
-  if (levelSatisfies(evidence.level, required)) return false;
-  if (required === 'write' && evidence.level === 'read') return true;
+  if (levelSatisfies(evidence.level, required) && (required !== 'write' || evidence.tokenSpecific)) return false;
+  if (required === 'write' && (evidence.level === 'read' || !evidence.tokenSpecific)) return true;
   return evidence.tokenSpecific || evidence.level === 'none';
 }
 

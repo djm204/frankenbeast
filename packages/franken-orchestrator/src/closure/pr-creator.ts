@@ -298,16 +298,17 @@ export class PrCreator {
       targetBranch = 'main';
     }
 
-    this.assertGitHubCapabilities(branch, logger);
+    const existing = this.findExistingPr(branch, logger);
+    if (existing === null) {
+      return null;
+    }
+
+    this.assertGitHubCapabilities(branch, logger, { requirePullRequestsWrite: existing.length === 0 });
 
     if (!this.pushBranch(branch, logger)) {
       return null;
     }
 
-    const existing = this.findExistingPr(branch, logger);
-    if (existing === null) {
-      return null;
-    }
     if (existing.length > 0) {
       logger?.info('PrCreator: PR already exists', { branch, url: existing[0]?.url });
       return null;
@@ -385,7 +386,11 @@ export class PrCreator {
     }
   }
 
-  private assertGitHubCapabilities(branch: string, logger?: ILogger): void {
+  private assertGitHubCapabilities(
+    branch: string,
+    logger?: ILogger,
+    options: { readonly requirePullRequestsWrite?: boolean } = {},
+  ): void {
     if (this.config.githubCapabilityCheck?.disabled === true) {
       return;
     }
@@ -398,7 +403,7 @@ export class PrCreator {
 
     const required: GitHubRequiredCapabilities = {
       ...(remoteInfo.tokenBackedPush ? { contents: 'write' as const } : {}),
-      pullRequests: 'write',
+      ...(options.requirePullRequestsWrite === false ? {} : { pullRequests: 'write' as const }),
       ...this.config.githubCapabilityCheck?.required,
     };
     const result = checkGitHubTokenCapabilities({
@@ -550,7 +555,7 @@ function parseGitHubOwnerRepo(remoteUrl: string): string | null {
 }
 
 function isHttpsGitHubRemote(remoteUrl: string): boolean {
-  return /^https?:\/\/github\.com\//i.test(remoteUrl.trim());
+  return /^https?:\/\/(?:[^@/\s]+@)?github\.com\//i.test(remoteUrl.trim());
 }
 
 interface GitContext {

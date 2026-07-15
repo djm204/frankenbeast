@@ -312,7 +312,7 @@ describe('PrCreator argv subprocess safety', () => {
       action: expect.stringContaining('GH_TOKEN'),
       branch: 'feature/actions-auth-warning',
     });
-    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
   });
 
   it('surfaces GitHub integration permission failures as actionable required-action errors', async () => {
@@ -447,13 +447,63 @@ describe('PrCreator argv subprocess safety', () => {
     const remoteIndex = calls.findIndex(c => c.command === 'git' && c.args.join(' ') === 'remote get-url origin');
     const userIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api -i /user');
     const repoIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api repos/djm204/frankenbeast');
+    const listIndex = calls.findIndex(c => c.command === 'gh' && c.args.includes('list'));
     const pushIndex = calls.findIndex(c => c.command === 'git' && c.args.includes('push'));
     const createIndex = calls.findIndex(c => c.command === 'gh' && c.args.includes('create'));
     expect(remoteIndex).toBeGreaterThanOrEqual(0);
-    expect(userIndex).toBeGreaterThan(remoteIndex);
+    expect(listIndex).toBeGreaterThanOrEqual(0);
+    expect(userIndex).toBeGreaterThan(listIndex);
     expect(repoIndex).toBeGreaterThan(userIndex);
     expect(pushIndex).toBeGreaterThan(repoIndex);
     expect(createIndex).toBeGreaterThan(pushIndex);
+  });
+
+  it('treats credentialed HTTPS GitHub remotes as token-backed before push', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/credentialed-remote\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'https://x-access-token:secret@github.com/djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: read:org\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ private: true, permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      action: expect.stringContaining('contents write'),
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
+  });
+
+  it('does not require pull-request write when reusing an existing PR', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/existing-pr\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'git@github.com:djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.includes('list')) return '[{"url":"https://github.com/djm204/frankenbeast/pull/1"}]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: read:org\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toBeNull();
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+    expect(calls.some(c => c.command === 'gh' && c.args.includes('create'))).toBe(false);
   });
 
   it('fails capability preflight before PR creation when required GitHub permissions are missing', async () => {
