@@ -1,5 +1,6 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { constants as osConstants } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -15,12 +16,17 @@ function runCronScript(args: string[]) {
   });
 }
 
-function parseEnvelope(stderr: string) {
-  const line = stderr
+function parseEnvelopes(stderr: string) {
+  return stderr
     .split('\n')
-    .find((entry) => entry.trim().startsWith('{') && entry.includes('franken.cron.script.error'));
-  expect(line, `stderr should include a structured JSON envelope: ${stderr}`).toBeDefined();
-  return JSON.parse(line!);
+    .filter((entry) => entry.trim().startsWith('{') && entry.includes('franken.cron.script.error'))
+    .map((entry) => JSON.parse(entry));
+}
+
+function parseEnvelope(stderr: string) {
+  const envelopes = parseEnvelopes(stderr);
+  expect(envelopes, `stderr should include a structured JSON envelope: ${stderr}`).toHaveLength(1);
+  return envelopes[0];
 }
 
 describe('cron script error envelope runner', () => {
@@ -64,6 +70,80 @@ describe('cron script error envelope runner', () => {
       failureKind: 'usage',
     });
     expect(envelope.message).toContain('Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]');
+  });
+
+  it('keeps the envelope parseable when stderr lacks a trailing newline', () => {
+    const result = runCronScript([
+      '--name',
+      'unterminated-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('unterminated'); process.exit(9)",
+    ]);
+
+    expect(result.status).toBe(9);
+    expect(result.stderr).toContain('unterminated\n{');
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'unterminated-stderr',
+      failureKind: 'exit',
+      exitCode: 9,
+    });
+  });
+
+  it('emits one spawn envelope when the child command cannot start', () => {
+    const result = runCronScript(['--name', 'bad-binary', '--', 'definitely-not-a-real-command-frankenbeast']);
+
+    expect(result.status).toBe(127);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'bad-binary',
+      failureKind: 'spawn',
+      exitCode: 127,
+    });
+  });
+
+  it('preserves the job name on option parse errors', () => {
+    const result = runCronScript(['--name', 'nightly', '--recvoerable', '--', process.execPath, '-e', 'process.exit(0)']);
+
+    expect(result.status).toBe(2);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'nightly',
+      failureKind: 'usage',
+      exitCode: 2,
+    });
+  });
+
+  it('forwards parent termination signals to the child and reports signal-specific status', async () => {
+    const child = spawn(process.execPath, [SCRIPT, '--name', 'signal-test', '--', process.execPath, '-e', 'setInterval(() => {}, 1000)'], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => {
+      child.on('close', (code) => resolve(code));
+    });
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    const envelope = parseEnvelope(stderr);
+    expect(envelope).toMatchObject({
+      script: 'signal-test',
+      failureKind: 'signal',
+      signal: 'SIGTERM',
+      exitCode: 128 + osConstants.signals.SIGTERM,
+    });
   });
 
   it('documents the envelope schema for operators and liveness tooling', () => {
