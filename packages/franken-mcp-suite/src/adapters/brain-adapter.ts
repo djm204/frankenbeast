@@ -51,58 +51,121 @@ export interface BrainAdapter {
     agentId?: string;
   }): Promise<void>;
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
-  forget(key: string): Promise<boolean>;
+  forget(key: string, input?: { agentId?: string }): Promise<boolean>;
   rightToForget(input: RightToForgetSelector): Promise<RightToForgetReport>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
 const DEFAULT_QUERY_LIMIT = 20;
 const MAX_QUERY_LIMIT = 1000;
-const AGENT_KEY_PREFIX = "agents/";
-const AGENT_EPISODIC_PREFIX = "[agent:";
+const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
+const AGENT_MEMORY_SCOPE_MARKER = "fbeast:agent-memory";
 
 type SupportedMemoryType = (typeof SUPPORTED_MEMORY_TYPES)[number];
 
-function normalizeAgentId(agentId: string | undefined): string | undefined {
+function resolveAgentId(agentId: string | undefined): string | undefined {
   if (agentId === undefined) return undefined;
   const trimmed = agentId.trim();
   if (trimmed.length === 0) return undefined;
+  return trimmed;
+}
+
+function encodeScopeComponent(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function decodeScopeComponent(value: string): string {
+  return decodeURIComponent(value);
+}
+
+interface AgentScopedWorkingValue {
+  __fbeastMemoryScope: typeof AGENT_MEMORY_SCOPE_MARKER;
+  agentId: string;
+  value: string;
+}
+
+function isAgentScopedWorkingValue(
+  value: unknown,
+): value is AgentScopedWorkingValue {
   return (
-    trimmed.replace(/[^a-zA-Z0-9_.-]/g, "-").replace(/^-+|-+$/g, "") ||
-    undefined
+    typeof value === "object" &&
+    value !== null &&
+    (value as { __fbeastMemoryScope?: unknown }).__fbeastMemoryScope ===
+      AGENT_MEMORY_SCOPE_MARKER &&
+    typeof (value as { agentId?: unknown }).agentId === "string" &&
+    typeof (value as { value?: unknown }).value === "string"
   );
 }
 
-function parseAgentFromWorkingKey(key: string): string | undefined {
-  if (!key.startsWith(AGENT_KEY_PREFIX)) return undefined;
-  const rest = key.slice(AGENT_KEY_PREFIX.length);
-  const slash = rest.indexOf("/");
-  if (slash <= 0) return undefined;
-  return rest.slice(0, slash);
-}
-
-function parseAgentFromEpisodicSummary(summary: string): string | undefined {
-  if (!summary.startsWith(AGENT_EPISODIC_PREFIX)) return undefined;
-  const end = summary.indexOf("]");
-  if (end <= AGENT_EPISODIC_PREFIX.length) return undefined;
-  return summary.slice(AGENT_EPISODIC_PREFIX.length, end);
-}
-
 function scopedWorkingKey(key: string, agentId: string | undefined): string {
-  const normalized = normalizeAgentId(agentId);
-  return normalized ? `${AGENT_KEY_PREFIX}${normalized}/${key}` : key;
+  const resolvedAgentId = resolveAgentId(agentId);
+  return resolvedAgentId
+    ? `${AGENT_WORKING_KEY_PREFIX}${encodeScopeComponent(resolvedAgentId)}/${encodeScopeComponent(key)}`
+    : key;
 }
 
-function scopedEpisodicSummary(
-  key: string,
+function scopedWorkingValue(
   value: string,
   agentId: string | undefined,
-): string {
-  const normalized = normalizeAgentId(agentId);
-  const summary = `${key}: ${value}`;
-  return normalized
-    ? `${AGENT_EPISODIC_PREFIX}${normalized}] ${summary}`
-    : summary;
+): string | AgentScopedWorkingValue {
+  const resolvedAgentId = resolveAgentId(agentId);
+  return resolvedAgentId
+    ? {
+        __fbeastMemoryScope: AGENT_MEMORY_SCOPE_MARKER,
+        agentId: resolvedAgentId,
+        value,
+      }
+    : value;
+}
+
+function parseScopedWorkingEntry(
+  key: string,
+  value: unknown,
+): { key: string; value: string; agentId?: string } {
+  if (
+    key.startsWith(AGENT_WORKING_KEY_PREFIX) &&
+    isAgentScopedWorkingValue(value)
+  ) {
+    const rest = key.slice(AGENT_WORKING_KEY_PREFIX.length);
+    const slash = rest.indexOf("/");
+    if (slash > 0) {
+      try {
+        return {
+          key: decodeScopeComponent(rest.slice(slash + 1)),
+          value: value.value,
+          agentId: value.agentId,
+        };
+      } catch {
+        // Fall through to treating malformed reserved keys as ordinary shared keys.
+      }
+    }
+  }
+  return {
+    key,
+    value: typeof value === "string" ? value : JSON.stringify(value),
+  };
+}
+
+function parseAgentFromEpisodicDetails(
+  details: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!details) return undefined;
+  return details["__fbeastMemoryScope"] === AGENT_MEMORY_SCOPE_MARKER &&
+    typeof details["agentId"] === "string"
+    ? details["agentId"]
+    : undefined;
+}
+
+function scopedEpisodicDetails(
+  agentId: string | undefined,
+): Record<string, unknown> | undefined {
+  const resolvedAgentId = resolveAgentId(agentId);
+  return resolvedAgentId
+    ? {
+        __fbeastMemoryScope: AGENT_MEMORY_SCOPE_MARKER,
+        agentId: resolvedAgentId,
+      }
+    : undefined;
 }
 
 function resolveMemoryReadScope(input: MemoryScopeInput): {
@@ -115,7 +178,7 @@ function resolveMemoryReadScope(input: MemoryScopeInput): {
       `Unsupported memory readScope: ${readScope}. Supported scopes: all, shared, agent`,
     );
   }
-  const agentId = normalizeAgentId(input.agentId);
+  const agentId = resolveAgentId(input.agentId);
   if (readScope === "agent" && !agentId) {
     throw new Error("agentId is required when readScope is agent");
   }
@@ -129,6 +192,14 @@ function canReadMemoryEntry(
   if (scope.readScope === "all") return true;
   if (scope.readScope === "shared") return entryAgentId === undefined;
   return entryAgentId === undefined || entryAgentId === scope.agentId;
+}
+
+function takeVisibleEntries<T>(
+  entries: T[],
+  limit: number,
+  canRead: (entry: T) => boolean,
+): T[] {
+  return entries.filter(canRead).slice(0, limit);
 }
 
 function resolveQueryLimit(limit: number | undefined): number {
@@ -196,15 +267,16 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
       // Search episodic memory
       if (!memoryType || memoryType === "episodic") {
-        const events = brain.episodic.recall(input.query, limit);
-        for (const event of events) {
-          if (
-            !canReadMemoryEntry(
-              parseAgentFromEpisodicSummary(event.summary),
+        const events = takeVisibleEntries(
+          brain.episodic.recall(input.query, -1),
+          limit,
+          (event) =>
+            canReadMemoryEntry(
+              parseAgentFromEpisodicDetails(event.details),
               readScope,
-            )
-          )
-            continue;
+            ),
+        );
+        for (const event of events) {
           results.push({
             key: String(event.id ?? event.summary),
             value: event.summary,
@@ -219,15 +291,17 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
         const snapshot = brain.working.snapshot();
         const query = input.query.toLowerCase();
         for (const [key, value] of Object.entries(snapshot)) {
-          if (!canReadMemoryEntry(parseAgentFromWorkingKey(key), readScope))
-            continue;
-          const strValue =
-            typeof value === "string" ? value : JSON.stringify(value);
+          const entry = parseScopedWorkingEntry(key, value);
+          if (!canReadMemoryEntry(entry.agentId, readScope)) continue;
           if (
-            key.toLowerCase().includes(query) ||
-            strValue.toLowerCase().includes(query)
+            entry.key.toLowerCase().includes(query) ||
+            entry.value.toLowerCase().includes(query)
           ) {
-            results.push({ key, value: strValue, type: "working" });
+            results.push({
+              key: entry.key,
+              value: entry.value,
+              type: "working",
+            });
           }
         }
       }
@@ -239,9 +313,11 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       const memoryType = resolveMemoryType(input.type);
 
       if (memoryType === "episodic") {
+        const details = scopedEpisodicDetails(input.agentId);
         brain.episodic.record({
           type: "success",
-          summary: scopedEpisodicSummary(input.key, input.value, input.agentId),
+          summary: `${input.key}: ${input.value}`,
+          ...(details ? { details } : {}),
           createdAt: isoNow(),
         });
         return;
@@ -249,7 +325,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
       brain.working.set(
         scopedWorkingKey(input.key, input.agentId),
-        input.value,
+        scopedWorkingValue(input.value, input.agentId),
       );
       brain.flush();
     },
@@ -261,26 +337,24 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       // Working memory
       const snapshot = brain.working.snapshot();
       const workingEntries = Object.entries(snapshot)
-        .filter(([k]) =>
-          canReadMemoryEntry(parseAgentFromWorkingKey(k), readScope),
-        )
-        .map(
-          ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
-        );
+        .map(([k, v]) => parseScopedWorkingEntry(k, v))
+        .filter((entry) => canReadMemoryEntry(entry.agentId, readScope))
+        .map((entry) => `${entry.key}: ${entry.value}`);
       if (workingEntries.length > 0) {
         sections.push({ type: "working", entries: workingEntries });
       }
 
       // Recent episodic events
-      const events = brain.episodic.recent(100);
-      const episodicEntries = events
-        .filter((e) =>
+      const events = takeVisibleEntries(
+        brain.episodic.recent(-1),
+        100,
+        (event) =>
           canReadMemoryEntry(
-            parseAgentFromEpisodicSummary(e.summary),
+            parseAgentFromEpisodicDetails(event.details),
             readScope,
           ),
-        )
-        .map((e) => `${e.id ?? "-"}: ${e.summary}`);
+      );
+      const episodicEntries = events.map((e) => `${e.id ?? "-"}: ${e.summary}`);
       if (episodicEntries.length > 0) {
         sections.push({ type: "episodic", entries: episodicEntries });
       }
@@ -288,9 +362,10 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       return sections;
     },
 
-    async forget(key) {
-      if (brain.working.has(key)) {
-        brain.working.delete(key);
+    async forget(key, input = {}) {
+      const resolvedKey = scopedWorkingKey(key, input.agentId);
+      if (brain.working.has(resolvedKey)) {
+        brain.working.delete(resolvedKey);
         brain.flush();
         return true;
       }

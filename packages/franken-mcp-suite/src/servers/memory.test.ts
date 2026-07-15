@@ -151,8 +151,8 @@ describe("Memory Server", () => {
     expect(brain.frontload).toHaveBeenCalledWith({ readScope: "shared" });
     expect(frontloadResult.content[0]!.text).toContain("adr: use adapters");
 
-    const forgetResult = await forgetTool.handler({ key: "adr" });
-    expect(brain.forget).toHaveBeenCalledWith("adr");
+    const forgetResult = await forgetTool.handler({ key: "adr", agentId: "agent-a" });
+    expect(brain.forget).toHaveBeenCalledWith("adr", { agentId: "agent-a" });
     expect(forgetResult.content[0]!.text).toContain("Removed memory: adr");
 
     const deletionResult = await rightToForgetTool.handler({

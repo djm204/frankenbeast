@@ -192,12 +192,14 @@ const TOOLS: ToolFull[] = [
       type: 'object',
       properties: {
         key: { type: 'string', description: 'Key of the memory entry to remove' },
+        agentId: { type: 'string', description: 'Optional agent id used when removing an agent-scoped working memory entry' },
       },
       required: ['key'],
     },
     makeHandler: ({ brain }) => async (args) => {
       const key = String(args['key']);
-      const removed = await brain.forget(key);
+      const agentId = args['agentId'] === undefined ? undefined : String(args['agentId']);
+      const removed = await brain.forget(key, agentId ? { agentId } : {});
       if (!removed) {
         return { content: [{ type: 'text', text: `No memory entry found with key: ${key}` }] };
       }

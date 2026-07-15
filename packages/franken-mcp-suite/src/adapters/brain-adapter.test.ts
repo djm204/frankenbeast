@@ -49,8 +49,17 @@ vi.mock("@franken/brain", () => ({
         restore: vi.fn(),
         snapshot: vi.fn(() => ({
           "task-1": "working entry",
-          "agents/alpha/private-task": "alpha entry",
-          "agents/beta/private-task": "beta entry",
+          "agents/oncall/runbook": "shared runbook",
+          "__fbeast_agent_memory__/alpha/private-task": {
+            __fbeastMemoryScope: "fbeast:agent-memory",
+            agentId: "alpha",
+            value: "alpha entry",
+          },
+          "__fbeast_agent_memory__/beta/private-task": {
+            __fbeastMemoryScope: "fbeast:agent-memory",
+            agentId: "beta",
+            value: "beta entry",
+          },
         })),
         set: vi.fn(),
         has: vi.fn(() => false),
@@ -72,12 +81,20 @@ vi.mock("@franken/brain", () => ({
           },
           {
             id: "evt-alpha",
-            summary: "[agent:alpha] alpha episode",
+            summary: "alpha episode",
+            details: {
+              __fbeastMemoryScope: "fbeast:agent-memory",
+              agentId: "alpha",
+            },
             createdAt: "2026-07-06T00:00:00.000Z",
           },
           {
             id: "evt-beta",
-            summary: "[agent:beta] beta episode",
+            summary: "beta episode",
+            details: {
+              __fbeastMemoryScope: "fbeast:agent-memory",
+              agentId: "beta",
+            },
             createdAt: "2026-07-06T00:00:00.000Z",
           },
         ]),
@@ -187,12 +204,9 @@ describe("createBrainAdapter", () => {
       limit: 10,
     });
     expect(alphaRows.map((row) => row.key)).toContain("task-1");
-    expect(alphaRows.map((row) => row.key)).toContain(
-      "agents/alpha/private-task",
-    );
-    expect(alphaRows.map((row) => row.key)).not.toContain(
-      "agents/beta/private-task",
-    );
+    expect(alphaRows.map((row) => row.key)).toContain("private-task");
+    expect(alphaRows.map((row) => row.value)).toContain("alpha entry");
+    expect(alphaRows.map((row) => row.value)).not.toContain("beta entry");
 
     const sharedRows = await brain.query({
       query: "entry",
@@ -208,10 +222,15 @@ describe("createBrainAdapter", () => {
     });
     const text = sections.flatMap((section) => section.entries).join("\n");
     expect(text).toContain("task-1: working entry");
-    expect(text).toContain("agents/alpha/private-task: alpha entry");
-    expect(text).toContain("[agent:alpha] alpha episode");
-    expect(text).not.toContain("agents/beta/private-task");
-    expect(text).not.toContain("[agent:beta] beta episode");
+    expect(text).toContain("agents/oncall/runbook: shared runbook");
+    expect(text).toContain("private-task: alpha entry");
+    expect(text).toContain("alpha episode");
+    expect(text).not.toContain("beta entry");
+    expect(text).not.toContain("beta episode");
+
+    const mockBrain = brainInstances[0];
+    expect(mockBrain.episodic.recall).toHaveBeenCalledWith("entry", -1);
+    expect(mockBrain.episodic.recent).toHaveBeenCalledWith(-1);
   });
 
   it("rejects agent read scope without an agent id before reading memory", async () => {
@@ -226,7 +245,7 @@ describe("createBrainAdapter", () => {
     expect(mockBrain.working.snapshot).not.toHaveBeenCalled();
   });
 
-  it("stores agent-scoped keys and episodic summaries using normalized agent ids", async () => {
+  it("stores agent-scoped keys and episodic details without lossy agent id normalization", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
     await brain.store({
@@ -244,12 +263,20 @@ describe("createBrainAdapter", () => {
 
     const mockBrain = brainInstances[0];
     expect(mockBrain.working.set).toHaveBeenCalledWith(
-      "agents/Alpha-Team/task",
-      "scoped",
+      "__fbeast_agent_memory__/Alpha%20Team!/task",
+      {
+        __fbeastMemoryScope: "fbeast:agent-memory",
+        agentId: "Alpha Team!",
+        value: "scoped",
+      },
     );
     expect(mockBrain.episodic.record).toHaveBeenCalledWith(
       expect.objectContaining({
-        summary: "[agent:Alpha-Team] episode: scoped",
+        summary: "episode: scoped",
+        details: {
+          __fbeastMemoryScope: "fbeast:agent-memory",
+          agentId: "Alpha Team!",
+        },
       }),
     );
   });
