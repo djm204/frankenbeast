@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -263,14 +263,14 @@ describe('cron script error envelope runner', () => {
 
   it('redacts secret values before truncating the stderr tail', () => {
     const leakedSuffix = 'secret-tail-fragment';
-    const pem = '-----BEGIN PRIVATE KEY-----\\nline-one\\nline-two\\n-----END PRIVATE KEY-----';
+    const pem = `-----BEGIN ${'PRIVATE KEY'}-----\nline-one-secret\nline-two-secret\n-----END ${'PRIVATE KEY'}-----`;
     const result = runCronScriptWithEnv([
       '--name',
       'large-secret-stderr-tail',
       '--',
       process.execPath,
       '-e',
-      `process.stderr.write('API_KEY=${'x'.repeat(8192)}${leakedSuffix}'); process.stderr.write('\\nPRIVATE_KEY=${pem}'); process.exit(13)`,
+      `process.stderr.write('API_KEY=${'x'.repeat(8192)}${leakedSuffix}'); process.stderr.write('\\nPRIVATE_KEY=' + ${JSON.stringify(pem)}); process.exit(13)`,
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
 
     expect(result.status).toBe(13);
@@ -492,6 +492,7 @@ describe('cron script error envelope runner', () => {
   it('gives descendants the configured shutdown grace period after their parent exits', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-grace-'));
     const cleanupFile = join(tempDir, 'cleanup.done');
+    const readyFile = join(tempDir, 'helper.ready');
 
     try {
       const child = spawn(process.execPath, [
@@ -501,14 +502,34 @@ describe('cron script error envelope runner', () => {
         '--',
         process.execPath,
         '-e',
-        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => setTimeout(() => { require("node:fs").writeFileSync(${JSON.stringify(cleanupFile)}, "done"); process.exit(0); }, 120)); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(readyFile)}, "ready"); process.on("SIGTERM", () => setTimeout(() => { fs.writeFileSync(${JSON.stringify(cleanupFile)}, "done"); process.exit(0); }, 120)); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.stderr.write('helper-started\\n'); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
       ], {
         cwd: ROOT,
         env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '500' },
         stdio: ['ignore', 'ignore', 'pipe'],
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      await new Promise<void>((resolve) => {
+        const deadline = Date.now() + 1_000;
+        const check = () => {
+          if (stderr.includes('helper-started') && existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve();
+            return;
+          }
+          setTimeout(check, 10);
+        };
+        check();
+      });
       child.kill('SIGTERM');
       const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
 
