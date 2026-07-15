@@ -122,6 +122,28 @@ The deterministic burst-load fixture at `packages/franken-orchestrator/tests/uni
 
 For live operator awareness before a hard pause, set `thresholds.capacityWatermarkRatio` to a value between `0` and `1` (for example `0.8`). The runner then emits `[issues] Capacity watermark alert for issue #<n>` with structured `alerts[]` whenever capacity-style signals such as `activeProcesses`, `inFlightBacklog`, `pendingIssueCount`, `oldestQueueAgeMs`, or `systemLoadAverage` reach that percentage of their configured threshold. Watermark alerts do not skip the issue; they are warning telemetry for PM/liveness tooling. Values below the watermark remain quiet so normal refill output is not noisy.
 
+Dependency-specific circuit breakers are available under `thresholds.dependencyCircuitBreakers`. Each key is an external dependency name reported by `signals().dependencyStatuses[]`, so callers can pause only the work that depends on GitHub, Slack, Chroma, or another named service instead of applying a global stop. A breaker opens when its configured dependency reports a paused status such as `unavailable`, reaches `maxConsecutiveFailures`, or carries a future `openUntil` timestamp; unrelated dependency signals are ignored unless they have their own configured breaker. Open breakers add structured `dependencyCircuitBreakers[]` data to the decision and a `backpressure: <dependency> ...` skip reason for operator/liveness output.
+
+Example:
+
+```ts
+await evaluateIssueBackpressure({
+  thresholds: {
+    dependencyCircuitBreakers: {
+      github: { maxConsecutiveFailures: 3, pauseOnStatuses: ['unavailable'] },
+    },
+  },
+  signals: () => ({
+    activeProcesses: 0,
+    failedStarts: 0,
+    inFlightBacklog: 0,
+    dependencyStatuses: [
+      { dependency: 'github', status: 'degraded', consecutiveFailures: 3 },
+    ],
+  }),
+}, context)
+```
+
 ## Scheduler fairness report
 
 Before execution starts, `IssueRunner` emits `[issues] Scheduler fairness report` with structured data that PM/liveness tooling can consume without parsing prose. The report includes:

@@ -21,6 +21,10 @@ export type {
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
   IssueCapacityWatermarkAlert,
+  IssueDependencyCircuitBreakerConfig,
+  IssueDependencyCircuitBreakerState,
+  IssueDependencySignal,
+  IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
 } from './issue-runner.js';
