@@ -137,6 +137,9 @@ export class SkillManager {
 
   private assertSkillsRootStable(): void {
     if (!existsSync(this.skillsDirRoot)) {
+      const parent = dirname(this.skillsDirRoot);
+      assertNoSymlink(parent, 'skills root parent');
+      assertContainedPath(this.skillsDirReal, realpathSync(parent), 'skills root');
       mkdirSync(this.skillsDirRoot, { recursive: true });
     }
     assertNoSymlink(this.skillsDirRoot, 'skills root');
@@ -213,7 +216,14 @@ export class SkillManager {
     const entries = readdirSync(this.skillsDirRoot, { withFileTypes: true });
     return entries
       .filter((e) => e.isDirectory())
-      .map((e) => this.readSkillInfo(e.name))
+      .map((e) => {
+        try {
+          return this.readSkillInfo(e.name);
+        } catch (err) {
+          if (isUnsafeSkillPathError(err)) return null;
+          throw err;
+        }
+      })
       .filter((info): info is SkillInfo => info !== null);
   }
 
@@ -326,23 +336,23 @@ export class SkillManager {
 
   readMcpConfig(name: string): McpConfig | null {
     const configPath = this.resolveSkillFilePath(name, 'mcp.json');
-    if (!existsSync(configPath)) return null;
     assertNoSymlink(configPath, 'skill file');
+    if (!existsSync(configPath)) return null;
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
     return McpConfigSchema.parse(raw);
   }
 
   readContext(name: string): string | null {
     const contextPath = this.resolveSkillFilePath(name, 'context.md');
-    if (!existsSync(contextPath)) return null;
     assertNoSymlink(contextPath, 'skill file');
+    if (!existsSync(contextPath)) return null;
     return readFileSync(contextPath, 'utf-8');
   }
 
   readTools(name: string): ToolDefinition[] {
     const toolsPath = this.resolveSkillFilePath(name, 'tools.json');
-    if (!existsSync(toolsPath)) return [];
     assertNoSymlink(toolsPath, 'skill file');
+    if (!existsSync(toolsPath)) return [];
     const raw = JSON.parse(readFileSync(toolsPath, 'utf-8'));
     return requireSecurityReviewByDefault(SkillToolManifestSchema.parse(raw));
   }

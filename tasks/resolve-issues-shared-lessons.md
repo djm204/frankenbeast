@@ -2,7 +2,7 @@
 
 ## 2026-07-15 — Skill installer path hardening review fixes
 - For installer path hardening, guard every public surface that can surface unsafe-path errors, not just install routes; context/read/write routes should return generic unsafe-path messages and tests should assert absolute roots/targets are not leaked.
-- If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly by recreating the root and then rechecking for symlink/replacement before creating child directories.
+- If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly: revalidate the missing root's parent before `mkdir`, reject symlinked/repointed parents, then recheck the recreated root before creating child directories.
 - When Codex reaches the configured review-invocation cap with new findings, fix/reply/resolve and stop for explicit approval before triggering another review; do not merge on stale clean signals after the head changed.
 
 ## 2026-07-15 — Beast process cleanup review fixes

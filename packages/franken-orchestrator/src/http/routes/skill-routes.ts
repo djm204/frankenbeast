@@ -151,7 +151,15 @@ export function createSkillRoutes(deps: {
   // Context read/write routes (Chunk 5.11)
   app.get('/:name/context', (c) => {
     const name = c.req.param('name');
-    const content = deps.skillManager.readContext(name);
+    let content: string | null;
+    try {
+      content = deps.skillManager.readContext(name);
+    } catch (err) {
+      return c.json(
+        { error: isUnsafeSkillPathError(err) ? 'Unsafe skill path' : err instanceof Error ? err.message : 'Failed' },
+        400,
+      );
+    }
     if (content === null) {
       return c.json({ content: null, exists: false });
     }
