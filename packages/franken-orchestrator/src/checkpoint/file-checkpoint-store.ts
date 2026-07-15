@@ -106,7 +106,10 @@ function staleDiagnostic(
   ownerPid?: number | undefined,
   ownerAlive?: boolean | undefined,
 ): CheckpointLockDiagnostic {
-  const ownerText = ownerPid === undefined ? 'no verified owner' : `owner pid ${ownerPid}${ownerAlive ? ' is not the recorded process' : ' is not running'}`;
+  const ownerText =
+    ownerPid === undefined
+      ? 'no verified owner'
+      : `owner pid ${ownerPid}${ownerAlive ? (reason.includes('unverifiable') ? ' is alive but could not be verified' : ' is not the recorded process') : ' is not running'}`;
   return {
     lockPath,
     status: 'stale',
@@ -129,22 +132,40 @@ export function detectCheckpointLock(
   options: DetectCheckpointLockOptions = {},
 ): CheckpointLockDiagnostic {
   const lockPath = `${checkpointPath}.lock`;
-  let owner: string;
+  let owner: string | undefined;
   let ageMs: number | undefined;
-  try {
-    owner = readFileSync(lockPath, 'utf-8');
-    ageMs = (options.nowMs ?? Date.now()) - statSync(lockPath).mtimeMs;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return {
-        lockPath,
-        status: 'absent',
-        safeToRemove: false,
-        reason: 'checkpoint lock file is absent',
-        unlockHint: 'No unlock action is needed; retry the checkpoint operation normally.',
-      };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const before = statSync(lockPath);
+      owner = readFileSync(lockPath, 'utf-8');
+      const after = statSync(lockPath);
+      if (before.mtimeMs === after.mtimeMs && before.size === after.size) {
+        ageMs = (options.nowMs ?? Date.now()) - after.mtimeMs;
+        break;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        if (attempt === 0) continue;
+        return {
+          lockPath,
+          status: 'absent',
+          safeToRemove: false,
+          reason: 'checkpoint lock file is absent',
+          unlockHint: 'No unlock action is needed; retry the checkpoint operation normally.',
+        };
+      }
+      throw error;
     }
-    throw error;
+  }
+
+  if (owner === undefined) {
+    return {
+      lockPath,
+      status: 'held',
+      safeToRemove: false,
+      reason: 'checkpoint lock changed while being inspected',
+      unlockHint: 'Do not remove this lock. Re-run the detector to inspect a stable lock snapshot.',
+    };
   }
 
   const ownerMatch = owner.match(/^(\d+):(\d+):[0-9a-f]{16}$/);
