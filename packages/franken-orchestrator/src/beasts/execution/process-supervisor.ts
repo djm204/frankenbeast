@@ -17,8 +17,12 @@ export interface ProcessCallbacks {
 export interface ProcessSupervisorLike {
   validateCwd?(cwd: string | undefined): void;
   spawn(spec: BeastProcessSpec, callbacks: ProcessCallbacks): Promise<SpawnedProcessHandle>;
-  stop(pid: number): Promise<void>;
-  kill(pid: number): Promise<void>;
+  stop(pid: number, options?: ProcessSignalOptions): Promise<void>;
+  kill(pid: number, options?: ProcessSignalOptions): Promise<void>;
+}
+
+export interface ProcessSignalOptions {
+  readonly processGroupOwned?: boolean | undefined;
 }
 
 export interface ProcessSupervisorOptions {
@@ -30,6 +34,7 @@ export interface ProcessSupervisorOptions {
 export interface OrphanProcessSweeperOptions {
   readonly enabled?: boolean | undefined;
   readonly signal?: NodeJS.Signals | undefined;
+  readonly escalationDelayMs?: number | undefined;
   readonly platform?: NodeJS.Platform | undefined;
   readonly killProcess?: typeof process.kill | undefined;
 }
@@ -85,6 +90,10 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     return this.options.orphanSweeper?.killProcess ?? process.kill;
   }
 
+  private orphanSweeperEscalationDelayMs(): number {
+    return this.options.orphanSweeper?.escalationDelayMs ?? 1_000;
+  }
+
   private shouldUseProcessGroup(): boolean {
     return this.orphanSweeperEnabled() && this.orphanSweeperPlatform() !== 'win32';
   }
@@ -113,6 +122,18 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       }
       throw error;
     }
+  }
+
+  private scheduleOrphanKillEscalation(pid: number): void {
+    const delayMs = this.orphanSweeperEscalationDelayMs();
+    if (delayMs < 0 || !this.shouldUseProcessGroup() || pid <= 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.sweepOrphanProcessGroup(pid, 'SIGKILL');
+    }, delayMs);
+    timer.unref?.();
   }
 
   validateCwd(cwd: string | undefined): void {
@@ -310,7 +331,9 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     recordExit = (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
-      this.sweepOrphanProcessGroup(pid);
+      if (this.sweepOrphanProcessGroup(pid).swept) {
+        this.scheduleOrphanKillEscalation(pid);
+      }
       setImmediate(() => {
         if (!stdoutClosed) {
           forceClose.stdout?.();
@@ -328,7 +351,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     return { pid };
   }
 
-  async stop(pid: number): Promise<void> {
+  async stop(pid: number, options: ProcessSignalOptions = {}): Promise<void> {
     if (pid <= 0) {
       return;
     }
@@ -339,10 +362,14 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       return;
     }
 
-    // Fallback to PID-based kill for legacy/external processes
+    // Only process-group sweep recovered attempts that were persisted as
+    // process-group leaders. Legacy/stale attempts fall back to direct PID
+    // signaling so a reused PID cannot fan out to an unrelated group.
     try {
-      if (!this.sweepOrphanProcessGroup(pid, 'SIGTERM').swept) {
+      if (!options.processGroupOwned || !this.sweepOrphanProcessGroup(pid, 'SIGTERM').swept) {
         this.killProcess()(pid, 'SIGTERM');
+      } else {
+        this.scheduleOrphanKillEscalation(pid);
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -352,7 +379,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     }
   }
 
-  async kill(pid: number): Promise<void> {
+  async kill(pid: number, options: ProcessSignalOptions = {}): Promise<void> {
     if (pid <= 0) {
       return;
     }
@@ -363,9 +390,11 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       return;
     }
 
-    // Fallback to PID-based kill for legacy/external processes
+    // Only process-group sweep recovered attempts that were persisted as
+    // process-group leaders. Legacy/stale attempts fall back to direct PID
+    // signaling so a reused PID cannot fan out to an unrelated group.
     try {
-      if (!this.sweepOrphanProcessGroup(pid, 'SIGKILL').swept) {
+      if (!options.processGroupOwned || !this.sweepOrphanProcessGroup(pid, 'SIGKILL').swept) {
         this.killProcess()(pid, 'SIGKILL');
       }
     } catch (error) {
@@ -379,6 +408,9 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
   private signalTrackedProcess(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
     const sweep = this.sweepOrphanProcessGroup(pid, signal);
     if (sweep.swept) {
+      if (signal === 'SIGTERM') {
+        this.scheduleOrphanKillEscalation(pid);
+      }
       return;
     }
     child.kill(signal);

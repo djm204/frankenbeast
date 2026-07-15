@@ -420,7 +420,7 @@ process.stdout.write('parent done\\n');`,
       });
     });
 
-    it('tries a process-group sweep before direct PID signaling for recovered attempts', async () => {
+    it('uses direct PID signaling by default for unmarked recovered attempts', async () => {
       const killProcess = vi.fn();
       supervisor = new ProcessSupervisor({
         orphanSweeper: { killProcess },
@@ -429,23 +429,36 @@ process.stdout.write('parent done\\n');`,
       await supervisor.stop(12345);
       await supervisor.kill(23456);
 
+      expect(killProcess).toHaveBeenNthCalledWith(1, 12345, 'SIGTERM');
+      expect(killProcess).toHaveBeenNthCalledWith(2, 23456, 'SIGKILL');
+    });
+
+    it('tries a process-group sweep before direct PID signaling for marked recovered attempts', async () => {
+      const killProcess = vi.fn();
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      await supervisor.stop(12345, { processGroupOwned: true });
+      await supervisor.kill(23456, { processGroupOwned: true });
+
       expect(killProcess).toHaveBeenNthCalledWith(1, -12345, 'SIGTERM');
       expect(killProcess).toHaveBeenNthCalledWith(2, -23456, 'SIGKILL');
     });
 
-    it('falls back to direct PID signaling when a recovered process group is gone', async () => {
+    it('falls back to direct PID signaling when a marked recovered process group is gone', async () => {
       const noGroup = Object.assign(new Error('no process group'), { code: 'ESRCH' });
       const killProcess = vi.fn((pid: number, _signal?: string | number) => {
         if (pid < 0) {
           throw noGroup;
         }
-        return true;
+        return true as const;
       });
       supervisor = new ProcessSupervisor({
         orphanSweeper: { killProcess },
       });
 
-      await supervisor.stop(34567);
+      await supervisor.stop(34567, { processGroupOwned: true });
 
       expect(killProcess).toHaveBeenCalledWith(-34567, 'SIGTERM');
       expect(killProcess).toHaveBeenCalledWith(34567, 'SIGTERM');

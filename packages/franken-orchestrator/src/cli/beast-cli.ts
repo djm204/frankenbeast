@@ -104,20 +104,27 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
   };
   const actor = process.env.USER ?? 'operator';
   let keepServicesAlive = false;
+  let liveRunId: string | undefined;
   let signalCleanupStarted = false;
   const disposeForSignal = (signal: NodeJS.Signals): void => {
     if (signalCleanupStarted) {
       return;
     }
     signalCleanupStarted = true;
-    try {
-      services.dispose();
-    } finally {
-      if (ownsControl) {
-        control?.dispose?.();
-      }
-      process.exit(signal === 'SIGINT' ? 130 : 143);
-    }
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+    Promise.resolve(liveRunId ? services.runs.kill(liveRunId, actor) : undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        try {
+          services.dispose();
+        } finally {
+          if (ownsControl) {
+            control?.dispose?.();
+          }
+          process.exit(signal === 'SIGINT' ? 130 : 143);
+        }
+      });
   };
   const onSigint = (): void => disposeForSignal('SIGINT');
   const onSigterm = (): void => disposeForSignal('SIGTERM');
@@ -157,6 +164,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           ...(args.moduleConfig ? { moduleConfig: args.moduleConfig } : {}),
         });
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
+        liveRunId = keepServicesAlive ? run.id : undefined;
         print(`Spawned ${run.definitionId} as ${run.id}`);
         return;
       }
@@ -209,6 +217,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         }
         const run = await services.runs.restart(args.beastTarget, actor);
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
+        liveRunId = keepServicesAlive ? run.id : undefined;
         print(`Restarted ${run.id}`);
         return;
       }
@@ -216,6 +225,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         if (!args.beastTarget) throw new Error('beasts resume requires an agent id');
         const run = await getControl().resumeAgent(args.beastTarget, actor);
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
+        liveRunId = keepServicesAlive ? run.id : undefined;
         print(`Resumed ${run.id}`);
         return;
       }
@@ -229,9 +239,9 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         throw new Error('Unknown beasts command');
     }
   } finally {
-    process.off('SIGINT', onSigint);
-    process.off('SIGTERM', onSigterm);
     if (!keepServicesAlive) {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
       services.dispose();
     }
     if (ownsControl && !keepServicesAlive) {

@@ -65,7 +65,16 @@ function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> =
   };
 }
 
+const baselineSigintListeners = process.listeners('SIGINT');
+const baselineSigtermListeners = process.listeners('SIGTERM');
+
 beforeEach(() => {
+  for (const listener of process.listeners('SIGINT')) {
+    if (!baselineSigintListeners.includes(listener)) process.off('SIGINT', listener as NodeJS.SignalsListener);
+  }
+  for (const listener of process.listeners('SIGTERM')) {
+    if (!baselineSigtermListeners.includes(listener)) process.off('SIGTERM', listener as NodeJS.SignalsListener);
+  }
   vi.clearAllMocks();
   vi.mocked(spawnSync).mockReturnValue({ status: 0, stderr: '' } as any);
 });
@@ -202,40 +211,35 @@ describe('handleBeastCommand() spawn', () => {
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it('disposes in-process services when SIGINT arrives during a direct spawn command', async () => {
+  it('forwards SIGINT to a live direct spawn run before disposing services', async () => {
     mockServices.catalog.getDefinition.mockReturnValue({
       id: 'design-interview',
       description: 'Design interview',
       interviewPrompts: [],
       configSchema: { parse: vi.fn(() => ({})) },
     });
-    let resolveRun!: (run: unknown) => void;
-    mockServices.dispatch.createRun.mockReturnValue(new Promise((resolve) => {
-      resolveRun = resolve;
-    }));
-    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
-      throw new Error('process.exit intercepted');
-    }) as never);
-    const deps = makeDeps({
-      args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
-    });
-
-    const command = handleBeastCommand(deps);
-    expect(() => process.emit('SIGINT')).toThrow('process.exit intercepted');
-    resolveRun({
+    mockServices.dispatch.createRun.mockResolvedValue({
       id: 'run-1',
       definitionId: 'design-interview',
       status: 'running',
       currentAttemptId: 'attempt-1',
     });
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
+    });
 
     try {
-      await command;
+      await handleBeastCommand(deps);
+      process.emit('SIGINT');
+      await vi.waitFor(() => {
+        expect(mockServices.runs.kill).toHaveBeenCalledWith('run-1', expect.any(String));
+        expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+        expect(exit).toHaveBeenCalledWith(130);
+      });
     } finally {
       exit.mockRestore();
     }
-
-    expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
 });
 

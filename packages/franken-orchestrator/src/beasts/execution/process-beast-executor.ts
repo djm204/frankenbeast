@@ -254,6 +254,11 @@ function resolveRunConfigOwner(
   return typeof owner === 'function' ? owner() : owner;
 }
 
+function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
+  return attempt.executorMetadata?.processGroupOwned === true
+    && attempt.executorMetadata?.processGroupLeaderPid === attempt.pid;
+}
+
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
   const root = resolve(rootDir);
   const target = resolve(configDir);
@@ -420,6 +425,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         startedAt,
         executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
           backend: 'process',
+          processGroupOwned: process.platform !== 'win32',
+          processGroupLeaderPid: handle.pid,
           command: processSpec.command,
           args: [...processSpec.args],
           ...(worktree
@@ -605,7 +612,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
       this.stoppingAttempts.add(attemptId);
       try {
-        await this.supervisor.stop(attempt.pid);
+        await this.supervisor.stop(attempt.pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
       } catch (error) {
         this.exitPromises.delete(attemptId);
         this.stoppingAttempts.delete(attemptId);
@@ -624,7 +631,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         if (!exited && this.exitPromises.has(attemptId)) {
           this.exitPromises.delete(attemptId);
           this.stoppingAttempts.delete(attemptId);
-          await this.supervisor.kill(pid);
+          await this.supervisor.kill(pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
         }
 
         // If process exited after an operator stop, handleProcessExit already updated status — don't overwrite
@@ -640,7 +647,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async kill(runId: string, attemptId: string): Promise<BeastRunAttempt> {
     const attempt = this.requireAttempt(attemptId);
     if (attempt.pid !== undefined) {
-      await this.supervisor.kill(attempt.pid);
+      await this.supervisor.kill(attempt.pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
     }
     return this.finishAttempt(runId, attempt, 'stopped', 'operator_kill');
   }
