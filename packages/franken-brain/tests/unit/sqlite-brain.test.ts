@@ -1417,6 +1417,108 @@ describe('SqliteBrain', () => {
       ).toThrow(/no unresolved conflict/);
     });
 
+    it('detects conflicts against persisted facts when runtime hydration is disabled', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-persisted-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const writer = new SqliteBrain(dbPath);
+        const approved = writer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.theme',
+          value: 'dark',
+          source: 'chat:turn-6',
+          confidence: 0.9,
+          reason: 'User requested dark theme.',
+        });
+        writer.memoryReview.approve(approved.id, { reviewer: 'operator' });
+        writer.close();
+
+        const reviewer = new SqliteBrain(dbPath, undefined, {
+          hydrateWorkingMemoryFromDb: false,
+        });
+        const contradictory = reviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.theme',
+          value: 'light',
+          source: 'chat:turn-7',
+          confidence: 0.8,
+          reason: 'Ambiguous later theme mention.',
+        });
+
+        expect(reviewer.working.has('user.preference.theme')).toBe(false);
+        expect(reviewer.memoryReview.conflictsFor(contradictory.id)).toEqual([
+          expect.objectContaining({
+            key: 'user.preference.theme',
+            existingValue: 'dark',
+            proposedValue: 'light',
+            existingProvenance: expect.objectContaining({
+              candidateId: approved.id,
+            }),
+          }),
+        ]);
+        reviewer.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('fails fast for invalid conflict resolution strings', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.tabs',
+        value: 'spaces',
+        source: 'chat:turn-8',
+        confidence: 0.9,
+        reason: 'User stated indentation preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.tabs',
+        value: 'tabs',
+        source: 'chat:turn-9',
+        confidence: 0.8,
+        reason: 'Later conflicting indentation mention.',
+      });
+
+      expect(() =>
+        brain.memoryReview.resolveConflict(contradictory.id, {
+          resolution: 'replace-existing',
+          reviewer: 'operator',
+        } as never),
+      ).toThrow(/Unsupported memory conflict resolution/);
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: contradictory.id }),
+      ]);
+    });
+
+    it('returns no conflicts for suppressed duplicate proposal handles', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.duplicate-conflict',
+        value: 'maybe',
+        source: 'chat:turn-10',
+        evidenceId: 'msg-10',
+        confidence: 0.4,
+        reason: 'Weak inferred preference.',
+      });
+      brain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+
+      const suppressed = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.duplicate-conflict',
+        value: 'maybe',
+        source: 'chat:turn-10',
+        evidenceId: 'msg-10',
+        confidence: 0.4,
+        reason: 'Weak inferred preference.',
+      });
+
+      expect(suppressed.status).toBe('suppressed');
+      expect(brain.memoryReview.conflictsFor(suppressed.id)).toEqual([]);
+    });
+
     it('edits a candidate before approval and writes the edited memory', () => {
       const candidate = brain.memoryReview.propose({
         targetStore: 'working',

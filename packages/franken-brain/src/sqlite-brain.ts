@@ -1693,6 +1693,7 @@ export class SqliteMemoryReviewQueue {
   }
 
   conflictsFor(id: string): MemoryConflict[] {
+    if (id.startsWith('memcand_suppressed_')) return [];
     const candidate = this.requireCandidate(id);
     if (candidate.status !== 'pending') return [];
     return this.detectConflicts(candidate);
@@ -1702,6 +1703,7 @@ export class SqliteMemoryReviewQueue {
     id: string,
     options: MemoryConflictResolutionOptions,
   ): MemoryCandidate {
+    this.assertValidConflictResolution(options.resolution);
     const candidate = this.requireCandidate(id, 'pending');
     const conflicts = this.detectConflicts(candidate);
     if (conflicts.length === 0) {
@@ -1732,9 +1734,8 @@ export class SqliteMemoryReviewQueue {
 
   private detectConflicts(candidate: MemoryCandidate): MemoryConflict[] {
     if (candidate.targetStore !== 'working') return [];
-    if (!this.working.has(candidate.key)) return [];
-    const existingValue = this.working.get(candidate.key);
-    if (memoryValuesEqual(existingValue, candidate.value)) return [];
+    const existingValue = this.existingWorkingValue(candidate.key);
+    if (existingValue === undefined || memoryValuesEqual(existingValue, candidate.value)) return [];
     const existingProvenance = this.provenanceFor(candidate.targetStore, candidate.key) ?? undefined;
     return [
       {
@@ -1749,6 +1750,30 @@ export class SqliteMemoryReviewQueue {
           'A pending memory candidate contradicts the current value for the same key. Resolve with keep_existing, replace_existing, or reject_candidate before treating the fact as durable.',
       },
     ];
+  }
+
+  private existingWorkingValue(key: string): unknown {
+    if (this.working.has(key)) return this.working.get(key);
+    const row = this.db
+      .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+      .get(key) as { value: string } | undefined;
+    if (!row) return undefined;
+    return this.decodeValue(row.value);
+  }
+
+  private assertValidConflictResolution(
+    resolution: MemoryConflictResolution,
+  ): void {
+    if (
+      resolution === 'keep_existing' ||
+      resolution === 'replace_existing' ||
+      resolution === 'reject_candidate'
+    ) {
+      return;
+    }
+    throw new Error(
+      `Unsupported memory conflict resolution: ${String(resolution)}`,
+    );
   }
 
   private validateProposal(proposal: MemoryCandidateProposal): void {
