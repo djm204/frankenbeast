@@ -218,8 +218,19 @@ export { checkModuleHealth, allHealthy } from './resilience/module-initializer.j
 export type { ModuleHealth } from './resilience/module-initializer.js';
 
 // Disaster recovery
-export { buildBackupEncryptionVerificationReport, detectRestorePreviewConflicts } from './dr/restore-preview.js';
+export {
+  buildApprovalLedgerRecoveryReport,
+  buildBackupEncryptionVerificationReport,
+  detectRestorePreviewConflicts,
+} from './dr/restore-preview.js';
 export type {
+  ApprovalLedgerRecordSummary,
+  ApprovalLedgerRecoveryFinding,
+  ApprovalLedgerRecoveryFindingCode,
+  ApprovalLedgerRecoveryOptions,
+  ApprovalLedgerRecoveryReport,
+  ApprovalLedgerRecoverySeverity,
+  ApprovalLedgerRecoveryStatus,
   BackupEncryptionMetadata,
   BackupEncryptionVerificationFinding,
   BackupEncryptionVerificationFindingCode,

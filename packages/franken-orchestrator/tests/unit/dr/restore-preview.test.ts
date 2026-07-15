@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import {
+  buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
   detectRestorePreviewConflicts,
   type RestorePreviewManifest,
@@ -363,6 +364,113 @@ describe('restore preview conflict detector', () => {
         expect.objectContaining({ code: 'missing-key-reference', severity: 'warning' }),
         expect.objectContaining({ code: 'missing-artifact-digest', severity: 'warning' }),
       ]),
+    );
+  });
+
+  it('returns a clean read-only approval ledger recovery report when approvals match', () => {
+    const backup: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [],
+      approvals: [{ id: 'approval-1', state: 'approved', digest: 'sha256:approval', updatedAt: '2026-07-14T12:00:00.000Z' }],
+      memory: [],
+      cron: [],
+    };
+
+    const report = buildApprovalLedgerRecoveryReport(backup, clone(backup), {
+      checkedAt: '2026-07-14T12:30:00.000Z',
+    });
+
+    expect(report).toEqual({
+      checkedAt: '2026-07-14T12:30:00.000Z',
+      wouldWrite: false,
+      status: 'clean',
+      safeToApplyAutomatically: false,
+      findings: [],
+      operatorSummary: 'Approval ledger recovery check is clean; no approval ledger drift was found.',
+    });
+  });
+
+  it('blocks approval ledger recovery for stale backup-only approval tokens', () => {
+    const report = buildApprovalLedgerRecoveryReport(
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-stale', state: 'approved', digest: 'sha256:stale-token' }],
+        memory: [],
+        cron: [],
+      },
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(report.safeToApplyAutomatically).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'approval-backup-only',
+        approvalId: 'approval-stale',
+        severity: 'blocker',
+        backup: { state: 'approved', digestPresent: true },
+        recommendation: expect.stringContaining('fresh human re-approval'),
+      }),
+    );
+  });
+
+  it('blocks changed approval ledger entries without echoing token values', () => {
+    const report = buildApprovalLedgerRecoveryReport(
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-drift', state: 'pending', digest: 'sha256:backup-secret-token', updatedAt: '2026-07-14T11:00:00.000Z' }],
+        memory: [],
+        cron: [],
+      },
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-drift', state: 'approved', digest: 'sha256:live-secret-token', updatedAt: '2026-07-14T12:00:00.000Z' }],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(JSON.stringify(report)).not.toContain('secret-token');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'approval-newer-live',
+        approvalId: 'approval-drift',
+        severity: 'blocker',
+        backup: { state: 'pending', digestPresent: true, updatedAt: '2026-07-14T11:00:00.000Z' },
+        live: { state: 'approved', digestPresent: true, updatedAt: '2026-07-14T12:00:00.000Z' },
+        recommendation: expect.stringContaining('fresh re-approval'),
+      }),
+    );
+  });
+
+  it('surfaces live-only approval ledger entries as operator review warnings', () => {
+    const report = buildApprovalLedgerRecoveryReport(
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-live', state: 'approved', digest: 'sha256:live-token' }],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('review-required');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'approval-live-only',
+        approvalId: 'approval-live',
+        severity: 'warning',
+        live: { state: 'approved', digestPresent: true },
+        recommendation: expect.stringContaining('Preserve the live approval ledger entry'),
+      }),
     );
   });
 });

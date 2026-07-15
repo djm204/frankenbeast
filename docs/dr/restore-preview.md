@@ -48,6 +48,38 @@ Interpretation guidance:
 
 Tests cover verified metadata, missing metadata, malformed runtime-loaded metadata, unsupported algorithms, and missing restore-critical references so future DR changes keep the report machine-readable and actionable.
 
+## Approval ledger recovery report
+
+`buildApprovalLedgerRecoveryReport(backupManifest, liveManifest, options)` is the dedicated approval-ledger recovery tool. It is read-only, deterministic, and returns structured output for operators and PM/liveness automation:
+
+- `status`: `clean`, `review-required`, or `blocked`
+- `wouldWrite`: always `false`
+- `safeToApplyAutomatically`: always `false`; approval recovery must not silently replay tokens
+- `findings`: machine-readable records keyed by approval id and finding code
+- `operatorSummary`: a concise handoff for the restore operator
+
+The report intentionally redacts approval token material. It summarizes only whether a digest is present plus safe metadata such as approval `state` and `updatedAt`.
+
+Interpretation guidance:
+
+- `clean`: backup and live approval ledger records match. The report is still read-only and should be attached to the restore evidence bundle.
+- `review-required`: live-only approval entries exist. Preserve live approval evidence unless an operator explicitly expires it; never let a backup delete live approvals silently.
+- `blocked`: backup-only, changed, newer-live, or schema-mismatched approval records exist. Quarantine the backup approval entry and require fresh human re-approval before any action can reuse that authorization.
+
+Example finding:
+
+```json
+{
+  "code": "approval-backup-only",
+  "approvalId": "approval-stale",
+  "severity": "blocker",
+  "backup": { "state": "approved", "digestPresent": true },
+  "recommendation": "Quarantine this backup approval entry and require a fresh human re-approval before any action can reuse the approval."
+}
+```
+
+Tests cover clean approval ledgers, backup-only stale tokens, changed/newer-live ledgers, live-only warnings, and token redaction so disaster-recovery tooling remains safe for automated handoffs.
+
 ## Kanban card resurrection guardrails
 
 Backup-only task records are treated as `blocker` conflicts. A backup-only task means the backup manifest contains a Kanban card that live state no longer has, so blindly restoring it could resurrect deleted, completed, reassigned, or otherwise intentionally removed work.
