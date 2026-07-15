@@ -218,7 +218,7 @@ export function routeIssueWorkerForDegradedMode(
     ? `backpressure: ${input.backpressureDecision.reasons.join('; ')}`
     : undefined;
   const degradedReason = input.stopRemainingReason ?? backpressureReason;
-  const hasProgress = input.checkpointHasIssueProgress || graphHasCheckpointProgress;
+  const hasProgress = graphHasCheckpointProgress || (input.graphHasCheckpointProgress === undefined && input.checkpointHasIssueProgress);
 
   if (graphComplete) {
     return {
@@ -711,7 +711,27 @@ export class IssueRunner {
     );
     const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
 
-    const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
+    const skipForDegradedRoute = (route: IssueDegradedModeWorkerRoute): IssueOutcome => {
+      logger?.warn(
+        `[issues] Degraded-mode route for issue #${issue.number}: ${route.action}`,
+        {
+          issueNumber: issue.number,
+          workerRoute: route,
+        },
+        'issues',
+      );
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: route.reason,
+      };
+    };
+
+    const pauseForBackpressure = async (
+      graphProgress?: { graphHasCheckpointProgress?: boolean; graphComplete?: boolean },
+    ): Promise<IssueOutcome | undefined> => {
       const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
         issue,
         ...backpressureContext,
@@ -735,6 +755,8 @@ export class IssueRunner {
       const route = routeIssueWorkerForDegradedMode({
         issue,
         checkpointHasIssueProgress,
+        graphHasCheckpointProgress: graphProgress?.graphHasCheckpointProgress,
+        graphComplete: graphProgress?.graphComplete,
         backpressureDecision,
       });
       logger?.warn(
@@ -757,13 +779,11 @@ export class IssueRunner {
     };
 
     if (backpressureContext.stopRemainingReason && !checkpointHasIssueProgress) {
-      return {
-        issueNumber: issue.number,
-        issueTitle: issue.title,
-        status: 'skipped',
-        tokensUsed: 0,
-        error: backpressureContext.stopRemainingReason,
-      };
+      return skipForDegradedRoute(routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      }));
     }
 
     const requiresCheckpointCompletionCheckBeforeBackpressure =
@@ -807,8 +827,22 @@ export class IssueRunner {
     const graphHasCheckpointProgress =
       issueCheckpoint !== undefined && graph.tasks.some((task) => checkpointHasTaskProgress(issueCheckpoint, task.id));
 
-    if (issueCheckpoint && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)))) {
-      logger?.info(`[issues] Issue #${issue.number} already completed (checkpoint)`, undefined, 'issues');
+    const graphComplete = issueCheckpoint !== undefined
+      && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)));
+
+    if (graphComplete) {
+      const route = routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        graphHasCheckpointProgress,
+        graphComplete,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      });
+      logger?.info(
+        `[issues] Issue #${issue.number} already completed (checkpoint)`,
+        { issueNumber: issue.number, workerRoute: route },
+        'issues',
+      );
       appendIssueLog(logFile, `Issue #${issue.number} already complete from checkpoint`);
       return {
         issueNumber: issue.number,
@@ -819,17 +853,17 @@ export class IssueRunner {
     }
 
     if (backpressureContext.stopRemainingReason && !graphHasCheckpointProgress) {
-      return {
-        issueNumber: issue.number,
-        issueTitle: issue.title,
-        status: 'skipped',
-        tokensUsed: 0,
-        error: backpressureContext.stopRemainingReason,
-      };
+      return skipForDegradedRoute(routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        graphHasCheckpointProgress,
+        graphComplete,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      }));
     }
 
     if (requiresCheckpointCompletionCheckBeforeBackpressure && !graphHasCheckpointProgress) {
-      const paused = await pauseForBackpressure();
+      const paused = await pauseForBackpressure({ graphHasCheckpointProgress, graphComplete });
       if (paused) return paused;
     }
 

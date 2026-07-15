@@ -953,11 +953,13 @@ describe('IssueRunner', () => {
     });
 
     it('stops iteration after queue depth backpressure to avoid priority inversion', async () => {
+      const logger = mockLogger();
       const graphBuilder = mockGraphBuilder();
       const config = makeConfig({
         issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
         triageResults: [makeTriage(16), makeTriage(17)],
         graphBuilder,
+        logger,
         backpressure: {
           thresholds: { maxPendingIssueCount: 1 },
         },
@@ -978,8 +980,55 @@ describe('IssueRunner', () => {
           error: expect.stringContaining('queue depth 2 exceeds limit 1'),
         }),
       ]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Degraded-mode route for issue #17: defer-fresh-start'),
+        expect.objectContaining({
+          workerRoute: expect.objectContaining({
+            action: 'defer-fresh-start',
+            issueNumber: 17,
+            reason: expect.stringContaining('queue depth 2 exceeds limit 1'),
+          }),
+        }),
+        'issues',
+      );
       expect(mockRun).not.toHaveBeenCalled();
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+    });
+
+    it('logs a defer route when queue-depth degradation reaches issue-scoped checkpoint metadata without graph progress', async () => {
+      const logger = mockLogger();
+      writePlanChunks('issue-17', ['api']);
+      const checkpoint = mockCheckpoint(new Set(['issue-17-metadata-only']));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
+        triageResults: [makeTriage(16), makeTriage(17, 'chunked')],
+        checkpoint,
+        logger,
+        backpressure: {
+          thresholds: { maxPendingIssueCount: 1 },
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[1]).toMatchObject({
+        issueNumber: 17,
+        status: 'skipped',
+        error: expect.stringContaining('queue depth 2 exceeds limit 1'),
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Degraded-mode route for issue #17: defer-fresh-start'),
+        expect.objectContaining({
+          workerRoute: expect.objectContaining({
+            action: 'defer-fresh-start',
+            checkpointHasIssueProgress: true,
+            graphHasCheckpointProgress: false,
+            graphComplete: false,
+          }),
+        }),
+        'issues',
+      );
+      expect(mockRun).not.toHaveBeenCalled();
     });
 
     it('resumes partially checkpointed issueRuntime work after queue-depth stops fresh starts', async () => {
