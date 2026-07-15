@@ -159,14 +159,41 @@ describe("Memory Server", () => {
       category: "pii",
       sourceScope: "import-1",
       query: "secret",
+      agentId: "agent-a",
     });
     expect(brain.rightToForget).toHaveBeenCalledWith({
       category: "pii",
       sourceScope: "import-1",
       query: "secret",
+      agentId: "agent-a",
     });
     expect(deletionResult.content[0]!.text).toContain("hashed-selector");
     expect(deletionResult.content[0]!.text).not.toContain("secret");
+  });
+
+  it("rejects blank agent ids before storing private memory as shared", async () => {
+    const brain = {
+      query: vi.fn().mockResolvedValue([]),
+      store: vi.fn(),
+      frontload: vi.fn(),
+      forget: vi.fn(),
+      rightToForget: vi.fn(),
+    };
+    const server = createMemoryServer({ brain });
+    const storeTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_store",
+    )!;
+
+    const result = await storeTool.handler({
+      key: "adr",
+      value: "use adapters",
+      type: "working",
+      agentId: "   ",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("agentId must be a non-empty string");
+    expect(brain.store).not.toHaveBeenCalled();
   });
 
   it("rejects invalid query limits before calling the brain adapter", async () => {

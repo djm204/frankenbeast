@@ -24,6 +24,11 @@ export interface MemoryScopeInput {
   agentId?: string;
 }
 
+export interface AgentScopedInput {
+  /** Agent id used to address agent-scoped working memory. */
+  agentId?: string;
+}
+
 export interface BrainQueryInput extends MemoryScopeInput {
   query: string;
   type?: string;
@@ -51,8 +56,10 @@ export interface BrainAdapter {
     agentId?: string;
   }): Promise<void>;
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
-  forget(key: string, input?: { agentId?: string }): Promise<boolean>;
-  rightToForget(input: RightToForgetSelector): Promise<RightToForgetReport>;
+  forget(key: string, input?: AgentScopedInput): Promise<boolean>;
+  rightToForget(
+    input: RightToForgetSelector & AgentScopedInput,
+  ): Promise<RightToForgetReport>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
@@ -267,8 +274,9 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
       // Search episodic memory
       if (!memoryType || memoryType === "episodic") {
+        const episodicLimit = readScope.readScope === "all" ? limit : -1;
         const events = takeVisibleEntries(
-          brain.episodic.recall(input.query, -1),
+          brain.episodic.recall(input.query, episodicLimit),
           limit,
           (event) =>
             canReadMemoryEntry(
@@ -345,8 +353,9 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       }
 
       // Recent episodic events
+      const episodicLimit = readScope.readScope === "all" ? 100 : -1;
       const events = takeVisibleEntries(
-        brain.episodic.recent(-1),
+        brain.episodic.recent(episodicLimit),
         100,
         (event) =>
           canReadMemoryEntry(
@@ -373,7 +382,13 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     },
 
     async rightToForget(input) {
-      return brain.rightToForget(input);
+      const { agentId, ...selector } = input;
+      return brain.rightToForget({
+        ...selector,
+        ...(selector.key !== undefined
+          ? { key: scopedWorkingKey(selector.key, agentId) }
+          : {}),
+      });
     },
   };
 }

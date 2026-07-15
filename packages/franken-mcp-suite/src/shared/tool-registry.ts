@@ -77,6 +77,15 @@ function parseMemoryReadScopeArgs(args: Record<string, unknown>): { ok: true; va
   return { ok: true, value: { ...(readScope ? { readScope: readScope as 'all' | 'shared' | 'agent' } : {}), ...(agentId ? { agentId } : {}) } };
 }
 
+function parseOptionalAgentIdArg(args: Record<string, unknown>): { ok: true; value?: string } | { ok: false; message: string } {
+  if (args['agentId'] === undefined) return { ok: true };
+  const agentId = String(args['agentId']).trim();
+  if (agentId.length === 0) {
+    return { ok: false, message: 'agentId must be a non-empty string when provided' };
+  }
+  return { ok: true, value: agentId };
+}
+
 function parseStringArg(name: string, value: unknown): { ok: true; value: string } | { ok: false; message: string } {
   if (typeof value !== 'string') {
     return { ok: false, message: `${name} must be a string` };
@@ -116,8 +125,11 @@ const TOOLS: ToolFull[] = [
       const key = String(args['key']);
       const value = String(args['value']);
       const type = String(args['type']);
-      const agentId = args['agentId'] === undefined ? undefined : String(args['agentId']);
-      await brain.store(agentId ? { key, value, type, agentId } : { key, value, type });
+      const agentId = parseOptionalAgentIdArg(args);
+      if (!agentId.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_store ${agentId.message}` }], isError: true };
+      }
+      await brain.store(agentId.value ? { key, value, type, agentId: agentId.value } : { key, value, type });
       return { content: [{ type: 'text', text: `Stored memory: ${key}` }] };
     },
   },
@@ -198,8 +210,11 @@ const TOOLS: ToolFull[] = [
     },
     makeHandler: ({ brain }) => async (args) => {
       const key = String(args['key']);
-      const agentId = args['agentId'] === undefined ? undefined : String(args['agentId']);
-      const removed = await brain.forget(key, agentId ? { agentId } : {});
+      const agentId = parseOptionalAgentIdArg(args);
+      if (!agentId.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_forget ${agentId.message}` }], isError: true };
+      }
+      const removed = await brain.forget(key, agentId.value ? { agentId: agentId.value } : {});
       if (!removed) {
         return { content: [{ type: 'text', text: `No memory entry found with key: ${key}` }] };
       }
@@ -217,16 +232,22 @@ const TOOLS: ToolFull[] = [
         category: { type: 'string', description: 'Category metadata or key prefix to delete' },
         sourceScope: { type: 'string', description: 'Source/sourceScope metadata or key prefix to delete' },
         query: { type: 'string', description: 'Sensitive fact substring to delete without echoing in the report' },
+        agentId: { type: 'string', description: 'Optional agent id used when deleting an exact agent-scoped working-memory key' },
         type: { type: 'string', description: 'Memory scope: working, episodic, or all', enum: ['working', 'episodic', 'all'] },
         dryRun: { type: 'boolean', description: 'Report counts without deleting or writing audit evidence' },
       },
     },
     makeHandler: ({ brain }) => async (args) => {
+      const agentId = parseOptionalAgentIdArg(args);
+      if (!agentId.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_right_to_forget ${agentId.message}` }], isError: true };
+      }
       const input = {
         ...(args['key'] !== undefined ? { key: String(args['key']) } : {}),
         ...(args['category'] !== undefined ? { category: String(args['category']) } : {}),
         ...(args['sourceScope'] !== undefined ? { sourceScope: String(args['sourceScope']) } : {}),
         ...(args['query'] !== undefined ? { query: String(args['query']) } : {}),
+        ...(agentId.value ? { agentId: agentId.value } : {}),
         ...(args['type'] !== undefined ? { type: String(args['type']) as 'working' | 'episodic' | 'all' } : {}),
         ...(args['dryRun'] !== undefined ? { dryRun: args['dryRun'] === true || String(args['dryRun']) === 'true' } : {}),
       };

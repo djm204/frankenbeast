@@ -20,6 +20,7 @@ const { databaseInstances, brainInstances } = vi.hoisted(() => {
       recent: ReturnType<typeof vi.fn>;
       record: ReturnType<typeof vi.fn>;
     };
+    rightToForget: ReturnType<typeof vi.fn>;
     flush: ReturnType<typeof vi.fn>;
   }> = [];
   return { databaseInstances, brainInstances };
@@ -100,6 +101,12 @@ vi.mock("@franken/brain", () => ({
         ]),
         record: vi.fn(),
       },
+      rightToForget: vi.fn(() => ({
+        selectorHash: "hash",
+        dryRun: false,
+        deleted: { working: 1, episodic: 0, derived: 0 },
+        remainingReferences: 0,
+      })),
       flush: vi.fn(),
     };
     brainInstances.push(brain);
@@ -279,6 +286,44 @@ describe("createBrainAdapter", () => {
         },
       }),
     );
+  });
+
+  it("keeps all-scope episodic reads bounded while scoped reads can backfill visible rows", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    await brain.query({ query: "episode", type: "episodic", limit: 7 });
+    await brain.frontload();
+    await brain.query({
+      query: "episode",
+      type: "episodic",
+      readScope: "shared",
+      limit: 7,
+    });
+    await brain.frontload({ readScope: "shared" });
+
+    expect(mockBrain.episodic.recall).toHaveBeenNthCalledWith(
+      1,
+      "episode",
+      7,
+    );
+    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(1, 100);
+    expect(mockBrain.episodic.recall).toHaveBeenNthCalledWith(
+      2,
+      "episode",
+      -1,
+    );
+    expect(mockBrain.episodic.recent).toHaveBeenNthCalledWith(2, -1);
+  });
+
+  it("translates right-to-forget exact keys for agent-scoped working memory", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    await brain.rightToForget({ key: "profile", agentId: "Alpha Team!" });
+
+    expect(brainInstances[0].rightToForget).toHaveBeenCalledWith({
+      key: "__fbeast_agent_memory__/Alpha%20Team!/profile",
+    });
   });
 
   it("rejects unsupported memory type", async () => {
