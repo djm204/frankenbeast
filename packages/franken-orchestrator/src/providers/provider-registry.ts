@@ -635,18 +635,25 @@ export class ProviderRegistry {
 
           if (retried) continue;
 
-          // Attempt completed — flush buffered events
+          // Attempt completed — flush buffered events. The provider stream has
+          // already completed at this point, so mark a buffered `done` as terminal
+          // before yielding earlier buffered chunks. Otherwise a caller that stops
+          // after the first yielded text event can make a successful half-open
+          // probe look like an abandoned stream in `finally`.
+          const bufferedDone = buffer.find((event) => event.type === 'done');
+          if (bufferedDone?.type === 'done') {
+            terminalEventObserved = true;
+            this.tokenAggregator.record(provider.name, bufferedDone.usage);
+            this.recordProviderSuccess(provider);
+            this.currentProviderIndex = providerIndex;
+          }
+
           for (const event of buffer) {
             if (event.type === 'done') {
-              terminalEventObserved = true;
-              this.tokenAggregator.record(provider.name, event.usage);
-              this.recordProviderSuccess(provider);
-            }
-            yield event;
-            if (event.type === 'done') {
-              this.currentProviderIndex = providerIndex;
+              yield event;
               return;
             }
+            yield event;
           }
 
           lastError = new Error('stream ended without done');

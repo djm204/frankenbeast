@@ -645,6 +645,44 @@ describe('ProviderRegistry', () => {
       });
     });
 
+    it('closes a half-open probe when the buffered stream completed before the caller stops early', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      let primaryShouldFail = true;
+      const p1: ILlmProvider = {
+        ...mockProvider('primary'),
+        execute: vi.fn(async function* () {
+          if (primaryShouldFail) throw new Error('transient outage');
+          yield { type: 'text' as const, content: 'primary recovered' };
+          yield { type: 'done' as const, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+        }),
+      };
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      primaryShouldFail = false;
+      registry.setOrder(['primary', 'fallback']);
+      const iterator = registry.execute(makeRequest());
+      await expect(iterator.next()).resolves.toEqual({
+        done: false,
+        value: { type: 'text', content: 'primary recovered' },
+      });
+      await iterator.return(undefined);
+
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'closed',
+        successes: 1,
+        halfOpenProbeCount: 0,
+        cooldownUntil: null,
+      });
+    });
+
     it('probes recovered providers after cooldown even when fallback is current', async () => {
       let now = Date.UTC(2026, 0, 1);
       let primaryShouldFail = true;
