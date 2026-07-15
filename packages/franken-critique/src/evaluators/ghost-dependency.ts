@@ -780,7 +780,11 @@ function isTypeOnlyImportReferenceUse(
   const openBraceIndex = trimmed.lastIndexOf('{');
   const semicolonIndex = trimmed.lastIndexOf(';');
   const annotationSuffix = trimmed.slice(colonIndex + 1);
-  if (/[=;]/.test(annotationSuffix)) return false;
+  if (/=\s*$/.test(trimmed)) return false;
+  if (/=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*$/.test(trimmed)) {
+    return false;
+  }
+  if (/;/.test(annotationSuffix)) return false;
   return colonIndex > semicolonIndex && !/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed.slice(openBraceIndex));
 }
 
@@ -985,6 +989,7 @@ function isInsideTypeAnnotation(
 
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (hasRuntimeAfterClosedTypeContext(annotationSuffix)) return false;
+  if (/[=;]/.test(annotationSuffix)) return false;
   if (/=>/.test(annotationSuffix)) {
     if (/\)\s*:\s*[^=]*=>\s*$/.test(prefix)) return false;
     return /^\s*(?:new\s*)?(?:\([\s\S]*\)|<[^>]*>\s*\([\s\S]*\)|[A-Za-z_$][\w$]*(?:\[\])?)\s*=>\s*$/.test(
@@ -1025,7 +1030,7 @@ function hasRuntimeAfterAnnotation(prefix: string, annotationIndex: number): boo
 }
 
 function hasRuntimeAfterClosedTypeContext(annotationSuffix: string): boolean {
-  return /}\s*\)?(?:\s*(?:\{\s*(?:return|throw|void|await|yield|case|default)\b|(?:\.|\[|\(|,|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])\s*)|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
+  return /}\s*\)?(?:\s*(?:\{\s*(?:return|throw|void|await|yield|case|default)\b|(?:\.|\[|\(|,|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])\s*)|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|function\b|async\s+function\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\()|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
     annotationSuffix,
   );
 }
@@ -1221,8 +1226,9 @@ function readQuotedString(
     if (ch === '\\') {
       const escaped = content[i + 1];
       if (escaped) {
-        value += escaped;
-        i += 1;
+        const decoded = decodeStringEscape(content, i);
+        value += decoded.value;
+        i = decoded.endIndex;
       }
       continue;
     }
@@ -1235,6 +1241,44 @@ function readQuotedString(
   }
 
   return null;
+}
+
+function decodeStringEscape(content: string, slashIndex: number): { value: string; endIndex: number } {
+  const escaped = content[slashIndex + 1];
+  if (!escaped) return { value: '', endIndex: slashIndex };
+
+  if (escaped === 'u') {
+    if (content[slashIndex + 2] === '{') {
+      const closeIndex = content.indexOf('}', slashIndex + 3);
+      const hex = closeIndex === -1 ? '' : content.slice(slashIndex + 3, closeIndex);
+      if (/^[0-9A-Fa-f]{1,6}$/.test(hex)) {
+        return { value: String.fromCodePoint(parseInt(hex, 16)), endIndex: closeIndex };
+      }
+    }
+    const hex = content.slice(slashIndex + 2, slashIndex + 6);
+    if (/^[0-9A-Fa-f]{4}$/.test(hex)) {
+      return { value: String.fromCharCode(parseInt(hex, 16)), endIndex: slashIndex + 5 };
+    }
+  }
+
+  if (escaped === 'x') {
+    const hex = content.slice(slashIndex + 2, slashIndex + 4);
+    if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+      return { value: String.fromCharCode(parseInt(hex, 16)), endIndex: slashIndex + 3 };
+    }
+  }
+
+  const simpleEscapes: Record<string, string> = {
+    b: '\b',
+    f: '\f',
+    n: '\n',
+    r: '\r',
+    t: '\t',
+    v: '\v',
+    '0': '\0',
+  };
+
+  return { value: simpleEscapes[escaped] ?? escaped, endIndex: slashIndex + 1 };
 }
 
 function readTemplateString(content: string, startIndex: number): TemplateRead {

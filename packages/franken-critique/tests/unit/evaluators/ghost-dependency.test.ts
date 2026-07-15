@@ -143,6 +143,7 @@ describe('GhostDependencyEvaluator', () => {
       const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
       const importMap = await import('#internal/tool');
       const fs = await import('node:fs/promises');
+      const escapedKnown = await import('z\\u006fd');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
@@ -414,6 +415,7 @@ describe('GhostDependencyEvaluator', () => {
       const cfg11 = value satisfies { dep: string }
       finally { import('finally-after-object-assertion-ghost'); }
       const annotatedArrow = (): any => import('annotated-arrow-body-ghost');
+      const typedArrowInitializer: (x: string) => Promise<unknown> = (x) => import('typed-arrow-initializer-ghost');
       type DefaultExportAlias = string
       export default async function defaultLoader() { return import('export-default-after-type-ghost'); }
       type DefaultExportExpressionAlias = string
@@ -442,6 +444,10 @@ describe('GhostDependencyEvaluator', () => {
       function objectReturn(): { type: string } { return import('object-return-type-key-ghost'); }
       function templateAfterTypedParam(opts: { path: string }) { return \`\${require('template-after-typed-param-ghost')}\`; }
       const assertedPair = value as Foo, chained = import('chained-after-assertion-ghost').then(load);
+      const assertedAssignment = value as { dep: string }
+      foo = import('assignment-after-object-assertion-ghost');
+      const assertedFunction = value satisfies { dep: string }
+      function afterAssertion() { return import('function-after-object-assertion-ghost'); }
       const as = String.raw; as\`\${require('as-tagged-template-ghost')}\`;
       const satisfies = String.raw; satisfies\`\${require('satisfies-tagged-template-ghost')}\`;
       const asIdentifier = 1; as; import('as-contextual-identifier-ghost');
@@ -450,7 +456,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(96);
+    expect(result.findings).toHaveLength(99);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -526,6 +532,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('catch-after-object-assertion-ghost'),
         expect.stringContaining('finally-after-object-assertion-ghost'),
         expect.stringContaining('annotated-arrow-body-ghost'),
+        expect.stringContaining('typed-arrow-initializer-ghost'),
         expect.stringContaining('export-default-after-type-ghost'),
         expect.stringContaining('export-default-expression-after-type-ghost'),
         expect.stringContaining('module-exports-after-type-ghost'),
@@ -545,6 +552,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('object-return-type-key-ghost'),
         expect.stringContaining('template-after-typed-param-ghost'),
         expect.stringContaining('chained-after-assertion-ghost'),
+        expect.stringContaining('assignment-after-object-assertion-ghost'),
+        expect.stringContaining('function-after-object-assertion-ghost'),
         expect.stringContaining('as-tagged-template-ghost'),
         expect.stringContaining('satisfies-tagged-template-ghost'),
         expect.stringContaining('as-contextual-identifier-ghost'),
