@@ -855,25 +855,28 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return result;
   }
 
-  runtimeValueState(key: string):
+  reviewValueState(key: string):
     | { state: 'present'; value: unknown }
     | { state: 'deleted' }
-    | { state: 'unhydrated' }
     | { state: 'absent' } {
-    if (this.store.has(key)) {
-      return { state: 'present', value: this.get(key) };
-    }
     if (this.deletedKeys.has(key)) return { state: 'deleted' };
-    if (this.persistedSerialized.has(key)) return { state: 'unhydrated' };
-    return { state: 'absent' };
+    if (this.dirtyKeys.has(key)) {
+      return this.store.has(key)
+        ? { state: 'present', value: this.get(key) }
+        : { state: 'deleted' };
+    }
+    const row = this.db
+      .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+      .get(key) as { value: string } | undefined;
+    if (!row) {
+      this.persistedSerialized.delete(key);
+      return { state: 'absent' };
+    }
+    const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+    this.persistedSerialized.set(key, serialized);
+    return { state: 'present', value: parseStoredWorkingMemoryValue(serialized) };
   }
 
-  persistedValue(key: string): unknown {
-    const serialized = this.persistedSerialized.get(key);
-    return serialized === undefined
-      ? undefined
-      : parseStoredWorkingMemoryValue(serialized);
-  }
 
   deletePersistedKeys(keys: readonly string[]): (() => void) | undefined {
     if (keys.length === 0) return;
@@ -1592,13 +1595,13 @@ export class SqliteMemoryReviewQueue {
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
-    return this.approveCandidate(id, options, false);
+    return this.approveCandidate(id, options);
   }
 
   private approveCandidate(
     id: string,
     options: MemoryReviewDecisionOptions,
-    allowConflictReplace: boolean,
+    replaceConflict?: { expectedExistingValue: unknown },
   ): MemoryCandidate {
     const now = isoNow();
     let finalizeWorkingFlush: (() => void) | undefined;
@@ -1621,7 +1624,24 @@ export class SqliteMemoryReviewQueue {
         approvedCandidate = this.requireCandidate(id);
         return;
       }
-      if (!allowConflictReplace && this.detectConflicts(candidate).length > 0) {
+      const conflicts = this.detectConflicts(candidate);
+      if (replaceConflict) {
+        if (conflicts.length === 0) {
+          throw new Error(
+            `Memory candidate ${id} no longer has an unresolved conflict`,
+          );
+        }
+        if (
+          !memoryValuesEqual(
+            conflicts[0]?.existingValue,
+            replaceConflict.expectedExistingValue,
+          )
+        ) {
+          throw new Error(
+            `Memory candidate ${id} conflict changed before approval; re-run conflictsFor() before replacing`,
+          );
+        }
+      } else if (conflicts.length > 0) {
         throw new Error(
           `Memory candidate ${id} conflicts with an existing value; call resolveConflict() with replace_existing to approve the replacement`,
         );
@@ -1752,7 +1772,7 @@ export class SqliteMemoryReviewQueue {
       return this.approveCandidate(id, {
         ...decisionOptions,
         note: decisionOptions.note ?? 'Memory conflict resolved by replacing the existing value.',
-      }, true);
+      }, { expectedExistingValue: conflicts[0]?.existingValue });
     }
 
     return this.reject(id, {
@@ -1790,10 +1810,8 @@ export class SqliteMemoryReviewQueue {
   }
 
   private existingWorkingValue(key: string): unknown {
-    const runtime = this.working.runtimeValueState(key);
-    if (runtime.state === 'present') return runtime.value;
-    if (runtime.state === 'deleted' || runtime.state === 'absent') return undefined;
-    return this.working.persistedValue(key);
+    const runtime = this.working.reviewValueState(key);
+    return runtime.state === 'present' ? runtime.value : undefined;
   }
 
   private assertValidConflictResolution(

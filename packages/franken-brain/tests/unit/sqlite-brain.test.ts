@@ -1547,6 +1547,50 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('refreshes persisted working memory before conflict approval checks', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-refresh-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const staleReviewer = new SqliteBrain(dbPath, undefined, {
+          hydrateWorkingMemoryFromDb: false,
+        });
+        const writer = new SqliteBrain(dbPath);
+        const approved = writer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.concurrent-theme',
+          value: 'dark',
+          source: 'chat:turn-7a',
+          confidence: 0.9,
+          reason: 'Concurrent reviewer approved theme.',
+        });
+        writer.memoryReview.approve(approved.id, { reviewer: 'operator' });
+        writer.close();
+
+        const contradictory = staleReviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.concurrent-theme',
+          value: 'light',
+          source: 'chat:turn-7b',
+          confidence: 0.8,
+          reason: 'Stale reviewer inferred a conflicting theme.',
+        });
+
+        expect(staleReviewer.memoryReview.conflictsFor(contradictory.id)).toEqual([
+          expect.objectContaining({
+            existingValue: 'dark',
+            proposedValue: 'light',
+          }),
+        ]);
+        expect(() =>
+          staleReviewer.memoryReview.approve(contradictory.id),
+        ).toThrow(/conflicts with an existing value/);
+        staleReviewer.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('fails fast for invalid conflict resolution strings', () => {
       const initial = brain.memoryReview.propose({
         targetStore: 'working',
@@ -2240,7 +2284,13 @@ describe('SqliteBrain', () => {
           confidence: 0.9,
           reason: 'Approved value equals stale cache.',
         });
-        stale.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+        expect(() =>
+          stale.memoryReview.approve(candidate.id, { reviewer: 'operator' }),
+        ).toThrow(/conflicts with an existing value/);
+        stale.memoryReview.resolveConflict(candidate.id, {
+          resolution: 'replace_existing',
+          reviewer: 'operator',
+        });
         stale.close();
         stale = undefined;
 
