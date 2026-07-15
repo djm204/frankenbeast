@@ -76,6 +76,8 @@ function isNodeBuiltinSpecifier(specifier: string): boolean {
 }
 
 function normalizePackageUrlSpecifier(specifier: string): string {
+  if (!/^(?:npm|jsr):/.test(specifier)) return specifier;
+
   return specifier
     .replace(/^(?:npm|jsr):/, '')
     .replace(/^(@[^/]+\/[^/@]+)@[^/]+/, '$1')
@@ -295,7 +297,15 @@ function skipTypeScriptImportArgumentAssertion(
   if (!keyword) return index;
 
   let i = skipImportTrivia(content, index + keyword.length);
-  while (i < content.length && content[i] !== ')' && content[i] !== ',') {
+  let angleDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  while (i < content.length) {
+    const ch = content[i]!;
+    if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && angleDepth === 0 && (ch === ')' || ch === ',')) {
+      break;
+    }
     if (content[i] === '/' && content[i + 1] === '/') {
       i = skipImportTrivia(content, skipSingleLineComment(content, i + 2));
       continue;
@@ -304,6 +314,18 @@ function skipTypeScriptImportArgumentAssertion(
       i = skipImportTrivia(content, skipMultiLineComment(content, i + 2) + 1);
       continue;
     }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i) + 1;
+      continue;
+    }
+    if (ch === '<') angleDepth += 1;
+    else if (ch === '>' && angleDepth > 0) angleDepth -= 1;
+    else if (ch === '{') braceDepth += 1;
+    else if (ch === '}' && braceDepth > 0) braceDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']' && bracketDepth > 0) bracketDepth -= 1;
+    else if (ch === '(') parenDepth += 1;
+    else if (ch === ')' && parenDepth > 0) parenDepth -= 1;
     i += 1;
   }
 
@@ -914,7 +936,7 @@ function hasRuntimeAfterAnnotation(prefix: string, annotationIndex: number): boo
 }
 
 function hasRuntimeAfterClosedTypeContext(annotationSuffix: string): boolean {
-  return /}\s*\)?(?:\s*\{\s*(?:return|throw|void|await|yield|case|default)\b|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|using\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
+  return /}\s*\)?(?:\s*(?:\{\s*(?:return|throw|void|await|yield|case|default)\b|(?:\.|\[|\(|,|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])\s*)|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|using\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
     annotationSuffix,
   );
 }

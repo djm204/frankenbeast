@@ -160,6 +160,24 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('balances TypeScript assertions inside dynamic import arguments', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content = `
+      const plugin = await import(('ghost-package' as Record<string, unknown>));
+      const other = await import(('another-ghost' satisfies Record<string, unknown>));
+    `;
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.map((finding) => finding.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('ghost-package'),
+        expect.stringContaining('another-ghost'),
+      ]),
+    );
+  });
+
   it('checks external package URL specifiers', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const known = await evaluator.evaluate(
@@ -168,12 +186,23 @@ describe('GhostDependencyEvaluator', () => {
     const unknown = await evaluator.evaluate(
       createInput(`import helper from 'npm:ghost-package/subpath';`),
     );
+    const nonPackageUrl = await evaluator.evaluate(
+      createInput(`await import('zod@999'); import brain from '@franken/brain@1';`),
+    );
 
     expect(known.verdict).toBe('pass');
     expect(known.findings).toHaveLength(0);
     expect(unknown.verdict).toBe('fail');
     expect(unknown.findings).toHaveLength(1);
     expect(unknown.findings[0]!.message).toContain('ghost-package');
+    expect(nonPackageUrl.verdict).toBe('fail');
+    expect(nonPackageUrl.findings).toHaveLength(2);
+    expect(nonPackageUrl.findings.map((finding) => finding.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('zod@999'),
+        expect.stringContaining('@franken/brain@1'),
+      ]),
+    );
   });
 
   it('detects no-substitution template literal dynamic imports', async () => {
@@ -359,6 +388,9 @@ describe('GhostDependencyEvaluator', () => {
       [import('punctuation-array-after-assertion-ghost')].forEach(load);
       const cfg5 = value satisfies { dep: string }
       !import('punctuation-bang-after-assertion-ghost');
+      (value as { dep: string }).load(import('method-after-object-assertion-ghost'));
+      (value as { dep: string }) && import('logical-after-object-assertion-ghost');
+      const cfg6 = value as { dep: string }, cfg7 = import('comma-after-object-assertion-ghost');
       const annotatedArrow = (): any => import('annotated-arrow-body-ghost');
       type DefaultExportAlias = string
       export default async function defaultLoader() { return import('export-default-after-type-ghost'); }
@@ -388,7 +420,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(73);
+    expect(result.findings).toHaveLength(76);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -449,6 +481,9 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('bare-after-commented-object-assertion-ghost'),
         expect.stringContaining('punctuation-array-after-assertion-ghost'),
         expect.stringContaining('punctuation-bang-after-assertion-ghost'),
+        expect.stringContaining('method-after-object-assertion-ghost'),
+        expect.stringContaining('logical-after-object-assertion-ghost'),
+        expect.stringContaining('comma-after-object-assertion-ghost'),
         expect.stringContaining('annotated-arrow-body-ghost'),
         expect.stringContaining('export-default-after-type-ghost'),
         expect.stringContaining('export-default-expression-after-type-ghost'),
