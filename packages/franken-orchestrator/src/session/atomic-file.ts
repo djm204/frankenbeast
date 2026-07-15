@@ -10,8 +10,9 @@ import {
   writeSync,
 } from 'node:fs';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
+const STALE_JOURNAL_AGE_MS = 30_000;
 let writeCounter = 0;
 
 export type StateWriteJournalPhase = 'preparing' | 'writing-temp' | 'renaming';
@@ -30,7 +31,11 @@ export interface StateWriteJournalRecovery {
   readonly targetPath?: string | undefined;
   readonly tempPath?: string | undefined;
   readonly quarantinePath?: string | undefined;
-  readonly action: 'removed-stale-temp' | 'removed-completed-journal' | 'quarantined-invalid-journal';
+  readonly action:
+    | 'removed-stale-temp'
+    | 'removed-completed-journal'
+    | 'quarantined-invalid-journal'
+    | 'retained-active-journal';
   readonly reason: string;
 }
 
@@ -70,14 +75,16 @@ function writeStateWriteJournal(filePath: string, entry: Omit<StateWriteTransact
     updatedAt: journalTimestamp(),
   };
   const journalPath = stateWriteJournalPath(filePath);
+  const journalTempPath = `${journalPath}.tmp.${writeCounter++}.${deterministicUuid('state-write-journal')}`;
   const payload = JSON.stringify(updatedEntry, null, 2);
-  const fd = openSync(journalPath, 'w', 0o600);
+  const fd = openSync(journalTempPath, 'wx', 0o600);
   try {
     writeAll(fd, payload);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
+  renameSync(journalTempPath, journalPath);
   fsyncDir(dirname(filePath));
 }
 
@@ -127,6 +134,24 @@ export function readStateWriteTransactionJournal(filePath: string): StateWriteTr
   }
 }
 
+function pathsReferenceSameFile(left: string, right: string): boolean {
+  return resolve(left) === resolve(right);
+}
+
+function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boolean {
+  const resolvedTempPath = resolve(tempPath);
+  const resolvedTargetPath = resolve(filePath);
+  return resolvedTempPath.startsWith(`${resolvedTargetPath}.tmp.`);
+}
+
+function isStaleJournal(journal: StateWriteTransactionJournal): boolean {
+  const updatedAtMs = Date.parse(journal.updatedAt);
+  if (!Number.isFinite(updatedAtMs)) {
+    return false;
+  }
+  return deterministicNow() - updatedAtMs >= STALE_JOURNAL_AGE_MS;
+}
+
 /**
  * Recovers an interrupted state write transaction recorded by the sidecar journal.
  * A leftover temp file is always discarded because the target path is either still
@@ -150,8 +175,29 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
     };
   }
 
-  const targetMatches = journal.targetPath === filePath;
+  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath);
+  if (targetMatches && !journalTempPathBelongsToTarget(journal.tempPath, filePath)) {
+    const quarantinePath = quarantineFile(journalPath);
+    return {
+      journalPath,
+      targetPath: journal.targetPath,
+      tempPath: journal.tempPath,
+      ...(quarantinePath === undefined ? {} : { quarantinePath }),
+      action: 'quarantined-invalid-journal',
+      reason: `State write journal tempPath ${journal.tempPath} is not an expected sidecar for ${filePath}.`,
+    };
+  }
+
   if (targetMatches && existsSync(journal.tempPath)) {
+    if (!isStaleJournal(journal)) {
+      return {
+        journalPath,
+        targetPath: journal.targetPath,
+        tempPath: journal.tempPath,
+        action: 'retained-active-journal',
+        reason: `State write journal ${journalPath} is still active; refusing to remove live temp file ${journal.tempPath}.`,
+      };
+    }
     rmSync(journal.tempPath, { force: true });
     rmSync(journalPath, { force: true });
     fsyncDir(dirname(filePath));
@@ -189,7 +235,10 @@ export function atomicWriteFileSync(
   contents: string,
   options: { mode?: number } = {},
 ): void {
-  recoverStateWriteTransaction(filePath);
+  const recovery = recoverStateWriteTransaction(filePath);
+  if (recovery?.action === 'retained-active-journal') {
+    throw new Error(recovery.reason);
+  }
   let tmpPath = `${filePath}.tmp.${writeCounter++}.${deterministicUuid('atomic-file-write')}`;
   const startedAt = journalTimestamp();
   const journalBase = {

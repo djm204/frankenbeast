@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   atomicWriteFileSync,
@@ -142,6 +142,89 @@ describe('atomic-file', () => {
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
       const quarantine = readdirSync(dir).filter((file) => file.includes('.journal.corrupt.'));
       expect(quarantine).toHaveLength(1);
+    });
+
+    it('retains active journals so concurrent writers do not remove live temp files', () => {
+      const dir = makeTmpDir('state-write-journal-active-');
+      const filePath = join(dir, 'state.json');
+      const tempPath = `${filePath}.tmp.live`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery).toMatchObject({
+        action: 'retained-active-journal',
+        tempPath,
+      });
+      expect(existsSync(tempPath)).toBe(true);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(true);
+      expect(() => atomicWriteFileSync(filePath, '{"new":true}')).toThrow(/still active/);
+    });
+
+    it('quarantines journals with temp paths outside the target sidecar namespace', () => {
+      const dir = makeTmpDir('state-write-journal-invalid-temp-');
+      const filePath = join(dir, 'state.json');
+      const victimPath = join(dir, 'important.json');
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(victimPath, '{"important":true}');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath: victimPath,
+          phase: 'writing-temp',
+          startedAt: '2026-07-15T00:00:00.000Z',
+          updatedAt: '2026-07-15T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery?.action).toBe('quarantined-invalid-journal');
+      expect(existsSync(victimPath)).toBe(true);
+      expect(readFileSync(victimPath, 'utf-8')).toBe('{"important":true}');
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+    });
+
+    it('normalizes target paths before deciding whether a journal belongs to the file', () => {
+      const dir = makeTmpDir('state-write-journal-normalized-target-');
+      const filePath = join(dir, 'state.json');
+      const tempPath = `${filePath}.tmp.stale`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: join(dir, '.', 'state.json'),
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2026-07-15T00:00:00.000Z',
+          updatedAt: '2026-07-15T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(resolve(dir, 'state.json'));
+
+      expect(recovery?.action).toBe('removed-stale-temp');
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
     });
   });
 
