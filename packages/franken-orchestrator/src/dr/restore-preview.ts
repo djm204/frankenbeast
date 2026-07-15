@@ -106,7 +106,9 @@ export function buildBackupEncryptionVerificationReport(
   options: BackupEncryptionVerificationOptions = {},
 ): BackupEncryptionVerificationReport {
   const checkedAt = options.checkedAt ?? new Date().toISOString();
-  const encryption = manifest.encryption;
+  const encryption = isRecord(manifest.encryption)
+    ? (manifest.encryption as unknown as BackupEncryptionMetadata)
+    : undefined;
   const findings: BackupEncryptionVerificationFinding[] = [];
   const allowedAlgorithms = new Set(
     (options.allowedAlgorithms ?? DEFAULT_ALLOWED_BACKUP_ENCRYPTION_ALGORITHMS).map((algorithm) =>
@@ -224,6 +226,10 @@ function statusForEncryptionFindings(
   if (findings.some((finding) => finding.severity === 'blocker')) return 'failed';
   if (findings.some((finding) => finding.severity === 'warning')) return 'warning';
   return 'verified';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function optionalString(value: unknown): string | undefined {

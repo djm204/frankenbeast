@@ -232,6 +232,26 @@ describe('restore preview conflict detector', () => {
     );
   });
 
+  it('fails backup encryption verification instead of throwing when encryption metadata is null', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      {
+        schemaVersion: 1,
+        encryption: null,
+        tasks: [],
+        approvals: [],
+        memory: [],
+        cron: [],
+      } as unknown as RestorePreviewManifest,
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.encrypted).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'missing-encryption-metadata', severity: 'blocker' }),
+    );
+  });
+
   it('fails closed when loaded encryption metadata has a non-boolean encrypted flag', () => {
     const report = buildBackupEncryptionVerificationReport(
       {
