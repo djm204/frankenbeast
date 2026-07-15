@@ -72,6 +72,17 @@ const MAX_OPERATIONAL_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
 type SupportedMemoryType = (typeof SUPPORTED_MEMORY_TYPES)[number];
 
+function isTemporaryOperationalValue(record: Record<string, unknown>): boolean {
+  const markers = [record.category, record.kind, record.type, record.scope];
+  return markers.some(
+    (marker) =>
+      typeof marker === "string" &&
+      /^(temporary[-_\s]?operational|operational[-_\s]?temporary|transient[-_\s]?operational)$/i.test(
+        marker.trim(),
+      ),
+  );
+}
+
 function resolveOperationalTtlMs(ttlMs: number | undefined): number | undefined {
   if (ttlMs === undefined) return undefined;
   if (
@@ -163,14 +174,15 @@ function scopedWorkingValue(
 
 function unwrapWorkingMemoryValue(value: unknown): { text: string; expiresAt?: string } {
   if (isAgentScopedWorkingValue(value)) {
+    const record = value as unknown as Record<string, unknown>;
     return {
       text: value.value,
-      ...(typeof value.expiresAt === "string" ? { expiresAt: value.expiresAt } : {}),
+      ...(typeof value.expiresAt === "string" && isTemporaryOperationalValue(record) ? { expiresAt: value.expiresAt } : {}),
     };
   }
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const record = value as { value?: unknown; expiresAt?: unknown };
-    if ("value" in record && typeof record.expiresAt === "string") {
+    const record = value as Record<string, unknown> & { value?: unknown; expiresAt?: unknown };
+    if ('value' in record && typeof record.expiresAt === 'string' && isTemporaryOperationalValue(record)) {
       return {
         text: typeof record.value === "string" ? record.value : JSON.stringify(record.value),
         expiresAt: record.expiresAt,

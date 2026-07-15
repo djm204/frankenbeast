@@ -671,7 +671,17 @@ class SqliteWorkingMemory implements IWorkingMemory {
     let total = 0;
     for (const [key, value] of this.store) {
       if (isExpiredWorkingMemoryValue(value)) {
-        this.deleteExpiredPersistedRows([{ key, serialized: this.serialized.get(key) }]);
+        const runtimeSerialized = this.serialized.get(key);
+        const persistedSerialized = this.persistedSerialized.get(key);
+        this.deleteExpiredPersistedRows([{ key, serialized: runtimeSerialized }]);
+        if (persistedSerialized !== undefined && persistedSerialized !== runtimeSerialized) {
+          const persistedValue = parseStoredWorkingMemoryValue(persistedSerialized);
+          if (!isExpiredWorkingMemoryValue(persistedValue)) {
+            const preparedPersisted = this.prepareEntry(key, persistedValue);
+            total += preparedPersisted.size;
+            prepared.push([key, preparedPersisted.normalized, preparedPersisted.serialized, preparedPersisted.size]);
+          }
+        }
         continue;
       }
       const { normalized, serialized, size } = this.prepareEntry(key, value);
@@ -895,8 +905,8 @@ class SqliteWorkingMemory implements IWorkingMemory {
       if (isExpiredWorkingMemoryValue(value)) {
         if (options.expirePersistedTtlEntries ?? true) {
           expiredPersistedRows.push({ key, serialized });
+          continue;
         }
-        continue;
       }
       result.push({
         key,

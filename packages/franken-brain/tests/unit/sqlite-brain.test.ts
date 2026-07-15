@@ -187,9 +187,7 @@ describe('SqliteBrain', () => {
     it('prunes expired persisted facts before enforcing persisted entry limits', () => {
       const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-limit-'));
       const dbPath = join(dir, 'brain.db');
-      const originalBrain = new SqliteBrain(dbPath, {
-        workingMemoryLimits: { maxEntries: 5 },
-      });
+      const originalBrain = new SqliteBrain(dbPath, { maxEntries: 5 });
       for (let index = 0; index < 4; index += 1) {
         originalBrain.working.set(`op:expired:${index}`, {
           value: `stale ${index}`,
@@ -207,9 +205,7 @@ describe('SqliteBrain', () => {
 
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
-      const hydratedBrain = new SqliteBrain(dbPath, {
-        workingMemoryLimits: { maxEntries: 3 },
-      });
+      const hydratedBrain = new SqliteBrain(dbPath, { maxEntries: 3 });
       try {
         expect(hydratedBrain.working.keys()).toEqual(['op:active']);
       } finally {
@@ -238,6 +234,8 @@ describe('SqliteBrain', () => {
       try {
         const report = dryRunBrain.rightToForget({ sourceScope: 'dry-run-test', dryRun: true });
         expect(report.dryRun).toBe(true);
+        expect(report.deleted.working).toBe(1);
+        expect(report.remainingReferences).toBeGreaterThanOrEqual(1);
         const db = new Database(dbPath, { readonly: true });
         try {
           const rows = db.prepare('SELECT key FROM working_memory ORDER BY key').all() as Array<{ key: string }>;
@@ -281,6 +279,46 @@ describe('SqliteBrain', () => {
       } finally {
         staleBrain.close();
         vi.useRealTimers();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('restores durable persisted values when unflushed temporary overlays expire during flush', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-overlay-'));
+      const dbPath = join(dir, 'brain.db');
+      const brain = new SqliteBrain(dbPath);
+      brain.working.set('shared:key', { value: 'durable asset', category: 'asset', expiresAt: '2099-01-01T00:00:00.000Z' });
+      brain.flush();
+
+      brain.working.set('shared:key', {
+        value: 'temporary overlay',
+        category: 'temporary-operational',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
+      try {
+        brain.flush();
+        expect(brain.working.get('shared:key')).toEqual({
+          value: 'durable asset',
+          category: 'asset',
+          expiresAt: '2099-01-01T00:00:00.000Z',
+        });
+      } finally {
+        brain.close();
+        vi.useRealTimers();
+      }
+
+      const rehydrated = new SqliteBrain(dbPath);
+      try {
+        expect(rehydrated.working.get('shared:key')).toEqual({
+          value: 'durable asset',
+          category: 'asset',
+          expiresAt: '2099-01-01T00:00:00.000Z',
+        });
+      } finally {
+        rehydrated.close();
         rmSync(dir, { recursive: true, force: true });
       }
     });

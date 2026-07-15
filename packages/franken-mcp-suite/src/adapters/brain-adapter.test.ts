@@ -225,6 +225,22 @@ describe("createBrainAdapter", () => {
     expect(mockBrain.working.set).not.toHaveBeenCalled();
   });
 
+  it("does not label durable working values with expiresAt fields as TTL-expiring", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+    mockBrain.working.snapshot.mockReturnValue({
+      asset: { value: "certificate metadata", category: "asset", expiresAt: "2099-01-01T00:00:00.000Z" },
+      tmp: { value: "runtime status", category: "temporary-operational", expiresAt: "2099-01-01T00:00:00.000Z" },
+    });
+
+    const result = await brain.query({ query: "", type: "working", limit: 5 });
+
+    expect(result).toEqual([
+      { key: "asset", value: JSON.stringify({ value: "certificate metadata", category: "asset", expiresAt: "2099-01-01T00:00:00.000Z" }), type: "working" },
+      { key: "tmp", value: "runtime status (expires 2099-01-01T00:00:00.000Z)", type: "working" },
+    ]);
+  });
+
   it("rejects unsafe query limits before reading memory", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     const mockBrain = brainInstances[0];
