@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 import { testCredential } from '../../support/test-credentials.js';
+import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
 
 const TEST_DASHBOARD_OPERATOR_TOKEN = testCredential('TEST_DASHBOARD_OPERATOR_TOKEN');
 const TEST_DISCORD_TOKEN = testCredential('TEST_DISCORD_TOKEN');
@@ -1701,6 +1702,7 @@ describe('main() execution', () => {
     const runConfigPath = join(root, 'run-config.json');
     mkdirSync(root, { recursive: true });
     writeFileSync(runConfigPath, JSON.stringify({ provider: 'codex' }));
+    writeRuntimeConfigIntegrityManifest({ configPath: runConfigPath });
     tempDirs.push(root);
     process.env.FRANKENBEAST_RUN_CONFIG = runConfigPath;
 

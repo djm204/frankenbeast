@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
+import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 
@@ -327,6 +328,7 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
         overrides: { 'plan-build': { provider: 'claude' } },
       },
     }));
+    writeRuntimeConfigIntegrityManifest({ configPath: runConfigPath });
     process.env.FRANKENBEAST_RUN_CONFIG = runConfigPath;
 
     await new Session(config).start();

@@ -8,6 +8,7 @@ import {
   RunConfigParseError,
   type RunConfig,
 } from '../../../src/cli/run-config-loader.js';
+import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
 
 describe('RunConfigLoader', () => {
   let workDir: string | undefined;
@@ -163,6 +164,7 @@ describe('RunConfigLoader', () => {
       };
       const filePath = join(workDir, 'env-config.json');
       await writeFile(filePath, JSON.stringify(config));
+      writeRuntimeConfigIntegrityManifest({ configPath: filePath });
       process.env['FRANKENBEAST_RUN_CONFIG'] = filePath;
 
       const result = loadRunConfigFromEnv();
@@ -177,6 +179,7 @@ describe('RunConfigLoader', () => {
       const config = { provider: 'claude' };
       const filePath = join(workDir, 'log-test.json');
       await writeFile(filePath, JSON.stringify(config));
+      writeRuntimeConfigIntegrityManifest({ configPath: filePath });
       process.env['FRANKENBEAST_RUN_CONFIG'] = filePath;
 
       const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});

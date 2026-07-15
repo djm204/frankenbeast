@@ -13,6 +13,11 @@ import {
 import { wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
 import { classifyWorkerCrash } from './worker-crash-classification.js';
+import {
+  assertRuntimeConfigIntegrity,
+  runtimeConfigIntegrityManifestPath,
+  writeRuntimeConfigIntegrityManifest,
+} from './runtime-config-integrity.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
 const STDERR_BUFFER_SIZE = 50;
@@ -213,6 +218,7 @@ type PreparedBeastStartResources = {
   readonly processSpec: BeastProcessSpec;
   readonly worktree: BeastWorktreeAllocation | undefined;
   readonly configFilePath: string;
+  readonly configManifestPath: string;
   readonly spawnedSpec: BeastProcessSpec;
   readonly configuredSecrets: readonly string[];
 };
@@ -236,6 +242,9 @@ export interface ProcessBeastExecutorOptions {
     handle: { pid: number },
   ) => Readonly<Record<string, unknown>>;
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
+  runtimeConfigIntegrity?: {
+    readonly bypass?: boolean | undefined;
+  } | undefined;
 }
 
 function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
@@ -380,7 +389,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
   private readonly pendingSpawnHandles = new Map<string, { pid: number }>();
   private readonly cancelledPendingRunIds = new Set<string>();
   private readonly pendingConfigFilePaths = new Map<string, string>();
+  private readonly pendingConfigManifestPaths = new Map<string, string>();
   private readonly attemptConfigFilePaths = new Map<string, string>();
+  private readonly attemptConfigManifestPaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
 
   constructor(
@@ -391,13 +402,21 @@ export class ProcessBeastExecutor implements BeastExecutor {
   ) {}
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
+    let resources: PreparedBeastStartResources;
+    try {
+      resources = this.prepareStartResources(run, definition);
+    } catch (error) {
+      this.handleStartPreparationFailure(run, error);
+      throw error;
+    }
     const {
       processSpec,
       worktree,
       configFilePath,
+      configManifestPath,
       spawnedSpec,
       configuredSecrets,
-    } = this.prepareStartResources(run, definition);
+    } = resources;
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -591,7 +610,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
     // The pending allocation map is only for pre-attempt spawn failures.
     this.worktreeAllocations.delete(run.id);
     this.pendingConfigFilePaths.delete(run.id);
+    this.pendingConfigManifestPaths.delete(run.id);
     this.attemptConfigFilePaths.set(attempt.id, configFilePath);
+    this.attemptConfigManifestPaths.set(attempt.id, configManifestPath);
 
     attemptId = attempt.id;
 
@@ -665,6 +686,39 @@ export class ProcessBeastExecutor implements BeastExecutor {
     return true;
   }
 
+  private handleStartPreparationFailure(run: BeastRun, error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorCode = (error as NodeJS.ErrnoException).code;
+    const failedAt = new Date(wallClockNow()).toISOString();
+
+    this.repository.updateRun(run.id, {
+      status: 'failed',
+      finishedAt: failedAt,
+      stopReason: 'spawn_failed',
+    });
+
+    const spawnFailedEvent = {
+      type: 'run.spawn_failed' as const,
+      payload: {
+        phase: 'prepare_start_resources',
+        error: errorMessage,
+        ...(errorCode ? { code: errorCode } : {}),
+      },
+      createdAt: failedAt,
+    };
+    this.repository.appendEvent(run.id, spawnFailedEvent);
+    this.options.eventBus?.publish({
+      type: 'run.event',
+      data: { runId: run.id, event: spawnFailedEvent },
+    });
+    this.cleanupRunResources(run.id);
+    this.options.eventBus?.publish({
+      type: 'run.status',
+      data: { runId: run.id, status: 'failed' as const, updatedAt: failedAt },
+    });
+    this.options.onRunStatusChange?.(run.id);
+  }
+
 
   private prepareStartResources(run: BeastRun, definition: BeastDefinition): PreparedBeastStartResources {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
@@ -676,6 +730,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       : run.configSnapshot;
     const isolatedSpec = this.buildIsolatedSpec(processSpec, worktree);
     const configFilePath = this.prepareRunConfigFile(run, isolatedSpec);
+    const configManifestPath = runtimeConfigIntegrityManifestPath(configFilePath);
 
     const mergedSpec = {
       ...isolatedSpec,
@@ -698,8 +753,17 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
     applyRunConfigOwnership(configFilePath, runConfigOwner);
     chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
+    writeRuntimeConfigIntegrityManifest({ configPath: configFilePath, manifestPath: configManifestPath });
+    applyRunConfigOwnership(configManifestPath, runConfigOwner);
+    chmodSync(configManifestPath, RUN_CONFIG_FILE_MODE);
+    assertRuntimeConfigIntegrity({
+      configPath: configFilePath,
+      manifestPath: configManifestPath,
+      bypass: this.options.runtimeConfigIntegrity?.bypass === true
+        || process.env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS === '1',
+    });
 
-    return { processSpec, worktree, configFilePath, spawnedSpec, configuredSecrets };
+    return { processSpec, worktree, configFilePath, configManifestPath, spawnedSpec, configuredSecrets };
   }
 
   private allocateWorktree(run: BeastRun, processSpec: BeastProcessSpec): BeastWorktreeAllocation | undefined {
@@ -737,6 +801,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
     ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
     const configFilePath = join(configDir, `${run.id}.json`);
+    const configManifestPath = runtimeConfigIntegrityManifestPath(configFilePath);
     try {
       lstatSync(configFilePath);
       unlinkSync(configFilePath);
@@ -745,7 +810,16 @@ export class ProcessBeastExecutor implements BeastExecutor {
         throw error;
       }
     }
+    try {
+      lstatSync(configManifestPath);
+      unlinkSync(configManifestPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
     this.pendingConfigFilePaths.set(run.id, configFilePath);
+    this.pendingConfigManifestPaths.set(run.id, configManifestPath);
     return configFilePath;
   }
 
@@ -924,6 +998,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
       try { unlinkSync(configPath); } catch { /* already removed */ }
       this.pendingConfigFilePaths.delete(runId);
     }
+    const manifestPath = this.pendingConfigManifestPaths.get(runId);
+    if (manifestPath) {
+      try { unlinkSync(manifestPath); } catch { /* already removed */ }
+      this.pendingConfigManifestPaths.delete(runId);
+    }
   }
 
   private cleanupAttemptConfig(attemptId: string): void {
@@ -931,6 +1010,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
     if (configPath) {
       try { unlinkSync(configPath); } catch { /* already removed */ }
       this.attemptConfigFilePaths.delete(attemptId);
+    }
+    const manifestPath = this.attemptConfigManifestPaths.get(attemptId);
+    if (manifestPath) {
+      try { unlinkSync(manifestPath); } catch { /* already removed */ }
+      this.attemptConfigManifestPaths.delete(attemptId);
     }
   }
 

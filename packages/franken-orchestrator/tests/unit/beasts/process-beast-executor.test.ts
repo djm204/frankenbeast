@@ -1064,14 +1064,19 @@ describe('ProcessBeastExecutor', () => {
       const configPath = join(runConfigDir, `${run.id}.json`);
       expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG).toBe(configPath);
       expect(existsSync(configPath)).toBe(true);
+      const manifestPath = `${configPath}.manifest.json`;
+      expect(existsSync(manifestPath)).toBe(true);
       expect(readFileSync(configPath, 'utf8')).toContain('Test objective');
       expect(readFileSync(configPath, 'utf8')).not.toContain('stale snapshot');
+      expect(readFileSync(manifestPath, 'utf8')).toContain('sha256');
       expect(statSync(runConfigDir).mode & 0o777).toBe(0o700);
       expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(statSync(manifestPath).mode & 0o777).toBe(0o600);
 
       capturedCallbacks!.onExit(0, null);
 
       expect(existsSync(configPath)).toBe(false);
+      expect(existsSync(manifestPath)).toBe(false);
     });
 
     it('redacts sensitive keys and secret-shaped values before writing run config files', async () => {

@@ -1,5 +1,9 @@
 import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
+import {
+  assertRuntimeConfigIntegrity,
+  runtimeConfigIntegrityManifestPath,
+} from '../beasts/execution/runtime-config-integrity.js';
 import { parseSafeJson } from '../utils/safe-json.js';
 
 
@@ -71,6 +75,14 @@ export class RunConfigParseError extends Error {
   }
 }
 
+export function assertRunConfigIntegrity(filePath: string): void {
+  assertRuntimeConfigIntegrity({
+    configPath: filePath,
+    manifestPath: runtimeConfigIntegrityManifestPath(filePath),
+    bypass: process.env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS === '1',
+  });
+}
+
 /**
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
@@ -105,6 +117,7 @@ export function loadRunConfig(filePath: string): RunConfig {
 export function loadRunConfigFromEnv(): RunConfig | undefined {
   const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
   if (!filePath) return undefined;
+  assertRunConfigIntegrity(filePath);
   const config = loadRunConfig(filePath);
   printLine(`loaded config from ${filePath}`);
   return config;

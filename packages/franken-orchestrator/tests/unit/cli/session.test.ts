@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
+import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 
@@ -279,6 +280,7 @@ describe('Session', () => {
         maxTotalTokens: 456_000,
         reflection: true,
       }));
+      writeRuntimeConfigIntegrityManifest({ configPath });
       process.env.FRANKENBEAST_RUN_CONFIG = configPath;
       const config = makeConfig({ entryPhase: 'execute' });
 

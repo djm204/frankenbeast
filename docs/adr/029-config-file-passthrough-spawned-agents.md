@@ -23,10 +23,14 @@ Write the full `run.configSnapshot` to a JSON file and pass its path to the subp
 **Flow:**
 
 1. `ProcessBeastExecutor.start()` writes config to `.frankenbeast/.build/run-configs/<runId>.json`
-2. Subprocess receives `FRANKENBEAST_RUN_CONFIG=<absolute-path>`
-3. CLI's `config-loader.ts` gains a new source at highest priority:
+2. The executor writes a sibling checksum manifest at `<runId>.json.manifest.json` with schema version, file name, algorithm, digest, and generation timestamp.
+3. Launch preflight verifies the runtime config against the manifest before `supervisor.spawn()` is called. Missing manifests, malformed manifests, or digest drift fail closed with operator guidance.
+4. Subprocess receives `FRANKENBEAST_RUN_CONFIG=<absolute-path>` only after the preflight passes.
+5. CLI's `config-loader.ts` gains a new source at highest priority:
    - `run-config > CLI args > env vars > config file > defaults`
-4. Config file deleted when run reaches terminal state (completed/failed/stopped)
+6. Config and manifest files are deleted when run reaches terminal state (completed/failed/stopped)
+
+**Legitimate config updates:** Reviewed runtime-config changes are approved by regenerating the manifest after inspection. For the daemon-managed ephemeral run config, this happens automatically during `ProcessBeastExecutor.start()` immediately after the redacted config snapshot is written and before the preflight check. For emergency operator recovery only, set `FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS=1` or pass the executor bypass option; bypasses are explicit and should be audit-noted by the caller.
 
 **Config file schema matches the existing orchestrator config shape** with wizard-specific extensions (llmConfig, gitConfig, skills, promptConfig). The spawned process logs `"loaded config from <path>"` on startup for debuggability.
 
@@ -46,7 +50,7 @@ Write the full `run.configSnapshot` to a JSON file and pass its path to the subp
 
 ### Risks
 - If the daemon crashes before cleanup, orphaned config files accumulate (mitigated by `--cleanup` command)
-- Config file could be tampered with between write and read (mitigated by `.frankenbeast/` directory permissions)
+- Config file could be tampered with between write and read (mitigated by `.frankenbeast/` directory permissions plus the pre-launch checksum manifest verification)
 
 ## Alternatives Considered
 
