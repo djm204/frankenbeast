@@ -414,6 +414,56 @@ describe('ProviderRegistry', () => {
       expect(delay2).toBeGreaterThanOrEqual(80); // 100ms with some tolerance
     });
 
+    it('caps retry delays and exposes them to deterministic sleep hooks', async () => {
+      const sleep = vi.fn().mockResolvedValue(undefined);
+      const p1: ILlmProvider = {
+        ...mockProvider('rate-limited'),
+        execute: vi.fn(async function* () {
+          yield { type: 'error' as const, error: 'rate limit', retryable: true };
+        }),
+      };
+      const p2 = mockProvider('backup');
+
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        maxRetriesPerProvider: 3,
+        retryDelayMs: 1_000,
+        maxRetryDelayMs: 1_500,
+        backoffMultiplier: 10,
+        sleep,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(sleep.mock.calls.map((call) => call[0])).toEqual([1_000, 1_500, 1_500]);
+    });
+
+    it('rejects unbounded retry policy options before executing a provider', () => {
+      const invalidOptions = [
+        { maxRetriesPerProvider: -1 },
+        { maxRetriesPerProvider: Number.NaN },
+        { maxRetriesPerProvider: Number.POSITIVE_INFINITY },
+        { maxRetriesPerProvider: 1.5 },
+        { maxRetriesPerProvider: 6 },
+        { retryDelayMs: -1 },
+        { retryDelayMs: Number.NaN },
+        { retryDelayMs: Number.POSITIVE_INFINITY },
+        { maxRetryDelayMs: -1 },
+        { maxRetryDelayMs: Number.NaN },
+        { maxRetryDelayMs: Number.POSITIVE_INFINITY },
+        { backoffMultiplier: 0 },
+        { backoffMultiplier: Number.NaN },
+        { backoffMultiplier: Number.POSITIVE_INFINITY },
+      ];
+
+      for (const options of invalidOptions) {
+        const provider = mockProvider('guarded');
+        expect(() => new ProviderRegistry([provider], mockBrain(), options)).toThrow(
+          /maxRetriesPerProvider|retryDelayMs|maxRetryDelayMs|backoffMultiplier/,
+        );
+        expect(provider.execute).not.toHaveBeenCalled();
+      }
+    });
+
     it('uses the exhausted retryable error as failover reason', async () => {
       const p1: ILlmProvider = {
         ...mockProvider('rate-limited'),
