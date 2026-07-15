@@ -44,11 +44,11 @@ jobs:
           CI_BOOTSTRAP_DRY_RUN: "1"
         run: npm run bootstrap:dry-run
 
-      - name: Dependency vulnerability audit
-        run: npm run audit:dependencies
-
       - name: Dependency vulnerability SLA dashboard
         run: npm run deps:vulnerability-sla
+
+      - name: Dependency vulnerability audit
+        run: npm run audit:dependencies
 
       - name: Dependency major-version freshness check
         run: npm run deps:outdated:major

@@ -129,10 +129,12 @@ jobs:
           node scripts/dependency-vulnerability-sla.mjs \
             --audit-input "$RUNNER_TEMP/audit.json" \
             --format human \
+            --allow-invalid-audit \
             --no-fail-on-sla > "$RUNNER_TEMP/dependency-vulnerability-sla.md"
           node scripts/dependency-vulnerability-sla.mjs \
             --audit-input "$RUNNER_TEMP/audit.json" \
             --format json \
+            --allow-invalid-audit \
             --no-fail-on-sla > "$RUNNER_TEMP/dependency-vulnerability-sla.json"
 
       # ── Persist all raw reports ──────────────────────────────────────────

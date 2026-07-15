@@ -404,6 +404,7 @@ updates:
     );
     const result = runVulnerabilitySlaReport(
       {
+        metadata: { vulnerabilities: { high: 1, total: 1 } },
         vulnerabilities: {
           vite: {
             name: "vite",
@@ -460,6 +461,7 @@ updates:
     );
     const result = runVulnerabilitySlaReport(
       {
+        metadata: { vulnerabilities: { critical: 1, total: 1 } },
         vulnerabilities: {
           protobufjs: {
             severity: "critical",
@@ -483,6 +485,66 @@ updates:
       overSla: true,
     });
     expect(result.stderr).toContain("Dependency vulnerability SLA exceeded");
+  });
+
+  it("rejects invalid npm audit error objects unless explicitly marked unknown", () => {
+    const invalid = {
+      error: { code: "EAUDIT", summary: "registry unavailable" },
+    };
+    const rejected = runVulnerabilitySlaReport(invalid, ["--format", "json"]);
+
+    expect(rejected.status).toBe(2);
+    expect(rejected.stderr).toContain("metadata and vulnerabilities");
+
+    const tolerated = runVulnerabilitySlaReport(invalid, [
+      "--format",
+      "json",
+      "--allow-invalid-audit",
+      "--no-fail-on-sla",
+    ]);
+    expect(tolerated.status).toBe(0);
+    const report = JSON.parse(tolerated.stdout) as {
+      auditStatus: string;
+      auditError: string;
+      findings: unknown[];
+    };
+    expect(report.auditStatus).toBe("unknown");
+    expect(report.auditError).toContain("metadata and vulnerabilities");
+    expect(report.findings).toHaveLength(0);
+  });
+
+  it("marks SLA age unknown without prior state and does not invent fixed versions", () => {
+    const result = runVulnerabilitySlaReport(
+      {
+        metadata: { vulnerabilities: { high: 1, total: 1 } },
+        vulnerabilities: {
+          leftpad: {
+            severity: "high",
+            range: "<2.0.0",
+            nodes: ["node_modules/leftpad"],
+            fixAvailable: false,
+            via: [{ title: "unpatched", range: "<2.0.0", severity: "high" }],
+          },
+        },
+      },
+      ["--now", "2026-07-15", "--format", "json"],
+    );
+
+    expect(result.status).toBe(0);
+    const report = JSON.parse(result.stdout) as {
+      ageSource: string;
+      findings: Array<{
+        ageDays: number | null;
+        fixedVersion: string | null;
+        overSla: boolean;
+      }>;
+    };
+    expect(report.ageSource).toBe("unknown");
+    expect(report.findings[0]).toMatchObject({
+      ageDays: null,
+      fixedVersion: null,
+      overSla: false,
+    });
   });
 
   it("wires dependency audit, major outdated check, dependabot guard, and SBOM artifact generation into CI", () => {
