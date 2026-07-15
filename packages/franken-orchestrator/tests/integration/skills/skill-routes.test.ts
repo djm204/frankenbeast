@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Hono } from 'hono';
@@ -168,6 +168,24 @@ describe('Skill API routes', () => {
       const body = await res.json();
       expect(body.error.code).toBe('INTERNAL_ERROR');
       expect(JSON.stringify(body)).not.toContain('EACCES');
+    });
+
+    it('returns 400 for unsafe skill install paths', async () => {
+      const outsideDir = join(tempDir, 'outside-skill');
+      mkdirSync(outsideDir, { recursive: true });
+      symlinkSync(outsideDir, join(skillsDir, 'escaped'), 'dir');
+
+      const res = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          custom: { name: 'escaped', config: { command: 'node' } },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('Unsafe skill path');
     });
 
     it('returns 400 when neither provided', async () => {

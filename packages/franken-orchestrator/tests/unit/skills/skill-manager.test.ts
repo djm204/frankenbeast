@@ -478,15 +478,16 @@ describe('SkillManager', () => {
 
     it('resolves relative skills roots once at construction time', async () => {
       const originalCwd = process.cwd();
+      const otherCwd = mkdtempSync(join(tempDir, 'other-cwd-'));
       try {
         process.chdir(tempDir);
         const relativeManager = new SkillManager('relative-skills', new Set());
-        process.chdir(tmpdir());
+        process.chdir(otherCwd);
 
         await relativeManager.installCustom('github', { command: 'node' });
 
         expect(existsSync(join(tempDir, 'relative-skills', 'github', 'mcp.json'))).toBe(true);
-        expect(existsSync(join(tmpdir(), 'relative-skills', 'github', 'mcp.json'))).toBe(false);
+        expect(existsSync(join(otherCwd, 'relative-skills', 'github', 'mcp.json'))).toBe(false);
       } finally {
         process.chdir(originalCwd);
       }

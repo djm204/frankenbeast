@@ -13,7 +13,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type {
   McpConfig,
   SkillInfo,
@@ -38,6 +38,10 @@ function unsafePathError(path: string, reason: string): Error {
   return new Error(`Unsafe skill path '${path}': ${reason}`);
 }
 
+export function isUnsafeSkillPathError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith('Unsafe skill path ');
+}
+
 function assertContainedPath(candidate: string, root: string, label: string): void {
   if (!isContainedPath(candidate, root)) {
     throw unsafePathError(candidate, `${label} escapes ${root}`);
@@ -55,15 +59,24 @@ function assertNoSymlink(path: string, label: string): void {
   }
 }
 
-function writeFileAtomicNoFollow(path: string, content: string): void {
+function assertParentStillContained(path: string, root: string): void {
+  const parent = dirname(path);
+  assertNoSymlink(parent, 'skill directory');
+  assertContainedPath(realpathSync(parent), root, 'skill directory');
+}
+
+function writeFileAtomicNoFollow(path: string, content: string, root: string): void {
   const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
   const tempPath = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   let fd: number | undefined;
   try {
+    assertParentStillContained(path, root);
     fd = openSync(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
+    assertParentStillContained(path, root);
     writeFileSync(fd, content);
     closeSync(fd);
     fd = undefined;
+    assertParentStillContained(path, root);
     renameSync(tempPath, path);
   } catch (err) {
     if (fd !== undefined) closeSync(fd);
@@ -164,7 +177,7 @@ export class SkillManager {
 
   private writeSkillFile(name: string, fileName: 'mcp.json' | 'tools.json' | 'context.md', content: string): void {
     const filePath = this.validateSkillFileTarget(name, fileName);
-    writeFileAtomicNoFollow(filePath, content);
+    writeFileAtomicNoFollow(filePath, content, this.skillsDirReal);
     const realFilePath = realpathSync(filePath);
     assertContainedPath(realFilePath, this.skillsDirReal, 'skill file');
   }
@@ -206,15 +219,17 @@ export class SkillManager {
       : undefined;
     this.validateSkillFileTarget(catalogEntry.name, 'mcp.json');
     const toolsPath = this.validateSkillFileTarget(catalogEntry.name, 'tools.json');
-    if (!tools && existsSync(toolsPath)) {
-      this.removeSkillFile(catalogEntry.name, 'tools.json');
-    }
+    const shouldRemoveStaleTools = !tools && existsSync(toolsPath);
 
     this.writeSkillFile(
       catalogEntry.name,
       'mcp.json',
       JSON.stringify(mcpConfig, null, 2),
     );
+
+    if (shouldRemoveStaleTools) {
+      this.removeSkillFile(catalogEntry.name, 'tools.json');
+    }
 
     if (tools) {
       this.writeSkillFile(
@@ -232,14 +247,15 @@ export class SkillManager {
     });
     this.validateSkillFileTarget(name, 'mcp.json');
     const toolsPath = this.validateSkillFileTarget(name, 'tools.json');
-    if (existsSync(toolsPath)) {
-      this.removeSkillFile(name, 'tools.json');
-    }
+    const shouldRemoveStaleTools = existsSync(toolsPath);
     this.writeSkillFile(
       name,
       'mcp.json',
       JSON.stringify(mcpConfig, null, 2),
     );
+    if (shouldRemoveStaleTools) {
+      this.removeSkillFile(name, 'tools.json');
+    }
   }
 
   enable(name: string): void {

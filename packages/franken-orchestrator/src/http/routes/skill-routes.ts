@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
-import type { SkillManager } from '../../skills/skill-manager.js';
+import { isUnsafeSkillPathError, type SkillManager } from '../../skills/skill-manager.js';
 import { SkillHealthChecker } from '../../skills/skill-health-checker.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
 import { HttpError, parseJsonBody } from '../middleware.js';
 
 function isSkillInstallValidationError(err: unknown): boolean {
   return err instanceof ZodError
+    || isUnsafeSkillPathError(err)
     || (err instanceof Error && err.message.startsWith('Invalid skill name '));
 }
 
