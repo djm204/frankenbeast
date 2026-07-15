@@ -4,7 +4,7 @@ Frankenbeast state files that use `atomicWriteFileSync()` are protected by a sid
 
 ## Normal write path
 
-1. The writer records a journal with the target path, temporary file path, phase, and timestamps. Journal phase updates are written through a temporary journal file and renamed into place so a crash cannot truncate the last valid journal record.
+1. The writer records a journal with the target path, temporary file path, phase, and wall-clock timestamps. Journal phase updates are written through a temporary journal file and renamed into place so a crash cannot truncate the last valid journal record. Long writes refresh the journal periodically before durability boundaries.
 2. The writer writes the replacement state to `<state-file>.tmp.*`, fsyncs it, and renames it over the target.
 3. The writer removes `<state-file>.journal` and fsyncs the parent directory.
 

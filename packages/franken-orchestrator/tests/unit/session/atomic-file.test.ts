@@ -286,6 +286,31 @@ describe('atomic-file', () => {
       expect(existsSync(nestedPath)).toBe(true);
     });
 
+    it('quarantines journals whose temp path is a sidecar directory', () => {
+      const dir = makeTmpDir('state-write-journal-dir-temp-');
+      const filePath = join(dir, 'state.json');
+      const dirTempPath = `${filePath}.tmp.directory`;
+      writeFileSync(filePath, '{"old":true}');
+      mkdirSync(dirTempPath);
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath: dirTempPath,
+          phase: 'writing-temp',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery?.action).toBe('quarantined-invalid-journal');
+      expect(existsSync(dirTempPath)).toBe(true);
+    });
+
     it('normalizes target paths before deciding whether a journal belongs to the file', () => {
       const dir = makeTmpDir('state-write-journal-normalized-target-');
       const filePath = join(dir, 'state.json');

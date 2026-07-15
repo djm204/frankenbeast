@@ -6,13 +6,16 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
 import { dirname, resolve } from 'node:path';
 
-const STALE_JOURNAL_AGE_MS = 30_000;
+const STALE_JOURNAL_AGE_MS = 5 * 60_000;
+const JOURNAL_REFRESH_INTERVAL_MS = 5_000;
+const WRITE_CHUNK_BYTES = 1024 * 1024;
 let writeCounter = 0;
 
 export type StateWriteJournalPhase = 'preparing' | 'writing-temp' | 'renaming';
@@ -39,11 +42,13 @@ export interface StateWriteJournalRecovery {
   readonly reason: string;
 }
 
-function writeAll(fd: number, payload: string): void {
+function writeAll(fd: number, payload: string, onProgress?: () => void): void {
   const buf = Buffer.from(payload, 'utf8');
   let written = 0;
   while (written < buf.length) {
-    written += writeSync(fd, buf, written, buf.length - written);
+    const bytesToWrite = Math.min(WRITE_CHUNK_BYTES, buf.length - written);
+    written += writeSync(fd, buf, written, bytesToWrite);
+    onProgress?.();
   }
 }
 
@@ -66,7 +71,7 @@ export function stateWriteJournalPath(filePath: string): string {
 }
 
 function journalTimestamp(): string {
-  return new Date(deterministicNow()).toISOString();
+  return new Date().toISOString();
 }
 
 function writeStateWriteJournal(filePath: string, entry: Omit<StateWriteTransactionJournal, 'updatedAt'>): void {
@@ -161,7 +166,17 @@ function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boo
   if (dirname(resolvedTempPath) !== dirname(resolvedTargetPath)) {
     return false;
   }
-  return resolvedTempPath.startsWith(`${resolvedTargetPath}.tmp.`);
+  if (!resolvedTempPath.startsWith(`${resolvedTargetPath}.tmp.`)) {
+    return false;
+  }
+  try {
+    return statSync(resolvedTempPath).isFile();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return true;
+    }
+    return false;
+  }
 }
 
 function isStaleJournal(journal: StateWriteTransactionJournal): boolean {
@@ -320,9 +335,21 @@ export function atomicWriteFileSync(
       }
     }
     try {
-      writeStateWriteJournal(filePath, { ...journalBase, tempPath: resolve(tmpPath), phase: 'writing-temp' });
-      writeAll(fd, contents);
+      const writingJournal = { ...journalBase, tempPath: resolve(tmpPath), phase: 'writing-temp' as const };
+      let lastJournalRefreshMs = Date.now();
+      const refreshWritingJournal = (): void => {
+        const nowMs = Date.now();
+        if (nowMs - lastJournalRefreshMs < JOURNAL_REFRESH_INTERVAL_MS) {
+          return;
+        }
+        writeStateWriteJournal(filePath, writingJournal);
+        lastJournalRefreshMs = nowMs;
+      };
+      writeStateWriteJournal(filePath, writingJournal);
+      writeAll(fd, contents, refreshWritingJournal);
+      writeStateWriteJournal(filePath, writingJournal);
       fsyncSync(fd);
+      writeStateWriteJournal(filePath, writingJournal);
     } finally {
       closeSync(fd);
     }
