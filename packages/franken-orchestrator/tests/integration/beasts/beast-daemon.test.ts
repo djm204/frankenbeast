@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { createBeastServices, type BeastServiceBundle } from '../../../src/beasts/create-beast-services.js';
 import type { BeastRun, BeastRunStatus } from '../../../src/beasts/types.js';
 import { createBeastDaemonApp } from '../../../src/http/beast-daemon-app.js';
-import { BeastDaemonShutdownError, startBeastDaemon } from '../../../src/http/beast-daemon-server.js';
+import { BeastDaemonDrainTimeoutError, BeastDaemonShutdownError, startBeastDaemon } from '../../../src/http/beast-daemon-server.js';
 
 import { testCredential } from '../../support/test-credentials.js';
 
@@ -386,6 +386,56 @@ describe('beast daemon', () => {
     await createRun.catch(() => undefined);
     await closePromise;
     expect(stop).toHaveBeenCalledWith('run-in-flight', 'beasts-daemon-shutdown');
+  });
+
+  it('does not stop live runs when mutating requests exceed the drain timeout', async () => {
+    const paths = await makePaths();
+    const runs: BeastRun[] = [];
+    const run = makeRun('run-timeout', 'running');
+    let releaseDispatch!: () => void;
+    let markDispatchStarted!: () => void;
+    const dispatchStarted = new Promise<void>((resolve) => { markDispatchStarted = resolve; });
+    const { services, stop, dispose } = makeDaemonServices(runs);
+    services.dispatch = {
+      createRun: vi.fn(async () => {
+        markDispatchStarted();
+        await new Promise<void>((release) => { releaseDispatch = release; });
+        runs.push(run);
+        return run;
+      }),
+    } as unknown as BeastServiceBundle['dispatch'];
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+      services,
+      mutationDrainTimeoutMs: 50,
+    });
+    const createRun = fetch(`${daemon.url}/v1/beasts/runs`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        config: { provider: 'codex', objective: 'Ship it', chunkDirectory: 'chunks' },
+        startNow: true,
+      }),
+    }).catch(() => undefined);
+
+    await dispatchStarted;
+    await expect(daemon.close()).rejects.toBeInstanceOf(BeastDaemonDrainTimeoutError);
+    expect(stop).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
+    expect(existsSync(paths.pidFile)).toBe(true);
+
+    releaseDispatch();
+    await createRun.catch(() => undefined);
+    await daemon.close();
+    expect(stop).toHaveBeenCalledWith('run-timeout', 'beasts-daemon-shutdown');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(existsSync(paths.pidFile)).toBe(false);
   });
 
   it('falls back to killing live child runs when graceful stop fails', async () => {

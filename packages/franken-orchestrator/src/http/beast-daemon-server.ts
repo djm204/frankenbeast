@@ -15,6 +15,7 @@ export interface StartBeastDaemonOptions extends BeastServicePaths {
   operatorToken: string;
   pidFile?: string;
   services?: BeastServiceBundle;
+  mutationDrainTimeoutMs?: number;
 }
 
 export interface BeastDaemonHandle {
@@ -133,6 +134,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
   let closed = false;
   let listening = false;
   const drainState = new MutableBeastDaemonDrainState();
+  const mutationDrainTimeoutMs = options.mutationDrainTimeoutMs ?? MUTATION_DRAIN_WAIT_TIMEOUT_MS;
 
   try {
     services = options.services ?? createBeastServices(options);
@@ -188,13 +190,16 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
       }
       closed = true;
       drainState.enter('shutdown');
-      const drainedMutations = await drainState.waitForMutations();
+      const drainedMutations = await drainState.waitForMutations(mutationDrainTimeoutMs);
       let httpServerClosed = false;
       if (!drainedMutations && listening) {
         const closedServer = closeHttpServer(server);
         server.closeAllConnections();
         await closedServer;
+        listening = false;
         httpServerClosed = true;
+        closed = false;
+        throw new BeastDaemonDrainTimeoutError(mutationDrainTimeoutMs);
       }
       const shutdownFailures = await stopLiveRuns(services);
       services.dispose();
@@ -202,9 +207,6 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         const closedServer = closeHttpServer(server);
         server.closeAllConnections();
         await closedServer;
-      }
-      if (!drainedMutations) {
-        throw new BeastDaemonDrainTimeoutError(MUTATION_DRAIN_WAIT_TIMEOUT_MS);
       }
       if (shutdownFailures.length > 0) {
         throw new BeastDaemonShutdownError(shutdownFailures);
