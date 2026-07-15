@@ -26,6 +26,7 @@ Frankenbeast is pre-1.0 and evolves quickly. Security fixes are applied to `main
 - Dependabot is configured for npm workspace dependencies and GitHub Actions updates.
 - Keep npm dependencies on the repository-pinned package manager (`packageManager` in `package.json`).
 - Run `npm run audit:dependencies` and `npm run audit:security` before shipping security-sensitive changes.
+- Run `npm run deps:vulnerability-sla` to produce the dependency vulnerability SLA dashboard. The dashboard summarizes npm audit findings by severity, package, ecosystem, vulnerable/fixed version, age, transitive path, and linked issue/PR metadata when provided. Critical findings older than 7 days and high findings older than 30 days are blocking by default; moderate and low findings are retained as triage signals.
 - The CI workflow runs dependency vulnerability checks, major-version freshness checks, and SBOM generation on pull requests.
 - Dependabot must ignore first-party `@franken/*` workspace packages, including security updates, and exclude that scope from every npm update group; release automation owns internal package version changes so registry-driven dependency PRs cannot confuse workspace packages with public packages.
 - The daily deterministic security scan runs Semgrep, Gitleaks, and dependency audit jobs; treat its filed issues as active security work until closed.
@@ -67,6 +68,7 @@ Useful local checks before opening or merging security-sensitive changes:
 ```bash
 npm run audit:dependencies
 npm run audit:security
+npm run deps:vulnerability-sla
 npm run check:dependabot-supply-chain
 npm run lint:security
 ```

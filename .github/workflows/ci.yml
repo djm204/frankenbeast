@@ -47,6 +47,9 @@ jobs:
       - name: Dependency vulnerability audit
         run: npm run audit:dependencies
 
+      - name: Dependency vulnerability SLA dashboard
+        run: npm run deps:vulnerability-sla
+
       - name: Dependency major-version freshness check
         run: npm run deps:outdated:major
 

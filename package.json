@@ -14,6 +14,7 @@
     "typecheck": "turbo run typecheck",
     "audit:security": "node scripts/check-package-manager.mjs && npm audit --audit-level=moderate",
     "audit:dependencies": "node scripts/check-package-manager.mjs && npm audit",
+    "deps:vulnerability-sla": "node scripts/check-package-manager.mjs && node scripts/dependency-vulnerability-sla.mjs",
     "check:package-manager": "node scripts/check-package-manager.mjs",
     "check:dependabot-supply-chain": "node scripts/check-dependabot-supply-chain.mjs",
     "dr:worker-push-rollback:dry-run": "node scripts/worker-push-rollback-plan.mjs --dry-run",
