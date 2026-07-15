@@ -112,8 +112,10 @@ export class ProviderRegistry {
       if (!(await provider.isAvailable())) {
         unavailableProviders.push(provider.name);
         const availabilityError = new Error(`Provider ${provider.name} is unavailable`);
-        lastFailedProviderName = provider.name;
-        lastError = availabilityError;
+        if (!lastError) {
+          lastFailedProviderName = provider.name;
+          lastError = availabilityError;
+        }
         terminalError ??= availabilityError;
         continue;
       }
@@ -197,6 +199,7 @@ export class ProviderRegistry {
           }
 
           lastError = new Error('stream ended without done');
+          terminalError = lastError;
           lastFailedProviderName = provider.name;
           break; // stream ended without done — failover
         } catch (error) {

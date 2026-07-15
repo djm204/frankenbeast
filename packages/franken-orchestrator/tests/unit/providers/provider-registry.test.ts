@@ -325,6 +325,26 @@ describe('ProviderRegistry', () => {
       );
     });
 
+    it('preserves the executed failure across unavailable fallback providers', async () => {
+      const p1 = mockProvider('primary', { failOnExecute: new Error('primary crashed') });
+      const p2 = mockProvider('secondary', { available: false });
+      const p3 = mockProvider('tertiary');
+      const onSwitch = vi.fn();
+
+      const registry = new ProviderRegistry([p1, p2, p3], mockBrain(), {
+        onProviderSwitch: onSwitch,
+      });
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(onSwitch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'primary',
+          to: 'tertiary',
+          reason: 'primary crashed',
+        }),
+      );
+    });
+
     it('checkpoints brain when all providers exhausted', async () => {
       const p1 = mockProvider('p1', { failOnExecute: new Error('err1') });
       const p2 = mockProvider('p2', { failOnExecute: new Error('err2') });
@@ -433,6 +453,24 @@ describe('ProviderRegistry', () => {
       expect(brain.recovery.checkpoint).toHaveBeenCalledWith(
         expect.objectContaining({
           context: { lastError: 'runner crashed' },
+        }),
+      );
+    });
+
+    it('reports no-done streams as the terminal exhaustion error', async () => {
+      const p1 = mockProvider('unavailable-primary', { available: false });
+      const p2 = mockProvider('silent', {
+        events: [{ type: 'text' as const, content: 'partial' }],
+      });
+      const brain = mockBrain();
+      const registry = new ProviderRegistry([p1, p2], brain);
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('stream ended without done');
+      expect(brain.recovery.checkpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: { lastError: 'stream ended without done' },
         }),
       );
     });
