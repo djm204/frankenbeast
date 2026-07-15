@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 import { testCredential } from '../../support/test-credentials.js';
-import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
+import {
+  RUNTIME_CONFIG_MANIFEST_KEY_ENV,
+  writeRuntimeConfigIntegrityManifest,
+} from '../../../src/beasts/execution/runtime-config-integrity.js';
+
+const runtimeConfigManifestKey = 'test-runtime-config-manifest-key';
 
 const TEST_DASHBOARD_OPERATOR_TOKEN = testCredential('TEST_DASHBOARD_OPERATOR_TOKEN');
 const TEST_DISCORD_TOKEN = testCredential('TEST_DISCORD_TOKEN');
@@ -1702,9 +1707,10 @@ describe('main() execution', () => {
     const runConfigPath = join(root, 'run-config.json');
     mkdirSync(root, { recursive: true });
     writeFileSync(runConfigPath, JSON.stringify({ provider: 'codex' }));
-    writeRuntimeConfigIntegrityManifest({ configPath: runConfigPath });
+    writeRuntimeConfigIntegrityManifest({ configPath: runConfigPath, manifestKey: runtimeConfigManifestKey });
     tempDirs.push(root);
     process.env.FRANKENBEAST_RUN_CONFIG = runConfigPath;
+    process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV] = runtimeConfigManifestKey;
 
     vi.mocked(loadConfig).mockResolvedValueOnce({
       maxCritiqueIterations: 3,

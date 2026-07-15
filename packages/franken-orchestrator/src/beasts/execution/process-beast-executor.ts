@@ -1,4 +1,5 @@
 import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
@@ -15,6 +16,7 @@ import type { ProcessSupervisorLike } from './process-supervisor.js';
 import { classifyWorkerCrash } from './worker-crash-classification.js';
 import {
   assertRuntimeConfigIntegrity,
+  RUNTIME_CONFIG_MANIFEST_KEY_ENV,
   runtimeConfigIntegrityManifestPath,
   writeRuntimeConfigIntegrityManifest,
 } from './runtime-config-integrity.js';
@@ -726,6 +728,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const isolatedSpec = this.buildIsolatedSpec(processSpec, worktree);
       const configFilePath = this.prepareRunConfigFile(run, isolatedSpec);
       const configManifestPath = runtimeConfigIntegrityManifestPath(configFilePath);
+      const runtimeConfigManifestKey = randomBytes(32).toString('base64url');
       const bypassRuntimeConfigIntegrity = this.options.runtimeConfigIntegrity?.bypass === true
         || process.env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS === '1';
 
@@ -735,6 +738,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           ...isolatedSpec.env,
           ...moduleEnv,
           FRANKENBEAST_RUN_CONFIG: configFilePath,
+          [RUNTIME_CONFIG_MANIFEST_KEY_ENV]: runtimeConfigManifestKey,
           ...(bypassRuntimeConfigIntegrity ? { FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS: '1' } : {}),
         },
       };
@@ -751,12 +755,17 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
       applyRunConfigOwnership(configFilePath, runConfigOwner);
       chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
-      writeRuntimeConfigIntegrityManifest({ configPath: configFilePath, manifestPath: configManifestPath });
+      writeRuntimeConfigIntegrityManifest({
+        configPath: configFilePath,
+        manifestPath: configManifestPath,
+        manifestKey: runtimeConfigManifestKey,
+      });
       applyRunConfigOwnership(configManifestPath, runConfigOwner);
       chmodSync(configManifestPath, RUN_CONFIG_FILE_MODE);
       assertRuntimeConfigIntegrity({
         configPath: configFilePath,
         manifestPath: configManifestPath,
+        manifestKey: runtimeConfigManifestKey,
         bypass: bypassRuntimeConfigIntegrity,
       });
 

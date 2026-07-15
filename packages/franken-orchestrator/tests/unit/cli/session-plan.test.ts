@@ -3,7 +3,12 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
-import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
+import {
+  RUNTIME_CONFIG_MANIFEST_KEY_ENV,
+  writeRuntimeConfigIntegrityManifest,
+} from '../../../src/beasts/execution/runtime-config-integrity.js';
+
+const runtimeConfigManifestKey = 'test-runtime-config-manifest-key';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 
@@ -328,8 +333,9 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
         overrides: { 'plan-build': { provider: 'claude' } },
       },
     }));
-    writeRuntimeConfigIntegrityManifest({ configPath: runConfigPath });
+    writeRuntimeConfigIntegrityManifest({ configPath: runConfigPath, manifestKey: runtimeConfigManifestKey });
     process.env.FRANKENBEAST_RUN_CONFIG = runConfigPath;
+    process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV] = runtimeConfigManifestKey;
 
     await new Session(config).start();
 

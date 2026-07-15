@@ -3,7 +3,12 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getProjectPaths, scaffoldFrankenbeast } from '../../../src/cli/project-root.js';
-import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
+import {
+  RUNTIME_CONFIG_MANIFEST_KEY_ENV,
+  writeRuntimeConfigIntegrityManifest,
+} from '../../../src/beasts/execution/runtime-config-integrity.js';
+
+const runtimeConfigManifestKey = 'test-runtime-config-manifest-key';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 
@@ -280,8 +285,9 @@ describe('Session', () => {
         maxTotalTokens: 456_000,
         reflection: true,
       }));
-      writeRuntimeConfigIntegrityManifest({ configPath });
+      writeRuntimeConfigIntegrityManifest({ configPath, manifestKey: runtimeConfigManifestKey });
       process.env.FRANKENBEAST_RUN_CONFIG = configPath;
+      process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV] = runtimeConfigManifestKey;
       const config = makeConfig({ entryPhase: 'execute' });
 
       await new Session(config).start();

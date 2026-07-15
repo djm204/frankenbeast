@@ -8,7 +8,12 @@ import {
   RunConfigParseError,
   type RunConfig,
 } from '../../../src/cli/run-config-loader.js';
-import { writeRuntimeConfigIntegrityManifest } from '../../../src/beasts/execution/runtime-config-integrity.js';
+import {
+  RUNTIME_CONFIG_MANIFEST_KEY_ENV,
+  writeRuntimeConfigIntegrityManifest,
+} from '../../../src/beasts/execution/runtime-config-integrity.js';
+
+const manifestKey = 'test-runtime-config-manifest-key';
 
 describe('RunConfigLoader', () => {
   let workDir: string | undefined;
@@ -19,6 +24,7 @@ describe('RunConfigLoader', () => {
     }
     delete process.env['FRANKENBEAST_RUN_CONFIG'];
     delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS'];
+    delete process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV];
   });
 
   describe('loadRunConfig', () => {
@@ -165,8 +171,9 @@ describe('RunConfigLoader', () => {
       };
       const filePath = join(workDir, 'env-config.json');
       await writeFile(filePath, JSON.stringify(config));
-      writeRuntimeConfigIntegrityManifest({ configPath: filePath });
+      writeRuntimeConfigIntegrityManifest({ configPath: filePath, manifestKey });
       process.env['FRANKENBEAST_RUN_CONFIG'] = filePath;
+      process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV] = manifestKey;
 
       const result = loadRunConfigFromEnv();
 
@@ -180,8 +187,9 @@ describe('RunConfigLoader', () => {
       const config = { provider: 'claude' };
       const filePath = join(workDir, 'log-test.json');
       await writeFile(filePath, JSON.stringify(config));
-      writeRuntimeConfigIntegrityManifest({ configPath: filePath });
+      writeRuntimeConfigIntegrityManifest({ configPath: filePath, manifestKey });
       process.env['FRANKENBEAST_RUN_CONFIG'] = filePath;
+      process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV] = manifestKey;
 
       const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
       try {

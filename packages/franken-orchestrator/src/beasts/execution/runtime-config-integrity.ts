@@ -1,9 +1,12 @@
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
 const RUNTIME_CONFIG_INTEGRITY_SCHEMA_VERSION = 1;
 const RUNTIME_CONFIG_INTEGRITY_ALGORITHM = 'sha256';
+const RUNTIME_CONFIG_MANIFEST_SIGNATURE_ALGORITHM = 'hmac-sha256';
+const RUNTIME_CONFIG_MANIFEST_MAX_BYTES = 4096;
+export const RUNTIME_CONFIG_MANIFEST_KEY_ENV = 'FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY';
 
 export interface RuntimeConfigIntegrityManifest {
   readonly schemaVersion: typeof RUNTIME_CONFIG_INTEGRITY_SCHEMA_VERSION;
@@ -11,6 +14,8 @@ export interface RuntimeConfigIntegrityManifest {
   readonly algorithm: typeof RUNTIME_CONFIG_INTEGRITY_ALGORITHM;
   readonly digest: string;
   readonly generatedAt: string;
+  readonly signatureAlgorithm: typeof RUNTIME_CONFIG_MANIFEST_SIGNATURE_ALGORITHM;
+  readonly signature: string;
 }
 
 export interface RuntimeConfigIntegrityVerification {
@@ -43,6 +48,28 @@ function sha256FileVerification(path: string): { digest?: string; reason?: strin
   }
 }
 
+function manifestSigningPayload(input: Omit<RuntimeConfigIntegrityManifest, 'signature'>): string {
+  return JSON.stringify({
+    schemaVersion: input.schemaVersion,
+    fileName: input.fileName,
+    algorithm: input.algorithm,
+    digest: input.digest,
+    generatedAt: input.generatedAt,
+    signatureAlgorithm: input.signatureAlgorithm,
+  });
+}
+
+function signManifest(input: Omit<RuntimeConfigIntegrityManifest, 'signature'>, key: string): string {
+  return createHmac('sha256', key).update(manifestSigningPayload(input)).digest('hex');
+}
+
+function verifyManifestSignature(manifest: RuntimeConfigIntegrityManifest, key: string): boolean {
+  const expected = signManifest(manifest, key);
+  const expectedBytes = Buffer.from(expected, 'hex');
+  const actualBytes = Buffer.from(manifest.signature, 'hex');
+  return expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes);
+}
+
 function formatRuntimeConfigIntegrityError(verification: RuntimeConfigIntegrityVerification): string {
   const reason = verification.reason ?? 'runtime config integrity verification failed';
   const digestDetails = verification.expectedDigest && verification.actualDigest
@@ -52,6 +79,10 @@ function formatRuntimeConfigIntegrityError(verification: RuntimeConfigIntegrityV
 }
 
 function parseManifest(path: string): RuntimeConfigIntegrityManifest {
+  const info = statSync(path);
+  if (info.size > RUNTIME_CONFIG_MANIFEST_MAX_BYTES) {
+    throw new Error(`runtime config integrity manifest exceeds maxBytes: ${info.size} > ${RUNTIME_CONFIG_MANIFEST_MAX_BYTES}`);
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -77,6 +108,12 @@ function parseManifest(path: string): RuntimeConfigIntegrityManifest {
   if (typeof manifest.generatedAt !== 'string' || Number.isNaN(Date.parse(manifest.generatedAt))) {
     throw new Error('runtime config integrity manifest generatedAt must be a parseable timestamp');
   }
+  if (manifest.signatureAlgorithm !== RUNTIME_CONFIG_MANIFEST_SIGNATURE_ALGORITHM) {
+    throw new Error(`runtime config integrity manifest signatureAlgorithm must be ${RUNTIME_CONFIG_MANIFEST_SIGNATURE_ALGORITHM}`);
+  }
+  if (typeof manifest.signature !== 'string' || !/^[a-f0-9]{64}$/.test(manifest.signature)) {
+    throw new Error('runtime config integrity manifest signature must be a lowercase hmac-sha256 hex digest');
+  }
   return manifest as unknown as RuntimeConfigIntegrityManifest;
 }
 
@@ -88,13 +125,23 @@ export function writeRuntimeConfigIntegrityManifest(input: {
   readonly configPath: string;
   readonly manifestPath?: string | undefined;
   readonly now?: Date | undefined;
+  readonly manifestKey?: string | undefined;
 }): RuntimeConfigIntegrityManifest {
-  const manifest: RuntimeConfigIntegrityManifest = {
+  const manifestKey = input.manifestKey ?? process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV];
+  if (!manifestKey) {
+    throw new Error(`runtime config integrity manifest requires ${RUNTIME_CONFIG_MANIFEST_KEY_ENV}`);
+  }
+  const unsignedManifest: Omit<RuntimeConfigIntegrityManifest, 'signature'> = {
     schemaVersion: RUNTIME_CONFIG_INTEGRITY_SCHEMA_VERSION,
     fileName: basename(input.configPath),
     algorithm: RUNTIME_CONFIG_INTEGRITY_ALGORITHM,
     digest: sha256File(input.configPath),
     generatedAt: (input.now ?? new Date()).toISOString(),
+    signatureAlgorithm: RUNTIME_CONFIG_MANIFEST_SIGNATURE_ALGORITHM,
+  };
+  const manifest: RuntimeConfigIntegrityManifest = {
+    ...unsignedManifest,
+    signature: signManifest(unsignedManifest, manifestKey),
   };
   writeFileSync(input.manifestPath ?? runtimeConfigIntegrityManifestPath(input.configPath), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   return manifest;
@@ -104,6 +151,7 @@ export function verifyRuntimeConfigIntegrity(input: {
   readonly configPath: string;
   readonly manifestPath?: string | undefined;
   readonly bypass?: boolean | undefined;
+  readonly manifestKey?: string | undefined;
 }): RuntimeConfigIntegrityVerification {
   const manifestPath = input.manifestPath ?? runtimeConfigIntegrityManifestPath(input.configPath);
   if (input.bypass) {
@@ -129,6 +177,27 @@ export function verifyRuntimeConfigIntegrity(input: {
       manifestPath,
       expectedDigest: manifest.digest,
       reason: `manifest fileName '${manifest.fileName}' does not match '${basename(input.configPath)}'`,
+    };
+  }
+  const manifestKey = input.manifestKey ?? process.env[RUNTIME_CONFIG_MANIFEST_KEY_ENV];
+  if (!manifestKey) {
+    return {
+      ok: false,
+      bypassed: false,
+      configPath: input.configPath,
+      manifestPath,
+      expectedDigest: manifest.digest,
+      reason: `runtime config integrity manifest key is missing from ${RUNTIME_CONFIG_MANIFEST_KEY_ENV}`,
+    };
+  }
+  if (!verifyManifestSignature(manifest, manifestKey)) {
+    return {
+      ok: false,
+      bypassed: false,
+      configPath: input.configPath,
+      manifestPath,
+      expectedDigest: manifest.digest,
+      reason: 'runtime config integrity manifest signature is invalid',
     };
   }
   const { digest: actualDigest, reason: readFailureReason } = sha256FileVerification(input.configPath);
@@ -167,6 +236,7 @@ export function assertRuntimeConfigIntegrity(input: {
   readonly configPath: string;
   readonly manifestPath?: string | undefined;
   readonly bypass?: boolean | undefined;
+  readonly manifestKey?: string | undefined;
 }): RuntimeConfigIntegrityVerification {
   const verification = verifyRuntimeConfigIntegrity(input);
   if (!verification.ok) {

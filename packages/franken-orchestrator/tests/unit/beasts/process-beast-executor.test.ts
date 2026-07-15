@@ -1093,6 +1093,7 @@ describe('ProcessBeastExecutor', () => {
 
       const [spawnedSpec] = supervisor.spawn.mock.calls[0];
       expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS).toBe('1');
+      expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY).toMatch(/^[A-Za-z0-9_-]+$/);
     });
 
     it('lets pre-runtime-config validation errors surface without rewriting them as spawn failures', async () => {
