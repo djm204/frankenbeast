@@ -53,6 +53,10 @@ vi.mock("@franken/brain", () => ({
           "agents/oncall/runbook": "shared runbook",
           "github-token": "ghp_" + "supersecretvalue123456",
           "public-key": "sk-" + "secretvalue123456",
+          "deployment-notes":
+            "-----BEGIN " +
+            "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
+            "OPENSSH PRIVATE KEY-----",
           profile: {
             password: "hunter2",
             "alice@example.com": "oncall",
@@ -89,7 +93,7 @@ vi.mock("@franken/brain", () => ({
           {
             id: "evt-shared",
             type: "success",
-            summary: "shared episode",
+            summary: "password: hunter2",
             details: {
               apiKey: "sk_" + "secretvalue123456",
               "bob@example.com": "operator",
@@ -279,9 +283,26 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("ghp_" + "supersecretvalue123456");
     expect(serialized).not.toContain("sk-" + "secretvalue123456");
     expect(serialized).not.toContain("sk_" + "secretvalue123456");
+    expect(serialized).not.toContain("OPENSSH PRIVATE KEY");
     expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("alice@example.com");
+    expect(serialized).not.toContain("bob@example.com");
     expect(serialized).not.toContain("apiKey");
+  });
+
+  it("redacts agent export scope identifiers in safe mode", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const exported = await brain.exportProjectMemory({
+      readScope: "agent",
+      agentId: "alice@example.com",
+      limit: 10,
+    });
+
+    expect(exported.scope).toEqual({
+      readScope: "agent",
+      agentId: "[redacted-email]",
+    });
   });
 
   it("rejects agent read scope without an agent id before reading memory", async () => {

@@ -277,6 +277,7 @@ function resolveExportLimit(limit: number | undefined): number {
 const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
+  [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, "[redacted-private-key]"],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
   [/\b(?:sk|gho|ghp)_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
@@ -331,6 +332,34 @@ function redactExportField<T>(
   keyHint?: string,
 ): T | unknown {
   return redaction === "none" ? value : redactExportValue(value, keyHint);
+}
+
+function redactExportScope(
+  scope: { readScope: MemoryReadScope; agentId?: string },
+  redaction: MemoryExportRedactionMode,
+): { readScope: MemoryReadScope; agentId?: string } {
+  if (redaction === "none" || scope.agentId === undefined) return scope;
+  return {
+    readScope: scope.readScope,
+    agentId: redactExportField(scope.agentId, redaction, "agentId") as string,
+  };
+}
+
+function redactEpisodicSummary(
+  summary: string,
+  redaction: MemoryExportRedactionMode,
+): string {
+  if (redaction === "none") return summary;
+  const colon = summary.indexOf(":");
+  if (colon > 0 && colon <= 200) {
+    const key = summary.slice(0, colon).trim();
+    const value = summary.slice(colon + 1).trimStart();
+    if (key.length > 0) {
+      const redactedValue = redactExportValue(value, key);
+      return `${redactExportKey(key, redaction)}: ${String(redactedValue)}`;
+    }
+  }
+  return redactExportString(summary);
 }
 
 export function createBrainAdapter(dbPath: string): BrainAdapter {
@@ -524,7 +553,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           ...(event.step === undefined
             ? {}
             : { step: redactExportField(event.step, redaction, "step") as string }),
-          summary: redactExportField(event.summary, redaction, "summary") as string,
+          summary: redactEpisodicSummary(event.summary, redaction),
           ...(event.details === undefined
             ? {}
             : { details: redactExportField(event.details, redaction, "details") }),
@@ -545,7 +574,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       return {
         version: 1,
         exportedAt: isoNow(),
-        scope: readScope,
+        scope: redactExportScope(readScope, redaction),
         redaction,
         counts: { working: working.length, episodic: episodic.length },
         working,

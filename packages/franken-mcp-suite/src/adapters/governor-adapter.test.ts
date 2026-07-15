@@ -127,6 +127,22 @@ describe('GovernorAdapter', () => {
     expect(result.reason).toContain('Memory edits persist');
   });
 
+  it('requires trusted-operator review for unredacted memory exports', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"redaction":"safe"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"redaction":"none"}',
+    })).resolves.toMatchObject({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('trusted-operator approval'),
+    });
+  });
+
   it('routes non-memory high-risk action classes through policy-as-code', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
 

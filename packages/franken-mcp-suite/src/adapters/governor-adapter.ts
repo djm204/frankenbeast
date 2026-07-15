@@ -323,6 +323,16 @@ function assessHighRiskAction(action: string, context: string): GovernorCheckRes
   return { decision: 'review_recommended', reason: `High-risk policy requires approval for ${action}: ${result.reason}` };
 }
 
+function isTrustedOperatorMemoryExport(action: string, context: string): boolean {
+  if (action !== 'fbeast_memory_export') return false;
+  try {
+    const parsed = JSON.parse(context) as Record<string, unknown>;
+    return parsed.redaction === 'none';
+  } catch {
+    return /"redaction"\s*:\s*"none"/i.test(context);
+  }
+}
+
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -336,6 +346,13 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 function assessAction(action: string, context: string): GovernorCheckResult {
   const highRiskResult = assessHighRiskAction(action, context);
   if (highRiskResult !== undefined) return highRiskResult;
+
+  if (isTrustedOperatorMemoryExport(action, context)) {
+    return {
+      decision: 'review_recommended',
+      reason: 'Unredacted fbeast_memory_export requires trusted-operator approval.',
+    };
+  }
 
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
