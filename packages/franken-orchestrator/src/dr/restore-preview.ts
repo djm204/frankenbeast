@@ -308,17 +308,6 @@ function destructiveActionsForConflict(conflict: RestorePreviewConflict): Restor
     ];
   }
 
-  if (conflict.area === 'approvals') {
-    return [
-      {
-        area: conflict.area,
-        id: conflict.id,
-        type: 'restore-approval-token',
-        reason: 'Approval tokens must not be restored or re-authorized during recovery mode.',
-      },
-    ];
-  }
-
   if (conflict.type === 'live-only') {
     return [
       {
@@ -326,6 +315,21 @@ function destructiveActionsForConflict(conflict: RestorePreviewConflict): Restor
         id: conflict.id,
         type: 'delete-live-record',
         reason: 'Removing live-only state would delete data that is absent from the backup.',
+      },
+    ];
+  }
+
+  if (conflict.type === 'backup-only' && conflict.area !== 'approvals') {
+    return [];
+  }
+
+  if (conflict.area === 'approvals') {
+    return [
+      {
+        area: conflict.area,
+        id: conflict.id,
+        type: 'restore-approval-token',
+        reason: 'Approval tokens must not be restored or re-authorized during recovery mode.',
       },
     ];
   }

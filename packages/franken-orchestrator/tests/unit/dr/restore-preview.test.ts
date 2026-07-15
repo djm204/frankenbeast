@@ -148,6 +148,50 @@ describe('restore preview conflict detector', () => {
     expect(preview.destructiveActions.blocked).toEqual([]);
   });
 
+  it('keeps backup-only task, memory, and cron records non-destructive in recovery mode', () => {
+    const preview = detectRestorePreviewConflicts(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'missing-task', digest: 'task-digest' }],
+        approvals: [],
+        memory: [{ id: 'missing-memory', digest: 'memory-digest' }],
+        cron: [{ id: 'missing-cron', digest: 'cron-digest' }],
+      },
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      { recoveryMode: true },
+    );
+
+    expect(preview.conflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ area: 'tasks', id: 'missing-task', type: 'backup-only' }),
+        expect.objectContaining({ area: 'memory', id: 'missing-memory', type: 'backup-only' }),
+        expect.objectContaining({ area: 'cron', id: 'missing-cron', type: 'backup-only' }),
+      ]),
+    );
+    expect(preview.destructiveActions.blocked).toEqual([]);
+  });
+
+  it('classifies live-only approvals as destructive deletes in recovery mode', () => {
+    const preview = detectRestorePreviewConflicts(
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'live-only-approval', state: 'pending', digest: 'live-token' }],
+        memory: [],
+        cron: [],
+      },
+      { recoveryMode: true },
+    );
+
+    expect(preview.conflicts).toContainEqual(
+      expect.objectContaining({ area: 'approvals', id: 'live-only-approval', type: 'live-only' }),
+    );
+    expect(preview.destructiveActions.blocked).toContainEqual(
+      expect.objectContaining({ area: 'approvals', id: 'live-only-approval', type: 'delete-live-record' }),
+    );
+  });
+
   it('treats backup-only approval tokens as blockers', () => {
     const preview = detectRestorePreviewConflicts(
       {
