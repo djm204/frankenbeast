@@ -211,6 +211,21 @@ describe('transcript retention controls', () => {
       redactionLevel: 'none',
       accessLevel: 'operator',
       storesRawTranscriptContent: true,
+      cleanupRemovesStoredTraces: true,
+    })
+  })
+
+  it('surfaces raw retention cleanup gaps for non-deleting adapters', () => {
+    const adapter = new TranscriptRetentionAdapter({
+      adapter: new NonDeletingAdapter(),
+      mode: 'raw',
+      redactionLevel: 'none',
+    })
+
+    expect(adapter.describePolicy()).toMatchObject({
+      storesRawTranscriptContent: true,
+      cleanupRemovesStoredTraces: false,
+      cleanupWarning: expect.stringContaining('does not support deleteTrace'),
     })
   })
 
@@ -235,6 +250,7 @@ describe('transcript retention controls', () => {
         summaries: true,
       },
       storesRawTranscriptContent: false,
+      cleanupRemovesStoredTraces: true,
       expiresAt: 61_000,
     })
   })
@@ -768,6 +784,10 @@ describe('transcript retention controls', () => {
             type: 'content_block_delta',
             delta: { type: 'text_delta', text: 'private streamed prompt' },
           },
+          untypedStreamEvent: {
+            type: 'content_block_delta',
+            delta: { text: 'private untyped streamed prompt' },
+          },
           toolEvent: {
             type: 'content_block_delta',
             delta: { type: 'input_json_delta', partial_json: '{"secret":"tool args"}' },
@@ -783,6 +803,10 @@ describe('transcript retention controls', () => {
     expect(retained.spans[0].metadata['streamEvent']).toEqual({
       type: 'content_block_delta',
       delta: { type: 'text_delta', text: '[REDACTED_TRANSCRIPT]' },
+    })
+    expect(retained.spans[0].metadata['untypedStreamEvent']).toEqual({
+      type: 'content_block_delta',
+      delta: { text: '[REDACTED_TRANSCRIPT]' },
     })
     expect(retained.spans[0].metadata['toolEvent']).toEqual({
       type: 'content_block_delta',
@@ -839,6 +863,25 @@ describe('transcript retention controls', () => {
     expect(retained.spans[0].metadata['document']).toEqual({
       type: 'file',
       file_data: '[REDACTED_TRANSCRIPT]',
+    })
+  })
+
+  it('redacts output text blocks and injected operator context fields', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          block: { type: 'output_text', text: 'private assistant transcript' },
+          hookSpecificOutput: { additionalContext: 'private operator context' },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['block']).toEqual({
+      type: 'output_text',
+      text: '[REDACTED_TRANSCRIPT]',
+    })
+    expect(retained.spans[0].metadata['hookSpecificOutput']).toEqual({
+      additionalContext: '[REDACTED_TRANSCRIPT]',
     })
   })
 

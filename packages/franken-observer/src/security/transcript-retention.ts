@@ -39,6 +39,8 @@ export interface ResolvedTranscriptRetentionPolicy {
 
 export interface TranscriptRetentionPolicyReport extends ResolvedTranscriptRetentionPolicy {
   readonly storesRawTranscriptContent: boolean
+  readonly cleanupRemovesStoredTraces: boolean
+  readonly cleanupWarning?: string
   readonly expiresAt?: number
 }
 
@@ -71,7 +73,7 @@ const DEFAULT_FIELDS: TranscriptRetainedFields = Object.freeze({
   summaries: true,
 })
 
-const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'goal', 'goals', 'transcript', 'transcripts'])
+const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'additionalcontext', 'operatorcontext', 'context', 'goal', 'goals', 'transcript', 'transcripts'])
 const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'input', 'inputs', 'arguments', 'args', 'parameters', 'params', 'stdin'])
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
@@ -166,7 +168,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   describePolicy(): TranscriptRetentionPolicyReport {
-    return describeTranscriptRetentionPolicy(this.policy, this.now)
+    return describeTranscriptRetentionPolicy(this.policy, this.now, hasDeleteTraceSupport(this.inner))
   }
 
   async cleanupExpired(): Promise<string[]> {
@@ -254,11 +256,17 @@ export function resolveTranscriptRetentionPolicy(
 export function describeTranscriptRetentionPolicy(
   policy: TranscriptRetentionPolicy = {},
   now: () => number = policy.now ?? Date.now,
+  cleanupRemovesStoredTraces = true,
 ): TranscriptRetentionPolicyReport {
   const resolved = resolveTranscriptRetentionPolicy(policy)
+  const storesRawTranscriptContent = resolved.mode !== 'disabled' && (resolved.mode === 'raw' || resolved.redactionLevel === 'none')
   return Object.freeze({
     ...resolved,
-    storesRawTranscriptContent: resolved.mode !== 'disabled' && (resolved.mode === 'raw' || resolved.redactionLevel === 'none'),
+    storesRawTranscriptContent,
+    cleanupRemovesStoredTraces,
+    ...(storesRawTranscriptContent && !cleanupRemovesStoredTraces
+      ? { cleanupWarning: 'Wrapped adapter does not support deleteTrace; TTL cleanup only hides traces through this retention wrapper and cannot remove already-exported raw transcripts from that backend.' }
+      : {}),
     ...(resolved.ttlMs > 0 ? { expiresAt: now() + resolved.ttlMs } : {}),
   })
 }
@@ -368,7 +376,12 @@ function redactNestedTranscriptValues(
 
   const retained: Record<string, unknown> = {}
   seen.set(value, retained)
+  const recordType = typeof value['type'] === 'string' ? value['type'].replace(/[_-]/g, '').toLowerCase() : ''
   for (const [key, nestedValue] of Object.entries(value)) {
+    if (recordType === 'contentblockdelta' && key.replace(/[_-]/g, '').toLowerCase() === 'delta') {
+      setRecordValue(retained, key, redactProviderStreamDeltaValue(nestedValue, policy, seen))
+      continue
+    }
     const field = classifyContextualTranscriptField(value, key)
     if (field && !policy.retainedFields[field]) continue
     setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
@@ -471,6 +484,10 @@ function redactProviderMessageValue(
   const messageType = typeof value['type'] === 'string' ? value['type'].replace(/[_-]/g, '').toLowerCase() : ''
   const messageRole = typeof value['role'] === 'string' ? value['role'].replace(/[_-]/g, '').toLowerCase() : ''
   for (const [key, nestedValue] of Object.entries(value)) {
+    if (messageType === 'contentblockdelta' && key.replace(/[_-]/g, '').toLowerCase() === 'delta') {
+      setRecordValue(retained, key, redactProviderStreamDeltaValue(nestedValue, policy, seen))
+      continue
+    }
     const contextualField = classifyProviderMessageField(messageType, messageRole, key)
     if (contextualField && !policy.retainedFields[contextualField]) continue
     setRecordValue(
@@ -480,6 +497,37 @@ function redactProviderMessageValue(
     )
   }
   return retained
+}
+
+function redactProviderStreamDeltaValue(
+  value: unknown,
+  policy: ResolvedTranscriptRetentionPolicy,
+  seen: WeakMap<object, unknown>,
+): unknown {
+  if (!isPlainRecordValue(value)) return redactNestedTranscriptValues(value, policy, seen)
+  if (seen.has(value)) return seen.get(value)
+
+  const retained: Record<string, unknown> = {}
+  seen.set(value, retained)
+  const deltaType = typeof value['type'] === 'string' ? value['type'].replace(/[_-]/g, '').toLowerCase() : ''
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const contextualField = classifyProviderStreamDeltaField(deltaType, key)
+    if (contextualField && !policy.retainedFields[contextualField]) continue
+    setRecordValue(
+      retained,
+      key,
+      contextualField ? redactFieldValue(nestedValue, contextualField, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen),
+    )
+  }
+  return retained
+}
+
+function classifyProviderStreamDeltaField(deltaType: string, key: string): TranscriptField | undefined {
+  const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+  if ((deltaType === '' || deltaType === 'textdelta' || deltaType === 'outputtextdelta') && normalizedKey === 'text') return 'prompts'
+  if (deltaType === 'inputjsondelta' && normalizedKey === 'partialjson') return 'toolInputs'
+  if (deltaType === 'thinkingdelta' && normalizedKey === 'thinking') return 'prompts'
+  return classifyProviderMessageField(deltaType, '', key)
 }
 
 function classifyProviderMessageField(messageType: string, messageRole: string, key: string): TranscriptField | undefined {
@@ -498,7 +546,7 @@ function isPromptBlockContentField(messageType: string, key: string): boolean {
     MULTIMODAL_PROMPT_CONTENT_KEYS.has(normalizedKey)
   ) return true
   return (
-    ((messageType === 'text' || messageType === 'inputtext') && normalizedKey === 'text') ||
+    ((messageType === 'text' || messageType === 'inputtext' || messageType === 'outputtext') && normalizedKey === 'text') ||
     ((messageType === 'imageurl' || messageType === 'inputimage') && (normalizedKey === 'imageurl' || normalizedKey === 'url'))
   )
 }
@@ -582,6 +630,13 @@ function getTraceExpiry(trace: Trace, ttlMs: number, retainedAt?: number): numbe
 
 function hasDeleteTrace(adapter: ExportAdapter): adapter is DeletableAdapter {
   return typeof (adapter as Partial<DeletableAdapter>).deleteTrace === 'function'
+}
+
+function hasDeleteTraceSupport(adapter: ExportAdapter, seen = new WeakSet<object>()): boolean {
+  if (seen.has(adapter)) return false
+  seen.add(adapter)
+  if (hasDeleteTrace(adapter)) return true
+  return childAdapters(adapter as AdapterWrapperShape).some(child => hasDeleteTraceSupport(child, seen))
 }
 
 async function deleteTraceFromAdapter(
