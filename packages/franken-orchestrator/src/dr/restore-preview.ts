@@ -231,7 +231,7 @@ export interface RestoreDryRunPreviewResult {
 export interface RestoreDryRunReport {
   readonly ok: true;
   readonly command: 'dr restore-dry-run';
-  readonly formatVersion: 1;
+  readonly formatVersion: 2;
   readonly generatedAt: string;
   readonly dryRun: true;
   readonly wouldWrite: false;
@@ -516,8 +516,7 @@ export function buildCrossFileStateConsistencyReport(
             area,
             id: record.id,
             referenceField: reference.field,
-            referencedTaskId: reference.taskId,
-            message: `Record '${record.id}' in ${area} references missing task '${reference.taskId}'.`,
+            message: `Record '${record.id}' in ${area} references a task that is missing from the manifest.`,
             recommendation:
               'Do not restore this manifest blindly. Restore, recreate, or explicitly skip the referenced task/card before applying dependent approval, memory, or cron state.',
           });
@@ -555,11 +554,12 @@ export function buildRestoreDryRunReport(
   const consistencyBlockerCount = [...backupConsistency.findings, ...liveConsistency.findings].filter(
     (finding) => finding.severity === 'blocker',
   ).length;
+  const safeToRestore = preview.safeToRestore && consistencyBlockerCount === 0;
 
   return {
     ok: true,
     command: 'dr restore-dry-run',
-    formatVersion: 1,
+    formatVersion: 2,
     generatedAt: options.generatedAt ?? new Date().toISOString(),
     dryRun: true,
     wouldWrite: false,
@@ -568,7 +568,7 @@ export function buildRestoreDryRunReport(
       ...(options.livePath === undefined ? {} : { livePath: options.livePath }),
     },
     summary: {
-      safeToRestore: preview.safeToRestore,
+      safeToRestore,
       conflictCount: preview.conflicts.length,
       blockerCount,
       warningCount,
@@ -581,7 +581,7 @@ export function buildRestoreDryRunReport(
       backup: backupConsistency,
       live: liveConsistency,
     },
-    operatorGuidance: preview.safeToRestore && consistencyBlockerCount === 0
+    operatorGuidance: safeToRestore
       ? 'Dry-run only: no restore writes were performed. Review the JSON report, then execute restore separately if an operator explicitly approves it.'
       : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts and cross-file consistency findings have explicit restore, merge, skip, repair, or quarantine decisions.',
   };
@@ -765,7 +765,7 @@ function taskReferencesFor(record: RestorePreviewRecord): readonly TaskReference
       references.push({ field, malformed: true });
     }
   }
-  for (const field of ['taskIds', 'task_ids', 'tasks'] as const) {
+  for (const field of ['taskIds', 'task_ids'] as const) {
     if (!(field in value)) continue;
     const fieldValue = value[field];
     if (!Array.isArray(fieldValue) || fieldValue.length === 0) {
