@@ -408,6 +408,32 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts proposed memory candidates in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_propose', {
+        key: 'secret-api-key',
+        value: 'store token abc123',
+        type: 'working',
+        source: 'operator pasted secret',
+        reason: 'contains DROP TABLE text for review',
+        confidence: 0.8,
+      })).toEqual({
+        key: '[memory-review-proposal-redacted]',
+        value: '[memory-review-proposal-redacted]',
+        type: 'working',
+        source: '[memory-review-proposal-redacted]',
+        reason: '[memory-review-proposal-redacted]',
+        confidence: 0.8,
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_review_propose',
+        args: { key: 'secret-api-key', value: 'token abc123', type: 'working' },
+      })).toEqual({
+        tool: 'fbeast_memory_review_propose',
+        args: '[memory-review-proposal-redacted]',
+      });
+    });
+
 
     it('redacts invalid and unknown right-to-forget audit payloads wholesale', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', 'alice@example.test')).toEqual({

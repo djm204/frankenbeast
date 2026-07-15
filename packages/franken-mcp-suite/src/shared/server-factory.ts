@@ -230,9 +230,32 @@ export function sanitizeToolArgumentsForAudit(args: unknown): Record<string, unk
 const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
 const RIGHT_TO_FORGET_SAFE_AUDIT_KEYS = new Set(['type', 'dryRun']);
 const RIGHT_TO_FORGET_SAFE_TYPES = new Set(['working', 'episodic', 'all']);
+const MEMORY_REVIEW_PROPOSE_TOOL = 'fbeast_memory_review_propose';
+const MEMORY_REVIEW_PROPOSE_SAFE_AUDIT_KEYS = new Set(['type', 'confidence']);
+const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
+
+function redactMemoryReviewProposalArgs(sanitized: Record<string, unknown>, redaction = '[memory-review-proposal-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'type') && !MEMORY_REVIEW_PROPOSE_SAFE_TYPES.has(String(sanitized['type']))) {
+    sanitized['type'] = redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'confidence') && typeof sanitized['confidence'] !== 'number') {
+    sanitized['confidence'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!MEMORY_REVIEW_PROPOSE_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
 
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
+  const isMemoryReviewPropose = toolName === MEMORY_REVIEW_PROPOSE_TOOL;
   const isDirectRightToForget = toolName === 'fbeast_memory_right_to_forget';
   const auditedTool = toolName === 'fbeast_memory_right_to_forget'
     ? toolName
@@ -240,6 +263,19 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
       ? sanitized['tool']
       : toolName;
   const auditedAction = typeof sanitized['action'] === 'string' ? sanitized['action'] : undefined;
+  if (auditedTool === MEMORY_REVIEW_PROPOSE_TOOL || auditedAction === MEMORY_REVIEW_PROPOSE_TOOL) {
+    if (toolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+      sanitized['args'] = '[memory-review-proposal-redacted]';
+      return sanitized;
+    }
+    if (auditedAction === MEMORY_REVIEW_PROPOSE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-review-proposal-redacted]';
+    }
+    if (isMemoryReviewPropose) {
+      return redactMemoryReviewProposalArgs(sanitized);
+    }
+    return sanitized;
+  }
   if (auditedTool !== 'fbeast_memory_right_to_forget' && auditedAction !== 'fbeast_memory_right_to_forget') return sanitized;
   if (auditedAction === 'fbeast_memory_right_to_forget' && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
     sanitized['context'] = '[right-to-forget-args-redacted]';
