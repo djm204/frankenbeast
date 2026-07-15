@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -59,6 +59,8 @@ export type {
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
   IssueCapacityWatermarkAlert,
+  IssueSchedulerFairnessBucket,
+  IssueSchedulerFairnessReport,
 } from './issues/index.js';
 
 // Config

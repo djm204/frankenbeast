@@ -95,6 +95,19 @@ export interface IssueBackpressureDecision {
   readonly alerts: readonly IssueCapacityWatermarkAlert[];
 }
 
+export interface IssueSchedulerFairnessBucket {
+  readonly severity: 'critical' | 'high' | 'medium' | 'low' | 'unprioritized';
+  readonly issueNumbers: readonly number[];
+  readonly count: number;
+}
+
+export interface IssueSchedulerFairnessReport {
+  readonly totalIssues: number;
+  readonly scheduledIssueNumbers: readonly number[];
+  readonly buckets: readonly IssueSchedulerFairnessBucket[];
+  readonly warnings: readonly string[];
+}
+
 export interface IssueRunnerConfig {
   readonly issues: readonly GithubIssue[];
   readonly triageResults: readonly TriageResult[];
@@ -262,8 +275,61 @@ function extractSeverity(labels: readonly string[]): number {
   return NO_SEVERITY;
 }
 
+function severityName(rank: number): IssueSchedulerFairnessBucket['severity'] {
+  switch (rank) {
+    case 0:
+      return 'critical';
+    case 1:
+      return 'high';
+    case 2:
+      return 'medium';
+    case 3:
+      return 'low';
+    default:
+      return 'unprioritized';
+  }
+}
+
 function sortBySeverity(issues: readonly GithubIssue[]): GithubIssue[] {
   return [...issues].sort((a, b) => extractSeverity(a.labels) - extractSeverity(b.labels));
+}
+
+export function buildIssueSchedulerFairnessReport(
+  issues: readonly GithubIssue[],
+  triageResults: readonly TriageResult[],
+): IssueSchedulerFairnessReport {
+  const scheduled = sortBySeverity(issues);
+  const triagedIssueNumbers = new Set(triageResults.map(triage => triage.issueNumber));
+  const buckets = new Map<IssueSchedulerFairnessBucket['severity'], number[]>();
+  const warnings: string[] = [];
+
+  for (const severity of ['critical', 'high', 'medium', 'low', 'unprioritized'] as const) {
+    buckets.set(severity, []);
+  }
+
+  for (const issue of scheduled) {
+    const severity = severityName(extractSeverity(issue.labels));
+    buckets.get(severity)!.push(issue.number);
+
+    if (severity === 'unprioritized') {
+      warnings.push(`issue #${issue.number} has no recognized severity label and is scheduled after prioritized work`);
+    }
+
+    if (!triagedIssueNumbers.has(issue.number)) {
+      warnings.push(`issue #${issue.number} has no triage result and will fail before execution if approved`);
+    }
+  }
+
+  return {
+    totalIssues: issues.length,
+    scheduledIssueNumbers: scheduled.map(issue => issue.number),
+    buckets: [...buckets.entries()].map(([severity, issueNumbers]) => ({
+      severity,
+      issueNumbers,
+      count: issueNumbers.length,
+    })),
+    warnings,
+  };
 }
 
 function findTriage(triages: readonly TriageResult[], issueNumber: number): TriageResult | undefined {
@@ -456,6 +522,7 @@ export class IssueRunner {
     if (issues.length === 0) return [];
 
     const sorted = sortBySeverity(issues);
+    logger?.info('[issues] Scheduler fairness report', buildIssueSchedulerFairnessReport(issues, triageResults), 'issues');
     const budgetTokens = budget * TOKENS_PER_DOLLAR;
     let cumulativeTokens = 0;
     let budgetExceeded = false;

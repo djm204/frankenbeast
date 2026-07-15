@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -282,6 +282,61 @@ describe('IssueRunner', () => {
 
       const order = outcomes.map(o => o.issueNumber);
       expect(order).toEqual([2, 4, 3, 1]);
+    });
+
+    it('builds a structured scheduler fairness report for PM/liveness output', () => {
+      const issues = [
+        makeIssue({ number: 31, labels: [] }),
+        makeIssue({ number: 32, labels: ['low'] }),
+        makeIssue({ number: 33, labels: ['critical'] }),
+        makeIssue({ number: 34, labels: ['medium'] }),
+      ];
+      const triages = [makeTriage(31), makeTriage(32), makeTriage(33), makeTriage(34)];
+
+      const report = buildIssueSchedulerFairnessReport(issues, triages);
+
+      expect(report).toEqual({
+        totalIssues: 4,
+        scheduledIssueNumbers: [33, 34, 32, 31],
+        buckets: [
+          { severity: 'critical', issueNumbers: [33], count: 1 },
+          { severity: 'high', issueNumbers: [], count: 0 },
+          { severity: 'medium', issueNumbers: [34], count: 1 },
+          { severity: 'low', issueNumbers: [32], count: 1 },
+          { severity: 'unprioritized', issueNumbers: [31], count: 1 },
+        ],
+        warnings: ['issue #31 has no recognized severity label and is scheduled after prioritized work'],
+      });
+    });
+
+    it('reports missing triage as an explicit scheduler fairness edge case', () => {
+      const report = buildIssueSchedulerFairnessReport(
+        [makeIssue({ number: 41, labels: ['high'] })],
+        [],
+      );
+
+      expect(report.warnings).toEqual([
+        'issue #41 has no triage result and will fail before execution if approved',
+      ]);
+    });
+
+    it('logs the scheduler fairness report before executing approved issues', async () => {
+      const logger = mockLogger();
+      const issues = [makeIssue({ number: 51, labels: ['low'] }), makeIssue({ number: 52, labels: ['critical'] })];
+      const triages = [makeTriage(51), makeTriage(52)];
+      const config = makeConfig({ issues, triageResults: triages, logger });
+
+      await runner.run(config);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        '[issues] Scheduler fairness report',
+        expect.objectContaining({
+          totalIssues: 2,
+          scheduledIssueNumbers: [52, 51],
+          warnings: [],
+        }),
+        'issues',
+      );
     });
   });
 
