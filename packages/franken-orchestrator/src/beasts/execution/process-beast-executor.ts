@@ -207,6 +207,15 @@ function remapRuntimePathArgs(
   });
 }
 
+
+type PreparedBeastStartResources = {
+  readonly processSpec: BeastProcessSpec;
+  readonly worktree: BeastWorktreeAllocation | undefined;
+  readonly configFilePath: string;
+  readonly spawnedSpec: BeastProcessSpec;
+  readonly configuredSecrets: readonly string[];
+};
+
 export interface ProcessBeastExecutorOptions {
   onRunStatusChange?: (runId: string) => void;
   eventBus?: BeastEventBus;
@@ -309,71 +318,13 @@ export class ProcessBeastExecutor implements BeastExecutor {
   ) {}
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
-    const processSpec = definition.buildProcessSpec(run.configSnapshot);
-    const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
-    this.supervisor.validateCwd?.(processSpec.cwd);
-    const worktree = run.trackedAgentId
-      ? createBeastWorktree(
-          this.options.worktreeIsolation,
-          run.trackedAgentId,
-          processSpec.cwd,
-        )
-      : undefined;
-    if (worktree) {
-      this.worktreeAllocations.set(run.id, worktree);
-    }
-    const isolatedConfigSnapshot = worktree
-      ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
-      : run.configSnapshot;
-    const isolatedSpec = worktree
-      ? {
-          ...processSpec,
-          args: remapRuntimePathArgs(processSpec.args, processSpec.cwd, worktree.executionCwd),
-          cwd: worktree.executionCwd,
-          env: {
-            ...processSpec.env,
-            FRANKENBEAST_WORKTREE_PATH: worktree.worktreePath,
-            FRANKENBEAST_WORKTREE_BRANCH: worktree.branchName,
-          },
-        }
-      : processSpec;
-
-    // Write configSnapshot to a JSON file for the spawned process to load
-    const runConfigRoot = resolve(this.options.runConfigRoot ?? isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
-    const configDir = resolve(this.options.runConfigDir ?? join(runConfigRoot, '.fbeast', '.build', 'run-configs'));
-    const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
-    ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
-    const configFilePath = join(configDir, `${run.id}.json`);
-    try {
-      lstatSync(configFilePath);
-      unlinkSync(configFilePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
-    }
-    this.pendingConfigFilePaths.set(run.id, configFilePath);
-
-    const mergedSpec = {
-      ...isolatedSpec,
-      env: {
-        ...isolatedSpec.env,
-        ...moduleEnv,
-        FRANKENBEAST_RUN_CONFIG: configFilePath,
-      },
-    };
-    const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
-    const configuredSecrets = collectConfiguredSecretValues(
-      run.configSnapshot,
-      processSpec.env,
-      isolatedSpec.env,
-      mergedSpec.env,
-      spawnedSpec.env,
-    );
-    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
-    writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
-    applyRunConfigOwnership(configFilePath, runConfigOwner);
-    chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
+    const {
+      processSpec,
+      worktree,
+      configFilePath,
+      spawnedSpec,
+      configuredSecrets,
+    } = this.prepareStartResources(run, definition);
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -557,6 +508,90 @@ export class ProcessBeastExecutor implements BeastExecutor {
       data: { runId: run.id, attemptId: attempt.id, stream: 'stdout', line: startLogLine, createdAt: startedAt },
     });
     return attempt;
+  }
+
+
+  private prepareStartResources(run: BeastRun, definition: BeastDefinition): PreparedBeastStartResources {
+    const processSpec = definition.buildProcessSpec(run.configSnapshot);
+    const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
+    this.supervisor.validateCwd?.(processSpec.cwd);
+    const worktree = this.allocateWorktree(run, processSpec);
+    const isolatedConfigSnapshot = worktree
+      ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
+      : run.configSnapshot;
+    const isolatedSpec = this.buildIsolatedSpec(processSpec, worktree);
+    const configFilePath = this.prepareRunConfigFile(run, isolatedSpec);
+
+    const mergedSpec = {
+      ...isolatedSpec,
+      env: {
+        ...isolatedSpec.env,
+        ...moduleEnv,
+        FRANKENBEAST_RUN_CONFIG: configFilePath,
+      },
+    };
+    const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
+    const configuredSecrets = collectConfiguredSecretValues(
+      run.configSnapshot,
+      processSpec.env,
+      isolatedSpec.env,
+      mergedSpec.env,
+      spawnedSpec.env,
+    );
+    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
+    writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
+    const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
+    applyRunConfigOwnership(configFilePath, runConfigOwner);
+    chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
+
+    return { processSpec, worktree, configFilePath, spawnedSpec, configuredSecrets };
+  }
+
+  private allocateWorktree(run: BeastRun, processSpec: BeastProcessSpec): BeastWorktreeAllocation | undefined {
+    const worktree = run.trackedAgentId
+      ? createBeastWorktree(
+          this.options.worktreeIsolation,
+          run.trackedAgentId,
+          processSpec.cwd,
+        )
+      : undefined;
+    if (worktree) {
+      this.worktreeAllocations.set(run.id, worktree);
+    }
+    return worktree;
+  }
+
+  private buildIsolatedSpec(processSpec: BeastProcessSpec, worktree: BeastWorktreeAllocation | undefined): BeastProcessSpec {
+    return worktree
+      ? {
+          ...processSpec,
+          args: remapRuntimePathArgs(processSpec.args, processSpec.cwd, worktree.executionCwd),
+          cwd: worktree.executionCwd,
+          env: {
+            ...processSpec.env,
+            FRANKENBEAST_WORKTREE_PATH: worktree.worktreePath,
+            FRANKENBEAST_WORKTREE_BRANCH: worktree.branchName,
+          },
+        }
+      : processSpec;
+  }
+
+  private prepareRunConfigFile(run: BeastRun, isolatedSpec: BeastProcessSpec): string {
+    const runConfigRoot = resolve(this.options.runConfigRoot ?? isolatedSpec.cwd ?? process.env.FBEAST_ROOT ?? process.cwd());
+    const configDir = resolve(this.options.runConfigDir ?? join(runConfigRoot, '.fbeast', '.build', 'run-configs'));
+    const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
+    ensureSecureRunConfigDirectory(configDir, runConfigOwner, runConfigRoot);
+    const configFilePath = join(configDir, `${run.id}.json`);
+    try {
+      lstatSync(configFilePath);
+      unlinkSync(configFilePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+    this.pendingConfigFilePaths.set(run.id, configFilePath);
+    return configFilePath;
   }
 
   async stop(runId: string, attemptId: string, options?: StopOptions): Promise<BeastRunAttempt> {
