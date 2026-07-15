@@ -1081,6 +1081,57 @@ describe('transcript retention controls', () => {
     ])
   })
 
+  it('recurses through raw response envelopes when prompt retention is disabled', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          response: {
+            candidates: [{ content: { parts: [{ text: 'private model transcript' }] } }],
+          },
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolOutputs: true },
+    })
+
+    expect(retained.spans[0].metadata['response']).toEqual({
+      candidates: [{}],
+    })
+  })
+
+  it('treats generic raw input envelopes as prompts instead of tool inputs', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { input: 'private user prompt', inputs: ['private user prompt'] } })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolInputs: true },
+    })
+
+    expect(retained.spans[0].metadata).not.toHaveProperty('input')
+    expect(retained.spans[0].metadata).not.toHaveProperty('inputs')
+  })
+
+  it('honors tool output opt-outs for raw tool result parts', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          messages: [{ role: 'tool', parts: [{ text: 'private parts tool result' }], tool_call_id: 'call-1' }],
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolOutputs: false },
+    })
+
+    expect(retained.spans[0].metadata['messages']).toEqual([
+      { role: 'tool', tool_call_id: 'call-1' },
+    ])
+  })
+
   it('drops object-valued prompt fields when raw prompt retention is disabled', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({

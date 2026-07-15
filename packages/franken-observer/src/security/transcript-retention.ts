@@ -74,7 +74,7 @@ const DEFAULT_FIELDS: TranscriptRetainedFields = Object.freeze({
 })
 
 const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'additionalcontext', 'operatorcontext', 'context', 'goal', 'goals', 'transcript', 'transcripts'])
-const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'input', 'inputs', 'arguments', 'args', 'parameters', 'params', 'stdin'])
+const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'arguments', 'args', 'parameters', 'params', 'stdin'])
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
 const SUMMARY_KEYS = new Set(['summary', 'summaries'])
@@ -377,6 +377,7 @@ function redactNestedTranscriptValues(
   const retained: Record<string, unknown> = {}
   seen.set(value, retained)
   const recordType = typeof value['type'] === 'string' ? value['type'].replace(/[_-]/g, '').toLowerCase() : ''
+  const recordRole = typeof value['role'] === 'string' ? value['role'].replace(/[_-]/g, '').toLowerCase() : ''
   for (const [key, nestedValue] of Object.entries(value)) {
     if (recordType === 'contentblockdelta' && key.replace(/[_-]/g, '').toLowerCase() === 'delta') {
       setRecordValue(retained, key, redactProviderStreamDeltaValue(nestedValue, policy, seen))
@@ -384,7 +385,12 @@ function redactNestedTranscriptValues(
     }
     const field = classifyContextualTranscriptField(value, key)
     if (field && !policy.retainedFields[field]) continue
-    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
+    const retainedValue = field === 'toolOutputs' && isRawRetention(policy) && isToolOutputMessageField(recordType, recordRole, key)
+      ? cloneValue(nestedValue, seen)
+      : field
+        ? redactFieldValue(nestedValue, field, policy, seen)
+        : redactNestedTranscriptValues(nestedValue, policy, seen)
+    setRecordValue(retained, key, retainedValue)
   }
   return retained
 }
@@ -393,7 +399,7 @@ function classifyContextualTranscriptField(record: Record<string, unknown>, key:
   const recordType = typeof record['type'] === 'string' ? record['type'].replace(/[_-]/g, '').toLowerCase() : ''
   const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
-  if ((recordType === 'toolresult' || recordRole === 'tool') && (normalizedKey === 'content' || normalizedKey === 'text')) return 'toolOutputs'
+  if (isToolOutputMessageField(recordType, recordRole, key)) return 'toolOutputs'
   if (recordType === 'inputjsondelta' && normalizedKey === 'partialjson') return 'toolInputs'
   if (isPromptBlockContentField(recordType, key)) return 'prompts'
   return classifyTranscriptField(key)
@@ -410,7 +416,9 @@ function classifyTranscriptField(key: string): TranscriptField | undefined {
     normalized.includes('instruction') ||
     normalized.includes('transcript') ||
     normalized.endsWith('goal') ||
-    normalized.endsWith('goals')
+    normalized.endsWith('goals') ||
+    normalized === 'input' ||
+    normalized === 'inputs'
   ) return 'prompts'
   if (
     TOOL_INPUT_KEYS.has(normalized) ||
@@ -466,11 +474,7 @@ function redactFieldValue(
     }
     if (value !== null && typeof value === 'object') return redactNestedTranscriptValues(value, policy, seen)
   }
-  if (field === 'toolOutputs' && (policy.mode === 'raw' || policy.redactionLevel === 'none')) {
-    return cloneValue(value, seen)
-  }
   if ((policy.mode === 'raw' || policy.redactionLevel === 'none') && value !== null && typeof value === 'object') {
-    if (field === 'toolOutputs') return cloneValue(value)
     return redactNestedTranscriptValues(value, policy, seen)
   }
   return redactValue(value, policy)
@@ -495,11 +499,12 @@ function redactProviderMessageValue(
     }
     const contextualField = classifyProviderMessageField(messageType, messageRole, key)
     if (contextualField && !policy.retainedFields[contextualField]) continue
-    setRecordValue(
-      retained,
-      key,
-      contextualField ? redactFieldValue(nestedValue, contextualField, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen),
-    )
+    const retainedValue = contextualField === 'toolOutputs' && isRawRetention(policy) && isToolOutputMessageField(messageType, messageRole, key)
+      ? cloneValue(nestedValue, seen)
+      : contextualField
+        ? redactFieldValue(nestedValue, contextualField, policy, seen)
+        : redactNestedTranscriptValues(nestedValue, policy, seen)
+    setRecordValue(retained, key, retainedValue)
   }
   return retained
 }
@@ -537,11 +542,21 @@ function classifyProviderStreamDeltaField(deltaType: string, key: string): Trans
 
 function classifyProviderMessageField(messageType: string, messageRole: string, key: string): TranscriptField | undefined {
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
-  if ((messageType === 'toolresult' || messageRole === 'tool') && (normalizedKey === 'content' || normalizedKey === 'text' || normalizedKey === 'parts')) return 'toolOutputs'
+  if (isToolOutputMessageField(messageType, messageRole, key)) return 'toolOutputs'
   if (messageType === 'inputjsondelta' && key.replace(/[_-]/g, '').toLowerCase() === 'partialjson') return 'toolInputs'
   if ((messageRole === 'user' || messageRole === 'system' || messageRole === 'assistant' || messageRole === 'model') && normalizedKey === 'parts') return 'prompts'
   if (isPromptBlockContentField(messageType, key)) return 'prompts'
   return classifyTranscriptField(key)
+}
+
+function isToolOutputMessageField(messageType: string, messageRole: string, key: string): boolean {
+  const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+  return (messageType === 'toolresult' || messageRole === 'tool' || messageRole === 'function') &&
+    (normalizedKey === 'content' || normalizedKey === 'text' || normalizedKey === 'parts')
+}
+
+function isRawRetention(policy: ResolvedTranscriptRetentionPolicy): boolean {
+  return policy.mode === 'raw' || policy.redactionLevel === 'none'
 }
 
 function isPromptBlockContentField(messageType: string, key: string): boolean {
@@ -595,7 +610,14 @@ function redactEnumerableObject(
   for (const [key, nestedValue] of Object.entries(value)) {
     const field = classifyContextualTranscriptField(record, key)
     if (field && !policy.retainedFields[field]) continue
-    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
+    const recordType = typeof record['type'] === 'string' ? record['type'].replace(/[_-]/g, '').toLowerCase() : ''
+    const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
+    const retainedValue = field === 'toolOutputs' && isRawRetention(policy) && isToolOutputMessageField(recordType, recordRole, key)
+      ? cloneValue(nestedValue, seen)
+      : field
+        ? redactFieldValue(nestedValue, field, policy, seen)
+        : redactNestedTranscriptValues(nestedValue, policy, seen)
+    setRecordValue(retained, key, retainedValue)
   }
   return retained
 }
