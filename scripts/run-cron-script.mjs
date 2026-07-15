@@ -5,6 +5,7 @@ import { constants as osConstants } from 'node:os';
 const USAGE = 'Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]';
 const STDERR_TAIL_LIMIT = 4_096;
 const KILL_GRACE_MS = Number.parseInt(process.env.CRON_SCRIPT_KILL_GRACE_MS ?? '5000', 10);
+const EXIT_STDERR_DRAIN_MS = Number.parseInt(process.env.CRON_SCRIPT_EXIT_STDERR_DRAIN_MS ?? '50', 10);
 
 function nowIso() {
   return new Date().toISOString();
@@ -110,6 +111,27 @@ function redactCommand(command) {
   return redacted;
 }
 
+function redactMessage(message, command) {
+  const raw = typeof message === 'string' ? message : String(message ?? '');
+  const redactedCommand = redactCommand(command);
+  let redacted = raw;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const original = command[index];
+    const replacement = redactedCommand[index];
+    if (!original || original === replacement) {
+      continue;
+    }
+    redacted = redacted.split(original).join(replacement);
+  }
+
+  return redacted.replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]');
+}
+
+function spawnFailureExitCode(error) {
+  return error?.code === 'EACCES' || error?.code === 'EPERM' ? 126 : 127;
+}
+
 function writeEnvelope({ script, command, exitCode, signal = null, failureKind = 'exit', message, stderrTail = '', durationMs, recoverable = false }) {
   const envelope = {
     schemaVersion: 1,
@@ -122,7 +144,7 @@ function writeEnvelope({ script, command, exitCode, signal = null, failureKind =
     signal,
     durationMs,
     recoverable,
-    message,
+    message: redactMessage(message, command),
     stderrTail,
   };
   process.stderr.write(`${JSON.stringify(envelope)}\n`);
@@ -235,20 +257,21 @@ async function runCronScript({ name, recoverable, command }) {
 
     child.on('error', (error) => {
       const durationMs = Date.now() - started;
+      const exitCode = spawnFailureExitCode(error);
       emitEnvelope({
         script: name,
         command,
-        exitCode: 127,
+        exitCode,
         failureKind: 'spawn',
-        message: error.message,
+        message: redactMessage(error.message, command),
         stderrTail,
         durationMs,
         recoverable,
       });
-      finish(127);
+      finish(exitCode);
     });
 
-    child.on('close', (code, signal) => {
+    const finishChildResult = (code, signal) => {
       if (settled) {
         return;
       }
@@ -273,6 +296,17 @@ async function runCronScript({ name, recoverable, command }) {
         });
       }
       finish(exitCode);
+    };
+
+    child.on('exit', (code, signal) => {
+      setTimeout(() => {
+        child.stderr?.destroy();
+        finishChildResult(code, signal);
+      }, EXIT_STDERR_DRAIN_MS);
+    });
+
+    child.on('close', (code, signal) => {
+      finishChildResult(code, signal);
     });
   });
 }

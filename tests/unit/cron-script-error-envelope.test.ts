@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { constants as osConstants } from 'node:os';
-import { resolve } from 'node:path';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { constants as osConstants, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -144,6 +144,59 @@ describe('cron script error envelope runner', () => {
       failureKind: 'spawn',
       exitCode: 127,
     });
+  });
+
+  it('scrubs secret-looking spawn failure messages before logging envelopes', () => {
+    const result = runCronScript(['--name', 'bad-secret-binary', '--', 'API_KEY=abc123', 'job.js']);
+
+    expect(result.status).toBe(127);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toEqual(['API_KEY=[REDACTED]', 'job.js']);
+    expect(envelope.message).toContain('API_KEY=[REDACTED]');
+    expect(envelope.message).not.toContain('abc123');
+    expect(result.stderr).not.toContain('API_KEY=abc123');
+  });
+
+  it('uses shell-compatible 126 for permission-denied spawn failures', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-permission-'));
+    const blockedCommand = join(tempDir, 'blocked-command');
+
+    try {
+      writeFileSync(blockedCommand, '#!/bin/sh\nexit 0\n');
+      chmodSync(blockedCommand, 0o644);
+
+      const result = runCronScript(['--name', 'permission-denied-command', '--', blockedCommand]);
+
+      expect(result.status).toBe(126);
+      const envelope = parseEnvelope(result.stderr);
+      expect(envelope).toMatchObject({
+        script: 'permission-denied-command',
+        failureKind: 'spawn',
+        exitCode: 126,
+      });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports child exit promptly even when a background helper keeps stderr open', () => {
+    const result = runCronScript([
+      '--name',
+      'inherited-stderr-helper',
+      '--',
+      process.execPath,
+      '-e',
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'ignore', 'inherit'] }); process.exit(7)",
+    ]);
+
+    expect(result.status).toBe(7);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope).toMatchObject({
+      script: 'inherited-stderr-helper',
+      failureKind: 'exit',
+      exitCode: 7,
+    });
+    expect(envelope.durationMs).toBeLessThan(1_500);
   });
 
   it('preserves the job name on option parse errors', () => {
