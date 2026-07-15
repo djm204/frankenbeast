@@ -115,6 +115,15 @@ class MutableBeastDaemonDrainState implements BeastDaemonDrainState {
       });
     });
   }
+
+  async waitForMutationCompletion(): Promise<void> {
+    if (this.activeMutations === 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.mutationWaiters.push(resolve);
+    });
+  }
 }
 
 export function defaultBeastDaemonPidFile(root: string): string {
@@ -191,6 +200,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
       closed = true;
       drainState.enter('shutdown');
       const drainedMutations = await drainState.waitForMutations(mutationDrainTimeoutMs);
+      let drainTimeoutError: BeastDaemonDrainTimeoutError | undefined;
       let httpServerClosed = false;
       if (!drainedMutations && listening) {
         const closedServer = closeHttpServer(server);
@@ -198,8 +208,8 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         await closedServer;
         listening = false;
         httpServerClosed = true;
-        closed = false;
-        throw new BeastDaemonDrainTimeoutError(mutationDrainTimeoutMs);
+        drainTimeoutError = new BeastDaemonDrainTimeoutError(mutationDrainTimeoutMs);
+        await drainState.waitForMutationCompletion();
       }
       const shutdownFailures = await stopLiveRuns(services);
       services.dispose();
@@ -212,6 +222,9 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         throw new BeastDaemonShutdownError(shutdownFailures);
       }
       await releasePidFile(pidFile);
+      if (drainTimeoutError) {
+        throw drainTimeoutError;
+      }
     },
   };
 }

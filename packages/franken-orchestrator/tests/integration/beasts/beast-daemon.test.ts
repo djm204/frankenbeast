@@ -388,7 +388,7 @@ describe('beast daemon', () => {
     expect(stop).toHaveBeenCalledWith('run-in-flight', 'beasts-daemon-shutdown');
   });
 
-  it('does not stop live runs when mutating requests exceed the drain timeout', async () => {
+  it('stops live runs before reporting a mutating request drain timeout', async () => {
     const paths = await makePaths();
     const runs: BeastRun[] = [];
     const run = makeRun('run-timeout', 'running');
@@ -425,14 +425,15 @@ describe('beast daemon', () => {
     }).catch(() => undefined);
 
     await dispatchStarted;
-    await expect(daemon.close()).rejects.toBeInstanceOf(BeastDaemonDrainTimeoutError);
+    const closePromise = daemon.close();
+    await new Promise((resolve) => setTimeout(resolve, 75));
     expect(stop).not.toHaveBeenCalled();
     expect(dispose).not.toHaveBeenCalled();
     expect(existsSync(paths.pidFile)).toBe(true);
 
     releaseDispatch();
     await createRun.catch(() => undefined);
-    await daemon.close();
+    await expect(closePromise).rejects.toBeInstanceOf(BeastDaemonDrainTimeoutError);
     expect(stop).toHaveBeenCalledWith('run-timeout', 'beasts-daemon-shutdown');
     expect(dispose).toHaveBeenCalledOnce();
     expect(existsSync(paths.pidFile)).toBe(false);
