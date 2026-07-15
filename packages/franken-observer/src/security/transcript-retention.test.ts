@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Span, Trace } from '../core/types.js'
 import { BatchAdapter } from '../adapters/batch/BatchAdapter.js'
 import { MultiAdapter } from '../adapters/multi/MultiAdapter.js'
@@ -67,6 +67,12 @@ class NonDeletingAdapter implements ExportAdapter {
       spanCount: trace.spans.length,
       startedAt: trace.startedAt,
     }))
+  }
+}
+
+class ThrowingDeleteAdapter extends NonDeletingAdapter {
+  deleteTrace(): void {
+    throw new Error('delete failed')
   }
 }
 
@@ -381,6 +387,32 @@ describe('transcript retention controls', () => {
     expect(await adapter.queryByTraceId('trace-1')).toBeNull()
   })
 
+  it('keeps expired traces hidden even when backend deletion throws', async () => {
+    let now = 10
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const adapter = new TranscriptRetentionAdapter({ adapter: new ThrowingDeleteAdapter(), ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
+    now = 16
+
+    await expect(adapter.cleanupExpired()).resolves.toEqual(['trace-1'])
+    expect(await adapter.listTraceIds()).toEqual([])
+    expect(await adapter.queryByTraceId('trace-1')).toBeNull()
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
+  it('retains active traces from flush time instead of expiring them by start time', async () => {
+    let now = 100
+    const adapter = new TranscriptRetentionAdapter({ adapter: new InMemoryAdapter(), ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 1, endedAt: undefined }))
+    expect(await adapter.listTraceIds()).toEqual(['trace-1'])
+
+    now = 106
+    expect(await adapter.listTraceIds()).toEqual([])
+  })
+
   it('keeps internal-slot objects intact instead of cloning them with fake prototypes', () => {
     const url = new URL('https://example.test/path')
     const retained = applyRetentionPolicy(makeTrace({
@@ -459,6 +491,28 @@ describe('transcript retention controls', () => {
     expect(retained.spans[0].metadata['messages']).toBe('[REDACTED_TRANSCRIPT]')
     expect(retained.spans[0].metadata['transcript']).toBe('[REDACTED_TRANSCRIPT]')
     expect(retained.spans[0].metadata['stdin']).toBe('[REDACTED_TRANSCRIPT]')
+  })
+
+  it('honors tool output opt-outs inside raw provider message arrays', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          messages: [
+            { role: 'user', content: 'private prompt' },
+            { role: 'tool', type: 'tool_result', content: 'private tool result', tool_call_id: 'call-1' },
+          ],
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolOutputs: false },
+    })
+
+    expect(retained.spans[0].metadata['messages']).toEqual([
+      { role: 'user', content: 'private prompt' },
+      { role: 'tool', type: 'tool_result', tool_call_id: 'call-1' },
+    ])
   })
 
   it('walks Map and Set metadata before preserving their container types', () => {

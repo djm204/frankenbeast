@@ -95,7 +95,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
     if (this.isExpired(trace)) return
 
     const retainedTrace = applyRetentionPolicy(trace, this.policy)
-    this.retained.set(retainedTrace.id, getTraceExpiry(retainedTrace, this.policy.ttlMs))
+    this.retained.set(retainedTrace.id, getTraceExpiry(retainedTrace, this.policy.ttlMs, this.now()))
     this.expiredTraceIds.delete(retainedTrace.id)
     await this.inner.flush(retainedTrace)
   }
@@ -136,10 +136,6 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
     const result: TraceSummary[] = []
     for (const summary of summaries) {
       if (this.expiredTraceIds.has(summary.id)) continue
-      if (summary.startedAt + this.policy.ttlMs <= this.now()) {
-        const trace = await this.queryByTraceId(summary.id)
-        if (!trace) continue
-      }
       if (await this.expireStoredTraceIfNeeded(summary.id)) continue
       const trace = await this.queryByTraceId(summary.id)
       if (!trace) continue
@@ -196,7 +192,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   private isExpired(trace: Trace): boolean {
-    return getTraceExpiry(trace, this.policy.ttlMs) <= this.now()
+    return getTraceExpiry(trace, this.policy.ttlMs, this.now()) <= this.now()
   }
 
   private async expireStoredTraceIfNeeded(traceId: string): Promise<boolean> {
@@ -208,8 +204,12 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
 
   private async markExpired(traceId: string): Promise<void> {
     this.retained.delete(traceId)
-    await deleteTraceFromAdapter(this.inner, traceId)
     this.expiredTraceIds.add(traceId)
+    try {
+      await deleteTraceFromAdapter(this.inner, traceId)
+    } catch (error) {
+      console.warn(`[TranscriptRetentionAdapter] Failed to delete expired trace ${traceId}; keeping it hidden`, error)
+    }
   }
 }
 
@@ -288,7 +288,7 @@ function retainMetadata(
   for (const [key, value] of Object.entries(metadata)) {
     const field = classifyTranscriptField(key)
     if (field && !policy.retainedFields[field]) continue
-    setRecordValue(retained, key, field ? redactValue(value, policy) : redactNestedTranscriptValues(value, policy, seen))
+    setRecordValue(retained, key, field ? redactFieldValue(value, field, policy, seen) : redactNestedTranscriptValues(value, policy, seen))
   }
   return retained
 }
@@ -313,7 +313,7 @@ function redactNestedTranscriptValues(
     for (const [key, nestedValue] of value.entries()) {
       const field = typeof key === 'string' ? classifyTranscriptField(key) : undefined
       if (field && !policy.retainedFields[field]) continue
-      retained.set(cloneValue(key), field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen))
+      retained.set(cloneValue(key), field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
     }
     return retained
   }
@@ -335,7 +335,7 @@ function redactNestedTranscriptValues(
   for (const [key, nestedValue] of Object.entries(value)) {
     const field = classifyTranscriptField(key)
     if (field && !policy.retainedFields[field]) continue
-    setRecordValue(retained, key, field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen))
+    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
   }
   return retained
 }
@@ -376,6 +376,44 @@ function redactValue(value: unknown, policy: ResolvedTranscriptRetentionPolicy):
   return MASK
 }
 
+function redactFieldValue(
+  value: unknown,
+  field: TranscriptField,
+  policy: ResolvedTranscriptRetentionPolicy,
+  seen: WeakMap<object, unknown>,
+): unknown {
+  if (field === 'prompts' && Array.isArray(value) && (policy.mode === 'raw' || policy.redactionLevel === 'none')) {
+    const retained: unknown[] = []
+    seen.set(value, retained)
+    for (const item of value) retained.push(redactProviderMessageValue(item, policy, seen))
+    return retained
+  }
+  return redactValue(value, policy)
+}
+
+function redactProviderMessageValue(
+  value: unknown,
+  policy: ResolvedTranscriptRetentionPolicy,
+  seen: WeakMap<object, unknown>,
+): unknown {
+  if (!isPlainRecordValue(value)) return redactNestedTranscriptValues(value, policy, seen)
+  if (seen.has(value)) return seen.get(value)
+
+  const retained: Record<string, unknown> = {}
+  seen.set(value, retained)
+  const messageType = typeof value['type'] === 'string' ? value['type'].replace(/[_-]/g, '').toLowerCase() : ''
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const contextualField = messageType === 'toolresult' && key === 'content' ? 'toolOutputs' : classifyTranscriptField(key)
+    if (contextualField && !policy.retainedFields[contextualField]) continue
+    setRecordValue(
+      retained,
+      key,
+      contextualField ? redactFieldValue(nestedValue, contextualField, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen),
+    )
+  }
+  return retained
+}
+
 function redactEnumerableObject(
   value: object,
   policy: ResolvedTranscriptRetentionPolicy,
@@ -386,7 +424,7 @@ function redactEnumerableObject(
   for (const [key, nestedValue] of Object.entries(value)) {
     const field = classifyTranscriptField(key)
     if (field && !policy.retainedFields[field]) continue
-    setRecordValue(retained, key, field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen))
+    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
   }
   return retained
 }
@@ -417,8 +455,8 @@ function redactString(value: string | undefined, policy: ResolvedTranscriptReten
   return redactValue(value, policy) as string
 }
 
-function getTraceExpiry(trace: Trace, ttlMs: number): number {
-  const anchor = trace.endedAt ?? trace.startedAt
+function getTraceExpiry(trace: Trace, ttlMs: number, retainedAt?: number): number {
+  const anchor = trace.endedAt ?? retainedAt ?? trace.startedAt
   return anchor + ttlMs
 }
 
@@ -506,4 +544,8 @@ function cloneValue(value: unknown, seen = new WeakMap<object, unknown>()): unkn
 function isPlainRecord(value: object): value is Record<string, unknown> {
   const prototype = Object.getPrototypeOf(value)
   return prototype === Object.prototype || prototype === null
+}
+
+function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && isPlainRecord(value)
 }
