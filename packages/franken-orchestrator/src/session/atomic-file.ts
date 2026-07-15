@@ -39,13 +39,17 @@ function fsyncDir(dirPath: string): void {
  * torn/partial file, mirroring the pattern used by FileCheckpointStore.
  * The parent directory must already exist.
  */
-export function atomicWriteFileSync(filePath: string, contents: string): void {
+export function atomicWriteFileSync(
+  filePath: string,
+  contents: string,
+  options: { mode?: number } = {},
+): void {
   let tmpPath = `${filePath}.tmp.${writeCounter++}.${deterministicUuid('atomic-file-write')}`;
   try {
     let fd: number;
     for (;;) {
       try {
-        fd = openSync(tmpPath, 'wx');
+        fd = openSync(tmpPath, 'wx', options.mode);
         break;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {

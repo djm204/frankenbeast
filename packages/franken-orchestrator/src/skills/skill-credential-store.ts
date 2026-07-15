@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { atomicWriteFileSync } from '../session/atomic-file.js';
 
 /**
  * Manages credential storage in .fbeast/.env.
@@ -62,6 +63,6 @@ export class SkillCredentialStore {
     const lines = Object.entries(entries).map(
       ([key, value]) => `${key}=${value}`,
     );
-    writeFileSync(this.envPath, lines.join('\n') + '\n');
+    atomicWriteFileSync(this.envPath, lines.join('\n') + '\n', { mode: 0o600 });
   }
 }
