@@ -14,6 +14,9 @@ import type {
   LessonQuarantineEvidence,
   LessonQuarantineMetadata,
   LessonUnquarantineMetadata,
+  LessonCandidateCategory,
+  LessonPrivacyFilterDecision,
+  LessonPrivacyRedaction,
 } from '../types/contracts.js';
 import type { CritiqueLoopResult, CritiqueIteration } from '../types/loop.js';
 import type { TaskId } from '../types/common.js';
@@ -46,6 +49,111 @@ const AGENT_IMPROVEMENT_SCORECARD_GUIDANCE =
   'Use this per-agent scorecard in worker retrospectives and PM handoff summaries to compare improvement over time without parsing free-form lesson prose.';
 const LEARNING_BACKLOG_PRIORITIZATION_GUIDANCE =
   'Use this report to sort newly observed learning backlog items before promotion, retirement, or PM routing; higher priority items should receive durable mitigation before low-risk documentation follow-up.';
+const PRIVACY_FILTER_TASK_STATE_REASON =
+  'Lesson candidate describes transient task or PR state and is rejected before durable learning.';
+const PRIVACY_FILTER_ADMIT_REASON =
+  'Lesson candidate passed the privacy filter before durable learning.';
+const PRIVACY_FILTER_SENSITIVE_REASON =
+  'Lesson candidate was redacted and flagged for explicit review before promotion because it contained sensitive data.';
+
+interface InternalLessonPrivacyRedaction extends LessonPrivacyRedaction {
+  readonly original: string;
+}
+
+interface InternalLessonPrivacyFilterDecision
+  extends Omit<LessonPrivacyFilterDecision, 'redactions'> {
+  readonly redactions: readonly InternalLessonPrivacyRedaction[];
+}
+
+interface LessonCandidatePrivacyFilterResult {
+  readonly decision: InternalLessonPrivacyFilterDecision;
+  readonly findings: readonly SanitizedLessonFinding[];
+}
+
+interface SanitizedLessonFinding {
+  readonly message: string;
+  readonly severity: string;
+  readonly location?: string | undefined;
+  readonly suggestion?: string | undefined;
+}
+
+interface PrivacyRedactionRule {
+  readonly kind: InternalLessonPrivacyRedaction['kind'];
+  readonly label: string;
+  readonly pattern: RegExp;
+  readonly replacement: string;
+}
+
+const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
+  {
+    kind: 'secret',
+    label: 'github-token',
+    pattern: /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{30,})\b/g,
+    replacement: '[REDACTED_GITHUB_TOKEN]',
+  },
+  {
+    kind: 'secret',
+    label: 'openai-api-key',
+    pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED_API_KEY]',
+  },
+  {
+    kind: 'secret',
+    label: 'bearer-token',
+    pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/g,
+    replacement: 'Bearer [REDACTED_TOKEN]',
+  },
+  {
+    kind: 'secret',
+    label: 'assigned-secret',
+    pattern:
+      /\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[^\s'\",;]{8,}/gi,
+    replacement: '[REDACTED_SECRET_ASSIGNMENT]',
+  },
+  {
+    kind: 'secret',
+    label: 'connection-string',
+    pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s'\")]+/gi,
+    replacement: '[REDACTED_CONNECTION_STRING]',
+  },
+  {
+    kind: 'personal-data',
+    label: 'email-address',
+    pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    replacement: '[REDACTED_EMAIL]',
+  },
+  {
+    kind: 'personal-data',
+    label: 'phone-number',
+    pattern: /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+    replacement: '[REDACTED_PHONE]',
+  },
+];
+
+const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
+  /\bcustomer\b/i,
+  /\bclient\b/i,
+  /\baccount\b/i,
+  /\btenant\b/i,
+];
+
+const TASK_STATE_PATTERNS: readonly RegExp[] = [
+  /\b(?:PR|pull request)\s*#?\d+\b/i,
+  /\bissue\s*#\d+\b/i,
+  /\b(?:merged|opened|closed|pushed|committed)\s+(?:PR|pull request|branch|commit)\b/i,
+  /\b(?:commit|sha)\s+[0-9a-f]{7,40}\b/i,
+  /\btask\s+t_[0-9a-f]{6,}\b/i,
+];
+
+const PREFERENCE_PATTERNS: readonly RegExp[] = [
+  /\b(?:user|operator|maintainer|team)\s+(?:prefers|expects|wants|likes|dislikes)\b/i,
+];
+
+const ENVIRONMENT_FACT_PATTERNS: readonly RegExp[] = [
+  /\b(?:repo|repository|project|package|workspace)\s+(?:uses|requires|runs|is)\b/i,
+  /\b@franken\/[a-z0-9-]+\b/i,
+  /\bfrankenbeast\b/i,
+];
 
 export interface BlockerPatternObservation {
   readonly taskId: TaskId;
@@ -421,7 +529,12 @@ export class LessonRecorder {
     );
 
     for (const iteration of failingIterations) {
-      const lessons = this.extractLessons(iteration, result.iterations, taskId);
+      const lessons = this.extractLessons(
+        iteration,
+        result.iterations,
+        taskId,
+        recordingResult,
+      );
       for (const extractedLesson of lessons) {
         await this.recordExtractedLesson(extractedLesson, recordingResult);
       }
@@ -547,6 +660,7 @@ export class LessonRecorder {
     failingIteration: CritiqueIteration,
     allIterations: readonly CritiqueIteration[],
     taskId: TaskId,
+    recordingResult: MutableLessonRecordingResult,
   ): CritiqueLesson[] {
     const lessons: CritiqueLesson[] = [];
     const passingIteration = allIterations.find(
@@ -559,6 +673,19 @@ export class LessonRecorder {
       );
 
       if (evalResult.verdict === 'fail' && critiqueFindings.length > 0) {
+        const privacyFilterResult = createLessonPrivacyFilterResult(
+          taskId,
+          evalResult.evaluatorName,
+          critiqueFindings,
+        );
+        const privacyDecision = toPublicPrivacyDecision(
+          privacyFilterResult.decision,
+        );
+        if (privacyFilterResult.decision.action === 'reject') {
+          recordingResult.rejectedByPrivacy.push(privacyDecision);
+          continue;
+        }
+        const filteredFindings = privacyFilterResult.findings;
         const resolvedIteration =
           passingIteration?.index ?? failingIteration.index;
         const lessonId = createLessonId(
@@ -566,7 +693,7 @@ export class LessonRecorder {
           evalResult.evaluatorName,
           failingIteration.index,
         );
-        const findingMessages = critiqueFindings.map((f) => f.message);
+        const findingMessages = filteredFindings.map((f) => f.message);
         const recordedAt = this.now();
         const cooldownBaseMs = Date.parse(recordedAt);
         this.pruneExpiredCooldowns(cooldownBaseMs);
@@ -580,13 +707,13 @@ export class LessonRecorder {
         const blockerPatternUpdate = this.previewBlockerPatterns(
           taskId,
           evalResult.evaluatorName,
-          critiqueFindings,
+          filteredFindings,
           recordedAt,
         );
         const failedTestSkillCandidate = createFailedTestSkillCandidate(
           failingIteration.index,
           evalResult.evaluatorName,
-          critiqueFindings,
+          filteredFindings,
         );
 
         const lesson: CritiqueLesson = {
@@ -626,7 +753,7 @@ export class LessonRecorder {
           reviewerFeedback: createReviewerFeedbackCapture(
             failingIteration.index,
             evalResult.evaluatorName,
-            critiqueFindings,
+            filteredFindings,
           ),
           ...(failedTestSkillCandidate ? { failedTestSkillCandidate } : {}),
           postPrLessonExtractionTemplate:
@@ -639,7 +766,7 @@ export class LessonRecorder {
                   evalResult.evaluatorName,
                   failingIteration,
                   allIterations,
-                  critiqueFindings,
+                  filteredFindings,
                   recordedAt,
                 ),
               }
@@ -654,6 +781,7 @@ export class LessonRecorder {
           ...(blockerPatternUpdate.patterns.length > 0
             ? { blockerPatterns: blockerPatternUpdate.patterns }
             : {}),
+          privacyFilter: privacyDecision,
         };
         this.pendingBlockerObservations.set(
           lesson,
@@ -1034,6 +1162,7 @@ function getPendingBlockerAdmissions(
 interface MutableLessonRecordingResult extends LessonRecordingResult {
   recorded: number;
   suppressedByCooldown: LessonCooldownSuppression[];
+  rejectedByPrivacy: LessonPrivacyFilterDecision[];
   minedBlockerPatterns: CrossTaskBlockerPattern[];
   learningBacklogItems: LearningBacklogPrioritizationItem[];
 }
@@ -1045,6 +1174,7 @@ function createMutableLessonRecordingResult(
   const result = {
     recorded: 0,
     suppressedByCooldown: [],
+    rejectedByPrivacy: [],
     minedBlockerPatterns: [],
   } as unknown as MutableLessonRecordingResult;
   Object.defineProperty(result, 'learningBacklogItems', {
@@ -1536,6 +1666,137 @@ function dedupeFailureSignals(
     });
   }
   return uniqueFailures;
+}
+
+function createLessonPrivacyFilterResult(
+  taskId: TaskId,
+  evaluatorName: string,
+  findings: readonly {
+    readonly message: string;
+    readonly severity: string;
+    readonly location?: string | undefined;
+    readonly suggestion?: string | undefined;
+  }[],
+): LessonCandidatePrivacyFilterResult {
+  const rawText = [
+    taskId,
+    evaluatorName,
+    ...findings.flatMap((finding) => [
+      finding.message,
+      finding.location ?? '',
+      finding.suggestion ?? '',
+    ]),
+  ].join('\n');
+  const redactions = collectPrivacyRedactions(rawText);
+  const flags = new Set<string>();
+  for (const redaction of redactions) {
+    flags.add(redaction.kind);
+    flags.add(redaction.label);
+  }
+  if (CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText))) {
+    flags.add('customer-data');
+  }
+
+  const category = classifyLessonCandidate(rawText);
+  const sensitive = redactions.length > 0 || flags.has('customer-data');
+  const action =
+    category === 'task-state' || category === 'discard' ? 'reject' : 'admit';
+  const decision: InternalLessonPrivacyFilterDecision = {
+    schemaVersion: 'lesson-privacy-filter-v1',
+    category,
+    action,
+    sensitive,
+    approvalRequired: action === 'admit' && sensitive,
+    flags: Array.from(flags).sort(),
+    redactions,
+    originalHash: stableHash(rawText),
+    reason:
+      action === 'reject'
+        ? PRIVACY_FILTER_TASK_STATE_REASON
+        : sensitive
+          ? PRIVACY_FILTER_SENSITIVE_REASON
+          : PRIVACY_FILTER_ADMIT_REASON,
+  };
+
+  return {
+    decision,
+    findings: findings.map((finding) => ({
+      message: redactSensitiveText(finding.message, redactions),
+      severity: finding.severity,
+      ...(finding.location
+        ? { location: redactSensitiveText(finding.location, redactions) }
+        : {}),
+      ...(finding.suggestion
+        ? { suggestion: redactSensitiveText(finding.suggestion, redactions) }
+        : {}),
+    })),
+  };
+}
+
+function toPublicPrivacyDecision(
+  decision: InternalLessonPrivacyFilterDecision,
+): LessonPrivacyFilterDecision {
+  return {
+    ...decision,
+    redactions: decision.redactions.map(({ original: _original, ...rest }) =>
+      rest,
+    ),
+  };
+}
+
+function classifyLessonCandidate(text: string): LessonCandidateCategory {
+  if (!text.trim()) {
+    return 'discard';
+  }
+  if (TASK_STATE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'task-state';
+  }
+  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'preference';
+  }
+  if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    return 'environment-fact';
+  }
+  return 'procedure';
+}
+
+function collectPrivacyRedactions(
+  text: string,
+): InternalLessonPrivacyRedaction[] {
+  const redactions: InternalLessonPrivacyRedaction[] = [];
+  const seen = new Set<string>();
+  for (const rule of PRIVACY_REDACTION_RULES) {
+    const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
+    for (const match of text.matchAll(pattern)) {
+      const original = match[0];
+      const key = `${rule.kind}:${rule.label}:${original}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      redactions.push({
+        kind: rule.kind,
+        label: rule.label,
+        replacement: rule.replacement,
+        original,
+      });
+    }
+  }
+  return redactions;
+}
+
+function redactSensitiveText(
+  text: string,
+  redactions: readonly InternalLessonPrivacyRedaction[],
+): string {
+  const longestFirst = [...redactions].sort(
+    (left, right) => right.original.length - left.original.length,
+  );
+  let redacted = text;
+  for (const redaction of longestFirst) {
+    redacted = redacted.split(redaction.original).join(redaction.replacement);
+  }
+  return redacted;
 }
 
 function stableHash(value: string): string {

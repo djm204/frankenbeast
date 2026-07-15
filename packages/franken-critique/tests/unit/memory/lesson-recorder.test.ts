@@ -86,6 +86,191 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).not.toHaveBeenCalled();
   });
 
+  it('redacts secrets before recording critique lessons', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const fakeToken = `ghp_${'FAKE'.padEnd(36, '0')}`;
+    const fakeConnectionString = `postgresql://user:${'pass'.padEnd(12, 'x')}@db.internal/app`;
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `Reviewer pasted Authorization: Bearer ${fakeToken} and ${fakeConnectionString}`,
+            severity: 'critical',
+            suggestion: `Move token ${fakeToken} into a secret manager before retrying.`,
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-task');
+
+    expect(recording.recorded).toBe(1);
+    expect(recording.rejectedByPrivacy).toEqual([]);
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(fakeToken);
+    expect(JSON.stringify(lesson)).not.toContain(fakeConnectionString);
+    expect(lesson.failureDescription).toContain('Bearer [REDACTED_TOKEN]');
+    expect(lesson.failureDescription).toContain(
+      '[REDACTED_CONNECTION_STRING]',
+    );
+    expect(lesson.reviewerFeedback?.findings[0]?.suggestion).toContain(
+      '[REDACTED_GITHUB_TOKEN]',
+    );
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        schemaVersion: 'lesson-privacy-filter-v1',
+        action: 'admit',
+        sensitive: true,
+        approvalRequired: true,
+        redactions: expect.arrayContaining([
+          expect.objectContaining({ label: 'github-token' }),
+          expect.objectContaining({ label: 'bearer-token' }),
+          expect.objectContaining({ label: 'connection-string' }),
+        ]),
+      }),
+    );
+    expect(JSON.stringify(lesson.privacyFilter)).not.toContain(fakeToken);
+  });
+
+  it('flags personal and customer data for explicit approval after redaction', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+    const emailAddress = `operator${'@'}example.test`;
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'privacy', [
+          {
+            message: `Customer account handoff included ${emailAddress}`,
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-personal-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(JSON.stringify(lesson)).not.toContain(emailAddress);
+    expect(lesson.failureDescription).toContain('[REDACTED_EMAIL]');
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        action: 'admit',
+        sensitive: true,
+        approvalRequired: true,
+        flags: expect.arrayContaining([
+          'customer-data',
+          'email-address',
+          'personal-data',
+        ]),
+      }),
+    );
+  });
+
+  it('classifies safe environment facts without redacting false-positive learning terms', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning', [
+          {
+            message:
+              'Repository uses token budget metadata for cooldown scoring',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-environment-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.failureDescription).toContain('token budget metadata');
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        category: 'environment-fact',
+        action: 'admit',
+        sensitive: false,
+        approvalRequired: false,
+        redactions: [],
+      }),
+    );
+  });
+
+  it('classifies reusable procedures as durable candidates', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning', [
+          {
+            message:
+              'Before recording lessons, validate evidence and include the verification command',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await recorder.record(result, 'privacy-procedure-task');
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(lesson.privacyFilter).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        action: 'admit',
+      }),
+    );
+  });
+
+  it('rejects transient task-state candidates before durable recording', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port);
+
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'reviewer', [
+          {
+            message: 'Merged PR #123 after CI turned green',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(result, 'privacy-task-state');
+
+    expect(recording.recorded).toBe(0);
+    expect(port.recordLesson).not.toHaveBeenCalled();
+    expect(recording.rejectedByPrivacy).toEqual([
+      expect.objectContaining({
+        schemaVersion: 'lesson-privacy-filter-v1',
+        category: 'task-state',
+        action: 'reject',
+        sensitive: false,
+        approvalRequired: false,
+      }),
+    ]);
+  });
+
   it('records a lesson when multi-iteration pass occurs (fail then pass)', async () => {
     const unsafeDynamicCallName = 'executeUntrustedCode';
 
