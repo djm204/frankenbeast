@@ -307,6 +307,64 @@ describe('cron script error envelope runner', () => {
     }
   });
 
+  it('terminates descendants when the wrapper receives a parent signal', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-'));
+    const pidFile = join(tempDir, 'helper.pid');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      const helperPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let helperAlive = true;
+      try {
+        process.kill(helperPid, 0);
+        helperAlive = readFileSync(`/proc/${helperPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        helperAlive = code !== 'ESRCH';
+      }
+      if (helperAlive) {
+        process.kill(helperPid, 'SIGKILL');
+      }
+      expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves the job name on option parse errors', () => {
     const result = runCronScript(['--name', 'nightly', '--recvoerable', '--', process.execPath, '-e', 'process.exit(0)']);
 
