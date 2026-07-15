@@ -26,6 +26,31 @@ function makeCallbacks(overrides: Partial<ProcessCallbacks> = {}): ProcessCallba
   };
 }
 
+function isProcessGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+      return true;
+    }
+    throw error;
+  }
+}
+
+async function killIfRunning(pid: number): Promise<void> {
+  if (pid <= 0 || isProcessGone(pid)) {
+    return;
+  }
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw error;
+    }
+  }
+}
+
 describe('ProcessSupervisor', () => {
   let supervisor: ProcessSupervisor;
   let workDir: string | undefined;
@@ -306,6 +331,60 @@ child.unref();`,
           }
         }
       }
+    });
+
+    it('sweeps background descendants in the supervised process group after parent exit', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-supervisor-orphan-sweep-'));
+      const pidFile = join(workDir, 'background.pid');
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: [
+          '-e',
+          `const { spawn } = require('node:child_process');
+const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+  stdio: 'ignore',
+});
+child.unref();
+require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+process.stdout.write('parent done\\n');`,
+        ],
+      });
+
+      let backgroundPid = 0;
+      try {
+        await supervisor.spawn(spec, callbacks);
+
+        await vi.waitFor(() => {
+          expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
+        }, { timeout: 5000 });
+
+        backgroundPid = Number(await readFile(pidFile, 'utf8'));
+        expect(backgroundPid).toBeGreaterThan(0);
+        await vi.waitFor(() => {
+          expect(isProcessGone(backgroundPid)).toBe(true);
+        }, { timeout: 5000 });
+      } finally {
+        await killIfRunning(backgroundPid);
+      }
+    });
+
+    it('reports unsupported platforms without attempting process-group cleanup', () => {
+      const killProcess = vi.fn();
+      const windowsSupervisor = new ProcessSupervisor({
+        orphanSweeper: {
+          platform: 'win32',
+          killProcess,
+        },
+      });
+
+      expect(windowsSupervisor.sweepOrphanProcessGroup(12345)).toEqual({
+        pid: 12345,
+        signal: 'SIGTERM',
+        swept: false,
+        skippedReason: 'unsupported_platform',
+      });
+      expect(killProcess).not.toHaveBeenCalled();
     });
 
     it('strips CLAUDE env vars from spawned process environment', async () => {
