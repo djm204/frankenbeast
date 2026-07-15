@@ -18,6 +18,7 @@ describe('RunConfigLoader', () => {
       await rm(workDir, { recursive: true, force: true });
     }
     delete process.env['FRANKENBEAST_RUN_CONFIG'];
+    delete process.env['FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS'];
   });
 
   describe('loadRunConfig', () => {
@@ -197,6 +198,16 @@ describe('RunConfigLoader', () => {
       const result = loadRunConfigFromEnv();
 
       expect(result).toBeUndefined();
+    });
+
+    it('enforces the max size before runtime config integrity verification hashes the file', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'run-config-'));
+      const filePath = join(workDir, 'oversized.json');
+      await writeFile(filePath, Buffer.alloc(1_048_577, ' '));
+      process.env['FRANKENBEAST_RUN_CONFIG'] = filePath;
+
+      expect(() => loadRunConfigFromEnv()).toThrow(RunConfigParseError);
+      expect(() => loadRunConfigFromEnv()).toThrow('exceeds maxBytes');
     });
   });
 });

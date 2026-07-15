@@ -1,6 +1,9 @@
 import { statSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { nonRootUserForWorkspace } from '../../../../src/beasts/execution/sandbox-policy.js';
+import {
+  DEFAULT_BEAST_ENV_ALLOWLIST,
+  nonRootUserForWorkspace,
+} from '../../../../src/beasts/execution/sandbox-policy.js';
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -55,5 +58,11 @@ describe('nonRootUserForWorkspace', () => {
     mockedStatSync.mockReturnValue({ uid: 0, gid: 0 } as ReturnType<typeof statSync>);
 
     expect(nonRootUserForWorkspace('/root-owned-workspace')).toBe('10001:10001');
+  });
+});
+
+describe('DEFAULT_BEAST_ENV_ALLOWLIST', () => {
+  it('preserves the runtime config integrity bypass for sandboxed spawned CLIs', () => {
+    expect(DEFAULT_BEAST_ENV_ALLOWLIST).toContain('FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS');
   });
 });

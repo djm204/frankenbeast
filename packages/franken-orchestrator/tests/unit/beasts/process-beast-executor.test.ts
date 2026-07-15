@@ -1079,6 +1079,43 @@ describe('ProcessBeastExecutor', () => {
       expect(existsSync(manifestPath)).toBe(false);
     });
 
+    it('propagates explicit runtime config integrity bypass to spawned CLIs', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+        runtimeConfigIntegrity: { bypass: true },
+      });
+      const run = createTestRun(repo);
+
+      await executor.start(run, createDefinitionWithCwd(workDir));
+
+      const [spawnedSpec] = supervisor.spawn.mock.calls[0];
+      expect((spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS).toBe('1');
+    });
+
+    it('lets pre-runtime-config validation errors surface without rewriting them as spawn failures', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+      const definition: BeastDefinition = {
+        ...createDefinitionWithCwd(workDir),
+        buildProcessSpec: () => {
+          throw new Error('invalid designDocPath');
+        },
+      };
+
+      await expect(executor.start(run, definition)).rejects.toThrow('invalid designDocPath');
+
+      expect(supervisor.spawn).not.toHaveBeenCalled();
+      expect(repo.listEvents(run.id).some((event) => event.type === 'run.spawn_failed')).toBe(false);
+      expect(repo.getRun(run.id)?.status).toBe('queued');
+    });
+
     it('redacts sensitive keys and secret-shaped values before writing run config files', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

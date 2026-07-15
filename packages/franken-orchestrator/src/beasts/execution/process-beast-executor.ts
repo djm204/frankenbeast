@@ -402,13 +402,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   ) {}
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
-    let resources: PreparedBeastStartResources;
-    try {
-      resources = this.prepareStartResources(run, definition);
-    } catch (error) {
-      this.handleStartPreparationFailure(run, error);
-      throw error;
-    }
+    const resources = this.prepareStartResources(run, definition);
     const {
       processSpec,
       worktree,
@@ -724,46 +718,53 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const processSpec = definition.buildProcessSpec(run.configSnapshot);
     const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
     this.supervisor.validateCwd?.(processSpec.cwd);
-    const worktree = this.allocateWorktree(run, processSpec);
-    const isolatedConfigSnapshot = worktree
-      ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
-      : run.configSnapshot;
-    const isolatedSpec = this.buildIsolatedSpec(processSpec, worktree);
-    const configFilePath = this.prepareRunConfigFile(run, isolatedSpec);
-    const configManifestPath = runtimeConfigIntegrityManifestPath(configFilePath);
+    try {
+      const worktree = this.allocateWorktree(run, processSpec);
+      const isolatedConfigSnapshot = worktree
+        ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
+        : run.configSnapshot;
+      const isolatedSpec = this.buildIsolatedSpec(processSpec, worktree);
+      const configFilePath = this.prepareRunConfigFile(run, isolatedSpec);
+      const configManifestPath = runtimeConfigIntegrityManifestPath(configFilePath);
+      const bypassRuntimeConfigIntegrity = this.options.runtimeConfigIntegrity?.bypass === true
+        || process.env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS === '1';
 
-    const mergedSpec = {
-      ...isolatedSpec,
-      env: {
-        ...isolatedSpec.env,
-        ...moduleEnv,
-        FRANKENBEAST_RUN_CONFIG: configFilePath,
-      },
-    };
-    const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
-    const configuredSecrets = collectConfiguredSecretValues(
-      run.configSnapshot,
-      processSpec.env,
-      isolatedSpec.env,
-      mergedSpec.env,
-      spawnedSpec.env,
-    );
-    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
-    writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
-    const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
-    applyRunConfigOwnership(configFilePath, runConfigOwner);
-    chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
-    writeRuntimeConfigIntegrityManifest({ configPath: configFilePath, manifestPath: configManifestPath });
-    applyRunConfigOwnership(configManifestPath, runConfigOwner);
-    chmodSync(configManifestPath, RUN_CONFIG_FILE_MODE);
-    assertRuntimeConfigIntegrity({
-      configPath: configFilePath,
-      manifestPath: configManifestPath,
-      bypass: this.options.runtimeConfigIntegrity?.bypass === true
-        || process.env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS === '1',
-    });
+      const mergedSpec = {
+        ...isolatedSpec,
+        env: {
+          ...isolatedSpec.env,
+          ...moduleEnv,
+          FRANKENBEAST_RUN_CONFIG: configFilePath,
+          ...(bypassRuntimeConfigIntegrity ? { FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS: '1' } : {}),
+        },
+      };
+      const spawnedSpec = this.options.transformSpec?.(run, processSpec, mergedSpec) ?? mergedSpec;
+      const configuredSecrets = collectConfiguredSecretValues(
+        run.configSnapshot,
+        processSpec.env,
+        isolatedSpec.env,
+        mergedSpec.env,
+        spawnedSpec.env,
+      );
+      const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
+      writeFileSync(configFilePath, JSON.stringify(redactedConfigSnapshot, null, 2), { mode: RUN_CONFIG_FILE_MODE });
+      const runConfigOwner = resolveRunConfigOwner(this.options.runConfigOwner);
+      applyRunConfigOwnership(configFilePath, runConfigOwner);
+      chmodSync(configFilePath, RUN_CONFIG_FILE_MODE);
+      writeRuntimeConfigIntegrityManifest({ configPath: configFilePath, manifestPath: configManifestPath });
+      applyRunConfigOwnership(configManifestPath, runConfigOwner);
+      chmodSync(configManifestPath, RUN_CONFIG_FILE_MODE);
+      assertRuntimeConfigIntegrity({
+        configPath: configFilePath,
+        manifestPath: configManifestPath,
+        bypass: bypassRuntimeConfigIntegrity,
+      });
 
-    return { processSpec, worktree, configFilePath, configManifestPath, spawnedSpec, configuredSecrets };
+      return { processSpec, worktree, configFilePath, configManifestPath, spawnedSpec, configuredSecrets };
+    } catch (error) {
+      this.handleStartPreparationFailure(run, error);
+      throw error;
+    }
   }
 
   private allocateWorktree(run: BeastRun, processSpec: BeastProcessSpec): BeastWorktreeAllocation | undefined {

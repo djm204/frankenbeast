@@ -6,6 +6,7 @@ import {
 } from '../beasts/execution/runtime-config-integrity.js';
 import { parseSafeJson } from '../utils/safe-json.js';
 
+const MAX_RUN_CONFIG_BYTES = 1_048_576;
 
 function printLine(...args: unknown[]): void {
   console.info(...args);
@@ -76,6 +77,7 @@ export class RunConfigParseError extends Error {
 }
 
 export function assertRunConfigIntegrity(filePath: string): void {
+  assertRunConfigSize(filePath);
   assertRuntimeConfigIntegrity({
     configPath: filePath,
     manifestPath: runtimeConfigIntegrityManifestPath(filePath),
@@ -83,21 +85,25 @@ export function assertRunConfigIntegrity(filePath: string): void {
   });
 }
 
+function assertRunConfigSize(filePath: string): void {
+  const info = statSync(filePath);
+  if (info.size > MAX_RUN_CONFIG_BYTES) {
+    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > ${MAX_RUN_CONFIG_BYTES}`);
+  }
+}
+
 /**
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
  */
 export function loadRunConfig(filePath: string): RunConfig {
-  const info = statSync(filePath);
-  if (info.size > 1_048_576) {
-    throw new RunConfigParseError(filePath, `Run config ${filePath} exceeds maxBytes: ${info.size} > 1048576`);
-  }
+  assertRunConfigSize(filePath);
   const raw = readFileSync(filePath, 'utf-8');
   let parsed: unknown;
   try {
     parsed = parseSafeJson(raw, {
       context: `Run config ${filePath}`,
-      maxBytes: 1_048_576,
+      maxBytes: MAX_RUN_CONFIG_BYTES,
       maxDepth: 64,
       maxContainers: 10_000,
       maxObjectKeys: 20_000,
