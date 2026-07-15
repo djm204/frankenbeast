@@ -4,6 +4,8 @@
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
 - CLI signal cleanup should register and unregister all handled signals symmetrically, and long-running `restart` commands should track the target run before awaiting restart so SIGINT/SIGHUP can clean up in-flight work.
+- After a dispatch `onRunCreated` callback, re-read persisted run state before startNow execution; signal cleanup can mark a just-created run stopped before any attempt exists.
+- Keep post-spawn metadata providers inside the same cleanup try/catch as attempt persistence so provider failures cannot leave a spawned process without an attempt record.
 
 ## 2026-07-15 — Issue-runner dependency circuit breaker verification
 - For availability/refill features that add dependency-specific throttles, model the dependency name in structured signals and configure named breakers so unrelated degraded dependencies do not create a global outage. Regression tests should cover the intended open condition plus an unrelated dependency and a retry/open-until edge case.
