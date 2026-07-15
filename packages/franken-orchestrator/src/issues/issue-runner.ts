@@ -67,6 +67,20 @@ export interface IssueBackpressureThresholds {
   readonly maxOldestQueueAgeMs?: number | undefined;
   readonly maxSystemLoadAverage?: number | undefined;
   readonly minProviderBudgetTokensRemaining?: number | undefined;
+  /**
+   * Optional live alert ratio for capacity-style limits. For example, 0.8 emits
+   * a warning when a signal reaches 80% of its configured limit while still
+   * allowing the issue start until the hard threshold is exceeded/reached.
+   */
+  readonly capacityWatermarkRatio?: number | undefined;
+}
+
+export interface IssueCapacityWatermarkAlert {
+  readonly signal: keyof IssueBackpressureSignals;
+  readonly value: number;
+  readonly threshold: number;
+  readonly watermarkRatio: number;
+  readonly message: string;
 }
 
 export interface IssueBackpressureConfig {
@@ -78,6 +92,7 @@ export interface IssueBackpressureDecision {
   readonly allowed: boolean;
   readonly reasons: readonly string[];
   readonly signals: IssueBackpressureSignals;
+  readonly alerts: readonly IssueCapacityWatermarkAlert[];
 }
 
 export interface IssueRunnerConfig {
@@ -120,6 +135,30 @@ function providerBudgetAtReserve(value: number | undefined, reserve: number | un
   return reserve !== undefined && value !== undefined && value <= reserve;
 }
 
+function validWatermarkRatio(value: number | undefined): value is number {
+  return value !== undefined && Number.isFinite(value) && value > 0 && value < 1;
+}
+
+function capacityAlert(
+  signal: keyof IssueBackpressureSignals,
+  label: string,
+  value: number | undefined,
+  threshold: number | undefined,
+  ratio: number | undefined,
+): IssueCapacityWatermarkAlert | undefined {
+  if (threshold === undefined || !validWatermarkRatio(ratio) || value === undefined) return undefined;
+  const thresholdValue: number = threshold;
+  const ratioValue: number = ratio;
+  if (value < thresholdValue * ratioValue) return undefined;
+  return {
+    signal,
+    value,
+    threshold: thresholdValue,
+    watermarkRatio: ratioValue,
+    message: `${label} ${value} reached ${Math.round(ratioValue * 100)}% of limit ${thresholdValue}`,
+  };
+}
+
 function defaultBackpressureSignals(context: IssueBackpressureSignalContext): IssueBackpressureSignals {
   return {
     activeProcesses: 0,
@@ -143,6 +182,43 @@ export async function evaluateIssueBackpressure(
   };
   const thresholds = backpressure?.thresholds ?? {};
   const reasons: string[] = [];
+  const alerts = [
+    capacityAlert(
+      'activeProcesses',
+      'active processes',
+      signals.activeProcesses,
+      thresholds.maxActiveProcesses,
+      thresholds.capacityWatermarkRatio,
+    ),
+    capacityAlert(
+      'inFlightBacklog',
+      'in-flight backlog',
+      signals.inFlightBacklog,
+      thresholds.maxInFlightBacklog,
+      thresholds.capacityWatermarkRatio,
+    ),
+    capacityAlert(
+      'pendingIssueCount',
+      'queue depth',
+      signals.pendingIssueCount,
+      thresholds.maxPendingIssueCount,
+      thresholds.capacityWatermarkRatio,
+    ),
+    capacityAlert(
+      'oldestQueueAgeMs',
+      'oldest queue age',
+      signals.oldestQueueAgeMs,
+      thresholds.maxOldestQueueAgeMs,
+      thresholds.capacityWatermarkRatio,
+    ),
+    capacityAlert(
+      'systemLoadAverage',
+      'system load',
+      signals.systemLoadAverage,
+      thresholds.maxSystemLoadAverage,
+      thresholds.capacityWatermarkRatio,
+    ),
+  ].filter((alert): alert is IssueCapacityWatermarkAlert => alert !== undefined);
 
   if (limitReached(signals.activeProcesses, thresholds.maxActiveProcesses)) {
     reasons.push(`active processes ${signals.activeProcesses} reached limit ${thresholds.maxActiveProcesses}`);
@@ -174,6 +250,7 @@ export async function evaluateIssueBackpressure(
     allowed: reasons.length === 0,
     reasons,
     signals,
+    alerts,
   };
 }
 
@@ -484,7 +561,20 @@ export class IssueRunner {
         ...backpressureContext,
       });
 
-      if (backpressureDecision.allowed) return undefined;
+      if (backpressureDecision.allowed) {
+        if (backpressureDecision.alerts.length > 0) {
+          logger?.warn(
+            `[issues] Capacity watermark alert for issue #${issue.number}: ${backpressureDecision.alerts.map(alert => alert.message).join('; ')}`,
+            {
+              issueNumber: issue.number,
+              alerts: backpressureDecision.alerts,
+              signals: backpressureDecision.signals,
+            },
+            'issues',
+          );
+        }
+        return undefined;
+      }
 
       const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
       logger?.warn(
