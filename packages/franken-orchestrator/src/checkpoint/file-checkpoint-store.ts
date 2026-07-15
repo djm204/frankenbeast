@@ -1,6 +1,5 @@
 import {
   closeSync,
-  copyFileSync,
   existsSync,
   fsyncSync,
   mkdirSync,
@@ -245,16 +244,26 @@ export class FileCheckpointStore implements ICheckpointStore {
   }
 
   private copyTaskOutputToStale(outputPath: string): void {
+    let payload: string;
     try {
-      copyFileSync(outputPath, `${outputPath}.stale`);
+      payload = readFileSync(outputPath, 'utf-8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw error;
       }
+      return;
     }
+    try {
+      deserialize(Buffer.from(payload, 'base64'));
+    } catch {
+      // Do not replace a known-good stale cache with an unreadable primary.
+      return;
+    }
+    this.atomicWriteFile(`${outputPath}.stale`, payload);
   }
 
   private promoteTaskOutputToStale(outputPath: string): void {
+    mkdirSync(dirname(outputPath), { recursive: true });
     this.withLock(() => {
       this.copyTaskOutputToStale(outputPath);
       this.deleteTaskOutput(outputPath);

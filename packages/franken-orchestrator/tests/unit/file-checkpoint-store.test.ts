@@ -180,6 +180,29 @@ describe('FileCheckpointStore', () => {
       });
     });
 
+    it('preserves a known-good stale cache when the primary sidecar is corrupted before promotion', () => {
+      store.writeTaskOutput('task-1', 'old-output');
+      store.writeTaskOutput('task-1', 'new-output');
+      const outputFile = readdirSync(`${filePath}.outputs`).find((entry) => !entry.endsWith('.stale'));
+      writeFileSync(join(`${filePath}.outputs`, outputFile!), 'not-valid-base64-v8-payload');
+
+      expect(() => store.writeTaskOutput('task-1', () => 'not cloneable')).not.toThrow();
+
+      expect(store.readTaskOutput('task-1')).toEqual({
+        found: true,
+        output: 'old-output',
+        stale: true,
+        staleReason: 'missing-primary',
+      });
+    });
+
+    it('does not throw when first output is unserializable for a nested checkpoint path', () => {
+      const nestedStore = new FileCheckpointStore(join(tmpDir, 'nested', 'checkpoint.log'));
+
+      expect(() => nestedStore.writeTaskOutput('task-1', () => 'not cloneable')).not.toThrow();
+      expect(nestedStore.readTaskOutput('task-1')).toEqual({ found: false });
+    });
+
     it('reports missing task output when no stale cache exists', () => {
       store.writeTaskOutput('task-1', 'only-output');
       const outputFile = readdirSync(`${filePath}.outputs`).find((entry) => !entry.endsWith('.stale'));
