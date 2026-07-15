@@ -568,6 +568,25 @@ describe('ProviderRegistry', () => {
       });
     });
 
+    it('still records provider outages when messages contain non-status 400 values', async () => {
+      const p1 = mockProvider('primary', { failOnExecute: new Error('provider timed out after 40000ms') });
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => Date.UTC(2026, 0, 1),
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'open',
+        failures: 1,
+        lastErrorClass: 'timeout',
+      });
+    });
+
     it('keeps an open breaker from calling the provider before cooldown expires', async () => {
       let now = Date.UTC(2026, 0, 1);
       const p1 = mockProvider('primary', { failOnExecute: new Error('provider down') });
@@ -844,6 +863,95 @@ describe('ProviderRegistry', () => {
         state: 'open',
         lastErrorClass: 'execution_error',
         cooldownUntil: '2026-01-01T00:00:20.001Z',
+      });
+    });
+
+    it('releases half-open probe slots for request errors without opening the breaker', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      const p1 = mockProvider('primary', { failOnExecute: new Error('outage') });
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+      const controls = registry as unknown as {
+        reserveCircuitBreakerProbe(provider: ILlmProvider): Error | undefined;
+        releaseHalfOpenProbeWithoutHealthFailure(provider: ILlmProvider, reason: string): void;
+      };
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      expect(controls.reserveCircuitBreakerProbe(p1)).toBeUndefined();
+      controls.releaseHalfOpenProbeWithoutHealthFailure(p1, 'half-open-probe-request-error');
+
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'half-open',
+        halfOpenProbeCount: 0,
+        failures: 1,
+      });
+      expect(controls.reserveCircuitBreakerProbe(p1)).toBeUndefined();
+      expect(registry.getProviderHealth('primary')).toMatchObject({ halfOpenProbeCount: 1 });
+    });
+
+    it('does not count stale successes after another execution has opened the breaker', async () => {
+      const p1 = mockProvider('primary');
+      const registry = new ProviderRegistry([p1], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => Date.UTC(2026, 0, 1),
+      });
+      const controls = registry as unknown as {
+        recordProviderFailure(provider: ILlmProvider, error: Error): void;
+        recordProviderSuccess(provider: ILlmProvider): void;
+      };
+
+      controls.recordProviderFailure(p1, new Error('outage'));
+      const before = registry.getProviderHealth('primary')!;
+      controls.recordProviderSuccess(p1);
+
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'open',
+        successes: before.successes,
+        failureRate: before.failureRate,
+      });
+    });
+
+    it('keeps a breaker half-open until every reserved success probe finishes', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      const p1 = mockProvider('primary', { failOnExecute: new Error('outage') });
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        circuitBreakerHalfOpenMaxProbes: 2,
+        now: () => now,
+      });
+      const controls = registry as unknown as {
+        reserveCircuitBreakerProbe(provider: ILlmProvider): Error | undefined;
+        recordProviderSuccess(provider: ILlmProvider): void;
+      };
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      expect(controls.reserveCircuitBreakerProbe(p1)).toBeUndefined();
+      expect(controls.reserveCircuitBreakerProbe(p1)).toBeUndefined();
+      controls.recordProviderSuccess(p1);
+
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'half-open',
+        halfOpenProbeCount: 1,
+        successes: 1,
+      });
+
+      controls.recordProviderSuccess(p1);
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'closed',
+        halfOpenProbeCount: 0,
+        successes: 2,
       });
     });
 

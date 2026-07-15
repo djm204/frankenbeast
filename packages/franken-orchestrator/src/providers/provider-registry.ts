@@ -193,6 +193,11 @@ function normalizeJitterRatio(value: number | undefined): number {
 function classifyProviderError(error: Error | string): string {
   const message = error instanceof Error ? error.message : error;
   const normalized = message.toLowerCase();
+  if (normalized.includes('rate limit') || normalized.includes('429')) return 'rate_limit';
+  if (normalized.includes('auth') || normalized.includes('permission') || normalized.includes('unauthorized')) return 'auth';
+  if (normalized.includes('timeout') || normalized.includes('timed out')) return 'timeout';
+  if (normalized.includes('unavailable') || normalized.includes('enoent')) return 'unavailable';
+  if (normalized.includes('stream ended without done')) return 'stream_incomplete';
   if (
     normalized.includes('bad request')
     || normalized.includes('invalid request')
@@ -200,13 +205,8 @@ function classifyProviderError(error: Error | string): string {
     || normalized.includes('context window')
     || normalized.includes('tool schema')
     || normalized.includes('schema validation')
-    || normalized.includes('400')
+    || /(?:^|\D)400(?:\D|$)/.test(normalized)
   ) return 'request_error';
-  if (normalized.includes('rate limit') || normalized.includes('429')) return 'rate_limit';
-  if (normalized.includes('auth') || normalized.includes('permission') || normalized.includes('unauthorized')) return 'auth';
-  if (normalized.includes('timeout') || normalized.includes('timed out')) return 'timeout';
-  if (normalized.includes('unavailable') || normalized.includes('enoent')) return 'unavailable';
-  if (normalized.includes('stream ended without done')) return 'stream_incomplete';
   return 'execution_error';
 }
 
@@ -417,11 +417,19 @@ export class ProviderRegistry {
   private recordProviderSuccess(provider: ILlmProvider): void {
     const record = this.getOrCreateProviderHealth(provider);
     const previousState = record.state;
-    record.successes += 1;
-    record.updatedAtMs = this.opts.now();
 
     if (previousState === 'open') {
       this.emitProviderHealthChange(provider, 'stale-success-ignored');
+      return;
+    }
+
+    record.updatedAtMs = this.opts.now();
+    record.successes += 1;
+
+    if (previousState === 'half-open' && record.halfOpenProbeCount > 1) {
+      record.halfOpenProbeCount -= 1;
+      record.consecutiveFailures = 0;
+      this.emitProviderHealthChange(provider, 'half-open-probe-succeeded');
       return;
     }
 
@@ -467,6 +475,14 @@ export class ProviderRegistry {
     const record = this.providerHealth.get(this.providerKey(provider));
     if (record?.state !== 'half-open' || record.halfOpenProbeCount <= 0) return;
     this.tripProvider(provider, reason, 'half-open-probe-released');
+  }
+
+  private releaseHalfOpenProbeWithoutHealthFailure(provider: ILlmProvider, reason: string): void {
+    const record = this.providerHealth.get(this.providerKey(provider));
+    if (record?.state !== 'half-open' || record.halfOpenProbeCount <= 0) return;
+    record.halfOpenProbeCount -= 1;
+    record.updatedAtMs = this.opts.now();
+    this.emitProviderHealthChange(provider, reason);
   }
 
   private getProviderIterationOrder(): number[] {
@@ -643,6 +659,8 @@ export class ProviderRegistry {
             terminalEventObserved = true;
             if (shouldRecordProviderHealthFailure(lastError)) {
               this.recordProviderFailure(provider, lastError, { tripHalfOpenProbe: halfOpenProbeReserved });
+            } else if (halfOpenProbeReserved) {
+              this.releaseHalfOpenProbeWithoutHealthFailure(provider, 'half-open-probe-request-error');
             }
           }
           terminalError = lastError;
