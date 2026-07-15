@@ -1,5 +1,5 @@
-import { SkillTrigger, TriggerRegistry } from '@franken/governor';
-import type { TriggerResult, TriggerSeverity } from '@franken/governor';
+import { SkillTrigger, TriggerRegistry, evaluateHighRiskActionPolicy } from '@franken/governor';
+import type { HighRiskActionClass, HighRiskActionEvidence, TriggerResult, TriggerSeverity } from '@franken/governor';
 import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
@@ -16,6 +16,12 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_forget',
   'fbeast_memory_right_to_forget',
 ]);
+
+const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
+  fbeast_memory_store: 'memory',
+  fbeast_memory_forget: 'memory',
+  fbeast_memory_right_to_forget: 'memory',
+};
 
 /**
  * fbeast tools whose payload is *data to query/analyze/store/log*, not an
@@ -150,6 +156,70 @@ function isRightToForgetDryRun(action: string, context: string): boolean {
   }
 }
 
+function parseContextObject(context: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Missing structured evidence intentionally falls through to fail-closed policy.
+  }
+  return {};
+}
+
+function stringContext(context: Record<string, unknown>, key: string): string | undefined {
+  const value = context[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function booleanContext(context: Record<string, unknown>, key: string): boolean | undefined {
+  const value = context[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function optionalTarget(target: string | undefined): Pick<HighRiskActionEvidence, 'target'> | Record<string, never> {
+  return target !== undefined ? { target } : {};
+}
+
+function optionalDryRun(dryRun: boolean | undefined): Pick<HighRiskActionEvidence, 'dryRun'> | Record<string, never> {
+  return dryRun !== undefined ? { dryRun } : {};
+}
+
+function memoryTarget(context: Record<string, unknown>): string | undefined {
+  const selectors = ['key', 'category', 'sourceScope', 'query']
+    .map((key) => stringContext(context, key))
+    .filter((value): value is string => value !== undefined);
+  return selectors.length > 0 ? selectors.join(',') : undefined;
+}
+
+function highRiskEvidence(action: string, context: string): HighRiskActionEvidence {
+  const parsed = parseContextObject(context);
+  if (action === 'fbeast_memory_store') return { operation: 'store', ...optionalTarget(memoryTarget(parsed)) };
+  if (action === 'fbeast_memory_forget') return { operation: 'delete', ...optionalTarget(memoryTarget(parsed)) };
+  if (action === 'fbeast_memory_right_to_forget') {
+    return {
+      operation: 'right-to-forget',
+      ...optionalTarget(memoryTarget(parsed)),
+      ...optionalDryRun(booleanContext(parsed, 'dryRun')),
+    };
+  }
+  return {};
+}
+
+function assessHighRiskAction(action: string, context: string): GovernorCheckResult | undefined {
+  const actionClass = HIGH_RISK_ACTIONS[action];
+  if (actionClass === undefined) return undefined;
+  const result = evaluateHighRiskActionPolicy({ actionClass, evidence: highRiskEvidence(action, context) });
+  if (result.decision === 'allow') {
+    return { decision: 'approved', reason: `High-risk policy allowed ${action}: ${result.reason}` };
+  }
+  if (result.decision === 'deny') {
+    return { decision: 'denied', reason: `High-risk policy denied ${action}: ${result.reason}` };
+  }
+  return { decision: 'review_recommended', reason: `High-risk policy requires approval for ${action}: ${result.reason}` };
+}
+
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -170,6 +240,9 @@ function assessAction(action: string, context: string): GovernorCheckResult {
       reason: `Tool "${action}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
     };
   }
+
+  const highRiskResult = assessHighRiskAction(action, context);
+  if (highRiskResult !== undefined) return highRiskResult;
 
   if (action === 'fbeast_memory_right_to_forget') {
     return {

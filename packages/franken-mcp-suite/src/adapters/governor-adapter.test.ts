@@ -33,16 +33,16 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('approved');
   });
 
-  it('denies legacy memory forget but allows explicit right-to-forget privacy deletions', async () => {
-    // The word heuristic does not catch "forget"; classification lives in the
-    // shared governor so every caller (hook, fbeast_governor_check, central
-    // gate, governor_log) gets the same decision for a benign key. The explicit
-    // privacy deletion workflow stays executable through the installed server.
+  it('requires review for legacy memory forget and explicit right-to-forget privacy deletions', async () => {
+    // Durable memory deletion is a high-risk action on every path (hook,
+    // fbeast_governor_check, central gate, governor_log). Dry-run privacy
+    // deletion remains allowed separately so users can inspect deletion counts
+    // before approval.
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     await expect(governor.check({ action: 'fbeast_memory_forget', context: '{"key":"note"}' }))
-      .resolves.toMatchObject({ decision: 'denied' });
+      .resolves.toMatchObject({ decision: 'review_recommended' });
     await expect(governor.check({ action: 'fbeast_memory_right_to_forget', context: '{"category":"[right-to-forget-selector-redacted]"}' }))
-      .resolves.toMatchObject({ decision: 'approved' });
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
 
@@ -53,7 +53,7 @@ describe('GovernorAdapter', () => {
     await expect(governor.check({
       action: 'fbeast_memory_right_to_forget',
       context: '{"query":"alice@example.test","key":"pii:email"}',
-    })).resolves.toMatchObject({ decision: 'approved' });
+    })).resolves.toMatchObject({ decision: 'review_recommended' });
 
     const db = new Database(dbPath);
     const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_right_to_forget') as { context: string };
@@ -117,16 +117,14 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('denied');
   });
 
-  it('exempts non-executing tools on the SHARED path even with dangerous-looking payload', async () => {
-    // The hook path calls the governor directly; the non-executing exemption
-    // must hold here too (not only in the central gate), so storing/logging
-    // risky-looking content is not a false-positive denial.
+  it('requires review for durable memory writes even with only payload-risky content', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({
       action: 'fbeast_memory_store',
-      context: '{"value":"delete drop truncate rm -rf /"}',
+      context: '{"key":"notes","value":"delete drop truncate rm -rf /"}',
     });
-    expect(result.decision).toBe('approved');
+    expect(result.decision).toBe('review_recommended');
+    expect(result.reason).toContain('High-risk policy requires approval');
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {
