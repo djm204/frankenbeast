@@ -73,7 +73,7 @@ const DEFAULT_FIELDS: TranscriptRetainedFields = Object.freeze({
   summaries: true,
 })
 
-const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'additionalcontext', 'operatorcontext', 'context', 'goal', 'goals', 'transcript', 'transcripts'])
+const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'additionalcontext', 'operatorcontext', 'context', 'goal', 'goals', 'transcript', 'transcripts', 'completion', 'completions', 'generation', 'generations', 'inlinedata'])
 const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'arguments', 'args', 'parameters', 'params', 'stdin'])
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
@@ -400,6 +400,8 @@ function classifyContextualTranscriptField(record: Record<string, unknown>, key:
   const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
   if (isToolOutputMessageField(recordType, recordRole, key)) return 'toolOutputs'
+  if ((recordType === 'tooluse' || recordType === 'functioncall') && normalizedKey === 'input') return 'toolInputs'
+  if ((recordRole === 'user' || recordRole === 'system' || recordRole === 'assistant' || recordRole === 'model') && (normalizedKey === 'text' || normalizedKey === 'parts')) return 'prompts'
   if (recordType === 'inputjsondelta' && normalizedKey === 'partialjson') return 'toolInputs'
   if (isPromptBlockContentField(recordType, key)) return 'prompts'
   return classifyTranscriptField(key)
@@ -543,8 +545,9 @@ function classifyProviderStreamDeltaField(deltaType: string, key: string): Trans
 function classifyProviderMessageField(messageType: string, messageRole: string, key: string): TranscriptField | undefined {
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
   if (isToolOutputMessageField(messageType, messageRole, key)) return 'toolOutputs'
+  if ((messageType === 'tooluse' || messageType === 'functioncall') && normalizedKey === 'input') return 'toolInputs'
   if (messageType === 'inputjsondelta' && key.replace(/[_-]/g, '').toLowerCase() === 'partialjson') return 'toolInputs'
-  if ((messageRole === 'user' || messageRole === 'system' || messageRole === 'assistant' || messageRole === 'model') && normalizedKey === 'parts') return 'prompts'
+  if ((messageRole === 'user' || messageRole === 'system' || messageRole === 'assistant' || messageRole === 'model') && (normalizedKey === 'parts' || normalizedKey === 'text')) return 'prompts'
   if (isPromptBlockContentField(messageType, key)) return 'prompts'
   return classifyTranscriptField(key)
 }
@@ -562,7 +565,7 @@ function isRawRetention(policy: ResolvedTranscriptRetentionPolicy): boolean {
 function isPromptBlockContentField(messageType: string, key: string): boolean {
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
   if ((messageType === 'textdelta' || messageType === 'outputtextdelta') && normalizedKey === 'text') return true
-  if (messageType === 'thinkingdelta' && normalizedKey === 'thinking') return true
+  if ((messageType === 'thinkingdelta' || messageType === 'thinking') && normalizedKey === 'thinking') return true
   if (
     isMultimodalPromptBlockType(messageType) &&
     MULTIMODAL_PROMPT_CONTENT_KEYS.has(normalizedKey)

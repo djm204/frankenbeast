@@ -1132,6 +1132,62 @@ describe('transcript retention controls', () => {
     ])
   })
 
+  it('redacts role-scoped provider text fields as prompts', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          messages: [{ role: 'user', text: 'private prompt' }, { role: 'assistant', text: 'private reply' }],
+          opaque: { role: 'user', text: 'private opaque prompt' },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['messages']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['opaque']).toEqual({ role: 'user', text: '[REDACTED_TRANSCRIPT]' })
+  })
+
+  it('honors tool input opt-outs for raw tool_use input blocks', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { block: { type: 'tool_use', input: { location: '123 Main St' } } } })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolInputs: false },
+    })
+
+    expect(retained.spans[0].metadata['block']).toEqual({ type: 'tool_use' })
+  })
+
+  it('redacts final thinking and completion payloads by default', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          thinkingBlock: { type: 'thinking', thinking: 'private chain of thought' },
+          completion: 'private assistant completion',
+          generations: [{ text: 'private generated text' }],
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['thinkingBlock']).toEqual({ type: 'thinking', thinking: '[REDACTED_TRANSCRIPT]' })
+    expect(retained.spans[0].metadata['completion']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['generations']).toBe('[REDACTED_TRANSCRIPT]')
+  })
+
+  it('redacts standalone inline multimodal payloads by default', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          inlineData: { data: 'base64-private-image', mimeType: 'image/png' },
+          inline_data: { data: 'base64-private-audio', mimeType: 'audio/wav' },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['inlineData']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['inline_data']).toBe('[REDACTED_TRANSCRIPT]')
+  })
+
   it('drops object-valued prompt fields when raw prompt retention is disabled', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({
