@@ -53,11 +53,21 @@ function appendTail(current, chunk, limit = STDERR_TAIL_LIMIT) {
   return next.slice(next.length - limit);
 }
 
+function hasSensitiveMarker(value) {
+  return /token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token|-----BEGIN/i.test(value);
+}
+
 function appendRedactedTail(currentRaw, chunk) {
   const combined = `${currentRaw}${chunk}`;
   const rawTail = appendTail(currentRaw, chunk, STDERR_REDACTION_CONTEXT_LIMIT);
   const discarded = combined.length > STDERR_REDACTION_CONTEXT_LIMIT ? combined.slice(0, combined.length - STDERR_REDACTION_CONTEXT_LIMIT) : '';
   const redactionInput = isTruncatedSecretContinuation(discarded, rawTail) ? `TRUNCATED_SECRET=${rawTail}` : rawTail;
+  if (!hasSensitiveMarker(redactionInput)) {
+    return {
+      rawTail,
+      redactedTail: appendTail('', rawTail),
+    };
+  }
   return {
     rawTail,
     redactedTail: appendTail('', redactSensitiveText(redactionInput)),
@@ -218,11 +228,12 @@ function signalChildTree(child, signal) {
 
   const signaledPids = [];
   const descendantPids = collectDescendantPids(child.pid).reverse();
+  const childProcessGroup = processGroupId(child.pid);
   let signaledProcessGroup = false;
-  if (process.platform !== 'win32') {
+  if (process.platform !== 'win32' && childProcessGroup === child.pid) {
     try {
-      process.kill(-child.pid, signal);
-      signaledPids.push(-child.pid);
+      process.kill(-childProcessGroup, signal);
+      signaledPids.push(-childProcessGroup);
       signaledProcessGroup = true;
     } catch (error) {
       if (error?.code !== 'ESRCH') {
@@ -232,7 +243,7 @@ function signalChildTree(child, signal) {
   }
 
   for (const pid of descendantPids) {
-    if (signaledProcessGroup && processGroupId(pid) === child.pid) {
+    if (signaledProcessGroup && processGroupId(pid) === childProcessGroup) {
       continue;
     }
     try {
@@ -343,6 +354,7 @@ function redactSensitiveText(value) {
   return raw
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/-----BEGIN PRIVATE [\s\S]*?-----END PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
+    .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)\{[^{}]*(?:\}|$)/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)\[[^\]]*\]/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(?!["'\[])([^,}\]\s][^,}\]]*)/gi, '$1[REDACTED]')
@@ -361,7 +373,7 @@ function redactSensitiveText(value) {
     .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)(?!\[REDACTED\])([^\s"']+)/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=\\(["'])(.*?)\\\2/gi, '$1=\\$2[REDACTED]\\$2')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=(["'])(.*?)\2/gi, '$1=$2[REDACTED]$2')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=(?!\[REDACTED\])([^\s"',;)}\]]+)([\s"',;)}\]]|$)/gi, '$1=[REDACTED]$3');
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=(?!\[REDACTED\])([^\s"',;`)})\]]+)([\s"',;`)})\]]|$)/gi, '$1=[REDACTED]$3');
 }
 
 function redactCommand(command) {
@@ -639,7 +651,7 @@ async function runCronScript({ name, recoverable, command }) {
             if (!parentTerminationRecheckTimer) {
               parentTerminationRecheckTimer = setTimeout(() => {
                 parentTerminationRecheckTimer = null;
-                finishChildResult(code, signal);
+                finishChildResult(exitResult?.code ?? code, exitResult?.signal ?? signal);
               }, Math.min(50, Math.max(10, KILL_GRACE_MS)));
               parentTerminationRecheckTimer.unref?.();
             }
