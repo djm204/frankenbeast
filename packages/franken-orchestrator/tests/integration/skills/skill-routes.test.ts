@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Hono } from 'hono';
@@ -70,6 +70,23 @@ describe('Skill API routes', () => {
       const body = await res.json();
       expect(body.skills).toHaveLength(1);
       expect(body.skills[0].name).toBe('github');
+    });
+
+    it('skips unsafe skill entries without returning a 500', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      });
+      mkdirSync(join(skillsDir, 'poisoned'), { recursive: true });
+      symlinkSync(join(tempDir, 'outside-mcp.json'), join(skillsDir, 'poisoned', 'mcp.json'));
+
+      const res = await app.request('/api/skills');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.skills.map((skill: { name: string }) => skill.name)).toEqual(['github']);
     });
   });
 
@@ -168,6 +185,26 @@ describe('Skill API routes', () => {
       const body = await res.json();
       expect(body.error.code).toBe('INTERNAL_ERROR');
       expect(JSON.stringify(body)).not.toContain('EACCES');
+    });
+
+    it('returns 400 for unsafe skill install paths', async () => {
+      const outsideDir = join(tempDir, 'outside-skill');
+      mkdirSync(outsideDir, { recursive: true });
+      symlinkSync(outsideDir, join(skillsDir, 'escaped'), 'dir');
+
+      const res = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          custom: { name: 'escaped', config: { command: 'node' } },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe('Unsafe skill install path');
+      expect(JSON.stringify(body)).not.toContain(skillsDir);
+      expect(JSON.stringify(body)).not.toContain(outsideDir);
     });
 
     it('returns 400 when neither provided', async () => {
@@ -376,6 +413,44 @@ describe('Skill API routes', () => {
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: 'Invalid JSON' });
       expect(writeContextSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns generic unsafe path errors for unsafe context writes', async () => {
+      mkdirSync(join(skillsDir, 'github'), { recursive: true });
+      writeFileSync(join(skillsDir, 'github', 'mcp.json'), JSON.stringify({
+        mcpServers: { github: { command: 'github-mcp' } },
+      }));
+      const outsideContext = join(tempDir, 'outside-context.md');
+      symlinkSync(outsideContext, join(skillsDir, 'github', 'context.md'));
+
+      const res = await app.request('/api/skills/github/context', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'new context' }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe('Unsafe skill path');
+      expect(JSON.stringify(body)).not.toContain(skillsDir);
+      expect(JSON.stringify(body)).not.toContain(outsideContext);
+    });
+
+    it('returns generic unsafe path errors for unsafe context reads', async () => {
+      mkdirSync(join(skillsDir, 'github'), { recursive: true });
+      writeFileSync(join(skillsDir, 'github', 'mcp.json'), JSON.stringify({
+        mcpServers: { github: { command: 'github-mcp' } },
+      }));
+      const outsideContext = join(tempDir, 'outside-context.md');
+      symlinkSync(outsideContext, join(skillsDir, 'github', 'context.md'));
+
+      const res = await app.request('/api/skills/github/context');
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe('Unsafe skill path');
+      expect(JSON.stringify(body)).not.toContain(skillsDir);
+      expect(JSON.stringify(body)).not.toContain(outsideContext);
     });
   });
 });

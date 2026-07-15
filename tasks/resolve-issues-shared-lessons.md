@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Skill installer path hardening review fixes
+- For installer path hardening, guard every public surface that can surface unsafe-path errors, not just install routes; context/read/write routes should return generic unsafe-path messages and tests should assert absolute roots/targets are not leaked.
+- If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly: revalidate the missing root's parent before `mkdir`, reject symlinked/repointed parents, then recheck the recreated root before creating child directories.
+- When Codex reaches the configured review-invocation cap with new findings, fix/reply/resolve and stop for explicit approval before triggering another review; do not merge on stale clean signals after the head changed.
+
 ## 2026-07-15 — Beast process cleanup review fixes
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
