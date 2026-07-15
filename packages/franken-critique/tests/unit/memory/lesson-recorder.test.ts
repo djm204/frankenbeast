@@ -800,6 +800,8 @@ describe('LessonRecorder', () => {
     expect(corrected.correctionApplied).toBe(
       'Require explicit human validation before promoting inferred learning signals.',
     );
+    expect(corrected.contradictionReport).toBeUndefined();
+    expect(corrected.testTraceability).toBeUndefined();
     expect(corrected.feedbackWeighting).toMatchObject({
       primarySource: 'explicit-user-correction',
       totalScore: -110,
@@ -815,7 +817,27 @@ describe('LessonRecorder', () => {
     });
     expect(isLessonApplicable(corrected)).toBe(false);
 
-    const approved = applyHumanFeedbackToLesson(lesson, {
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-approval',
+        reason: 'Missing audit evidence must not promote a lesson.',
+        observedAt: '2026-07-12T01:30:00.000Z',
+        evidence: [],
+      }),
+    ).toThrow('Explicit lesson approval requires at least one evidence item.');
+
+    const quarantinedCandidate = quarantineLesson(lesson, {
+      trigger: 'repeated-failure-threshold',
+      reason: 'Repeated failures paused this candidate before explicit approval.',
+      quarantinedAt: '2026-07-12T01:45:00.000Z',
+      evidence: [
+        {
+          kind: 'failed-regression',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+    });
+    const approved = applyHumanFeedbackToLesson(quarantinedCandidate, {
       source: 'explicit-user-approval',
       reason: 'User approved this lesson for reuse after reviewing the evidence.',
       observedAt: '2026-07-12T02:00:00.000Z',

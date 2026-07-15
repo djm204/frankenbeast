@@ -261,7 +261,10 @@ export function applyHumanFeedbackToLesson(
 
   if (request.source === 'explicit-user-correction') {
     const revisedLesson = request.revisedCorrectionApplied
-      ? { ...lesson, correctionApplied: request.revisedCorrectionApplied }
+      ? removeStaleLessonValidation({
+          ...lesson,
+          correctionApplied: request.revisedCorrectionApplied,
+        })
       : lesson;
     return {
       ...quarantineLesson(revisedLesson, {
@@ -274,13 +277,27 @@ export function applyHumanFeedbackToLesson(
     };
   }
 
-  const { experimentSandbox, ...lessonWithoutSandbox } = lesson;
+  if (request.evidence.length === 0) {
+    throw new RangeError(
+      'Explicit lesson approval requires at least one evidence item.',
+    );
+  }
+  const { experimentSandbox, quarantine, ...lessonWithoutBlocks } = lesson;
   void experimentSandbox;
+  void quarantine;
   return {
-    ...lessonWithoutSandbox,
+    ...lessonWithoutBlocks,
     lifecycleStatus: 'active',
     feedbackWeighting,
   };
+}
+
+function removeStaleLessonValidation(lesson: CritiqueLesson): CritiqueLesson {
+  const { contradictionReport, testTraceability, ...lessonWithoutValidation } =
+    lesson;
+  void contradictionReport;
+  void testTraceability;
+  return lessonWithoutValidation;
 }
 
 export function isLessonApplicable(lesson: CritiqueLesson): boolean {
