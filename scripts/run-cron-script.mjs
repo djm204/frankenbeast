@@ -53,7 +53,7 @@ function appendTail(current, chunk) {
 }
 
 function appendRedactedTail(current, chunk) {
-  return appendTail(current, redactSensitiveText(chunk));
+  return appendTail('', redactSensitiveText(`${current}${chunk}`));
 }
 
 function countTrailingBackslashes(value, carry = 0) {
