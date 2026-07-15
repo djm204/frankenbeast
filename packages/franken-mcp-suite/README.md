@@ -187,7 +187,7 @@ sensitive payloads into logs or issue comments.
 
 ## Combined server
 
-`fbeast-mcp` runs all 22 tools in a single MCP server process.
+`fbeast-mcp` runs all 23 tools in a single MCP server process.
 
 ## Tool argument shape hardening
 
