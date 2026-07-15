@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Cron wrapper Codex closeout
+- Cron script wrappers that emit structured failure envelopes need regression coverage for quoted/escaped secret values in both stderr and argv snippets, full Authorization schemes, descendant cleanup after parent termination, and long stderr-drain timers; old inline comments can be superseded only after pushing, resolving the exact Codex threads, and obtaining a fresh current-head review.
+
 ## 2026-07-15 — Graceful shutdown drain gates
 - For daemon drain modes, make one outer mutation-admission middleware own both the draining check and in-flight counter; nested route-specific re-checks can reject already-admitted requests after shutdown begins.
 - If shutdown times out waiting for in-flight mutations, do not release ownership markers such as pid files until mutations are quiesced or definitively aborted; otherwise a replacement daemon can start while the old handler still mutates shared state.
