@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -220,6 +220,88 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
     })),
   };
 }
+
+
+describe('duplicate worker-card process detector', () => {
+  it('reports duplicate live process ownership for the same worker card with structured guidance', () => {
+    const findings = detectDuplicateWorkerCardProcesses([
+      {
+        cardId: 't_worker_1',
+        pid: 4202,
+        runId: 'run-10',
+        issueNumber: 1809,
+        owner: 'worker-a',
+        status: 'running',
+        startedAt: '2026-07-15T09:00:00.000Z',
+        lastHeartbeatAt: '2026-07-15T09:10:00.000Z',
+      },
+      {
+        cardId: 't_worker_1',
+        pid: 4201,
+        runId: 'run-9',
+        issueNumber: 1809,
+        owner: 'worker-b',
+        status: 'claimed',
+        startedAt: '2026-07-15T09:05:00.000Z',
+        lastHeartbeatAt: '2026-07-15T09:12:00.000Z',
+      },
+      { cardId: 't_worker_2', pid: 4300, runId: 'run-11', issueNumber: 1810, owner: 'worker-c', status: 'running' },
+    ]);
+
+    expect(findings).toEqual([
+      {
+        cardId: 't_worker_1',
+        severity: 'warning',
+        processCount: 2,
+        pids: [4201, 4202],
+        runIds: ['run-10', 'run-9'],
+        issueNumbers: [1809],
+        owners: ['worker-a', 'worker-b'],
+        statuses: ['claimed', 'running'],
+        newestStartedAt: '2026-07-15T09:05:00.000Z',
+        lastHeartbeatAt: '2026-07-15T09:12:00.000Z',
+        message: 'Worker card t_worker_1 has 2 live processes: 4201, 4202',
+        guidance: 'Keep one live owner for the worker card, stop or park the duplicate process, then record the surviving PID/run id in PM/liveness output.',
+      },
+    ]);
+  });
+
+
+
+  it('keeps blocked live workers visible while ignoring stopped or deleted cards', () => {
+    const findings = detectDuplicateWorkerCardProcesses([
+      { cardId: 't_blocked', pid: 5101, status: 'blocked', alive: true, runId: 'run-blocked-a' },
+      { cardId: 't_blocked', pid: 5102, status: 'blocked', alive: true, runId: 'run-blocked-b' },
+      { cardId: 't_stopped', pid: 5103, status: 'stopped' },
+      { cardId: 't_stopped', pid: 5104, status: 'deleted' },
+    ]);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_blocked',
+      pids: [5101, 5102],
+      runIds: ['run-blocked-a', 'run-blocked-b'],
+      statuses: ['blocked'],
+    });
+  });
+
+  it('ignores terminal, dead, invalid, and repeated-PID snapshots so false positives stay quiet', () => {
+    const findings = detectDuplicateWorkerCardProcesses([
+      { cardId: 't_complete', pid: 5001, status: 'completed' },
+      { cardId: 't_complete', pid: 5002, status: 'done' },
+      { cardId: 't_stopped', pid: 5011, status: 'stopped' },
+      { cardId: 't_stopped', pid: 5012, status: 'deleted' },
+      { cardId: 't_dead', pid: 5003, alive: false, status: 'running' },
+      { cardId: 't_dead', pid: 5004, alive: false, status: 'claimed' },
+      { cardId: 't_same_pid', pid: 5005, status: 'running' },
+      { cardId: 't_same_pid', pid: 5005, status: 'claimed' },
+      { cardId: '', pid: 5006, status: 'running' },
+      { cardId: 't_invalid_pid', pid: 0, status: 'running' },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+});
 
 describe('degraded-mode worker routing policy', () => {
   it('defers fresh worker starts during degraded backpressure with operator guidance', () => {
