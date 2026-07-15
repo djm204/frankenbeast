@@ -532,6 +532,26 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).not.toContain('false');
   });
 
+  it('redacts array-valued JSON secret values', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'array-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"password":["array-secret"],"tokens":["first","second"],"safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"password":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"tokens":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('array-secret');
+    expect(JSON.stringify(envelope)).not.toContain('first');
+    expect(JSON.stringify(envelope)).not.toContain('second');
+  });
+
   it('redacts split Authorization header argv tokens', () => {
     const result = runCronScript([
       '--name',
@@ -550,6 +570,30 @@ describe('cron script error envelope runner', () => {
     expect(envelope.command).toContain('Authorization:');
     expect(JSON.stringify(envelope)).not.toContain('Bearer');
     expect(JSON.stringify(envelope)).not.toContain('argv-bearer-secret');
+  });
+
+  it('redacts split secret header argv tokens beyond Authorization', () => {
+    const result = runCronScript([
+      '--name',
+      'split-secret-header-argv',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(9)',
+      'Proxy-Authorization:',
+      'Bearer',
+      'proxy-secret',
+      'Private-Token:',
+      'private-token-secret',
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('Proxy-Authorization:');
+    expect(envelope.command).toContain('Private-Token:');
+    expect(JSON.stringify(envelope)).not.toContain('Bearer');
+    expect(JSON.stringify(envelope)).not.toContain('proxy-secret');
+    expect(JSON.stringify(envelope)).not.toContain('private-token-secret');
   });
 
   it('carries JSON escape state across stderr chunks', () => {

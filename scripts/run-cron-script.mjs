@@ -69,6 +69,20 @@ function processGroupAlive(pid) {
     return false;
   }
   try {
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) {
+        continue;
+      }
+      const memberPid = Number.parseInt(entry, 10);
+      if (processGroupId(memberPid) === pid && processAlive(memberPid)) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    // Fall back to process-group probing on non-/proc platforms or races.
+  }
+  try {
     process.kill(-pid, 0);
     return true;
   } catch (error) {
@@ -210,15 +224,26 @@ function isAuthScheme(value) {
   return /^(?:Bearer|Basic|Digest|ApiKey|Token)$/i.test(value);
 }
 
+function isSecretHeaderName(value) {
+  return /^(?:authorization|proxy-authorization|x-api-key|api-key|x-auth-token|x-access-token|private-token|access-token|token|secret):\s*$/i.test(value);
+}
+
+function redactedHeaderLabel(value) {
+  const colonIndex = value.indexOf(':');
+  return colonIndex === -1 ? '[REDACTED]' : value.slice(0, colonIndex + 1);
+}
+
 function redactSensitiveText(value) {
   const raw = typeof value === 'string' ? value : String(value ?? '');
   return raw
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/-----BEGIN PRIVATE [\s\S]*?-----END PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)\[[\s\S]*?\]/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(?!["'\[])([^,}\]\s][^,}\]]*)/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(["'])([^"']*)$/gi, '$1$2[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*\\["'])(.*?)(\\["'])/gi, '$1[REDACTED]$3')
+    .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*)\[[\s\S]*?\]/gi, '$1[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*)(?!\\["']|\[)([^,}\]\s][^,}\]]*)/gi, '$1[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*\\["'])([\s\S]*)$/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+([^\s"']+)/gi, '$1$2 [REDACTED]')
@@ -260,16 +285,16 @@ function redactCommand(command) {
       continue;
     }
 
-    if (/^authorization:\s*$/i.test(part)) {
-      redacted.push(part.endsWith(':') ? 'Authorization:' : '[REDACTED]');
-      redactNextParts = 2;
+    if (isSecretHeaderName(part)) {
+      redacted.push(redactedHeaderLabel(part));
+      redactNextParts = /authorization/i.test(part) ? 2 : 1;
       continue;
     }
 
-    const authorizationHeaderMatch = /^(Authorization\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)$/i.exec(part);
-    if (authorizationHeaderMatch) {
-      redacted.push(`${authorizationHeaderMatch[1]}[REDACTED]`);
-      redactNextParts = 1;
+    const secretHeaderWithSchemeMatch = /^((?:Authorization|Proxy-Authorization|X-Api-Key|Api-Key|X-Auth-Token|X-Access-Token|Private-Token|Access-Token|Token|Secret)\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)?$/i.exec(part);
+    if (secretHeaderWithSchemeMatch) {
+      redacted.push(`${secretHeaderWithSchemeMatch[1]}[REDACTED]`);
+      redactNextParts = secretHeaderWithSchemeMatch[2] ? 1 : 0;
       continue;
     }
 
@@ -444,6 +469,20 @@ async function runCronScript({ name, recoverable, command }) {
       }
     };
 
+    const parentTerminationProcessesAlive = () => (
+      processGroupAlive(parentTerminationProcessGroup) || trackedParentTerminationPids().some(processAlive)
+    );
+
+    const scheduleParentTerminationRecheck = () => {
+      if (!forceKillTimer || exitDrainTimer) {
+        return;
+      }
+      exitDrainTimer = setTimeout(() => {
+        exitDrainTimer = null;
+        finishChildResult(exitResult?.code ?? null, exitResult?.signal ?? null);
+      }, Math.min(EXIT_STDERR_DRAIN_MS, 100));
+    };
+
     function handleParentSignal(signal) {
       if (settled || parentTerminationExitCode !== null) {
         return;
@@ -481,14 +520,15 @@ async function runCronScript({ name, recoverable, command }) {
         return;
       }
       if (parentTerminationExitCode !== null) {
-        emitParentTerminationEnvelope();
         if (forceKillTimer) {
-          if (processGroupAlive(parentTerminationProcessGroup) || trackedParentTerminationPids().some(processAlive)) {
+          if (parentTerminationProcessesAlive()) {
+            scheduleParentTerminationRecheck();
             return;
           }
           clearTimeout(forceKillTimer);
           forceKillTimer = null;
         }
+        emitParentTerminationEnvelope();
         finish(parentTerminationExitCode);
         return;
       }
@@ -513,6 +553,11 @@ async function runCronScript({ name, recoverable, command }) {
     const scheduleExitDrainFinish = () => {
       if (exitDrainTimer) {
         clearTimeout(exitDrainTimer);
+        exitDrainTimer = null;
+      }
+      if (parentTerminationExitCode !== null && forceKillTimer) {
+        scheduleParentTerminationRecheck();
+        return;
       }
       const drainMs = exitResult?.code === 0 && !exitResult?.signal ? Math.min(EXIT_STDERR_DRAIN_MS, 250) : EXIT_STDERR_DRAIN_MS;
       exitDrainTimer = setTimeout(() => {
