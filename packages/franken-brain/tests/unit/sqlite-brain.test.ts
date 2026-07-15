@@ -1407,15 +1407,22 @@ describe('SqliteBrain', () => {
       expect(neverStored.value).toBe('[never-store-redacted]');
       const db = (brain as unknown as { db: Database.Database }).db;
       const candidateRow = db
-        .prepare(`SELECT value FROM memory_review_candidates WHERE id = ?`)
-        .get(candidate.id) as { value: string };
+        .prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates WHERE id = ?`)
+        .get(candidate.id) as { value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null };
       const suppressionRow = db
-        .prepare(`SELECT value FROM memory_review_suppressions`)
-        .get() as { value: string };
+        .prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`)
+        .get() as { value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null };
       expect(candidateRow.value).toBe(JSON.stringify('[never-store-redacted]'));
       expect(suppressionRow.value).toBe(JSON.stringify('[never-store-redacted]'));
       expect(candidateRow.value).not.toContain(secret);
       expect(suppressionRow.value).not.toContain(secret);
+      for (const row of [candidateRow, suppressionRow]) {
+        expect(row.source).toBe('[never-store-redacted]');
+        expect(row.evidence_id).toBeNull();
+        expect(row.reason).toBe('[never-store-redacted]');
+        expect(row.reviewer).toBeNull();
+        expect(row.note).toBeNull();
+      }
     });
 
     it('does not let stale rejection decisions overwrite settled candidates', () => {
@@ -1566,6 +1573,41 @@ describe('SqliteBrain', () => {
       expect(
         brain.memoryReview.provenanceFor('working', 'user.preference.sensitive'),
       ).toBeNull();
+    });
+
+    it('redacts review payloads that match right-to-forget selectors', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'contact.review-candidate',
+        value: `Candidate contains ${secret}`,
+        source: 'chat:turn-secret',
+        evidenceId: `evidence-${secret}`,
+        confidence: 0.9,
+        reason: `Review reason mentions ${secret}`,
+      });
+      brain.memoryReview.reject(candidate.id, {
+        reviewer: `reviewer-${secret}`,
+        note: `note ${secret}`,
+      });
+
+      const report = brain.rightToForget({ query: secret });
+
+      expect(report.remainingReferences).toBe(0);
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const rows = db.prepare(
+        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+      ).all() as Array<{ value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null }>;
+      expect(rows).toHaveLength(1);
+      for (const row of rows) {
+        expect(JSON.stringify(row)).not.toContain(secret);
+        expect(row.value).toBe(JSON.stringify('[never-store-redacted]'));
+        expect(row.source).toBe('[never-store-redacted]');
+        expect(row.evidence_id).toBeNull();
+        expect(row.reason).toBe('[never-store-redacted]');
+        expect(row.reviewer).toBeNull();
+        expect(row.note).toBeNull();
+      }
     });
 
     it('uses persisted value normalization when signing suppressions', () => {
