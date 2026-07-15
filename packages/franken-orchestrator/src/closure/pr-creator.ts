@@ -287,8 +287,6 @@ export class PrCreator {
       targetBranch = 'main';
     }
 
-    this.assertGitHubCapabilities(branch, options?.issueNumber, logger);
-
     if (!this.pushBranch(branch, logger)) {
       return null;
     }
@@ -301,6 +299,8 @@ export class PrCreator {
       logger?.info('PrCreator: PR already exists', { branch, url: existing[0]?.url });
       return null;
     }
+
+    this.assertGitHubCapabilities(branch, logger);
 
     // Gather git context for PR description
     const gitContext = this.gatherGitContext(targetBranch, logger);
@@ -374,7 +374,7 @@ export class PrCreator {
     }
   }
 
-  private assertGitHubCapabilities(branch: string, issueNumber?: number, logger?: ILogger): void {
+  private assertGitHubCapabilities(branch: string, logger?: ILogger): void {
     if (this.config.githubCapabilityCheck?.disabled === true) {
       return;
     }
@@ -386,10 +386,7 @@ export class PrCreator {
     }
 
     const required: GitHubRequiredCapabilities = {
-      repo: 'read',
-      contents: 'write',
       pullRequests: 'write',
-      ...(issueNumber != null ? { issues: 'write' as const } : {}),
       ...this.config.githubCapabilityCheck?.required,
     };
     const result = checkGitHubTokenCapabilities({
@@ -408,8 +405,7 @@ export class PrCreator {
         message: 'GitHub token capability preflight failed before push/PR creation.',
         action: [
           'Update the GitHub token or lane policy before retrying',
-          'required capabilities: repo read, contents write, pull-requests write',
-          issueNumber != null ? 'issues write' : undefined,
+          'required capability: pull-requests write',
         ].filter(Boolean).join('; '),
         branch,
         details: result,

@@ -422,7 +422,7 @@ describe('PrCreator argv subprocess safety', () => {
     expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
   });
 
-  it('runs GitHub token capability preflight before pushing to a GitHub remote', async () => {
+  it('runs GitHub token capability preflight before creating a PR on a GitHub remote', async () => {
     const calls: ExecCall[] = [];
     const exec = (command: string, args: readonly string[] = []): string => {
       calls.push({ command, args });
@@ -448,13 +448,15 @@ describe('PrCreator argv subprocess safety', () => {
     const userIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api -i /user');
     const repoIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api repos/djm204/frankenbeast');
     const pushIndex = calls.findIndex(c => c.command === 'git' && c.args.includes('push'));
+    const createIndex = calls.findIndex(c => c.command === 'gh' && c.args.includes('create'));
     expect(remoteIndex).toBeGreaterThanOrEqual(0);
+    expect(pushIndex).toBeGreaterThanOrEqual(0);
     expect(userIndex).toBeGreaterThan(remoteIndex);
     expect(repoIndex).toBeGreaterThan(userIndex);
-    expect(pushIndex).toBeGreaterThan(repoIndex);
+    expect(createIndex).toBeGreaterThan(repoIndex);
   });
 
-  it('fails capability preflight before push when required GitHub permissions are missing', async () => {
+  it('fails capability preflight before PR creation when required GitHub permissions are missing', async () => {
     const calls: ExecCall[] = [];
     const exec = (command: string, args: readonly string[] = []): string => {
       calls.push({ command, args });
@@ -464,6 +466,7 @@ describe('PrCreator argv subprocess safety', () => {
       if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
         return JSON.stringify({ permissions: { pull: true, push: false, triage: false, maintain: false, admin: false } });
       }
+      if (command === 'gh' && args.includes('list')) return '[]';
       return '';
     };
     const creator = new PrCreator(
@@ -477,7 +480,7 @@ describe('PrCreator argv subprocess safety', () => {
       action: expect.stringContaining('pull-requests write'),
       branch: 'feature/missing-capability',
     });
-    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
     expect(calls.some(c => c.command === 'gh' && c.args.includes('create'))).toBe(false);
   });
 

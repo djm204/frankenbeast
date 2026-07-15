@@ -8,6 +8,8 @@ export interface GitHubCapabilityEvidenceItem {
   readonly available: boolean;
   readonly level: GitHubCapabilityLevel;
   readonly source: string;
+  /** True only when evidence comes from token-specific OAuth scope data. */
+  readonly tokenSpecific: boolean;
 }
 
 export interface GitHubTokenCapabilityEvidence {
@@ -58,24 +60,39 @@ interface RepositoryPermissions {
   readonly admin?: boolean | undefined;
 }
 
+interface OAuthScopeReadResult {
+  readonly scopes: readonly string[];
+  readonly warning?: GitHubCapabilityIssue | undefined;
+}
+
+const UNAVAILABLE_ITEM: GitHubCapabilityEvidenceItem = {
+  available: false,
+  level: 'none',
+  source: 'unavailable',
+  tokenSpecific: false,
+};
+
 const EMPTY_EVIDENCE: GitHubTokenCapabilityEvidence = {
   oauthScopes: [],
-  repo: { available: false, level: 'none', source: 'unavailable' },
-  issues: { available: false, level: 'none', source: 'unavailable' },
-  pullRequests: { available: false, level: 'none', source: 'unavailable' },
-  contents: { available: false, level: 'none', source: 'unavailable' },
+  repo: UNAVAILABLE_ITEM,
+  issues: UNAVAILABLE_ITEM,
+  pullRequests: UNAVAILABLE_ITEM,
+  contents: UNAVAILABLE_ITEM,
 };
 
 const TOKEN_RE = /\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9_.-]{12,})\b/g;
 
 export function checkGitHubTokenCapabilities(options: GitHubTokenCapabilityCheckOptions): GitHubTokenCapabilityCheckResult {
   try {
-    const scopes = readOauthScopes(options.exec);
+    const scopeRead = readOauthScopes(options.exec);
     const repoPermissions = readRepositoryPermissions(options.exec, options.repo);
-    const evidence = buildEvidence(scopes, repoPermissions);
+    const evidence = buildEvidence(scopeRead.scopes, repoPermissions);
     const missingIssues = collectMissingRequiredCapabilities(evidence, options.required ?? {});
     const excessiveIssues = collectExcessiveWriteCapabilities(evidence, options.lowRiskPolicy);
-    const warnings = options.lowRiskPolicy?.mode === 'warn' ? excessiveIssues : [];
+    const warnings = [
+      ...(scopeRead.warning ? [scopeRead.warning] : []),
+      ...(options.lowRiskPolicy?.mode === 'warn' ? excessiveIssues : []),
+    ];
     const failures = options.lowRiskPolicy?.mode === 'fail'
       ? [...missingIssues, ...excessiveIssues]
       : missingIssues;
@@ -93,29 +110,43 @@ export function checkGitHubTokenCapabilities(options: GitHubTokenCapabilityCheck
       evidence: EMPTY_EVIDENCE,
       issues: [{
         code: 'github-api-unavailable',
-        message: `Unable to inspect GitHub token capabilities: ${message}`,
+        message: `Unable to inspect GitHub repository capabilities: ${message}`,
       }],
       warnings: [],
     };
   }
 }
 
-function readOauthScopes(exec: GitHubCapabilityExec): readonly string[] {
-  const output = exec('gh', ['api', '-i', '/user']);
+function readOauthScopes(exec: GitHubCapabilityExec): OAuthScopeReadResult {
+  let output: string;
+  try {
+    output = exec('gh', ['api', '-i', '/user']);
+  } catch (error) {
+    return {
+      scopes: [],
+      warning: {
+        code: 'github-api-unavailable',
+        message: `OAuth scope headers were unavailable from /user; continuing with repository capability evidence only. ${sanitizeErrorMessage(error)}`,
+      },
+    };
+  }
+
   const headers = output.split(/\r?\n\r?\n/, 1)[0] ?? '';
   for (const line of headers.split(/\r?\n/)) {
     const separator = line.indexOf(':');
     if (separator < 0) continue;
     const name = line.slice(0, separator).trim().toLowerCase();
     if (name !== 'x-oauth-scopes') continue;
-    return line
-      .slice(separator + 1)
-      .split(',')
-      .map(scope => scope.trim())
-      .filter(Boolean)
-      .sort();
+    return {
+      scopes: line
+        .slice(separator + 1)
+        .split(',')
+        .map(scope => scope.trim())
+        .filter(Boolean)
+        .sort(),
+    };
   }
-  return [];
+  return { scopes: [] };
 }
 
 function readRepositoryPermissions(exec: GitHubCapabilityExec, repo: string): RepositoryPermissions {
@@ -125,35 +156,80 @@ function readRepositoryPermissions(exec: GitHubCapabilityExec, repo: string): Re
 }
 
 function buildEvidence(scopes: readonly string[], permissions: RepositoryPermissions): GitHubTokenCapabilityEvidence {
-  const hasWrite = permissions.admin === true || permissions.maintain === true || permissions.push === true;
-  const hasRead = hasWrite || permissions.triage === true || permissions.pull === true;
-  const hasRepoScope = scopes.includes('repo');
-  const hasPublicRepoScope = scopes.includes('public_repo');
-  const fallbackRead = hasRepoScope || hasPublicRepoScope;
-  const fallbackWrite = hasRepoScope;
+  const hasClassicRepoScope = scopes.includes('repo');
+  const hasClassicPublicRepoScope = scopes.includes('public_repo');
+  const scopesObserved = scopes.length > 0;
+  const repoRoleRead = permissions.admin === true
+    || permissions.maintain === true
+    || permissions.push === true
+    || permissions.triage === true
+    || permissions.pull === true;
+  const repoRoleWrite = permissions.admin === true || permissions.maintain === true || permissions.push === true;
+  const repoRoleLevel: GitHubCapabilityLevel = repoRoleWrite ? 'write' : repoRoleRead ? 'read' : 'none';
 
   return {
     oauthScopes: scopes,
-    repo: buildItem(hasRead, hasWrite, fallbackRead, fallbackWrite, 'repository.permissions.pull', 'repository.permissions.push'),
-    issues: buildItem(hasRead, hasWrite, fallbackRead, fallbackWrite, 'repository.permissions.pull', 'repository.permissions.push'),
-    pullRequests: buildItem(hasRead, hasWrite, fallbackRead, fallbackWrite, 'repository.permissions.pull', 'repository.permissions.push'),
-    contents: buildItem(hasRead, hasWrite, fallbackRead, fallbackWrite, 'repository.permissions.pull', 'repository.permissions.push'),
+    repo: tokenAwareItem({
+      scopeWrite: hasClassicRepoScope,
+      scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope || repoRoleRead,
+      scopesObserved,
+      roleLevel: repoRoleLevel,
+      source: repoRoleRead ? 'repository access check' : 'not exposed by GitHub API response',
+    }),
+    issues: tokenAwareItem({
+      scopeWrite: hasClassicRepoScope,
+      scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
+      scopesObserved,
+      roleLevel: repoRoleLevel,
+      source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
+    }),
+    pullRequests: tokenAwareItem({
+      scopeWrite: hasClassicRepoScope,
+      scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
+      scopesObserved,
+      roleLevel: repoRoleLevel,
+      source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
+    }),
+    contents: tokenAwareItem({
+      scopeWrite: hasClassicRepoScope,
+      scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
+      scopesObserved,
+      roleLevel: repoRoleLevel,
+      source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
+    }),
   };
 }
 
-function buildItem(
-  permissionRead: boolean,
-  permissionWrite: boolean,
-  fallbackRead: boolean,
-  fallbackWrite: boolean,
-  readSource: string,
-  writeSource: string,
-): GitHubCapabilityEvidenceItem {
-  if (permissionWrite) return { available: true, level: 'write', source: writeSource };
-  if (permissionRead) return { available: true, level: 'read', source: readSource };
-  if (fallbackWrite) return { available: true, level: 'write', source: 'x-oauth-scopes: repo' };
-  if (fallbackRead) return { available: true, level: 'read', source: 'x-oauth-scopes: public_repo' };
-  return { available: false, level: 'none', source: 'not exposed by GitHub API response' };
+function tokenAwareItem(options: {
+  readonly scopeWrite: boolean;
+  readonly scopeRead: boolean;
+  readonly scopesObserved: boolean;
+  readonly roleLevel: GitHubCapabilityLevel;
+  readonly source: string;
+}): GitHubCapabilityEvidenceItem {
+  if (options.scopeWrite) {
+    return { available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true };
+  }
+  if (options.scopeRead) {
+    return {
+      available: true,
+      level: options.roleLevel === 'write' ? 'write' : 'read',
+      source: options.source,
+      tokenSpecific: false,
+    };
+  }
+  if (options.scopesObserved) {
+    return {
+      available: false,
+      level: 'none',
+      source: 'x-oauth-scopes lacks repo/public_repo',
+      tokenSpecific: true,
+    };
+  }
+  if (options.roleLevel !== 'none') {
+    return { available: true, level: options.roleLevel, source: options.source, tokenSpecific: false };
+  }
+  return { available: false, level: 'none', source: options.source, tokenSpecific: false };
 }
 
 function collectMissingRequiredCapabilities(
@@ -161,7 +237,7 @@ function collectMissingRequiredCapabilities(
   required: GitHubRequiredCapabilities,
 ): readonly GitHubCapabilityIssue[] {
   return (Object.entries(required) as Array<[GitHubTokenCapability, Exclude<GitHubCapabilityLevel, 'none'>]>)
-    .filter(([capability, level]) => !levelSatisfies(evidence[capability].level, level))
+    .filter(([capability, level]) => isDefinitivelyMissing(evidence[capability], level))
     .map(([capability, level]) => ({
       code: 'missing-capability' as const,
       capability,
@@ -179,13 +255,21 @@ function collectExcessiveWriteCapabilities(
   const allowed = new Set(policy.allowedWriteCapabilities);
   const capabilities: readonly GitHubTokenCapability[] = ['repo', 'issues', 'pullRequests', 'contents'];
   return capabilities
-    .filter(capability => evidence[capability].level === 'write' && !allowed.has(capability))
+    .filter(capability => evidence[capability].tokenSpecific && evidence[capability].level === 'write' && !allowed.has(capability))
     .map(capability => ({
       code: 'excessive-write-permission' as const,
       capability,
       actual: 'write' as const,
       message: `GitHub token exposes write capability for ${capability}, which this low-risk lane does not allow.`,
     }));
+}
+
+function isDefinitivelyMissing(
+  evidence: GitHubCapabilityEvidenceItem,
+  required: Exclude<GitHubCapabilityLevel, 'none'>,
+): boolean {
+  if (levelSatisfies(evidence.level, required)) return false;
+  return evidence.tokenSpecific || evidence.level === 'none';
 }
 
 function levelSatisfies(actual: GitHubCapabilityLevel, required: Exclude<GitHubCapabilityLevel, 'none'>): boolean {

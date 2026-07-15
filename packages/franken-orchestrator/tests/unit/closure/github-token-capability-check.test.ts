@@ -38,10 +38,10 @@ describe('GitHub token capability check', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.evidence.repo).toEqual({ available: true, level: 'write', source: 'repository.permissions.push' });
-    expect(result.evidence.issues).toEqual({ available: true, level: 'write', source: 'repository.permissions.push' });
-    expect(result.evidence.pullRequests).toEqual({ available: true, level: 'write', source: 'repository.permissions.push' });
-    expect(result.evidence.contents).toEqual({ available: true, level: 'write', source: 'repository.permissions.push' });
+    expect(result.evidence.repo).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
+    expect(result.evidence.issues).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
+    expect(result.evidence.pullRequests).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
+    expect(result.evidence.contents).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
     expect(result.evidence.oauthScopes).toEqual(['repo', 'workflow']);
     expect(JSON.stringify(result)).not.toContain('ghp_should_not_leak');
   });
@@ -88,25 +88,29 @@ describe('GitHub token capability check', () => {
     ]));
   });
 
-  it('turns GitHub API auth failures into sanitized capability issues', () => {
+  it('continues when OAuth scopes are unavailable for installation tokens', () => {
     const exec: GitHubCapabilityExec = (command, args) => {
       if (command === 'gh' && args.join(' ') === 'api -i /user') {
         const error = new Error('Command failed: gh api -i /user') as Error & { stderr: string; status: number };
-        error.stderr = 'HTTP 401: Bad credentials for token ghp_should_not_leak';
+        error.stderr = 'HTTP 403: Resource not accessible by integration for token ghp_should_not_leak';
         error.status = 1;
         throw error;
       }
-      throw new Error('unexpected command');
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ permissions: { pull: true, push: true, admin: false, maintain: false, triage: true } });
+      }
+      throw new Error(`unexpected args ${args.join(' ')}`);
     };
 
     const result = checkGitHubTokenCapabilities({
       repo: 'djm204/frankenbeast',
       exec,
-      required: { repo: 'read' },
+      required: { pullRequests: 'write' },
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.issues[0]).toEqual(expect.objectContaining({ code: 'github-api-unavailable' }));
+    expect(result.ok).toBe(true);
+    expect(result.issues).toHaveLength(0);
+    expect(result.warnings[0]).toEqual(expect.objectContaining({ code: 'github-api-unavailable' }));
     expect(JSON.stringify(result)).not.toContain('ghp_should_not_leak');
     expect(JSON.stringify(result)).toContain('<redacted>');
   });
