@@ -38,10 +38,10 @@ describe('GitHub token capability check', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.evidence.repo).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
-    expect(result.evidence.issues).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
-    expect(result.evidence.pullRequests).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
-    expect(result.evidence.contents).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true });
+    expect(result.evidence.repo).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
+    expect(result.evidence.issues).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
+    expect(result.evidence.pullRequests).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
+    expect(result.evidence.contents).toEqual({ available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true });
     expect(result.evidence.oauthScopes).toEqual(['repo', 'workflow']);
     expect(JSON.stringify(result)).not.toContain('ghp_should_not_leak');
   });

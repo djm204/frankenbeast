@@ -49,6 +49,17 @@ export interface PrCreateOptions {
   readonly issueNumber?: number | undefined;
 }
 
+interface PrBodyInfo {
+  readonly title: string;
+  readonly body: string;
+}
+
+interface GitHubRemoteInfo {
+  readonly repo: string;
+  readonly url: string;
+  readonly tokenBackedPush: boolean;
+}
+
 /**
  * Executes a subprocess as a binary name plus a discrete argument array.
  * Arguments are never concatenated into a shell string, so branch, remote and
@@ -379,18 +390,19 @@ export class PrCreator {
       return;
     }
 
-    const repo = this.resolveGitHubRepo(logger);
-    if (!repo) {
+    const remoteInfo = this.resolveGitHubRemote(logger);
+    if (!remoteInfo) {
       logger?.warn('PrCreator: skipped GitHub token capability preflight because the GitHub repo could not be resolved');
       return;
     }
 
     const required: GitHubRequiredCapabilities = {
+      ...(remoteInfo.tokenBackedPush ? { contents: 'write' as const } : {}),
       pullRequests: 'write',
       ...this.config.githubCapabilityCheck?.required,
     };
     const result = checkGitHubTokenCapabilities({
-      repo,
+      repo: remoteInfo.repo,
       exec: this.exec,
       required,
       lowRiskPolicy: this.config.githubCapabilityCheck?.lowRiskPolicy,
@@ -403,25 +415,44 @@ export class PrCreator {
     if (!result.ok) {
       throw new PrCreationRequiredActionError({
         message: 'GitHub token capability preflight failed before push/PR creation.',
-        action: [
-          'Update the GitHub token or lane policy before retrying',
-          'required capability: pull-requests write',
-        ].filter(Boolean).join('; '),
+        action: this.formatCapabilityFailureAction(result, required),
         branch,
         details: result,
       });
     }
 
     logger?.info('PrCreator: GitHub token capability preflight passed', {
-      repo,
+      repo: remoteInfo.repo,
       evidence: result.evidence,
     });
   }
 
-  private resolveGitHubRepo(logger?: ILogger): string | null {
+  private resolveGitHubRemote(logger?: ILogger): GitHubRemoteInfo | null {
+    const configured = this.config.remote.trim();
+    const configuredRepo = parseGitHubOwnerRepo(configured);
+    if (configuredRepo) {
+      return { repo: configuredRepo, url: configured, tokenBackedPush: isHttpsGitHubRemote(configured) };
+    }
+
     const remoteUrl = this.safeExec('git', ['remote', 'get-url', this.config.remote], logger)?.trim();
     if (!remoteUrl) return null;
-    return parseGitHubOwnerRepo(remoteUrl);
+    const repo = parseGitHubOwnerRepo(remoteUrl);
+    if (!repo) return null;
+    return { repo, url: remoteUrl, tokenBackedPush: isHttpsGitHubRemote(remoteUrl) };
+  }
+
+  private formatCapabilityFailureAction(
+    result: ReturnType<typeof checkGitHubTokenCapabilities>,
+    required: GitHubRequiredCapabilities,
+  ): string {
+    if (result.issues.some(issue => issue.code === 'github-api-unavailable')) {
+      return 'Install/login gh or restore GitHub API connectivity before retrying';
+    }
+    const capabilityLabel = (capability: string): string => capability.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`);
+    const requiredText = Object.entries(required)
+      .map(([capability, level]) => `${capabilityLabel(capability)} ${level}`)
+      .join(', ');
+    return `Update the GitHub token or lane policy before retrying; required capabilities: ${requiredText}`;
   }
 
   private findExistingPr(branch: string, logger?: ILogger): Array<{ url?: string }> | null {
@@ -516,6 +547,10 @@ function parseGitHubOwnerRepo(remoteUrl: string): string | null {
   const match = remoteUrl.match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
   if (!match) return null;
   return `${match[1]}/${match[2]}`;
+}
+
+function isHttpsGitHubRemote(remoteUrl: string): boolean {
+  return /^https?:\/\/github\.com\//i.test(remoteUrl.trim());
 }
 
 interface GitContext {

@@ -200,7 +200,7 @@ describe('PrCreator argv subprocess safety', () => {
   ])('accepts repository URL %s as a push remote', async (remote) => {
     const { exec, calls } = makeExecRecorder('feature/foo');
     const creator = new PrCreator(
-      { targetBranch: 'main', disabled: false, remote },
+      { targetBranch: 'main', disabled: false, remote, githubCapabilityCheck: { disabled: true } },
       exec,
     );
 

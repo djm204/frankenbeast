@@ -217,7 +217,10 @@ function tokenAwareItem(options: {
   readonly source: string;
 }): GitHubCapabilityEvidenceItem {
   if (options.scopeWrite) {
-    return { available: true, level: 'write', source: 'x-oauth-scopes: repo', tokenSpecific: true };
+    if (options.roleLevel === 'write') {
+      return { available: true, level: 'write', source: 'x-oauth-scopes: repo + repository write access', tokenSpecific: true };
+    }
+    return { available: true, level: options.roleLevel === 'read' ? 'read' : 'none', source: 'x-oauth-scopes: repo without repository write access', tokenSpecific: true };
   }
   if (options.scopeRead) {
     return {
@@ -260,7 +263,7 @@ function maybeProbeRequiredCapabilities(
 
 function probePullRequestWrite(exec: GitHubCapabilityExec, repositoryId?: string): boolean {
   if (!repositoryId) return false;
-  const query = 'mutation($repositoryId:ID!){createPullRequest(input:{repositoryId:$repositoryId,baseRefName:"__franken_capability_preflight_base__",headRefName:"__franken_capability_preflight_head__",title:"franken capability preflight",body:"preflight"}){pullRequest{id}}}';
+  const query = 'mutation($repositoryId:ID!){createPullRequest(input:{repositoryId:$repositoryId,baseRefName:"__franken_capability_preflight_base..invalid__",headRefName:"__franken_capability_preflight_head..invalid__",title:"franken capability preflight",body:"preflight"}){pullRequest{id}}}';
   try {
     exec('gh', ['api', 'graphql', '-f', `query=${query}`, '-f', `repositoryId=${repositoryId}`]);
     return true;
