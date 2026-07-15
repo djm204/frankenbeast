@@ -681,6 +681,59 @@ updates:
     expect(result.stderr).toContain("New critical/high dependency vulnerability");
   });
 
+  it("treats added advisories on an existing package finding as new", () => {
+    const state = writeSlaJson(
+      {
+        findings: [
+          {
+            key: "leftpad|high|<2.0.0|https://github.com/advisories/GHSA-leftpad-a",
+            package: "leftpad",
+            severity: "high",
+            advisoryKeys: ["https://github.com/advisories/GHSA-leftpad-a"],
+            firstSeen: "2026-06-01",
+          },
+        ],
+      },
+      "state.json",
+    );
+    const result = runVulnerabilitySlaReport(
+      {
+        metadata: { vulnerabilities: { high: 1, total: 1 } },
+        vulnerabilities: {
+          leftpad: {
+            severity: "high",
+            range: "<2.0.0",
+            nodes: ["node_modules/leftpad"],
+            fixAvailable: false,
+            via: [
+              { url: "https://github.com/advisories/GHSA-leftpad-a" },
+              { url: "https://github.com/advisories/GHSA-leftpad-b" },
+            ],
+          },
+        },
+      },
+      [
+        "--state",
+        state,
+        "--now",
+        "2026-07-15",
+        "--format",
+        "json",
+        "--fail-on-new-critical-high",
+      ],
+    );
+
+    expect(result.status).toBe(1);
+    const report = JSON.parse(result.stdout) as {
+      findings: Array<{ ageDays: number; firstSeen: string; isNew: boolean }>;
+    };
+    expect(report.findings[0]).toMatchObject({
+      ageDays: 44,
+      firstSeen: "2026-06-01",
+      isNew: true,
+    });
+  });
+
   it("fails closed when a requested SLA state file is missing", () => {
     const audit = writeSlaJson({
       metadata: { vulnerabilities: { high: 1, total: 1 } },
@@ -743,10 +796,13 @@ updates:
     expect(workflow).toContain("dependency-vulnerability-sla-state.json");
     expect(workflow).toContain("scripts/dependency-vulnerability-sla.mjs");
     expect(workflow).toContain("--fail-on-new-critical-high");
+    expect(workflow).toContain('if [ "$status" -eq 0 ]; then');
+    expect(workflow).toContain("if: success()");
     expect(
       workflow.indexOf("Dependency vulnerability SLA dashboard"),
     ).toBeLessThan(workflow.indexOf("npm run audit:dependencies"));
-    expect(workflow).toContain("npm run audit:dependencies -- --json");
+    expect(workflow).toContain('run: npm run audit:dependencies -- --json > "${RUNNER_TEMP}/audit.json"');
+    expect(workflow).not.toContain('npm run audit:dependencies -- --json > "${RUNNER_TEMP}/audit.json" || true');
     expect(workflow).toContain("npm run audit:security -- --json");
     expect(workflow).toContain("|| true");
     expect(workflow).toContain("npm run deps:outdated:major");

@@ -70,18 +70,22 @@ jobs:
           status=$?
           set -e
           node scripts/dependency-vulnerability-sla.mjs "${state_args[@]}" --format human --no-fail-on-sla
-          mv "$state.next" "$state"
+          if [ "$status" -eq 0 ]; then
+            mv "$state.next" "$state"
+          else
+            rm -f "$state.next"
+          fi
           exit "$status"
 
       - name: Save dependency vulnerability SLA state
-        if: always()
+        if: success()
         uses: actions/cache/save@v4
         with:
           path: .cache/dependency-vulnerability-sla-state.json
           key: dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
 
       - name: Dependency vulnerability audit
-        run: npm run audit:dependencies -- --json > "${RUNNER_TEMP}/audit.json" || true
+        run: npm run audit:dependencies -- --json > "${RUNNER_TEMP}/audit.json"
 
       - name: Dependency major-version freshness check
         run: npm run deps:outdated:major
