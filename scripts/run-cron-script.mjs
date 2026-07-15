@@ -330,15 +330,6 @@ async function runCronScript({ name, recoverable, command }) {
       return [...tracked];
     };
 
-    const hasLiveProcess = (pid) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (error) {
-        return error?.code !== 'ESRCH';
-      }
-    };
-
     const killTrackedParentTerminationProcesses = (signal) => {
       if (parentTerminationProcessGroup && process.platform !== 'win32') {
         try {
@@ -402,11 +393,7 @@ async function runCronScript({ name, recoverable, command }) {
       if (parentTerminationExitCode !== null) {
         emitParentTerminationEnvelope();
         if (forceKillTimer) {
-          if (processGroupAlive(parentTerminationProcessGroup)) {
-            return;
-          }
-          clearTimeout(forceKillTimer);
-          forceKillTimer = null;
+          return;
         }
         finish(parentTerminationExitCode);
         return;
