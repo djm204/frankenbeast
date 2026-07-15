@@ -4,6 +4,11 @@ import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
 import { commandFailureFromExecError } from '../errors/command-failure.js';
 import { completeWithCacheHint } from '../cache/cached-cli-llm-client.js';
+import {
+  checkGitHubTokenCapabilities,
+  type GitHubLowRiskCapabilityPolicy,
+  type GitHubRequiredCapabilities,
+} from './github-token-capability-check.js';
 
 export interface PrCreationRequiredActionErrorOptions {
   readonly message: string;
@@ -33,10 +38,26 @@ export interface PrCreatorConfig {
   readonly remote: string;
   readonly disableBranding?: boolean;
   readonly commitConvention?: 'conventional' | 'freeform';
+  readonly githubCapabilityCheck?: {
+    readonly disabled?: boolean;
+    readonly required?: GitHubRequiredCapabilities;
+    readonly lowRiskPolicy?: GitHubLowRiskCapabilityPolicy;
+  } | undefined;
 }
 
 export interface PrCreateOptions {
   readonly issueNumber?: number | undefined;
+}
+
+interface PrBodyInfo {
+  readonly title: string;
+  readonly body: string;
+}
+
+interface GitHubRemoteInfo {
+  readonly repo: string;
+  readonly url: string;
+  readonly tokenBackedPush: boolean;
 }
 
 /**
@@ -113,6 +134,7 @@ export class PrCreator {
       remote: config.remote ?? 'origin',
       disableBranding: config.disableBranding ?? false,
       commitConvention: config.commitConvention ?? 'conventional',
+      githubCapabilityCheck: config.githubCapabilityCheck,
     };
     this.exec = exec;
     this.llm = llm;
@@ -276,14 +298,17 @@ export class PrCreator {
       targetBranch = 'main';
     }
 
-    if (!this.pushBranch(branch, logger)) {
-      return null;
-    }
-
     const existing = this.findExistingPr(branch, logger);
     if (existing === null) {
       return null;
     }
+
+    this.assertGitHubCapabilities(branch, logger, { requirePullRequestsWrite: existing.length === 0 });
+
+    if (!this.pushBranch(branch, logger)) {
+      return null;
+    }
+
     if (existing.length > 0) {
       logger?.info('PrCreator: PR already exists', { branch, url: existing[0]?.url });
       return null;
@@ -331,7 +356,7 @@ export class PrCreator {
       }
       const failure = this.commandFailure('gh', 'gh pr create', error, { rawCommand: 'gh pr create' });
       if (isGhAuthFailure(error, failure)) {
-        throw buildGhAuthRequiredAction(branch, failure);
+        throw buildGhAuthRequiredAction(branch, failure, { branchPushed: true });
       }
       logger?.error('PrCreator: failed to create PR', failure);
       return null;
@@ -361,6 +386,79 @@ export class PrCreator {
     }
   }
 
+  private assertGitHubCapabilities(
+    branch: string,
+    logger?: ILogger,
+    options: { readonly requirePullRequestsWrite?: boolean } = {},
+  ): void {
+    if (this.config.githubCapabilityCheck?.disabled === true) {
+      return;
+    }
+
+    const remoteInfo = this.resolveGitHubRemote(logger);
+    if (!remoteInfo) {
+      logger?.warn('PrCreator: skipped GitHub token capability preflight because the GitHub repo could not be resolved');
+      return;
+    }
+
+    const required: GitHubRequiredCapabilities = {
+      ...(options.requirePullRequestsWrite === false ? {} : { pullRequests: 'write' as const }),
+      ...this.config.githubCapabilityCheck?.required,
+    };
+    const result = checkGitHubTokenCapabilities({
+      repo: remoteInfo.repo,
+      exec: this.exec,
+      required,
+      lowRiskPolicy: this.config.githubCapabilityCheck?.lowRiskPolicy,
+    });
+
+    for (const warning of result.warnings) {
+      logger?.warn('PrCreator: GitHub token capability preflight warning', warning);
+    }
+
+    if (!result.ok) {
+      throw new PrCreationRequiredActionError({
+        message: 'GitHub token capability preflight failed before push/PR creation.',
+        action: this.formatCapabilityFailureAction(result, required),
+        branch,
+        details: result,
+      });
+    }
+
+    logger?.info('PrCreator: GitHub token capability preflight passed', {
+      repo: remoteInfo.repo,
+      evidence: result.evidence,
+    });
+  }
+
+  private resolveGitHubRemote(logger?: ILogger): GitHubRemoteInfo | null {
+    const configured = this.config.remote.trim();
+    const configuredRepo = parseGitHubOwnerRepo(configured);
+    if (configuredRepo) {
+      return { repo: configuredRepo, url: configured, tokenBackedPush: isHttpsGitHubRemote(configured) };
+    }
+
+    const remoteUrl = this.safeExec('git', ['remote', 'get-url', this.config.remote], logger)?.trim();
+    if (!remoteUrl) return null;
+    const repo = parseGitHubOwnerRepo(remoteUrl);
+    if (!repo) return null;
+    return { repo, url: remoteUrl, tokenBackedPush: isHttpsGitHubRemote(remoteUrl) };
+  }
+
+  private formatCapabilityFailureAction(
+    result: ReturnType<typeof checkGitHubTokenCapabilities>,
+    required: GitHubRequiredCapabilities,
+  ): string {
+    if (result.issues.some(issue => issue.code === 'github-api-unavailable')) {
+      return 'Install/login gh or restore GitHub API connectivity before retrying';
+    }
+    const capabilityLabel = (capability: string): string => capability.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`);
+    const requiredText = Object.entries(required)
+      .map(([capability, level]) => `${capabilityLabel(capability)} ${level}`)
+      .join(', ');
+    return `Update the GitHub token or lane policy before retrying; required capabilities: ${requiredText}`;
+  }
+
   private findExistingPr(branch: string, logger?: ILogger): Array<{ url?: string }> | null {
     const args = ['pr', 'list', '--head', branch, '--json', 'url', '--limit', '1'];
     try {
@@ -376,7 +474,7 @@ export class PrCreator {
         rawCommand: formatCommand('gh', args),
       });
       if (isGhAuthFailure(error, failure)) {
-        throw buildGhAuthRequiredAction(branch, failure);
+        throw buildGhAuthRequiredAction(branch, failure, { branchPushed: false });
       }
       logger?.error('PrCreator: failed to list PRs', failure);
       return null;
@@ -447,6 +545,27 @@ function formatCaughtError(error: unknown): { error: string; name?: string | und
     return { error: error.message, name: error.name };
   }
   return { error: String(error) };
+}
+
+function parseGitHubOwnerRepo(remoteUrl: string): string | null {
+  const trimmed = remoteUrl.trim();
+  const scpLikeMatch = trimmed.match(/^(?:[^@/\s]+@)?github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpLikeMatch) return `${scpLikeMatch[1]}/${scpLikeMatch[2]}`;
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.hostname.toLowerCase() !== 'github.com') return null;
+  const pathMatch = url.pathname.match(/^\/([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+  if (!pathMatch) return null;
+  return `${pathMatch[1]}/${pathMatch[2]}`;
+}
+
+function isHttpsGitHubRemote(remoteUrl: string): boolean {
+  return /^https?:\/\/(?:[^@/\s]+@)?github\.com(?::\d+)?\//i.test(remoteUrl.trim());
 }
 
 interface GitContext {
@@ -693,7 +812,11 @@ function isGhAuthFailure(error: unknown, failure: { stdout?: string; stderr?: st
   return GH_AUTH_FAILURE_RE.test(text);
 }
 
-function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreationRequiredActionError {
+function buildGhAuthRequiredAction(
+  branch: string,
+  details: unknown,
+  options: { readonly branchPushed: boolean },
+): PrCreationRequiredActionError {
   const detailText = [
     stringifyError(details),
     readErrorText((details as { stderr?: unknown }).stderr),
@@ -703,12 +826,14 @@ function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreation
   const isActionsTokenFailure = /GH_TOKEN|GitHub Actions workflow/i.test(detailText);
   const isIntegrationPermissionFailure = /resource not accessible by (?:integration|personal access token)/i.test(detailText);
   const isActionsPrPermissionFailure = /GitHub Actions is not permitted to create or approve pull requests/i.test(detailText);
+  const retryTarget = options.branchPushed ? 'the pushed branch' : `branch ${branch}`;
+  const pushedNote = options.branchPushed ? `branch ${branch} is pushed.` : `branch ${branch} was not pushed.`;
   const action = isActionsTokenFailure || isIntegrationPermissionFailure || isActionsPrPermissionFailure
-    ? 'Set the `GH_TOKEN` environment variable with pull-request permissions, then retry PR creation for the pushed branch.'
-    : 'Run `gh auth login`, then retry PR creation for the pushed branch.';
+    ? `Set the \`GH_TOKEN\` environment variable with pull-request permissions, then retry PR creation for ${retryTarget}.`
+    : `Run \`gh auth login\`, then retry PR creation for ${retryTarget}.`;
   const message = isActionsTokenFailure || isIntegrationPermissionFailure || isActionsPrPermissionFailure
-    ? `PR not created: set \`GH_TOKEN\` with pull-request permissions for GitHub CLI; branch ${branch} is pushed.`
-    : `PR not created: run \`gh auth login\`; branch ${branch} is pushed.`;
+    ? `PR not created: set \`GH_TOKEN\` with pull-request permissions for GitHub CLI; ${pushedNote}`
+    : `PR not created: run \`gh auth login\`; ${pushedNote}`;
 
   return new PrCreationRequiredActionError({
     message,
