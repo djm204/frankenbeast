@@ -68,4 +68,33 @@ describe('memory access audit trail', () => {
 
     brain.close();
   });
+
+  it('audits denied learning writes without exposing raw selectors', () => {
+    const brain = new SqliteBrain(':memory:');
+
+    brain.rightToForget({ query: 'sensitive-learning-secret' });
+
+    expect(() => brain.episodic.recordLearning(
+      {
+        type: 'observation',
+        summary: 'sensitive-learning-secret should stay forgotten',
+        createdAt: new Date().toISOString(),
+      },
+      { key: 'learning-secret-key' },
+    )).toThrow(/right-to-forget/);
+
+    const deniedAudit = brain.accessAudit.list({ operation: 'episodic.recordLearning' });
+    expect(deniedAudit).toMatchObject([
+      {
+        operation: 'episodic.recordLearning',
+        store: 'episodic',
+        outcome: 'denied',
+      },
+    ]);
+    expect(deniedAudit[0]?.keyHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(deniedAudit)).not.toContain('learning-secret-key');
+    expect(JSON.stringify(deniedAudit)).not.toContain('sensitive-learning-secret');
+
+    brain.close();
+  });
 });

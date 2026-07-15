@@ -1427,6 +1427,16 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       return { recorded: true, key, cooldownMs };
     } catch (error) {
       this.db.exec('ROLLBACK');
+      this.audit?.({
+        operation: 'episodic.recordLearning',
+        store: 'episodic',
+        key,
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          cooldownMs,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
       throw error;
     }
   }
