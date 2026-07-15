@@ -17,6 +17,9 @@ function skillInstallErrorMessage(err: unknown): string {
       .map((issue) => `${issue.path.join('.') || 'config'}: ${issue.message}`)
       .join('; ');
   }
+  if (isUnsafeSkillPathError(err)) {
+    return 'Unsafe skill install path';
+  }
   return err instanceof Error ? err.message : 'Failed to install skill';
 }
 

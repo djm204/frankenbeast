@@ -301,6 +301,7 @@ export class SkillManager {
   exists(name: string): boolean {
     if (!SAFE_NAME.test(name)) return false;
     try {
+      this.assertSkillsRootStable();
       const skillDir = this.skillDirectoryPath(name);
       if (existsSync(skillDir)) {
         assertNoSymlink(skillDir, 'skill directory');

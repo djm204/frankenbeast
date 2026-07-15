@@ -185,7 +185,9 @@ describe('Skill API routes', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error).toContain('Unsafe skill path');
+      expect(body.error).toBe('Unsafe skill install path');
+      expect(JSON.stringify(body)).not.toContain(skillsDir);
+      expect(JSON.stringify(body)).not.toContain(outsideDir);
     });
 
     it('returns 400 when neither provided', async () => {
