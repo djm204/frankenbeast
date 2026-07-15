@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
@@ -93,7 +93,10 @@ function createZip(entries: readonly ZipEntryFixture[]): Buffer {
 describe('safe archive extraction', () => {
   it('extracts a small zip inside the destination', async () => {
     const destination = await tempDir();
-    const archive = createZip([{ name: 'nested/readme.txt', body: Buffer.from('hello') }]);
+    const archive = createZip([
+      { name: 'nested/', body: Buffer.alloc(0), method: 0 },
+      { name: 'nested/readme.txt', body: Buffer.from('hello') },
+    ]);
 
     const result = await extractZipArchive(archive, destination);
 
@@ -149,6 +152,65 @@ describe('safe archive extraction', () => {
     const traversalDestination = await tempDir();
     await expect(extractZipArchive(traversalArchive, traversalDestination)).rejects.toThrow(/path traversal/i);
     await expect(stat(join(traversalDestination, '..', 'outside.txt'))).rejects.toThrow();
+  });
+
+  it('rejects symlinked destination components before writing outside the extraction root', async () => {
+    const destination = await tempDir();
+    const outside = await tempDir();
+    await symlink(outside, join(destination, 'link'));
+
+    await expect(
+      extractZipArchive(createZip([{ name: 'link/file.txt', body: Buffer.from('owned') }]), destination),
+    ).rejects.toThrow(/symlink/i);
+    await expect(stat(join(outside, 'file.txt'))).rejects.toThrow();
+  });
+
+  it('rejects Windows-special path segments before writing', async () => {
+    for (const name of ['docs/victim.txt:payload', 'docs/NUL', 'docs/name. ', 'docs/trailing.']) {
+      const destination = await tempDir();
+      await expect(extractZipArchive(createZip([{ name, body: Buffer.from('x') }]), destination)).rejects.toThrow(
+        /Windows-special/i,
+      );
+      await expect(readdir(destination)).resolves.toEqual([]);
+    }
+  });
+
+  it('rejects colliding normalized paths before partial writes', async () => {
+    const duplicateDestination = await tempDir();
+    await expect(
+      extractZipArchive(
+        createZip([
+          { name: 'duplicate.txt', body: Buffer.from('first') },
+          { name: 'duplicate.txt', body: Buffer.from('second') },
+        ]),
+        duplicateDestination,
+      ),
+    ).rejects.toThrow(/collision/i);
+    await expect(readdir(duplicateDestination)).resolves.toEqual([]);
+
+    const prefixDestination = await tempDir();
+    await expect(
+      extractZipArchive(
+        createZip([
+          { name: 'a', body: Buffer.from('file') },
+          { name: 'a/b', body: Buffer.from('child') },
+        ]),
+        prefixDestination,
+      ),
+    ).rejects.toThrow(/collision/i);
+    await expect(readdir(prefixDestination)).resolves.toEqual([]);
+  });
+
+  it('wraps corrupt deflate payloads as safe archive errors', async () => {
+    const destination = await tempDir();
+    const originalPayload = Buffer.from('valid deflate data');
+    const archive = Buffer.from(createZip([{ name: 'bad.txt', body: originalPayload }]));
+    const corruptIndex = archive.indexOf(deflateRawSync(originalPayload));
+    expect(corruptIndex).toBeGreaterThanOrEqual(0);
+    archive[corruptIndex] = 0xff;
+
+    await expect(extractZipArchive(archive, destination)).rejects.toThrow(SafeArchiveExtractionError);
+    await expect(readdir(destination)).resolves.toEqual([]);
   });
 
   it('documents conservative default limits for consumers and operators', () => {

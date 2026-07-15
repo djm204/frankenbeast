@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
@@ -66,6 +66,7 @@ const SYMLINK_FILE_TYPE = 0o120000;
 const FILE_TYPE_MASK = 0o170000;
 
 const ARCHIVE_ENTRY_PATTERN = /(?:^|[/\\])[^/\\]+\.(?:zip|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz|gz|bz2|xz)$/iu;
+const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
 
 export async function extractZipArchive(
   archive: Buffer | Uint8Array,
@@ -87,7 +88,9 @@ export async function extractZipArchive(
   await mkdir(destinationRoot, { recursive: true });
   for (const entry of files) {
     const data = readZipEntry(buffer, entry, limits);
+    await rejectSymlinkedPathComponents(destinationRoot, entry.targetPath);
     await mkdir(dirname(entry.targetPath), { recursive: true });
+    await rejectSymlinkedPathComponents(destinationRoot, entry.targetPath);
     await writeFile(entry.targetPath, data, { flag: 'wx', mode: 0o600 });
   }
 
@@ -161,7 +164,8 @@ function parseZipCentralDirectory(buffer: Buffer, destinationRoot: string): ZipC
     }
 
     const rawPath = buffer.subarray(nameStart, nameEnd).toString('utf8');
-    const normalizedPath = normalizeArchivePath(rawPath, destinationRoot);
+    const isDirectory = rawPath.endsWith('/') || rawPath.endsWith('\\');
+    const normalizedPath = normalizeArchivePath(isDirectory ? rawPath.replace(/[\\/]+$/u, '') : rawPath, destinationRoot);
     entries.push({
       path: normalizedPath.relativePath,
       method,
@@ -170,7 +174,7 @@ function parseZipCentralDirectory(buffer: Buffer, destinationRoot: string): ZipC
       uncompressedBytes,
       localHeaderOffset,
       externalAttributes,
-      isDirectory: rawPath.endsWith('/') || rawPath.endsWith('\\'),
+      isDirectory,
       targetPath: normalizedPath.targetPath,
     });
     cursor = nameEnd + extraLength + commentLength;
@@ -204,6 +208,11 @@ function normalizeArchivePath(rawPath: string, destinationRoot: string): { relat
   if (parts.some((part) => part === '' || part === '.' || part === '..')) {
     throw new SafeArchiveExtractionError(`Archive entry path traversal is not allowed: ${rawPath}`);
   }
+  for (const part of parts) {
+    if (isWindowsSpecialSegment(part)) {
+      throw new SafeArchiveExtractionError(`Windows-special archive path segment is not allowed: ${rawPath}`);
+    }
+  }
   const targetPath = resolve(destinationRoot, ...parts);
   const rootWithSeparator = destinationRoot.endsWith(sep) ? destinationRoot : `${destinationRoot}${sep}`;
   if (targetPath !== destinationRoot && !targetPath.startsWith(rootWithSeparator)) {
@@ -219,6 +228,10 @@ function preflightEntries(entries: readonly ZipCentralDirectoryEntry[], limits: 
   }
 
   let totalUncompressedBytes = 0;
+  rejectPathCollisions(
+    files,
+    entries.filter((entry) => entry.isDirectory).map((entry) => entry.path),
+  );
   for (const entry of files) {
     if (entry.flags & 0x1) {
       throw new SafeArchiveExtractionError(`Encrypted ZIP entries are not supported: ${entry.path}`);
@@ -250,6 +263,65 @@ function preflightEntries(entries: readonly ZipCentralDirectoryEntry[], limits: 
   return files;
 }
 
+function isWindowsSpecialSegment(segment: string): boolean {
+  return segment.includes(':') || segment.endsWith('.') || segment.endsWith(' ') || WINDOWS_RESERVED_NAMES.test(segment);
+}
+
+function rejectPathCollisions(files: readonly ZipCentralDirectoryEntry[], explicitDirectories: readonly string[]): void {
+  const filePaths = new Set<string>();
+  const ancestorDirectories = new Set<string>();
+  const directoryPaths = new Set(explicitDirectories);
+
+  for (const entry of files) {
+    if (filePaths.has(entry.path) || directoryPaths.has(entry.path) || ancestorDirectories.has(entry.path)) {
+      throw new SafeArchiveExtractionError(`Archive path collision is not allowed: ${entry.path}`);
+    }
+
+    const parts = entry.path.split('/');
+    const ancestors: string[] = [];
+    for (let index = 1; index < parts.length; index += 1) {
+      const ancestor = parts.slice(0, index).join('/');
+      if (filePaths.has(ancestor)) {
+        throw new SafeArchiveExtractionError(`Archive path collision is not allowed: ${entry.path}`);
+      }
+      ancestors.push(ancestor);
+    }
+
+    filePaths.add(entry.path);
+    for (const ancestor of ancestors) {
+      ancestorDirectories.add(ancestor);
+    }
+  }
+}
+
+async function rejectSymlinkedPathComponents(destinationRoot: string, targetPath: string): Promise<void> {
+  const relative = targetPath.slice(destinationRoot.length).replace(new RegExp(`^\\${sep}`), '');
+  const parts = relative.length === 0 ? [] : relative.split(sep);
+  let current = destinationRoot;
+  await rejectSymlink(current, destinationRoot);
+  for (const part of parts.slice(0, -1)) {
+    current = resolve(current, part);
+    await rejectSymlink(current, destinationRoot);
+  }
+}
+
+async function rejectSymlink(path: string, destinationRoot: string): Promise<void> {
+  try {
+    const stats = await lstat(path);
+    if (stats.isSymbolicLink()) {
+      throw new SafeArchiveExtractionError(`Archive extraction destination contains a symlink: ${path}`);
+    }
+  } catch (error) {
+    if (error instanceof SafeArchiveExtractionError) {
+      throw error;
+    }
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return;
+    }
+    throw new SafeArchiveExtractionError(`Unable to validate extraction path under ${destinationRoot}: ${path}`);
+  }
+}
+
 function readZipEntry(buffer: Buffer, entry: ZipCentralDirectoryEntry, limits: SafeArchiveLimits): Buffer {
   const cursor = entry.localHeaderOffset;
   if (cursor + 30 > buffer.byteLength || buffer.readUInt32LE(cursor) !== LOCAL_FILE_SIGNATURE) {
@@ -264,10 +336,15 @@ function readZipEntry(buffer: Buffer, entry: ZipCentralDirectoryEntry, limits: S
   }
 
   const compressed = buffer.subarray(dataStart, dataEnd);
-  const data =
-    entry.method === 0
-      ? Buffer.from(compressed)
-      : inflateRawSync(compressed, { maxOutputLength: Math.min(entry.uncompressedBytes, limits.maxFileBytes) });
+  let data: Buffer;
+  try {
+    data =
+      entry.method === 0
+        ? Buffer.from(compressed)
+        : inflateRawSync(compressed, { maxOutputLength: Math.min(entry.uncompressedBytes, limits.maxFileBytes) });
+  } catch (cause) {
+    throw new SafeArchiveExtractionError(`Unable to inflate ZIP entry ${entry.path}: ${(cause as Error).message}`);
+  }
   if (data.byteLength !== entry.uncompressedBytes) {
     throw new SafeArchiveExtractionError(
       `ZIP entry ${entry.path} inflated to ${data.byteLength} bytes, expected ${entry.uncompressedBytes}`,
