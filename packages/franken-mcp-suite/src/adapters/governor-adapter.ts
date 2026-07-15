@@ -23,14 +23,18 @@ const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_right_to_forget: 'memory',
 };
 
+const GIT_GLOBAL_OPTIONS_PATTERN = String.raw`(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*`;
+const GH_GLOBAL_OPTIONS_PATTERN = String.raw`(?:\s+(?:-[A-Za-z]\s+\S+|--(?:repo|hostname)(?:=\S+|\s+\S+)|--[^\s=]+(?:=\S+)?))*`;
+const GH_MUTATING_RESOURCES_PATTERN = String.raw`(?:api|issue|pr|workflow|repo|release|label|run|secret)`;
+
 const HIGH_RISK_ACTION_NAME_PATTERNS: ReadonlyArray<readonly [RegExp, HighRiskActionClass]> = [
-  [/\bgit\b(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*\s+push\b/i, 'git-remote-write'],
-  [/\bgh\s+(?:api|issue|pr|workflow|repo|release|label|run)\b/i, 'github-mutation'],
+  [new RegExp(String.raw`\bgit\b${GIT_GLOBAL_OPTIONS_PATTERN}\s+push\b`, 'i'), 'git-remote-write'],
+  [new RegExp(String.raw`\bgh\b${GH_GLOBAL_OPTIONS_PATTERN}\s+${GH_MUTATING_RESOURCES_PATTERN}\b`, 'i'), 'github-mutation'],
   [/\b(?:curl|fetch)\b[^\n]*api\.github\.com\b/i, 'github-mutation'],
   [/\b(?:cron|crontab|cronjob|schedule|scheduled\s+job)\b/i, 'cron'],
   [/\b(?:profile|skill|plugin|credential|config)\b[^\n]*(?:write|edit|patch|create|delete|remove|install|set)\b/i, 'profile-write'],
-  [/\b(?:webhook|discord_webhook_url|slack_webhook_url)\b|https:\/\/hooks\.slack\.com\/services\//i, 'webhook'],
-  [/\b(?:kill|pkill|killall|nohup|disown|systemctl|service|docker\s+(?:stop|kill|rm|restart)|process\s+(?:kill|start|stop))\b/i, 'shell-process-control'],
+  [/\b(?:webhook|discord_webhook_url|slack_webhook_url)\b|https:\/\/hooks\.slack\.com\/services\/|https:\/\/(?:discord(?:app)?\.com)\/api\/webhooks\//i, 'webhook'],
+  [/\b(?:kill|pkill|killall|nohup|disown|systemctl|service\s+\S+\s+(?:start|stop|restart|reload|enable|disable)|docker\s+(?:stop|kill|rm|restart)|process\s+(?:kill|start|stop))\b/i, 'shell-process-control'],
 ];
 
 /**
@@ -222,7 +226,7 @@ function extractGitPushTarget(command: string): string | undefined {
 }
 
 function inferGithubOperation(command: string, fallback: string): string {
-  const match = /\bgh\s+(?<resource>api|issue|pr|workflow|repo|release|label|run)\b(?:\s+(?<verb>[A-Za-z][\w-]*))?/i.exec(command);
+  const match = new RegExp(String.raw`\bgh\b${GH_GLOBAL_OPTIONS_PATTERN}\s+(?<resource>${GH_MUTATING_RESOURCES_PATTERN})\b(?:\s+(?<verb>[A-Za-z][\w-]*))?`, 'i').exec(command);
   const resource = match?.groups?.resource?.toLowerCase();
   const verb = match?.groups?.verb?.toLowerCase();
   if (resource === undefined) return fallback;
@@ -270,10 +274,10 @@ function highRiskEvidence(action: string, context: string): HighRiskActionEviden
   if (action === 'fbeast_memory_forget') return memoryEvidence('delete');
   if (action === 'fbeast_memory_right_to_forget') return memoryEvidence('right-to-forget');
   const command = contextCommand(action, context);
-  if (/\bgit\b(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*\s+push\b/i.test(command)) {
+  if (new RegExp(String.raw`\bgit\b${GIT_GLOBAL_OPTIONS_PATTERN}\s+push\b`, 'i').test(command)) {
     return {
       command,
-      ...optionalTarget(extractGitPushTarget(command) ?? command),
+      ...optionalTarget(extractGitPushTarget(command)),
       force: /(?:\s--force(?:-with-lease)?\b|\s-f\b)/i.test(command),
     };
   }

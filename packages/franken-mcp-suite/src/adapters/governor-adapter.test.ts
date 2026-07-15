@@ -151,9 +151,15 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'run_shell', context: 'gh pr list --state open' }))
       .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'run_shell', context: 'gh --repo owner/repo pr view 5' }))
+      .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'run_shell', context: 'gh label create security' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
     await expect(governor.check({ action: 'run_shell', context: 'gh run cancel 123' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'run_shell', context: 'gh --repo owner/repo pr merge 123 --merge' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'run_shell', context: 'gh secret set TOKEN --body value' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
@@ -164,6 +170,8 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'review_recommended' });
     await expect(governor.check({ action: 'run_shell', context: 'git --git-dir=.git push origin main' }))
       .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'run_shell', context: 'git push' }))
+      .resolves.toMatchObject({ decision: 'denied' });
   });
 
   it('routes crontab edits through cron policy', async () => {
@@ -191,6 +199,19 @@ describe('GovernorAdapter', () => {
 
     await expect(governor.check({ action: 'run_shell', context: 'curl -X POST https://hooks.slack.com/services/T/B/C' }))
       .resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({ action: 'run_shell', context: 'curl -X POST https://discord.com/api/webhooks/123/token' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+  });
+
+  it('does not classify ordinary service paths as process control', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'run_shell', context: 'cat src/service/config.ts' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'run_shell', context: 'npm test packages/user-service' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'run_shell', context: 'service nginx restart' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {
