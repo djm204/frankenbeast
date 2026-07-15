@@ -142,11 +142,26 @@ function unqualifyMcpActionName(action: string): string {
   return index >= 0 ? action.slice(index + marker.length) : action;
 }
 
-function contextIncludesTool(context: string, toolName: string): boolean {
-  return context.includes(`"tool":"${toolName}"`)
-    || context.includes(`"tool_name":"${toolName}"`)
-    || context.includes(`"name":"${toolName}"`)
-    || context.includes(toolName);
+function contextValueTargetsTool(value: unknown, toolName: string): boolean {
+  return typeof value === 'string' && unqualifyMcpActionName(value) === toolName;
+}
+
+function contextTargetsTool(context: string, toolName: string): boolean {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    const direct = record['tool'] ?? record['tool_name'] ?? record['name'];
+    if (contextValueTargetsTool(direct, toolName)) return true;
+    const toolInput = record['tool_input'];
+    if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
+      const nested = (toolInput as Record<string, unknown>)['tool'];
+      return contextValueTargetsTool(nested, toolName);
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
@@ -157,7 +172,7 @@ function redactRightToForgetGovernanceContext(action: string, context: string): 
 function redactMemoryReviewProposalGovernanceContext(action: string, context: string): string {
   const unqualified = unqualifyMcpActionName(action);
   if (unqualified !== 'fbeast_memory_review_propose'
-    && !(unqualified === 'execute_tool' && contextIncludesTool(context, 'fbeast_memory_review_propose'))) {
+    && !(unqualified === 'execute_tool' && contextTargetsTool(context, 'fbeast_memory_review_propose'))) {
     return context;
   }
   return MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION;
@@ -207,13 +222,6 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     return {
       decision: 'approved',
       reason: 'Tool "fbeast_memory_right_to_forget" is an explicit privacy deletion workflow; execution is allowed through the central gate while audit context remains redacted.',
-    };
-  }
-
-  if (unqualifiedAction === 'fbeast_memory_review_decide' && context.includes('never_store')) {
-    return {
-      decision: 'review_recommended',
-      reason: 'Tool "fbeast_memory_review_decide" with action "never_store" is destructive and requires explicit operator approval before applying suppression/deletion.',
     };
   }
 

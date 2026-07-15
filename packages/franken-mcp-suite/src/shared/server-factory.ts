@@ -234,6 +234,12 @@ const MEMORY_REVIEW_PROPOSE_TOOL = 'fbeast_memory_review_propose';
 const MEMORY_REVIEW_PROPOSE_SAFE_AUDIT_KEYS = new Set(['type', 'confidence']);
 const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
 
+function unqualifyMcpToolName(toolName: string): string {
+  const marker = '__';
+  const index = toolName.lastIndexOf(marker);
+  return index >= 0 ? toolName.slice(index + marker.length) : toolName;
+}
+
 function redactMemoryReviewProposalArgs(sanitized: Record<string, unknown>, redaction = '[memory-review-proposal-redacted]'): Record<string, unknown> {
   if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
     sanitized['invalid'] = redaction;
@@ -255,16 +261,17 @@ function redactMemoryReviewProposalArgs(sanitized: Record<string, unknown>, reda
 
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
-  const isMemoryReviewPropose = toolName === MEMORY_REVIEW_PROPOSE_TOOL;
-  const isDirectRightToForget = toolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = toolName === 'fbeast_memory_right_to_forget'
-    ? toolName
+  const unqualifiedToolName = unqualifyMcpToolName(toolName);
+  const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
+  const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
+  const auditedTool = unqualifiedToolName === 'fbeast_memory_right_to_forget'
+    ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
-      ? sanitized['tool']
-      : toolName;
-  const auditedAction = typeof sanitized['action'] === 'string' ? sanitized['action'] : undefined;
+      ? unqualifyMcpToolName(sanitized['tool'])
+      : unqualifiedToolName;
+  const auditedAction = typeof sanitized['action'] === 'string' ? unqualifyMcpToolName(sanitized['action']) : undefined;
   if (auditedTool === MEMORY_REVIEW_PROPOSE_TOOL || auditedAction === MEMORY_REVIEW_PROPOSE_TOOL) {
-    if (toolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    if (unqualifiedToolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
       sanitized['args'] = '[memory-review-proposal-redacted]';
       return sanitized;
     }

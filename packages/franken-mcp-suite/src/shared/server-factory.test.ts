@@ -432,6 +432,22 @@ describe('createMcpServer', () => {
         tool: 'fbeast_memory_review_propose',
         args: '[memory-review-proposal-redacted]',
       });
+
+      expect(sanitizeToolArgumentsForAuditTrail('mcp__fbeast-proxy__execute_tool', {
+        tool: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        args: { key: 'secret-api-key', value: 'token abc123', type: 'working' },
+      })).toEqual({
+        tool: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        args: '[memory-review-proposal-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
+        action: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        context: '{"value":"token abc123"}',
+      })).toEqual({
+        action: 'mcp__fbeast-memory__fbeast_memory_review_propose',
+        context: '[memory-review-proposal-redacted]',
+      });
     });
 
 
