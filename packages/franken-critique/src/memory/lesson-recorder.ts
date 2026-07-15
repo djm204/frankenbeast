@@ -101,7 +101,7 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
   {
     kind: 'secret',
     label: 'bearer-token',
-    pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/g,
+    pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi,
     replacement: 'Bearer [REDACTED_TOKEN]',
   },
   {
@@ -128,6 +128,12 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
     label: 'phone-number',
     pattern: /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
     replacement: '[REDACTED_PHONE]',
+  },
+  {
+    kind: 'task-state',
+    label: 'task-reference',
+    pattern: /\b(?:PR|issue|ticket)\s*#?\d+\b/gi,
+    replacement: '[REDACTED_TASK_REFERENCE]',
   },
 ];
 
@@ -1707,11 +1713,7 @@ function createLessonPrivacyFilterResult(
   const admittedDecisions: InternalLessonPrivacyFilterDecision[] = [];
 
   for (const finding of findings) {
-    const findingText = [
-      finding.message,
-      finding.location ?? '',
-      finding.suggestion ?? '',
-    ].join('\n');
+    const findingText = createFindingPrivacyText(finding);
     const findingDecision = createPrivacyDecision(findingText);
     if (findingDecision.action === 'reject') {
       rejectedDecisions.push(findingDecision);
@@ -1740,9 +1742,10 @@ function createLessonPrivacyFilterResult(
     });
   }
 
-  const rawText = [metadataText, ...findings.map((finding) => finding.message)].join(
-    '\n',
-  );
+  const rawText = [
+    metadataText,
+    ...findings.map((finding) => createFindingPrivacyText(finding)),
+  ].join('\n');
   if (admittedFindings.length === 0) {
     return {
       decision: {
@@ -1803,19 +1806,22 @@ function createPrivacyDecision(
     CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(rawText));
   if (containsCustomerData) {
     flags.add('customer-data');
-    if (redactions.length === 0) {
-      for (const segment of rawText.split('\n')) {
-        if (!CUSTOMER_DATA_PATTERNS.some((pattern) => pattern.test(segment))) {
-          continue;
-        }
-        redactions.push({
-          kind: 'customer-data',
-          label: 'customer-context',
-          replacement:
-            'Customer data redacted [REDACTED_CUSTOMER_DATA]; validate privacy boundaries before recording lessons',
-          original: segment,
-        });
+    for (const segment of rawText.split('\n').flatMap(extractCustomerSegments)) {
+      if (
+        redactions.some(
+          (redaction) =>
+            redaction.kind === 'customer-data' && redaction.original === segment,
+        )
+      ) {
+        continue;
       }
+      redactions.push({
+        kind: 'customer-data',
+        label: 'customer-context',
+        replacement:
+          'Customer data redacted [REDACTED_CUSTOMER_DATA]; validate privacy boundaries before recording lessons',
+        original: segment,
+      });
     }
   }
   const category = classifyLessonCandidate(rawText);
@@ -1838,6 +1844,23 @@ function createPrivacyDecision(
           ? PRIVACY_FILTER_SENSITIVE_REASON
           : PRIVACY_FILTER_ADMIT_REASON,
   };
+}
+
+function extractCustomerSegments(text: string): string[] {
+  const segments = text.match(
+    /\b(?:customer|client|tenant|account)(?:\s+[A-Za-z0-9_.:-]+){0,4}\b/gi,
+  );
+  return segments ?? [];
+}
+
+function createFindingPrivacyText(finding: {
+  readonly message: string;
+  readonly location?: string | undefined;
+  readonly suggestion?: string | undefined;
+}): string {
+  return [finding.message, finding.location ?? '', finding.suggestion ?? ''].join(
+    '\n',
+  );
 }
 
 function mergePrivacyRedactions(
@@ -1886,7 +1909,10 @@ function classifyLessonCandidate(text: string): LessonCandidateCategory {
   if (!text.trim()) {
     return 'discard';
   }
-  if (TASK_STATE_PATTERNS.some((pattern) => pattern.test(text))) {
+  const containsTaskState = TASK_STATE_PATTERNS.some((pattern) =>
+    pattern.test(text),
+  );
+  if (containsTaskState && !containsReusableLessonSignal(text)) {
     return 'task-state';
   }
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) {
@@ -1896,6 +1922,18 @@ function classifyLessonCandidate(text: string): LessonCandidateCategory {
     return 'environment-fact';
   }
   return 'procedure';
+}
+
+function containsReusableLessonSignal(text: string): boolean {
+  if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+  return /\b(?:always|avoid|before|check|ensure|prefer|require|run|validate|verify)\b/i.test(
+    text,
+  );
 }
 
 function collectPrivacyRedactions(

@@ -243,7 +243,7 @@ export type LessonCandidateCategory =
 
 /** Redaction applied before a learned lesson candidate can reach durable memory. */
 export interface LessonPrivacyRedaction {
-  readonly kind: 'secret' | 'personal-data' | 'customer-data';
+  readonly kind: 'secret' | 'personal-data' | 'customer-data' | 'task-state';
   readonly label: string;
   readonly replacement: string;
 }
