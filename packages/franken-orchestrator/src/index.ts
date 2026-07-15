@@ -110,6 +110,19 @@ export { PrCreator } from './closure/pr-creator.js';
 export { PATTERNS_ALL_TIERS, PATTERNS_STRICT_ONLY } from './middleware/index.js';
 export type { InjectionTier } from './middleware/index.js';
 
+// Archive extraction hardening
+export {
+  DEFAULT_SAFE_ARCHIVE_LIMITS,
+  SafeArchiveExtractionError,
+  extractZipArchive,
+} from './security/safe-archive-extractor.js';
+export type {
+  SafeArchiveEntryResult,
+  SafeArchiveExtractionResult,
+  SafeArchiveLimitOverrides,
+  SafeArchiveLimits,
+} from './security/safe-archive-extractor.js';
+
 // Circuit breakers
 export { checkInjection } from './breakers/injection-breaker.js';
 export { checkBudget, BudgetExceededError } from './breakers/budget-breaker.js';
