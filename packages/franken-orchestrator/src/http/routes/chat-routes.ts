@@ -20,6 +20,7 @@ import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
+import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import { ChatMutationAdmission, chatClientKey } from '../chat-rate-limit.js';
 
 const CreateSessionBody = z.object({
@@ -159,6 +160,21 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     }
   }
 
+  function throwKnownChatRuntimeError(error: unknown): never {
+    if (error instanceof CapacityReservationError) {
+      throw new HttpError(
+        409,
+        'AGENT_CAPACITY_RESERVED',
+        'Agent capacity is reserved for urgent matching work',
+        {
+          decision: error.decision,
+          capacity: error.state,
+        },
+      );
+    }
+    throw error;
+  }
+
   // Health check
   app.get('/health', (c) => {
     c.header('x-frankenbeast-service', 'chat-server');
@@ -249,7 +265,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         transcript: session.transcript,
         ...(session.beastContext !== undefined ? { beastContext: session.beastContext } : {}),
         ...(executionMode ? { executionMode } : {}),
-      });
+      }).catch(throwKnownChatRuntimeError);
 
       session.transcript = result.transcript;
       session.state = result.state;

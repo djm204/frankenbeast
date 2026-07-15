@@ -132,6 +132,49 @@ describe('CapacityReservationPolicy', () => {
     });
   });
 
+  it('does not over-admit matching candidates by displacing active urgent work into unavailable capacity', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 3,
+      reservations: [
+        { id: 'security-urgent', slots: 1, labels: ['security'] },
+        { id: 'availability-urgent', slots: 1, categories: ['availability'] },
+      ],
+    });
+
+    const runningItems = [
+      { id: 'security-1', labels: ['security'] },
+      { id: 'normal-1', labels: ['feature'] },
+    ];
+
+    expect(policy.canStart({ id: 'security-2', labels: ['security'] }, runningItems)).toEqual({
+      allowed: false,
+      reason: 'reserved_capacity_only',
+      reservationId: undefined,
+    });
+  });
+
+  it('reallocates flexible urgent work away from released reservations before admitting normal work', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 3,
+      releasedReservationIds: ['security-urgent'],
+      reservations: [
+        { id: 'security-urgent', slots: 1, labels: ['security'] },
+        { id: 'availability-urgent', slots: 1, categories: ['availability'] },
+      ],
+    });
+
+    const runningItems = [
+      { id: 'normal-1', labels: ['feature'] },
+      { id: 'flexible-urgent', labels: ['security'], categories: ['availability'] },
+    ];
+
+    expect(policy.canStart({ id: 'normal-2', labels: ['feature'] }, runningItems)).toEqual({
+      allowed: true,
+      reason: 'released_reserved_capacity_available',
+      reservationId: undefined,
+    });
+  });
+
   it('renders operator-visible reservation state with used and free reserved capacity', () => {
     const policy = new CapacityReservationPolicy({
       totalSlots: 5,

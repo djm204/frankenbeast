@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
+import { CapacityReservationError } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import type { ChatSession } from '../../../src/chat/types.js';
 
 function pendingApprovalSession(session: ChatSession): ChatSession {
@@ -348,6 +349,50 @@ describe('chat approval route persistence', () => {
       pendingApproval: false,
       reason: expect.stringContaining('no approval metadata'),
     });
+  });
+
+  it('translates chat beast capacity reservation failures to conflict responses', async () => {
+    const runtime = {
+      run: vi.fn().mockRejectedValue(new CapacityReservationError(
+        { allowed: false, reason: 'reserved_capacity_only', reservationId: undefined },
+        {
+          totalSlots: 1,
+          usedSlots: 0,
+          freeSlots: 1,
+          normalSlots: { total: 0, used: 0, free: 0 },
+          reservations: [
+            {
+              id: 'security-urgent',
+              slots: 1,
+              used: 0,
+              free: 1,
+              released: false,
+              labels: ['security'],
+              categories: [],
+            },
+          ],
+        },
+      )),
+    };
+    const app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+    });
+    const session = sessionStore.create('project-1');
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'Ship Beast monitoring' }),
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json() as { error: { code: string; details: { decision: { reason: string } } } };
+    expect(body.error.code).toBe('AGENT_CAPACITY_RESERVED');
+    expect(body.error.details.decision.reason).toBe('reserved_capacity_only');
+    expect(sessionStore.get(session.id)?.transcript).toHaveLength(0);
   });
 
   it('reports unsafe approval-cop health without leaking unsafe command details in the reason', async () => {

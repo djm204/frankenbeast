@@ -105,9 +105,11 @@ export class CapacityReservationPolicy {
     }
 
     const candidateIndex = activeItems.length;
-    const candidateAllocation = this.allocateReservations([...activeItems, candidate], candidateIndex);
+    const candidateItems = [...activeItems, candidate];
+    const candidateAllocation = this.allocateReservations(candidateItems, candidateIndex);
+    const candidateState = this.stateFromAllocation(candidateItems.length, candidateAllocation.buckets);
     const matchingReservationIndex = candidateAllocation.assignedBucketByItemIndex.get(candidateIndex);
-    if (matchingReservationIndex !== undefined) {
+    if (matchingReservationIndex !== undefined && this.normalWorkFits(candidateState)) {
       const reservation = this.reservations[matchingReservationIndex];
       if (reservation) {
         return { allowed: true, reason: 'reserved_capacity_available', reservationId: reservation.id };
@@ -118,7 +120,7 @@ export class CapacityReservationPolicy {
       return { allowed: true, reason: 'normal_capacity_available', reservationId: undefined };
     }
 
-    if (this.releasedReservationFreeForNormalWork(state, activeItems) > 0) {
+    if (this.normalWorkFits(candidateState)) {
       return { allowed: true, reason: 'released_reserved_capacity_available', reservationId: undefined };
     }
 
@@ -126,8 +128,22 @@ export class CapacityReservationPolicy {
   }
 
   describe(activeItems: readonly CapacityReservationWorkItem[]): CapacityReservationState {
-    const usedSlots = activeItems.length;
     const { buckets } = this.allocateReservations(activeItems);
+
+    return this.stateFromAllocation(activeItems.length, buckets);
+  }
+
+  private stateFromAllocation(
+    usedSlots: number,
+    buckets: Array<{
+      id: string;
+      slots: number;
+      used: number;
+      released: boolean;
+      labels: string[];
+      categories: string[];
+    }>,
+  ): CapacityReservationState {
 
     const bucketsWithFree = buckets.map((bucket) => ({
       ...bucket,
@@ -151,16 +167,13 @@ export class CapacityReservationPolicy {
     };
   }
 
-  private releasedReservationFreeForNormalWork(
-    state: CapacityReservationState,
-    activeItems: readonly CapacityReservationWorkItem[],
-  ): number {
+  private normalWorkFits(state: CapacityReservationState): boolean {
     const reservedUsed = state.reservations.reduce((sum, bucket) => sum + bucket.used, 0);
-    const normalOverflowUsed = Math.max(0, activeItems.length - reservedUsed - state.normalSlots.total);
+    const normalOverflowUsed = Math.max(0, state.usedSlots - reservedUsed - state.normalSlots.total);
     const releasedFree = state.reservations
       .filter((reservation) => reservation.released)
       .reduce((sum, reservation) => sum + reservation.free, 0);
-    return Math.max(0, releasedFree - normalOverflowUsed);
+    return normalOverflowUsed <= releasedFree;
   }
 
   private allocateReservations(
@@ -197,6 +210,15 @@ export class CapacityReservationPolicy {
           const reservation = this.reservations[bucketIndex];
           if (!reservation) return [];
           return this.matches(reservation, item) ? [slotIndex] : [];
+        }).sort((leftSlotIndex, rightSlotIndex) => {
+          const leftBucketIndex = bucketSlots[leftSlotIndex];
+          const rightBucketIndex = bucketSlots[rightSlotIndex];
+          const leftReleased = leftBucketIndex !== undefined && buckets[leftBucketIndex]?.released === true;
+          const rightReleased = rightBucketIndex !== undefined && buckets[rightBucketIndex]?.released === true;
+          if (leftReleased !== rightReleased) {
+            return leftReleased ? 1 : -1;
+          }
+          return leftSlotIndex - rightSlotIndex;
         }),
       }))
       .filter(({ matchingSlotIndexes }) => matchingSlotIndexes.length > 0)
