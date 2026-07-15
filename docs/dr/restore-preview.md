@@ -27,3 +27,7 @@ Expected interpretation:
 - recovery guidance: do not automatically resurrect the card; confirm why the live card is absent, then explicitly recreate a new card or skip that backup record.
 
 This guardrail keeps restore-preview output consumable by PM/liveness tooling: backup-only cards require an explicit operator decision instead of being presented as safe informational drift.
+
+## Tabletop exercises
+
+Use `docs/dr/tabletop-exercise-template.md` when operators need to rehearse a restore-preview scenario before executing any recovery work. The template keeps disaster-recovery practice read-only, requires at least one fail-closed edge case such as corrupt backup input, and records explicit restore/merge/skip/quarantine decisions for every drift item.
