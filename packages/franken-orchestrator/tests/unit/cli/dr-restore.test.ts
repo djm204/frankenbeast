@@ -17,6 +17,18 @@ describe('dr restore-dry-run CLI', () => {
     expect(args.drLiveManifestPath).toBe('/live/manifest.json');
   });
 
+  it('parses encrypted backup, verify, list, and restore commands', () => {
+    expect(parseArgs(['dr', 'backup', '/state', '/backup.enc.json', '/key']).drKeyFilePath).toBe('/key');
+    expect(parseArgs(['dr', 'list', '/backup.enc.json']).drAction).toBe('list');
+    expect(parseArgs(['dr', 'verify', '/backup.enc.json', '/key']).drLiveManifestPath).toBe('/key');
+    const restore = parseArgs(['--dry-run', 'dr', 'restore', '/backup.enc.json', '/restore', '/key']);
+    expect(restore.drAction).toBe('restore');
+    expect(restore.drBackupManifestPath).toBe('/backup.enc.json');
+    expect(restore.drLiveManifestPath).toBe('/restore');
+    expect(restore.drKeyFilePath).toBe('/key');
+    expect(restore.dryRun).toBe(true);
+  });
+
   it('prints structured dry-run JSON without mutating input manifests', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
     const backupPath = join(dir, 'backup.json');

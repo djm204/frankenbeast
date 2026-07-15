@@ -51,7 +51,7 @@ export type BeastAction =
 export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
 export type MemoryAction = 'snapshot-diff' | 'verify-backup' | undefined;
-export type DrAction = 'restore-dry-run' | undefined;
+export type DrAction = 'backup' | 'list' | 'verify' | 'restore' | 'restore-dry-run' | undefined;
 
 export interface CliArgs {
   subcommand: Subcommand;
@@ -66,6 +66,7 @@ export interface CliArgs {
   drAction?: DrAction;
   drBackupManifestPath?: string | undefined;
   drLiveManifestPath?: string | undefined;
+  drKeyFilePath?: string | undefined;
   networkDetached: boolean;
   networkSet?: string[] | undefined;
   skillAction?: SkillAction;
@@ -116,7 +117,7 @@ export interface CliArgs {
 const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'dr', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup']);
-const VALID_DR_ACTIONS = new Set(['restore-dry-run']);
+const VALID_DR_ACTIONS = new Set(['backup', 'list', 'verify', 'restore', 'restore-dry-run']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -181,7 +182,7 @@ Subcommands:
   beasts-daemon           Run the standalone Beast control-plane daemon
   network                 Manage Frankenbeast request-serving services
   memory                  Inspect persisted BrainSnapshot JSON artifacts and SQLite backups
-  dr                      Disaster-recovery restore preview utilities
+  dr                      Disaster-recovery encrypted backup and restore utilities
   skill                   Manage MCP skill plugins
   security                View or change security profile
 
@@ -245,6 +246,13 @@ Memory Commands:
                                   Verify a read-only SQLite memory backup and print structured JSON
 
 Disaster-Recovery Commands:
+  dr backup <state-dir> <backup-file> <key-file>
+                                  Create an encrypted backup of Kanban, approval, liveness, run metadata, and related state
+  dr list <backup-file>           List encrypted backup manifest metadata without decrypting file contents
+  dr verify <backup-file> <key-file>
+                                  Decrypt and verify backup integrity without writing state
+  dr restore [--dry-run] <backup-file> <target-dir> <key-file>
+                                  Restore an encrypted state backup; --dry-run verifies and prints planned writes only
   dr restore-dry-run <backup-manifest.json> <live-manifest.json>
                                   Compare backup/live restore manifests and print read-only JSON output
 
@@ -530,6 +538,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let drAction: DrAction;
   let drBackupManifestPath: string | undefined;
   let drLiveManifestPath: string | undefined;
+  let drKeyFilePath: string | undefined;
   let skillAction: SkillAction;
   let skillTarget: string | undefined;
   let skillCommand: string | undefined;
@@ -587,8 +596,16 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     }
     drBackupManifestPath = positionals[1];
     drLiveManifestPath = positionals[2];
-    if (positionals.length > 3) {
-      throw new TypeError(`Unexpected argument '${positionals[3]}'. dr restore-dry-run accepts exactly two manifest files`);
+    drKeyFilePath = positionals[3];
+    const maxPositionals = drAction === 'backup' || drAction === 'restore'
+      ? 4
+      : drAction === 'verify' || drAction === 'restore-dry-run'
+        ? 3
+        : drAction === 'list'
+          ? 2
+          : 1;
+    if (positionals.length > maxPositionals) {
+      throw new TypeError(`Unexpected argument '${positionals[maxPositionals]}'. dr ${drAction ?? '<action>'} accepts ${String(maxPositionals - 1)} argument(s)`);
     }
   } else if (subcommand === 'skill') {
     const actionCandidate = positionals[0];
@@ -729,6 +746,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     drAction,
     drBackupManifestPath,
     drLiveManifestPath,
+    drKeyFilePath,
     networkDetached: values.detached ?? false,
     networkSet: values.set,
     skillAction,
