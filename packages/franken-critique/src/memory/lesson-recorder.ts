@@ -101,7 +101,7 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
   {
     kind: 'secret',
     label: 'bearer-token',
-    pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi,
+    pattern: /\bBearer[ \t]+[A-Za-z0-9._~+/=-]{20,}\b/gi,
     replacement: 'Bearer [REDACTED_TOKEN]',
   },
   {
@@ -140,14 +140,15 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
 
 const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
   /\bcustomer(?:\s+account)?\b/i,
-  /\btenant\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
-  /\bclient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)\b/,
-  /\baccount\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
+  /\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*\b/,
+  /\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)\b/,
+  /\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
 ];
 
 const TASK_STATE_PATTERNS: readonly RegExp[] = [
   /\b(?:PR|pull request)\s*#?\d+\b/i,
   /\bissue\s*#\d+\b/i,
+  /\bticket\s*#?\d+\b/i,
   /\b(?:merged|opened|closed|pushed|committed)\s+(?:PR|pull request|branch|commit)\b/i,
   /\b(?:commit|sha)\s+[0-9a-f]{7,40}\b/i,
   /\btask\s+t_[0-9a-f]{6,}\b/i,
@@ -1849,7 +1850,7 @@ function createPrivacyDecision(
 
 function extractCustomerSegments(text: string): string[] {
   const segments = text.match(
-    /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b|\b[Tt]enant\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b/g,
+    /\b[Cc]ustomer(?:\s+account)?(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
   );
   return segments ?? [];
 }
@@ -1960,26 +1961,104 @@ function collectPrivacyRedactions(
         replacement: rule.replacement,
         original,
       });
+      for (const nested of splitCrossFieldSecretRedactions(rule, original)) {
+        const nestedKey = `${rule.kind}:${rule.label}:${nested}`;
+        if (seen.has(nestedKey)) {
+          continue;
+        }
+        seen.add(nestedKey);
+        redactions.push({
+          kind: rule.kind,
+          label: rule.label,
+          replacement: rule.replacement,
+          original: nested,
+        });
+      }
     }
   }
   return redactions;
+}
+
+function splitCrossFieldSecretRedactions(
+  rule: PrivacyRedactionRule,
+  original: string,
+): string[] {
+  if (rule.kind !== 'secret' || !original.includes('\n')) {
+    return [];
+  }
+  const secretValue = original
+    .split(/[:=]/)
+    .at(-1)
+    ?.trim()
+    .replace(/^["']/, '');
+  return secretValue && secretValue !== original ? [secretValue] : [];
 }
 
 function redactSensitiveText(
   text: string,
   redactions: readonly InternalLessonPrivacyRedaction[],
 ): string {
-  const longestFirst = [...redactions].sort(
-    (left, right) =>
-      Number(left.kind === 'customer-data') -
-        Number(right.kind === 'customer-data') ||
-      right.original.length - left.original.length,
+  const spans = redactions.flatMap((redaction) =>
+    findRedactionSpans(text, redaction),
   );
-  let redacted = text;
-  for (const redaction of longestFirst) {
-    redacted = redacted.split(redaction.original).join(redaction.replacement);
+  if (spans.length === 0) {
+    return text;
   }
+  spans.sort(
+    (left, right) =>
+      left.start - right.start ||
+      right.end - right.start - (left.end - left.start),
+  );
+  const chosen: RedactionSpan[] = [];
+  for (const span of spans) {
+    const previous = chosen.at(-1);
+    if (previous && span.start < previous.end) {
+      if (span.end - span.start > previous.end - previous.start) {
+        chosen[chosen.length - 1] = span;
+      }
+      continue;
+    }
+    chosen.push(span);
+  }
+  let redacted = '';
+  let cursor = 0;
+  for (const span of chosen) {
+    redacted += text.slice(cursor, span.start);
+    redacted += span.replacement;
+    cursor = span.end;
+  }
+  redacted += text.slice(cursor);
   return redacted;
+}
+
+interface RedactionSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly replacement: string;
+}
+
+function findRedactionSpans(
+  text: string,
+  redaction: InternalLessonPrivacyRedaction,
+): RedactionSpan[] {
+  if (!redaction.original) {
+    return [];
+  }
+  const spans: RedactionSpan[] = [];
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const start = text.indexOf(redaction.original, searchFrom);
+    if (start === -1) {
+      break;
+    }
+    spans.push({
+      start,
+      end: start + redaction.original.length,
+      replacement: redaction.replacement,
+    });
+    searchFrom = start + redaction.original.length;
+  }
+  return spans;
 }
 
 function stableHash(value: string): string {
