@@ -836,6 +836,44 @@ describe('LessonRecorder', () => {
         evidence: [{ kind: 'operator-report', reference: '   ' }],
       }),
     ).toThrow('Lesson quarantine evidence reference must be a non-empty string.');
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-correction',
+        reason: 'Blank revised guidance must not replace a lesson.',
+        observedAt: '2026-07-12T01:40:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#blank',
+          },
+        ],
+        revisedCorrectionApplied: '   ',
+      }),
+    ).toThrow('Lesson revised correctionApplied must be a non-empty string.');
+
+    const directlyApproved = applyHumanFeedbackToLesson(lesson, {
+      source: 'explicit-user-approval',
+      reason: 'User approved this candidate lesson after reviewing evidence.',
+      observedAt: '2026-07-12T01:42:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763#direct',
+        },
+      ],
+    });
+    expect(directlyApproved.lifecycleStatus).toBe('active');
+    expect(directlyApproved.experimentSandbox).toBeUndefined();
+    expect(directlyApproved.feedbackWeighting?.weights[0]).toMatchObject({
+      source: 'explicit-user-approval',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763#direct',
+        },
+      ],
+    });
+    expect(isLessonApplicable(directlyApproved)).toBe(true);
 
     const approvedAfterCorrection = applyHumanFeedbackToLesson(corrected, {
       source: 'explicit-user-approval',

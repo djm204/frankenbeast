@@ -250,30 +250,41 @@ export function applyHumanFeedbackToLesson(
   lesson: CritiqueLesson,
   request: LessonHumanFeedbackRequest,
 ): CritiqueLesson {
+  const observedAt = normalizeTimestamp(request.observedAt);
+  const feedbackEvidence = request.evidence.map(normalizeQuarantineEvidence);
+  const revisedCorrectionApplied =
+    request.revisedCorrectionApplied !== undefined
+      ? requireNonEmptyString(
+          request.revisedCorrectionApplied,
+          'revised correctionApplied',
+        )
+      : undefined;
   const feedbackWeighting = createLessonFeedbackWeighting([
     ...(lesson.feedbackWeighting?.weights ?? []),
     createLessonFeedbackWeight(
       request.source,
-      normalizeTimestamp(request.observedAt),
+      observedAt,
       request.reason,
+      feedbackEvidence,
     ),
   ]);
 
   if (request.source === 'explicit-user-correction') {
-    const revisedLesson = request.revisedCorrectionApplied
+    const revisedLesson = revisedCorrectionApplied
       ? {
           ...lesson,
-          correctionApplied: request.revisedCorrectionApplied,
+          correctionApplied: revisedCorrectionApplied,
+          lifecycleStatus: 'candidate' as const,
         }
       : lesson;
     const quarantinedLesson = quarantineLesson(revisedLesson, {
       trigger: 'explicit-user-correction',
       reason: request.reason,
-      evidence: request.evidence,
-      quarantinedAt: request.observedAt,
+      evidence: feedbackEvidence,
+      quarantinedAt: observedAt,
     });
     return {
-      ...(request.revisedCorrectionApplied
+      ...(revisedCorrectionApplied
         ? removeStaleLessonValidation(quarantinedLesson)
         : quarantinedLesson),
       feedbackWeighting,
@@ -285,13 +296,12 @@ export function applyHumanFeedbackToLesson(
       'Explicit lesson approval requires at least one evidence item.',
     );
   }
-  const approvalEvidence = request.evidence.map(normalizeQuarantineEvidence);
-  if (approvalEvidence.length === 0) {
+  if (feedbackEvidence.length === 0) {
     throw new RangeError(
       'Explicit lesson approval requires at least one evidence item.',
     );
   }
-  const primaryApprovalEvidence = approvalEvidence[0];
+  const primaryApprovalEvidence = feedbackEvidence[0];
   if (primaryApprovalEvidence === undefined) {
     throw new RangeError(
       'Explicit lesson approval requires at least one evidence item.',
@@ -300,7 +310,7 @@ export function applyHumanFeedbackToLesson(
   if (lesson.lifecycleStatus === 'quarantined' && lesson.quarantine !== undefined) {
     return {
       ...unquarantineLesson(lesson, {
-        reviewedAt: request.observedAt,
+        reviewedAt: observedAt,
         reviewer: request.source,
         evidenceUrl: primaryApprovalEvidence.reference,
         reason: request.reason,
@@ -308,10 +318,17 @@ export function applyHumanFeedbackToLesson(
       feedbackWeighting,
     };
   }
+  const shouldActivateApprovedLesson =
+    lesson.lifecycleStatus === undefined ||
+    lesson.lifecycleStatus === 'active' ||
+    lesson.lifecycleStatus === 'candidate';
+  const { experimentSandbox, ...lessonWithoutSandbox } = lesson;
+  void experimentSandbox;
   return {
-    ...lesson,
-    lifecycleStatus:
-      lesson.lifecycleStatus === undefined ? 'active' : lesson.lifecycleStatus,
+    ...(lesson.lifecycleStatus === 'candidate' ? lessonWithoutSandbox : lesson),
+    lifecycleStatus: shouldActivateApprovedLesson
+      ? 'active'
+      : lesson.lifecycleStatus,
     feedbackWeighting,
   };
 }
@@ -1204,6 +1221,7 @@ function createLessonFeedbackWeight(
   source: LessonFeedbackSignalSource,
   observedAt: string,
   rationale: string,
+  evidence: readonly LessonQuarantineEvidence[] = [],
 ): LessonFeedbackWeight {
   const configured = LESSON_FEEDBACK_WEIGHTS[source];
   return {
@@ -1212,6 +1230,7 @@ function createLessonFeedbackWeight(
     scoreImpact: configured.scoreImpact,
     observedAt,
     rationale,
+    ...(evidence.length > 0 ? { evidence } : {}),
   };
 }
 

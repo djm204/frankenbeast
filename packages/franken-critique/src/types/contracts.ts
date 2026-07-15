@@ -180,6 +180,8 @@ export interface LessonFeedbackWeight {
   readonly scoreImpact: number;
   readonly observedAt: string;
   readonly rationale: string;
+  /** Optional audit evidence for explicit human feedback signals. */
+  readonly evidence?: readonly LessonQuarantineEvidence[];
 }
 
 /** Score model that explains which feedback sources influenced a lesson decision. */
