@@ -143,37 +143,40 @@ export class FileCheckpointStore implements ICheckpointStore {
       const serialized = serialize(output);
       const rehydrated = deserialize(serialized);
       if (!isDeepStrictEqual(rehydrated, output)) {
-        this.deleteTaskOutput(outputPath);
+        this.promoteTaskOutputToStale(outputPath);
         return;
       }
       payload = serialized.toString('base64');
     } catch {
       // Checkpoint markers must never fail a successful task just because its
       // output cannot be cloned or faithfully rehydrated. Persist what can be
-      // safely rehydrated and fall back to marker-only recovery otherwise.
-      this.deleteTaskOutput(outputPath);
+      // safely rehydrated and fall back to the last known-good dependency cache
+      // otherwise. That preserves availability for downstream resume paths while
+      // keeping the primary cache honest for future writes.
+      this.promoteTaskOutputToStale(outputPath);
       return;
     }
     mkdirSync(dirname(outputPath), { recursive: true });
     this.withLock(() => {
+      this.copyTaskOutputToStale(outputPath);
       this.atomicWriteFile(outputPath, payload);
     });
   }
 
-  readTaskOutput(taskId: string): { found: boolean; output?: unknown } {
+  readTaskOutput(taskId: string): { found: boolean; output?: unknown; stale?: boolean | undefined; staleReason?: 'missing-primary' | 'corrupt-primary' | undefined } {
     let payload: string;
     try {
       payload = readFileSync(this.taskOutputPath(taskId), 'utf-8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { found: false };
+        return this.readStaleTaskOutput(taskId, 'missing-primary');
       }
       throw error;
     }
     try {
       return { found: true, output: deserialize(Buffer.from(payload, 'base64')) };
     } catch {
-      return { found: false };
+      return this.readStaleTaskOutput(taskId, 'corrupt-primary');
     }
   }
 
@@ -215,8 +218,56 @@ export class FileCheckpointStore implements ICheckpointStore {
     return join(this.taskOutputDir, `${outputKey}.v8`);
   }
 
+  private staleTaskOutputPath(taskId: string): string {
+    return `${this.taskOutputPath(taskId)}.stale`;
+  }
+
+  private readStaleTaskOutput(
+    taskId: string,
+    staleReason: 'missing-primary' | 'corrupt-primary',
+  ): { found: boolean; output?: unknown; stale?: boolean | undefined; staleReason?: 'missing-primary' | 'corrupt-primary' | undefined } {
+    try {
+      const payload = readFileSync(this.staleTaskOutputPath(taskId), 'utf-8');
+      return {
+        found: true,
+        output: deserialize(Buffer.from(payload, 'base64')),
+        stale: true,
+        staleReason,
+      };
+    } catch {
+      return { found: false };
+    }
+  }
+
   private get taskOutputDir(): string {
     return `${this.checkpointPath}.outputs`;
+  }
+
+  private copyTaskOutputToStale(outputPath: string): void {
+    let payload: string;
+    try {
+      payload = readFileSync(outputPath, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      return;
+    }
+    try {
+      deserialize(Buffer.from(payload, 'base64'));
+    } catch {
+      // Do not replace a known-good stale cache with an unreadable primary.
+      return;
+    }
+    this.atomicWriteFile(`${outputPath}.stale`, payload);
+  }
+
+  private promoteTaskOutputToStale(outputPath: string): void {
+    mkdirSync(dirname(outputPath), { recursive: true });
+    this.withLock(() => {
+      this.copyTaskOutputToStale(outputPath);
+      this.deleteTaskOutput(outputPath);
+    });
   }
 
   private deleteTaskOutput(outputPath: string): void {

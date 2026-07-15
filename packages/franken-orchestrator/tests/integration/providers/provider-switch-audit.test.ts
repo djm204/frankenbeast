@@ -3,9 +3,12 @@ import type {
   ILlmProvider,
   LlmStreamEvent,
   ProviderCapabilities,
-  BrainSnapshot,
 } from '@franken/types';
-import { ProviderRegistry } from '../../../src/providers/provider-registry.js';
+import {
+  createModelProviderFailoverAuditPayload,
+  ProviderRegistry,
+  type ProviderSwitchEvent,
+} from '../../../src/providers/provider-registry.js';
 import { AuditTrail, createAuditEvent } from '@franken/observer';
 
 function mockProvider(
@@ -46,10 +49,10 @@ function mockBrain() {
 }
 
 describe('Provider switch audit integration', () => {
-  it('emits provider.switch audit event on failover', async () => {
+  it('emits model-provider.failover audit event on failover', async () => {
     const auditTrail = new AuditTrail();
-    const onSwitch = vi.fn((event: { from: string; to: string; reason: string; brainSnapshotHash: string }) => {
-      auditTrail.append(createAuditEvent('provider.switch', event, {
+    const onSwitch = vi.fn((event: ProviderSwitchEvent) => {
+      auditTrail.append(createAuditEvent('model-provider.failover', createModelProviderFailoverAuditPayload(event), {
         phase: 'execution',
         provider: event.to,
       }));
@@ -73,10 +76,15 @@ describe('Provider switch audit integration', () => {
       brainSnapshotHash: expect.stringMatching(/^sha256:/),
     }));
 
-    const switchEvents = auditTrail.getByType('provider.switch');
-    expect(switchEvents).toHaveLength(1);
-    expect((switchEvents[0]!.payload as Record<string, string>)['from']).toBe('primary');
-    expect((switchEvents[0]!.payload as Record<string, string>)['to']).toBe('secondary');
+    const failoverEvents = auditTrail.getByType('model-provider.failover');
+    expect(failoverEvents).toHaveLength(1);
+    const payload = failoverEvents[0]!.payload as Record<string, string>;
+    expect(payload['event']).toBe('model-provider.failover');
+    expect(payload['category']).toBe('availability');
+    expect(payload['from']).toBe('primary');
+    expect(payload['to']).toBe('secondary');
+    expect(payload['reason']).toBe('crashed');
+    expect(payload['operatorGuidance']).toContain('Provider failover occurred');
   });
 
   it('does not emit event when no switch occurs', async () => {
@@ -87,7 +95,9 @@ describe('Provider switch audit integration', () => {
       { onProviderSwitch: onSwitch },
     );
 
-    for await (const _ of registry.execute({ systemPrompt: '', messages: [] })) { /* consume */ }
+    for await (const event of registry.execute({ systemPrompt: '', messages: [] })) {
+      expect(event.type).toBeDefined();
+    }
     expect(onSwitch).not.toHaveBeenCalled();
   });
 
@@ -105,7 +115,9 @@ describe('Provider switch audit integration', () => {
       },
     );
 
-    for await (const _ of registry.execute({ systemPrompt: '', messages: [] })) { /* consume */ }
+    for await (const event of registry.execute({ systemPrompt: '', messages: [] })) {
+      expect(event.type).toBeDefined();
+    }
 
     expect(capturedHash).toHaveLength(1);
     expect(capturedHash[0]).toMatch(/^sha256:[a-f0-9]{64}$/);

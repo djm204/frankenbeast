@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -58,6 +58,9 @@ export type {
   IssueBackpressureSignals,
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
+  IssueCapacityWatermarkAlert,
+  IssueSchedulerFairnessBucket,
+  IssueSchedulerFairnessReport,
 } from './issues/index.js';
 
 // Config
@@ -120,6 +123,15 @@ export {
   assessPmHandoffQuality,
   formatHandoff,
 } from './providers/format-handoff.js';
+export {
+  createModelProviderFailoverAuditPayload,
+  ProviderRegistry as LlmProviderRegistry,
+} from './providers/provider-registry.js';
+export type {
+  ModelProviderFailoverAuditPayload,
+  ProviderRegistryOptions as LlmProviderRegistryOptions,
+  ProviderSwitchEvent,
+} from './providers/provider-registry.js';
 export type {
   PmHandoffQualityAssessment,
   PmHandoffRubricCriterion,
@@ -257,7 +269,12 @@ export type {
   RestorePreviewArea,
   RestorePreviewConflict,
   RestorePreviewConflictType,
+  RestorePreviewDestructiveAction,
+  RestorePreviewDestructiveActionPolicy,
+  RestorePreviewDestructiveActionType,
   RestorePreviewManifest,
+  RestorePreviewMode,
+  RestorePreviewOptions,
   RestorePreviewRecord,
   RestorePreviewResult,
   RestorePreviewSeverity,

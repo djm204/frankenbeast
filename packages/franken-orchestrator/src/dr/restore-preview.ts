@@ -161,6 +161,14 @@ export interface CrossFileStateConsistencyOptions {
   readonly manifestPath?: string;
 }
 
+export type RestorePreviewMode = 'normal' | 'recovery';
+
+export type RestorePreviewDestructiveActionType =
+  | 'schema-migration'
+  | 'overwrite-live-record'
+  | 'delete-live-record'
+  | 'restore-approval-token';
+
 export interface RestorePreviewRecord {
   readonly id: string;
   readonly digest?: string;
@@ -190,15 +198,39 @@ export interface RestorePreviewConflict {
   readonly recommendation: string;
 }
 
+export interface RestorePreviewOptions {
+  /**
+   * Recovery mode keeps restore planning read-only and disables every action that would
+   * overwrite, delete, migrate, or re-authorize live state.
+   */
+  readonly recoveryMode?: boolean;
+}
+
+export interface RestorePreviewDestructiveAction {
+  readonly area: RestorePreviewArea;
+  readonly id: string;
+  readonly type: RestorePreviewDestructiveActionType;
+  readonly reason: string;
+}
+
+export interface RestorePreviewDestructiveActionPolicy {
+  /** False in recovery mode so automation can hard-stop before any mutating restore step. */
+  readonly enabled: boolean;
+  readonly blocked: readonly RestorePreviewDestructiveAction[];
+  readonly guidance: string;
+}
+
 export interface RestorePreviewResult {
   /** Explicitly records that preview calculation is read-only and performs no restore writes. */
   readonly wouldWrite: false;
+  readonly mode: RestorePreviewMode;
   readonly safeToRestore: boolean;
   readonly schema: {
     readonly backupVersion: number;
     readonly liveVersion: number;
     readonly compatible: boolean;
   };
+  readonly destructiveActions: RestorePreviewDestructiveActionPolicy;
   readonly conflicts: readonly RestorePreviewConflict[];
 }
 
@@ -432,9 +464,11 @@ export function buildApprovalLedgerRecoveryReport(
 export function detectRestorePreviewConflicts(
   backup: RestorePreviewManifest,
   live: RestorePreviewManifest,
+  options: RestorePreviewOptions = {},
 ): RestorePreviewResult {
   const conflicts: RestorePreviewConflict[] = [];
   const schemaCompatible = backup.schemaVersion === live.schemaVersion;
+  const mode: RestorePreviewMode = options.recoveryMode === true ? 'recovery' : 'normal';
 
   if (!schemaCompatible) {
     conflicts.push({
@@ -455,12 +489,14 @@ export function detectRestorePreviewConflicts(
 
   return {
     wouldWrite: false,
+    mode,
     safeToRestore: conflicts.length === 0,
     schema: {
       backupVersion: backup.schemaVersion,
       liveVersion: live.schemaVersion,
       compatible: schemaCompatible,
     },
+    destructiveActions: buildDestructiveActionPolicy(conflicts, mode),
     conflicts,
   };
 }
@@ -805,6 +841,69 @@ function operatorSummaryForEncryptionReport(
   if (status === 'verified') return 'Backup encryption is verified; no encryption blockers or warnings were found.';
   if (status === 'warning') return `Backup encryption is present but has ${findingCount} warning(s) requiring operator review.`;
   return `Backup encryption verification failed with ${findingCount} blocker/warning finding(s); do not restore blindly.`;
+}
+
+function buildDestructiveActionPolicy(
+  conflicts: readonly RestorePreviewConflict[],
+  mode: RestorePreviewMode,
+): RestorePreviewDestructiveActionPolicy {
+  const blocked = mode === 'recovery' ? conflicts.flatMap(destructiveActionsForConflict) : [];
+  return {
+    enabled: mode !== 'recovery',
+    blocked,
+    guidance:
+      mode === 'recovery'
+        ? 'Recovery mode is active: destructive restore actions are disabled. Review conflicts, restore only non-destructive data, and require explicit operator approval before overwriting, deleting, migrating, or re-authorizing live state.'
+        : 'Normal mode: preview remains read-only; downstream restore tooling must still require explicit operator approval before executing destructive actions.',
+  };
+}
+
+function destructiveActionsForConflict(conflict: RestorePreviewConflict): RestorePreviewDestructiveAction[] {
+  if (conflict.area === 'schema') {
+    return [
+      {
+        area: conflict.area,
+        id: conflict.id,
+        type: 'schema-migration',
+        reason: 'Schema mismatches can require live-state migrations before restore.',
+      },
+    ];
+  }
+
+  if (conflict.type === 'live-only') {
+    return [
+      {
+        area: conflict.area,
+        id: conflict.id,
+        type: 'delete-live-record',
+        reason: 'Removing live-only state would delete data that is absent from the backup.',
+      },
+    ];
+  }
+
+  if (conflict.type === 'backup-only' && conflict.area !== 'approvals') {
+    return [];
+  }
+
+  if (conflict.area === 'approvals') {
+    return [
+      {
+        area: conflict.area,
+        id: conflict.id,
+        type: 'restore-approval-token',
+        reason: 'Approval tokens must not be restored or re-authorized during recovery mode.',
+      },
+    ];
+  }
+
+  return [
+    {
+      area: conflict.area,
+      id: conflict.id,
+      type: 'overwrite-live-record',
+      reason: 'Applying the backup record would overwrite or replace current live state.',
+    },
+  ];
 }
 
 function operatorSummaryForApprovalLedgerReport(

@@ -200,7 +200,7 @@ describe('PrCreator argv subprocess safety', () => {
   ])('accepts repository URL %s as a push remote', async (remote) => {
     const { exec, calls } = makeExecRecorder('feature/foo');
     const creator = new PrCreator(
-      { targetBranch: 'main', disabled: false, remote },
+      { targetBranch: 'main', disabled: false, remote, githubCapabilityCheck: { disabled: true } },
       exec,
     );
 
@@ -312,7 +312,7 @@ describe('PrCreator argv subprocess safety', () => {
       action: expect.stringContaining('GH_TOKEN'),
       branch: 'feature/actions-auth-warning',
     });
-    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
   });
 
   it('surfaces GitHub integration permission failures as actionable required-action errors', async () => {
@@ -420,6 +420,195 @@ describe('PrCreator argv subprocess safety', () => {
       branch: 'feature/pat-permission',
     });
     expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it('runs GitHub token capability preflight before creating a PR on a GitHub remote', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/capability-check\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'https://github.com/djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: repo\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    const result = await creator.create(makeResult(), undefined, { issueNumber: 1706 });
+
+    expect(result).toEqual({ url: 'https://example.com/pr/1' });
+    const remoteIndex = calls.findIndex(c => c.command === 'git' && c.args.join(' ') === 'remote get-url origin');
+    const userIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api -i /user');
+    const repoIndex = calls.findIndex(c => c.command === 'gh' && c.args.join(' ') === 'api repos/djm204/frankenbeast');
+    const listIndex = calls.findIndex(c => c.command === 'gh' && c.args.includes('list'));
+    const pushIndex = calls.findIndex(c => c.command === 'git' && c.args.includes('push'));
+    const createIndex = calls.findIndex(c => c.command === 'gh' && c.args.includes('create'));
+    expect(remoteIndex).toBeGreaterThanOrEqual(0);
+    expect(listIndex).toBeGreaterThanOrEqual(0);
+    expect(userIndex).toBeGreaterThan(listIndex);
+    expect(repoIndex).toBeGreaterThan(userIndex);
+    expect(pushIndex).toBeGreaterThan(repoIndex);
+    expect(createIndex).toBeGreaterThan(pushIndex);
+  });
+
+  it('honors explicitly required contents write before pushing to a credentialed HTTPS GitHub remote', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/credentialed-remote\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'https://x-access-token:secret@github.com/djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: read:org\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ private: true, permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin', githubCapabilityCheck: { required: { contents: 'write' } } },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      action: expect.stringContaining('contents write'),
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
+  });
+
+  it('does not require contents write merely because a GitHub remote uses HTTPS', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/fine-grained-pat\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'https://github.com/djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: \n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ node_id: 'R_test', private: true, permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      if (command === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
+        const error = new Error('Command failed: gh api graphql') as Error & { stderr: string; status: number };
+        error.stderr = 'Validation Failed: Head ref must exist';
+        error.status = 1;
+        throw error;
+      }
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toEqual({ url: 'https://example.com/pr/1' });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it.each([
+    'ssh://git@github.com:22/djm204/frankenbeast.git',
+    'https://github.com:443/djm204/frankenbeast.git',
+  ])('parses GitHub remote URLs with explicit ports: %s', async (remoteUrl) => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/ported-remote\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return `${remoteUrl}\n`;
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: repo\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ private: true, permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toEqual({ url: 'https://example.com/pr/1' });
+    expect(calls.some(c => c.command === 'gh' && c.args.join(' ') === 'api repos/djm204/frankenbeast')).toBe(true);
+  });
+
+  it('skips GitHub preflight for non-GitHub remotes whose path contains github.com', async () => {
+    const calls: ExecCall[] = [];
+    const remoteUrl = 'ssh://git@git.corp/github.com/djm204/frankenbeast.git';
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/internal-mirror\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return `${remoteUrl}\n`;
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      if (command === 'gh' && args.join(' ').startsWith('api repos/')) throw new Error(`unexpected ${command} ${args.join(' ')}`);
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toEqual({ url: 'https://example.com/pr/1' });
+    expect(calls.some(c => c.command === 'gh' && c.args.join(' ').startsWith('api repos/'))).toBe(false);
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+  });
+
+  it('does not require pull-request write when reusing an existing PR', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/existing-pr\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'git@github.com:djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.includes('list')) return '[{"url":"https://github.com/djm204/frankenbeast/pull/1"}]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: read:org\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toBeNull();
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(true);
+    expect(calls.some(c => c.command === 'gh' && c.args.includes('create'))).toBe(false);
+  });
+
+  it('fails capability preflight before PR creation when required GitHub permissions are missing', async () => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/missing-capability\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return 'git@github.com:djm204/frankenbeast.git\n';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: read:org\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ permissions: { pull: true, push: false, triage: false, maintain: false, admin: false } });
+      }
+      if (command === 'gh' && args.includes('list')) return '[]';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).rejects.toMatchObject({
+      name: PrCreationRequiredActionError.name,
+      message: expect.stringContaining('capability preflight failed'),
+      action: expect.stringContaining('pull-requests write'),
+      branch: 'feature/missing-capability',
+    });
+    expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
+    expect(calls.some(c => c.command === 'gh' && c.args.includes('create'))).toBe(false);
   });
 
   // Argument-injection and invalid-ref guards must still hold.

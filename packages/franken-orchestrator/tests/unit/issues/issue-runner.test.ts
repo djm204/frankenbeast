@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { IssueRunner } from '../../../src/issues/issue-runner.js';
-import type { IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from '../../../src/issues/issue-runner.js';
+import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
 import type { IssueGraphBuilder } from '../../../src/issues/issue-graph-builder.js';
@@ -30,6 +30,34 @@ const mockRun = vi.fn(async (deps?: BeastLoopDeps) => {
   await deps?.prCreator?.create?.(result, undefined);
   return result;
 });
+
+interface BurstDispatchIssueFixture {
+  readonly number: number;
+  readonly title: string;
+  readonly labels: readonly string[];
+}
+
+interface BurstDispatchLoadFixtureCase {
+  readonly name: string;
+  readonly thresholds?: IssueBackpressureThresholds;
+  readonly signals: IssueBackpressureSignals;
+  readonly expectedAllowed: boolean;
+  readonly expectedReasons: readonly string[];
+}
+
+interface BurstDispatchLoadFixture {
+  readonly description: string;
+  readonly issues: readonly BurstDispatchIssueFixture[];
+  readonly thresholds: IssueBackpressureThresholds;
+  readonly snapshots: readonly BurstDispatchLoadFixtureCase[];
+  readonly edgeCases: readonly BurstDispatchLoadFixtureCase[];
+}
+
+function readBurstDispatchLoadFixture(): BurstDispatchLoadFixture {
+  return JSON.parse(
+    readFileSync(join(__dirname, 'fixtures', 'burst-dispatch-load.json'), 'utf8'),
+  ) as BurstDispatchLoadFixture;
+}
 
 vi.mock('../../../src/beast-loop.js', () => {
   return {
@@ -255,6 +283,61 @@ describe('IssueRunner', () => {
       const order = outcomes.map(o => o.issueNumber);
       expect(order).toEqual([2, 4, 3, 1]);
     });
+
+    it('builds a structured scheduler fairness report for PM/liveness output', () => {
+      const issues = [
+        makeIssue({ number: 31, labels: [] }),
+        makeIssue({ number: 32, labels: ['low'] }),
+        makeIssue({ number: 33, labels: ['critical'] }),
+        makeIssue({ number: 34, labels: ['medium'] }),
+      ];
+      const triages = [makeTriage(31), makeTriage(32), makeTriage(33), makeTriage(34)];
+
+      const report = buildIssueSchedulerFairnessReport(issues, triages);
+
+      expect(report).toEqual({
+        totalIssues: 4,
+        scheduledIssueNumbers: [33, 34, 32, 31],
+        buckets: [
+          { severity: 'critical', issueNumbers: [33], count: 1 },
+          { severity: 'high', issueNumbers: [], count: 0 },
+          { severity: 'medium', issueNumbers: [34], count: 1 },
+          { severity: 'low', issueNumbers: [32], count: 1 },
+          { severity: 'unprioritized', issueNumbers: [31], count: 1 },
+        ],
+        warnings: ['issue #31 has no recognized severity label and is scheduled after prioritized work'],
+      });
+    });
+
+    it('reports missing triage as an explicit scheduler fairness edge case', () => {
+      const report = buildIssueSchedulerFairnessReport(
+        [makeIssue({ number: 41, labels: ['high'] })],
+        [],
+      );
+
+      expect(report.warnings).toEqual([
+        'issue #41 has no triage result and will fail before execution if approved',
+      ]);
+    });
+
+    it('logs the scheduler fairness report before executing approved issues', async () => {
+      const logger = mockLogger();
+      const issues = [makeIssue({ number: 51, labels: ['low'] }), makeIssue({ number: 52, labels: ['critical'] })];
+      const triages = [makeTriage(51), makeTriage(52)];
+      const config = makeConfig({ issues, triageResults: triages, logger });
+
+      await runner.run(config);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        '[issues] Scheduler fairness report',
+        expect.objectContaining({
+          totalIssues: 2,
+          scheduledIssueNumbers: [52, 51],
+          warnings: [],
+        }),
+        'issues',
+      );
+    });
   });
 
   describe('per-issue execution', () => {
@@ -391,6 +474,53 @@ describe('IssueRunner', () => {
   });
 
   describe('backpressure controls', () => {
+    it('loads the burst dispatch fixture and classifies overload versus recovered capacity', async () => {
+      const fixture = readBurstDispatchLoadFixture();
+
+      expect(fixture.description).toContain('Burst dispatch load fixture');
+      expect(fixture.issues.map(issue => issue.number)).toEqual([182401, 182402]);
+
+      for (const snapshot of fixture.snapshots) {
+        const decision = await evaluateIssueBackpressure(
+          { thresholds: fixture.thresholds, signals: () => snapshot.signals },
+          {
+            issue: makeIssue(fixture.issues[0]!),
+            index: 0,
+            totalIssues: fixture.issues.length,
+            pendingIssueCount: fixture.issues.length,
+            cumulativeTokens: 0,
+            budgetTokens: 1_000_000,
+            providerBudgetTokensRemaining: 1_000_000,
+          },
+        );
+
+        expect(decision.allowed, snapshot.name).toBe(snapshot.expectedAllowed);
+        expect(decision.reasons, snapshot.name).toEqual(snapshot.expectedReasons);
+      }
+    });
+
+    it('keeps burst dispatch fixture edge cases explicit for queue-depth pauses', async () => {
+      const fixture = readBurstDispatchLoadFixture();
+      const edgeCase = fixture.edgeCases.find(testCase => testCase.name === 'queue-depth-stops-fresh-starts');
+
+      expect(edgeCase).toBeDefined();
+      const decision = await evaluateIssueBackpressure(
+        { thresholds: edgeCase!.thresholds, signals: () => edgeCase!.signals },
+        {
+          issue: makeIssue(fixture.issues[0]!),
+          index: 0,
+          totalIssues: fixture.issues.length,
+          pendingIssueCount: fixture.issues.length,
+          cumulativeTokens: 0,
+          budgetTokens: 1_000_000,
+          providerBudgetTokensRemaining: 1_000_000,
+        },
+      );
+
+      expect(decision.allowed).toBe(false);
+      expect(decision.reasons).toEqual(edgeCase!.expectedReasons);
+    });
+
     it('skips fresh issue starts when active process capacity is exhausted and explains the throttle', async () => {
       const logger = mockLogger();
       const issues = [makeIssue({ number: 11 })];
@@ -481,6 +611,93 @@ describe('IssueRunner', () => {
       expect(outcomes[0]!.error).toContain('failed starts 3 exceeds limit 1');
       expect(outcomes[1]).toMatchObject({ issueNumber: 14, status: 'fixed' });
       expect(mockRun).toHaveBeenCalledOnce();
+    });
+
+    it('emits live capacity watermark alerts without pausing fresh issue starts', async () => {
+      const logger = mockLogger();
+      const issues = [makeIssue({ number: 18 })];
+      const triages = [makeTriage(18)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        logger,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 10, capacityWatermarkRatio: 0.8 },
+          signals: () => ({
+            activeProcesses: 8,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 18, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Capacity watermark alert for issue #18'),
+        expect.objectContaining({
+          alerts: expect.arrayContaining([
+            expect.objectContaining({
+              signal: 'activeProcesses',
+              value: 8,
+              threshold: 10,
+              watermarkRatio: 0.8,
+              message: 'active processes 8 reached 80% of limit 10',
+            }),
+          ]),
+        }),
+        'issues',
+      );
+    });
+
+    it('keeps capacity watermark alerts quiet below the configured watermark edge', async () => {
+      const logger = mockLogger();
+      const config = makeConfig({
+        issues: [makeIssue({ number: 19 })],
+        triageResults: [makeTriage(19)],
+        logger,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 10, capacityWatermarkRatio: 0.8 },
+          signals: () => ({
+            activeProcesses: 7,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 19, status: 'fixed' });
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('keeps capacity watermark alerts quiet when hard thresholds are zero', async () => {
+      const logger = mockLogger();
+      const config = makeConfig({
+        issues: [makeIssue({ number: 20 })],
+        triageResults: [makeTriage(20)],
+        logger,
+        backpressure: {
+          thresholds: { maxInFlightBacklog: 0, capacityWatermarkRatio: 0.8 },
+          signals: () => ({
+            activeProcesses: 0,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 20, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+      expect(logger.warn).not.toHaveBeenCalled();
     });
 
     it('preserves checkpoint-complete outcomes before evaluating backpressure', async () => {

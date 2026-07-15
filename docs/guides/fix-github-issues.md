@@ -117,3 +117,18 @@ The `--budget` flag sets a USD spending cap across all issues (default: $10). Wh
 ## Backpressure
 
 Issue execution has a programmatic backpressure policy for orchestrator/refill callers that need to pause fresh issue starts before they create an availability incident. Callers can pass capacity signals for active processes, failed starts, in-flight backlog, pending queue depth, oldest queue age, provider budget remaining, and system load. When a configured threshold is exceeded, the runner skips the fresh issue start with status `skipped`, logs `[issues] Backpressure paused issue #<n>`, and includes a `backpressure: ...` reason in the issue outcome so refill/liveness output explains why work was paused. Once later signals fall below threshold, the next eligible issue is allowed automatically; no manual reset is required.
+
+The deterministic burst-load fixture at `packages/franken-orchestrator/tests/unit/issues/fixtures/burst-dispatch-load.json` captures an overloaded dispatch tick, a recovered-capacity tick, and a queue-depth edge case. Use it when changing availability/refill policy so tests can prove both the pause reason and the automatic recovery behavior remain machine-readable.
+
+For live operator awareness before a hard pause, set `thresholds.capacityWatermarkRatio` to a value between `0` and `1` (for example `0.8`). The runner then emits `[issues] Capacity watermark alert for issue #<n>` with structured `alerts[]` whenever capacity-style signals such as `activeProcesses`, `inFlightBacklog`, `pendingIssueCount`, `oldestQueueAgeMs`, or `systemLoadAverage` reach that percentage of their configured threshold. Watermark alerts do not skip the issue; they are warning telemetry for PM/liveness tooling. Values below the watermark remain quiet so normal refill output is not noisy.
+
+## Scheduler fairness report
+
+Before execution starts, `IssueRunner` emits `[issues] Scheduler fairness report` with structured data that PM/liveness tooling can consume without parsing prose. The report includes:
+
+- `totalIssues`: number of approved issues considered for this run.
+- `scheduledIssueNumbers`: the actual severity-ordered execution order.
+- `buckets[]`: counts and issue numbers for `critical`, `high`, `medium`, `low`, and `unprioritized` work.
+- `warnings[]`: explicit edge cases, such as unprioritized issues that will run after prioritized work or approved issues missing triage results.
+
+Library callers can produce the same deterministic payload directly with `buildIssueSchedulerFairnessReport(issues, triageResults)`. Treat non-empty `warnings[]` as operator guidance: either add the missing labels/triage data before approving the run, or record why the fallback order is acceptable.
