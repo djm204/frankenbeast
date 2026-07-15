@@ -255,20 +255,37 @@ function resolveRunConfigOwner(
   return typeof owner === 'function' ? owner() : owner;
 }
 
+type ProcessStartTimeReadResult =
+  | { status: 'matched'; ticks: string }
+  | { status: 'not_linux' | 'invalid_pid' | 'leader_absent' | 'unreadable' };
+
 function processStartTimeTicks(pid: number): string | undefined {
-  if (pid <= 0 || process.platform !== 'linux') {
-    return undefined;
+  const result = readProcessStartTimeTicks(pid);
+  return result.status === 'matched' ? result.ticks : undefined;
+}
+
+function readProcessStartTimeTicks(pid: number): ProcessStartTimeReadResult {
+  if (pid <= 0) {
+    return { status: 'invalid_pid' };
+  }
+  if (process.platform !== 'linux') {
+    return { status: 'not_linux' };
   }
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
     const endOfCommand = stat.lastIndexOf(')');
     if (endOfCommand < 0) {
-      return undefined;
+      return { status: 'unreadable' };
     }
     const fieldsFromState = stat.slice(endOfCommand + 2).trim().split(/\s+/);
-    return fieldsFromState[19] || undefined;
-  } catch {
-    return undefined;
+    const ticks = fieldsFromState[19];
+    return typeof ticks === 'string' && ticks.length > 0
+      ? { status: 'matched', ticks }
+      : { status: 'unreadable' };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { status: 'leader_absent' }
+      : { status: 'unreadable' };
   }
 }
 
@@ -298,11 +315,14 @@ function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
   if (typeof expectedStartTime !== 'string') {
     return false;
   }
-  const actualStartTime = processStartTimeTicks(pid);
-  if (actualStartTime === undefined) {
+  const actualStartTime = readProcessStartTimeTicks(pid);
+  if (actualStartTime.status === 'matched') {
+    return actualStartTime.ticks === expectedStartTime;
+  }
+  if (actualStartTime.status === 'leader_absent') {
     return processGroupExists(pid);
   }
-  return actualStartTime === expectedStartTime;
+  return false;
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {

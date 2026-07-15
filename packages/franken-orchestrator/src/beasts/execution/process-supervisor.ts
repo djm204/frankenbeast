@@ -89,11 +89,6 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
   private killProcess(): typeof process.kill {
     return this.options.orphanSweeper?.killProcess ?? process.kill;
   }
-
-  private orphanSweeperEscalationDelayMs(): number {
-    return this.options.orphanSweeper?.escalationDelayMs ?? 1_000;
-  }
-
   private shouldUseProcessGroup(): boolean {
     return this.orphanSweeperEnabled() && this.orphanSweeperPlatform() !== 'win32';
   }
@@ -122,17 +117,6 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       }
       throw error;
     }
-  }
-
-  private scheduleOrphanKillEscalation(pid: number): void {
-    const delayMs = this.orphanSweeperEscalationDelayMs();
-    if (delayMs < 0 || !this.shouldUseProcessGroup() || pid <= 0) {
-      return;
-    }
-
-    setTimeout(() => {
-      this.sweepOrphanProcessGroup(pid, 'SIGKILL');
-    }, delayMs);
   }
 
   validateCwd(cwd: string | undefined): void {
@@ -330,9 +314,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     recordExit = (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
-      if (this.sweepOrphanProcessGroup(pid).swept) {
-        this.scheduleOrphanKillEscalation(pid);
-      }
+      this.sweepOrphanProcessGroup(pid);
       setImmediate(() => {
         if (!stdoutClosed) {
           forceClose.stdout?.();

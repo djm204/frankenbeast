@@ -188,7 +188,7 @@ describe('ProcessBeastExecutor', () => {
     expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: false });
   });
 
-  it('sweeps a recovered process group when the original leader exited but the group still exists', async () => {
+  it('fails closed when a recovered process-group leader start time is unreadable', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
@@ -204,22 +204,10 @@ describe('ProcessBeastExecutor', () => {
         processStartTimeTicks: 'known-original-start-time',
       },
     });
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === -4242 && signal === 0) {
-        return true;
-      }
-      const error = new Error('missing process') as NodeJS.ErrnoException;
-      error.code = 'ESRCH';
-      throw error;
-    }) as typeof process.kill);
 
-    try {
-      await executor.kill(run.id, attempt.id);
-    } finally {
-      killSpy.mockRestore();
-    }
+    await executor.kill(run.id, attempt.id);
 
-    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: true });
+    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: false });
   });
 
   it('kills a spawned process when attempt creation fails', async () => {
