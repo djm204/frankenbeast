@@ -177,21 +177,45 @@ function pathsReferenceSameFile(left: string, right: string): boolean {
   }
 }
 
+function canonicalSidecarPath(value: string): string | undefined {
+  try {
+    return join(realpathSync.native(dirname(value)), basename(value));
+  } catch {
+    return undefined;
+  }
+}
+
+function generatedStateTempPattern(filePath: string): RegExp {
+  const uuidPattern = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  return new RegExp(`^${escapeRegExp(basename(filePath))}\\.tmp\\.[0-9]+\\.${uuidPattern}$`);
+}
+
 function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boolean {
-  const resolvedTempPath = resolve(tempPath);
-  const resolvedTargetPath = resolve(filePath);
-  if (dirname(resolvedTempPath) !== dirname(resolvedTargetPath)) {
+  const canonicalTempPath = canonicalSidecarPath(tempPath) ?? resolve(tempPath);
+  const canonicalTargetPath = canonicalSidecarPath(filePath) ?? resolve(filePath);
+  if (dirname(canonicalTempPath) !== dirname(canonicalTargetPath)) {
     return false;
   }
-  if (!resolvedTempPath.startsWith(`${resolvedTargetPath}.tmp.`)) {
+  if (!canonicalTempPath.startsWith(`${canonicalTargetPath}.tmp.`)) {
     return false;
   }
   try {
-    return statSync(resolvedTempPath).isFile();
+    return statSync(canonicalTempPath).isFile();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return true;
     }
+    return false;
+  }
+}
+
+function journalTempIsEmptyGeneratedSidecar(tempPath: string, filePath: string): boolean {
+  if (!journalTempPathBelongsToTarget(tempPath, filePath)) {
+    return false;
+  }
+  try {
+    return statSync(tempPath).size === 0;
+  } catch {
     return false;
   }
 }
@@ -290,7 +314,7 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
     };
   }
 
-  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath);
+  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath) || journalPath === stateWriteJournalPath(filePath);
   if (targetMatches && !journalTempPathBelongsToTarget(journal.tempPath, filePath)) {
     const quarantinePath = quarantineFile(journalPath);
     return {
@@ -311,6 +335,18 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
         tempPath: journal.tempPath,
         action: 'retained-active-journal',
         reason: `State write journal ${journalPath} is still preparing; refusing to remove live journal for ${journal.tempPath}.`,
+      };
+    }
+    if (journalTempIsEmptyGeneratedSidecar(journal.tempPath, filePath)) {
+      rmSync(journal.tempPath, { force: true });
+      rmSync(journalPath, { force: true });
+      fsyncDir(dirname(filePath));
+      return {
+        journalPath,
+        targetPath: journal.targetPath,
+        tempPath: journal.tempPath,
+        action: 'removed-stale-temp',
+        reason: `Removed stale preparing state write journal and empty generated temp file from an interrupted writer after temp creation.`,
       };
     }
     rmSync(journalPath, { force: true });
