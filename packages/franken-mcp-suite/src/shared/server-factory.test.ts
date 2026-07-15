@@ -428,9 +428,11 @@ describe('createMcpServer', () => {
       expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
         tool: 'fbeast_memory_review_propose',
         args: { key: 'secret-api-key', value: 'token abc123', type: 'working' },
+        value: 'token abc123 outside args',
       })).toEqual({
         tool: 'fbeast_memory_review_propose',
         args: '[memory-review-proposal-redacted]',
+        value: '[memory-review-proposal-redacted]',
       });
 
       expect(sanitizeToolArgumentsForAuditTrail('mcp__fbeast-proxy__execute_tool', {

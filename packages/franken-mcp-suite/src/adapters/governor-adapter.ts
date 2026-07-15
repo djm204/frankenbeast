@@ -37,6 +37,7 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_governor_budget',
   'fbeast_memory_store',
   'fbeast_memory_review_propose',
+  'fbeast_memory_review_decide',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_plan_decompose',
@@ -138,6 +139,7 @@ function matchesDangerousPattern(action: string, context: string): boolean {
 
 function unqualifyMcpActionName(action: string): string {
   const marker = '__';
+  if (!action.startsWith('mcp__')) return action;
   const index = action.lastIndexOf(marker);
   return index >= 0 ? action.slice(index + marker.length) : action;
 }
@@ -194,8 +196,28 @@ function redactMemoryReviewProposalGovernanceContext(action: string, context: st
   return MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION;
 }
 
+function redactMemoryReviewDecisionGovernanceContext(action: string, context: string): string {
+  if (unqualifyMcpActionName(action) !== 'fbeast_memory_review_decide') return context;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return context;
+    const record = parsed as Record<string, unknown>;
+    return JSON.stringify({
+      ...(typeof record['id'] === 'string' ? { id: record['id'] } : {}),
+      ...(typeof record['action'] === 'string' ? { action: record['action'] } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
+    });
+  } catch {
+    return context;
+  }
+}
+
 function redactGovernanceContext(action: string, context: string): string {
-  return redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context));
+  return redactMemoryReviewDecisionGovernanceContext(
+    action,
+    redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+  );
 }
 
 function isRightToForgetDryRun(action: string, context: string): boolean {
@@ -241,7 +263,9 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     };
   }
 
-  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction) || matchesDangerousPattern(unqualifiedAction, context);
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction)
+    || matchesDangerousPattern(action, context)
+    || matchesDangerousPattern(unqualifiedAction, context);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({

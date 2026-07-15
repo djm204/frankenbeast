@@ -259,6 +259,15 @@ function redactMemoryReviewProposalArgs(sanitized: Record<string, unknown>, reda
   return sanitized;
 }
 
+function redactMemoryReviewProposalEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-review-proposal-redacted]'): Record<string, unknown> {
+  const safeEnvelopeKeys = new Set(['tool', 'action', 'args']);
+  for (const key of Object.keys(sanitized)) {
+    sanitized[key] = safeEnvelopeKeys.has(key) ? sanitized[key] : redaction;
+  }
+  sanitized['args'] = redaction;
+  return sanitized;
+}
+
 export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unknown): Record<string, unknown> {
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
@@ -272,8 +281,7 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const auditedAction = typeof sanitized['action'] === 'string' ? unqualifyMcpToolName(sanitized['action']) : undefined;
   if (auditedTool === MEMORY_REVIEW_PROPOSE_TOOL || auditedAction === MEMORY_REVIEW_PROPOSE_TOOL) {
     if (unqualifiedToolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
-      sanitized['args'] = '[memory-review-proposal-redacted]';
-      return sanitized;
+      return redactMemoryReviewProposalEnvelope(sanitized);
     }
     if (auditedAction === MEMORY_REVIEW_PROPOSE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
       sanitized['context'] = '[memory-review-proposal-redacted]';

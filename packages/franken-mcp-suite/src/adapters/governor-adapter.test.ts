@@ -100,6 +100,8 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'denied' });
     await expect(governor.check({ action: 'dropTable', context: '{"name":"events"}' }))
       .resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({ action: 'delete__file', context: '{"path":"src/app.ts"}' }))
+      .resolves.toMatchObject({ decision: 'denied' });
   });
 
   it('approves benign substrings that are not destructive verbs', async () => {
@@ -193,6 +195,17 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"never_store"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate text contains rm -rf /"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('ignores dangerous reviewer notes when governing memory review decisions', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({
+      action: 'fbeast_memory_review_decide',
+      context: '{"id":"memcand_1","action":"reject","reviewer":"alice","note":"Rejected because candidate contains rm -rf /"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {
