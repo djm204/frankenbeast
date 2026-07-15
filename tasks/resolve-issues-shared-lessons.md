@@ -6,6 +6,11 @@
 - Put sensitive learning/review keys through the audit event `key` hashing field rather than plaintext `details`, and audit deletion-guard rejections before rethrowing so denied writes are visible without leaking selectors.
 - When broadening audit coverage, wire every public persisted-memory surface through a shared audit sink (working, episodic learning/recall, recovery checkpoint/clear, review queue/provenance, right-to-forget) and update schema metadata tests for the extra audit/hash-key rows.
 
+## 2026-07-15 — High-risk governor policy review fixes
+- When adding policy-as-code for high-risk action classes, wire the class map into every shared governor path before non-executing exemptions; otherwise new classes can exist in the policy module but never gate hook/public/central checks.
+- For memory governance evidence, pass only selector/dry-run/profile fields into hook/governor context and redact selectors before logging; never serialize full memory tool payloads because schema-rejected extras or stored values can leak secrets into governor logs.
+- High-risk shell-command inference must parse common CLI variants, not just simple substrings: allow read-only GitHub inspection (`gh issue/pr view|list`), gate mutating GitHub subcommands such as labels/runs/secrets even behind inherited flags, recognize `git` global options before `push`, deny Git remote writes without a concrete target, avoid matching ordinary `service` path/package names as process control, include `crontab` edits, and match real webhook hosts like `hooks.slack.com/services` and Discord `/api/webhooks/`.
+
 ## 2026-07-15 — Skill installer path hardening review fixes
 - For installer path hardening, guard every public surface that can surface unsafe-path errors, not just install routes; context/read/write routes should return generic unsafe-path messages and tests should assert absolute roots/targets are not leaked.
 - If an installer snapshots a root realpath at construction, handle missing-root recovery explicitly: revalidate the missing root's parent before `mkdir`, reject symlinked/repointed parents, then recheck the recreated root before creating child directories.

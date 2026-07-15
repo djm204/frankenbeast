@@ -1,5 +1,5 @@
-import { SkillTrigger, TriggerRegistry } from '@franken/governor';
-import type { TriggerResult, TriggerSeverity } from '@franken/governor';
+import { SkillTrigger, TriggerRegistry, evaluateHighRiskActionPolicy } from '@franken/governor';
+import type { HighRiskActionClass, HighRiskActionEvidence, TriggerResult, TriggerSeverity } from '@franken/governor';
 import { CostCalculator, DEFAULT_PRICING } from '@franken/observer';
 
 import { createSqliteStore } from '../shared/sqlite-store.js';
@@ -17,6 +17,26 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_right_to_forget',
 ]);
 
+const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
+  fbeast_memory_store: 'memory',
+  fbeast_memory_forget: 'memory',
+  fbeast_memory_right_to_forget: 'memory',
+};
+
+const GIT_GLOBAL_OPTIONS_PATTERN = String.raw`(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*`;
+const GH_GLOBAL_OPTIONS_PATTERN = String.raw`(?:\s+(?:-[A-Za-z]\s+\S+|--(?:repo|hostname)(?:=\S+|\s+\S+)|--[^\s=]+(?:=\S+)?))*`;
+const GH_MUTATING_RESOURCES_PATTERN = String.raw`(?:api|issue|pr|workflow|repo|release|label|run|secret)`;
+
+const HIGH_RISK_ACTION_NAME_PATTERNS: ReadonlyArray<readonly [RegExp, HighRiskActionClass]> = [
+  [new RegExp(String.raw`\bgit\b${GIT_GLOBAL_OPTIONS_PATTERN}\s+push\b`, 'i'), 'git-remote-write'],
+  [new RegExp(String.raw`\bgh\b${GH_GLOBAL_OPTIONS_PATTERN}\s+${GH_MUTATING_RESOURCES_PATTERN}\b`, 'i'), 'github-mutation'],
+  [/\b(?:curl|fetch)\b[^\n]*api\.github\.com\b/i, 'github-mutation'],
+  [/\b(?:cron|crontab|cronjob|schedule|scheduled\s+job)\b/i, 'cron'],
+  [/\b(?:profile|skill|plugin|credential|config)\b[^\n]*(?:write|edit|patch|create|delete|remove|install|set)\b/i, 'profile-write'],
+  [/\b(?:webhook|discord_webhook_url|slack_webhook_url)\b|https:\/\/hooks\.slack\.com\/services\/|https:\/\/(?:discord(?:app)?\.com)\/api\/webhooks\//i, 'webhook'],
+  [/\b(?:kill|pkill|killall|nohup|disown|systemctl|service\s+\S+\s+(?:start|stop|restart|reload|enable|disable)|docker\s+(?:stop|kill|rm|restart)|process\s+(?:kill|start|stop))\b/i, 'shell-process-control'],
+];
+
 /**
  * fbeast tools whose payload is *data to query/analyze/store/log*, not an
  * operation to authorize. Their input frequently contains dangerous words (the
@@ -33,7 +53,6 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_firewall_scan_file',
   'fbeast_governor_check',
   'fbeast_governor_budget',
-  'fbeast_memory_store',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_plan_decompose',
@@ -151,6 +170,158 @@ function isRightToForgetDryRun(action: string, context: string): boolean {
   }
 }
 
+function parseContextObject(context: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Missing structured evidence intentionally falls through to fail-closed policy.
+  }
+  return {};
+}
+
+function stringContext(context: Record<string, unknown>, key: string): string | undefined {
+  const value = context[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function booleanContext(context: Record<string, unknown>, key: string): boolean | undefined {
+  const value = context[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function optionalTarget(target: string | undefined): Pick<HighRiskActionEvidence, 'target'> | Record<string, never> {
+  return target !== undefined ? { target } : {};
+}
+
+function memoryTarget(context: Record<string, unknown>): string | undefined {
+  const selectors = ['key', 'category', 'sourceScope', 'query']
+    .map((key) => stringContext(context, key))
+    .filter((value): value is string => value !== undefined);
+  return selectors.length > 0 ? selectors.join(',') : undefined;
+}
+
+function contextCommand(action: string, context: string): string {
+  const parsed = parseContextObject(context);
+  for (const key of ['command', 'cmd', 'script']) {
+    const value = stringContext(parsed, key);
+    if (value !== undefined) return value;
+  }
+  for (const key of ['args', 'argv', 'commands']) {
+    const value = parsed[key];
+    if (Array.isArray(value)) return value.map(String).join(' ');
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return `${action} ${context}`.trim();
+}
+
+function extractGitPushTarget(command: string): string | undefined {
+  const match = /\bgit\b(?:\s+(?:-[A-Za-z](?:\s+\S+)?|--[^\s=]+(?:=\S+)?))*\s+push\b(?:\s+--[^\s]+)*(?:\s+(?<remote>[^\s]+))?(?:\s+(?<ref>[^\s]+))?/i.exec(command);
+  if (!match?.groups) return undefined;
+  const remote = match.groups.remote;
+  const ref = match.groups.ref;
+  return [remote, ref].filter((part): part is string => part !== undefined && !part.startsWith('-')).join(' ') || undefined;
+}
+
+function inferGithubOperation(command: string, fallback: string): string {
+  const match = new RegExp(String.raw`\bgh\b${GH_GLOBAL_OPTIONS_PATTERN}\s+(?<resource>${GH_MUTATING_RESOURCES_PATTERN})\b(?:\s+(?<verb>[A-Za-z][\w-]*))?`, 'i').exec(command);
+  const resource = match?.groups?.resource?.toLowerCase();
+  const verb = match?.groups?.verb?.toLowerCase();
+  if (resource === undefined) return fallback;
+  if (resource === 'api') return fallback;
+  if (verb === undefined || ['view', 'list', 'status', 'checks', 'diff'].includes(verb)) return 'read';
+  return verb;
+}
+
+function inferCronOperation(command: string, fallback: string): string {
+  if (/\bcrontab\s+-l\b/i.test(command)) return 'list';
+  if (/\bcrontab\s+-r\b/i.test(command)) return 'remove';
+  if (/\bcrontab\s+-e\b/i.test(command)) return 'update';
+  if (/\bcrontab\s+\S+/i.test(command)) return 'install';
+  return fallback;
+}
+
+function extractUrl(text: string): string | undefined {
+  return /https?:\/\/[^\s'"`<>]+/i.exec(text)?.[0];
+}
+
+function inferHighRiskActionClass(action: string, context: string): HighRiskActionClass | undefined {
+  const explicit = HIGH_RISK_ACTIONS[action];
+  if (explicit !== undefined) return explicit;
+  const combined = `${action} ${context}`;
+  return HIGH_RISK_ACTION_NAME_PATTERNS.find(([pattern]) => pattern.test(combined))?.[1];
+}
+
+function highRiskEvidence(action: string, context: string): HighRiskActionEvidence {
+  const parsed = parseContextObject(context);
+  const memoryEvidence = (operation: string): HighRiskActionEvidence => {
+    const evidence: HighRiskActionEvidence = { operation };
+    const target = memoryTarget(parsed);
+    const profile = stringContext(parsed, 'profile');
+    const activeProfile = stringContext(parsed, 'activeProfile');
+    const crossProfile = booleanContext(parsed, 'crossProfile');
+    const dryRun = booleanContext(parsed, 'dryRun');
+    if (target !== undefined) Object.assign(evidence, { target });
+    if (profile !== undefined) Object.assign(evidence, { profile });
+    if (activeProfile !== undefined) Object.assign(evidence, { activeProfile });
+    if (crossProfile !== undefined) Object.assign(evidence, { crossProfile });
+    if (dryRun !== undefined) Object.assign(evidence, { dryRun });
+    return evidence;
+  };
+  if (action === 'fbeast_memory_store') return memoryEvidence('store');
+  if (action === 'fbeast_memory_forget') return memoryEvidence('delete');
+  if (action === 'fbeast_memory_right_to_forget') return memoryEvidence('right-to-forget');
+  const command = contextCommand(action, context);
+  if (new RegExp(String.raw`\bgit\b${GIT_GLOBAL_OPTIONS_PATTERN}\s+push\b`, 'i').test(command)) {
+    return {
+      command,
+      ...optionalTarget(extractGitPushTarget(command)),
+      force: /(?:\s--force(?:-with-lease)?\b|\s-f\b)/i.test(command),
+    };
+  }
+  const actionClass = inferHighRiskActionClass(action, context);
+  const parsedOperation = stringContext(parsed, 'operation');
+  const operation = parsedOperation
+    ?? (actionClass === 'github-mutation' ? inferGithubOperation(command, action)
+      : actionClass === 'cron' ? inferCronOperation(command, action)
+        : action);
+  const target = stringContext(parsed, 'target') ?? extractUrl(command) ?? command;
+  const evidence: HighRiskActionEvidence = { command, operation, ...optionalTarget(target) };
+  for (const [key, value] of [
+    ['profile', stringContext(parsed, 'profile')],
+    ['activeProfile', stringContext(parsed, 'activeProfile')],
+    ['url', extractUrl(command)],
+  ] as const) {
+    if (value !== undefined) Object.assign(evidence, { [key]: value });
+  }
+  for (const [key, value] of [
+    ['allowlisted', booleanContext(parsed, 'allowlisted')],
+    ['dryRun', booleanContext(parsed, 'dryRun')],
+    ['readOnly', booleanContext(parsed, 'readOnly')],
+    ['destructive', booleanContext(parsed, 'destructive')],
+    ['force', booleanContext(parsed, 'force')],
+    ['crossProfile', booleanContext(parsed, 'crossProfile')],
+  ] as const) {
+    if (value !== undefined) Object.assign(evidence, { [key]: value });
+  }
+  return evidence;
+}
+
+function assessHighRiskAction(action: string, context: string): GovernorCheckResult | undefined {
+  const actionClass = inferHighRiskActionClass(action, context);
+  if (actionClass === undefined) return undefined;
+  const result = evaluateHighRiskActionPolicy({ actionClass, evidence: highRiskEvidence(action, context) });
+  if (result.decision === 'allow') {
+    return { decision: 'approved', reason: `High-risk policy allowed ${action}: ${result.reason}` };
+  }
+  if (result.decision === 'deny') {
+    return { decision: 'denied', reason: `High-risk policy denied ${action}: ${result.reason}` };
+  }
+  return { decision: 'review_recommended', reason: `High-risk policy requires approval for ${action}: ${result.reason}` };
+}
+
 function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; model: string }): boolean {
   if (row.cost_usd > 0 || row.cost_source === 'explicit') {
     return false;
@@ -162,6 +333,9 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 }
 
 function assessAction(action: string, context: string): GovernorCheckResult {
+  const highRiskResult = assessHighRiskAction(action, context);
+  if (highRiskResult !== undefined) return highRiskResult;
+
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
   // public check tool, central gate) — not just the central dispatch gate.

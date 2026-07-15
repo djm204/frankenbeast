@@ -14,6 +14,11 @@ export {
   formatApprovalPolicyManifestPayload,
   verifySignedApprovalPolicyManifest,
 } from './approval-policy-manifest.js';
+export {
+  evaluateHighRiskActionPolicy,
+  HIGH_RISK_ACTION_CLASSES,
+  isHighRiskActionClass,
+} from './high-risk-action-policy.js';
 export type {
   ApprovalPolicyManifest,
   ApprovalPolicyManifestPolicy,
@@ -22,3 +27,10 @@ export type {
   ApprovalPolicyManifestVerificationOptions,
   VerifiedApprovalPolicyManifest,
 } from './approval-policy-manifest.js';
+export type {
+  HighRiskActionClass,
+  HighRiskActionEvidence,
+  HighRiskActionPolicyDecision,
+  HighRiskPolicyDecisionKind,
+  HighRiskActionPolicyInput,
+} from './high-risk-action-policy.js';

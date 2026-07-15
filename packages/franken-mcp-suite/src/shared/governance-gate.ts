@@ -9,17 +9,21 @@ function stringifyArgs(args: Record<string, unknown>): string {
   }
 }
 
-const RIGHT_TO_FORGET_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
+const MEMORY_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
+const MEMORY_POLICY_EVIDENCE_KEYS = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'profile', 'activeProfile', 'crossProfile'] as const;
 
 function stringifyArgsForGovernanceLog(tool: string, args: Record<string, unknown>): string {
-  if (tool !== 'fbeast_memory_right_to_forget') return stringifyArgs(args);
-  const redacted: Record<string, unknown> = { ...args };
-  for (const key of RIGHT_TO_FORGET_SELECTOR_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(redacted, key)) {
-      redacted[key] = '[right-to-forget-selector-redacted]';
-    }
+  if (!['fbeast_memory_store', 'fbeast_memory_forget', 'fbeast_memory_right_to_forget'].includes(tool)) {
+    return stringifyArgs(args);
   }
-  return stringifyArgs(redacted);
+  const evidence: Record<string, unknown> = {};
+  for (const key of MEMORY_POLICY_EVIDENCE_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(args, key)) continue;
+    evidence[key] = MEMORY_SELECTOR_KEYS.has(key)
+      ? '[right-to-forget-selector-redacted]'
+      : args[key];
+  }
+  return stringifyArgs(evidence);
 }
 
 /**
@@ -39,8 +43,8 @@ export function createGovernanceGate(source: string | GovernorAdapter): Governan
 
   return {
     async check({ tool, args }) {
-      // Exempt non-executing tools: their payload is data to query/analyze/
-      // store/log, not an operation to authorize, so payload-keyword governance
+      // Exempt non-executing tools: their payload is data to query/analyze/log,
+      // not an operation to authorize, so payload-keyword governance
       // would only produce false-positive denials on legitimate risky content.
       if (NON_EXECUTING_TOOLS.has(tool)) {
         return {

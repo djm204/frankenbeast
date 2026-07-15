@@ -60,8 +60,11 @@ export { GovernorAuditRecorder } from './audit/index.js';
 
 export {
   createEvaluatorsFromApprovalPolicyManifest,
+  evaluateHighRiskActionPolicy,
   formatApprovalPolicyManifestPayload,
   formatApprovalResponseSignaturePayload,
+  HIGH_RISK_ACTION_CLASSES,
+  isHighRiskActionClass,
   SignatureVerifier,
   verifySignedApprovalPolicyManifest,
 } from './security/index.js';
@@ -72,6 +75,11 @@ export type {
   ApprovalPolicyManifestTriggerId,
   ApprovalPolicyManifestVerificationOptions,
   ApprovalResponseSignaturePayloadFields,
+  HighRiskActionClass,
+  HighRiskActionEvidence,
+  HighRiskActionPolicyDecision,
+  HighRiskActionPolicyInput,
+  HighRiskPolicyDecisionKind,
   VerifiedApprovalPolicyManifest,
 } from './security/index.js';
 export {
