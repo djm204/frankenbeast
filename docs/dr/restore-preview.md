@@ -42,8 +42,12 @@ A backup manifest should include:
 
 Interpretation guidance:
 
-- `failed`: do not restore blindly. Encryption metadata is missing, encryption is disabled, or the cipher suite is absent.
+- `failed`: do not restore blindly. Encryption metadata is missing, encryption is disabled, the cipher suite is absent, or runtime-loaded metadata is malformed.
 - `warning`: encryption is present, but the report lacks restore-critical evidence such as an allowed algorithm, logical key reference, or encrypted artifact digest. Require operator review before restore.
 - `verified`: encryption is present, uses an allowed algorithm, and includes key/digest evidence for disaster-recovery handoff.
 
-Tests cover verified metadata, missing metadata, unsupported algorithms, and missing restore-critical references so future DR changes keep the report machine-readable and actionable.
+Tests cover verified metadata, missing metadata, malformed runtime-loaded metadata, unsupported algorithms, and missing restore-critical references so future DR changes keep the report machine-readable and actionable.
+
+## Tabletop exercises
+
+Use `docs/dr/tabletop-exercise-template.md` when operators need to rehearse a restore-preview scenario before executing any recovery work. The template keeps disaster-recovery practice read-only, requires at least one fail-closed edge case such as corrupt backup input, and records explicit restore/merge/skip/quarantine decisions for every drift item.

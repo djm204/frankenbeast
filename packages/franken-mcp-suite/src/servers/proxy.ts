@@ -40,7 +40,9 @@ export function createProxyServer(deps: ProxyServerDeps): FbeastMcpServer {
   let cachedAdapters: AdapterSet | undefined;
   // Govern/audit the *resolved* target tool, not the `execute_tool` wrapper, so
   // policy and audit are keyed by the real high-risk action (ADR-035, finding
-  // round-1). The gate/observer are created lazily, preserving lazy-DB behavior.
+  // round-1). This is the Tool wrapper confusion control in
+  // docs/agent-tool-execution-threat-model.md. The gate/observer are created
+  // lazily, preserving lazy-DB behavior.
   const governance = deps.governance ?? createGovernanceGate(dbPath);
   const audit = deps.audit ?? createAuditSink(dbPath);
 

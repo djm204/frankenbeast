@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SkillCredentialStore } from '../../../src/skills/skill-credential-store.js';
@@ -29,6 +29,45 @@ describe('SkillCredentialStore', () => {
     );
     expect(content).toContain('GITHUB_TOKEN=ghp_abc');
     expect(content).toContain('LINEAR_KEY=lin_xyz');
+  });
+
+  it('creates the credential env file with owner-only permissions', () => {
+    store.setMany({ GITHUB_TOKEN: 'ghp_abc' });
+
+    const mode = statSync(join(tempDir, '.fbeast', '.env')).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  it('persists credentials without the truncating writeFileSync path', async () => {
+    rmSync(tempDir, { recursive: true, force: true });
+    const isolatedDir = mkdtempSync(join(tmpdir(), 'cred-atomic-test-'));
+    tempDir = isolatedDir;
+    writeFileSync(join(isolatedDir, 'existing.txt'), 'keep fs import active');
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...actual,
+        writeFileSync: vi.fn(() => {
+          throw new Error('non-atomic writeFileSync must not be used');
+        }),
+      };
+    });
+    try {
+      const { SkillCredentialStore: IsolatedStore } = await import(
+        '../../../src/skills/skill-credential-store.js'
+      );
+      const isolatedStore = new IsolatedStore(isolatedDir);
+
+      expect(() => isolatedStore.setMany({ API_KEY: 'secret' })).not.toThrow();
+      expect(readFileSync(join(isolatedDir, '.fbeast', '.env'), 'utf-8')).toBe(
+        'API_KEY=secret\n',
+      );
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
   });
 
   it('setMany preserves existing credentials', () => {

@@ -26,7 +26,8 @@ function stringifyArgsForGovernanceLog(tool: string, args: Record<string, unknow
  * Builds the default central governance gate used by the MCP server dispatch
  * path. It reuses the same {@link GovernorAdapter} the client hook path uses
  * (`fbeast-hook pre-tool`), so server-side enforcement and hook-based
- * enforcement apply identical policy.
+ * enforcement apply identical policy. Keep this boundary aligned with
+ * docs/agent-tool-execution-threat-model.md.
  *
  * Pass a `dbPath` (the adapter is created lazily on first check, preserving the
  * lazy-DB semantics of the proxy server) or an existing `GovernorAdapter` to
