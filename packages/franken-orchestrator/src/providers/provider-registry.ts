@@ -193,12 +193,25 @@ function normalizeJitterRatio(value: number | undefined): number {
 function classifyProviderError(error: Error | string): string {
   const message = error instanceof Error ? error.message : error;
   const normalized = message.toLowerCase();
+  if (
+    normalized.includes('bad request')
+    || normalized.includes('invalid request')
+    || normalized.includes('context length')
+    || normalized.includes('context window')
+    || normalized.includes('tool schema')
+    || normalized.includes('schema validation')
+    || normalized.includes('400')
+  ) return 'request_error';
   if (normalized.includes('rate limit') || normalized.includes('429')) return 'rate_limit';
   if (normalized.includes('auth') || normalized.includes('permission') || normalized.includes('unauthorized')) return 'auth';
   if (normalized.includes('timeout') || normalized.includes('timed out')) return 'timeout';
   if (normalized.includes('unavailable') || normalized.includes('enoent')) return 'unavailable';
   if (normalized.includes('stream ended without done')) return 'stream_incomplete';
   return 'execution_error';
+}
+
+function shouldRecordProviderHealthFailure(error: Error | string): boolean {
+  return classifyProviderError(error) !== 'request_error';
 }
 
 export class ProviderRegistry {
@@ -284,13 +297,21 @@ export class ProviderRegistry {
     }
 
     const occurrences = new Map<string, number>();
+    const usedKeys = new Set<string>();
     for (const provider of providers) {
       if (this.providerKeys.has(provider)) continue;
       const occurrence = occurrences.get(provider.name) ?? 0;
       occurrences.set(provider.name, occurrence + 1);
-      const providerKey = (totals.get(provider.name) ?? 0) > 1
+      const candidateKey = (totals.get(provider.name) ?? 0) > 1
         ? `${provider.name}#${occurrence + 1}`
         : provider.name;
+      let providerKey = candidateKey;
+      let collisionSuffix = 2;
+      while (usedKeys.has(providerKey)) {
+        providerKey = `${candidateKey}#${collisionSuffix}`;
+        collisionSuffix += 1;
+      }
+      usedKeys.add(providerKey);
       this.providerKeys.set(provider, providerKey);
     }
   }
@@ -368,7 +389,11 @@ export class ProviderRegistry {
     return record;
   }
 
-  private recordProviderFailure(provider: ILlmProvider, error: Error | string): ProviderHealthRecord {
+  private recordProviderFailure(
+    provider: ILlmProvider,
+    error: Error | string,
+    options: { tripHalfOpenProbe?: boolean } = {},
+  ): ProviderHealthRecord {
     const record = this.getOrCreateProviderHealth(provider);
     const now = this.opts.now();
     record.failures += 1;
@@ -377,7 +402,11 @@ export class ProviderRegistry {
     record.lastFailureAtMs = now;
     record.updatedAtMs = now;
 
-    if (record.state === 'half-open' || record.consecutiveFailures >= this.opts.circuitBreakerFailureThreshold) {
+    if (
+      options.tripHalfOpenProbe
+      || record.state === 'half-open'
+      || record.consecutiveFailures >= this.opts.circuitBreakerFailureThreshold
+    ) {
       return this.tripProvider(provider, error, 'provider-failure-threshold');
     }
 
@@ -500,11 +529,14 @@ export class ProviderRegistry {
       attemptedProviders++;
 
       let effectiveRequest = request;
-      if (i > 0) {
+      if (providerIndex !== this.currentProviderIndex) {
         const snapshot = this.brain.serialize();
         const failedProviderName = lastFailedProviderName ?? this.providers[this.currentProviderIndex]!.name;
+        const health = this.providerHealth.get(this.providerKey(provider));
+        const switchReason = lastError?.message
+          ?? (health?.state === 'half-open' ? 'provider circuit breaker cooldown elapsed' : 'unknown');
         snapshot.metadata.lastProvider = failedProviderName;
-        snapshot.metadata.switchReason = lastError?.message ?? 'unknown';
+        snapshot.metadata.switchReason = switchReason;
 
         if (this.opts.onProviderSwitch) {
           const json = JSON.stringify(snapshot);
@@ -513,7 +545,7 @@ export class ProviderRegistry {
           this.opts.onProviderSwitch({
             from: failedProviderName,
             to: provider.name,
-            reason: lastError?.message ?? 'unknown',
+            reason: switchReason,
             brainSnapshotHash: hash,
           });
         }
@@ -569,8 +601,12 @@ export class ProviderRegistry {
             if (event.type === 'error') {
               lastError = new Error(event.error);
               terminalEventObserved = true;
-              this.recordProviderFailure(provider, lastError);
-              failureAlreadyRecorded = true;
+              if (shouldRecordProviderHealthFailure(lastError)) {
+                this.recordProviderFailure(provider, lastError, { tripHalfOpenProbe: halfOpenProbeReserved });
+                failureAlreadyRecorded = true;
+              } else {
+                failureAlreadyRecorded = true;
+              }
               terminalError = lastError;
               lastFailedProviderName = provider.name;
               throw lastError; // discard buffer, failover
@@ -605,7 +641,9 @@ export class ProviderRegistry {
             error instanceof Error ? error : new Error(String(error));
           if (!failureAlreadyRecorded) {
             terminalEventObserved = true;
-            this.recordProviderFailure(provider, lastError);
+            if (shouldRecordProviderHealthFailure(lastError)) {
+              this.recordProviderFailure(provider, lastError, { tripHalfOpenProbe: halfOpenProbeReserved });
+            }
           }
           terminalError = lastError;
           lastFailedProviderName = provider.name;
