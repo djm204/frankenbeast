@@ -103,7 +103,6 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     operatorToken: options.operatorToken,
     security,
     rateLimit,
-    drainMutatingRequest,
   }));
 
   return app;

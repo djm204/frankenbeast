@@ -188,20 +188,24 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
       }
       closed = true;
       drainState.enter('shutdown');
-      if (!await drainState.waitForMutations()) {
-        if (listening) {
-          const closedServer = closeHttpServer(server);
-          server.closeAllConnections();
-          await closedServer;
-        }
-        throw new BeastDaemonDrainTimeoutError(MUTATION_DRAIN_WAIT_TIMEOUT_MS);
-      }
-      const shutdownFailures = await stopLiveRuns(services);
-      services.dispose();
-      if (listening) {
+      const drainedMutations = await drainState.waitForMutations();
+      let httpServerClosed = false;
+      if (!drainedMutations && listening) {
         const closedServer = closeHttpServer(server);
         server.closeAllConnections();
         await closedServer;
+        httpServerClosed = true;
+      }
+      const shutdownFailures = await stopLiveRuns(services);
+      services.dispose();
+      if (listening && !httpServerClosed) {
+        const closedServer = closeHttpServer(server);
+        server.closeAllConnections();
+        await closedServer;
+      }
+      if (!drainedMutations) {
+        await releasePidFile(pidFile);
+        throw new BeastDaemonDrainTimeoutError(MUTATION_DRAIN_WAIT_TIMEOUT_MS);
       }
       if (shutdownFailures.length > 0) {
         throw new BeastDaemonShutdownError(shutdownFailures);
