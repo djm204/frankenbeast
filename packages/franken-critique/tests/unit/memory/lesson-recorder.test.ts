@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   LessonRecorder,
+  applyHumanFeedbackToLesson,
   detectLessonContradictions,
   isLessonApplicable,
   quarantineLesson,
@@ -712,6 +713,10 @@ describe('LessonRecorder', () => {
           title: 'Codex blocker was left unresolved',
           rationale:
             'Recorded lesson contains critical findings and should be reviewed before routine learning cleanup.',
+          feedbackSources: [
+            { source: 'inferred-failure', weight: 35, scoreImpact: -35 },
+            { source: 'inferred-success', weight: 25, scoreImpact: 25 },
+          ],
           recommendedAction:
             'Route this lesson through promotion review with its traceability verifier before adding it to durable guidance.',
         },
@@ -728,6 +733,107 @@ describe('LessonRecorder', () => {
         ],
       },
     });
+  });
+
+  it('weights explicit human feedback higher than inferred lesson signals', async () => {
+    const port = createMockMemoryPort();
+    const recorder = new LessonRecorder(port, {
+      now: (): Date => new Date('2026-07-12T00:00:00.000Z'),
+    });
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'learning-reviewer', [
+          {
+            message: 'Lesson inferred too much from a green local test',
+            severity: 'warning',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const summary = await recorder.record(result, 'feedback-weight-task');
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as CritiqueLesson;
+
+    expect(lesson.feedbackWeighting).toMatchObject({
+      schemaVersion: 'lesson-feedback-weighting-v1',
+      primarySource: 'inferred-failure',
+      totalScore: -10,
+      weights: [
+        expect.objectContaining({
+          source: 'inferred-failure',
+          weight: 35,
+          scoreImpact: -35,
+        }),
+        expect.objectContaining({
+          source: 'inferred-success',
+          weight: 25,
+          scoreImpact: 25,
+        }),
+      ],
+    });
+    expect(summary.learningBacklogPrioritizationReport.items[0]).toMatchObject({
+      score: 50,
+      feedbackSources: [
+        { source: 'inferred-failure', weight: 35, scoreImpact: -35 },
+        { source: 'inferred-success', weight: 25, scoreImpact: 25 },
+      ],
+    });
+
+    const corrected = applyHumanFeedbackToLesson(lesson, {
+      source: 'explicit-user-correction',
+      reason: 'User corrected the lesson after it caused a bad handoff.',
+      observedAt: '2026-07-12T01:00:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+      revisedCorrectionApplied:
+        'Require explicit human validation before promoting inferred learning signals.',
+    });
+
+    expect(corrected.lifecycleStatus).toBe('quarantined');
+    expect(corrected.correctionApplied).toBe(
+      'Require explicit human validation before promoting inferred learning signals.',
+    );
+    expect(corrected.feedbackWeighting).toMatchObject({
+      primarySource: 'explicit-user-correction',
+      totalScore: -110,
+      weights: [
+        expect.objectContaining({
+          source: 'explicit-user-correction',
+          weight: 100,
+          scoreImpact: -100,
+        }),
+        expect.objectContaining({ source: 'inferred-failure' }),
+        expect.objectContaining({ source: 'inferred-success' }),
+      ],
+    });
+    expect(isLessonApplicable(corrected)).toBe(false);
+
+    const approved = applyHumanFeedbackToLesson(lesson, {
+      source: 'explicit-user-approval',
+      reason: 'User approved this lesson for reuse after reviewing the evidence.',
+      observedAt: '2026-07-12T02:00:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+    });
+
+    expect(approved.lifecycleStatus).toBe('active');
+    expect(approved.experimentSandbox).toBeUndefined();
+    expect(approved.feedbackWeighting).toMatchObject({
+      primarySource: 'explicit-user-approval',
+      totalScore: 70,
+    });
+    expect(isLessonApplicable(approved)).toBe(true);
   });
 
   it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {
