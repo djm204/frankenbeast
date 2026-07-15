@@ -331,7 +331,7 @@ describe('Error Reporting to Dashboard', () => {
       await new Promise((r) => setTimeout(r, 200));
 
       // supervisor.kill should have been called as escalation
-      expect(supervisor.kill).toHaveBeenCalledWith(5555);
+      expect(supervisor.kill).toHaveBeenCalledWith(5555, { processGroupOwned: true });
     });
 
     it('applies default timeout when no timeoutMs is provided (escalates stuck process)', async () => {
@@ -367,7 +367,7 @@ describe('Error Reporting to Dashboard', () => {
       await new Promise((r) => setTimeout(r, 200));
 
       // supervisor.kill should have been called as escalation
-      expect(supervisor.kill).toHaveBeenCalledWith(7777);
+      expect(supervisor.kill).toHaveBeenCalledWith(7777, { processGroupOwned: true });
     });
 
     it('does not escalate to kill when process exits before timeout', async () => {
