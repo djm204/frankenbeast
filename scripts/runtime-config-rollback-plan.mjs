@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { chmod, lstat, open, readFile, rename, stat, unlink } from 'node:fs/promises';
+import { chmod, chown, lstat, open, rename, stat, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SNAPSHOT_LIMITS = Object.freeze({
@@ -16,11 +16,20 @@ const SNAPSHOT_LIMITS = Object.freeze({
 
 const ROLLBACK_HELPER_MODULE = import.meta.url;
 
-export async function fileSha256(filePath) {
-  return createHash('sha256').update(await readFile(filePath)).digest('hex');
+export async function readFileNoFollow(filePath, encoding) {
+  const handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    return await handle.readFile(encoding == null ? undefined : { encoding });
+  } finally {
+    await handle.close();
+  }
 }
 
-export async function writeFileNoFollow(filePath, data, mode = 0o600) {
+export async function fileSha256(filePath) {
+  return createHash('sha256').update(await readFileNoFollow(filePath)).digest('hex');
+}
+
+export async function writeFileNoFollow(filePath, data, mode = 0o600, owner) {
   await assertExistingPathIsNotSymlink(filePath);
   const tempPath = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
   const handle = await open(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
@@ -33,6 +42,10 @@ export async function writeFileNoFollow(filePath, data, mode = 0o600) {
   await chmod(tempPath, mode);
   try {
     await rename(tempPath, filePath);
+    if (owner && Number.isInteger(owner.uid) && Number.isInteger(owner.gid)) {
+      await chown(filePath, owner.uid, owner.gid);
+    }
+    await chmod(filePath, mode);
   } catch (error) {
     await unlink(tempPath).catch(() => undefined);
     throw error;
@@ -40,7 +53,7 @@ export async function writeFileNoFollow(filePath, data, mode = 0o600) {
 }
 
 export async function copyFileNoFollow(sourcePath, destinationPath, mode = 0o600) {
-  await writeFileNoFollow(destinationPath, await readFile(sourcePath), mode);
+  await writeFileNoFollow(destinationPath, await readFileNoFollow(sourcePath), mode);
 }
 
 async function assertExistingPathIsNotSymlink(filePath) {
@@ -56,15 +69,27 @@ async function assertExistingPathIsNotSymlink(filePath) {
 }
 
 export async function loadRuntimeConfigSnapshot(filePath) {
+  return (await loadRuntimeConfigSnapshotWithDigest(filePath)).snapshot;
+}
+
+export async function loadRuntimeConfigSnapshotWithDigest(filePath) {
   const info = await stat(filePath);
   if (info.size > SNAPSHOT_LIMITS.maxBytes) {
     throw new Error(`Runtime config snapshot ${filePath} exceeds maxBytes: ${info.size} > ${SNAPSHOT_LIMITS.maxBytes}`);
   }
-  const raw = await readFile(filePath, 'utf8');
+  const raw = await readFileNoFollow(filePath, 'utf8');
   const rawBytes = Buffer.byteLength(raw, 'utf8');
   if (rawBytes > SNAPSHOT_LIMITS.maxBytes) {
     throw new Error(`Runtime config snapshot ${filePath} exceeds maxBytes: ${rawBytes} > ${SNAPSHOT_LIMITS.maxBytes}`);
   }
+  const snapshot = parseRuntimeConfigSnapshot(raw, filePath);
+  return {
+    snapshot,
+    sha256: createHash('sha256').update(raw).digest('hex'),
+  };
+}
+
+function parseRuntimeConfigSnapshot(raw, filePath) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -76,6 +101,7 @@ export async function loadRuntimeConfigSnapshot(filePath) {
   if (!isPlainObject(parsed)) {
     throw new Error(`Runtime config snapshot ${filePath} must contain a JSON object`);
   }
+  validateRuntimeConfigSchema(parsed, filePath);
   return parsed;
 }
 
@@ -110,6 +136,8 @@ export function buildRuntimeConfigRollbackPlan(options) {
     throw new Error('approvalCop must name the approval-cop/HITL command; blank overrides are not allowed');
   }
 
+  validateRuntimeConfigSchema(before, beforePath);
+  validateRuntimeConfigSchema(after, afterPath);
   const detailedChanges = diffRuntimeConfig(before, after);
   const changes = detailedChanges.map(({ path, type }) => ({ path, type }));
   if (changes.length === 0) {
@@ -164,7 +192,7 @@ export function buildRuntimeConfigRollbackPlan(options) {
         'node',
         '--input-type=module',
         '-e',
-        `import { buildRuntimeConfigRollbackPlan, fileSha256, loadRuntimeConfigSnapshot, writeFileNoFollow } from ${helperImport}; const [out,rollbackPath,afterCapturePath,targetPath,evidenceDir]=process.argv.slice(1); const before=await loadRuntimeConfigSnapshot(rollbackPath); const after=await loadRuntimeConfigSnapshot(afterCapturePath); const [beforeSha256, afterSha256]=await Promise.all([fileSha256(rollbackPath), fileSha256(afterCapturePath)]); const plan=buildRuntimeConfigRollbackPlan({ beforePath: rollbackPath, afterPath: afterCapturePath, targetPath, evidenceDir, before, after, beforeSha256, afterSha256 }); await writeFileNoFollow(out, JSON.stringify(plan.changes, null, 2) + "\\n");`,
+        `import { buildRuntimeConfigRollbackPlan, loadRuntimeConfigSnapshotWithDigest, writeFileNoFollow } from ${helperImport}; const [out,rollbackPath,afterCapturePath,targetPath,evidenceDir]=process.argv.slice(1); const beforeResult=await loadRuntimeConfigSnapshotWithDigest(rollbackPath); const afterResult=await loadRuntimeConfigSnapshotWithDigest(afterCapturePath); const plan=buildRuntimeConfigRollbackPlan({ beforePath: rollbackPath, afterPath: afterCapturePath, targetPath, evidenceDir, before: beforeResult.snapshot, after: afterResult.snapshot, beforeSha256: beforeResult.sha256, afterSha256: afterResult.sha256 }); await writeFileNoFollow(out, JSON.stringify(plan.changes, null, 2) + "\\n");`,
         changesPath,
         rollbackConfigPath,
         afterConfigPath,
@@ -195,7 +223,7 @@ export function buildRuntimeConfigRollbackPlan(options) {
         'node',
         '--input-type=module',
         '-e',
-        `import { createHash } from "node:crypto"; import { lstat, readFile } from "node:fs/promises"; import { dirname, parse, relative, resolve, sep } from "node:path"; import { writeFileNoFollow } from ${helperImport}; const [rollback,target,after,expectedRollbackSha,expectedAfterSha]=process.argv.slice(1); const sha=data=>createHash("sha256").update(data).digest("hex"); async function assertNoSymlink(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(\`Refusing symlinked runtime config path component: \${current}\`); } } await assertNoSymlink(dirname(target)); await assertNoSymlink(target); const [rollbackRaw,targetRaw,afterRaw]=await Promise.all([readFile(rollback), readFile(target), readFile(after)]); if (sha(rollbackRaw)!==expectedRollbackSha) throw new Error("Refusing rollback: rollback snapshot no longer matches approved before snapshot"); if (sha(afterRaw)!==expectedAfterSha) throw new Error("Refusing rollback: captured after snapshot no longer matches reviewed after snapshot"); if (!targetRaw.equals(afterRaw)) throw new Error("Refusing rollback: target runtime config no longer matches after snapshot"); await writeFileNoFollow(target, rollbackRaw);`,
+        `import { createHash } from "node:crypto"; import { lstat, stat } from "node:fs/promises"; import { dirname, parse, relative, resolve, sep } from "node:path"; import { readFileNoFollow, writeFileNoFollow } from ${helperImport}; const [rollback,target,after,expectedRollbackSha,expectedAfterSha]=process.argv.slice(1); const sha=data=>createHash("sha256").update(data).digest("hex"); async function assertNoSymlink(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(\`Refusing symlinked runtime config path component: \${current}\`); } } await assertNoSymlink(dirname(target)); await assertNoSymlink(target); const targetInfo=await stat(target); const [rollbackRaw,targetRaw,afterRaw]=await Promise.all([readFileNoFollow(rollback), readFileNoFollow(target), readFileNoFollow(after)]); if (sha(rollbackRaw)!==expectedRollbackSha) throw new Error("Refusing rollback: rollback snapshot no longer matches approved before snapshot"); if (sha(afterRaw)!==expectedAfterSha) throw new Error("Refusing rollback: captured after snapshot no longer matches reviewed after snapshot"); if (!targetRaw.equals(afterRaw)) throw new Error("Refusing rollback: target runtime config no longer matches after snapshot"); await writeFileNoFollow(target, rollbackRaw, targetInfo.mode & 0o777, { uid: targetInfo.uid, gid: targetInfo.gid });`,
         rollbackConfigPath,
         targetPath,
         afterConfigPath,
@@ -279,6 +307,108 @@ function buildChange(path, before, after) {
   return { path: path || '/', type: 'changed', before, after };
 }
 
+function validateRuntimeConfigSchema(value, filePath) {
+  assertOptionalString(value.provider, 'provider', filePath);
+  assertOptionalString(value.objective, 'objective', filePath);
+  assertOptionalString(value.chunkDirectory, 'chunkDirectory', filePath);
+  assertOptionalString(value.model, 'model', filePath);
+  assertOptionalPositiveInteger(value.maxDurationMs, 'maxDurationMs', filePath);
+  assertOptionalNumber(value.maxTotalTokens, 'maxTotalTokens', filePath);
+  assertOptionalBoolean(value.reflection, 'reflection', filePath);
+  assertOptionalStringArray(value.skills, 'skills', filePath);
+  assertOptionalObject(value.llmConfig, 'llmConfig', filePath, validateLlmConfig);
+  assertOptionalObject(value.modules, 'modules', filePath, validateModulesConfig);
+  assertOptionalObject(value.gitConfig, 'gitConfig', filePath, validateGitConfig);
+  assertOptionalObject(value.promptConfig, 'promptConfig', filePath, validatePromptConfig);
+}
+
+function validateLlmConfig(value, path, filePath) {
+  assertKnownKeys(value, ['default', 'overrides'], path, filePath);
+  assertOptionalObject(value.default, `${path}.default`, filePath, validateLlmOverride);
+  if (value.overrides !== undefined) {
+    assertPlainObjectAt(value.overrides, `${path}.overrides`, filePath);
+    for (const [name, override] of Object.entries(value.overrides)) {
+      assertPlainObjectAt(override, `${path}.overrides.${name}`, filePath);
+      validateLlmOverride(override, `${path}.overrides.${name}`, filePath);
+    }
+  }
+}
+
+function validateLlmOverride(value, path, filePath) {
+  assertKnownKeys(value, ['provider', 'model'], path, filePath);
+  assertOptionalString(value.provider, `${path}.provider`, filePath);
+  assertOptionalString(value.model, `${path}.model`, filePath);
+}
+
+function validateModulesConfig(value, path, filePath) {
+  assertKnownKeys(value, ['firewall', 'skills', 'memory', 'planner', 'critique', 'governor', 'heartbeat'], path, filePath);
+  for (const key of Object.keys(value)) assertOptionalBoolean(value[key], `${path}.${key}`, filePath);
+}
+
+function validateGitConfig(value, path, filePath) {
+  assertKnownKeys(value, ['preset', 'baseBranch', 'branchPattern', 'prCreation', 'disableBranding', 'mergeStrategy', 'commitConvention'], path, filePath);
+  assertOptionalString(value.preset, `${path}.preset`, filePath);
+  assertOptionalString(value.baseBranch, `${path}.baseBranch`, filePath);
+  assertOptionalString(value.branchPattern, `${path}.branchPattern`, filePath);
+  assertOptionalEnum(value.prCreation, ['auto', 'manual', 'disabled'], `${path}.prCreation`, filePath);
+  assertOptionalBoolean(value.disableBranding, `${path}.disableBranding`, filePath);
+  assertOptionalEnum(value.mergeStrategy, ['merge', 'squash', 'rebase'], `${path}.mergeStrategy`, filePath);
+  assertOptionalString(value.commitConvention, `${path}.commitConvention`, filePath);
+}
+
+function validatePromptConfig(value, path, filePath) {
+  assertKnownKeys(value, ['text', 'files'], path, filePath);
+  assertOptionalString(value.text, `${path}.text`, filePath);
+  assertOptionalStringArray(value.files, `${path}.files`, filePath);
+}
+
+function assertKnownKeys(value, keys, path, filePath) {
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key)) throw new Error(`Runtime config snapshot ${filePath} has unsupported ${path}.${key}`);
+  }
+}
+
+function assertOptionalObject(value, path, filePath, validator) {
+  if (value === undefined) return;
+  assertPlainObjectAt(value, path, filePath);
+  validator(value, path, filePath);
+}
+
+function assertPlainObjectAt(value, path, filePath) {
+  if (!isPlainObject(value)) throw new Error(`Runtime config snapshot ${filePath} field ${path} must be an object`);
+}
+
+function assertOptionalString(value, path, filePath) {
+  if (value !== undefined && typeof value !== 'string') throw new Error(`Runtime config snapshot ${filePath} field ${path} must be a string`);
+}
+
+function assertOptionalBoolean(value, path, filePath) {
+  if (value !== undefined && typeof value !== 'boolean') throw new Error(`Runtime config snapshot ${filePath} field ${path} must be a boolean`);
+}
+
+function assertOptionalNumber(value, path, filePath) {
+  if (value !== undefined && typeof value !== 'number') throw new Error(`Runtime config snapshot ${filePath} field ${path} must be a number`);
+}
+
+function assertOptionalPositiveInteger(value, path, filePath) {
+  if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
+    throw new Error(`Runtime config snapshot ${filePath} field ${path} must be a positive integer`);
+  }
+}
+
+function assertOptionalStringArray(value, path, filePath) {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+    throw new Error(`Runtime config snapshot ${filePath} field ${path} must be an array of strings`);
+  }
+}
+
+function assertOptionalEnum(value, allowed, path, filePath) {
+  if (value !== undefined && !allowed.includes(value)) {
+    throw new Error(`Runtime config snapshot ${filePath} field ${path} must be one of: ${allowed.join(', ')}`);
+  }
+}
+
 function validateSnapshotShape(value, filePath) {
   const stack = [{ value, depth: 1 }];
   let containers = 0;
@@ -343,7 +473,7 @@ function assertSafePath(value, label) {
 }
 
 function formatChangedPath(value) {
-  return JSON.stringify(String(value));
+  return JSON.stringify(String(value)).replace(/\u2028/gu, '\\u2028').replace(/\u2029/gu, '\\u2029');
 }
 
 function quoteCommand(args) {
@@ -397,10 +527,25 @@ async function main(argv) {
   if (!['markdown', 'json'].includes(options.format)) {
     throw new Error('--format must be markdown or json');
   }
-  const before = await loadRuntimeConfigSnapshot(options.beforePath);
-  const after = await loadRuntimeConfigSnapshot(options.afterPath);
-  const [beforeSha256, afterSha256] = await Promise.all([fileSha256(options.beforePath), fileSha256(options.afterPath)]);
-  const plan = buildRuntimeConfigRollbackPlan({ ...options, before, after, beforeSha256, afterSha256 });
+  const beforePath = resolve(options.beforePath);
+  const afterPath = resolve(options.afterPath);
+  const targetPath = resolve(options.targetPath);
+  const evidenceDir = options.evidenceDir === undefined ? defaultEvidenceDir(targetPath) : resolve(options.evidenceDir);
+  const [beforeResult, afterResult] = await Promise.all([
+    loadRuntimeConfigSnapshotWithDigest(beforePath),
+    loadRuntimeConfigSnapshotWithDigest(afterPath),
+  ]);
+  const plan = buildRuntimeConfigRollbackPlan({
+    ...options,
+    beforePath,
+    afterPath,
+    targetPath,
+    evidenceDir,
+    before: beforeResult.snapshot,
+    after: afterResult.snapshot,
+    beforeSha256: beforeResult.sha256,
+    afterSha256: afterResult.sha256,
+  });
   console.info(options.format === 'json' ? JSON.stringify(plan, null, 2) : renderPlan(plan));
 }
 

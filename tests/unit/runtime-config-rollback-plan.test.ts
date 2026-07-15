@@ -10,6 +10,7 @@ import {
   defaultEvidenceDir,
   diffRuntimeConfig,
   loadRuntimeConfigSnapshot,
+  loadRuntimeConfigSnapshotWithDigest,
 } from '../../scripts/runtime-config-rollback-plan.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -101,6 +102,8 @@ describe('runtime config rollback plan dry-run helper', () => {
       expect.stringMatching(/^[a-f0-9]{64}$/u),
     ]);
     expect(plan.approvalGatedActions[0].join(' ')).toContain('lstat');
+    expect(plan.approvalGatedActions[0].join(' ')).toContain('readFileNoFollow');
+    expect(plan.approvalGatedActions[0].join(' ')).toContain('targetInfo.mode & 0o777');
     expect(plan.approvalGatedActions[0].join(' ')).toContain('rollback snapshot no longer matches approved before snapshot');
     expect(plan.approvalGatedActions[0].join(' ')).toContain('target runtime config no longer matches after snapshot');
     expect(plan.postRollbackVerification.map(command => command.join(' '))).toContain(
@@ -166,6 +169,21 @@ describe('runtime config rollback plan dry-run helper', () => {
     await expect(loadRuntimeConfigSnapshot(bad)).rejects.toThrow(/must contain a JSON object/u);
     await expect(loadRuntimeConfigSnapshot(oversized)).rejects.toThrow(/exceeds maxBytes/u);
     await expect(loadRuntimeConfigSnapshot(tooDeep)).rejects.toThrow(/exceeds maxDepth/u);
+  });
+
+  it('validates snapshots with runtime config rules and hashes the parsed bytes from one read', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-schema-'));
+    const pretty = join(workDir, 'pretty.json');
+    const invalid = join(workDir, 'invalid.json');
+    const raw = `${JSON.stringify({ provider: 'claude', maxDurationMs: 123, skills: ['safe'] }, null, 2)}\n`;
+    await writeFile(pretty, raw);
+    await writeFile(invalid, JSON.stringify({ maxDurationMs: 'later', modules: { planner: 'yes' } }));
+
+    await expect(loadRuntimeConfigSnapshot(invalid)).rejects.toThrow(/maxDurationMs.*positive integer/u);
+    await expect(loadRuntimeConfigSnapshotWithDigest(pretty)).resolves.toMatchObject({
+      snapshot: { provider: 'claude', maxDurationMs: 123, skills: ['safe'] },
+      sha256: createHash('sha256').update(raw).digest('hex'),
+    });
   });
 
   it('prints JSON and markdown dry-run plans without mutating the target config', async () => {
@@ -262,14 +280,43 @@ describe('runtime config rollback plan dry-run helper', () => {
     await expect(readFile(join(evidence, 'rollback-comment.md'), 'utf8')).resolves.toContain('Changed paths: "/provider"');
   });
 
+  it('emits absolute generated paths when invoked with relative CLI paths', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-relative-'));
+    await writeFile(join(workDir, 'before.json'), JSON.stringify({ provider: 'claude' }));
+    await writeFile(join(workDir, 'after.json'), JSON.stringify({ provider: 'openai' }));
+    await writeFile(join(workDir, 'current.json'), JSON.stringify({ provider: 'openai' }));
+
+    const jsonResult = spawnSync(process.execPath, [
+      SCRIPT,
+      '--dry-run',
+      '--format', 'json',
+      '--before', 'before.json',
+      '--after', 'after.json',
+      '--target', 'current.json',
+      '--evidence-dir', 'evidence',
+    ], { cwd: workDir, encoding: 'utf8' });
+
+    expect(jsonResult.status).toBe(0);
+    const parsed = JSON.parse(jsonResult.stdout);
+    expect(parsed.beforePath).toBe(join(workDir, 'before.json'));
+    expect(parsed.afterPath).toBe(join(workDir, 'after.json'));
+    expect(parsed.targetPath).toBe(join(workDir, 'current.json'));
+    expect(parsed.evidenceDir).toBe(join(workDir, 'evidence'));
+    expect(parsed.approvalGatedActions[0]).toEqual(expect.arrayContaining([
+      join(workDir, 'evidence', 'rollback-config.json'),
+      join(workDir, 'current.json'),
+      join(workDir, 'evidence', 'after-config.json'),
+    ]));
+  });
+
   it('encodes markdown control characters in rendered changed paths', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'runtime-config-rollback-markdown-'));
     const before = join(workDir, 'before.json');
     const after = join(workDir, 'after.json');
     const target = join(workDir, 'current.json');
-    await writeFile(before, JSON.stringify({ 'safe\n## fake`tick': 'old' }));
-    await writeFile(after, JSON.stringify({ 'safe\n## fake`tick': 'new' }));
-    await writeFile(target, JSON.stringify({ 'safe\n## fake`tick': 'new' }));
+    await writeFile(before, JSON.stringify({ 'safe\n## fake`tick': 'old', 'unicode\u2028separator': 'old' }));
+    await writeFile(after, JSON.stringify({ 'safe\n## fake`tick': 'new', 'unicode\u2028separator': 'new' }));
+    await writeFile(target, JSON.stringify({ 'safe\n## fake`tick': 'new', 'unicode\u2028separator': 'new' }));
 
     const markdownResult = spawnSync(process.execPath, [
       SCRIPT,
@@ -281,6 +328,7 @@ describe('runtime config rollback plan dry-run helper', () => {
 
     expect(markdownResult.status).toBe(0);
     expect(markdownResult.stdout).toContain('"/safe\\n## fake`tick": changed');
+    expect(markdownResult.stdout).toContain('"/unicode\\u2028separator": changed');
     expect(markdownResult.stdout).not.toContain('\n## fake`tick": changed');
   });
 });
