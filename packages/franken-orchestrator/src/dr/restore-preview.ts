@@ -91,10 +91,10 @@ export interface PointInTimeBackupManifestMetadata {
   readonly generatedAt: string;
   /** Operator-readable source such as an environment, backup job id, or storage URI. */
   readonly source?: string;
-  /** Every restore-preview area covered by this point-in-time manifest. */
+  /** Restore-preview areas explicitly present in this point-in-time manifest. */
   readonly includedAreas: readonly ComparableArea[];
-  /** Record counts captured for each restore-preview area so partial backups are visible before restore. */
-  readonly recordCounts: Readonly<Record<ComparableArea, number>>;
+  /** Record counts for explicitly captured areas so omitted areas remain visible before restore. */
+  readonly recordCounts: Readonly<Partial<Record<ComparableArea, number>>>;
   /** Optional digest for the manifest payload or archive that contains it. */
   readonly manifestDigest?: string;
 }
@@ -102,10 +102,6 @@ export interface PointInTimeBackupManifestMetadata {
 export interface PointInTimeBackupManifest extends RestorePreviewManifest {
   readonly generatedAt: string;
   readonly pointInTime: PointInTimeBackupManifestMetadata;
-  readonly tasks: readonly RestorePreviewRecord[];
-  readonly approvals: readonly RestorePreviewRecord[];
-  readonly memory: readonly RestorePreviewRecord[];
-  readonly cron: readonly RestorePreviewRecord[];
 }
 
 export interface PointInTimeBackupManifestOptions {
@@ -243,21 +239,17 @@ export function buildPointInTimeBackupManifest(
     throw new Error('Point-in-time backup manifest capturedAt must not be later than generatedAt.');
   }
 
-  const tasks = cloneRecords(manifest.tasks);
-  const approvals = cloneRecords(manifest.approvals);
-  const memory = cloneRecords(manifest.memory);
-  const cron = cloneRecords(manifest.cron);
-  const recordCounts: Record<ComparableArea, number> = {
-    tasks: tasks.length,
-    approvals: approvals.length,
-    memory: memory.length,
-    cron: cron.length,
-  };
+  const capturedAreas = (Object.keys(AREA_ACCESSORS) as ComparableArea[]).filter(
+    (area) => manifest[area] !== undefined,
+  );
+  const recordCounts = Object.fromEntries(
+    capturedAreas.map((area) => [area, AREA_ACCESSORS[area](manifest).length]),
+  ) as Partial<Record<ComparableArea, number>>;
   const pointInTime: PointInTimeBackupManifestMetadata = {
     capturedAt,
     generatedAt,
     ...(options.source === undefined ? {} : { source: options.source }),
-    includedAreas: [...(Object.keys(AREA_ACCESSORS) as ComparableArea[])],
+    includedAreas: capturedAreas,
     recordCounts,
     ...(options.manifestDigest === undefined ? {} : { manifestDigest: options.manifestDigest }),
   };
@@ -267,10 +259,7 @@ export function buildPointInTimeBackupManifest(
     generatedAt,
     pointInTime,
     ...(manifest.encryption === undefined ? {} : { encryption: { ...manifest.encryption } }),
-    tasks,
-    approvals,
-    memory,
-    cron,
+    ...copyCapturedRecords(manifest),
   };
 }
 
@@ -578,10 +567,18 @@ function optionalString(value: unknown): string | undefined {
 
 function normalizeIsoInstant(value: string, fieldName: string): string {
   const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) {
-    throw new Error(`Point-in-time backup manifest ${fieldName} must be a valid ISO timestamp.`);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value) {
+    throw new Error(`Point-in-time backup manifest ${fieldName} must be a valid canonical ISO timestamp.`);
   }
   return new Date(parsed).toISOString();
+}
+
+function copyCapturedRecords(manifest: RestorePreviewManifest): Partial<Record<ComparableArea, readonly RestorePreviewRecord[]>> {
+  return Object.fromEntries(
+    (Object.keys(AREA_ACCESSORS) as ComparableArea[])
+      .filter((area) => manifest[area] !== undefined)
+      .map((area) => [area, cloneRecords(manifest[area])]),
+  ) as Partial<Record<ComparableArea, readonly RestorePreviewRecord[]>>;
 }
 
 function cloneRecords(records: readonly RestorePreviewRecord[] | undefined): readonly RestorePreviewRecord[] {

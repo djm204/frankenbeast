@@ -88,8 +88,8 @@ The point-in-time block includes:
 
 - `capturedAt`: the logical instant represented by the backup. Restores should assume state after this instant is absent.
 - `generatedAt`: the instant the manifest was written.
-- `includedAreas`: every restore-preview area accounted for by the manifest: `tasks`, `approvals`, `memory`, and `cron`.
-- `recordCounts`: deterministic counts for each included area, including zero-count areas, so partial backups are visible before restore.
+- `includedAreas`: restore-preview areas explicitly present in the manifest. Omitted areas stay omitted so partial or legacy backups are not mistaken for complete captures.
+- `recordCounts`: deterministic counts for each explicitly included area, including zero counts for areas that were captured empty.
 - optional `source` and `manifestDigest` fields for operator handoff and integrity checks.
 
 Example:
