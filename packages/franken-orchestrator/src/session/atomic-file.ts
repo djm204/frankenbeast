@@ -243,15 +243,15 @@ export function atomicWriteFileSync(
   const startedAt = journalTimestamp();
   const journalBase = {
     schemaVersion: 1 as const,
-    targetPath: filePath,
-    tempPath: tmpPath,
+    targetPath: resolve(filePath),
+    tempPath: resolve(tmpPath),
     startedAt,
   };
   try {
     let fd: number;
     for (;;) {
       try {
-        writeStateWriteJournal(filePath, { ...journalBase, tempPath: tmpPath, phase: 'preparing' });
+        writeStateWriteJournal(filePath, { ...journalBase, tempPath: resolve(tmpPath), phase: 'preparing' });
         fd = openSync(tmpPath, 'wx', options.mode);
         break;
       } catch (error) {
@@ -262,13 +262,13 @@ export function atomicWriteFileSync(
       }
     }
     try {
-      writeStateWriteJournal(filePath, { ...journalBase, tempPath: tmpPath, phase: 'writing-temp' });
+      writeStateWriteJournal(filePath, { ...journalBase, tempPath: resolve(tmpPath), phase: 'writing-temp' });
       writeAll(fd, contents);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
     }
-    writeStateWriteJournal(filePath, { ...journalBase, tempPath: tmpPath, phase: 'renaming' });
+    writeStateWriteJournal(filePath, { ...journalBase, tempPath: resolve(tmpPath), phase: 'renaming' });
     renameSync(tmpPath, filePath);
     rmSync(stateWriteJournalPath(filePath), { force: true });
   } catch (error) {
