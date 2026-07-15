@@ -101,13 +101,15 @@ function collectDescendantPids(rootPid) {
 
 function signalChildTree(child, signal) {
   if (!child.pid) {
-    return;
+    return [];
   }
 
+  const signaledPids = [];
   if (process.platform !== 'win32') {
     for (const pid of collectDescendantPids(child.pid).reverse()) {
       try {
         process.kill(pid, signal);
+        signaledPids.push(pid);
       } catch (error) {
         if (error?.code !== 'ESRCH') {
           // Keep trying the rest of the tree even if one descendant refuses the signal.
@@ -117,10 +119,16 @@ function signalChildTree(child, signal) {
   }
 
   child.kill(signal);
+  signaledPids.push(child.pid);
+  return signaledPids;
 }
 
 function isSecretKey(value) {
-  return /^--?[a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key)[a-z0-9_-]*$/i.test(value);
+  return /^--?[a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key)[a-z0-9_-]*$/i.test(value);
+}
+
+function isAuthScheme(value) {
+  return /^(?:Bearer|Basic|Digest|ApiKey|Token)$/i.test(value);
 }
 
 function redactSensitiveText(value) {
@@ -140,12 +148,12 @@ function redactSensitiveText(value) {
 
 function redactCommand(command) {
   const redacted = [];
-  let redactNext = false;
+  let redactNextParts = 0;
 
   for (const part of command) {
-    if (redactNext) {
+    if (redactNextParts > 0) {
       redacted.push('[REDACTED]');
-      redactNext = false;
+      redactNextParts = isAuthScheme(part) ? 1 : redactNextParts - 1;
       continue;
     }
 
@@ -158,7 +166,7 @@ function redactCommand(command) {
     if (isSecretKey(part)) {
       redacted.push('[REDACTED]');
       if (part.startsWith('-') && !part.includes('=')) {
-        redactNext = true;
+        redactNextParts = 1;
       }
       continue;
     }
@@ -219,6 +227,7 @@ async function runCronScript({ name, recoverable, command }) {
   let parentTerminationSignal = null;
   let parentTerminationMessage = null;
   let parentTerminationEnvelopeEmitted = false;
+  let parentTerminationPids = [];
 
   return await new Promise((resolve) => {
     let child;
@@ -284,10 +293,19 @@ async function runCronScript({ name, recoverable, command }) {
       parentTerminationSignal = signal;
       parentTerminationMessage = `cron wrapper received ${signal} and terminated child script`;
       if (child && !child.killed) {
-        signalChildTree(child, signal);
+        parentTerminationPids = signalChildTree(child, signal);
         forceKillTimer = setTimeout(() => {
           forceKillTimer = null;
           emitParentTerminationEnvelope();
+          for (const pid of parentTerminationPids) {
+            try {
+              process.kill(pid, 'SIGKILL');
+            } catch (error) {
+              if (error?.code !== 'ESRCH') {
+                // Keep trying the rest of the previously tracked process tree.
+              }
+            }
+          }
           signalChildTree(child, 'SIGKILL');
           finish(parentTerminationExitCode);
         }, KILL_GRACE_MS);
@@ -340,6 +358,9 @@ async function runCronScript({ name, recoverable, command }) {
       }
       if (parentTerminationExitCode !== null) {
         emitParentTerminationEnvelope();
+        if (forceKillTimer) {
+          return;
+        }
         finish(parentTerminationExitCode);
         return;
       }

@@ -76,14 +76,24 @@ describe('cron script error envelope runner', () => {
       '--token',
       'super-secret-token',
       '--api-key=abc123',
-      'postgres://user:db-password@localhost:5432/db',
-      'https://commandtoken@github.com/org/repo.git',
+      '--authorization',
+      'Bearer',
+      'split-bearer-token',
+      '--private-key',
+      'inline-private-key',
+      '--private-key=inline-private-key-equals',
+      'postgres://user:***@localhost:5432/db',
+      'https://***@github.com/org/repo.git',
     ]);
 
     expect(result.status).toBe(3);
     const envelope = parseEnvelope(result.stderr);
     expect(envelope.command).toContain('[REDACTED]');
     expect(envelope.command).toContain('--api-key=[REDACTED]');
+    expect(envelope.command).not.toContain('Bearer');
+    expect(envelope.command).not.toContain('split-bearer-token');
+    expect(envelope.command).not.toContain('inline-private-key');
+    expect(envelope.command).toContain('--private-key=[REDACTED]');
     expect(envelope.command).toContain('postgres://[REDACTED]:[REDACTED]@localhost:5432/db');
     expect(envelope.command).toContain('https://[REDACTED]@github.com/org/repo.git');
     expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
@@ -104,6 +114,8 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('bearer-value');
     expect(JSON.stringify(envelope)).not.toContain('deploytoken');
     expect(JSON.stringify(envelope)).not.toContain('commandtoken');
+    expect(JSON.stringify(envelope)).not.toContain('split-bearer-token');
+    expect(JSON.stringify(envelope)).not.toContain('inline-private-key');
   });
 
   it('fails with an explicit envelope when the cron command is missing', () => {
@@ -326,6 +338,64 @@ describe('cron script error envelope runner', () => {
         process.execPath,
         '-e',
         `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise<void>((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          try {
+            readFileSync(pidFile, 'utf8');
+            resolve();
+          } catch {
+            if (Date.now() - started > 1_000) {
+              resolve();
+              return;
+            }
+            setTimeout(poll, 20);
+          }
+        };
+        poll();
+      });
+
+      const helperPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.on('close', resolve));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      let helperAlive = true;
+      try {
+        process.kill(helperPid, 0);
+        helperAlive = readFileSync(`/proc/${helperPid}/stat`, 'utf8').split(' ')[2] !== 'Z';
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        helperAlive = code !== 'ESRCH';
+      }
+      if (helperAlive) {
+        process.kill(helperPid, 'SIGKILL');
+      }
+      expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the force-kill timer active after the direct child exits during shutdown', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-orphan-descendant-'));
+    const pidFile = join(tempDir, 'helper.pid');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'exiting-parent-descendant-signal-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); process.on('SIGTERM', () => { process.exit(0); }); setInterval(() => {}, 1000);`,
       ], {
         cwd: ROOT,
         env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
