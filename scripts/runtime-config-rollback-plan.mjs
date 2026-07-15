@@ -38,7 +38,7 @@ export async function loadRuntimeConfigSnapshot(filePath) {
 }
 
 export function diffRuntimeConfig(before, after) {
-  return diffValues(before, after, '').sort((left, right) => left.path.localeCompare(right.path));
+  return diffValues(before, after, '').sort((left, right) => Buffer.compare(Buffer.from(left.path), Buffer.from(right.path)));
 }
 
 export function defaultEvidenceDir(targetPath) {
@@ -75,6 +75,7 @@ export function buildRuntimeConfigRollbackPlan(options) {
   }
 
   const rollbackConfigPath = `${evidenceDir}/rollback-config.json`;
+  const afterConfigPath = `${evidenceDir}/after-config.json`;
   const changesPath = `${evidenceDir}/runtime-config-changes.json`;
   const rollbackCommentPath = `${evidenceDir}/rollback-comment.md`;
   const changedPaths = changes.map(change => change.path);
@@ -88,14 +89,20 @@ export function buildRuntimeConfigRollbackPlan(options) {
     changedPaths,
     changes,
     readOnlyCapture: [
-      ['mkdir', '-p', evidenceDir],
-      ['chmod', '700', evidenceDir],
-      ['install', '-m', '600', beforePath, rollbackConfigPath],
       [
         'node',
         '--input-type=module',
         '-e',
-        'import { writeFileSync } from "node:fs"; import { buildRuntimeConfigRollbackPlan, loadRuntimeConfigSnapshot } from "./scripts/runtime-config-rollback-plan.mjs"; const [out,beforePath,afterPath,targetPath,evidenceDir]=process.argv.slice(1); const before=await loadRuntimeConfigSnapshot(beforePath); const after=await loadRuntimeConfigSnapshot(afterPath); const plan=buildRuntimeConfigRollbackPlan({ beforePath, afterPath, targetPath, evidenceDir, before, after }); writeFileSync(out, JSON.stringify(plan.changes, null, 2) + "\\n", { mode: 0o600 });',
+        'import { chmod, lstat, mkdir } from "node:fs/promises"; import { parse, relative, resolve, sep } from "node:path"; const [dir]=process.argv.slice(1); async function assertNoSymlinkExisting(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); try { const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked evidence path component: ${current}`); } catch (error) { if (error && error.code === "ENOENT") break; throw error; } } } await assertNoSymlinkExisting(dir); await mkdir(dir, { recursive: true }); await assertNoSymlinkExisting(dir); await chmod(dir, 0o700);',
+        evidenceDir,
+      ],
+      ['install', '-m', '600', beforePath, rollbackConfigPath],
+      ['install', '-m', '600', afterPath, afterConfigPath],
+      [
+        'node',
+        '--input-type=module',
+        '-e',
+        'import { chmodSync, writeFileSync } from "node:fs"; import { buildRuntimeConfigRollbackPlan, loadRuntimeConfigSnapshot } from "./scripts/runtime-config-rollback-plan.mjs"; const [out,beforePath,afterPath,targetPath,evidenceDir]=process.argv.slice(1); const before=await loadRuntimeConfigSnapshot(beforePath); const after=await loadRuntimeConfigSnapshot(afterPath); const plan=buildRuntimeConfigRollbackPlan({ beforePath, afterPath, targetPath, evidenceDir, before, after }); writeFileSync(out, JSON.stringify(plan.changes, null, 2) + "\\n"); chmodSync(out, 0o600);',
         changesPath,
         beforePath,
         afterPath,
@@ -128,7 +135,7 @@ export function buildRuntimeConfigRollbackPlan(options) {
         'import { copyFile, lstat, readFile } from "node:fs/promises"; import { dirname, parse, relative, resolve, sep } from "node:path"; const [rollback,target,after]=process.argv.slice(1); async function assertNoSymlink(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked runtime config path component: ${current}`); } } await assertNoSymlink(dirname(target)); await assertNoSymlink(target); const [targetRaw, afterRaw]=await Promise.all([readFile(target), readFile(after)]); if (!targetRaw.equals(afterRaw)) throw new Error("Refusing rollback: target runtime config no longer matches after snapshot"); await copyFile(rollback, target);',
         rollbackConfigPath,
         targetPath,
-        afterPath,
+        afterConfigPath,
       ],
     ],
     postRollbackVerification: [
@@ -265,8 +272,8 @@ function assertSafePath(value, label) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 4096) {
     throw new Error(`${label} must be a non-empty path`);
   }
-  if (value.startsWith('-') || /\x00/u.test(value)) {
-    throw new Error(`${label} is not safe for argv usage: ${value}`);
+  if (value.startsWith('-') || /[\x00-\x1F\x7F]/u.test(value)) {
+    throw new Error(`${label} is not safe for argv or Markdown usage: ${value}`);
   }
 }
 

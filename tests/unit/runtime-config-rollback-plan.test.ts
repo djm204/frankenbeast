@@ -58,14 +58,17 @@ describe('runtime config rollback plan dry-run helper', () => {
 
     expect(plan.summary).toBe('Dry-run runtime config rollback plan for .fbeast/.build/run-configs/run-123.json');
     expect(plan.changedPaths).toEqual(['/modules/memory', '/modules/planner', '/provider']);
-    expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'mkdir -p rollback-evidence/runtime-run-123',
-    );
-    expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'chmod 700 rollback-evidence/runtime-run-123',
-    );
+    expect(plan.readOnlyCapture[0]).toEqual(expect.arrayContaining([
+      'node',
+      '--input-type=module',
+      'rollback-evidence/runtime-run-123',
+    ]));
+    expect(plan.readOnlyCapture[0].join(' ')).toContain('Refusing symlinked evidence path component');
     expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
       'install -m 600 snapshots/run-123.before.json rollback-evidence/runtime-run-123/rollback-config.json',
+    );
+    expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
+      'install -m 600 snapshots/run-123.after.json rollback-evidence/runtime-run-123/after-config.json',
     );
     expect(plan.readOnlyCapture[3]).toEqual(expect.arrayContaining([
       'rollback-evidence/runtime-run-123/runtime-config-changes.json',
@@ -80,7 +83,7 @@ describe('runtime config rollback plan dry-run helper', () => {
       '--input-type=module',
       'rollback-evidence/runtime-run-123/rollback-config.json',
       '.fbeast/.build/run-configs/run-123.json',
-      'snapshots/run-123.after.json',
+      'rollback-evidence/runtime-run-123/after-config.json',
     ]));
     expect(plan.approvalGatedActions[0].join(' ')).toContain('lstat');
     expect(plan.approvalGatedActions[0].join(' ')).toContain('target runtime config no longer matches after snapshot');
@@ -99,6 +102,16 @@ describe('runtime config rollback plan dry-run helper', () => {
       before: { provider: 'claude' },
       after: { provider: 'claude' },
     })).toThrow(/No runtime config changes/u);
+  });
+
+  it('rejects control characters in operator-rendered paths', () => {
+    expect(() => buildRuntimeConfigRollbackPlan({
+      beforePath: 'before.json',
+      afterPath: 'after.json',
+      targetPath: 'current\nforged.json',
+      before: { provider: 'claude' },
+      after: { provider: 'openai' },
+    })).toThrow(/not safe for argv or Markdown/u);
   });
 
   it('uses a deterministic unique evidence directory when none is provided', () => {
@@ -151,15 +164,16 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(jsonResult.status).toBe(0);
     const parsed = JSON.parse(jsonResult.stdout);
     expect(parsed.changedPaths).toEqual(['/provider']);
-    expect(parsed.readOnlyCapture[0]).toEqual(['mkdir', '-p', join(workDir, 'evidence')]);
-    expect(parsed.readOnlyCapture[1]).toEqual(['chmod', '700', join(workDir, 'evidence')]);
-    expect(parsed.readOnlyCapture[2]).toEqual(['install', '-m', '600', before, join(workDir, 'evidence', 'rollback-config.json')]);
+    expect(parsed.readOnlyCapture[0]).toEqual(expect.arrayContaining(['node', '--input-type=module', join(workDir, 'evidence')]));
+    expect(parsed.readOnlyCapture[0].join(' ')).toContain('Refusing symlinked evidence path component');
+    expect(parsed.readOnlyCapture[1]).toEqual(['install', '-m', '600', before, join(workDir, 'evidence', 'rollback-config.json')]);
+    expect(parsed.readOnlyCapture[2]).toEqual(['install', '-m', '600', after, join(workDir, 'evidence', 'after-config.json')]);
     expect(parsed.approvalGatedActions[0]).toEqual(expect.arrayContaining([
       'node',
       '--input-type=module',
       join(workDir, 'evidence', 'rollback-config.json'),
       target,
-      after,
+      join(workDir, 'evidence', 'after-config.json'),
     ]));
     expect(JSON.stringify(parsed.changes)).not.toContain('openai');
     await expect(readFile(target, 'utf8')).resolves.toContain('openai');
@@ -176,7 +190,7 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(markdownResult.status).toBe(0);
     expect(markdownResult.stdout).toContain('## 1. Capture read-only rollback evidence');
     expect(markdownResult.stdout).toContain('approval-cop run -- node');
-    expect(markdownResult.stdout).toContain('mkdir -p');
+    expect(markdownResult.stdout).toContain('Refusing symlinked evidence path component');
   });
 
   it('encodes markdown control characters in rendered changed paths', async () => {

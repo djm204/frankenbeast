@@ -10,6 +10,7 @@ The helper is intentionally conservative:
 - it prints deterministic JSON-pointer changed paths;
 - it JSON-encodes changed paths in Markdown so unusual config keys cannot forge headings or command bullets;
 - it redacts changed values from machine-readable plan output and evidence commands;
+- it rejects control characters in rendered file paths;
 - it never writes the target runtime config itself;
 - the default evidence directory is deterministic but unique per target path;
 - captured evidence commands use private directory/file modes (`0700`/`0600`);
@@ -38,9 +39,9 @@ npm run dr:runtime-config-rollback:dry-run -- \
 
 The plan has four sections:
 
-1. `Capture read-only rollback evidence` — create the evidence directory, force it to `0700`, copy the before snapshot into it with `0600` permissions, and write deterministic change metadata.
+1. `Capture read-only rollback evidence` — refuse symlinked evidence path components, create the evidence directory, force it to `0700`, copy the before/after snapshots into it with `0600` permissions, and write deterministic value-redacted change metadata.
 2. `Operator decisions before rollback` — confirm the before snapshot is the intended last-known-good state and the changed paths match the incident.
-3. `Approval-gated rollback action` — the single `approval-cop run -- node ...` command that refuses symlinked target paths, checks that the target still matches the captured after snapshot, and then restores the before snapshot to the target config.
+3. `Approval-gated rollback action` — the single `approval-cop run -- node ...` command that refuses symlinked target paths, checks that the target still matches the captured immutable after snapshot under the evidence directory, and then restores the before snapshot to the target config.
 4. `Verify rollback` — compare the restored target with the rollback snapshot and parse both JSON files before resuming the affected runtime.
 
 Do not run the approval-gated copy until the evidence is captured and the changed paths are reviewed. After approval-cop restores the config, rerun the affected Beast/runtime launch path and record the verification result in the generated `rollback-comment.md` before posting it to a PR, incident record, or Kanban card.
