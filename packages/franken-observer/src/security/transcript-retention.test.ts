@@ -737,8 +737,10 @@ describe('transcript retention controls', () => {
       spans: [makeSpan({
         metadata: {
           messages: [
+            'private primitive prompt',
             { type: 'text', text: 'private prompt text' },
             { type: 'image_url', image_url: { url: 'data:image/png;base64,private' } },
+            { type: 'input_audio', input_audio: { data: 'private-base64-audio' } },
             { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
           ],
         },
@@ -750,10 +752,64 @@ describe('transcript retention controls', () => {
     })
 
     expect(retained.spans[0].metadata['messages']).toEqual([
+      '[TRANSCRIPT_NOT_RETAINED]',
       { type: 'text' },
       { type: 'image_url' },
+      { type: 'input_audio' },
       { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
     ])
+  })
+
+  it('redacts provider stream deltas stored under opaque metadata keys', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'private streamed prompt text' },
+          },
+          toolEvent: {
+            type: 'content_block_delta',
+            delta: { type: 'input_json_delta', partial_json: '{"secret":"tool input"}' },
+          },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['event']).toEqual({
+      type: 'content_block_delta',
+      delta: { type: 'text_delta', text: '[REDACTED_TRANSCRIPT]' },
+    })
+    expect(retained.spans[0].metadata['toolEvent']).toEqual({
+      type: 'content_block_delta',
+      delta: { type: 'input_json_delta', partial_json: '[REDACTED_TRANSCRIPT]' },
+    })
+  })
+
+  it('redacts multimodal prompt block payloads stored under opaque metadata keys', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          payload: {
+            type: 'input_audio',
+            input_audio: { data: 'private-base64-audio' },
+          },
+          document: {
+            type: 'file',
+            file_data: 'private-file-bytes',
+          },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['payload']).toEqual({
+      type: 'input_audio',
+      input_audio: '[REDACTED_TRANSCRIPT]',
+    })
+    expect(retained.spans[0].metadata['document']).toEqual({
+      type: 'file',
+      file_data: '[REDACTED_TRANSCRIPT]',
+    })
   })
 
   it('honors tool output opt-outs inside raw prompt envelopes', () => {

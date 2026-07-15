@@ -461,7 +461,7 @@ function redactProviderMessageValue(
   policy: ResolvedTranscriptRetentionPolicy,
   seen: WeakMap<object, unknown>,
 ): unknown {
-  if (!isPlainRecordValue(value)) return redactNestedTranscriptValues(value, policy, seen)
+  if (!isPlainRecordValue(value)) return policy.retainedFields.prompts ? redactNestedTranscriptValues(value, policy, seen) : DROPPED
   if (seen.has(value)) return seen.get(value)
 
   const retained: Record<string, unknown> = {}
@@ -488,10 +488,42 @@ function classifyProviderMessageField(messageType: string, messageRole: string, 
 
 function isPromptBlockContentField(messageType: string, key: string): boolean {
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+  if ((messageType === 'textdelta' || messageType === 'outputtextdelta') && normalizedKey === 'text') return true
+  if (messageType === 'inputjsondelta' && normalizedKey === 'partialjson') return true
+  if (
+    isMultimodalPromptBlockType(messageType) &&
+    MULTIMODAL_PROMPT_CONTENT_KEYS.has(normalizedKey)
+  ) return true
   return (
     ((messageType === 'text' || messageType === 'inputtext') && normalizedKey === 'text') ||
     ((messageType === 'imageurl' || messageType === 'inputimage') && (normalizedKey === 'imageurl' || normalizedKey === 'url'))
   )
+}
+
+const MULTIMODAL_PROMPT_CONTENT_KEYS = new Set([
+  'audio',
+  'data',
+  'document',
+  'file',
+  'filedata',
+  'image',
+  'imageurl',
+  'inputaudio',
+  'inputimage',
+  'source',
+  'url',
+])
+
+function isMultimodalPromptBlockType(messageType: string): boolean {
+  return messageType === 'inputaudio' ||
+    messageType === 'audio' ||
+    messageType === 'inputfile' ||
+    messageType === 'file' ||
+    messageType === 'document' ||
+    messageType === 'inputdocument' ||
+    messageType === 'image' ||
+    messageType === 'inputimage' ||
+    messageType === 'imageurl'
 }
 
 function redactEnumerableObject(
