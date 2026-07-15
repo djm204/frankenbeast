@@ -314,7 +314,7 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
       : unqualifiedToolName;
   const auditedAction = typeof sanitized['action'] === 'string' ? unqualifyMcpToolName(sanitized['action']) : undefined;
   if (auditedTool === MEMORY_REVIEW_PROPOSE_TOOL || auditedAction === MEMORY_REVIEW_PROPOSE_TOOL) {
-    if (unqualifiedToolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    if (unqualifiedToolName === 'execute_tool') {
       return redactMemoryReviewProposalEnvelope(sanitized);
     }
     if (auditedAction === MEMORY_REVIEW_PROPOSE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
@@ -326,25 +326,13 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     return sanitized;
   }
   if (auditedTool === MEMORY_REVIEW_DECIDE_TOOL || auditedAction === MEMORY_REVIEW_DECIDE_TOOL) {
-    if (unqualifiedToolName === 'execute_tool' && Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
-      return redactMemoryReviewDecisionEnvelope(sanitized);
-    }
-    if (auditedAction === MEMORY_REVIEW_DECIDE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
-      sanitized['context'] = '[memory-review-decision-metadata-redacted]';
-    }
-    if (isDirectMemoryReviewDecide) {
-      return redactMemoryReviewDecisionArgs(sanitized);
-    }
-    return sanitized;
-  }
-  if (auditedTool === MEMORY_REVIEW_DECIDE_TOOL || auditedAction === MEMORY_REVIEW_DECIDE_TOOL) {
     if (unqualifiedToolName === 'execute_tool') {
       return redactMemoryReviewDecisionEnvelope(sanitized);
     }
     if (auditedAction === MEMORY_REVIEW_DECIDE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
       sanitized['context'] = '[memory-review-decision-metadata-redacted]';
     }
-    if (unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL) {
+    if (isDirectMemoryReviewDecide) {
       return redactMemoryReviewDecisionArgs(sanitized);
     }
     return sanitized;

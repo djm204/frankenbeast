@@ -443,6 +443,19 @@ describe('createMcpServer', () => {
         args: '[memory-review-proposal-redacted]',
       });
 
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_review_propose',
+        key: 'secret-api-key',
+        value: 'token abc123 outside args',
+        source: 'malformed wrapper',
+      })).toEqual({
+        tool: 'fbeast_memory_review_propose',
+        key: '[memory-review-proposal-redacted]',
+        value: '[memory-review-proposal-redacted]',
+        source: '[memory-review-proposal-redacted]',
+        args: '[memory-review-proposal-redacted]',
+      });
+
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_governor_check', {
         action: 'mcp__fbeast-memory__fbeast_memory_review_propose',
         context: '{"value":"token abc123"}',

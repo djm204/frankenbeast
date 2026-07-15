@@ -56,7 +56,6 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_governor_check',
   'fbeast_governor_budget',
   'fbeast_memory_review_propose',
-  'fbeast_memory_review_decide',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_plan_decompose',
@@ -259,7 +258,7 @@ function redactGovernanceContext(action: string, context: string): string {
 }
 
 function isRightToForgetDryRun(action: string, context: string): boolean {
-  if (action !== 'fbeast_memory_right_to_forget') return false;
+  if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return false;
   try {
     const parsed = JSON.parse(context) as unknown;
     return parsed !== null
@@ -437,6 +436,33 @@ function assessAction(action: string, context: string): GovernorCheckResult {
   const unqualifiedAction = unqualifyMcpActionName(action);
   const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
+
+  if (unqualifiedAction === 'fbeast_memory_review_decide') {
+    const parsed = parseContextObject(context);
+    const reviewAction = stringContext(parsed, 'action');
+    if (reviewAction === 'approve') {
+      const result = evaluateHighRiskActionPolicy({
+        actionClass: 'memory',
+        evidence: {
+          operation: 'review-approve',
+          ...optionalTarget(stringContext(parsed, 'id')),
+        },
+      });
+      if (result.decision === 'allow') {
+        return { decision: 'approved', reason: `High-risk policy allowed memory review approval: ${result.reason}` };
+      }
+      if (result.decision === 'deny') {
+        return { decision: 'denied', reason: `High-risk policy denied memory review approval: ${result.reason}` };
+      }
+      return { decision: 'review_recommended', reason: `High-risk policy requires approval for memory review approval: ${result.reason}` };
+    }
+    if (reviewAction === 'reject' || reviewAction === 'never_store') {
+      return {
+        decision: 'approved',
+        reason: `Memory review ${reviewAction} decision does not persist candidate content; allowed while audit metadata remains redacted.`,
+      };
+    }
+  }
 
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
