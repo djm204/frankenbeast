@@ -25,4 +25,10 @@ describe('public API exports', () => {
     expect(publicApi.verifySignedApprovalPolicyManifest).toBeDefined();
     expect(publicApi.createEvaluatorsFromApprovalPolicyManifest).toBeDefined();
   });
+
+  it('re-exports high-risk action policy helpers from the package root', () => {
+    expect(publicApi.HIGH_RISK_ACTION_CLASSES).toContain('git-remote-write');
+    expect(publicApi.evaluateHighRiskActionPolicy).toBeDefined();
+    expect(publicApi.isHighRiskActionClass('webhook')).toBe(true);
+  });
 });
