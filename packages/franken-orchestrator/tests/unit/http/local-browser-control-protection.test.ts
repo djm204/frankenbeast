@@ -83,6 +83,20 @@ describe('local browser control protection', () => {
       method: 'POST',
       headers: {
         origin: 'https://dashboard.example.com',
+        'sec-fetch-site': 'cross-site',
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('allows IPv6 loopback same-origin browser mutations', async () => {
+    const app = createProtectedApp();
+
+    const res = await app.request('http://[::1]:3737/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        origin: 'http://[::1]:3737',
         'sec-fetch-site': 'same-origin',
       },
     });

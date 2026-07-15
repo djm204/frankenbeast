@@ -66,30 +66,35 @@ function isLocalControlPath(pathname: string): boolean {
 function isTrustedOriginHost(origin: string): boolean {
   try {
     const hostname = new URL(origin).hostname;
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
   } catch {
     return false;
   }
 }
 
 function isSameOriginMutation(c: Context, allowedOrigins: ReadonlySet<string>): boolean {
-  const secFetchSite = c.req.header('sec-fetch-site')?.trim().toLowerCase();
-  if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
-    return false;
-  }
-
   const origin = c.req.header('origin');
   if (!origin) {
     return true;
   }
 
+  let normalizedOrigin: string;
   try {
-    const normalizedOrigin = new URL(origin).origin;
-    return allowedOrigins.has(normalizedOrigin)
-      || (normalizedOrigin === requestOrigin(c) && isTrustedOriginHost(normalizedOrigin));
+    normalizedOrigin = new URL(origin).origin;
   } catch {
     return false;
   }
+
+  if (allowedOrigins.has(normalizedOrigin)) {
+    return true;
+  }
+
+  const secFetchSite = c.req.header('sec-fetch-site')?.trim().toLowerCase();
+  if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
+    return false;
+  }
+
+  return normalizedOrigin === requestOrigin(c) && isTrustedOriginHost(normalizedOrigin);
 }
 
 function setLocalBrowserSecurityHeaders(c: Context): void {
