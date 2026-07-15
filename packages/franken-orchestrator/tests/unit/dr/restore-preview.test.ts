@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
+  buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
   type RestorePreviewManifest,
 } from '../../../src/dr/restore-preview.js';
@@ -92,6 +93,51 @@ describe('restore preview conflict detector', () => {
         expect.objectContaining({ area: 'cron', id: 'hourly-watchdog', type: 'live-only', recommendation: expect.stringContaining('preserve') }),
       ]),
     );
+  });
+
+  it('builds deterministic restore dry-run JSON output for automation', () => {
+    const backup: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [{ id: 'task-1', digest: 'old-task', updatedAt: '2026-07-14T10:00:00.000Z' }],
+      approvals: [{ id: 'approval-1', state: 'pending', digest: 'pending-token' }],
+      memory: [],
+      cron: [],
+    };
+    const live: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [{ id: 'task-1', digest: 'new-task', updatedAt: '2026-07-14T11:00:00.000Z' }],
+      approvals: [],
+      memory: [{ id: 'memory:user', digest: 'live-only-memory' }],
+      cron: [],
+    };
+
+    const report = buildRestoreDryRunReport(backup, live, {
+      generatedAt: '2026-07-14T12:30:00.000Z',
+      backupPath: '/backups/manifest.json',
+      livePath: '/state/live-manifest.json',
+    });
+
+    expect(report).toEqual({
+      ok: true,
+      command: 'dr restore-dry-run',
+      formatVersion: 1,
+      generatedAt: '2026-07-14T12:30:00.000Z',
+      dryRun: true,
+      wouldWrite: false,
+      inputs: {
+        backupPath: '/backups/manifest.json',
+        livePath: '/state/live-manifest.json',
+      },
+      summary: {
+        safeToRestore: false,
+        conflictCount: 3,
+        blockerCount: 1,
+        warningCount: 1,
+        infoCount: 1,
+      },
+      preview: expect.objectContaining({ wouldWrite: false, safeToRestore: false }),
+      operatorGuidance: expect.stringContaining('do not execute restore'),
+    });
   });
 
   it('treats backup-only approval tokens as blockers', () => {

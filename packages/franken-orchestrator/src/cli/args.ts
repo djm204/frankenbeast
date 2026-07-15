@@ -16,6 +16,7 @@ export type Subcommand =
   | 'beasts-daemon'
   | 'network'
   | 'memory'
+  | 'dr'
   | 'skill'
   | 'security'
   | undefined;
@@ -50,6 +51,7 @@ export type BeastAction =
 export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
 export type MemoryAction = 'snapshot-diff' | 'verify-backup' | undefined;
+export type DrAction = 'restore-dry-run' | undefined;
 
 export interface CliArgs {
   subcommand: Subcommand;
@@ -61,6 +63,9 @@ export interface CliArgs {
   memorySnapshotBefore?: string | undefined;
   memorySnapshotAfter?: string | undefined;
   memoryBackupPath?: string | undefined;
+  drAction?: DrAction;
+  drBackupManifestPath?: string | undefined;
+  drLiveManifestPath?: string | undefined;
   networkDetached: boolean;
   networkSet?: string[] | undefined;
   skillAction?: SkillAction;
@@ -108,9 +113,10 @@ export interface CliArgs {
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'skill', 'security']);
+const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'dr', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup']);
+const VALID_DR_ACTIONS = new Set(['restore-dry-run']);
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
@@ -175,6 +181,7 @@ Subcommands:
   beasts-daemon           Run the standalone Beast control-plane daemon
   network                 Manage Frankenbeast request-serving services
   memory                  Inspect persisted BrainSnapshot JSON artifacts and SQLite backups
+  dr                      Disaster-recovery restore preview utilities
   skill                   Manage MCP skill plugins
   security                View or change security profile
 
@@ -236,6 +243,10 @@ Memory Commands:
                                   Print a structured JSON diff between two BrainSnapshot files
   memory verify-backup <backup.sqlite>
                                   Verify a read-only SQLite memory backup and print structured JSON
+
+Disaster-Recovery Commands:
+  dr restore-dry-run <backup-manifest.json> <live-manifest.json>
+                                  Compare backup/live restore manifests and print read-only JSON output
 
 Beast Commands:
   beasts catalog                      List fixed Beast definitions
@@ -516,6 +527,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let memorySnapshotBefore: string | undefined;
   let memorySnapshotAfter: string | undefined;
   let memoryBackupPath: string | undefined;
+  let drAction: DrAction;
+  let drBackupManifestPath: string | undefined;
+  let drLiveManifestPath: string | undefined;
   let skillAction: SkillAction;
   let skillTarget: string | undefined;
   let skillCommand: string | undefined;
@@ -562,6 +576,19 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       if (positionals.length > 3) {
         throw new TypeError(`Unexpected argument '${positionals[3]}'. memory snapshot-diff accepts exactly two snapshot files`);
       }
+    }
+  } else if (subcommand === 'dr') {
+    const actionCandidate = positionals[0];
+    if (actionCandidate !== undefined) {
+      if (!VALID_DR_ACTIONS.has(actionCandidate)) {
+        throw new TypeError(`Unknown dr action: ${actionCandidate}`);
+      }
+      drAction = actionCandidate as DrAction;
+    }
+    drBackupManifestPath = positionals[1];
+    drLiveManifestPath = positionals[2];
+    if (positionals.length > 3) {
+      throw new TypeError(`Unexpected argument '${positionals[3]}'. dr restore-dry-run accepts exactly two manifest files`);
     }
   } else if (subcommand === 'skill') {
     const actionCandidate = positionals[0];
@@ -699,6 +726,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     memorySnapshotBefore,
     memorySnapshotAfter,
     memoryBackupPath,
+    drAction,
+    drBackupManifestPath,
+    drLiveManifestPath,
     networkDetached: values.detached ?? false,
     networkSet: values.set,
     skillAction,
