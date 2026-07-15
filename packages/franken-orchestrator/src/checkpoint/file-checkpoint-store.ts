@@ -115,7 +115,7 @@ function staleDiagnostic(
     ownerPid,
     ownerAlive,
     reason,
-    unlockHint: `Safe unlock hint: ${ownerText}; the lock is ${formatLockAge(ageMs)}. Remove only this lock file with: rm -- ${shellSingleQuote(lockPath)}`,
+    unlockHint: `Safe unlock hint: ${ownerText}; the lock is ${formatLockAge(ageMs)}. Quiesce checkpoint writers, re-run this detector to confirm the same stale owner, then remove only this lock file with: rm -- ${shellSingleQuote(lockPath)}`,
   };
 }
 
@@ -469,12 +469,13 @@ export class FileCheckpointStore implements ICheckpointStore {
       const pid = Number.parseInt(ownerMatch[1]!, 10);
       const recordedStart = ownerMatch[2]!;
       if (isProcessAlive(pid)) {
-        if (recordedStart !== '0' && processStartTime(pid) === recordedStart) {
+        const currentStart = processStartTime(pid);
+        if (recordedStart !== '0' && currentStart === recordedStart) {
           // Verified live owner (PID + start time match rules out reuse) —
           // never break its lock, however long it holds it.
           return;
         }
-        if (recordedStart === '0') {
+        if (recordedStart === '0' || currentStart === '0') {
           // Owner identity cannot be verified (no start time available):
           // the age ceiling is the only backstop against PID reuse.
           try {
@@ -485,7 +486,7 @@ export class FileCheckpointStore implements ICheckpointStore {
             return;
           }
         }
-        // Live PID with a mismatched start time is a reused PID — reap.
+        // Live PID with a mismatched, verified start time is a reused PID — reap.
       }
       // Dead owner, reused PID, or unverifiable past the ceiling — reap.
     } else {

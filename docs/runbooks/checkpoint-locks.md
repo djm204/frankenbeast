@@ -25,7 +25,7 @@ The structured result includes:
 
 ## Safe unlock policy
 
-Only remove a lock manually when `safeToRemove` is `true`. The hint names the exact lock file to remove with a shell-quoted `rm -- '<checkpoint>.lock'` command.
+Only remove a lock manually when `safeToRemove` is `true`. The hint names the exact lock file to remove with a shell-quoted `rm -- '<checkpoint>.lock'` command, but operators must first quiesce checkpoint writers and re-run the detector so a newly acquired live lock is not removed.
 
 Do not remove a lock when the detector reports `status: 'held'` and `safeToRemove: false`. Inspect the owner process first, for example:
 

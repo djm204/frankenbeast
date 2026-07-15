@@ -322,6 +322,7 @@ describe('FileCheckpointStore', () => {
         reason: 'recorded owner process is no longer running',
       });
       expect(stale.unlockHint).toContain('Safe unlock hint');
+      expect(stale.unlockHint).toContain('Quiesce checkpoint writers');
       expect(stale.unlockHint).toContain(`rm -- '${filePath}.lock'`);
 
       writeFileSync(`${filePath}.lock`, `${process.pid}:0:0123456789abcdef`);
