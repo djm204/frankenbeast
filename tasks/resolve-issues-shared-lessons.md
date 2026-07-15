@@ -1,5 +1,12 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Beast process cleanup review fixes
+- For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
+- Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
+- CLI signal cleanup should register and unregister all handled signals symmetrically, and long-running `restart` commands should track the target run before awaiting restart so SIGINT/SIGHUP can clean up in-flight work.
+- After a dispatch `onRunCreated` callback, re-read persisted run state before startNow execution; signal cleanup can mark a just-created run stopped before any attempt exists.
+- Keep post-spawn metadata providers inside the same cleanup try/catch as attempt persistence so provider failures cannot leave a spawned process without an attempt record.
+
 ## 2026-07-15 — Graceful shutdown drain gates
 - For daemon drain modes, make one outer mutation-admission middleware own both the draining check and in-flight counter; nested route-specific re-checks can reject already-admitted requests after shutdown begins.
 - If shutdown times out waiting for in-flight mutations, do not release ownership markers such as pid files until mutations are quiesced or definitively aborted; otherwise a replacement daemon can start while the old handler still mutates shared state.
@@ -210,3 +217,4 @@
 - 2026-07-14 — Network egress guards: guarded fetch wrappers must force manual redirect handling and validate `Location` targets without replaying the original method/body/credentials to a redirected origin; also preserve `redirect: "error"` semantics and classify GitHub archive hosts such as `codeload.github.com` as GitHub.
 - 2026-07-14 — Network config additions: when adding new `network.*` schema fields, also add supported paths in `network-config-paths.ts` and unit coverage so `frankenbeast network config --set` and dashboard PATCH flows can update them.
 - 2026-07-14 — Egress policy wiring: provider/comms adapters that perform outbound HTTP must receive the live runtime egress policy from their construction routes, not just expose standalone guarded fetch helpers. For SDKs without a first-class fetch injection point, add a narrow wrapper with tests that prove the guarded fetch is active during the SDK request and that global fetch is restored afterward.
+- 2026-07-15 — Codex-cap cleanup rounds: when Codex findings arrive at the review-trigger cap, fix/reply/resolve every actionable thread and verify CI/unresolved-thread state, but do not fire an over-cap `@codex review` without explicit human approval; block with the exact refused trigger command and latest passing commit so the next worker can resume cleanly.

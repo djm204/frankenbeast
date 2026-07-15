@@ -103,4 +103,8 @@ export class ContainerBeastExecutor implements BeastExecutor {
   kill(runId: string, attemptId: string): Promise<BeastRunAttempt> {
     return this.inner.kill(runId, attemptId);
   }
+
+  cleanupPendingRun(runId: string): Promise<boolean> {
+    return this.inner.cleanupPendingRun(runId);
+  }
 }
