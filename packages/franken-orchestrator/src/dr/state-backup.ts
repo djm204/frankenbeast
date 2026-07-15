@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 export const STATE_BACKUP_FORMAT = 'frankenbeast-dr-state-backup';
@@ -128,15 +128,17 @@ async function walkFiles(root: string): Promise<string[]> {
   return files.sort();
 }
 
-async function buildPayload(stateDir: string, generatedAt: string): Promise<StateBackupPayload> {
+async function buildPayload(stateDir: string, generatedAt: string, excludePath?: string): Promise<StateBackupPayload> {
   const root = resolve(stateDir);
+  const excluded = excludePath === undefined ? undefined : resolve(excludePath);
   const rootStats = await stat(root);
   if (!rootStats.isDirectory()) {
     throw new Error(`DR backup source must be a directory: ${stateDir}`);
   }
 
   const categories = emptyCategoryCounts();
-  const files = await Promise.all((await walkFiles(root)).map(async (absolutePath) => {
+  const sourceFiles = (await walkFiles(root)).filter((absolutePath) => resolve(absolutePath) !== excluded);
+  const files = await Promise.all(sourceFiles.map(async (absolutePath) => {
     const rel = relative(root, absolutePath).split(sep).join('/');
     assertSafeRelativePath(rel);
     const data = await readFile(absolutePath);
@@ -166,7 +168,8 @@ async function buildPayload(stateDir: string, generatedAt: string): Promise<Stat
 
 export async function createEncryptedStateBackup(options: CreateStateBackupOptions): Promise<StateBackupEnvelope> {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
-  const payload = await buildPayload(options.stateDir, generatedAt);
+  const outputPath = resolve(options.outputPath);
+  const payload = await buildPayload(options.stateDir, generatedAt, outputPath);
   const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
   const key = await deriveKey(options.keyFilePath);
   const iv = randomBytes(12);
@@ -188,8 +191,13 @@ export async function createEncryptedStateBackup(options: CreateStateBackupOptio
     },
     ciphertext: ciphertext.toString('base64'),
   };
-  await mkdir(dirname(resolve(options.outputPath)), { recursive: true });
-  await writeFile(options.outputPath, `${JSON.stringify(envelope, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await mkdir(dirname(outputPath), { recursive: true });
+  const tmpPath = join(dirname(outputPath), `.${basename(outputPath)}.tmp-${process.pid}-${Date.now()}`);
+  await writeFile(tmpPath, `${JSON.stringify(envelope, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await rename(tmpPath, outputPath).catch(async (error: unknown) => {
+    await rm(tmpPath, { force: true });
+    throw error;
+  });
   return envelope;
 }
 
@@ -264,6 +272,27 @@ function validatePayload(payload: StateBackupPayload): void {
   }
 }
 
+async function assertNoSymlinkParents(targetDir: string, targetPath: string): Promise<void> {
+  const relativeParent = relative(targetDir, dirname(targetPath));
+  if (!relativeParent) return;
+  let current = targetDir;
+  for (const segment of relativeParent.split(sep)) {
+    if (!segment || segment === '.') continue;
+    current = join(current, segment);
+    try {
+      const stats = await lstat(current);
+      if (stats.isSymbolicLink()) {
+        throw new Error(`Refusing to restore through symlinked directory: ${current}`);
+      }
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
+  }
+}
+
 export async function verifyEncryptedStateBackup(backupPath: string, keyFilePath: string): Promise<VerifyStateBackupReport> {
   const payload = await decryptPayload(backupPath, keyFilePath);
   return {
@@ -291,6 +320,7 @@ export async function restoreEncryptedStateBackup(options: RestoreStateBackupOpt
         throw new Error(`Unsafe backup entry path: ${file.path}`);
       }
       await mkdir(dirname(targetPath), { recursive: true });
+      await assertNoSymlinkParents(targetDir, targetPath);
       const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
       await writeFile(tmpPath, Buffer.from(file.data, 'base64'), { mode: 0o600 });
       await rename(tmpPath, targetPath).catch(async (error: unknown) => {

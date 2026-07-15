@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -96,6 +96,35 @@ describe('encrypted DR state backups', () => {
       expect(restored.wouldWrite).toBe(true);
       await expect(readFile(join(restoreDir, 'kanban.db'), 'utf8')).resolves.toBe('sqlite-kanban-bytes');
       await expect(readFile(join(restoreDir, 'approvals', 'ledger.json'), 'utf8')).resolves.toContain('secret-approval-token');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes an in-tree output artifact and refuses restore through symlinked parents', async () => {
+    const { dir, keyFile } = await makeFixtureState();
+    const inTreeBackupPath = join(dir, 'state', 'backup.franken-dr.json');
+    const restoreDir = join(dir, 'restore-symlink');
+    const outsideDir = join(dir, 'outside-approvals');
+
+    try {
+      await writeFile(inTreeBackupPath, 'stale previous backup', 'utf8');
+      const envelope = await createEncryptedStateBackup({
+        stateDir: join(dir, 'state'),
+        outputPath: inTreeBackupPath,
+        keyFilePath: keyFile,
+      });
+      expect(envelope.manifest.files.map((file) => file.path)).not.toContain('backup.franken-dr.json');
+
+      await mkdir(outsideDir, { recursive: true });
+      await mkdir(restoreDir, { recursive: true });
+      await symlink(outsideDir, join(restoreDir, 'approvals'));
+      await expect(restoreEncryptedStateBackup({
+        backupPath: inTreeBackupPath,
+        targetDir: restoreDir,
+        keyFilePath: keyFile,
+      })).rejects.toThrow(/symlinked directory/);
+      await expect(stat(join(outsideDir, 'ledger.json'))).rejects.toThrow();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

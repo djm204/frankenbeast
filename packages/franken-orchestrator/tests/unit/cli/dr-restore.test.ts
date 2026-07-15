@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -27,6 +27,41 @@ describe('dr restore-dry-run CLI', () => {
     expect(restore.drLiveManifestPath).toBe('/restore');
     expect(restore.drKeyFilePath).toBe('/key');
     expect(restore.dryRun).toBe(true);
+  });
+
+  it('prints a small backup summary and marks list output unverified', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
+    const stateDir = join(dir, 'state');
+    const backupPath = join(dir, 'backup.enc.json');
+    const keyPath = join(dir, 'key');
+    const output: string[] = [];
+
+    try {
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(join(stateDir, 'kanban.db'), 'secret kanban bytes', 'utf8');
+      await writeFile(keyPath, 'key material', 'utf8');
+      await handleDrCommand({
+        action: 'backup',
+        backupManifestPath: stateDir,
+        liveManifestPath: backupPath,
+        keyFilePath: keyPath,
+        print: (message) => output.push(message),
+      });
+
+      const backupReport = JSON.parse(output.pop() ?? '') as { command: string; ciphertext?: string; manifest: { categories: { kanban: number } } };
+      expect(backupReport.command).toBe('dr backup');
+      expect(backupReport.ciphertext).toBeUndefined();
+      expect(backupReport.manifest.categories.kanban).toBe(1);
+      expect(await readFile(backupPath, 'utf8')).not.toContain('secret kanban bytes');
+
+      await handleDrCommand({ action: 'list', backupManifestPath: backupPath, print: (message) => output.push(message) });
+      const listReport = JSON.parse(output.pop() ?? '') as { command: string; verified: boolean; verificationRequired: string };
+      expect(listReport.command).toBe('dr list');
+      expect(listReport.verified).toBe(false);
+      expect(listReport.verificationRequired).toContain('dr verify');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('prints structured dry-run JSON without mutating input manifests', async () => {

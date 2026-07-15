@@ -77,12 +77,21 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     if (!backupManifestPath || !liveManifestPath || !keyFilePath) {
       throw new Error('dr backup requires <state-dir> <backup-file> <key-file>');
     }
-    print(JSON.stringify(await createEncryptedStateBackup({
+    const envelope = await createEncryptedStateBackup({
       stateDir: backupManifestPath,
       outputPath: liveManifestPath,
       keyFilePath,
       ...(deps.generatedAt === undefined ? {} : { generatedAt: deps.generatedAt }),
-    }), null, 2));
+    });
+    print(JSON.stringify({
+      ok: true,
+      command: 'dr backup',
+      backupPath: liveManifestPath,
+      encrypted: envelope.encryption.encrypted,
+      algorithm: envelope.encryption.algorithm,
+      artifactDigest: envelope.encryption.artifactDigest,
+      manifest: envelope.manifest,
+    }, null, 2));
     return;
   }
 
@@ -95,6 +104,8 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
       ok: true,
       command: 'dr list',
       encrypted: envelope.encryption.encrypted,
+      verified: false,
+      verificationRequired: 'Run dr verify <backup-file> <key-file> before trusting manifest metadata or restoring this backup.',
       algorithm: envelope.encryption.algorithm,
       manifest: envelope.manifest,
     }, null, 2));
