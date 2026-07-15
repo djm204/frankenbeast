@@ -124,35 +124,102 @@ function validateHttpsUrl(url: URL, fieldName: string): void {
   }
 }
 
+function validateUrlHasNoCredentials(url: URL, fieldName: string): void {
+  if (url.username || url.password) {
+    throw new TypeError(`${fieldName} must not include credentials`)
+  }
+}
+
+function extractShortcutIpv4Octets(host: string): [number, number, number, number] | undefined {
+  const suffixes = ['.nip.io', '.sslip.io', '.xip.io']
+  const suffix = suffixes.find(candidate => host.endsWith(candidate))
+  if (!suffix) {
+    return undefined
+  }
+  const labels = host.slice(0, -suffix.length).split(/[.-]/u).filter(Boolean)
+  const octets = labels.slice(-4).map(Number)
+  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return undefined
+  }
+  return octets as [number, number, number, number]
+}
+
+function ipv4FromMappedIpv6(ip: string): string | undefined {
+  const dotted = /^(?:::ffff:|0:0:0:0:0:ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(ip)
+  if (dotted) {
+    return dotted[1]
+  }
+
+  const parts = ip.split(':')
+  const marker = parts.lastIndexOf('ffff')
+  if (marker < 0 || marker !== parts.length - 3) {
+    return undefined
+  }
+  const high = Number.parseInt(parts[parts.length - 2] ?? '', 16)
+  const low = Number.parseInt(parts[parts.length - 1] ?? '', 16)
+  if (!Number.isInteger(high) || !Number.isInteger(low) || high < 0 || high > 0xffff || low < 0 || low > 0xffff) {
+    return undefined
+  }
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`
+}
+
+function isPrivateIpv4(ip: string): boolean {
+  const octets = ip.split('.').map(Number)
+  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return false
+  }
+  const [firstOctet, secondOctet] = octets as [number, number, number, number]
+  return firstOctet === 0 ||
+    firstOctet === 10 ||
+    firstOctet === 127 ||
+    (firstOctet === 169 && secondOctet === 254) ||
+    (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) ||
+    (firstOctet === 192 && secondOctet === 168) ||
+    (firstOctet === 100 && secondOctet >= 64 && secondOctet <= 127) ||
+    firstOctet >= 224
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  const mappedIpv4 = ipv4FromMappedIpv6(ip)
+  if (mappedIpv4) {
+    return isPrivateIpv4(mappedIpv4)
+  }
+  const firstHextet = Number.parseInt(ip.split(':', 1)[0] || '0', 16)
+  return ip === '::' ||
+    ip === '::1' ||
+    (Number.isInteger(firstHextet) && firstHextet >= 0xfe80 && firstHextet <= 0xfebf) ||
+    ip.startsWith('fc') ||
+    ip.startsWith('fd') ||
+    ip.startsWith('ff')
+}
+
 function validatePublicWebhookHost(url: URL, fieldName: string): void {
   const hostname = url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/g, '').toLowerCase()
-  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+  const shortcutIpv4 = extractShortcutIpv4Octets(hostname)
+  if (hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === 'lvh.me' ||
+    hostname.endsWith('.lvh.me') ||
+    hostname === 'metadata' ||
+    hostname === 'instance-data' ||
+    hostname === 'metadata.google.internal' ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.svc') ||
+    hostname.endsWith('.cluster.local') ||
+    (shortcutIpv4 && isPrivateIpv4(shortcutIpv4.join('.')))) {
     throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
   }
 
   const ipVersion = isIP(hostname)
   if (ipVersion === 4) {
-    const [firstOctet = 0, secondOctet = 0] = hostname.split('.').map(part => Number(part))
-    const isPrivateOrLocal =
-      firstOctet === 0 ||
-      firstOctet === 10 ||
-      firstOctet === 127 ||
-      (firstOctet === 169 && secondOctet === 254) ||
-      (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) ||
-      (firstOctet === 192 && secondOctet === 168)
-    if (isPrivateOrLocal) {
+    if (isPrivateIpv4(hostname)) {
       throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
     }
   }
 
   if (ipVersion === 6) {
-    const normalized = hostname.toLowerCase()
-    const firstHextet = Number.parseInt(normalized.split(':', 1)[0] || '0', 16)
-    const isLoopback = normalized === '::1'
-    const isUniqueLocal = firstHextet >= 0xfc00 && firstHextet <= 0xfdff
-    const isLinkLocal = firstHextet >= 0xfe80 && firstHextet <= 0xfebf
-    const isIpv4Mapped = normalized.includes('::ffff:')
-    if (isLoopback || isUniqueLocal || isLinkLocal || isIpv4Mapped) {
+    if (isPrivateIpv6(hostname)) {
       throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
     }
   }
@@ -173,10 +240,21 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
   return new Set(origins.map(origin => parseUrlOrigin(origin, 'allowedTargetOrigins entry')))
 }
 
+function validateWebhookPathname(pathname: string, fieldName: string): void {
+  if (/%(?:2e|2f|5c)/iu.test(pathname)) {
+    throw new TypeError(`${fieldName} must not include encoded dot segments or separators`)
+  }
+  const segments = pathname.split('/')
+  if (segments.includes('.') || segments.includes('..')) {
+    throw new TypeError(`${fieldName} must not include dot segments`)
+  }
+}
+
 function normalizePathnamePrefix(pathnamePrefix: string | undefined, fieldName: string): string | undefined {
   if (pathnamePrefix === undefined || pathnamePrefix === '' || pathnamePrefix === '/') {
     return undefined
   }
+  validateWebhookPathname(pathnamePrefix, fieldName)
   if (!pathnamePrefix.startsWith('/')) {
     throw new TypeError(`${fieldName} must start with /`)
   }
@@ -212,6 +290,7 @@ function normalizeAllowedTargets(
       const url = parseAbsoluteUrl(target, `allowedTargets[${index}]`)
       validateHttpsUrl(url, `allowedTargets[${index}]`)
       validatePublicWebhookHost(url, `allowedTargets[${index}]`)
+      validateWebhookPathname(url.pathname, `allowedTargets[${index}].pathname`)
       return {
         origin: url.origin,
         pathnamePrefix: normalizePathnamePrefix(url.pathname, `allowedTargets[${index}].pathnamePrefix`),
@@ -283,7 +362,9 @@ export class WebhookNotifier {
     this.url = options.url
     this.parsedUrl = parseAbsoluteUrl(options.url, 'url')
     validateHttpsUrl(this.parsedUrl, 'url')
+    validateUrlHasNoCredentials(this.parsedUrl, 'url')
     validatePublicWebhookHost(this.parsedUrl, 'url')
+    validateWebhookPathname(this.parsedUrl.pathname, 'url pathname')
     this.targetOrigin = this.parsedUrl.origin
     this.allowedTargetOrigins = normalizeAllowedTargetOrigins(options.allowedTargetOrigins)
     this.allowedTargets = normalizeAllowedTargets(options.allowedTargets)

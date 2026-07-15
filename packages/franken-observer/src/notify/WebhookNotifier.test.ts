@@ -404,6 +404,16 @@ describe('WebhookNotifier', () => {
         allowedTargets: ['https://192.168.1.10/api/webhooks/'],
         fetch: mockFetch,
       })).toThrow('url host 192.168.1.10 is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://100.64.0.1/api/webhooks/123/secret',
+        allowedTargets: ['https://100.64.0.1/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host 100.64.0.1 is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://224.0.0.1/api/webhooks/123/secret',
+        allowedTargets: ['https://224.0.0.1/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host 224.0.0.1 is not allowed')
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
@@ -417,6 +427,33 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
         'Webhook target origin https://discord.com is not allowed',
       )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects private-host webhook aliases during configuration load', () => {
+      const unsafeUrls = [
+        'https://127.0.0.1.nip.io/api/webhooks/123/secret',
+        'https://lvh.me/api/webhooks/123/secret',
+        'https://foo.lvh.me/api/webhooks/123/secret',
+        'https://metadata.google.internal/computeMetadata/v1',
+      ]
+
+      for (const url of unsafeUrls) {
+        expect(() => new WebhookNotifier({
+          url,
+          allowedTargets: [url],
+          fetch: mockFetch,
+        })).toThrow(/host .* is not allowed/u)
+      }
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects encoded path traversal before sending', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks/%2e%2e%2fadmin',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url pathname must not include encoded dot segments or separators')
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
