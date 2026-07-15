@@ -247,6 +247,65 @@ describe('agent routes integration', () => {
     });
   });
 
+  it('preserves capacity conflict responses when auto-dispatch loses a capacity race', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const repository = new SQLiteBeastRepository(join(TMP, 'auto-dispatch-capacity.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const runs = { getRun: vi.fn(), start: vi.fn(), stop: vi.fn(), kill: vi.fn(), restart: vi.fn() };
+    const dispatch = {
+      createRun: vi.fn(async () => {
+        throw new CapacityReservationError(
+          { allowed: false, reason: 'reserved_capacity_only', reservationId: undefined },
+          {
+            totalSlots: 1,
+            usedSlots: 1,
+            freeSlots: 0,
+            normalSlots: { total: 1, used: 1, free: 0 },
+            reservations: [],
+          },
+        );
+      }),
+    };
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.route('/', agentRoutes({
+      agents,
+      dispatch: dispatch as never,
+      runs: runs as never,
+      operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
+      security: new TransportSecurityService(),
+    }));
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_SUPER_SECRET_OPERATOR_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks' },
+        },
+        initConfig: { provider: 'claude', objective: 'Race auto-dispatch', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_CAPACITY_RESERVED',
+        details: {
+          decision: { reason: 'reserved_capacity_only' },
+        },
+      },
+    });
+    expect(repository.listTrackedAgents()).toHaveLength(1);
+    expect(repository.listTrackedAgents()[0]).toMatchObject({ status: 'initializing' });
+  });
+
   it('returns validation errors for invalid tracked agent payloads', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
 
