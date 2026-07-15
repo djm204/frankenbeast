@@ -35,8 +35,12 @@ export class RuntimeConfigIntegrityError extends Error {
   }
 }
 
+function sha256Bytes(content: string | Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
 function sha256File(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
+  return sha256Bytes(readFileSync(path));
 }
 
 function sha256FileVerification(path: string): { digest?: string; reason?: string } {
@@ -152,6 +156,8 @@ export function verifyRuntimeConfigIntegrity(input: {
   readonly manifestPath?: string | undefined;
   readonly bypass?: boolean | undefined;
   readonly manifestKey?: string | undefined;
+  /** Optional bytes that the caller will parse after verification. Supplying this closes check-then-read races. */
+  readonly configContent?: string | Buffer | undefined;
 }): RuntimeConfigIntegrityVerification {
   const manifestPath = input.manifestPath ?? runtimeConfigIntegrityManifestPath(input.configPath);
   if (input.bypass) {
@@ -200,7 +206,9 @@ export function verifyRuntimeConfigIntegrity(input: {
       reason: 'runtime config integrity manifest signature is invalid',
     };
   }
-  const { digest: actualDigest, reason: readFailureReason } = sha256FileVerification(input.configPath);
+  const { digest: actualDigest, reason: readFailureReason } = input.configContent !== undefined
+    ? { digest: sha256Bytes(input.configContent) }
+    : sha256FileVerification(input.configPath);
   if (!actualDigest) {
     return {
       ok: false,
@@ -237,6 +245,8 @@ export function assertRuntimeConfigIntegrity(input: {
   readonly manifestPath?: string | undefined;
   readonly bypass?: boolean | undefined;
   readonly manifestKey?: string | undefined;
+  /** Optional bytes that the caller will parse after verification. Supplying this closes check-then-read races. */
+  readonly configContent?: string | Buffer | undefined;
 }): RuntimeConfigIntegrityVerification {
   const verification = verifyRuntimeConfigIntegrity(input);
   if (!verification.ok) {

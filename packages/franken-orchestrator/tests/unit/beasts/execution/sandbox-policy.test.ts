@@ -62,8 +62,8 @@ describe('nonRootUserForWorkspace', () => {
 });
 
 describe('DEFAULT_BEAST_ENV_ALLOWLIST', () => {
-  it('preserves runtime config integrity controls for sandboxed spawned CLIs', () => {
+  it('keeps non-secret runtime config controls in the default allowlist', () => {
     expect(DEFAULT_BEAST_ENV_ALLOWLIST).toContain('FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS');
-    expect(DEFAULT_BEAST_ENV_ALLOWLIST).toContain('FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY');
+    expect(DEFAULT_BEAST_ENV_ALLOWLIST).not.toContain('FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY');
   });
 });

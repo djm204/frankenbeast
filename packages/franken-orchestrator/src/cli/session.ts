@@ -43,8 +43,8 @@ function appendPromptContext(value: string, promptText: string | undefined): str
 function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
   const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
   if (!filePath) return undefined;
-  assertRunConfigIntegrity(filePath);
   const raw = readFileSync(filePath, 'utf-8');
+  assertRunConfigIntegrity(filePath, raw);
   const parsed = JSON.parse(raw) as { promptConfig?: unknown };
   if (!parsed.promptConfig) return undefined;
   return PromptConfigSchema.parse(parsed.promptConfig);
@@ -53,8 +53,8 @@ function loadPromptConfigFromEnv(): RunConfig['promptConfig'] | undefined {
 function loadCompatibleRunConfigFromEnv(): RunConfig | undefined {
   const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
   if (!filePath) return undefined;
-  assertRunConfigIntegrity(filePath);
   const raw = readFileSync(filePath, 'utf-8');
+  assertRunConfigIntegrity(filePath, raw);
   const parsed = JSON.parse(raw) as unknown;
   const result = RunConfigSchema.safeParse(parsed);
   return result.success ? result.data : undefined;

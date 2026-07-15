@@ -31,9 +31,15 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
+import { RUNTIME_CONFIG_MANIFEST_KEY_ENV } from '../beasts/execution/runtime-config-integrity.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
+
+function scrubRuntimeConfigManifestKey(env: Record<string, string>): Record<string, string> {
+  delete env[RUNTIME_CONFIG_MANIFEST_KEY_ENV];
+  return env;
+}
 
 function terminateRunningProcess(proc: ChildProcess): void {
   if (proc.exitCode === null && proc.signalCode === null) {
@@ -82,11 +88,11 @@ export class GeminiCliAdapter implements ILlmProvider {
       const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
-        env: {
+        env: scrubRuntimeConfigManifestKey({
           ...process.env,
           GEMINI_CLI_SYSTEM_DEFAULTS_PATH: this.effectiveSystemDefaultsPath(),
           GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath,
-        },
+        }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -120,7 +126,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       const { stdout, exitCode } = await collectCliOutput(
         this.binaryPath,
         ['tool', 'list', '--json'],
-        { ...process.env } as Record<string, string>,
+        scrubRuntimeConfigManifestKey({ ...process.env } as Record<string, string>),
       );
       if (exitCode !== 0 || !stdout.trim()) {
         return this.discoverFromSettingsFile();

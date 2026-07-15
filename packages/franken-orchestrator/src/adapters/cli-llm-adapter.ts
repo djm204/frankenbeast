@@ -12,6 +12,12 @@ import {
   parseResetTimeText,
   type CommandFailure,
 } from '../errors/command-failure.js';
+import { RUNTIME_CONFIG_MANIFEST_KEY_ENV } from '../beasts/execution/runtime-config-integrity.js';
+
+function scrubRuntimeConfigManifestKey(env: Record<string, string>): Record<string, string> {
+  delete env[RUNTIME_CONFIG_MANIFEST_KEY_ENV];
+  return env;
+}
 
 type CliCacheSessionHint = {
   key: string;
@@ -415,7 +421,7 @@ export class CliLlmAdapter implements IAdapter {
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
     }
-    return rawEnv;
+    return scrubRuntimeConfigManifestKey(rawEnv);
   }
 
   private resolveSleepMs(exhaustedProviders: Map<string, CommandFailure>): number {

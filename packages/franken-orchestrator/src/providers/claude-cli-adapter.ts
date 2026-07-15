@@ -14,6 +14,12 @@ import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
+import { RUNTIME_CONFIG_MANIFEST_KEY_ENV } from '../beasts/execution/runtime-config-integrity.js';
+
+function scrubRuntimeConfigManifestKey(env: Record<string, string>): Record<string, string> {
+  delete env[RUNTIME_CONFIG_MANIFEST_KEY_ENV];
+  return env;
+}
 
 function terminateRunningProcess(proc: ChildProcess): void {
   if (proc.exitCode === null && proc.signalCode === null) {
@@ -133,7 +139,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
   }
 
   sanitizedEnv(): Record<string, string> {
-    const env = { ...process.env };
+    const env = scrubRuntimeConfigManifestKey({ ...process.env } as Record<string, string>);
     for (const key of Object.keys(env)) {
       if (key.startsWith('CLAUDE')) {
         delete env[key];

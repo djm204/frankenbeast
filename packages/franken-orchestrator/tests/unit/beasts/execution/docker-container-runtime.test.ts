@@ -107,6 +107,23 @@ describe('toDockerSpec', () => {
     expect(spec.env).toEqual({});
   });
 
+  it('passes the runtime config manifest key through docker env without persisting the value in args', () => {
+    const spec = toDockerSpec(
+      {
+        ...base,
+        env: {
+          ...base.env,
+          FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY: 'secret-signing-key',
+        },
+      },
+      { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' },
+    );
+
+    expect(spec.args).toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY']));
+    expect(spec.args).not.toEqual(expect.arrayContaining(['-e', 'FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY=secret-signing-key']));
+    expect(spec.env).toEqual({ FRANKENBEAST_RUN_CONFIG_MANIFEST_KEY: 'secret-signing-key' });
+  });
+
   it('appends the original command and args after the image', () => {
     const spec = toDockerSpec(base, { ...DEFAULT_SANDBOX_POLICY, image: 'fbeast/sandbox:1', workspaceHostPath: '/proj' });
 

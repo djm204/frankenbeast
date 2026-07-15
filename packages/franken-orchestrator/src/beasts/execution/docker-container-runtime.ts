@@ -1,5 +1,6 @@
 import type { BeastProcessSpec } from '../types.js';
 import type { SandboxPolicy } from './sandbox-policy.js';
+import { RUNTIME_CONFIG_MANIFEST_KEY_ENV } from './runtime-config-integrity.js';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 
@@ -37,6 +38,8 @@ function containerCommand(command: string, policy: SandboxPolicy): string {
   return basename(command);
 }
 
+const SENSITIVE_CONTAINER_ENV_KEYS = [RUNTIME_CONFIG_MANIFEST_KEY_ENV] as const;
+
 function dockerEnvArgs(spec: BeastProcessSpec, policy: SandboxPolicy): string[] {
   const args: string[] = [
     '-e',
@@ -50,6 +53,11 @@ function dockerEnvArgs(spec: BeastProcessSpec, policy: SandboxPolicy): string[] 
     const value = spec.env?.[key];
     if (value !== undefined) {
       args.push('-e', `${key}=${remapHostWorkspacePath(value, policy)}`);
+    }
+  }
+  for (const key of SENSITIVE_CONTAINER_ENV_KEYS) {
+    if (spec.env?.[key] !== undefined) {
+      args.push('-e', key);
     }
   }
   return args;
@@ -118,6 +126,10 @@ export function toDockerSpec(
       ...spec.args.map((arg) => remapHostWorkspacePath(arg, policy)),
     ],
     cwd: spec.cwd,
-    env: {},
+    env: Object.fromEntries(
+      SENSITIVE_CONTAINER_ENV_KEYS
+        .map((key) => [key, spec.env?.[key]])
+        .filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
   };
 }

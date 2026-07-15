@@ -76,12 +76,13 @@ export class RunConfigParseError extends Error {
   }
 }
 
-export function assertRunConfigIntegrity(filePath: string): void {
+export function assertRunConfigIntegrity(filePath: string, configContent?: string | Buffer): void {
   assertRunConfigSize(filePath);
   assertRuntimeConfigIntegrity({
     configPath: filePath,
     manifestPath: runtimeConfigIntegrityManifestPath(filePath),
     bypass: process.env.FRANKENBEAST_RUN_CONFIG_INTEGRITY_BYPASS === '1',
+    configContent,
   });
 }
 
@@ -92,13 +93,17 @@ function assertRunConfigSize(filePath: string): void {
   }
 }
 
+function readRunConfigFile(filePath: string): string {
+  assertRunConfigSize(filePath);
+  return readFileSync(filePath, 'utf-8');
+}
+
 /**
  * Load and validate a RunConfig from a JSON file path.
  * Throws if the file does not exist or the content fails Zod validation.
  */
-export function loadRunConfig(filePath: string): RunConfig {
-  assertRunConfigSize(filePath);
-  const raw = readFileSync(filePath, 'utf-8');
+export function loadRunConfig(filePath: string, verifiedRaw?: string): RunConfig {
+  const raw = verifiedRaw ?? readRunConfigFile(filePath);
   let parsed: unknown;
   try {
     parsed = parseSafeJson(raw, {
@@ -123,8 +128,9 @@ export function loadRunConfig(filePath: string): RunConfig {
 export function loadRunConfigFromEnv(): RunConfig | undefined {
   const filePath = process.env['FRANKENBEAST_RUN_CONFIG'];
   if (!filePath) return undefined;
-  assertRunConfigIntegrity(filePath);
-  const config = loadRunConfig(filePath);
+  const raw = readRunConfigFile(filePath);
+  assertRunConfigIntegrity(filePath, raw);
+  const config = loadRunConfig(filePath, raw);
   printLine(`loaded config from ${filePath}`);
   return config;
 }
