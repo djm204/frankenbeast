@@ -52,17 +52,21 @@ export const stalePreferenceInjectionFixtures: readonly StalePreferenceInjection
     name: 'oversized-stale-preference-omitted-before-current-facts',
     objective: 'Stay inside memory budget',
     context: {
-      adrs: ['Project convention: use conventional commits.'],
+      adrs: ['Project convention: commits.'],
       rules: [
         `Stale user preference: ${'obsolete verbose reporting '.repeat(20)}`,
-        'User preference: report only actionable blockers.',
+        'User preference: report only blockers.',
       ],
-      knownErrors: ['Environment memory: Node 24 is supported in CI.'],
+      knownErrors: [],
     },
-    expectedActivePreference: 'User preference: report only actionable blockers.',
+    expectedActivePreference: 'User preference: report only blockers.',
     stalePreference: 'Stale user preference: obsolete verbose reporting',
-    expectedOmitted: ['obsolete verbose reporting obsolete verbose reporting'],
-    expectedPresent: ['[memory truncated:'],
+    expectedOmitted: ['Stale user preference: obsolete verbose reporting'],
+    expectedPresent: [
+      'User preference: report only blockers.',
+      'Project convention: commits.',
+      '[memory truncated:',
+    ],
     memoryContextBudgetChars: 760,
   },
 ] as const;
