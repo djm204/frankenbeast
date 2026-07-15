@@ -29,13 +29,22 @@ describe('WebhookNotifier', () => {
       controller.close()
     },
   })
-  const mockPinnedHttpsResponse = (statusCode = 204, statusMessage = 'No Content') => {
+  const mockPinnedHttpsResponse = (statusCode = 204, statusMessage = 'No Content', bodyChunks: readonly string[] = []) => {
     const request = new EventEmitter() as EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
     request.write = vi.fn()
     request.end = vi.fn(() => {
-      const response = new EventEmitter() as EventEmitter & { statusCode: number; statusMessage: string }
+      const response = new EventEmitter() as EventEmitter & {
+        statusCode: number
+        statusMessage: string
+        [Symbol.asyncIterator]: () => AsyncIterator<Buffer>
+      }
       response.statusCode = statusCode
       response.statusMessage = statusMessage
+      response[Symbol.asyncIterator] = async function * () {
+        for (const chunk of bodyChunks) {
+          yield Buffer.from(chunk)
+        }
+      }
       const callback = vi.mocked(httpsRequest).mock.calls.at(-1)?.[1]
       callback?.(response as never)
     })
@@ -521,6 +530,61 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('pins custom fetch delivery to the DNS-validated address', async () => {
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com:8443/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com:8443/api/webhooks/'],
+        fetch: mockFetch,
+        dnsLookup,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://203.0.113.10:8443/api/webhooks/123/secret',
+        expect.objectContaining({
+          headers: expect.objectContaining({ Host: 'webhooks.example.com:8443' }),
+        }),
+      )
+    })
+
+    it('preserves response bodies from the default pinned HTTPS transport', async () => {
+      mockPinnedHttpsResponse(500, 'Internal Server Error', ['provider diagnostic'])
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error for https://webhooks.example.com/[REDACTED]/[REDACTED]/[REDACTED]/[REDACTED]: provider diagnostic',
+      )
+    })
+
+    it('tries later validated DNS addresses when the first pinned address fails', async () => {
+      const firstRequest = new EventEmitter() as EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
+      firstRequest.write = vi.fn()
+      firstRequest.end = vi.fn(() => firstRequest.emit('error', new Error('ECONNREFUSED')))
+      const secondRequest = mockPinnedHttpsResponse()
+      vi.mocked(httpsRequest)
+        .mockReturnValueOnce(firstRequest as never)
+        .mockReturnValueOnce(secondRequest as never)
+      const dnsLookup = vi.fn(async () => ['203.0.113.10', '203.0.113.11'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(httpsRequest).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(httpsRequest).mock.calls[0][0]).toEqual(expect.objectContaining({ hostname: '203.0.113.10' }))
+      expect(vi.mocked(httpsRequest).mock.calls[1][0]).toEqual(expect.objectContaining({ hostname: '203.0.113.11' }))
+    })
+
     it('pins the DNS-validated address for default HTTPS delivery', async () => {
       const request = mockPinnedHttpsResponse()
       const dnsLookup = vi.fn(async () => ['203.0.113.10'])
@@ -586,6 +650,15 @@ describe('WebhookNotifier', () => {
         allowedTargets: [{ origin: 'https://discord.com/api/webhooks/' }],
         fetch: mockFetch,
       })).toThrow('allowedTargets[0].origin must not include a path, query, or fragment')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects credentials in object-form allowed target origins', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://evil.example/api/webhooks/123/secret',
+        allowedTargets: [{ origin: 'https://reviewed.example@evil.example' }],
+        fetch: mockFetch,
+      })).toThrow('allowedTargets[0].origin must not include credentials')
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
@@ -670,14 +743,14 @@ describe('WebhookNotifier', () => {
     })
 
     it('revalidates DNS before each retry attempt', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      mockPinnedHttpsResponse(503, 'Service Unavailable')
       const sleepFn = vi.fn().mockResolvedValue(undefined)
       const dnsLookup = vi.fn()
         .mockResolvedValueOnce(['203.0.113.10'])
         .mockResolvedValueOnce(['169.254.169.254'])
-      const notifier = createNotifier({
+      const notifier = new WebhookNotifier({
         url: 'https://hooks.example.com/signal',
-        fetch: mockFetch,
+        allowedTargetOrigins,
         dnsLookup,
         retry: { maxRetries: 1 },
         sleep: sleepFn,
@@ -687,7 +760,7 @@ describe('WebhookNotifier', () => {
         'resolved webhook address host 169.254.169.254 is not allowed',
       )
       expect(dnsLookup).toHaveBeenCalledTimes(2)
-      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(httpsRequest).toHaveBeenCalledTimes(1)
     })
 
     it('throws after exhausting all retries', async () => {

@@ -30,7 +30,7 @@ export interface WebhookAllowedTarget {
 type WebhookDnsLookup = (hostname: string) => Promise<readonly string[]>
 type WebhookFetchInit = NonNullable<Parameters<FetchFn>[1]>
 type WebhookFetchResponse = Awaited<ReturnType<FetchFn>> & {
-  body?: { getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | null
+  body?: ({ getReader?: () => ReadableStreamDefaultReader<Uint8Array> } & Partial<AsyncIterable<Uint8Array | Buffer | string>>) | null
 }
 
 export interface WebhookNotifierOptions {
@@ -333,6 +333,7 @@ function normalizeAllowedTargets(
 
     const url = parseAbsoluteUrl(target.origin, `allowedTargets[${index}].origin`)
     validateHttpsUrl(url, `allowedTargets[${index}].origin`)
+    validateUrlHasNoCredentials(url, `allowedTargets[${index}].origin`)
     validatePublicWebhookHost(url, `allowedTargets[${index}].origin`)
     assertOriginOnly(url, `allowedTargets[${index}].origin`)
     return {
@@ -491,11 +492,13 @@ export class WebhookNotifier {
   private async readResponseBody(response: WebhookFetchResponse): Promise<string> {
     try {
       const readable = response as {
-        body?: { getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | null
+        body?: ({ getReader?: () => ReadableStreamDefaultReader<Uint8Array> } & Partial<AsyncIterable<Uint8Array | Buffer | string>>) | null
         text?: () => Promise<string>
       }
-      const body = readable.body && typeof readable.body.getReader === 'function'
-        ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
+      const body = readable.body
+        ? typeof readable.body.getReader === 'function'
+          ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
+          : await this.readBoundedAsyncIterable(readable.body)
         : ''
       const redactedBody = redactWebhookSecrets(body)
       return redactedBody.length > MAX_ERROR_BODY_CHARS
@@ -562,6 +565,44 @@ export class WebhookNotifier {
     return truncated || timedOut ? `${decoded}…` : decoded
   }
 
+  private async readBoundedAsyncIterable(body: unknown): Promise<string> {
+    const iterator = body && typeof body === 'object'
+      ? (body as Partial<AsyncIterable<Uint8Array | Buffer | string>>)[Symbol.asyncIterator]
+      : undefined
+    if (typeof iterator !== 'function') {
+      return ''
+    }
+
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+    let truncated = false
+    const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
+
+    for await (const chunk of body as AsyncIterable<Uint8Array | Buffer | string>) {
+      if (Date.now() >= deadlineMs) {
+        truncated = true
+        break
+      }
+      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk)
+      const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
+      if (bytes.byteLength > remainingBytes) {
+        chunks.push(bytes.subarray(0, remainingBytes))
+        totalBytes += remainingBytes
+        truncated = true
+        break
+      }
+      chunks.push(bytes)
+      totalBytes += bytes.byteLength
+      if (totalBytes >= MAX_ERROR_BODY_CHARS) {
+        truncated = true
+        break
+      }
+    }
+
+    const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
+    return truncated ? `${decoded}…` : decoded
+  }
+
   private async resolveAllowedTargetAddresses(): Promise<readonly string[]> {
     const hostname = normalizeHostnameForValidation(this.parsedUrl.hostname)
     if (!this.dnsLookupFn || isIP(hostname) !== 0) {
@@ -569,7 +610,7 @@ export class WebhookNotifier {
     }
     const addresses = await this.dnsLookupFn(hostname)
     if (addresses.length === 0) {
-      throw new TypeError('resolved webhook address lookup returned no addresses')
+      throw new Error(`Webhook DNS lookup returned no addresses for host ${hostname}`)
     }
     for (const address of addresses) {
       const parsedAddress = parseAbsoluteUrl(`https://${isIP(address) === 6 ? `[${address}]` : address}/`, 'resolved webhook address')
@@ -579,11 +620,34 @@ export class WebhookNotifier {
   }
 
   private async fetchWebhook(resolvedAddresses: readonly string[], init: WebhookFetchInit): Promise<WebhookFetchResponse> {
-    if (!this.usePinnedDefaultFetch || resolvedAddresses.length === 0) {
+    if (resolvedAddresses.length === 0) {
       return this.fetchFn(this.url, init)
     }
 
-    return this.fetchWithPinnedAddress(resolvedAddresses[0], init)
+    let lastError: unknown
+    for (const address of resolvedAddresses) {
+      try {
+        return this.usePinnedDefaultFetch
+          ? await this.fetchWithPinnedAddress(address, init)
+          : await this.fetchWithPinnedCustomFetch(address, init)
+      } catch (err) {
+        lastError = err
+      }
+    }
+
+    throw lastError
+  }
+
+  private async fetchWithPinnedCustomFetch(address: string, init: WebhookFetchInit): Promise<WebhookFetchResponse> {
+    const pinnedUrl = new URL(this.url)
+    pinnedUrl.hostname = isIP(address) === 6 ? `[${address}]` : address
+    return this.fetchFn(pinnedUrl.toString(), {
+      ...init,
+      headers: {
+        ...(init.headers as Record<string, string>),
+        Host: this.parsedUrl.host,
+      },
+    })
   }
 
   private async fetchWithPinnedAddress(address: string, init: WebhookFetchInit): Promise<WebhookFetchResponse> {
