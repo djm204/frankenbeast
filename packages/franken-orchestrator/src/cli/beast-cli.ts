@@ -161,6 +161,9 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           dispatchedByUser: actor,
           executionMode,
           startNow: true,
+          onRunCreated: (createdRun) => {
+            liveRunId = createdRun.id;
+          },
           ...(args.moduleConfig ? { moduleConfig: args.moduleConfig } : {}),
         });
         keepServicesAlive = shouldKeepServicesAliveForRun(run);

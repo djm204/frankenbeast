@@ -111,6 +111,7 @@ export interface CreateBeastRunRequest {
   readonly trackedAgentId?: string | undefined;
   readonly executionMode?: BeastExecutionMode | undefined;
   readonly startNow?: boolean | undefined;
+  readonly onRunCreated?: ((run: BeastRun) => void) | undefined;
   readonly moduleConfig?: ModuleConfig | undefined;
 }
 
@@ -208,6 +209,8 @@ export class BeastDispatchService {
 
       return createdRun;
     });
+
+    request.onRunCreated?.(run);
 
     await this.appendLogSafely(run.id, 'system', 'stdout', 'run created');
     this.metrics.recordRunCreated(run.definitionId, run.dispatchedBy);

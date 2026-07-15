@@ -408,9 +408,6 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
   private signalTrackedProcess(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
     const sweep = this.sweepOrphanProcessGroup(pid, signal);
     if (sweep.swept) {
-      if (signal === 'SIGTERM') {
-        this.scheduleOrphanKillEscalation(pid);
-      }
       return;
     }
     child.kill(signal);

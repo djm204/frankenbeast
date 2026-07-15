@@ -330,8 +330,10 @@ describe('Error Reporting to Dashboard', () => {
       // Wait for the timeout to fire
       await new Promise((r) => setTimeout(r, 200));
 
-      // supervisor.kill should have been called as escalation
-      expect(supervisor.kill).toHaveBeenCalledWith(5555, { processGroupOwned: true });
+      // supervisor.kill should escalate only the already-tracked PID. The
+      // supervisor owns process-group signaling for live children; passing a
+      // recovered process-group hint here would make stale PID reuse unsafe.
+      expect(supervisor.kill).toHaveBeenCalledWith(5555, { processGroupOwned: false });
     });
 
     it('applies default timeout when no timeoutMs is provided (escalates stuck process)', async () => {
@@ -366,8 +368,10 @@ describe('Error Reporting to Dashboard', () => {
       // Wait for timeout to fire
       await new Promise((r) => setTimeout(r, 200));
 
-      // supervisor.kill should have been called as escalation
-      expect(supervisor.kill).toHaveBeenCalledWith(7777, { processGroupOwned: true });
+      // supervisor.kill should escalate only the already-tracked PID. The
+      // supervisor owns process-group signaling for live children; passing a
+      // recovered process-group hint here would make stale PID reuse unsafe.
+      expect(supervisor.kill).toHaveBeenCalledWith(7777, { processGroupOwned: false });
     });
 
     it('does not escalate to kill when process exits before timeout', async () => {

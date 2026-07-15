@@ -1,4 +1,4 @@
-import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
@@ -254,9 +254,31 @@ function resolveRunConfigOwner(
   return typeof owner === 'function' ? owner() : owner;
 }
 
+function processStartTimeTicks(pid: number): string | undefined {
+  if (pid <= 0 || process.platform !== 'linux') {
+    return undefined;
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const endOfCommand = stat.lastIndexOf(')');
+    if (endOfCommand < 0) {
+      return undefined;
+    }
+    const fieldsFromState = stat.slice(endOfCommand + 2).trim().split(/\s+/);
+    return fieldsFromState[19] || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
-  return attempt.executorMetadata?.processGroupOwned === true
-    && attempt.executorMetadata?.processGroupLeaderPid === attempt.pid;
+  const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
+  const pid = attempt.pid;
+  return typeof pid === 'number'
+    && attempt.executorMetadata?.processGroupOwned === true
+    && attempt.executorMetadata?.processGroupLeaderPid === pid
+    && typeof expectedStartTime === 'string'
+    && processStartTimeTicks(pid) === expectedStartTime;
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
@@ -417,6 +439,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
 
     const startedAt = new Date(wallClockNow()).toISOString();
+    const processStartTime = processStartTimeTicks(handle.pid);
     let attempt: BeastRunAttempt;
     try {
       attempt = this.repository.createAttempt(run.id, {
@@ -427,6 +450,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           backend: 'process',
           processGroupOwned: process.platform !== 'win32',
           processGroupLeaderPid: handle.pid,
+          ...(processStartTime ? { processStartTimeTicks: processStartTime } : {}),
           command: processSpec.command,
           args: [...processSpec.args],
           ...(worktree
