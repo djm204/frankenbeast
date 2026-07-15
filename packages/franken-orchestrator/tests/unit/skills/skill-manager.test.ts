@@ -492,5 +492,27 @@ describe('SkillManager', () => {
         process.chdir(originalCwd);
       }
     });
+
+    it('rejects installs if the skills root is replaced with a symlink before directory creation', async () => {
+      const outsideRoot = join(tempDir, 'outside-root');
+      mkdirSync(outsideRoot, { recursive: true });
+      rmSync(skillsDir, { recursive: true, force: true });
+      symlinkSync(outsideRoot, skillsDir, 'dir');
+
+      await expect(manager.installCustom('escaped-root', { command: 'node' }))
+        .rejects.toThrow(/Unsafe skill path/);
+
+      expect(existsSync(join(outsideRoot, 'escaped-root'))).toBe(false);
+    });
+
+    it('rejects recursive removal if the skills root was replaced with a symlink', () => {
+      const outsideRoot = join(tempDir, 'outside-root');
+      mkdirSync(join(outsideRoot, 'github'), { recursive: true });
+      rmSync(skillsDir, { recursive: true, force: true });
+      symlinkSync(outsideRoot, skillsDir, 'dir');
+
+      expect(() => manager.remove('github')).toThrow(/Unsafe skill path/);
+      expect(existsSync(join(outsideRoot, 'github'))).toBe(true);
+    });
   });
 });

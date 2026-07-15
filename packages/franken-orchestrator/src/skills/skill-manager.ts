@@ -135,7 +135,15 @@ export class SkillManager {
     return skillDir;
   }
 
+  private assertSkillsRootStable(): void {
+    assertNoSymlink(this.skillsDirRoot, 'skills root');
+    if (realpathSync(this.skillsDirRoot) !== this.skillsDirReal) {
+      throw unsafePathError(this.skillsDirRoot, 'skills root changed after initialization');
+    }
+  }
+
   private validateExistingSkillDirectory(skillDir: string): void {
+    this.assertSkillsRootStable();
     if (!existsSync(skillDir)) return;
     assertNoSymlink(skillDir, 'skill directory');
     if (!lstatSync(skillDir).isDirectory()) {
@@ -154,6 +162,7 @@ export class SkillManager {
 
   private ensureSkillDirectory(name: string): string {
     const skillDir = this.skillDirectoryPath(name);
+    this.assertSkillsRootStable();
     if (existsSync(skillDir)) {
       assertNoSymlink(skillDir, 'skill directory');
       if (!lstatSync(skillDir).isDirectory()) {
@@ -274,6 +283,7 @@ export class SkillManager {
   remove(name: string): void {
     this.validateName(name);
     const skillDir = this.skillDirectoryPath(name);
+    this.assertSkillsRootStable();
     if (existsSync(skillDir)) {
       if (lstatSync(skillDir).isSymbolicLink()) {
         rmSync(skillDir);
@@ -281,6 +291,7 @@ export class SkillManager {
         this.configStore?.save(this.enabledSkills);
         return;
       }
+      assertContainedPath(realpathSync(skillDir), this.skillsDirReal, 'skill directory');
       rmSync(skillDir, { recursive: true });
     }
     this.enabledSkills.delete(name);
