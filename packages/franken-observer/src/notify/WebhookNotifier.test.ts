@@ -380,6 +380,16 @@ describe('WebhookNotifier', () => {
         fetch: mockFetch,
       })).toThrow('url host localhost is not allowed')
       expect(() => new WebhookNotifier({
+        url: 'https://localhost./api/webhooks/123/secret',
+        allowedTargets: ['https://localhost./api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host localhost is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://[::1]/api/webhooks/123/secret',
+        allowedTargets: ['https://[::1]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host ::1 is not allowed')
+      expect(() => new WebhookNotifier({
         url: 'https://192.168.1.10/api/webhooks/123/secret',
         allowedTargets: ['https://192.168.1.10/api/webhooks/'],
         fetch: mockFetch,
@@ -397,6 +407,28 @@ describe('WebhookNotifier', () => {
       await expect(notifier.send({ type: 'test' })).rejects.toThrow(
         'Webhook target origin https://discord.com is not allowed',
       )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('enforces path-prefix boundaries before sending', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks-anything',
+        allowedTargets: [{ origin: 'https://discord.com', pathnamePrefix: '/api/webhooks' }],
+        fetch: mockFetch,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook target origin https://discord.com is not allowed',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects object-form allowed target origins that include paths', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks/123/secret',
+        allowedTargets: [{ origin: 'https://discord.com/api/webhooks/' }],
+        fetch: mockFetch,
+      })).toThrow('allowedTargets[0].origin must not include a path, query, or fragment')
       expect(mockFetch).not.toHaveBeenCalled()
     })
 

@@ -125,7 +125,7 @@ function validateHttpsUrl(url: URL, fieldName: string): void {
 }
 
 function validatePublicWebhookHost(url: URL, fieldName: string): void {
-  const hostname = url.hostname.toLowerCase()
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/g, '').toLowerCase()
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
     throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
   }
@@ -183,6 +183,23 @@ function normalizePathnamePrefix(pathnamePrefix: string | undefined, fieldName: 
   return pathnamePrefix
 }
 
+function assertOriginOnly(url: URL, fieldName: string): void {
+  if (url.pathname !== '/' || url.search !== '' || url.hash !== '') {
+    throw new TypeError(`${fieldName} must not include a path, query, or fragment; use pathnamePrefix for path scoping`)
+  }
+}
+
+function pathMatchesPrefix(pathname: string, pathnamePrefix: string | undefined): boolean {
+  if (!pathnamePrefix) {
+    return true
+  }
+  if (pathname === pathnamePrefix) {
+    return true
+  }
+  const boundaryPrefix = pathnamePrefix.endsWith('/') ? pathnamePrefix : `${pathnamePrefix}/`
+  return pathname.startsWith(boundaryPrefix)
+}
+
 function normalizeAllowedTargets(
   targets: readonly (string | WebhookAllowedTarget)[] | undefined,
 ): readonly NormalizedWebhookTarget[] {
@@ -204,6 +221,7 @@ function normalizeAllowedTargets(
     const url = parseAbsoluteUrl(target.origin, `allowedTargets[${index}].origin`)
     validateHttpsUrl(url, `allowedTargets[${index}].origin`)
     validatePublicWebhookHost(url, `allowedTargets[${index}].origin`)
+    assertOriginOnly(url, `allowedTargets[${index}].origin`)
     return {
       origin: url.origin,
       pathnamePrefix: normalizePathnamePrefix(target.pathnamePrefix, `allowedTargets[${index}].pathnamePrefix`),
@@ -421,7 +439,7 @@ export class WebhookNotifier {
       if (target.origin !== this.targetOrigin) {
         return false
       }
-      return target.pathnamePrefix ? this.parsedUrl.pathname.startsWith(target.pathnamePrefix) : true
+      return pathMatchesPrefix(this.parsedUrl.pathname, target.pathnamePrefix)
     })
     if (!targetAllowedByOrigin && !targetAllowedByPath) {
       throw new Error(`Webhook target origin ${this.targetOrigin} is not allowed`)
