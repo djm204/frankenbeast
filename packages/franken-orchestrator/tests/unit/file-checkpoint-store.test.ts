@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { FileCheckpointStore } from '../../src/checkpoint/file-checkpoint-store.js';
+import { FileCheckpointStore, detectCheckpointLock } from '../../src/checkpoint/file-checkpoint-store.js';
 import type { ICheckpointStore } from '../../src/deps.js';
 
 const rootRequire = createRequire(new URL('../../../../package.json', import.meta.url));
@@ -298,6 +298,80 @@ describe('FileCheckpointStore', () => {
       expect(() => impatient.write('blocked')).toThrow(/Timed out acquiring checkpoint lock/);
       // The live holder's lock must still be there, untouched.
       expect(readFileSync(`${filePath}.lock`, 'utf-8')).toBe(`${process.pid}:0:0123456789abcdef`);
+    });
+
+    it('detects absent, stale, and live checkpoint locks with safe operator hints', async () => {
+      expect(detectCheckpointLock(filePath)).toMatchObject({
+        lockPath: `${filePath}.lock`,
+        status: 'absent',
+        safeToRemove: false,
+      });
+
+      const deadPid: number = await new Promise((res, rej) => {
+        const child = execFile(process.execPath, ['-e', ''], (err: unknown) =>
+          err ? rej(err) : res(child.pid!),
+        );
+      });
+      writeFileSync(`${filePath}.lock`, `${deadPid}:12345:deadbeefdeadbeef`);
+      const stale = detectCheckpointLock(filePath);
+      expect(stale).toMatchObject({
+        status: 'stale',
+        safeToRemove: true,
+        ownerPid: deadPid,
+        ownerAlive: false,
+        reason: 'recorded owner process is no longer running',
+      });
+      expect(stale.unlockHint).toContain('Safe unlock hint');
+      expect(stale.unlockHint).toContain('Quiesce checkpoint writers');
+      expect(stale.unlockHint).toContain(`rm -- '${filePath}.lock'`);
+
+      writeFileSync(`${filePath}.lock`, `${process.pid}:0:0123456789abcdef`);
+      const live = detectCheckpointLock(filePath);
+      expect(live).toMatchObject({
+        status: 'held',
+        safeToRemove: false,
+        ownerPid: process.pid,
+        ownerAlive: true,
+      });
+      expect(live.unlockHint).toContain('Do not remove this lock');
+    });
+
+    it('shell-quotes stale lock removal hints without allowing command substitution', async () => {
+      const unsafeCheckpoint = join(tmpDir, "checkpoint-$(touch should-not-run)'x.log");
+      const deadPid: number = await new Promise((res, rej) => {
+        const child = execFile(process.execPath, ['-e', ''], (err: unknown) =>
+          err ? rej(err) : res(child.pid!),
+        );
+      });
+      writeFileSync(`${unsafeCheckpoint}.lock`, `${deadPid}:12345:deadbeefdeadbeef`);
+
+      const stale = detectCheckpointLock(unsafeCheckpoint);
+
+      expect(stale.safeToRemove).toBe(true);
+      expect(stale.unlockHint).toContain("rm -- '");
+      expect(stale.unlockHint).toContain("'\\''x.log.lock'");
+      expect(stale.unlockHint).not.toContain('rm -- "');
+    });
+
+    it('keeps malformed fresh locks inside the grace window and marks old malformed locks safe', () => {
+      writeFileSync(`${filePath}.lock`, '1');
+
+      const fresh = detectCheckpointLock(filePath, { lockTimeoutMs: 5_000 });
+      expect(fresh).toMatchObject({
+        status: 'held',
+        safeToRemove: false,
+      });
+      expect(fresh.reason).toContain('crash-recovery grace window');
+
+      const past = new Date(Date.now() - 60_000);
+      utimesSync(`${filePath}.lock`, past, past);
+
+      const stale = detectCheckpointLock(filePath, { lockTimeoutMs: 5_000 });
+      expect(stale).toMatchObject({
+        status: 'stale',
+        safeToRemove: true,
+        reason: 'lock owner record is missing, truncated, or malformed',
+      });
     });
   });
 
