@@ -100,6 +100,14 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 All servers share `.fbeast/beast.db` (SQLite, WAL mode). Memory frontload is scoped to that database: use a separate database per project when project isolation is required.
 
+Memory reads support explicit per-agent scope controls on `fbeast_memory_query` and `fbeast_memory_frontload`:
+
+- omit `readScope` or set `readScope: "all"` for legacy behavior;
+- set `readScope: "shared"` to hide entries stored under an agent namespace;
+- set `readScope: "agent"` with `agentId` to return shared entries plus entries for that agent only.
+
+To create agent-scoped entries through `fbeast_memory_store`, pass `agentId`; working-memory entries are stored under an internal reserved key with explicit scope metadata, and episodic entries carry the same metadata in event details. `fbeast_memory_forget` accepts the same optional `agentId` so callers can delete scoped working-memory entries using the logical key they stored. `readScope: "agent"` requires a non-empty `agentId` and rejects the request before touching memory when the id is missing, making failures deterministic and preventing accidental broad reads.
+
 `fbeast_memory_right_to_forget` performs user-directed memory deletion by exact key, category metadata, source scope, or sensitive query text. The report returns only a selector hash, deleted counts, remaining-reference count, and optional audit event id; it does not echo the deleted content. Non-dry-run deletions also install hashed reinference guards so future working-memory writes matching forgotten keys, categories, source scopes, or query tokens are rejected.
 
 ### Skill health endpoint

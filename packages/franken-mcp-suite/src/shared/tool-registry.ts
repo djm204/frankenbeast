@@ -70,6 +70,27 @@ function parseNonEmptyStringArg(name: string, value: unknown): { ok: true; value
   return { ok: true, value };
 }
 
+function parseMemoryReadScopeArgs(args: Record<string, unknown>): { ok: true; value: { readScope?: 'all' | 'shared' | 'agent'; agentId?: string } } | { ok: false; message: string } {
+  const readScope = args['readScope'] === undefined ? undefined : String(args['readScope']);
+  if (readScope !== undefined && !['all', 'shared', 'agent'].includes(readScope)) {
+    return { ok: false, message: 'readScope must be one of: all, shared, agent' };
+  }
+  const agentId = args['agentId'] === undefined ? undefined : String(args['agentId']).trim();
+  if (readScope === 'agent' && !agentId) {
+    return { ok: false, message: 'agentId is required when readScope is agent' };
+  }
+  return { ok: true, value: { ...(readScope ? { readScope: readScope as 'all' | 'shared' | 'agent' } : {}), ...(agentId ? { agentId } : {}) } };
+}
+
+function parseOptionalAgentIdArg(args: Record<string, unknown>): { ok: true; value?: string } | { ok: false; message: string } {
+  if (args['agentId'] === undefined) return { ok: true };
+  const agentId = String(args['agentId']).trim();
+  if (agentId.length === 0) {
+    return { ok: false, message: 'agentId must be a non-empty string when provided' };
+  }
+  return { ok: true, value: agentId };
+}
+
 function parseStringArg(name: string, value: unknown): { ok: true; value: string } | { ok: false; message: string } {
   if (typeof value !== 'string') {
     return { ok: false, message: `${name} must be a string` };
@@ -128,6 +149,7 @@ const TOOLS: ToolFull[] = [
         key: { type: 'string', description: 'Unique key for this memory entry' },
         value: { type: 'string', description: 'Content to store' },
         type: { type: 'string', description: 'Memory type: working or episodic', enum: ['working', 'episodic'] },
+        agentId: { type: 'string', description: 'Optional agent id; when provided, the stored entry is namespaced for that agent and visible through readScope=agent for the same agent' },
       },
       required: ['key', 'value', 'type'],
     },
@@ -135,7 +157,11 @@ const TOOLS: ToolFull[] = [
       const key = String(args['key']);
       const value = String(args['value']);
       const type = String(args['type']);
-      await brain.store({ key, value, type });
+      const agentId = parseOptionalAgentIdArg(args);
+      if (!agentId.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_store ${agentId.message}` }], isError: true };
+      }
+      await brain.store(agentId.value ? { key, value, type, agentId: agentId.value } : { key, value, type });
       return { content: [{ type: 'text', text: `Stored memory: ${key}` }] };
     },
   },
@@ -149,6 +175,8 @@ const TOOLS: ToolFull[] = [
         query: { type: 'string', description: 'Search query (substring match on key and value)' },
         type: { type: 'string', description: 'Filter by type: working or episodic', enum: ['working', 'episodic'] },
         limit: { type: 'string', description: 'Max results (default 20)' },
+        readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
       },
       required: ['query'],
     },
@@ -159,8 +187,12 @@ const TOOLS: ToolFull[] = [
       if (!parsedLimit.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_query ${parsedLimit.message}` }], isError: true };
       }
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_query ${scopeArgs.message}` }], isError: true };
+      }
       const limit = parsedLimit.value;
-      const rows = await brain.query(type ? { query, type, limit } : { query, limit });
+      const rows = await brain.query({ query, ...(type ? { type } : {}), limit, ...scopeArgs.value });
       if (rows.length === 0) {
         return { content: [{ type: 'text', text: `No memory entries found for query: "${query}"` }] };
       }
@@ -179,10 +211,16 @@ const TOOLS: ToolFull[] = [
       type: 'object',
       properties: {
         projectId: { type: 'string', description: 'Optional legacy project identifier; frontload is database-scoped' },
+        readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
       },
     },
-    makeHandler: ({ brain }) => async () => {
-      const sections = await brain.frontload();
+    makeHandler: ({ brain }) => async (args) => {
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_frontload ${scopeArgs.message}` }], isError: true };
+      }
+      const sections = await brain.frontload(scopeArgs.value);
       if (sections.length === 0) {
         return { content: [{ type: 'text', text: 'No memory entries stored yet.' }] };
       }
@@ -198,12 +236,17 @@ const TOOLS: ToolFull[] = [
       type: 'object',
       properties: {
         key: { type: 'string', description: 'Key of the memory entry to remove' },
+        agentId: { type: 'string', description: 'Optional agent id used when removing an agent-scoped working memory entry' },
       },
       required: ['key'],
     },
     makeHandler: ({ brain }) => async (args) => {
       const key = String(args['key']);
-      const removed = await brain.forget(key);
+      const agentId = parseOptionalAgentIdArg(args);
+      if (!agentId.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_forget ${agentId.message}` }], isError: true };
+      }
+      const removed = await brain.forget(key, agentId.value ? { agentId: agentId.value } : {});
       if (!removed) {
         return { content: [{ type: 'text', text: `No memory entry found with key: ${key}` }] };
       }
@@ -221,16 +264,22 @@ const TOOLS: ToolFull[] = [
         category: { type: 'string', description: 'Category metadata or key prefix to delete' },
         sourceScope: { type: 'string', description: 'Source/sourceScope metadata or key prefix to delete' },
         query: { type: 'string', description: 'Sensitive fact substring to delete without echoing in the report' },
+        agentId: { type: 'string', description: 'Optional agent id used when deleting an exact agent-scoped working-memory key' },
         type: { type: 'string', description: 'Memory scope: working, episodic, or all', enum: ['working', 'episodic', 'all'] },
         dryRun: { type: 'boolean', description: 'Report counts without deleting or writing audit evidence' },
       },
     },
     makeHandler: ({ brain }) => async (args) => {
+      const agentId = parseOptionalAgentIdArg(args);
+      if (!agentId.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_right_to_forget ${agentId.message}` }], isError: true };
+      }
       const input = {
         ...(args['key'] !== undefined ? { key: String(args['key']) } : {}),
         ...(args['category'] !== undefined ? { category: String(args['category']) } : {}),
         ...(args['sourceScope'] !== undefined ? { sourceScope: String(args['sourceScope']) } : {}),
         ...(args['query'] !== undefined ? { query: String(args['query']) } : {}),
+        ...(agentId.value ? { agentId: agentId.value } : {}),
         ...(args['type'] !== undefined ? { type: String(args['type']) as 'working' | 'episodic' | 'all' } : {}),
         ...(args['dryRun'] !== undefined ? { dryRun: args['dryRun'] === true || String(args['dryRun']) === 'true' } : {}),
       };
