@@ -132,6 +132,7 @@ The live orchestrator execution phase runs topological parallel waves: parallel-
 - CLI-backed and HITL-gated tasks are serialized because they share a checkout and operator approval channel
 - A failed task is recorded but not added to the completed set
 - Later waves continue with tasks whose dependencies are satisfied; dependents of failed tasks are later skipped as unmet dependencies
+- On resume, completed-task outputs are read from checkpoint sidecars so downstream dependency inputs can be rehydrated. If the primary sidecar is missing or corrupted but a previous known-good output exists, execution uses that stale dependency cache, emits a `dependency-output-cache:stale-fallback` audit event, and logs the reason so operators can decide whether to rerun the upstream task.
 
 **Linear planner strategy** (`@franken/planner/src/planners/linear.ts`) — planner strategy module, not the live orchestrator execution loop
 - Tasks execute one at a time in topological order

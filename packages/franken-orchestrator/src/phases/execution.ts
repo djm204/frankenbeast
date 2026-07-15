@@ -203,6 +203,18 @@ export async function runExecution(
       // Skip tasks already completed in a previous run (checkpoint recovery)
       if (checkpoint?.has(`${task.id}:done`)) {
         const checkpointedOutput = checkpoint.readTaskOutput?.(task.id);
+        if (checkpointedOutput?.stale) {
+          logger.warn('Execution: using stale dependency output cache for checkpointed task', {
+            taskId: task.id,
+            reason: checkpointedOutput.staleReason,
+            checkpointPath: checkpoint.checkpointPath,
+          });
+          ctx.addAudit('executor', 'dependency-output-cache:stale-fallback', {
+            taskId: task.id,
+            reason: checkpointedOutput.staleReason,
+            checkpointPath: checkpoint.checkpointPath,
+          });
+        }
         logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
         const outcome = { taskId: task.id, status: 'success' as const, output: checkpointedOutput?.output };
         if (checkpointedOutput?.found) {
