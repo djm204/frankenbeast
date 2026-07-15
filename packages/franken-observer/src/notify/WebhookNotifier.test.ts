@@ -422,6 +422,11 @@ describe('WebhookNotifier', () => {
         fetch: mockFetch,
       })).toThrow('url host fe90::1 is not allowed')
       expect(() => new WebhookNotifier({
+        url: 'https://[fec0::1]/api/webhooks/123/secret',
+        allowedTargets: ['https://[fec0::1]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host fec0::1 is not allowed')
+      expect(() => new WebhookNotifier({
         url: 'https://192.168.1.10/api/webhooks/123/secret',
         allowedTargets: ['https://192.168.1.10/api/webhooks/'],
         fetch: mockFetch,
@@ -437,6 +442,18 @@ describe('WebhookNotifier', () => {
         fetch: mockFetch,
       })).toThrow('url host 224.0.0.1 is not allowed')
       expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('does not treat public IPv6 addresses with ffff tail hextets as IPv4-mapped', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://[2001:4860::ffff:c0a8:10a]/api/webhooks/123/secret',
+        allowedTargets: ['https://[2001:4860::ffff:c0a8:10a]/api/webhooks/'],
+        fetch: mockFetch,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 
     it('denies webhook targets outside configured path prefixes before sending', async () => {

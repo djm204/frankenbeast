@@ -165,18 +165,18 @@ function extractShortcutIpv4Octets(host: string): [number, number, number, numbe
 }
 
 function ipv4FromMappedIpv6(ip: string): string | undefined {
-  const dotted = /^(?:::ffff:|0:0:0:0:0:ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(ip)
+  const normalizedIp = ip.toLowerCase()
+  const dotted = /^(?:::ffff:|0:0:0:0:0:ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(normalizedIp)
   if (dotted) {
     return dotted[1]
   }
 
-  const parts = ip.split(':')
-  const marker = parts.lastIndexOf('ffff')
-  if (marker < 0 || marker !== parts.length - 3) {
+  const hexMapped = /^(?:::ffff:|0:0:0:0:0:ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(normalizedIp)
+  if (!hexMapped) {
     return undefined
   }
-  const high = Number.parseInt(parts[parts.length - 2] ?? '', 16)
-  const low = Number.parseInt(parts[parts.length - 1] ?? '', 16)
+  const high = Number.parseInt(hexMapped[1], 16)
+  const low = Number.parseInt(hexMapped[2], 16)
   if (!Number.isInteger(high) || !Number.isInteger(low) || high < 0 || high > 0xffff || low < 0 || low > 0xffff) {
     return undefined
   }
@@ -207,7 +207,7 @@ function isPrivateIpv6(ip: string): boolean {
   const firstHextet = Number.parseInt(ip.split(':', 1)[0] || '0', 16)
   return ip === '::' ||
     ip === '::1' ||
-    (Number.isInteger(firstHextet) && firstHextet >= 0xfe80 && firstHextet <= 0xfebf) ||
+    (Number.isInteger(firstHextet) && firstHextet >= 0xfe80 && firstHextet <= 0xfeff) ||
     ip.startsWith('fc') ||
     ip.startsWith('fd') ||
     ip.startsWith('ff')
