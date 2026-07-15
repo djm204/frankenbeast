@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.3.2](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.3.1...franken-mcp-suite-v0.3.2) (2026-07-15)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.10.0 to 0.10.1
+    * @franken/orchestrator bumped from 0.48.0 to 0.49.0
+
+## [0.3.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.3.0...franken-mcp-suite-v0.3.1) (2026-07-15)
+
+
+### Documentation
+
+* **security:** add agent tool execution threat model ([#2251](https://github.com/djm204/frankenbeast/issues/2251)) ([3e17ba8](https://github.com/djm204/frankenbeast/commit/3e17ba80f8606dbbc72f132e02cde392c8d62799))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.11.0 to 0.12.0
+    * @franken/brain bumped from 0.9.0 to 0.10.0
+    * @franken/critique bumped from 0.8.2 to 0.8.3
+    * @franken/governor bumped from 0.6.2 to 0.7.0
+    * @franken/observer bumped from 0.8.1 to 0.8.2
+    * @franken/orchestrator bumped from 0.47.1 to 0.48.0
+    * @franken/planner bumped from 0.4.17 to 0.4.18
+
 ## [0.3.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.2.16...franken-mcp-suite-v0.3.0) (2026-07-14)
 
 

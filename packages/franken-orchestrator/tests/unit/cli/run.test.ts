@@ -11,6 +11,15 @@ const TEST_DISCORD_TOKEN = testCredential('TEST_DISCORD_TOKEN');
 const TEST_DISCORD_BOT_TOKEN = testCredential('TEST_DISCORD_BOT_TOKEN');
 const TEST_ROOT_ENV_TOKEN = testCredential('TEST_ROOT_ENV_TOKEN');
 const TEST_DASHBOARD_FILE_TOKEN = testCredential('TEST_DASHBOARD_FILE_TOKEN');
+
+function commandHealthyForTest(command: string): boolean {
+  try {
+    execFileSync(command, ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
 // ── Hoisted mocks (available inside vi.mock factories) ──
 
 const {
@@ -478,7 +487,10 @@ describe('dashboard provider snapshots', () => {
       providers: {
         default: 'claude',
         fallbackChain: ['codex'],
-        overrides: { claude: { model: 'claude-sonnet-4' }, codex: { model: 'gpt-5' } },
+        overrides: {
+          claude: { model: 'claude-sonnet-4', command: 'node' },
+          codex: { model: 'gpt-5', command: 'node' },
+        },
       },
     } as any, {
       getProviders: () => [
@@ -498,7 +510,11 @@ describe('dashboard provider snapshots', () => {
       providers: {
         default: 'gemini',
         fallbackChain: [],
-        overrides: { codex: { model: 'gpt-5-codex' } },
+        overrides: {
+          codex: { model: 'gpt-5-codex', command: 'node' },
+          claude: { command: 'node' },
+          gemini: { command: 'node' },
+        },
       },
     } as any, { getProviders: () => [] } as any, ['codex', 'claude']);
 
@@ -514,7 +530,7 @@ describe('dashboard provider snapshots', () => {
       providers: {
         default: 'aider',
         fallbackChain: [],
-        overrides: {},
+        overrides: { aider: { command: 'node' } },
       },
     } as any, {
       getProviders: () => [
@@ -525,6 +541,172 @@ describe('dashboard provider snapshots', () => {
     expect(providers).toEqual([
       { name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0 },
     ]);
+  });
+
+  it('marks configured fallback CLI providers unavailable when their command cannot execute', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'claude',
+        fallbackChain: ['codex'],
+        overrides: {
+          claude: { command: 'node' },
+          codex: { command: '/definitely/missing/frankenbeast-codex' },
+        },
+      },
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+      { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1 },
+    ]);
+  });
+
+  it('marks consolidated CLI providers unavailable from their cliPath so dashboard banners reflect real snapshots', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'claude',
+        fallbackChain: [],
+        overrides: {},
+      },
+      consolidatedProviders: [
+        { name: 'primary-claude', type: 'claude-cli', cliPath: '/definitely/missing/frankenbeast-claude' },
+        { name: 'backup-codex', type: 'codex-cli', cliPath: 'node', model: 'gpt-5.3-codex-spark' },
+      ],
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+      { name: 'backup-codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5.3-codex-spark' },
+    ]);
+  });
+
+  it('matches consolidated aliases before shared provider types when checking CLI availability', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: { default: 'primary-claude', fallbackChain: ['backup-claude'], overrides: {} },
+      consolidatedProviders: [
+        { name: 'primary-claude', type: 'claude-cli', cliPath: '/definitely/missing/frankenbeast-primary-claude' },
+        { name: 'backup-claude', type: 'claude-cli', cliPath: 'node' },
+      ],
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+      { name: 'backup-claude', type: 'claude-cli', available: true, failoverOrder: 1 },
+    ]);
+  });
+
+  it('honors consolidated cliPath before legacy overrides for dashboard CLI availability', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'prod-claude',
+        fallbackChain: [],
+        overrides: { claude: { command: 'node' } },
+      },
+      consolidatedProviders: [
+        { name: 'prod-claude', type: 'claude-cli', cliPath: '/definitely/missing/frankenbeast-prod-claude' },
+      ],
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'prod-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+    ]);
+  });
+
+  it('ignores legacy overrides for consolidated providers without cliPath', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'prod-claude-default',
+        fallbackChain: [],
+        overrides: { claude: { command: '/definitely/missing/frankenbeast-prod-claude-default' } },
+      },
+      consolidatedProviders: [
+        { name: 'prod-claude-default', type: 'claude-cli' },
+      ],
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'prod-claude-default', type: 'claude-cli', available: commandHealthyForTest('claude'), failoverOrder: 0 },
+    ]);
+  });
+
+  it('marks CLI providers unavailable when the command exists but fails --version', async () => {
+    const config = {
+      providers: {
+        default: 'broken-claude',
+        fallbackChain: [],
+        overrides: {},
+      },
+      consolidatedProviders: [
+        { name: 'broken-claude', type: 'claude-cli', cliPath: '/bin/false' },
+      ],
+    } as any;
+
+    buildDashboardProviderSnapshot(config, { getProviders: () => [] } as any);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const providers = buildDashboardProviderSnapshot(config, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'broken-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+    ]);
+  });
+
+  it('checks the legacy aider command when no aider override is configured', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'aider',
+        fallbackChain: [],
+        overrides: {},
+      },
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'aider', type: 'claude-cli', available: commandHealthyForTest('aider'), failoverOrder: 0 },
+    ]);
+  });
+
+  it('trims consolidated API keys before marking providers available', () => {
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const googleApiKey = process.env.GOOGLE_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    try {
+      const providers = buildDashboardProviderSnapshot({
+        providers: { default: 'blank-gemini', fallbackChain: [], overrides: {} },
+        consolidatedProviders: [
+          { name: 'blank-gemini', type: 'gemini-api', apiKey: '   ' },
+        ],
+      } as any, { getProviders: () => [] } as any);
+
+      expect(providers).toEqual([
+        { name: 'blank-gemini', type: 'gemini-api', available: false, failoverOrder: 0 },
+      ]);
+    } finally {
+      if (geminiApiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = geminiApiKey;
+      if (googleApiKey === undefined) delete process.env.GOOGLE_API_KEY;
+      else process.env.GOOGLE_API_KEY = googleApiKey;
+    }
+  });
+
+  it('treats GOOGLE_API_KEY as Gemini API availability when GEMINI_API_KEY is blank', () => {
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const googleApiKey = process.env.GOOGLE_API_KEY;
+    process.env.GEMINI_API_KEY = '';
+    process.env.GOOGLE_API_KEY = 'test-google-key';
+    try {
+      const providers = buildDashboardProviderSnapshot({
+        providers: { default: 'gemini-api', fallbackChain: [], overrides: {} },
+      } as any, { getProviders: () => [] } as any);
+
+      expect(providers).toEqual([
+        { name: 'gemini-api', type: 'gemini-api', available: true, failoverOrder: 0 },
+      ]);
+    } finally {
+      if (geminiApiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = geminiApiKey;
+      if (googleApiKey === undefined) delete process.env.GOOGLE_API_KEY;
+      else process.env.GOOGLE_API_KEY = googleApiKey;
+    }
   });
 });
 
@@ -1763,7 +1945,14 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh', model: 'gemini-2.5-pro' } } },
+      providers: {
+        default: 'gemini',
+        fallbackChain: [],
+        overrides: {
+          gemini: { command: 'node', model: 'gemini-2.5-pro' },
+          codex: { command: 'node' },
+        },
+      },
       security: {
         profile: 'permissive',
         webhookSignaturePolicy: 'local-dev-unsigned',

@@ -5,6 +5,10 @@
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
 - CLI signal cleanup should register and unregister all handled signals symmetrically, and long-running `restart` commands should track the target run before awaiting restart so SIGINT/SIGHUP can clean up in-flight work.
 
+## 2026-07-15 — Issue-runner dependency circuit breaker verification
+- For availability/refill features that add dependency-specific throttles, model the dependency name in structured signals and configure named breakers so unrelated degraded dependencies do not create a global outage. Regression tests should cover the intended open condition plus an unrelated dependency and a retry/open-until edge case.
+- After `npm ci` in a fresh worktree, package-local orchestrator typecheck may fail until dependent workspaces have been built; run `npm run build` (or build the needed workspace packages) before re-running package-local `tsc --noEmit`.
+
 ## 2026-07-14 — Type-safety hardening regressions
 - For removing unsafe TypeScript double-casts, pair the runtime regression with a source-inspection guard that names the exact bypass (`as unknown as ...`) and the intended type-coupling construct (`satisfies z.ZodType<...>` or typed null-object helpers) so future changes cannot silently reintroduce the cast while preserving behavior.
 - Disabled/null-object implementations should return structurally complete domain objects rather than partial objects cast through `unknown`; include required lifecycle/status/time fields in the helper so `tsc --noEmit` enforces drift against upstream type changes.

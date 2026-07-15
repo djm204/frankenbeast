@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.49.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.48.0...@franken/orchestrator-v0.49.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add degraded worker routing policy ([#2272](https://github.com/djm204/frankenbeast/issues/2272)) ([a2d8f80](https://github.com/djm204/frankenbeast/commit/a2d8f800cbc1bddd0bb04b8d6f996984eb939b68))
+* **availability:** add provider outage incident banner ([#2270](https://github.com/djm204/frankenbeast/issues/2270)) ([3d37834](https://github.com/djm204/frankenbeast/commit/3d3783417ea57f9bea4d99c9b49cd62f42a9c160))
+
+
+### Bug Fixes
+
+* **orchestrator:** add dispatcher startup integrity checks ([#2271](https://github.com/djm204/frankenbeast/issues/2271)) ([d4c3947](https://github.com/djm204/frankenbeast/commit/d4c3947d2933276ce5ff763d5443ab86b46782d5))
+* **stability:** add stale checkpoint lock detector ([#2275](https://github.com/djm204/frankenbeast/issues/2275)) ([00e9e79](https://github.com/djm204/frankenbeast/commit/00e9e79805ef0b8c9d8db68c596fe72f53dbf1ed))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/brain bumped from 0.10.0 to 0.10.1
+
+## [0.48.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.47.1...@franken/orchestrator-v0.48.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add capacity watermark alerts ([#2266](https://github.com/djm204/frankenbeast/issues/2266)) ([219ffd3](https://github.com/djm204/frankenbeast/commit/219ffd34483126e6f09b11c17b86d89226c39280))
+* **availability:** add scheduler fairness report ([#2268](https://github.com/djm204/frankenbeast/issues/2268)) ([2494097](https://github.com/djm204/frankenbeast/commit/2494097dfdeaabd49848908aa38bb630f93404e7)), closes [#1821](https://github.com/djm204/frankenbeast/issues/1821)
+* **availability:** audit model provider failover ([#2263](https://github.com/djm204/frankenbeast/issues/2263)) ([d3f0ac2](https://github.com/djm204/frankenbeast/commit/d3f0ac209a82a02786c12faf518bb695fae6341e))
+* **dr:** add approval ledger recovery report ([#2256](https://github.com/djm204/frankenbeast/issues/2256)) ([c0413fb](https://github.com/djm204/frankenbeast/commit/c0413fbf6a771e84eb126db6417badbf94bf0aaf))
+* **dr:** add backup encryption verification report ([#2252](https://github.com/djm204/frankenbeast/issues/2252)) ([9a9b957](https://github.com/djm204/frankenbeast/commit/9a9b957a3b7b05e8c17be5de4e30cb131f19e9bf))
+* **dr:** add point-in-time backup manifest ([#2258](https://github.com/djm204/frankenbeast/issues/2258)) ([bd599d6](https://github.com/djm204/frankenbeast/commit/bd599d64c11bf3233ddfc51937c989f8874ee430)), closes [#1830](https://github.com/djm204/frankenbeast/issues/1830)
+* **dr:** add recovery-mode destructive action guard ([#2249](https://github.com/djm204/frankenbeast/issues/2249)) ([f126546](https://github.com/djm204/frankenbeast/commit/f126546a24625d2279cea5fbb4e8abbdf571ec36))
+* **dr:** add restore dry-run JSON output ([#2259](https://github.com/djm204/frankenbeast/issues/2259)) ([d6aac73](https://github.com/djm204/frankenbeast/commit/d6aac73b91ddbf62f6bff5bb1dddd07ad2d3d2f2))
+* **dr:** block Kanban card resurrection ([#2255](https://github.com/djm204/frankenbeast/issues/2255)) ([3fdb87c](https://github.com/djm204/frankenbeast/commit/3fdb87c7f105951f5fdfc7c9d889cb0057c718dc)), closes [#1834](https://github.com/djm204/frankenbeast/issues/1834)
+* **dr:** verify memory backups ([#2254](https://github.com/djm204/frankenbeast/issues/2254)) ([0be3e69](https://github.com/djm204/frankenbeast/commit/0be3e69e4c97a5126243bab17967bedd4bd898d6))
+* **orchestrator:** add approval readiness health endpoint ([#2262](https://github.com/djm204/frankenbeast/issues/2262)) ([e5ba904](https://github.com/djm204/frankenbeast/commit/e5ba904987618708bacc27731ae6f565d90e02d6))
+* **orchestrator:** add stale dependency cache fallback ([#2267](https://github.com/djm204/frankenbeast/issues/2267)) ([52906fd](https://github.com/djm204/frankenbeast/commit/52906fd55282d97f4101214de82f4dc5bd3a5517))
+
+
+### Bug Fixes
+
+* **orchestrator:** preflight github token capabilities ([#2253](https://github.com/djm204/frankenbeast/issues/2253)) ([d398a9b](https://github.com/djm204/frankenbeast/commit/d398a9be70dd0e793d4d3c87bc36ebc905f1f66b))
+* **orchestrator:** remove unsafe double casts ([#2243](https://github.com/djm204/frankenbeast/issues/2243)) ([c6494fa](https://github.com/djm204/frankenbeast/commit/c6494fac50fef4ae782de1f347e8c8a36d5bc2ff))
+* **orchestrator:** write skill credentials atomically ([022a941](https://github.com/djm204/frankenbeast/commit/022a941abff1d826da05bbcd0fce7384b129a3cc))
+
+
+### Refactoring
+
+* **orchestrator:** decompose god functions ([#2244](https://github.com/djm204/frankenbeast/issues/2244)) ([4e26a2d](https://github.com/djm204/frankenbeast/commit/4e26a2dddb27487c2c598f290f40f758ba59240c))
+
+
+### Tests
+
+* **availability:** add burst dispatch load fixture ([#2261](https://github.com/djm204/frankenbeast/issues/2261)) ([a64b04c](https://github.com/djm204/frankenbeast/commit/a64b04c68d15b008235d29c33261be04138ad144))
+* **dr:** add missing cron job recovery fixture ([#2246](https://github.com/djm204/frankenbeast/issues/2246)) ([e293d73](https://github.com/djm204/frankenbeast/commit/e293d73e251ae8ff9b4f8891edb078c619cfe834))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.8.2 to 0.8.3
+    * @franken/governor bumped from 0.6.2 to 0.7.0
+    * @franken/types bumped from 0.11.0 to 0.12.0
+    * @franken/observer bumped from 0.8.1 to 0.8.2
+    * @franken/planner bumped from 0.4.17 to 0.4.18
+    * @franken/brain bumped from 0.9.0 to 0.10.0
+
 ## [0.47.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.47.0...@franken/orchestrator-v0.47.1) (2026-07-14)
 
 

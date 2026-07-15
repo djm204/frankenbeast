@@ -725,6 +725,21 @@ detector.on('loop-detected', result => {
 
 `send()` throws on non-2xx responses and network errors. For fire-and-forget use inside event handlers, handle rejections with `.catch()` or `void`.
 
+Retries are opt-in through `retry`. When enabled, `WebhookNotifier` retries only transient failures: network errors, HTTP 429, and HTTP 5xx responses. Non-transient 4xx responses fail immediately so invalid payloads or credentials do not create retry storms. Retry delays use exponential backoff (`baseDelayMs * 2^attempt`), jitter is enabled by default to spread concurrent webhook traffic, and the final delay is always capped by `maxDelayMs` even after jitter is applied.
+
+```ts
+const notifier = new WebhookNotifier({
+  url: process.env.SLACK_WEBHOOK_URL!,
+  allowedTargetOrigins: ['https://hooks.slack.com'],
+  retry: {
+    maxRetries: 3,      // initial request + up to 3 retries
+    baseDelayMs: 200,  // first retry waits about 200ms before jitter
+    maxDelayMs: 5_000, // strict upper bound for every retry sleep
+    jitter: true,      // default; set false for deterministic operator tests
+  },
+})
+```
+
 Webhook targets are deny-by-default: configure `allowedTargetOrigins` with the trusted webhook origins that may receive HITL payloads. The configured `url` must resolve to one of those origins before any network request is attempted, and redirects are not followed automatically so an allowlisted endpoint cannot forward the POST body to an unlisted origin. Legacy deployments can set `allowUnlistedTarget: true` as an explicit unsafe opt-out while they migrate to an allowlist.
 
 ---

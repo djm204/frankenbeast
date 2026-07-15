@@ -30,6 +30,24 @@ const UNREADABLE_LOCK_REAP_MS = 2000;
 const LIVE_LOCK_AGE_CEILING_MS = 60_000;
 const MAX_ENTRY_LENGTH = 4096;
 
+export type CheckpointLockStatus = 'absent' | 'held' | 'stale';
+
+export interface CheckpointLockDiagnostic {
+  readonly lockPath: string;
+  readonly status: CheckpointLockStatus;
+  readonly safeToRemove: boolean;
+  readonly ageMs?: number | undefined;
+  readonly ownerPid?: number | undefined;
+  readonly ownerAlive?: boolean | undefined;
+  readonly reason: string;
+  readonly unlockHint: string;
+}
+
+export interface DetectCheckpointLockOptions {
+  readonly lockTimeoutMs?: number | undefined;
+  readonly nowMs?: number | undefined;
+}
+
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -39,7 +57,6 @@ function isValidEntry(line: string): boolean {
     return false;
   }
   // Corrupted regions (interleaved or torn writes) surface as NUL bytes or control chars.
-  // eslint-disable-next-line no-control-regex
   return !/[\u0000-\u0008\u000B-\u001F\u007F]/.test(line);
 }
 
@@ -71,6 +88,147 @@ function writeAll(fd: number, payload: string): void {
   while (written < buf.length) {
     written += writeSync(fd, buf, written, buf.length - written);
   }
+}
+
+function formatLockAge(ageMs: number | undefined): string {
+  if (ageMs === undefined) return 'unknown age';
+  return `${Math.max(0, Math.round(ageMs))}ms old`;
+}
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function staleDiagnostic(
+  lockPath: string,
+  reason: string,
+  ageMs: number | undefined,
+  ownerPid?: number | undefined,
+  ownerAlive?: boolean | undefined,
+): CheckpointLockDiagnostic {
+  const ownerText =
+    ownerPid === undefined
+      ? 'no verified owner'
+      : `owner pid ${ownerPid}${ownerAlive ? (reason.includes('unverifiable') ? ' is alive but could not be verified' : ' is not the recorded process') : ' is not running'}`;
+  return {
+    lockPath,
+    status: 'stale',
+    safeToRemove: true,
+    ageMs,
+    ownerPid,
+    ownerAlive,
+    reason,
+    unlockHint: `Safe unlock hint: ${ownerText}; the lock is ${formatLockAge(ageMs)}. Quiesce checkpoint writers, re-run this detector to confirm the same stale owner, then remove only this lock file with: rm -- ${shellSingleQuote(lockPath)}`,
+  };
+}
+
+/**
+ * Read-only detector for checkpoint lock files. It mirrors FileCheckpointStore's
+ * reap rules but never mutates the filesystem, so PM/liveness tooling can show
+ * operators whether a lock is held or safely removable before a manual unlock.
+ */
+export function detectCheckpointLock(
+  checkpointPath: string,
+  options: DetectCheckpointLockOptions = {},
+): CheckpointLockDiagnostic {
+  const lockPath = `${checkpointPath}.lock`;
+  let owner: string | undefined;
+  let ageMs: number | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const before = statSync(lockPath);
+      const sampledOwner = readFileSync(lockPath, 'utf-8');
+      const after = statSync(lockPath);
+      if (before.mtimeMs === after.mtimeMs && before.size === after.size) {
+        owner = sampledOwner;
+        ageMs = (options.nowMs ?? Date.now()) - after.mtimeMs;
+        break;
+      }
+      owner = undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        if (attempt === 0) continue;
+        return {
+          lockPath,
+          status: 'absent',
+          safeToRemove: false,
+          reason: 'checkpoint lock file is absent',
+          unlockHint: 'No unlock action is needed; retry the checkpoint operation normally.',
+        };
+      }
+      throw error;
+    }
+  }
+
+  if (owner === undefined) {
+    return {
+      lockPath,
+      status: 'held',
+      safeToRemove: false,
+      reason: 'checkpoint lock changed while being inspected',
+      unlockHint: 'Do not remove this lock. Re-run the detector to inspect a stable lock snapshot.',
+    };
+  }
+
+  const ownerMatch = owner.match(/^(\d+):(\d+):[0-9a-f]{16}$/);
+  if (!ownerMatch) {
+    const reapAgeMs = Math.min(UNREADABLE_LOCK_REAP_MS, (options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS) / 2);
+    if ((ageMs ?? 0) >= reapAgeMs) {
+      return staleDiagnostic(lockPath, 'lock owner record is missing, truncated, or malformed', ageMs);
+    }
+    return {
+      lockPath,
+      status: 'held',
+      safeToRemove: false,
+      ageMs,
+      reason: 'lock owner record is not readable yet, but it is still inside the crash-recovery grace window',
+      unlockHint: `Do not remove yet. Wait until the lock is at least ${reapAgeMs}ms old, then re-run the detector before unlocking.`,
+    };
+  }
+
+  const pid = Number.parseInt(ownerMatch[1]!, 10);
+  const recordedStart = ownerMatch[2]!;
+  const ownerAlive = isProcessAlive(pid);
+  if (!ownerAlive) {
+    return staleDiagnostic(lockPath, 'recorded owner process is no longer running', ageMs, pid, false);
+  }
+
+  const currentStart = processStartTime(pid);
+  if (recordedStart !== '0' && currentStart === recordedStart) {
+    return {
+      lockPath,
+      status: 'held',
+      safeToRemove: false,
+      ageMs,
+      ownerPid: pid,
+      ownerAlive: true,
+      reason: 'recorded owner process is alive and matches the lock start time',
+      unlockHint: `Do not remove this lock. Inspect the live owner first, for example: ps -p ${pid} -o pid,ppid,etime,command`,
+    };
+  }
+
+  if (ownerAlive && (recordedStart === '0' || currentStart === '0') && (ageMs ?? 0) < LIVE_LOCK_AGE_CEILING_MS) {
+    return {
+      lockPath,
+      status: 'held',
+      safeToRemove: false,
+      ageMs,
+      ownerPid: pid,
+      ownerAlive: true,
+      reason: 'owner process is alive but this platform cannot verify process start time yet',
+      unlockHint: `Do not remove this lock unless process ${pid} exits or the lock exceeds ${LIVE_LOCK_AGE_CEILING_MS}ms; then re-run the detector.`,
+    };
+  }
+
+  return staleDiagnostic(
+    lockPath,
+    recordedStart === '0'
+      ? 'owner process start time is unverifiable and the lock exceeded the live-owner age ceiling'
+      : 'recorded PID has been reused by a different process',
+    ageMs,
+    pid,
+    true,
+  );
 }
 
 /** Best-effort directory fsync so a rename survives power loss; ignored where unsupported. */
@@ -334,12 +492,13 @@ export class FileCheckpointStore implements ICheckpointStore {
       const pid = Number.parseInt(ownerMatch[1]!, 10);
       const recordedStart = ownerMatch[2]!;
       if (isProcessAlive(pid)) {
-        if (recordedStart !== '0' && processStartTime(pid) === recordedStart) {
+        const currentStart = processStartTime(pid);
+        if (recordedStart !== '0' && currentStart === recordedStart) {
           // Verified live owner (PID + start time match rules out reuse) —
           // never break its lock, however long it holds it.
           return;
         }
-        if (recordedStart === '0') {
+        if (recordedStart === '0' || currentStart === '0') {
           // Owner identity cannot be verified (no start time available):
           // the age ceiling is the only backstop against PID reuse.
           try {
@@ -350,7 +509,7 @@ export class FileCheckpointStore implements ICheckpointStore {
             return;
           }
         }
-        // Live PID with a mismatched start time is a reused PID — reap.
+        // Live PID with a mismatched, verified start time is a reused PID — reap.
       }
       // Dead owner, reused PID, or unverifiable past the ceiling — reap.
     } else {

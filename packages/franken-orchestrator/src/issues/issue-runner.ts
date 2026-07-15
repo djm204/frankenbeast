@@ -43,6 +43,22 @@ export interface IssueBackpressureSignals {
   readonly systemLoadAverage?: number | undefined;
   readonly providerBudgetTokensRemaining?: number | undefined;
   readonly pendingIssueCount?: number | undefined;
+  readonly dependencyStatuses?: readonly IssueDependencySignal[] | undefined;
+}
+
+export type IssueDependencyStatus = 'healthy' | 'degraded' | 'unavailable';
+
+export interface IssueDependencySignal {
+  readonly dependency: string;
+  readonly status: IssueDependencyStatus;
+  readonly consecutiveFailures?: number | undefined;
+  readonly openUntil?: string | number | Date | undefined;
+  readonly error?: string | undefined;
+}
+
+export interface IssueDependencyCircuitBreakerConfig {
+  readonly maxConsecutiveFailures?: number | undefined;
+  readonly pauseOnStatuses?: readonly IssueDependencyStatus[] | undefined;
 }
 
 export interface IssueBackpressureSignalContext {
@@ -67,6 +83,13 @@ export interface IssueBackpressureThresholds {
   readonly maxOldestQueueAgeMs?: number | undefined;
   readonly maxSystemLoadAverage?: number | undefined;
   readonly minProviderBudgetTokensRemaining?: number | undefined;
+  /**
+   * Optional dependency-specific circuit breakers. Each key is a dependency
+   * name reported by `signals().dependencyStatuses`; only matching dependencies
+   * can pause fresh starts, so a degraded non-critical dependency does not
+   * silently stop unrelated work.
+   */
+  readonly dependencyCircuitBreakers?: Readonly<Record<string, IssueDependencyCircuitBreakerConfig>> | undefined;
   /**
    * Optional live alert ratio for capacity-style limits. For example, 0.8 emits
    * a warning when a signal reaches 80% of its configured limit while still
@@ -93,6 +116,41 @@ export interface IssueBackpressureDecision {
   readonly reasons: readonly string[];
   readonly signals: IssueBackpressureSignals;
   readonly alerts: readonly IssueCapacityWatermarkAlert[];
+  readonly dependencyCircuitBreakers: readonly IssueDependencyCircuitBreakerState[];
+}
+
+export interface IssueDependencyCircuitBreakerState {
+  readonly dependency: string;
+  readonly status: IssueDependencyStatus;
+  readonly state: 'closed' | 'open';
+  readonly reason?: string | undefined;
+  readonly retryAfterMs?: number | undefined;
+}
+
+export type IssueDegradedModeWorkerRouteAction =
+  | 'start-fresh'
+  | 'resume-checkpointed'
+  | 'complete-checkpointed'
+  | 'defer-fresh-start';
+
+export interface IssueDegradedModeWorkerRoute {
+  readonly mode: 'normal' | 'degraded';
+  readonly action: IssueDegradedModeWorkerRouteAction;
+  readonly issueNumber: number;
+  readonly reason?: string | undefined;
+  readonly guidance: string;
+  readonly checkpointHasIssueProgress: boolean;
+  readonly graphHasCheckpointProgress: boolean;
+  readonly graphComplete: boolean;
+}
+
+export interface IssueDegradedModeWorkerRouteInput {
+  readonly issue: GithubIssue;
+  readonly checkpointHasIssueProgress: boolean;
+  readonly graphHasCheckpointProgress?: boolean | undefined;
+  readonly graphComplete?: boolean | undefined;
+  readonly backpressureDecision?: IssueBackpressureDecision | undefined;
+  readonly stopRemainingReason?: string | undefined;
 }
 
 export interface IssueSchedulerFairnessBucket {
@@ -152,6 +210,80 @@ function validWatermarkRatio(value: number | undefined): value is number {
   return value !== undefined && Number.isFinite(value) && value > 0 && value < 1;
 }
 
+function configuredPauseStatuses(
+  config: IssueDependencyCircuitBreakerConfig,
+): readonly IssueDependencyStatus[] {
+  return config.pauseOnStatuses ?? ['unavailable'];
+}
+
+function retryAfterMs(openUntil: string | number | Date | undefined, nowMs: number): number | undefined {
+  if (openUntil === undefined) return undefined;
+  const untilMs = openUntil instanceof Date ? openUntil.getTime() : new Date(openUntil).getTime();
+  if (!Number.isFinite(untilMs) || untilMs <= nowMs) return undefined;
+  return untilMs - nowMs;
+}
+
+function evaluateDependencyCircuitBreakers(
+  signals: IssueBackpressureSignals,
+  thresholds: IssueBackpressureThresholds,
+  nowMs: number = Date.now(),
+): IssueDependencyCircuitBreakerState[] {
+  const configs = thresholds.dependencyCircuitBreakers ?? {};
+  const states: IssueDependencyCircuitBreakerState[] = [];
+
+  for (const signal of signals.dependencyStatuses ?? []) {
+    const config = configs[signal.dependency];
+    if (!config) continue;
+
+    const retryMs = retryAfterMs(signal.openUntil, nowMs);
+    if (retryMs !== undefined) {
+      states.push({
+        dependency: signal.dependency,
+        status: signal.status,
+        state: 'open',
+        retryAfterMs: retryMs,
+        reason: `${signal.dependency} circuit breaker is open for another ${retryMs}ms`,
+      });
+      continue;
+    }
+
+    const maxFailures = config.maxConsecutiveFailures;
+    if (
+      maxFailures !== undefined
+      && maxFailures > 0
+      && signal.consecutiveFailures !== undefined
+      && signal.consecutiveFailures >= maxFailures
+    ) {
+      states.push({
+        dependency: signal.dependency,
+        status: signal.status,
+        state: 'open',
+        reason: `${signal.dependency} consecutive failures ${signal.consecutiveFailures} reached circuit breaker limit ${maxFailures}`,
+      });
+      continue;
+    }
+
+    const pauseStatuses = configuredPauseStatuses(config);
+    if (pauseStatuses.includes(signal.status)) {
+      states.push({
+        dependency: signal.dependency,
+        status: signal.status,
+        state: 'open',
+        reason: `${signal.dependency} dependency status ${signal.status} opened circuit breaker`,
+      });
+      continue;
+    }
+
+    states.push({
+      dependency: signal.dependency,
+      status: signal.status,
+      state: 'closed',
+    });
+  }
+
+  return states;
+}
+
 function capacityAlert(
   signal: keyof IssueBackpressureSignals,
   label: string,
@@ -180,6 +312,69 @@ function defaultBackpressureSignals(context: IssueBackpressureSignalContext): Is
     pendingIssueCount: context.pendingIssueCount,
     providerBudgetTokensRemaining: context.providerBudgetTokensRemaining,
     systemLoadAverage: loadavg()[0],
+  };
+}
+
+export function routeIssueWorkerForDegradedMode(
+  input: IssueDegradedModeWorkerRouteInput,
+): IssueDegradedModeWorkerRoute {
+  const graphHasCheckpointProgress = input.graphHasCheckpointProgress ?? false;
+  const graphComplete = input.graphComplete ?? false;
+  const backpressureReason = input.backpressureDecision && !input.backpressureDecision.allowed
+    ? `backpressure: ${input.backpressureDecision.reasons.join('; ')}`
+    : undefined;
+  const degradedReason = input.stopRemainingReason ?? backpressureReason;
+  const hasProgress = graphHasCheckpointProgress || (input.graphHasCheckpointProgress === undefined && input.checkpointHasIssueProgress);
+
+  if (graphComplete) {
+    return {
+      mode: degradedReason ? 'degraded' : 'normal',
+      action: 'complete-checkpointed',
+      issueNumber: input.issue.number,
+      reason: degradedReason,
+      guidance: 'Treat this issue as already complete from checkpoint; do not start a duplicate worker.',
+      checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+      graphHasCheckpointProgress,
+      graphComplete,
+    };
+  }
+
+  if (hasProgress) {
+    return {
+      mode: degradedReason ? 'degraded' : 'normal',
+      action: 'resume-checkpointed',
+      issueNumber: input.issue.number,
+      reason: degradedReason,
+      guidance: degradedReason
+        ? 'Resume checkpointed work during degraded mode; avoid opening a new fresh worker while capacity is constrained.'
+        : 'Route the worker to resume checkpointed work before considering fresh-start policy.',
+      checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+      graphHasCheckpointProgress,
+      graphComplete,
+    };
+  }
+
+  if (degradedReason) {
+    return {
+      mode: 'degraded',
+      action: 'defer-fresh-start',
+      issueNumber: input.issue.number,
+      reason: degradedReason,
+      guidance: 'Defer this fresh worker start until capacity/dependency signals recover; keep the skip reason in liveness output.',
+      checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+      graphHasCheckpointProgress,
+      graphComplete,
+    };
+  }
+
+  return {
+    mode: 'normal',
+    action: 'start-fresh',
+    issueNumber: input.issue.number,
+    guidance: 'Start a fresh worker; no degraded-mode routing condition is active.',
+    checkpointHasIssueProgress: input.checkpointHasIssueProgress,
+    graphHasCheckpointProgress,
+    graphComplete,
   };
 }
 
@@ -258,12 +453,19 @@ export async function evaluateIssueBackpressure(
       `provider budget remaining ${signals.providerBudgetTokensRemaining} tokens is at or below reserve ${thresholds.minProviderBudgetTokensRemaining}`,
     );
   }
+  const dependencyCircuitBreakers = evaluateDependencyCircuitBreakers(signals, thresholds);
+  for (const breaker of dependencyCircuitBreakers) {
+    if (breaker.state === 'open' && breaker.reason) {
+      reasons.push(breaker.reason);
+    }
+  }
 
   return {
     allowed: reasons.length === 0,
     reasons,
     signals,
     alerts,
+    dependencyCircuitBreakers,
   };
 }
 
@@ -622,7 +824,31 @@ export class IssueRunner {
     );
     const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
 
-    const pauseForBackpressure = async (): Promise<IssueOutcome | undefined> => {
+    const logDegradedRoute = (route: IssueDegradedModeWorkerRoute): void => {
+      logger?.warn(
+        `[issues] Degraded-mode route for issue #${issue.number}: ${route.action}`,
+        {
+          issueNumber: issue.number,
+          workerRoute: route,
+        },
+        'issues',
+      );
+    };
+
+    const skipForDegradedRoute = (route: IssueDegradedModeWorkerRoute): IssueOutcome => {
+      logDegradedRoute(route);
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: route.reason,
+      };
+    };
+
+    const pauseForBackpressure = async (
+      graphProgress?: { graphHasCheckpointProgress?: boolean; graphComplete?: boolean },
+    ): Promise<IssueOutcome | undefined> => {
       const backpressureDecision = await evaluateIssueBackpressure(config.backpressure, {
         issue,
         ...backpressureContext,
@@ -643,13 +869,21 @@ export class IssueRunner {
         return undefined;
       }
 
-      const reason = `backpressure: ${backpressureDecision.reasons.join('; ')}`;
+      const route = routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        graphHasCheckpointProgress: graphProgress?.graphHasCheckpointProgress,
+        graphComplete: graphProgress?.graphComplete,
+        backpressureDecision,
+      });
       logger?.warn(
         `[issues] Backpressure paused issue #${issue.number}: ${backpressureDecision.reasons.join('; ')}`,
         {
           issueNumber: issue.number,
           reasons: backpressureDecision.reasons,
           signals: backpressureDecision.signals,
+          workerRoute: route,
+          dependencyCircuitBreakers: backpressureDecision.dependencyCircuitBreakers,
         },
         'issues',
       );
@@ -658,18 +892,16 @@ export class IssueRunner {
         issueTitle: issue.title,
         status: 'skipped',
         tokensUsed: 0,
-        error: reason,
+        error: route.reason ?? `backpressure: ${backpressureDecision.reasons.join('; ')}`,
       };
     };
 
     if (backpressureContext.stopRemainingReason && !checkpointHasIssueProgress) {
-      return {
-        issueNumber: issue.number,
-        issueTitle: issue.title,
-        status: 'skipped',
-        tokensUsed: 0,
-        error: backpressureContext.stopRemainingReason,
-      };
+      return skipForDegradedRoute(routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      }));
     }
 
     const requiresCheckpointCompletionCheckBeforeBackpressure =
@@ -713,8 +945,22 @@ export class IssueRunner {
     const graphHasCheckpointProgress =
       issueCheckpoint !== undefined && graph.tasks.some((task) => checkpointHasTaskProgress(issueCheckpoint, task.id));
 
-    if (issueCheckpoint && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)))) {
-      logger?.info(`[issues] Issue #${issue.number} already completed (checkpoint)`, undefined, 'issues');
+    const graphComplete = issueCheckpoint !== undefined
+      && graph.tasks.every((task) => issueCheckpoint.has(issueCompletionKey(task.id)));
+
+    if (graphComplete) {
+      const route = routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        graphHasCheckpointProgress,
+        graphComplete,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      });
+      logger?.info(
+        `[issues] Issue #${issue.number} already completed (checkpoint)`,
+        { issueNumber: issue.number, workerRoute: route },
+        'issues',
+      );
       appendIssueLog(logFile, `Issue #${issue.number} already complete from checkpoint`);
       return {
         issueNumber: issue.number,
@@ -725,17 +971,27 @@ export class IssueRunner {
     }
 
     if (backpressureContext.stopRemainingReason && !graphHasCheckpointProgress) {
-      return {
-        issueNumber: issue.number,
-        issueTitle: issue.title,
-        status: 'skipped',
-        tokensUsed: 0,
-        error: backpressureContext.stopRemainingReason,
-      };
+      return skipForDegradedRoute(routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        graphHasCheckpointProgress,
+        graphComplete,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      }));
+    }
+
+    if (backpressureContext.stopRemainingReason && graphHasCheckpointProgress) {
+      logDegradedRoute(routeIssueWorkerForDegradedMode({
+        issue,
+        checkpointHasIssueProgress,
+        graphHasCheckpointProgress,
+        graphComplete,
+        stopRemainingReason: backpressureContext.stopRemainingReason,
+      }));
     }
 
     if (requiresCheckpointCompletionCheckBeforeBackpressure && !graphHasCheckpointProgress) {
-      const paused = await pauseForBackpressure();
+      const paused = await pauseForBackpressure({ graphHasCheckpointProgress, graphComplete });
       if (paused) return paused;
     }
 

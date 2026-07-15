@@ -11,7 +11,7 @@ export type {
 export { IssueFetcher } from './issue-fetcher.js';
 export { IssueTriage } from './issue-triage.js';
 export { IssueGraphBuilder } from './issue-graph-builder.js';
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from './issue-runner.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode } from './issue-runner.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -21,6 +21,13 @@ export type {
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
   IssueCapacityWatermarkAlert,
+  IssueDegradedModeWorkerRoute,
+  IssueDegradedModeWorkerRouteAction,
+  IssueDegradedModeWorkerRouteInput,
+  IssueDependencyCircuitBreakerConfig,
+  IssueDependencyCircuitBreakerState,
+  IssueDependencySignal,
+  IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
 } from './issue-runner.js';
