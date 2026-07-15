@@ -70,6 +70,12 @@ If the daemon or chat server is launched by a wrapper from outside the intended 
 
 If you bind to a non-loopback host, the server refuses to start without an operator token. The same fail-closed rule applies when `chat-server` is launched by `frankenbeast network`: the supervisor sets the internal `FRANKENBEAST_NETWORK_MANAGED=1` child-process marker, and managed `chat-server` requires an operator token even on loopback. Do not export this marker for normal standalone debugging; unset it for local standalone `chat-server` runs, or provide `FRANKENBEAST_BEAST_OPERATOR_TOKEN` / the configured secret-store token when intentionally exercising managed semantics.
 
+### Local browser threat model
+
+The local dashboard assumes same-origin browser access through the Vite proxy or a production same-origin frontend. The backend rejects unsafe browser mutations to local control paths (`/v1/chat`, `/v1/beasts`, `/v1/network`, `/v1/comms`, `/api/security`, `/api/skills`, `/api/dashboard`, and `/api/analytics`) when `Origin` / `Sec-Fetch-Site` shows a cross-origin page is trying to drive the controls. Non-browser CLI/API callers should continue to use the operator bearer token or `x-frankenbeast-operator-token`; do not rely on browser cookies or embedded iframes for automation.
+
+Control responses also send `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` by default so the dashboard/control API cannot be clickjacked from another page. If you intentionally front this behind another origin, terminate/proxy it as same-origin instead of relaxing these headers.
+
 ## 2. Start the dashboard
 
 In a second terminal, either reuse the same repo-root `.env`/secret-store token or export the same local token before starting Vite so the Node-side dev proxy can inject it server-side:

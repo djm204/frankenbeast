@@ -20,6 +20,7 @@ import {
   DEFAULT_MAX_BODY_SIZE,
   SKILL_CONTEXT_MAX_BODY_SIZE,
   errorHandler,
+  localBrowserControlProtection,
   requestId,
   requestSizeLimit,
 } from './middleware.js';
@@ -157,6 +158,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
 
   const app = new Hono();
   app.use('*', requestId);
+  app.use('*', localBrowserControlProtection);
   if (opts.allowedOrigins && opts.allowedOrigins.length > 0) {
     const allowedOrigins = new Set(opts.allowedOrigins.filter((origin) => origin !== '*'));
     if (allowedOrigins.size > 0) {
