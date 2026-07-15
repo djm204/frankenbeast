@@ -457,6 +457,31 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('rejects query strings in string-form allowed targets', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://example.com/api/webhooks/123?token=other',
+        allowedTargets: ['https://example.com/api/webhooks/123?token=secret'],
+        fetch: mockFetch,
+      })).toThrow('allowedTargets[0] must not include a query or fragment')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('resolves hostnames and rejects private resolved addresses before sending', async () => {
+      const dnsLookup = vi.fn(async () => ['169.254.169.254'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        fetch: mockFetch,
+        dnsLookup,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'resolved webhook address host 169.254.169.254 is not allowed',
+      )
+      expect(dnsLookup).toHaveBeenCalledWith('webhooks.example.com')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
     it('enforces path-prefix boundaries before sending', async () => {
       const notifier = new WebhookNotifier({
         url: 'https://discord.com/api/webhooks-anything',

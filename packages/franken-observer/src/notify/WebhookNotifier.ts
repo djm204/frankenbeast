@@ -1,3 +1,4 @@
+import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 
 import { seededRandom } from '@franken/types'
@@ -24,6 +25,8 @@ export interface WebhookAllowedTarget {
   /** Optional URL path prefix that the configured webhook URL must start with. */
   pathnamePrefix?: string
 }
+
+type WebhookDnsLookup = (hostname: string) => Promise<readonly string[]>
 
 export interface WebhookNotifierOptions {
   /** URL to POST the JSON payload to. */
@@ -54,6 +57,12 @@ export interface WebhookNotifierOptions {
   headers?: Record<string, string>
   /** Injectable for testing. Defaults to globalThis.fetch. */
   fetch?: FetchFn
+  /**
+   * Optional DNS resolver used to verify public hostnames before delivery.
+   * Defaults to Node's DNS lookup when using the default fetch; injected fetches
+   * must opt in explicitly so unit tests and custom transports stay deterministic.
+   */
+  dnsLookup?: WebhookDnsLookup
   /** Retry configuration. Omit to send exactly once (backwards-compatible). */
   retry?: WebhookRetryOptions
   /**
@@ -127,6 +136,12 @@ function validateHttpsUrl(url: URL, fieldName: string): void {
 function validateUrlHasNoCredentials(url: URL, fieldName: string): void {
   if (url.username || url.password) {
     throw new TypeError(`${fieldName} must not include credentials`)
+  }
+}
+
+function validateUrlHasNoQueryOrFragment(url: URL, fieldName: string): void {
+  if (url.search || url.hash) {
+    throw new TypeError(`${fieldName} must not include a query or fragment`)
   }
 }
 
@@ -289,6 +304,8 @@ function normalizeAllowedTargets(
     if (typeof target === 'string') {
       const url = parseAbsoluteUrl(target, `allowedTargets[${index}]`)
       validateHttpsUrl(url, `allowedTargets[${index}]`)
+      validateUrlHasNoCredentials(url, `allowedTargets[${index}]`)
+      validateUrlHasNoQueryOrFragment(url, `allowedTargets[${index}]`)
       validatePublicWebhookHost(url, `allowedTargets[${index}]`)
       validateWebhookPathname(url.pathname, `allowedTargets[${index}].pathname`)
       return {
@@ -355,6 +372,7 @@ export class WebhookNotifier {
   private readonly allowUnlistedTarget: boolean
   private readonly extraHeaders: Record<string, string>
   private readonly fetchFn: FetchFn
+  private readonly dnsLookupFn: WebhookDnsLookup | null
   private readonly retry: Required<WebhookRetryOptions> | null
   private readonly sleepFn: (ms: number) => Promise<void>
 
@@ -376,6 +394,9 @@ export class WebhookNotifier {
     }
     this.extraHeaders = options.headers ?? {}
     this.fetchFn = options.fetch ?? (globalThis.fetch as unknown as FetchFn)
+    this.dnsLookupFn = options.dnsLookup ?? (options.fetch
+      ? null
+      : async hostname => (await dnsLookup(hostname, { all: true })).map(result => result.address))
     this.sleepFn = options.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)))
     this.retry = options.retry
       ? {
@@ -389,6 +410,7 @@ export class WebhookNotifier {
 
   async send(payload: unknown): Promise<void> {
     this.assertTargetAllowed()
+    await this.assertResolvedTargetAddressesAllowed()
 
     const maxAttempts = this.retry ? 1 + this.retry.maxRetries : 1
     let lastError: unknown
@@ -509,6 +531,17 @@ export class WebhookNotifier {
 
     const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
     return truncated || timedOut ? `${decoded}…` : decoded
+  }
+
+  private async assertResolvedTargetAddressesAllowed(): Promise<void> {
+    if (!this.dnsLookupFn || isIP(this.parsedUrl.hostname.replace(/^\[|\]$/g, '')) !== 0) {
+      return
+    }
+    const addresses = await this.dnsLookupFn(this.parsedUrl.hostname)
+    for (const address of addresses) {
+      const parsedAddress = parseAbsoluteUrl(`https://${isIP(address) === 6 ? `[${address}]` : address}/`, 'resolved webhook address')
+      validatePublicWebhookHost(parsedAddress, 'resolved webhook address')
+    }
   }
 
   private assertTargetAllowed(): void {
