@@ -116,6 +116,37 @@ describe('restore preview conflict detector', () => {
     );
   });
 
+  it('blocks backup-only Kanban cards so restore cannot resurrect deleted live work silently', () => {
+    const preview = detectRestorePreviewConflicts(
+      {
+        schemaVersion: 1,
+        tasks: [
+          {
+            id: 't_deleted_live',
+            state: 'running',
+            digest: 'stale-card-body',
+            updatedAt: '2026-07-14T09:00:00.000Z',
+          },
+        ],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+    );
+
+    expect(preview.safeToRestore).toBe(false);
+    expect(preview.conflicts).toContainEqual(
+      expect.objectContaining({
+        area: 'tasks',
+        id: 't_deleted_live',
+        type: 'backup-only',
+        severity: 'blocker',
+        recommendation: expect.stringContaining('Do not resurrect'),
+      }),
+    );
+  });
+
   it('loads the missing cron job recovery fixture as an explicit backup-only cron conflict', () => {
     const fixture = readMissingCronJobRecoveryFixture();
     const preview = detectRestorePreviewConflicts(fixture.backup, fixture.live);
