@@ -17,12 +17,35 @@ export interface ProviderRegistryOptions {
   /** Rate limit backoff multiplier */
   backoffMultiplier?: number;
   /** Callback fired when switching providers */
-  onProviderSwitch?: (event: {
-    from: string;
-    to: string;
-    reason: string;
-    brainSnapshotHash: string;
-  }) => void;
+  onProviderSwitch?: (event: ProviderSwitchEvent) => void;
+}
+
+export interface ProviderSwitchEvent {
+  from: string;
+  to: string;
+  reason: string;
+  brainSnapshotHash: string;
+}
+
+export interface ModelProviderFailoverAuditPayload extends ProviderSwitchEvent {
+  event: 'model-provider.failover';
+  category: 'availability';
+  operatorGuidance: string;
+}
+
+export function createModelProviderFailoverAuditPayload(
+  event: ProviderSwitchEvent,
+): ModelProviderFailoverAuditPayload {
+  return {
+    event: 'model-provider.failover',
+    category: 'availability',
+    from: event.from,
+    to: event.to,
+    reason: event.reason,
+    brainSnapshotHash: event.brainSnapshotHash,
+    operatorGuidance:
+      'Provider failover occurred. Inspect the failed provider health/credentials and use brainSnapshotHash to correlate the handoff state.',
+  };
 }
 
 interface ResolvedOptions {
