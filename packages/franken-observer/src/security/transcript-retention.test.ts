@@ -1152,7 +1152,12 @@ describe('transcript retention controls', () => {
 
   it('honors tool input opt-outs for raw tool_use input blocks', () => {
     const retained = applyRetentionPolicy(makeTrace({
-      spans: [makeSpan({ metadata: { block: { type: 'tool_use', input: { location: '123 Main St' } } } })],
+      spans: [makeSpan({
+        metadata: {
+          block: { type: 'tool_use', input: { location: '123 Main St' } },
+          serverBlock: { type: 'server_tool_use', input: { location: '456 Main St' } },
+        },
+      })],
     }), {
       mode: 'raw',
       redactionLevel: 'none',
@@ -1160,6 +1165,7 @@ describe('transcript retention controls', () => {
     })
 
     expect(retained.spans[0].metadata['block']).toEqual({ type: 'tool_use' })
+    expect(retained.spans[0].metadata['serverBlock']).toEqual({ type: 'server_tool_use' })
   })
 
   it('redacts final thinking and completion payloads by default', () => {
@@ -1167,6 +1173,9 @@ describe('transcript retention controls', () => {
       spans: [makeSpan({
         metadata: {
           thinkingBlock: { type: 'thinking', thinking: 'private chain of thought' },
+          reasoning_content: 'private provider reasoning',
+          reasoning: 'private reasoning alias',
+          thinking: 'private thinking alias',
           completion: 'private assistant completion',
           generations: [{ text: 'private generated text' }],
         },
@@ -1174,8 +1183,25 @@ describe('transcript retention controls', () => {
     }))
 
     expect(retained.spans[0].metadata['thinkingBlock']).toEqual({ type: 'thinking', thinking: '[REDACTED_TRANSCRIPT]' })
+    expect(retained.spans[0].metadata['reasoning_content']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['reasoning']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['thinking']).toBe('[REDACTED_TRANSCRIPT]')
     expect(retained.spans[0].metadata['completion']).toBe('[REDACTED_TRANSCRIPT]')
     expect(retained.spans[0].metadata['generations']).toBe('[REDACTED_TRANSCRIPT]')
+  })
+
+  it('redacts provider-qualified stream delta payloads', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          event: { type: 'response.output_text.delta', delta: 'private streamed reply' },
+          doneEvent: { type: 'response.output_text.done', text: 'private final reply' },
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['event']).toEqual({ type: 'response.output_text.delta', delta: '[REDACTED_TRANSCRIPT]' })
+    expect(retained.spans[0].metadata['doneEvent']).toEqual({ type: 'response.output_text.done', text: '[REDACTED_TRANSCRIPT]' })
   })
 
   it('redacts standalone inline multimodal payloads by default', () => {
