@@ -173,6 +173,9 @@ describe('restore preview conflict detector', () => {
     const preview = detectRestorePreviewConflicts(backup, live);
 
     expect(preview.safeToRestore).toBe(false);
+    expect(preview.mode).toBe('normal');
+    expect(preview.destructiveActions.enabled).toBe(true);
+    expect(preview.destructiveActions.blocked).toEqual([]);
     expect(preview.conflicts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ area: 'tasks', id: 'task-1', type: 'newer-live', recommendation: expect.stringContaining('merge') }),
@@ -182,6 +185,102 @@ describe('restore preview conflict detector', () => {
         expect.objectContaining({ area: 'cron', id: 'daily-brief', type: 'changed', recommendation: expect.stringContaining('explicitly restore') }),
         expect.objectContaining({ area: 'cron', id: 'hourly-watchdog', type: 'live-only', recommendation: expect.stringContaining('preserve') }),
       ]),
+    );
+  });
+
+  it('disables destructive restore actions when recovery mode is enabled', () => {
+    const preview = detectRestorePreviewConflicts(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-1', digest: 'old-task', updatedAt: '2026-07-14T10:00:00.000Z' }],
+        approvals: [{ id: 'approval-1', state: 'pending', digest: 'pending-token' }],
+        memory: [],
+        cron: [],
+      },
+      {
+        schemaVersion: 1,
+        tasks: [
+          { id: 'task-1', digest: 'new-task', updatedAt: '2026-07-14T11:00:00.000Z' },
+          { id: 'task-2', digest: 'live-only', updatedAt: '2026-07-14T11:30:00.000Z' },
+        ],
+        approvals: [{ id: 'approval-1', state: 'approved', digest: 'approved-token' }],
+        memory: [],
+        cron: [],
+      },
+      { recoveryMode: true },
+    );
+
+    expect(preview.mode).toBe('recovery');
+    expect(preview.wouldWrite).toBe(false);
+    expect(preview.destructiveActions.enabled).toBe(false);
+    expect(preview.destructiveActions.guidance).toContain('destructive restore actions are disabled');
+    expect(preview.destructiveActions.blocked).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ area: 'tasks', id: 'task-1', type: 'overwrite-live-record' }),
+        expect.objectContaining({ area: 'tasks', id: 'task-2', type: 'delete-live-record' }),
+        expect.objectContaining({ area: 'approvals', id: 'approval-1', type: 'restore-approval-token' }),
+      ]),
+    );
+  });
+
+  it('keeps clean recovery-mode previews read-only with no blocked destructive actions', () => {
+    const backup: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [{ id: 'task-1', digest: 'task-digest', updatedAt: '2026-07-14T10:00:00.000Z' }],
+      approvals: [],
+      memory: [],
+      cron: [],
+    };
+
+    const preview = detectRestorePreviewConflicts(backup, clone(backup), { recoveryMode: true });
+
+    expect(preview.safeToRestore).toBe(true);
+    expect(preview.mode).toBe('recovery');
+    expect(preview.destructiveActions.enabled).toBe(false);
+    expect(preview.destructiveActions.blocked).toEqual([]);
+  });
+
+  it('keeps backup-only task, memory, and cron records non-destructive in recovery mode', () => {
+    const preview = detectRestorePreviewConflicts(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'missing-task', digest: 'task-digest' }],
+        approvals: [],
+        memory: [{ id: 'missing-memory', digest: 'memory-digest' }],
+        cron: [{ id: 'missing-cron', digest: 'cron-digest' }],
+      },
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      { recoveryMode: true },
+    );
+
+    expect(preview.conflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ area: 'tasks', id: 'missing-task', type: 'backup-only' }),
+        expect.objectContaining({ area: 'memory', id: 'missing-memory', type: 'backup-only' }),
+        expect.objectContaining({ area: 'cron', id: 'missing-cron', type: 'backup-only' }),
+      ]),
+    );
+    expect(preview.destructiveActions.blocked).toEqual([]);
+  });
+
+  it('classifies live-only approvals as destructive deletes in recovery mode', () => {
+    const preview = detectRestorePreviewConflicts(
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'live-only-approval', state: 'pending', digest: 'live-token' }],
+        memory: [],
+        cron: [],
+      },
+      { recoveryMode: true },
+    );
+
+    expect(preview.conflicts).toContainEqual(
+      expect.objectContaining({ area: 'approvals', id: 'live-only-approval', type: 'live-only' }),
+    );
+    expect(preview.destructiveActions.blocked).toContainEqual(
+      expect.objectContaining({ area: 'approvals', id: 'live-only-approval', type: 'delete-live-record' }),
     );
   });
 

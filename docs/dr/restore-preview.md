@@ -124,6 +124,26 @@ Expected interpretation:
 
 This guardrail keeps restore-preview output consumable by PM/liveness tooling: backup-only cards require an explicit operator decision instead of being presented as safe informational drift.
 
+## Recovery mode
+
+Call `detectRestorePreviewConflicts(backup, live, { recoveryMode: true })` when an operator or autonomous worker is inspecting a damaged, partial, or otherwise uncertain live state. Recovery mode is still read-only (`wouldWrite: false`), and it adds a structured destructive-action policy to the preview:
+
+```json
+{
+  "mode": "recovery",
+  "destructiveActions": {
+    "enabled": false,
+    "blocked": [
+      { "area": "tasks", "id": "task-1", "type": "overwrite-live-record" },
+      { "area": "tasks", "id": "task-2", "type": "delete-live-record" },
+      { "area": "approvals", "id": "approval-1", "type": "restore-approval-token" }
+    ]
+  }
+}
+```
+
+Operators should treat `destructiveActions.enabled: false` as a hard stop for restore executors: do not overwrite live records, delete live-only records, run schema migrations, or restore approval tokens while recovery mode is active. Backup-only task, memory, and cron records are intentionally not listed as destructive because restoring missing non-approval state is additive; backup-only approval tokens remain blocked because they re-authorize sensitive workflow state. Use the conflict list to preserve/merge non-destructive state first, then exit recovery mode only after a human explicitly approves the destructive restore plan.
+
 ## Tabletop exercises
 
 Use `docs/dr/tabletop-exercise-template.md` when operators need to rehearse a restore-preview scenario before executing any recovery work. The template keeps disaster-recovery practice read-only, requires at least one fail-closed edge case such as corrupt backup input, and records explicit restore/merge/skip/quarantine decisions for every drift item.
