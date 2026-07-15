@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -220,6 +220,73 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
     })),
   };
 }
+
+describe('degraded-mode worker routing policy', () => {
+  it('defers fresh worker starts during degraded backpressure with operator guidance', () => {
+    const issue = makeIssue({ number: 1818 });
+    const route = routeIssueWorkerForDegradedMode({
+      issue,
+      checkpointHasIssueProgress: false,
+      backpressureDecision: {
+        allowed: false,
+        reasons: ['active processes 8 reached limit 8'],
+        signals: { activeProcesses: 8, failedStarts: 0, inFlightBacklog: 0 },
+        alerts: [],
+      },
+    });
+
+    expect(route).toEqual({
+      mode: 'degraded',
+      action: 'defer-fresh-start',
+      issueNumber: 1818,
+      reason: 'backpressure: active processes 8 reached limit 8',
+      guidance: 'Defer this fresh worker start until capacity/dependency signals recover; keep the skip reason in liveness output.',
+      checkpointHasIssueProgress: false,
+      graphHasCheckpointProgress: false,
+      graphComplete: false,
+    });
+  });
+
+  it('routes checkpointed work to resume during degraded mode instead of starting a duplicate worker', () => {
+    const issue = makeIssue({ number: 1818 });
+    const route = routeIssueWorkerForDegradedMode({
+      issue,
+      checkpointHasIssueProgress: true,
+      graphHasCheckpointProgress: true,
+      stopRemainingReason: 'backpressure: queue depth 12 exceeds limit 10',
+    });
+
+    expect(route).toMatchObject({
+      mode: 'degraded',
+      action: 'resume-checkpointed',
+      issueNumber: 1818,
+      reason: 'backpressure: queue depth 12 exceeds limit 10',
+      checkpointHasIssueProgress: true,
+      graphHasCheckpointProgress: true,
+      graphComplete: false,
+    });
+    expect(route.guidance).toContain('Resume checkpointed work during degraded mode');
+  });
+
+  it('keeps the normal route explicit when no degradation signal is active', () => {
+    const route = routeIssueWorkerForDegradedMode({
+      issue: makeIssue({ number: 1818 }),
+      checkpointHasIssueProgress: false,
+      backpressureDecision: {
+        allowed: true,
+        reasons: [],
+        signals: { activeProcesses: 0, failedStarts: 0, inFlightBacklog: 0 },
+        alerts: [],
+      },
+    });
+
+    expect(route).toMatchObject({
+      mode: 'normal',
+      action: 'start-fresh',
+      issueNumber: 1818,
+    });
+  });
+});
 
 describe('IssueRunner', () => {
   let runner: IssueRunner;
@@ -962,11 +1029,13 @@ describe('IssueRunner', () => {
     });
 
     it('stops iteration after queue depth backpressure to avoid priority inversion', async () => {
+      const logger = mockLogger();
       const graphBuilder = mockGraphBuilder();
       const config = makeConfig({
         issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
         triageResults: [makeTriage(16), makeTriage(17)],
         graphBuilder,
+        logger,
         backpressure: {
           thresholds: { maxPendingIssueCount: 1 },
         },
@@ -987,11 +1056,59 @@ describe('IssueRunner', () => {
           error: expect.stringContaining('queue depth 2 exceeds limit 1'),
         }),
       ]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Degraded-mode route for issue #17: defer-fresh-start'),
+        expect.objectContaining({
+          workerRoute: expect.objectContaining({
+            action: 'defer-fresh-start',
+            issueNumber: 17,
+            reason: expect.stringContaining('queue depth 2 exceeds limit 1'),
+          }),
+        }),
+        'issues',
+      );
       expect(mockRun).not.toHaveBeenCalled();
       expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
     });
 
+    it('logs a defer route when queue-depth degradation reaches issue-scoped checkpoint metadata without graph progress', async () => {
+      const logger = mockLogger();
+      writePlanChunks('issue-17', ['api']);
+      const checkpoint = mockCheckpoint(new Set(['issue-17-metadata-only']));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
+        triageResults: [makeTriage(16), makeTriage(17, 'chunked')],
+        checkpoint,
+        logger,
+        backpressure: {
+          thresholds: { maxPendingIssueCount: 1 },
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[1]).toMatchObject({
+        issueNumber: 17,
+        status: 'skipped',
+        error: expect.stringContaining('queue depth 2 exceeds limit 1'),
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Degraded-mode route for issue #17: defer-fresh-start'),
+        expect.objectContaining({
+          workerRoute: expect.objectContaining({
+            action: 'defer-fresh-start',
+            checkpointHasIssueProgress: true,
+            graphHasCheckpointProgress: false,
+            graphComplete: false,
+          }),
+        }),
+        'issues',
+      );
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
     it('resumes partially checkpointed issueRuntime work after queue-depth stops fresh starts', async () => {
+      const logger = mockLogger();
       const issueRuntime = makeIssueRuntimeSupport();
       vi.mocked(issueRuntime.checkpointForIssue).mockImplementation((issueNumber: number) =>
         issueNumber === 17 ? mockCheckpoint(new Set(['impl:01_issue-17:done'])) : mockCheckpoint(),
@@ -1006,6 +1123,7 @@ describe('IssueRunner', () => {
         issues: [makeIssue({ number: 16 }), makeIssue({ number: 17 })],
         triageResults: [makeTriage(16), makeTriage(17)],
         issueRuntime,
+        logger,
         backpressure: {
           thresholds: { maxPendingIssueCount: 1 },
         },
@@ -1015,6 +1133,18 @@ describe('IssueRunner', () => {
 
       expect(outcomes[0]).toMatchObject({ issueNumber: 16, status: 'skipped' });
       expect(outcomes[1]).toMatchObject({ issueNumber: 17, status: 'fixed' });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Degraded-mode route for issue #17: resume-checkpointed'),
+        expect.objectContaining({
+          workerRoute: expect.objectContaining({
+            action: 'resume-checkpointed',
+            checkpointHasIssueProgress: true,
+            graphHasCheckpointProgress: true,
+            reason: expect.stringContaining('queue depth 2 exceeds limit 1'),
+          }),
+        }),
+        'issues',
+      );
       expect(mockRun).toHaveBeenCalledOnce();
     });
 
