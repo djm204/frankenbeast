@@ -377,4 +377,40 @@ describe('BeastDispatchService', () => {
       status: 'failed',
     });
   });
+
+  it('does not start a run that was stopped by onRunCreated cleanup', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: { provider: 'claude', objective: 'Stop before start', chunkDirectory: '.' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: true,
+      onRunCreated: (createdRun) => {
+        repo.updateRun(createdRun.id, {
+          status: 'stopped',
+          finishedAt: '2026-03-17T00:00:00.000Z',
+          stopReason: 'operator_kill',
+        });
+      },
+    });
+
+    expect(run.status).toBe('stopped');
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(repo.getRun(run.id)?.attemptCount).toBe(0);
+  });
 });

@@ -8,6 +8,7 @@ export function createBeastControlClient(paths: ProjectPaths, serviceBundle?: Be
   return {
     listRuns: () => services.runs.listRuns(),
     getRun: (runId: string) => services.runs.getRun(runId),
+    getAgentRunId: (agentId: string) => services.agents.getMutableAgent(agentId).dispatchRunId,
     readLogs: (runId: string) => services.runs.readLogs(runId),
     stopRun: (runId: string, actor: string) => services.runs.stop(runId, actor),
     restartRun: (runId: string, actor: string) => services.runs.restart(runId, actor),
