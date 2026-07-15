@@ -102,8 +102,8 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain("token='[REDACTED]'");
     expect(envelope.stderrTail).toContain('AUTHORIZATION=Bearer [REDACTED]');
     expect(envelope.stderrTail).toContain('PASSWORD=[REDACTED]');
-    expect(envelope.stderrTail).toContain('Authorization: Basic ***');
-    expect(envelope.stderrTail).toContain('Authorization: Bearer ***');
+    expect(envelope.stderrTail).toContain('AUTHORIZATION=[REDACTED]');
+    expect(envelope.stderrTail).toContain('PASSWORD=[REDACTED]');
     expect(JSON.stringify(envelope)).not.toContain('super-secret-token');
     expect(JSON.stringify(envelope)).not.toContain('abc123');
     expect(JSON.stringify(envelope)).not.toContain('db-password');
@@ -112,6 +112,8 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('quoted-value');
     expect(JSON.stringify(envelope)).not.toContain('top secret');
     expect(JSON.stringify(envelope)).not.toContain('single quoted value');
+    expect(JSON.stringify(envelope)).not.toContain('json-value');
+    expect(JSON.stringify(envelope)).not.toContain('json-token-value');
     expect(JSON.stringify(envelope)).not.toContain('basic-value');
     expect(JSON.stringify(envelope)).not.toContain('bearer-value');
     expect(JSON.stringify(envelope)).not.toContain('deploytoken');
