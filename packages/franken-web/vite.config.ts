@@ -9,6 +9,12 @@ import { assertNoBrowserOperatorToken, assertSecureProxyTarget, loadProxyEnv, lo
 type ServerSideProxyConfig = Record<string, string | ProxyOptions>;
 
 const repoRootDir = fileURLToPath(new URL('../../', import.meta.url));
+const dashboardSecurityHeaders = {
+  'Content-Security-Policy': "frame-ancestors 'none'",
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'same-origin',
+} as const;
 const rootPackageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
@@ -108,15 +114,11 @@ export default defineConfig(async ({ command, mode }) => {
       __FRANKENBEAST_VERSION__: JSON.stringify(rootPackageJson.version),
     },
     server: {
-      headers: {
-        'Content-Security-Policy': "frame-ancestors 'none'",
-        'X-Frame-Options': 'DENY',
-        'X-Content-Type-Options': 'nosniff',
-        'Referrer-Policy': 'same-origin',
-      },
+      headers: dashboardSecurityHeaders,
       proxy: serverSideProxy,
     },
     preview: {
+      headers: dashboardSecurityHeaders,
       proxy: serverSideProxy,
     },
     build: {

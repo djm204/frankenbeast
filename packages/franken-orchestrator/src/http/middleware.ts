@@ -59,6 +59,15 @@ function requestOrigin(c: Context): string {
   return url.origin;
 }
 
+function forwardedOrigin(c: Context): string | undefined {
+  const forwardedProto = firstHeaderValue(c.req.header('x-forwarded-proto'))?.toLowerCase();
+  const forwardedHost = firstHeaderValue(c.req.header('x-forwarded-host'));
+  if ((forwardedProto === 'http' || forwardedProto === 'https') && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+  return undefined;
+}
+
 function isLocalControlPath(pathname: string): boolean {
   return LOCAL_CONTROL_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
@@ -74,7 +83,11 @@ function isTrustedOriginHost(origin: string): boolean {
 
 function isSameOriginMutation(c: Context, allowedOrigins: ReadonlySet<string>): boolean {
   const origin = c.req.header('origin');
+  const secFetchSite = c.req.header('sec-fetch-site')?.trim().toLowerCase();
   if (!origin) {
+    if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
+      return false;
+    }
     return true;
   }
 
@@ -89,12 +102,14 @@ function isSameOriginMutation(c: Context, allowedOrigins: ReadonlySet<string>): 
     return true;
   }
 
-  const secFetchSite = c.req.header('sec-fetch-site')?.trim().toLowerCase();
   if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
     return false;
   }
 
-  return normalizedOrigin === requestOrigin(c) && isTrustedOriginHost(normalizedOrigin);
+  const normalizedRequestOrigin = requestOrigin(c);
+  const normalizedForwardedOrigin = forwardedOrigin(c);
+  return (normalizedOrigin === normalizedRequestOrigin && isTrustedOriginHost(normalizedOrigin))
+    || normalizedOrigin === normalizedForwardedOrigin;
 }
 
 function setLocalBrowserSecurityHeaders(c: Context): void {

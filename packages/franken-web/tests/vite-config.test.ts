@@ -44,6 +44,13 @@ describe('vite dev proxy configuration', () => {
     expect(CONFIG_SOURCE).toContain('preview:');
   });
 
+  it('applies dashboard hardening headers to both dev server and preview responses', () => {
+    expect(CONFIG_SOURCE).toContain('const dashboardSecurityHeaders');
+    expect(CONFIG_SOURCE).toContain('headers: dashboardSecurityHeaders');
+    expect(CONFIG_SOURCE).toContain("'X-Frame-Options': 'DENY'");
+    expect(CONFIG_SOURCE).toContain("'Content-Security-Policy': \"frame-ancestors 'none'\"");
+  });
+
   it('does not define VITE_BEAST_OPERATOR_TOKEN into the browser bundle', () => {
     expect(CONFIG_SOURCE).not.toContain("'import.meta.env.VITE_BEAST_OPERATOR_TOKEN'");
     expect(CONFIG_SOURCE).not.toContain('import.meta.env.VITE_BEAST_OPERATOR_TOKEN');

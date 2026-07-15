@@ -146,4 +146,28 @@ describe('chat app beast daemon proxy', () => {
     expect(forwardedHeaders.get('x-forwarded-host')).toBe('dashboard.example.com');
     expect(forwardedHeaders.get('x-forwarded-proto')).toBe('https');
   });
+
+  it('derives forwarded origin headers from allowed browser origins when proxying to the beast daemon', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp({ allowedOrigins: ['https://dashboard.example.com'] });
+
+    const response = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_DAEMON_TOKEN}`,
+        origin: 'https://dashboard.example.com',
+        'sec-fetch-site': 'cross-site',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ ok: true }),
+    });
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    const forwardedHeaders = init.headers as Headers;
+    expect(forwardedHeaders.get('x-forwarded-host')).toBe('dashboard.example.com');
+    expect(forwardedHeaders.get('x-forwarded-proto')).toBe('https');
+  });
+
 });

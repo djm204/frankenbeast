@@ -59,6 +59,19 @@ describe('local browser control protection', () => {
     });
   });
 
+  it('denies cross-site fetch-metadata mutations even when Origin is absent', async () => {
+    const app = createProtectedApp();
+
+    const res = await app.request('http://localhost:3737/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        'sec-fetch-site': 'cross-site',
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
   it('does not apply the local control CSRF gate to provider webhook ingress paths', async () => {
     const app = createProtectedApp();
 
@@ -98,6 +111,22 @@ describe('local browser control protection', () => {
       headers: {
         origin: 'http://[::1]:3737',
         'sec-fetch-site': 'same-origin',
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('allows same-origin reverse-proxy browser mutations with forwarded public origin headers', async () => {
+    const app = createProtectedApp();
+
+    const res = await app.request('http://127.0.0.1:3737/v1/beasts/runs', {
+      method: 'POST',
+      headers: {
+        origin: 'https://dashboard.example.com',
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-host': 'dashboard.example.com',
+        'x-forwarded-proto': 'https',
       },
     });
 
