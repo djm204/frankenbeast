@@ -481,25 +481,37 @@ function assessAction(action: string, context: string): GovernorCheckResult {
     const parsed = parseContextObject(context);
     const reviewAction = stringContext(parsed, 'action');
     if (reviewAction === 'approve') {
+      return {
+        decision: 'approved',
+        reason: 'Memory review approve is the operator approval signal for a queued candidate; allowed after proposal governance while audit metadata remains redacted.',
+      };
+    }
+    if (reviewAction === 'approve') {
+      return {
+        decision: 'approved',
+        reason: 'Memory review approval is the explicit operator promotion decision; candidate content remains governed by the review queue.',
+      };
+    }
+    if (reviewAction === 'never_store') {
       const result = evaluateHighRiskActionPolicy({
         actionClass: 'memory',
         evidence: {
-          operation: 'review-approve',
+          operation: 'review-never-store',
           ...optionalTarget(stringContext(parsed, 'id')),
         },
       });
       if (result.decision === 'allow') {
-        return { decision: 'approved', reason: `High-risk policy allowed memory review approval: ${result.reason}` };
+        return { decision: 'approved', reason: `High-risk policy allowed memory review never-store: ${result.reason}` };
       }
       if (result.decision === 'deny') {
-        return { decision: 'denied', reason: `High-risk policy denied memory review approval: ${result.reason}` };
+        return { decision: 'denied', reason: `High-risk policy denied memory review never-store: ${result.reason}` };
       }
-      return { decision: 'review_recommended', reason: `High-risk policy requires approval for memory review approval: ${result.reason}` };
+      return { decision: 'review_recommended', reason: `High-risk policy requires approval for memory review never-store: ${result.reason}` };
     }
-    if (reviewAction === 'reject' || reviewAction === 'never_store') {
-      return {
+    if (reviewAction === 'reject') {
+
         decision: 'approved',
-        reason: `Memory review ${reviewAction} decision does not persist candidate content; allowed while audit metadata remains redacted.`,
+        reason: 'Memory review reject decision does not persist or delete candidate content; allowed while audit metadata remains redacted.',
       };
     }
   }

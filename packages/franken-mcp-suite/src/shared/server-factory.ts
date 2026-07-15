@@ -262,7 +262,7 @@ function redactMemoryReviewProposalArgs(sanitized: Record<string, unknown>, reda
 }
 
 function redactMemoryReviewProposalEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-review-proposal-redacted]'): Record<string, unknown> {
-  const safeEnvelopeKeys = new Set(['tool', 'action', 'args']);
+  const safeEnvelopeKeys = new Set(['tool', 'args']);
   for (const key of Object.keys(sanitized)) {
     sanitized[key] = safeEnvelopeKeys.has(key) ? sanitized[key] : redaction;
   }

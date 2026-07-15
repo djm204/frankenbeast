@@ -288,19 +288,23 @@ describe('GovernorAdapter', () => {
     })).resolves.toMatchObject({ decision: 'denied' });
   });
 
-  it('requires approval for memory review approvals but allows reject/never-store decisions through the shared path', async () => {
+  it('allows memory review approvals/rejections but gates never-store deletions through the shared path', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"approve"}' }))
-      .resolves.toMatchObject({ decision: 'review_recommended' });
+      .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"never_store"}' }))
-      .resolves.toMatchObject({ decision: 'approved' });
+      .resolves.toMatchObject({ decision: 'review_recommended' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate text contains rm -rf /"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"approve","note":"candidate"}}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"never_store","note":"candidate"}}}',
     })).resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
