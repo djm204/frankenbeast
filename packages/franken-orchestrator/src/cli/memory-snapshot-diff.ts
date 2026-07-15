@@ -1,5 +1,25 @@
 import { readFile } from 'node:fs/promises';
+import Database from 'better-sqlite3';
 import { BrainSnapshotSchema, type BrainSnapshot, type EpisodicEvent } from '@franken/types';
+
+const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+const REQUIRED_BACKUP_TABLES = [
+  'memory_schema_versions',
+  'working_memory',
+  'episodic_events',
+  'checkpoints',
+] as const;
+const MEMORY_BACKUP_TABLES = [
+  ...REQUIRED_BACKUP_TABLES,
+  'memory_deletion_guards',
+  'memory_deletion_hash_keys',
+] as const;
+const JSON_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
+  working_memory: ['value'],
+  episodic_events: ['details'],
+  checkpoints: ['state'],
+};
+const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
 
 export interface SnapshotDiff<T = unknown> {
   readonly added: Record<string, T>;
@@ -31,10 +51,33 @@ export interface MemorySnapshotDiffReport {
   };
 }
 
+export interface MemoryBackupVerificationReport {
+  readonly ok: true;
+  readonly command: 'memory verify-backup';
+  readonly path: string;
+  readonly integrity: {
+    readonly integrityCheck: string;
+    readonly quickCheck: string;
+  };
+  readonly schema: {
+    readonly version: number;
+    readonly requiredTablesPresent: boolean;
+    readonly stores: Array<{ readonly store: string; readonly version: number; readonly recordCount: number }>;
+  };
+  readonly summary: {
+    readonly workingEntries: number;
+    readonly episodicEvents: number;
+    readonly checkpoints: number;
+    readonly deletionGuards: number;
+    readonly deletionHashKeys: number;
+  };
+}
+
 export interface MemoryCommandDeps {
-  readonly action: 'snapshot-diff' | undefined;
+  readonly action: 'snapshot-diff' | 'verify-backup' | undefined;
   readonly beforePath?: string | undefined;
   readonly afterPath?: string | undefined;
+  readonly backupPath?: string | undefined;
   readonly print: (message: string) => void;
 }
 
@@ -97,6 +140,69 @@ function indexEvents(events: EpisodicEvent[]): Record<string, EpisodicEvent> {
   return Object.fromEntries(events.map((event, index) => [eventDiffKey(event, index), event]));
 }
 
+function sqliteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/gu, '""')}"`;
+}
+
+function readSinglePragmaValue(db: Database.Database, pragma: string): string {
+  const row = db.prepare(`PRAGMA ${pragma}`).get() as Record<string, unknown> | undefined;
+  const value = row ? Object.values(row)[0] : undefined;
+  return typeof value === 'string' ? value : String(value ?? '');
+}
+
+function readTables(db: Database.Database): Set<string> {
+  const rows = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{ name: string }>;
+  return new Set(rows.map((row) => row.name));
+}
+
+function readTableColumns(db: Database.Database, table: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${sqliteIdentifier(table)})`).all() as Array<{ name: string }>;
+  return new Set(rows.map((row) => row.name));
+}
+
+function countRows(db: Database.Database, table: string, tables: Set<string>): number {
+  if (!tables.has(table)) return 0;
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${sqliteIdentifier(table)}`).get() as { count: number };
+  return row.count;
+}
+
+function verifyJsonColumns(db: Database.Database, table: string, columns: Set<string>): void {
+  const jsonColumns = JSON_COLUMNS_BY_TABLE[table] ?? [];
+  for (const column of jsonColumns) {
+    if (!columns.has(column)) continue;
+    const rows = db
+      .prepare(`SELECT rowid AS rowid, ${sqliteIdentifier(column)} AS value FROM ${sqliteIdentifier(table)} WHERE ${sqliteIdentifier(column)} IS NOT NULL`)
+      .all() as Array<{ rowid: number; value: unknown }>;
+    for (const row of rows) {
+      if (typeof row.value !== 'string' || row.value.startsWith(ENCRYPTED_MEMORY_PREFIX)) continue;
+      try {
+        JSON.parse(row.value) as unknown;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Invalid JSON payload in ${table}.${column} row ${row.rowid}: ${message}`);
+      }
+    }
+  }
+}
+
+function readSchemaStores(db: Database.Database, tables: Set<string>): MemoryBackupVerificationReport['schema']['stores'] {
+  if (!tables.has('memory_schema_versions')) return [];
+  return (db
+    .prepare(`SELECT store, version FROM memory_schema_versions ORDER BY store ASC`)
+    .all() as Array<{ store: string; version: number }>).map((row) => {
+    if (row.version > CURRENT_MEMORY_SCHEMA_VERSION) {
+      throw new Error(
+        `Memory store ${row.store} uses schema version ${row.version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+      );
+    }
+    return {
+      store: row.store,
+      version: row.version,
+      recordCount: countRows(db, row.store, tables),
+    };
+  });
+}
+
 export function diffMemorySnapshots(
   beforePath: string,
   before: BrainSnapshot,
@@ -134,6 +240,74 @@ export function diffMemorySnapshots(
   };
 }
 
+export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport {
+  let db: Database.Database;
+  try {
+    db = new Database(path, { readonly: true, fileMustExist: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to open memory backup ${path}: ${message}`);
+  }
+
+  try {
+    const integrityCheck = readSinglePragmaValue(db, 'integrity_check');
+    if (integrityCheck !== 'ok') {
+      throw new Error(`SQLite integrity_check failed: ${integrityCheck}`);
+    }
+    const quickCheck = readSinglePragmaValue(db, 'quick_check');
+    if (quickCheck !== 'ok') {
+      throw new Error(`SQLite quick_check failed: ${quickCheck}`);
+    }
+
+    const tables = readTables(db);
+    const missingTables = REQUIRED_BACKUP_TABLES.filter((table) => !tables.has(table));
+    if (missingTables.length > 0) {
+      throw new Error(`Memory backup is missing required table(s): ${missingTables.join(', ')}`);
+    }
+
+    for (const table of MEMORY_BACKUP_TABLES) {
+      if (!tables.has(table)) continue;
+      const columns = readTableColumns(db, table);
+      if (!columns.has('schema_version') && table !== 'memory_schema_versions') {
+        throw new Error(`Memory backup table ${table} is missing schema_version column`);
+      }
+      if (columns.has('schema_version')) {
+        const future = db
+          .prepare(`SELECT schema_version FROM ${sqliteIdentifier(table)} WHERE schema_version > ? LIMIT 1`)
+          .get(CURRENT_MEMORY_SCHEMA_VERSION) as { schema_version: number } | undefined;
+        if (future) {
+          throw new Error(
+            `Memory table ${table} contains record schema version ${future.schema_version}, but this runtime supports only ${CURRENT_MEMORY_SCHEMA_VERSION}`,
+          );
+        }
+      }
+      verifyJsonColumns(db, table, columns);
+    }
+
+    const stores = readSchemaStores(db, tables);
+    return {
+      ok: true,
+      command: 'memory verify-backup',
+      path,
+      integrity: { integrityCheck, quickCheck },
+      schema: {
+        version: Math.max(...stores.map((store) => store.version), CURRENT_MEMORY_SCHEMA_VERSION),
+        requiredTablesPresent: true,
+        stores,
+      },
+      summary: {
+        workingEntries: countRows(db, 'working_memory', tables),
+        episodicEvents: countRows(db, 'episodic_events', tables),
+        checkpoints: countRows(db, 'checkpoints', tables),
+        deletionGuards: countRows(db, 'memory_deletion_guards', tables),
+        deletionHashKeys: countRows(db, 'memory_deletion_hash_keys', tables),
+      },
+    };
+  } finally {
+    db.close();
+  }
+}
+
 async function readSnapshot(path: string): Promise<BrainSnapshot> {
   let parsed: unknown;
   try {
@@ -151,9 +325,16 @@ async function readSnapshot(path: string): Promise<BrainSnapshot> {
 }
 
 export async function handleMemoryCommand(deps: MemoryCommandDeps): Promise<void> {
-  const { action, beforePath, afterPath, print } = deps;
+  const { action, beforePath, afterPath, backupPath, print } = deps;
+  if (action === 'verify-backup') {
+    if (!backupPath) {
+      throw new Error('memory verify-backup requires one SQLite backup file: <backup.sqlite>');
+    }
+    print(JSON.stringify(verifyMemoryBackup(backupPath), null, 2));
+    return;
+  }
   if (action !== 'snapshot-diff') {
-    throw new Error('Usage: frankenbeast memory snapshot-diff <before-snapshot.json> <after-snapshot.json>');
+    throw new Error('Usage: frankenbeast memory snapshot-diff <before-snapshot.json> <after-snapshot.json> OR frankenbeast memory verify-backup <backup.sqlite>');
   }
   if (!beforePath || !afterPath) {
     throw new Error('memory snapshot-diff requires two BrainSnapshot JSON files: <before> <after>');
