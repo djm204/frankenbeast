@@ -58,6 +58,7 @@ export type {
   IssueBackpressureSignals,
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
+  IssueCapacityWatermarkAlert,
 } from './issues/index.js';
 
 // Config
