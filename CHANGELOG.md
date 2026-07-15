@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.3](https://github.com/djm204/frankenbeast/compare/v0.55.2...v0.55.3) (2026-07-15)
+
+
+### Tests
+
+* **docs:** cover issue 2104 broken link regression ([6bf8543](https://github.com/djm204/frankenbeast/commit/6bf854350b5008b1c998fa7f1d69cabdd14630b5))
+
 ## [0.55.2](https://github.com/djm204/frankenbeast/compare/v0.55.1...v0.55.2) (2026-07-15)
 
 
