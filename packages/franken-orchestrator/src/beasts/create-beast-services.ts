@@ -77,12 +77,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     executors,
   });
 
-  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus });
+  runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy });
 
   return {
     agents: new AgentService(repository, undefined, { capacityPolicy }),
     catalog,
-    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus }),
+    dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, { eventBus, capacityPolicy }),
     runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
@@ -99,6 +99,9 @@ function createCapacityReservationPolicyFromEnv(): CapacityReservationPolicy | u
   const totalSlots = parsePositiveInteger(process.env.FBEAST_AGENT_CAPACITY_TOTAL);
   const reservations = parseCapacityReservations(process.env.FBEAST_AGENT_CAPACITY_RESERVATIONS);
   const releasedReservationIds = parseCsv(process.env.FBEAST_AGENT_CAPACITY_RELEASED_RESERVATIONS);
+  if (reservations.length > 0 && totalSlots === undefined) {
+    throw new RangeError('FBEAST_AGENT_CAPACITY_TOTAL is required when FBEAST_AGENT_CAPACITY_RESERVATIONS is set');
+  }
   if (totalSlots === undefined || reservations.length === 0) {
     return undefined;
   }

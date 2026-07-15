@@ -6,9 +6,16 @@ import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import type { BeastExecutors } from './beast-dispatch-service.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { isoNow } from '@franken/types';
+import {
+  CapacityReservationError,
+  type CapacityReservationPolicy,
+  type CapacityReservationWorkItem,
+  capacityItemFromConfig,
+} from './capacity-reservation-policy.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
+  capacityPolicy?: CapacityReservationPolicy | undefined;
 }
 
 export class UnknownBeastRunError extends Error {
@@ -61,6 +68,7 @@ export class BeastRunService {
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
     const run = this.requireRun(runId);
+    this.assertTrackedAgentCapacity(run);
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const priorAttemptId = run.currentAttemptId;
     const priorAttemptCount = run.attemptCount;
@@ -314,6 +322,31 @@ export class BeastRunService {
     if (run) {
       this.syncTrackedAgent(run);
     }
+  }
+
+  private assertTrackedAgentCapacity(run: BeastRun): void {
+    if (!run.trackedAgentId || !this.serviceOptions.capacityPolicy) return;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (!trackedAgent || trackedAgent.status === 'deleted') return;
+
+    const activeItems = this.activeCapacityItems(run.trackedAgentId);
+    const decision = this.serviceOptions.capacityPolicy.canStart(
+      capacityItemFromConfig(trackedAgent.id, trackedAgent.initConfig),
+      activeItems,
+    );
+    if (!decision.allowed) {
+      throw new CapacityReservationError(decision, this.serviceOptions.capacityPolicy.describe(activeItems));
+    }
+  }
+
+  private activeCapacityItems(excludeAgentId: string): CapacityReservationWorkItem[] {
+    return this.repository.listTrackedAgents()
+      .filter((agent) => agent.id !== excludeAgentId)
+      .filter((agent) => agent.status === 'initializing'
+        || agent.status === 'dispatching'
+        || agent.status === 'awaiting_approval'
+        || agent.status === 'running')
+      .map((agent) => capacityItemFromConfig(agent.id, agent.initConfig));
   }
 
   private syncTrackedAgent(run: BeastRun): void {

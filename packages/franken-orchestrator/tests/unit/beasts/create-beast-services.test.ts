@@ -21,6 +21,9 @@ describe('createBeastServices', () => {
   let tempDir: string | undefined;
 
   afterEach(async () => {
+    delete process.env.FBEAST_AGENT_CAPACITY_TOTAL;
+    delete process.env.FBEAST_AGENT_CAPACITY_RESERVATIONS;
+    delete process.env.FBEAST_AGENT_CAPACITY_RELEASED_RESERVATIONS;
     processExecutorConstructor.mockClear();
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
@@ -59,5 +62,19 @@ describe('createBeastServices', () => {
     } finally {
       process.chdir(originalCwd);
     }
+  });
+
+  it('fails fast when reservation rules are configured without total capacity', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    process.env.FBEAST_AGENT_CAPACITY_RESERVATIONS = JSON.stringify([
+      { id: 'security-urgent', slots: 1, labels: ['security'] },
+    ]);
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+
+    expect(() => createBeastServices({
+      beastsDb: join(tempDir!, 'beast.db'),
+      beastLogsDir: join(tempDir!, 'logs'),
+      root: tempDir!,
+    })).toThrow(/FBEAST_AGENT_CAPACITY_TOTAL is required/);
   });
 });

@@ -14,6 +14,7 @@ import {
   validateBody,
 } from '../middleware.js';
 import { TransportSecurityService } from '../security/transport-security.js';
+import type { BeastRun, TrackedAgent } from '../../beasts/types.js';
 
 const ModuleConfigSchema = z.object({
   firewall: z.boolean().optional(),
@@ -265,7 +266,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         const existingRun = deps.runs.getRun(agent.dispatchRunId);
         const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
           ? await dispatchDetachedAgent(deps, agentId)
-          : await deps.runs.start(agent.dispatchRunId, 'operator');
+          : await startLinkedAgentRun(deps, agent);
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.start.requested',
@@ -344,7 +345,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         const existingRun = deps.runs.getRun(agent.dispatchRunId);
         const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
           ? await dispatchReplacementAgentRun(deps, agentId, existingRun)
-          : await deps.runs.restart(agent.dispatchRunId, 'operator');
+          : await restartLinkedAgentRun(deps, agent);
         deps.agents.appendEvent(agentId, {
           level: 'info',
           type: 'agent.restart.requested',
@@ -563,6 +564,37 @@ async function dispatchReplacementAgentRun(
   return dispatchDetachedAgent(deps, agentId);
 }
 
+async function startLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): Promise<BeastRun> {
+  assertAgentCapacityAvailable(deps, agent);
+  if (!agent.dispatchRunId) {
+    throw new Error(`Tracked agent '${agent.id}' has no linked run`);
+  }
+  return deps.runs.start(agent.dispatchRunId, 'operator');
+}
+
+async function restartLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): Promise<BeastRun> {
+  assertAgentCapacityAvailable(deps, agent);
+  if (!agent.dispatchRunId) {
+    throw new Error(`Tracked agent '${agent.id}' has no linked run`);
+  }
+  return deps.runs.restart(agent.dispatchRunId, 'operator');
+}
+
+function assertAgentCapacityAvailable(deps: AgentRoutesDeps, agent: TrackedAgent): void {
+  const capacityDecision = deps.agents.canStartAgent(agent);
+  if (!capacityDecision.allowed) {
+    throw new HttpError(
+      409,
+      'AGENT_CAPACITY_RESERVED',
+      'Agent capacity is reserved for urgent matching work',
+      {
+        decision: capacityDecision,
+        capacity: deps.agents.getCapacityReservationState(),
+      },
+    );
+  }
+}
+
 async function dispatchDetachedAgent(
   deps: AgentRoutesDeps,
   agentId: string,
@@ -576,18 +608,7 @@ async function dispatchDetachedAgent(
     );
   }
 
-  const capacityDecision = deps.agents.canStartAgent(agent);
-  if (!capacityDecision.allowed) {
-    throw new HttpError(
-      409,
-      'AGENT_CAPACITY_RESERVED',
-      'Agent capacity is reserved for urgent matching work',
-      {
-        decision: capacityDecision,
-        capacity: deps.agents.getCapacityReservationState(),
-      },
-    );
-  }
+  assertAgentCapacityAvailable(deps, agent);
 
   return deps.dispatch.createRun({
     definitionId: agent.definitionId,

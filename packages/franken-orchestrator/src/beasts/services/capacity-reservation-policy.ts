@@ -51,6 +51,16 @@ export interface CapacityReservationBucketState {
   readonly categories: readonly string[];
 }
 
+export class CapacityReservationError extends Error {
+  constructor(
+    public readonly decision: CapacityReservationDecision,
+    public readonly state: CapacityReservationState,
+  ) {
+    super('Agent capacity is reserved for urgent matching work');
+    this.name = 'CapacityReservationError';
+  }
+}
+
 export class CapacityReservationPolicy {
   private readonly releasedReservationIds: ReadonlySet<string>;
   private readonly reservations: readonly CapacityReservationRule[];
@@ -94,19 +104,18 @@ export class CapacityReservationPolicy {
       return { allowed: false, reason: 'capacity_full', reservationId: undefined };
     }
 
-    const matchingReservation = this.reservations.find((reservation) => this.matches(reservation, candidate));
+    const matchingReservation = this.reservations
+      .filter((reservation) => this.matches(reservation, candidate))
+      .find((reservation) => state.reservations.some((bucket) => bucket.id === reservation.id && bucket.free > 0));
     if (matchingReservation) {
-      const bucket = state.reservations.find((entry) => entry.id === matchingReservation.id);
-      if (bucket && bucket.free > 0) {
-        return { allowed: true, reason: 'reserved_capacity_available', reservationId: matchingReservation.id };
-      }
+      return { allowed: true, reason: 'reserved_capacity_available', reservationId: matchingReservation.id };
     }
 
     if (state.normalSlots.free > 0) {
       return { allowed: true, reason: 'normal_capacity_available', reservationId: undefined };
     }
 
-    if (state.reservations.some((reservation) => reservation.released && reservation.free > 0)) {
+    if (this.releasedReservationFreeForNormalWork(state, activeItems) > 0) {
       return { allowed: true, reason: 'released_reserved_capacity_available', reservationId: undefined };
     }
 
@@ -115,20 +124,33 @@ export class CapacityReservationPolicy {
 
   describe(activeItems: readonly CapacityReservationWorkItem[]): CapacityReservationState {
     const usedSlots = activeItems.length;
-    const buckets = this.reservations.map((reservation) => {
-      const used = activeItems.filter((item) => this.matches(reservation, item)).length;
-      return {
-        id: reservation.id,
-        slots: reservation.slots,
-        used: Math.min(used, reservation.slots),
-        free: Math.max(0, reservation.slots - used),
-        released: this.releasedReservationIds.has(reservation.id),
-        labels: [...(reservation.labels ?? [])],
-        categories: [...(reservation.categories ?? [])],
-      };
-    });
-    const totalReservedSlots = buckets.reduce((sum, bucket) => sum + bucket.slots, 0);
-    const reservedUsed = buckets.reduce((sum, bucket) => sum + bucket.used, 0);
+    const buckets = this.reservations.map((reservation) => ({
+      id: reservation.id,
+      slots: reservation.slots,
+      used: 0,
+      released: this.releasedReservationIds.has(reservation.id),
+      labels: [...(reservation.labels ?? [])],
+      categories: [...(reservation.categories ?? [])],
+    }));
+
+    for (const item of activeItems) {
+      const bucket = buckets.find((candidateBucket, index) => {
+        const reservation = this.reservations[index];
+        if (!reservation) return false;
+        return candidateBucket.used < candidateBucket.slots
+          && this.matches(reservation, item);
+      });
+      if (bucket) {
+        bucket.used += 1;
+      }
+    }
+
+    const bucketsWithFree = buckets.map((bucket) => ({
+      ...bucket,
+      free: Math.max(0, bucket.slots - bucket.used),
+    }));
+    const totalReservedSlots = bucketsWithFree.reduce((sum, bucket) => sum + bucket.slots, 0);
+    const reservedUsed = bucketsWithFree.reduce((sum, bucket) => sum + bucket.used, 0);
     const normalTotal = this.totalSlots - totalReservedSlots;
     const normalUsed = Math.max(0, usedSlots - reservedUsed);
 
@@ -141,8 +163,20 @@ export class CapacityReservationPolicy {
         used: Math.min(normalUsed, normalTotal),
         free: Math.max(0, normalTotal - normalUsed),
       },
-      reservations: buckets,
+      reservations: bucketsWithFree,
     };
+  }
+
+  private releasedReservationFreeForNormalWork(
+    state: CapacityReservationState,
+    activeItems: readonly CapacityReservationWorkItem[],
+  ): number {
+    const reservedUsed = state.reservations.reduce((sum, bucket) => sum + bucket.used, 0);
+    const normalOverflowUsed = Math.max(0, activeItems.length - reservedUsed - state.normalSlots.total);
+    const releasedFree = state.reservations
+      .filter((reservation) => reservation.released)
+      .reduce((sum, reservation) => sum + reservation.free, 0);
+    return Math.max(0, releasedFree - normalOverflowUsed);
   }
 
   private matches(reservation: CapacityReservationRule, item: CapacityReservationWorkItem): boolean {
@@ -153,6 +187,27 @@ export class CapacityReservationPolicy {
   }
 }
 
+export function capacityItemFromConfig(
+  id: string,
+  initConfig: Readonly<Record<string, unknown>>,
+): CapacityReservationWorkItem {
+  const issue = isRecord(initConfig.issue) ? initConfig.issue : undefined;
+  return {
+    id,
+    labels: [
+      ...stringsFromUnknown(initConfig.labels),
+      ...stringsFromUnknown(initConfig.label),
+      ...stringsFromUnknown(initConfig.issueLabels),
+      ...stringsFromUnknown(issue?.labels),
+    ],
+    categories: [
+      ...stringsFromUnknown(initConfig.categories),
+      ...stringsFromUnknown(initConfig.category),
+      ...stringsFromUnknown(issue?.category),
+    ],
+  };
+}
+
 function normalizeMatchers(values: readonly string[] | undefined): readonly string[] {
   return [...new Set((values ?? []).map(normalizeMatcher).filter(Boolean))];
 }
@@ -161,6 +216,20 @@ function normalizeMatcher(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function stringsFromUnknown(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === 'string');
+  }
+  return [];
+}
+
 function isString(value: unknown): value is string {
   return typeof value === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

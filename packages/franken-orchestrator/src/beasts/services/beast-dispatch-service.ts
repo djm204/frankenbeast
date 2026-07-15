@@ -8,9 +8,16 @@ import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
 import { UnknownBeastDefinitionError } from '../errors.js';
 import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
+import {
+  CapacityReservationError,
+  type CapacityReservationPolicy,
+  type CapacityReservationWorkItem,
+  capacityItemFromConfig,
+} from './capacity-reservation-policy.js';
 
 export interface BeastDispatchServiceOptions {
   eventBus?: BeastEventBus;
+  capacityPolicy?: CapacityReservationPolicy | undefined;
 }
 
 export interface BeastExecutors {
@@ -158,6 +165,9 @@ export class BeastDispatchService {
       ? { ...config, modules: moduleConfig }
       : config;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
+    if (request.startNow && request.trackedAgentId) {
+      this.assertTrackedAgentCapacity(request.trackedAgentId);
+    }
     const createdAt = new Date(wallClockNow()).toISOString();
     const linkedAt = new Date(wallClockNow()).toISOString();
     const run = this.repository.transaction(() => {
@@ -299,6 +309,29 @@ export class BeastDispatchService {
 
   private executorFor(mode: BeastExecutionMode): BeastExecutor {
     return mode === 'container' ? this.executors.container : this.executors.process;
+  }
+
+  private assertTrackedAgentCapacity(trackedAgentId: string): void {
+    if (!this.options.capacityPolicy) return;
+    const trackedAgent = this.repository.requireTrackedAgent(trackedAgentId);
+    const activeItems = this.activeCapacityItems(trackedAgentId);
+    const decision = this.options.capacityPolicy.canStart(
+      capacityItemFromConfig(trackedAgent.id, trackedAgent.initConfig),
+      activeItems,
+    );
+    if (!decision.allowed) {
+      throw new CapacityReservationError(decision, this.options.capacityPolicy.describe(activeItems));
+    }
+  }
+
+  private activeCapacityItems(excludeAgentId: string): CapacityReservationWorkItem[] {
+    return this.repository.listTrackedAgents()
+      .filter((agent) => agent.id !== excludeAgentId)
+      .filter((agent) => agent.status === 'initializing'
+        || agent.status === 'dispatching'
+        || agent.status === 'awaiting_approval'
+        || agent.status === 'running')
+      .map((agent) => capacityItemFromConfig(agent.id, agent.initConfig));
   }
 
   private resolveAgentModuleConfig(trackedAgentId?: string): ModuleConfig | undefined {

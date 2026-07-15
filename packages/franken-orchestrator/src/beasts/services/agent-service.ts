@@ -14,6 +14,7 @@ import type {
   CapacityReservationState,
   CapacityReservationWorkItem,
 } from './capacity-reservation-policy.js';
+import { capacityItemFromConfig } from './capacity-reservation-policy.js';
 
 export interface CreateTrackedAgentRequest {
   readonly definitionId: string;
@@ -166,36 +167,4 @@ export class AgentService {
 
 function capacityItemFromAgent(agent: TrackedAgent): CapacityReservationWorkItem {
   return capacityItemFromConfig(agent.id, agent.initConfig);
-}
-
-function capacityItemFromConfig(id: string, initConfig: Readonly<Record<string, unknown>>): CapacityReservationWorkItem {
-  const issue = isRecord(initConfig.issue) ? initConfig.issue : undefined;
-  return {
-    id,
-    labels: [
-      ...stringsFromUnknown(initConfig.labels),
-      ...stringsFromUnknown(initConfig.label),
-      ...stringsFromUnknown(initConfig.issueLabels),
-      ...stringsFromUnknown(issue?.labels),
-    ],
-    categories: [
-      ...stringsFromUnknown(initConfig.categories),
-      ...stringsFromUnknown(initConfig.category),
-      ...stringsFromUnknown(issue?.category),
-    ],
-  };
-}
-
-function stringsFromUnknown(value: unknown): string[] {
-  if (typeof value === 'string') {
-    return [value];
-  }
-  if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === 'string');
-  }
-  return [];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -45,6 +45,50 @@ describe('CapacityReservationPolicy', () => {
     });
   });
 
+  it('checks all matching reservation buckets before rejecting overlapping urgent work', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 3,
+      reservations: [
+        { id: 'security-urgent', slots: 1, labels: ['security'] },
+        { id: 'availability-urgent', slots: 1, categories: ['availability'] },
+      ],
+    });
+
+    const runningItems = [
+      { id: 'normal-1', labels: ['feature'] },
+      { id: 'security-1', labels: ['security'] },
+    ];
+
+    expect(policy.canStart({ id: 'security-availability', labels: ['security'], categories: ['availability'] }, runningItems)).toEqual({
+      allowed: true,
+      reason: 'reserved_capacity_available',
+      reservationId: 'availability-urgent',
+    });
+  });
+
+  it('counts normal work already admitted through released reservations before allowing another normal start', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 4,
+      releasedReservationIds: ['security-urgent'],
+      reservations: [
+        { id: 'security-urgent', slots: 1, labels: ['security'] },
+        { id: 'availability-urgent', slots: 1, categories: ['availability'] },
+      ],
+    });
+
+    const normalCapacityPlusReleasedSlot = [
+      { id: 'backlog-1', labels: ['feature'] },
+      { id: 'backlog-2', labels: ['feature'] },
+      { id: 'backlog-3', labels: ['feature'] },
+    ];
+
+    expect(policy.canStart({ id: 'backlog-4', labels: ['feature'] }, normalCapacityPlusReleasedSlot)).toEqual({
+      allowed: false,
+      reason: 'reserved_capacity_only',
+      reservationId: undefined,
+    });
+  });
+
   it('renders operator-visible reservation state with used and free reserved capacity', () => {
     const policy = new CapacityReservationPolicy({
       totalSlots: 5,
