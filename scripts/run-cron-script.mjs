@@ -54,6 +54,26 @@ function signalExitCode(signal) {
   return typeof signalNumber === 'number' ? 128 + signalNumber : 128;
 }
 
+function signalChildTree(child, signal) {
+  if (!child.pid) {
+    return;
+  }
+
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      if (error?.code !== 'ESRCH') {
+        child.kill(signal);
+      }
+      return;
+    }
+  }
+
+  child.kill(signal);
+}
+
 function writeEnvelope({ script, command, exitCode, signal = null, failureKind = 'exit', message, stderrTail = '', durationMs, recoverable = false }) {
   const envelope = {
     schemaVersion: 1,
@@ -122,9 +142,9 @@ async function runCronScript({ name, recoverable, command }) {
       parentTerminationSignal = signal;
       parentTerminationMessage = `cron wrapper received ${signal} and terminated child script`;
       if (child && !child.killed) {
-        child.kill(signal);
+        signalChildTree(child, signal);
         forceKillTimer = setTimeout(() => {
-          child.kill('SIGKILL');
+          signalChildTree(child, 'SIGKILL');
         }, 5_000);
         forceKillTimer.unref?.();
       }
@@ -134,6 +154,7 @@ async function runCronScript({ name, recoverable, command }) {
       cwd: process.cwd(),
       env: process.env,
       shell: process.platform === 'win32',
+      detached: process.platform !== 'win32',
       stdio: ['inherit', 'inherit', 'pipe'],
     });
 
