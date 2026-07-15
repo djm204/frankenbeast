@@ -137,4 +137,20 @@ describe('dispatcher startup integrity checks', () => {
       expect.objectContaining({ code: 'invalid_prompt_contract', definitionId: 'example-beast' }),
     ]));
   });
+
+  it('rejects whitespace-padded prompt keys because interview config uses raw keys', () => {
+    const report = checkDispatcherStartupIntegrity({
+      definitions: [definition({
+        interviewPrompts: [
+          { key: ' objective ', prompt: 'What should this Beast do?', kind: 'string', required: true },
+        ],
+      })],
+      executors,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'invalid_prompt_contract', definitionId: 'example-beast' }),
+    ]));
+  });
 });

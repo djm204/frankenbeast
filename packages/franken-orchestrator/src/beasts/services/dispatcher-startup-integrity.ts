@@ -141,12 +141,12 @@ function validateDefinition(
   const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
   const promptKeys = new Set<string>();
   for (const prompt of definition.interviewPrompts) {
-    const key = prompt.key.trim();
-    if (key.length === 0 || prompt.prompt.trim().length === 0 || promptKeys.has(key) || !VALID_PROMPT_KINDS.has(prompt.kind) || (shape && !(key in shape))) {
+    const key = prompt.key;
+    if (key.length === 0 || key !== key.trim() || prompt.prompt.trim().length === 0 || promptKeys.has(key) || !VALID_PROMPT_KINDS.has(prompt.kind) || (shape && !(key in shape))) {
       findings.push({
         code: 'invalid_prompt_contract',
         definitionId,
-        message: `prompt '${prompt.key}' must have a unique non-empty key accepted by the config schema, non-empty prompt, and supported kind`,
+        message: `prompt '${prompt.key}' must have a unique non-empty unpadded key accepted by the config schema, non-empty prompt, and supported kind`,
       });
     }
     promptKeys.add(key);
