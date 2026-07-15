@@ -204,7 +204,6 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         await closedServer;
       }
       if (!drainedMutations) {
-        await releasePidFile(pidFile);
         throw new BeastDaemonDrainTimeoutError(MUTATION_DRAIN_WAIT_TIMEOUT_MS);
       }
       if (shutdownFailures.length > 0) {
