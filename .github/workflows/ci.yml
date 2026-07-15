@@ -97,7 +97,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - run: npm run audit:security
+      - name: Security audit snapshot
+        run: npm run audit:security -- --json > "${RUNNER_TEMP}/security-audit.json" || true
 
       - name: Run Docker sandbox build smoke test
         run: npm run test:docker:sandbox

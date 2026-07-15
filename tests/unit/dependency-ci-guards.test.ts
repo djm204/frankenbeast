@@ -483,7 +483,7 @@ updates:
             severity: "critical",
             range: "<7.6.5",
             nodes: ["node_modules/protobufjs"],
-            fixAvailable: true,
+            fixAvailable: { name: "@anthropic-ai/sdk", version: "0.110.0" },
             via: ["@anthropic-ai/sdk"],
           },
         },
@@ -493,11 +493,17 @@ updates:
 
     expect(result.status).toBe(1);
     const report = JSON.parse(result.stdout) as {
-      findings: Array<{ package: string; ageDays: number; overSla: boolean }>;
+      findings: Array<{
+        package: string;
+        ageDays: number;
+        overSla: boolean;
+        fixedVersion: string;
+      }>;
     };
     expect(report.findings[0]).toMatchObject({
       package: "protobufjs",
       ageDays: 14,
+      fixedVersion: "@anthropic-ai/sdk@0.110.0",
       overSla: true,
     });
     expect(result.stderr).toContain("Dependency vulnerability SLA exceeded");
@@ -630,6 +636,7 @@ updates:
       workflow.indexOf("Dependency vulnerability SLA dashboard"),
     ).toBeLessThan(workflow.indexOf("npm run audit:dependencies"));
     expect(workflow).toContain("npm run audit:dependencies -- --json");
+    expect(workflow).toContain("npm run audit:security -- --json");
     expect(workflow).toContain("|| true");
     expect(workflow).toContain("npm run deps:outdated:major");
     expect(workflow).toContain("npm run check:dependabot-supply-chain");
