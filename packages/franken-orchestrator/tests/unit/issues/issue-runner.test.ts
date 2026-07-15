@@ -558,6 +558,69 @@ describe('IssueRunner', () => {
       expect(mockRun).toHaveBeenCalledOnce();
     });
 
+    it('emits live capacity watermark alerts without pausing fresh issue starts', async () => {
+      const logger = mockLogger();
+      const issues = [makeIssue({ number: 18 })];
+      const triages = [makeTriage(18)];
+      const config = makeConfig({
+        issues,
+        triageResults: triages,
+        logger,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 10, capacityWatermarkRatio: 0.8 },
+          signals: () => ({
+            activeProcesses: 8,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 18, status: 'fixed' });
+      expect(mockRun).toHaveBeenCalledOnce();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('[issues] Capacity watermark alert for issue #18'),
+        expect.objectContaining({
+          alerts: expect.arrayContaining([
+            expect.objectContaining({
+              signal: 'activeProcesses',
+              value: 8,
+              threshold: 10,
+              watermarkRatio: 0.8,
+              message: 'active processes 8 reached 80% of limit 10',
+            }),
+          ]),
+        }),
+        'issues',
+      );
+    });
+
+    it('keeps capacity watermark alerts quiet below the configured watermark edge', async () => {
+      const logger = mockLogger();
+      const config = makeConfig({
+        issues: [makeIssue({ number: 19 })],
+        triageResults: [makeTriage(19)],
+        logger,
+        backpressure: {
+          thresholds: { maxActiveProcesses: 10, capacityWatermarkRatio: 0.8 },
+          signals: () => ({
+            activeProcesses: 7,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            oldestQueueAgeMs: 0,
+          }),
+        },
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 19, status: 'fixed' });
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
     it('preserves checkpoint-complete outcomes before evaluating backpressure', async () => {
       const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
       const issueRuntime = makeIssueRuntimeSupport();

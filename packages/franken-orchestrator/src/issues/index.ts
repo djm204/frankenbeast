@@ -20,6 +20,7 @@ export type {
   IssueBackpressureSignals,
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
+  IssueCapacityWatermarkAlert,
 } from './issue-runner.js';
 export { IssueReview } from './issue-review.js';
 export type { ReviewIO, ReviewDecision, IssueReviewOptions } from './issue-review.js';
