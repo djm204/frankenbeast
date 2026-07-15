@@ -79,8 +79,14 @@ const MEMORY_REVIEW_RESULT_TOOLS = new Set([
   'execute_tool',
 ]);
 
+function unqualifyMcpToolName(toolName: string): string {
+  const marker = '__';
+  const index = toolName.lastIndexOf(marker);
+  return index >= 0 ? toolName.slice(index + marker.length) : toolName;
+}
+
 function redactPostToolPayload(toolName: string, payload: string): string {
-  if (!MEMORY_REVIEW_RESULT_TOOLS.has(toolName)) return payload;
+  if (!MEMORY_REVIEW_RESULT_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
   return '[memory-review-result-redacted]';
 }
 

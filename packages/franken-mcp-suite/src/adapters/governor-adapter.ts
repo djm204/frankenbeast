@@ -136,13 +136,30 @@ function matchesDangerousPattern(action: string, context: string): boolean {
   return matchesDangerousActionName(action) || DANGEROUS_CONTEXT_PATTERNS.some((p) => p.test(combined));
 }
 
+function unqualifyMcpActionName(action: string): string {
+  const marker = '__';
+  const index = action.lastIndexOf(marker);
+  return index >= 0 ? action.slice(index + marker.length) : action;
+}
+
+function contextIncludesTool(context: string, toolName: string): boolean {
+  return context.includes(`"tool":"${toolName}"`)
+    || context.includes(`"tool_name":"${toolName}"`)
+    || context.includes(`"name":"${toolName}"`)
+    || context.includes(toolName);
+}
+
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
-  if (action !== 'fbeast_memory_right_to_forget') return context;
+  if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return context;
   return '[right-to-forget-context-redacted]';
 }
 
 function redactMemoryReviewProposalGovernanceContext(action: string, context: string): string {
-  if (action !== 'fbeast_memory_review_propose') return context;
+  const unqualified = unqualifyMcpActionName(action);
+  if (unqualified !== 'fbeast_memory_review_propose'
+    && !(unqualified === 'execute_tool' && contextIncludesTool(context, 'fbeast_memory_review_propose'))) {
+    return context;
+  }
   return MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION;
 }
 
@@ -174,28 +191,37 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 }
 
 function assessAction(action: string, context: string): GovernorCheckResult {
+  const unqualifiedAction = unqualifyMcpActionName(action);
+
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
   // public check tool, central gate) — not just the central dispatch gate.
-  if (NON_EXECUTING_TOOLS.has(action)) {
+  if (NON_EXECUTING_TOOLS.has(unqualifiedAction)) {
     return {
       decision: 'approved',
       reason: `Tool "${action}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
     };
   }
 
-  if (action === 'fbeast_memory_right_to_forget') {
+  if (unqualifiedAction === 'fbeast_memory_right_to_forget') {
     return {
       decision: 'approved',
       reason: 'Tool "fbeast_memory_right_to_forget" is an explicit privacy deletion workflow; execution is allowed through the central gate while audit context remains redacted.',
     };
   }
 
-  const isDestructive = DESTRUCTIVE_ACTIONS.has(action) || matchesDangerousPattern(action, context);
+  if (unqualifiedAction === 'fbeast_memory_review_decide' && context.includes('never_store')) {
+    return {
+      decision: 'review_recommended',
+      reason: 'Tool "fbeast_memory_review_decide" with action "never_store" is destructive and requires explicit operator approval before applying suppression/deletion.',
+    };
+  }
+
+  const isDestructive = DESTRUCTIVE_ACTIONS.has(unqualifiedAction) || matchesDangerousPattern(unqualifiedAction, context);
 
   // Evaluate via governor SkillTrigger with pattern-derived destructiveness
   const triggerResult: TriggerResult = triggerRegistry.evaluateAll({
-    skillId: action,
+    skillId: unqualifiedAction,
     requiresHitl: false,
     isDestructive,
   });

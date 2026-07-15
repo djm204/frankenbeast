@@ -145,10 +145,34 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('token abc123');
   });
 
-  it('allows memory review decisions through the shared path so queued candidates can be resolved', async () => {
+  it('redacts proxied proposed memory context before shared governor logging', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_name":"mcp__fbeast-proxy__execute_tool","tool_input":{"tool":"fbeast_memory_review_propose","args":{"key":"secret","value":"token abc123","source":"chat","reason":"remember"}}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('mcp__fbeast-proxy__execute_tool') as { context: string };
+    db.close();
+    expect(row.context).toBe('[memory-review-proposal-context-redacted]');
+    expect(row.context).not.toContain('token abc123');
+  });
+
+  it('allows memory review approve/reject decisions through the shared path so queued candidates can be resolved', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"approve"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject"}' }))
+      .resolves.toMatchObject({ decision: 'approved' });
+  });
+
+  it('gates never-store memory review decisions as destructive on the shared path', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+    await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"never_store"}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {
