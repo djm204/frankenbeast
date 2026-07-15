@@ -1807,7 +1807,14 @@ describe('main() execution', () => {
       enableHeartbeat: false,
       minCritiqueScore: 0.7,
       maxTotalTokens: 100_000,
-      providers: { default: 'gemini', fallbackChain: [], overrides: { gemini: { command: 'sh', model: 'gemini-2.5-pro' } } },
+      providers: {
+        default: 'gemini',
+        fallbackChain: [],
+        overrides: {
+          gemini: { command: 'sh', model: 'gemini-2.5-pro' },
+          codex: { command: 'sh' },
+        },
+      },
       security: {
         profile: 'permissive',
         webhookSignaturePolicy: 'local-dev-unsigned',
