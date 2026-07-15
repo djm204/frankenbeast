@@ -825,6 +825,33 @@ describe('LessonRecorder', () => {
         evidence: [],
       }),
     ).toThrow('Explicit lesson approval requires at least one evidence item.');
+    expect(() =>
+      applyHumanFeedbackToLesson(lesson, {
+        source: 'explicit-user-approval',
+        reason: 'Blank audit evidence must not promote a lesson.',
+        observedAt: '2026-07-12T01:35:00.000Z',
+        evidence: [{ kind: 'operator-report', reference: '   ' }],
+      }),
+    ).toThrow('Lesson quarantine evidence reference must be a non-empty string.');
+
+    const approvedAfterCorrection = applyHumanFeedbackToLesson(corrected, {
+      source: 'explicit-user-approval',
+      reason: 'User approved the revised lesson after reviewing correction evidence.',
+      observedAt: '2026-07-12T01:45:00.000Z',
+      evidence: [
+        {
+          kind: 'operator-report',
+          reference: 'https://github.com/djm204/frankenbeast/issues/1763',
+        },
+      ],
+    });
+    expect(approvedAfterCorrection.feedbackWeighting).toMatchObject({
+      primarySource: 'explicit-user-approval',
+      totalScore: -30,
+    });
+    expect(approvedAfterCorrection.quarantine).toBeUndefined();
+    expect(approvedAfterCorrection.lifecycleStatus).toBe('candidate');
+    expect(isLessonApplicable(approvedAfterCorrection)).toBe(false);
 
     const quarantinedCandidate = quarantineLesson(lesson, {
       trigger: 'repeated-failure-threshold',
@@ -849,13 +876,13 @@ describe('LessonRecorder', () => {
       ],
     });
 
-    expect(approved.lifecycleStatus).toBe('active');
-    expect(approved.experimentSandbox).toBeUndefined();
+    expect(approved.lifecycleStatus).toBe('candidate');
+    expect(approved.experimentSandbox).toBeDefined();
     expect(approved.feedbackWeighting).toMatchObject({
       primarySource: 'explicit-user-approval',
       totalScore: 70,
     });
-    expect(isLessonApplicable(approved)).toBe(true);
+    expect(isLessonApplicable(approved)).toBe(false);
   });
 
   it('prioritizes suppressed duplicate learning items as low-risk reuse follow-up', async () => {

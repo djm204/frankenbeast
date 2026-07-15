@@ -282,12 +282,24 @@ export function applyHumanFeedbackToLesson(
       'Explicit lesson approval requires at least one evidence item.',
     );
   }
-  const { experimentSandbox, quarantine, ...lessonWithoutBlocks } = lesson;
-  void experimentSandbox;
-  void quarantine;
+  const approvalEvidence = request.evidence.map(normalizeQuarantineEvidence);
+  if (approvalEvidence.length === 0) {
+    throw new RangeError(
+      'Explicit lesson approval requires at least one evidence item.',
+    );
+  }
+  const { quarantine, ...lessonWithoutQuarantine } = lesson;
+  const restoredLifecycleStatus =
+    quarantine?.previousLifecycleStatus ??
+    (lesson.lifecycleStatus === 'quarantined'
+      ? 'candidate'
+      : lesson.lifecycleStatus);
+  const lifecycleStatus = lesson.experimentSandbox?.promotionBlocked
+    ? (restoredLifecycleStatus ?? 'candidate')
+    : 'active';
   return {
-    ...lessonWithoutBlocks,
-    lifecycleStatus: 'active',
+    ...lessonWithoutQuarantine,
+    lifecycleStatus,
     feedbackWeighting,
   };
 }
@@ -1201,7 +1213,7 @@ function createLessonFeedbackWeighting(
   const sortedWeights = [...deduped.values()].sort(
     (left, right) => right.weight - left.weight || left.source.localeCompare(right.source),
   );
-  const primarySource = sortedWeights[0]?.source ?? 'inferred-success';
+  const primarySource = selectPrimaryFeedbackSource(sortedWeights);
   return {
     schemaVersion: 'lesson-feedback-weighting-v1',
     primarySource,
@@ -1212,6 +1224,22 @@ function createLessonFeedbackWeighting(
     weights: sortedWeights,
     guidance: LESSON_FEEDBACK_WEIGHTING_GUIDANCE,
   };
+}
+
+function selectPrimaryFeedbackSource(
+  weights: readonly LessonFeedbackWeight[],
+): LessonFeedbackSignalSource {
+  const explicitSignals = weights.filter(
+    (weight) =>
+      weight.source === 'explicit-user-correction' ||
+      weight.source === 'explicit-user-approval',
+  );
+  const latestExplicitSignal = explicitSignals.sort(
+    (left, right) =>
+      Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
+      right.weight - left.weight,
+  )[0];
+  return latestExplicitSignal?.source ?? weights[0]?.source ?? 'inferred-success';
 }
 
 function summarizeFeedbackSources(
