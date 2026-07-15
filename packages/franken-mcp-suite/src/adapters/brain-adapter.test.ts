@@ -213,6 +213,18 @@ describe("createBrainAdapter", () => {
     expect(mockBrain.flush).not.toHaveBeenCalled();
   });
 
+  it("rejects ttlMs for episodic memory because episodic records are durable", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    await expect(
+      brain.store({ key: "evt-ttl", value: "should stay durable", type: "episodic", ttlMs: 60_000 }),
+    ).rejects.toThrow("ttlMs is only supported for working memory");
+
+    expect(mockBrain.episodic.record).not.toHaveBeenCalled();
+    expect(mockBrain.working.set).not.toHaveBeenCalled();
+  });
+
   it("rejects unsafe query limits before reading memory", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     const mockBrain = brainInstances[0];

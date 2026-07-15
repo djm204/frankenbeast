@@ -44,6 +44,23 @@ describe('TOOL_REGISTRY', () => {
     expect(stubNames.size).toBe(EXPECTED_COUNT);
   });
 
+  it('rejects episodic TTL stores before invoking the registry adapter handler', async () => {
+    const brain = {
+      query: vi.fn(),
+      store: vi.fn(),
+      frontload: vi.fn(),
+      forget: vi.fn(),
+      rightToForget: vi.fn(),
+    };
+    const handler = TOOL_REGISTRY.get('fbeast_memory_store')!.makeHandler({ brain } as unknown as AdapterSet);
+
+    const result = await handler({ key: 'evt', value: 'durable event', type: 'episodic', ttlMs: '60000' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('ttlMs is only supported for working memory');
+    expect(brain.store).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {
     const observer = {
       log: vi.fn().mockResolvedValue({ id: 42, hash: 'abc123' }),

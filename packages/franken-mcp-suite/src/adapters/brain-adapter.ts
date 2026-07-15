@@ -382,6 +382,9 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
 
     async store(input) {
       const memoryType = resolveMemoryType(input.type);
+      if (input.ttlMs !== undefined && memoryType !== 'working') {
+        throw new Error('ttlMs is only supported for working memory entries');
+      }
 
       if (memoryType === "episodic") {
         const details = scopedEpisodicDetails(input.agentId);

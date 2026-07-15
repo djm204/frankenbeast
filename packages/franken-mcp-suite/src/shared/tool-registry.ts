@@ -134,6 +134,9 @@ const TOOLS: ToolFull[] = [
       if (ttlMs !== undefined && (!Number.isFinite(ttlMs) || !Number.isSafeInteger(ttlMs) || ttlMs < 1)) {
         return { content: [{ type: 'text', text: 'Error: fbeast_memory_store ttlMs must be a positive integer number of milliseconds' }], isError: true };
       }
+      if (ttlMs !== undefined && type !== 'working') {
+        return { content: [{ type: 'text', text: 'Error: fbeast_memory_store ttlMs is only supported for working memory entries' }], isError: true };
+      }
       await brain.store({
         key,
         value,
