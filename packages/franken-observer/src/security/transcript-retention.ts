@@ -91,7 +91,7 @@ const NON_TRANSCRIPT_TOKEN_KEYS = new Set([
   'totaltokencount',
   'totaltokenscount',
 ])
-const CHAT_TRANSCRIPT_KEYS = new Set(['message', 'messages', 'content', 'contents'])
+const CHAT_TRANSCRIPT_KEYS = new Set(['message', 'messages', 'content', 'contents', 'parts'])
 
 export class TranscriptRetentionAdapter implements ExportAdapter {
   private readonly inner: ExportAdapter
@@ -465,6 +465,9 @@ function redactFieldValue(
       return retained
     }
     if (value !== null && typeof value === 'object') return redactNestedTranscriptValues(value, policy, seen)
+  }
+  if (field === 'toolOutputs' && (policy.mode === 'raw' || policy.redactionLevel === 'none')) {
+    return cloneValue(value, seen)
   }
   if ((policy.mode === 'raw' || policy.redactionLevel === 'none') && value !== null && typeof value === 'object') {
     if (field === 'toolOutputs') return cloneValue(value)

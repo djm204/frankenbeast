@@ -1039,6 +1039,48 @@ describe('transcript retention controls', () => {
     ])
   })
 
+  it('drops raw provider message parts when prompt retention is disabled', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          contents: [
+            { role: 'user', parts: [{ text: 'private Gemini prompt' }] },
+            { role: 'model', parts: [{ text: 'private Gemini response' }] },
+          ],
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolOutputs: true },
+    })
+
+    expect(retained.spans[0].metadata['contents']).toEqual([
+      { role: 'user' },
+      { role: 'model' },
+    ])
+  })
+
+  it('retains raw provider tool output content-block arrays when prompts are disabled', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          messages: [
+            { role: 'tool', content: [{ type: 'text', text: 'private tool result' }], tool_call_id: 'call-1' },
+          ],
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolOutputs: true },
+    })
+
+    expect(retained.spans[0].metadata['messages']).toEqual([
+      { role: 'tool', content: [{ type: 'text', text: 'private tool result' }], tool_call_id: 'call-1' },
+    ])
+  })
+
   it('drops object-valued prompt fields when raw prompt retention is disabled', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({
