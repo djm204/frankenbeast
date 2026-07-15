@@ -1,6 +1,9 @@
+import { isIP } from 'node:net'
+
+import { seededRandom } from '@franken/types'
+
 import type { FetchFn } from '../adapters/langfuse/LangfuseAdapter.js'
 
-import { seededRandom } from '@franken/types';
 export interface WebhookRetryOptions {
   /** Maximum number of retry attempts after the initial try. Default: 0 (no retry). */
   maxRetries: number
@@ -15,6 +18,13 @@ export interface WebhookRetryOptions {
   jitter?: boolean
 }
 
+export interface WebhookAllowedTarget {
+  /** Trusted webhook origin, for example `https://discord.com`. */
+  origin: string
+  /** Optional URL path prefix that the configured webhook URL must start with. */
+  pathnamePrefix?: string
+}
+
 export interface WebhookNotifierOptions {
   /** URL to POST the JSON payload to. */
   url: string
@@ -24,6 +34,13 @@ export interface WebhookNotifierOptions {
    * `allowUnlistedTarget: true` for a deliberate legacy/unsafe opt-out.
    */
   allowedTargetOrigins?: readonly string[]
+  /**
+   * Explicit allowlist of webhook targets. String entries may include an
+   * optional pathname prefix; object entries separate the origin and prefix.
+   * Prefer this over `allowedTargetOrigins` when only a specific provider path
+   * such as `/api/webhooks/` should receive payloads.
+   */
+  allowedTargets?: readonly (string | WebhookAllowedTarget)[]
   /**
    * Explicit unsafe opt-out for legacy deployments that cannot provide an
    * allowlist yet. Prefer `allowedTargetOrigins` for normal operation.
@@ -88,12 +105,64 @@ function validateFiniteNonNegativeNumber(value: number, fieldName: string): numb
   return value
 }
 
-function parseUrlOrigin(value: string, fieldName: string): string {
+interface NormalizedWebhookTarget {
+  origin: string
+  pathnamePrefix?: string
+}
+
+function parseAbsoluteUrl(value: string, fieldName: string): URL {
   try {
-    return new URL(value).origin
+    return new URL(value)
   } catch {
     throw new TypeError(`${fieldName} must be an absolute URL`)
   }
+}
+
+function validateHttpsUrl(url: URL, fieldName: string): void {
+  if (url.protocol !== 'https:') {
+    throw new TypeError(`${fieldName} must use https:`)
+  }
+}
+
+function validatePublicWebhookHost(url: URL, fieldName: string): void {
+  const hostname = url.hostname.toLowerCase()
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
+  }
+
+  const ipVersion = isIP(hostname)
+  if (ipVersion === 4) {
+    const [firstOctet = 0, secondOctet = 0] = hostname.split('.').map(part => Number(part))
+    const isPrivateOrLocal =
+      firstOctet === 0 ||
+      firstOctet === 10 ||
+      firstOctet === 127 ||
+      (firstOctet === 169 && secondOctet === 254) ||
+      (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) ||
+      (firstOctet === 192 && secondOctet === 168)
+    if (isPrivateOrLocal) {
+      throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
+    }
+  }
+
+  if (ipVersion === 6) {
+    const normalized = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (
+      normalized === '::1' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      normalized.startsWith('fe80:')
+    ) {
+      throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
+    }
+  }
+}
+
+function parseUrlOrigin(value: string, fieldName: string): string {
+  const url = parseAbsoluteUrl(value, fieldName)
+  validateHttpsUrl(url, fieldName)
+  validatePublicWebhookHost(url, fieldName)
+  return url.origin
 }
 
 function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): ReadonlySet<string> | null {
@@ -102,6 +171,44 @@ function normalizeAllowedTargetOrigins(origins: readonly string[] | undefined): 
   }
 
   return new Set(origins.map(origin => parseUrlOrigin(origin, 'allowedTargetOrigins entry')))
+}
+
+function normalizePathnamePrefix(pathnamePrefix: string | undefined, fieldName: string): string | undefined {
+  if (pathnamePrefix === undefined || pathnamePrefix === '' || pathnamePrefix === '/') {
+    return undefined
+  }
+  if (!pathnamePrefix.startsWith('/')) {
+    throw new TypeError(`${fieldName} must start with /`)
+  }
+  return pathnamePrefix
+}
+
+function normalizeAllowedTargets(
+  targets: readonly (string | WebhookAllowedTarget)[] | undefined,
+): readonly NormalizedWebhookTarget[] {
+  if (!targets || targets.length === 0) {
+    return []
+  }
+
+  return targets.map((target, index) => {
+    if (typeof target === 'string') {
+      const url = parseAbsoluteUrl(target, `allowedTargets[${index}]`)
+      validateHttpsUrl(url, `allowedTargets[${index}]`)
+      validatePublicWebhookHost(url, `allowedTargets[${index}]`)
+      return {
+        origin: url.origin,
+        pathnamePrefix: normalizePathnamePrefix(url.pathname, `allowedTargets[${index}].pathnamePrefix`),
+      }
+    }
+
+    const url = parseAbsoluteUrl(target.origin, `allowedTargets[${index}].origin`)
+    validateHttpsUrl(url, `allowedTargets[${index}].origin`)
+    validatePublicWebhookHost(url, `allowedTargets[${index}].origin`)
+    return {
+      origin: url.origin,
+      pathnamePrefix: normalizePathnamePrefix(target.pathnamePrefix, `allowedTargets[${index}].pathnamePrefix`),
+    }
+  })
 }
 
 const MAX_ERROR_BODY_CHARS = 2048
@@ -144,8 +251,10 @@ function sanitizeWebhookEndpoint(value: string): string {
 
 export class WebhookNotifier {
   private readonly url: string
+  private readonly parsedUrl: URL
   private readonly targetOrigin: string
   private readonly allowedTargetOrigins: ReadonlySet<string> | null
+  private readonly allowedTargets: readonly NormalizedWebhookTarget[]
   private readonly allowUnlistedTarget: boolean
   private readonly extraHeaders: Record<string, string>
   private readonly fetchFn: FetchFn
@@ -154,12 +263,16 @@ export class WebhookNotifier {
 
   constructor(options: WebhookNotifierOptions) {
     this.url = options.url
-    this.targetOrigin = parseUrlOrigin(options.url, 'url')
+    this.parsedUrl = parseAbsoluteUrl(options.url, 'url')
+    validateHttpsUrl(this.parsedUrl, 'url')
+    validatePublicWebhookHost(this.parsedUrl, 'url')
+    this.targetOrigin = this.parsedUrl.origin
     this.allowedTargetOrigins = normalizeAllowedTargetOrigins(options.allowedTargetOrigins)
+    this.allowedTargets = normalizeAllowedTargets(options.allowedTargets)
     this.allowUnlistedTarget = options.allowUnlistedTarget ?? false
-    if (!this.allowUnlistedTarget && this.allowedTargetOrigins === null) {
+    if (!this.allowUnlistedTarget && this.allowedTargetOrigins === null && this.allowedTargets.length === 0) {
       throw new Error(
-        'Webhook target allowlist is required; set allowedTargetOrigins or explicitly opt out with allowUnlistedTarget: true',
+        'Webhook target allowlist is required; set allowedTargets or allowedTargetOrigins, or explicitly opt out with allowUnlistedTarget: true',
       )
     }
     this.extraHeaders = options.headers ?? {}
@@ -303,7 +416,14 @@ export class WebhookNotifier {
     if (this.allowUnlistedTarget) {
       return
     }
-    if (!this.allowedTargetOrigins?.has(this.targetOrigin)) {
+    const targetAllowedByOrigin = this.allowedTargetOrigins?.has(this.targetOrigin) ?? false
+    const targetAllowedByPath = this.allowedTargets.some(target => {
+      if (target.origin !== this.targetOrigin) {
+        return false
+      }
+      return target.pathnamePrefix ? this.parsedUrl.pathname.startsWith(target.pathnamePrefix) : true
+    })
+    if (!targetAllowedByOrigin && !targetAllowedByPath) {
       throw new Error(`Webhook target origin ${this.targetOrigin} is not allowed`)
     }
   }

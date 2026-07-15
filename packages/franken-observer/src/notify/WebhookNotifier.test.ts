@@ -352,6 +352,54 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('allows Discord webhook targets that match an allowed provider path', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://discord.com/api/webhooks/123456/secret-token',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        fetch: mockFetch,
+      })
+
+      await notifier.send({ type: 'test' })
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(mockFetch.mock.calls[0][0]).toBe('https://discord.com/api/webhooks/123456/secret-token')
+    })
+
+    it('rejects malformed webhook URLs during configuration load', () => {
+      expect(() => new WebhookNotifier({
+        url: 'not a url',
+        allowedTargets: ['https://discord.com/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url must be an absolute URL')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects localhost and private network webhook targets during configuration load', () => {
+      expect(() => new WebhookNotifier({
+        url: 'https://localhost/api/webhooks/123/secret',
+        allowedTargets: ['https://localhost/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host localhost is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://192.168.1.10/api/webhooks/123/secret',
+        allowedTargets: ['https://192.168.1.10/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host 192.168.1.10 is not allowed')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('denies webhook targets outside configured path prefixes before sending', async () => {
+      const notifier = new WebhookNotifier({
+        url: 'https://discord.com/api/oauth2/authorize',
+        allowedTargets: [{ origin: 'https://discord.com', pathnamePrefix: '/api/webhooks/' }],
+        fetch: mockFetch,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook target origin https://discord.com is not allowed',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
     it('allows explicit unsafe opt-out for legacy deployments', async () => {
       const notifier = new WebhookNotifier({
         url: 'https://legacy.example.net/signal',

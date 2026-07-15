@@ -65,7 +65,7 @@ export type { LangfuseAdapterOptions, FetchFn } from './adapters/langfuse/Langfu
 export type { SQLiteAdapterOptions } from './adapters/sqlite/SQLiteAdapter.js'
 export type { PrometheusAdapterOptions } from './adapters/prometheus/PrometheusAdapter.js'
 export type { TempoAdapterOptions, TempoBasicAuth } from './adapters/tempo/TempoAdapter.js'
-export type { WebhookNotifierOptions, WebhookRetryOptions } from './notify/WebhookNotifier.js'
+export type { WebhookAllowedTarget, WebhookNotifierOptions, WebhookRetryOptions } from './notify/WebhookNotifier.js'
 export type {
   ClassificationGuardAdapterOptions,
   DataClassification,
