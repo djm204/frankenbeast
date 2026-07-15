@@ -117,14 +117,14 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('denied');
   });
 
-  it('requires review for durable memory writes even with only payload-risky content', async () => {
+  it('exempts ordinary memory stores from payload governance', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({
       action: 'fbeast_memory_store',
       context: '{"key":"notes","value":"delete drop truncate rm -rf /"}',
     });
-    expect(result.decision).toBe('review_recommended');
-    expect(result.reason).toContain('High-risk policy requires approval');
+    expect(result.decision).toBe('approved');
+    expect(result.reason).toContain('non-executing');
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {

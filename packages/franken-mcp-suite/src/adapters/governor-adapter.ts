@@ -18,7 +18,6 @@ const DESTRUCTIVE_ACTIONS = new Set([
 ]);
 
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
-  fbeast_memory_store: 'memory',
   fbeast_memory_forget: 'memory',
   fbeast_memory_right_to_forget: 'memory',
 };
@@ -39,6 +38,7 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_firewall_scan_file',
   'fbeast_governor_check',
   'fbeast_governor_budget',
+  'fbeast_memory_store',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_plan_decompose',

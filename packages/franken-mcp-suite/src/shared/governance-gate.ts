@@ -1,14 +1,5 @@
 import { createGovernorAdapter, NON_EXECUTING_TOOLS, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import type { GovernanceGate } from './server-factory.js';
-import { evaluateHighRiskActionPolicy, type HighRiskActionClass, type HighRiskActionEvidence } from '@franken/governor';
-
-type GateDecision = Awaited<ReturnType<GovernanceGate['check']>>;
-
-const HIGH_RISK_TOOL_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
-  fbeast_memory_store: 'memory',
-  fbeast_memory_forget: 'memory',
-  fbeast_memory_right_to_forget: 'memory',
-};
 
 function stringifyArgs(args: Record<string, unknown>): string {
   try {
@@ -29,63 +20,6 @@ function stringifyArgsForGovernanceLog(tool: string, args: Record<string, unknow
     }
   }
   return stringifyArgs(redacted);
-}
-
-function stringArg(args: Record<string, unknown>, key: string): string | undefined {
-  const value = args[key];
-  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
-}
-
-function booleanArg(args: Record<string, unknown>, key: string): boolean | undefined {
-  const value = args[key];
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    if (value === 'true') return true;
-    if (value === 'false') return false;
-  }
-  return undefined;
-}
-
-function selectorTarget(args: Record<string, unknown>): string | undefined {
-  const selectors = ['key', 'category', 'sourceScope', 'query']
-    .map((key) => stringArg(args, key))
-    .filter((value): value is string => value !== undefined);
-  return selectors.length > 0 ? selectors.join(',') : undefined;
-}
-
-function evidenceForHighRiskTool(tool: string, args: Record<string, unknown>): HighRiskActionEvidence | undefined {
-  switch (tool) {
-    case 'fbeast_memory_store': {
-      const target = stringArg(args, 'key');
-      return { operation: 'store', ...(target !== undefined ? { target } : {}) };
-    }
-    case 'fbeast_memory_forget': {
-      const target = stringArg(args, 'key');
-      return { operation: 'delete', ...(target !== undefined ? { target } : {}) };
-    }
-    case 'fbeast_memory_right_to_forget': {
-      const target = selectorTarget(args);
-      const dryRun = booleanArg(args, 'dryRun');
-      return {
-        operation: 'right-to-forget',
-        ...(target !== undefined ? { target } : {}),
-        ...(dryRun !== undefined ? { dryRun } : {}),
-      };
-    }
-    default:
-      return undefined;
-  }
-}
-
-function mapPolicyDecision(tool: string, actionClass: HighRiskActionClass, evidence: HighRiskActionEvidence): GateDecision {
-  const result = evaluateHighRiskActionPolicy({ actionClass, evidence });
-  if (result.decision === 'allow') {
-    return { decision: 'approved', reason: `High-risk policy allowed ${tool}: ${result.reason}` };
-  }
-  if (result.decision === 'deny') {
-    return { decision: 'denied', reason: `High-risk policy denied ${tool}: ${result.reason}` };
-  }
-  return { decision: 'review_recommended', reason: `High-risk policy requires approval for ${tool}: ${result.reason}` };
 }
 
 /**
@@ -113,10 +47,6 @@ export function createGovernanceGate(source: string | GovernorAdapter): Governan
           decision: 'approved',
           reason: `Tool "${tool}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
         };
-      }
-      const highRiskActionClass = HIGH_RISK_TOOL_ACTIONS[tool];
-      if (highRiskActionClass !== undefined) {
-        return mapPolicyDecision(tool, highRiskActionClass, evidenceForHighRiskTool(tool, args) ?? {});
       }
       if (!governor) {
         governor = createGovernorAdapter(dbPath!);
