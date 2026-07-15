@@ -1,0 +1,114 @@
+{
+  "description": "Flaky liveness replay fixture for deterministic issue-worker routing tests. Each snapshot captures one liveness tick and the expected PM-visible routing result.",
+  "issue": { "number": 1806, "title": "test(stability): add flaky liveness fixture replay harness", "labels": ["P2", "reliability"] },
+  "thresholds": {
+    "maxActiveProcesses": 5,
+    "maxFailedStarts": 1,
+    "maxInFlightBacklog": 4,
+    "maxPendingIssueCount": 10,
+    "maxOldestQueueAgeMs": 300000,
+    "maxSystemLoadAverage": 8,
+    "minProviderBudgetTokensRemaining": 100000,
+    "dependencyCircuitBreakers": {
+      "github": { "maxConsecutiveFailures": 2, "pauseOnStatuses": ["unavailable"] }
+    }
+  },
+  "snapshots": [
+    {
+      "name": "process-capacity-spike-defers-fresh-worker",
+      "checkpointHasIssueProgress": false,
+      "graphHasCheckpointProgress": false,
+      "signals": {
+        "activeProcesses": 5,
+        "failedStarts": 0,
+        "inFlightBacklog": 1,
+        "pendingIssueCount": 2,
+        "oldestQueueAgeMs": 120000,
+        "systemLoadAverage": 2.5,
+        "providerBudgetTokensRemaining": 500000,
+        "dependencyStatuses": [
+          { "dependency": "github", "status": "healthy", "consecutiveFailures": 0 }
+        ]
+      },
+      "expectedAllowed": false,
+      "expectedReasons": ["active processes 5 reached limit 5"],
+      "expectedRoute": {
+        "mode": "degraded",
+        "action": "defer-fresh-start",
+        "reason": "backpressure: active processes 5 reached limit 5"
+      }
+    },
+    {
+      "name": "github-flake-resumes-checkpointed-worker",
+      "checkpointHasIssueProgress": true,
+      "graphHasCheckpointProgress": true,
+      "signals": {
+        "activeProcesses": 1,
+        "failedStarts": 0,
+        "inFlightBacklog": 0,
+        "pendingIssueCount": 1,
+        "oldestQueueAgeMs": 0,
+        "systemLoadAverage": 1.75,
+        "providerBudgetTokensRemaining": 500000,
+        "dependencyStatuses": [
+          { "dependency": "github", "status": "degraded", "consecutiveFailures": 2 }
+        ]
+      },
+      "expectedAllowed": false,
+      "expectedReasons": ["github consecutive failures 2 reached circuit breaker limit 2"],
+      "expectedRoute": {
+        "mode": "degraded",
+        "action": "resume-checkpointed",
+        "reason": "backpressure: github consecutive failures 2 reached circuit breaker limit 2"
+      }
+    },
+    {
+      "name": "recovered-liveness-starts-fresh-worker",
+      "checkpointHasIssueProgress": false,
+      "graphHasCheckpointProgress": false,
+      "signals": {
+        "activeProcesses": 1,
+        "failedStarts": 0,
+        "inFlightBacklog": 0,
+        "pendingIssueCount": 1,
+        "oldestQueueAgeMs": 0,
+        "systemLoadAverage": 1.5,
+        "providerBudgetTokensRemaining": 500000,
+        "dependencyStatuses": [
+          { "dependency": "github", "status": "healthy", "consecutiveFailures": 0 }
+        ]
+      },
+      "expectedAllowed": true,
+      "expectedReasons": [],
+      "expectedRoute": {
+        "mode": "normal",
+        "action": "start-fresh"
+      }
+    }
+  ],
+  "edgeCases": [
+    {
+      "name": "unconfigured-unrelated-dependency-does-not-pause-liveness",
+      "checkpointHasIssueProgress": false,
+      "graphHasCheckpointProgress": false,
+      "signals": {
+        "activeProcesses": 1,
+        "failedStarts": 0,
+        "inFlightBacklog": 0,
+        "pendingIssueCount": 1,
+        "oldestQueueAgeMs": 0,
+        "systemLoadAverage": 1.5,
+        "providerBudgetTokensRemaining": 500000,
+        "dependencyStatuses": [
+          { "dependency": "grafana", "status": "unavailable", "consecutiveFailures": 99 }
+        ]
+      },
+      "expectedAllowed": true,
+      "expectedReasons": [],
+      "expectedRoute": {
+        "mode": "normal",
+        "action": "start-fresh"
+      }
+    }
+  ]
+}
