@@ -14,7 +14,7 @@ This checklist is operator guidance, not a restore script. Do not run destructiv
 | Scribe | `<person recording decisions>` |
 | Affected automation | `<dispatcher, PM swarm, Codex gate, approval-cop, cron monitor, restore-preview, backup job>` |
 | Communication channel | `<Discord thread, incident room, Kanban card, or issue>` |
-| Current severity | `SEV-1 | SEV-2 | SEV-3 | SEV-4` |
+| Current severity | `SEV-1 \| SEV-2 \| SEV-3 \| SEV-4` |
 
 ## 1. Declare command and freeze unsafe paths
 
@@ -66,7 +66,7 @@ Every mutation or route change must have a row before it happens.
 
 | Time (UTC) | Decision | Owner | Evidence | Expiry / revisit |
 | --- | --- | --- | --- | --- |
-| `<HH:MM>` | `pause monitor | unblock card | trigger review | merge | bypass | quarantine artifact | restore item` | `<name/card>` | `<link/path/command output>` | `<time or condition>` |
+| `<HH:MM>` | `pause monitor \| unblock card \| trigger review \| merge \| bypass \| quarantine artifact \| restore item` | `<name/card>` | `<link/path/command output>` | `<time or condition>` |
 
 ## 6. Recovery action checklist
 
@@ -114,7 +114,7 @@ Close the automation-failure incident only when all of these are true:
 
 Fail the incident review if any of these occurred without a recorded command decision:
 
-- A merge, force-push, branch deletion, restore command, approval replay, or broad unblock was executed.
+- A merge, force-push, branch deletion, restore command, approval replay, broad unblock, or broad worker respawn was executed.
 - A second worker or monitor was started while a live owner already existed for the same issue/PR/card.
 - A stale Codex clean or usage-limit response was treated as a current-head clean gate.
 - A corrupt, partial, or unclassified backup artifact was restored or merged into live state.

@@ -57,7 +57,7 @@ describe('issue #1832 automation failure incident command checklist', () => {
     }
 
     for (const negativeCase of [
-      'A merge, force-push, branch deletion, restore command, approval replay, or broad unblock was executed.',
+      'A merge, force-push, branch deletion, restore command, approval replay, broad unblock, or broad worker respawn was executed.',
       'A second worker or monitor was started while a live owner already existed for the same issue/PR/card.',
       'A stale Codex clean or usage-limit response was treated as a current-head clean gate.',
       'A corrupt, partial, or unclassified backup artifact was restored or merged into live state.',
