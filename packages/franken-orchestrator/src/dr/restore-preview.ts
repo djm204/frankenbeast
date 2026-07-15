@@ -541,11 +541,12 @@ export function buildRestoreDryRunReport(
   options: RestoreDryRunReportOptions = {},
 ): RestoreDryRunReport {
   const preview = detectRestorePreviewConflicts(backup, live);
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
   const backupConsistency = buildCrossFileStateConsistencyReport(backup, {
-    ...(options.generatedAt === undefined ? {} : { checkedAt: options.generatedAt }),
+    checkedAt: generatedAt,
   });
   const liveConsistency = buildCrossFileStateConsistencyReport(live, {
-    ...(options.generatedAt === undefined ? {} : { checkedAt: options.generatedAt }),
+    checkedAt: generatedAt,
   });
   const blockerCount = preview.conflicts.filter((conflict) => conflict.severity === 'blocker').length;
   const warningCount = preview.conflicts.filter((conflict) => conflict.severity === 'warning').length;
@@ -560,7 +561,7 @@ export function buildRestoreDryRunReport(
     ok: true,
     command: 'dr restore-dry-run',
     formatVersion: 2,
-    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    generatedAt,
     dryRun: true,
     wouldWrite: false,
     inputs: {
@@ -756,7 +757,7 @@ function taskReferencesFor(record: RestorePreviewRecord): readonly TaskReference
   if (!isRecord(record.value)) return [];
   const value = record.value;
   const references: TaskReferenceCandidate[] = [];
-  for (const field of ['taskId', 'task_id', 'task'] as const) {
+  for (const field of ['taskId', 'task_id'] as const) {
     if (!(field in value)) continue;
     const fieldValue = value[field];
     if (typeof fieldValue === 'string' && fieldValue.trim().length > 0) {

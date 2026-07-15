@@ -259,7 +259,7 @@ describe('restore preview conflict detector', () => {
         tasks: [{ id: 'task-1', digest: 'task-digest' }],
         approvals: [{ id: 'approval-1', state: 'approved', value: { taskId: 'task-1' } }],
         memory: [{ id: 'memory-1', value: { taskIds: ['task-1'] } }],
-        cron: [{ id: 'cron-1', state: 'enabled', value: { task: 'task-1' } }],
+        cron: [{ id: 'cron-1', state: 'enabled', value: { taskId: 'task-1' } }],
       },
       { checkedAt: '2026-07-14T12:30:00.000Z' },
     );
@@ -280,7 +280,7 @@ describe('restore preview conflict detector', () => {
         tasks: [{ id: 'task-live', digest: 'task-digest' }],
         approvals: [{ id: 'approval-orphan', state: 'approved', value: { taskId: 'task-missing', token: 'secret-token' } }],
         memory: [{ id: 'memory-bad', value: { taskIds: ['task-live', 42] } }],
-        cron: [{ id: 'cron-bad', state: 'enabled', value: { task: { id: 'task-live' } } }],
+        cron: [{ id: 'cron-bad', state: 'enabled', value: { taskId: { id: 'task-live' } } }],
       } as unknown as RestorePreviewManifest,
       { checkedAt: '2026-07-14T12:30:00.000Z' },
     );
@@ -306,7 +306,7 @@ describe('restore preview conflict detector', () => {
           code: 'malformed-task-reference',
           area: 'cron',
           id: 'cron-bad',
-          referenceField: 'task',
+          referenceField: 'taskId',
           severity: 'blocker',
         }),
       ]),
@@ -330,6 +330,8 @@ describe('restore preview conflict detector', () => {
     expect(report.summary.consistencyFindingCount).toBe(1);
     expect(report.summary.consistencyBlockerCount).toBe(1);
     expect(report.summary.safeToRestore).toBe(false);
+    expect(report.consistency.backup.checkedAt).toBe(report.generatedAt);
+    expect(report.consistency.live.checkedAt).toBe(report.generatedAt);
     expect(report.consistency.backup.findings).toContainEqual(
       expect.objectContaining({ code: 'dangling-task-reference' }),
     );
@@ -388,6 +390,22 @@ describe('restore preview conflict detector', () => {
         approvals: [],
         memory: [{ id: 'memory-planner-output', value: { tasks: [{ id: 'domain-task' }] } }],
         cron: [{ id: 'cron-empty-domain-list', value: { tasks: [] } }],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('clean');
+    expect(report.findings).toEqual([]);
+  });
+
+  it('ignores arbitrary value.task payloads that are not explicit task-reference fields', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-live', digest: 'task-digest' }],
+        approvals: [],
+        memory: [{ id: 'memory-note', value: { task: 'fix auth flow' } }],
+        cron: [{ id: 'cron-domain-note', value: { task: { title: 'domain task, not a card id' } } }],
       },
       { checkedAt: '2026-07-14T12:30:00.000Z' },
     );
