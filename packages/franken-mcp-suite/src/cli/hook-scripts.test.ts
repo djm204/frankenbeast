@@ -47,6 +47,9 @@ function installFakeHook(root: string): string {
     'if [ "$PHASE" = "pre-tool" ]; then',
     '  # Context arrives via env; the tool name is the positional after "--".',
     '  CONTEXT="${FBEAST_TOOL_CONTEXT:-}"',
+    '  if [ -n "${FBEAST_CAPTURE_CONTEXT_FILE:-}" ]; then',
+    '    printf "%s" "$CONTEXT" > "$FBEAST_CAPTURE_CONTEXT_FILE"',
+    '  fi',
     '  TOOL_NAME="${4:-}"',
     '  if [ "$TOOL_NAME" = "hang" ]; then',
     '    sleep 10',
@@ -270,6 +273,96 @@ describe('Codex hook scripts', () => {
     expect(result.status).toBe(2);
     expect(result.stdout).toContain('"permissionDecision":"deny"');
     expect(result.stdout).toContain('destructive payload blocked');
+  });
+
+  it('forwards structured high-risk privacy deletion evidence to the pre-tool hook without raw selectors', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'fbeast_memory_right_to_forget',
+      tool_input: {
+        query: 'alice@example.test',
+        category: 'pii',
+        dryRun: true,
+        token: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+        value: 'also-secret',
+      },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      query: '[right-to-forget-selector-redacted]',
+      category: '[right-to-forget-selector-redacted]',
+      dryRun: true,
+    });
+    expect(context).not.toContain('alice@example.test');
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+    expect(context).not.toContain('also-secret');
+  });
+
+  it('forwards only structured memory-forget evidence to the pre-tool hook', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'fbeast_memory_forget',
+      tool_input: {
+        key: 'api-token-memory-key',
+        category: 'credentials',
+        token: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+        value: 'also-secret',
+      },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      key: '[right-to-forget-selector-redacted]',
+      category: '[right-to-forget-selector-redacted]',
+    });
+    expect(context).not.toContain('api-token-memory-key');
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+    expect(context).not.toContain('also-secret');
+  });
+
+  it('forwards only structured memory-store policy evidence to the pre-tool hook', () => {
+    const root = makeTempRoot();
+    tempRoots.push(root);
+    const binDir = installFakeHook(root);
+    const contextFile = join(root, 'context.txt');
+    const { preTool } = writeHookScripts(root, 'codex');
+
+    const result = runScript(preTool, {
+      tool_name: 'fbeast_memory_store',
+      tool_input: {
+        key: 'release-note',
+        value: 'delete drop rm -rf / plus SECRET_TOKEN_SHOULD_NOT_LEAK',
+        profile: 'default',
+        activeProfile: 'default',
+      },
+      session_id: 'sess-1',
+    }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
+
+    expect(result.status, result.stderr).toBe(0);
+    const context = readFileSync(contextFile, 'utf8');
+    expect(JSON.parse(context)).toEqual({
+      key: '[right-to-forget-selector-redacted]',
+      profile: 'default',
+      activeProfile: 'default',
+    });
+    expect(context).not.toContain('release-note');
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+    expect(context).not.toContain('rm -rf');
   });
 
   it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {

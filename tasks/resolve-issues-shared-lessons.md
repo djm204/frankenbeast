@@ -1,8 +1,15 @@
 # Resolve Issues Shared Lessons
 
+<<<<<<< HEAD
 ## 2026-07-15 — Webhook DNS pinning review fixes
 - For outbound webhook SSRF hardening, validate object-form allowlist origins for credentials too; URL normalization can otherwise hide deceptive `userinfo@host` entries.
 - When a webhook hostname is DNS-validated before delivery, the actual transport must consume the validated address: custom fetches should receive an IP-pinned URL plus original Host header, default HTTPS should try later validated addresses after network failures, and pinned HTTPS error bodies need async-iterable response coverage.
+=======
+## 2026-07-15 — High-risk governor policy review fixes
+- When adding policy-as-code for high-risk action classes, wire the class map into every shared governor path before non-executing exemptions; otherwise new classes can exist in the policy module but never gate hook/public/central checks.
+- For memory governance evidence, pass only selector/dry-run/profile fields into hook/governor context and redact selectors before logging; never serialize full memory tool payloads because schema-rejected extras or stored values can leak secrets into governor logs.
+- High-risk shell-command inference must parse common CLI variants, not just simple substrings: allow read-only GitHub inspection (`gh issue/pr view|list`), gate mutating GitHub subcommands such as labels/runs/secrets even behind inherited flags, recognize `git` global options before `push`, deny Git remote writes without a concrete target, avoid matching ordinary `service` path/package names as process control, include `crontab` edits, and match real webhook hosts like `hooks.slack.com/services` and Discord `/api/webhooks/`.
+>>>>>>> origin/main
 
 ## 2026-07-15 — Skill installer path hardening review fixes
 - For installer path hardening, guard every public surface that can surface unsafe-path errors, not just install routes; context/read/write routes should return generic unsafe-path messages and tests should assert absolute roots/targets are not leaked.
