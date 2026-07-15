@@ -203,6 +203,51 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('cleanup after signal');
   });
 
+  it('emits a signal envelope before force-finishing when the child ignores termination', async () => {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'force-kill-signal-test',
+      '--',
+      process.execPath,
+      '-e',
+      "process.on('SIGTERM', () => { process.stderr.write('ignoring signal'); }); process.stderr.write('ready for signal\\n'); setInterval(() => {}, 1000)",
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready for signal')) {
+          resolve();
+        }
+      });
+    });
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => {
+      child.on('close', (code) => resolve(code));
+    });
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    const envelope = parseEnvelope(stderr);
+    expect(envelope).toMatchObject({
+      script: 'force-kill-signal-test',
+      failureKind: 'signal',
+      signal: 'SIGTERM',
+      exitCode: 128 + osConstants.signals.SIGTERM,
+    });
+    expect(envelope.stderrTail).toContain('ignoring signal');
+  });
+
   it('documents the envelope schema for operators and liveness tooling', () => {
     const doc = readFileSync(DOC, 'utf8');
 

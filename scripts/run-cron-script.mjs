@@ -138,6 +138,7 @@ async function runCronScript({ name, recoverable, command }) {
   let parentTerminationExitCode = null;
   let parentTerminationSignal = null;
   let parentTerminationMessage = null;
+  let parentTerminationEnvelopeEmitted = false;
 
   return await new Promise((resolve) => {
     let child;
@@ -170,6 +171,25 @@ async function runCronScript({ name, recoverable, command }) {
       writeEnvelope(details);
     };
 
+    const emitParentTerminationEnvelope = () => {
+      if (parentTerminationEnvelopeEmitted || parentTerminationExitCode === null) {
+        return;
+      }
+      parentTerminationEnvelopeEmitted = true;
+      const durationMs = Date.now() - started;
+      emitEnvelope({
+        script: name,
+        command,
+        exitCode: parentTerminationExitCode,
+        signal: parentTerminationSignal,
+        failureKind: 'signal',
+        message: parentTerminationMessage,
+        stderrTail,
+        durationMs,
+        recoverable,
+      });
+    };
+
     function handleParentSignal(signal) {
       if (settled || parentTerminationExitCode !== null) {
         return;
@@ -181,6 +201,8 @@ async function runCronScript({ name, recoverable, command }) {
       if (child && !child.killed) {
         signalChildTree(child, signal);
         forceKillTimer = setTimeout(() => {
+          forceKillTimer = null;
+          emitParentTerminationEnvelope();
           signalChildTree(child, 'SIGKILL');
           finish(parentTerminationExitCode);
         }, KILL_GRACE_MS);
@@ -231,21 +253,7 @@ async function runCronScript({ name, recoverable, command }) {
         return;
       }
       if (parentTerminationExitCode !== null) {
-        const durationMs = Date.now() - started;
-        emitEnvelope({
-          script: name,
-          command,
-          exitCode: parentTerminationExitCode,
-          signal: parentTerminationSignal,
-          failureKind: 'signal',
-          message: parentTerminationMessage,
-          stderrTail,
-          durationMs,
-          recoverable,
-        });
-        if (forceKillTimer) {
-          return;
-        }
+        emitParentTerminationEnvelope();
         finish(parentTerminationExitCode);
         return;
       }
