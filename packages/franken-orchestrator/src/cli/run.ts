@@ -8,7 +8,7 @@ function printLine(...args: unknown[]): void {
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
@@ -584,7 +584,9 @@ function firstNonEmptyEnv(...names: readonly string[]): string | undefined {
 
 function resolveDashboardProviderCommand(name: string, type: string, config: OrchestratorConfig): string | undefined {
   const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
-  if (consolidatedProvider?.cliPath) return consolidatedProvider.cliPath;
+  if (consolidatedProvider) {
+    return consolidatedProvider.cliPath ?? resolveDashboardProviderDefaultCommand(name, type);
+  }
 
   const providerRegistryName = resolveDashboardProviderRegistryName(name, type);
   const overrideCommand = config.providers.overrides?.[name]?.command
@@ -598,7 +600,7 @@ function resolveDashboardProviderCommand(name: string, type: string, config: Orc
 function resolveDashboardProviderAvailability(name: string, type: string, config: OrchestratorConfig): boolean {
   if (type.endsWith('-cli')) {
     const command = resolveDashboardProviderCommand(name, type, config);
-    return Boolean(command && isCommandHealthy(command));
+    return Boolean(command && isCachedCommandHealthy(command));
   }
 
   const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
@@ -671,17 +673,43 @@ export function buildDashboardProviderSnapshot(
   });
 }
 
-function isCommandHealthy(command: string): boolean {
+const DASHBOARD_COMMAND_HEALTH_TTL_MS = 30_000;
+const dashboardCommandHealthCache = new Map<string, { available: boolean; checkedAt: number; checking: boolean }>();
+
+function isCachedCommandHealthy(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed) return false;
+  const now = Date.now();
+  const cached = dashboardCommandHealthCache.get(trimmed);
+  if (!cached) {
+    const initialAvailable = isCommandAvailable(trimmed);
+    dashboardCommandHealthCache.set(trimmed, { available: initialAvailable, checkedAt: 0, checking: false });
+    scheduleDashboardCommandHealthProbe(trimmed);
+    return initialAvailable;
+  }
+  if (!cached.checking && now - cached.checkedAt > DASHBOARD_COMMAND_HEALTH_TTL_MS) {
+    scheduleDashboardCommandHealthProbe(trimmed);
+  }
+  return cached.available;
+}
+
+function scheduleDashboardCommandHealthProbe(command: string): void {
+  const cached = dashboardCommandHealthCache.get(command);
+  if (cached?.checking) return;
+  dashboardCommandHealthCache.set(command, {
+    available: cached?.available ?? false,
+    checkedAt: cached?.checkedAt ?? 0,
+    checking: true,
+  });
   try {
-    const result = spawnSync(trimmed, ['--version'], {
-      stdio: 'ignore',
-      timeout: 5_000,
-    });
-    return result.status === 0;
+    const proc = spawn(command, ['--version'], { stdio: 'ignore', timeout: 5_000 });
+    const finish = (available: boolean) => {
+      dashboardCommandHealthCache.set(command, { available, checkedAt: Date.now(), checking: false });
+    };
+    proc.on('close', (code) => finish(code === 0));
+    proc.on('error', () => finish(false));
   } catch {
-    return false;
+    dashboardCommandHealthCache.set(command, { available: false, checkedAt: Date.now(), checking: false });
   }
 }
 

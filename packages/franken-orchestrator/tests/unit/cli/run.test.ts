@@ -612,8 +612,25 @@ describe('dashboard provider snapshots', () => {
     ]);
   });
 
-  it('marks CLI providers unavailable when the command exists but fails --version', () => {
+  it('ignores legacy overrides for consolidated providers without cliPath', () => {
     const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'prod-claude-default',
+        fallbackChain: [],
+        overrides: { claude: { command: '/definitely/missing/frankenbeast-prod-claude-default' } },
+      },
+      consolidatedProviders: [
+        { name: 'prod-claude-default', type: 'claude-cli' },
+      ],
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'prod-claude-default', type: 'claude-cli', available: commandHealthyForTest('claude'), failoverOrder: 0 },
+    ]);
+  });
+
+  it('marks CLI providers unavailable when the command exists but fails --version', async () => {
+    const config = {
       providers: {
         default: 'broken-claude',
         fallbackChain: [],
@@ -622,7 +639,11 @@ describe('dashboard provider snapshots', () => {
       consolidatedProviders: [
         { name: 'broken-claude', type: 'claude-cli', cliPath: '/bin/false' },
       ],
-    } as any, { getProviders: () => [] } as any);
+    } as any;
+
+    buildDashboardProviderSnapshot(config, { getProviders: () => [] } as any);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const providers = buildDashboardProviderSnapshot(config, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
       { name: 'broken-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
