@@ -452,7 +452,7 @@ function redactProviderMessageValue(
   const messageType = typeof value['type'] === 'string' ? value['type'].replace(/[_-]/g, '').toLowerCase() : ''
   const messageRole = typeof value['role'] === 'string' ? value['role'].replace(/[_-]/g, '').toLowerCase() : ''
   for (const [key, nestedValue] of Object.entries(value)) {
-    const contextualField = (messageType === 'toolresult' || messageRole === 'tool') && key === 'content' ? 'toolOutputs' : classifyTranscriptField(key)
+    const contextualField = classifyProviderMessageField(messageType, messageRole, key)
     if (contextualField && !policy.retainedFields[contextualField]) continue
     setRecordValue(
       retained,
@@ -463,6 +463,12 @@ function redactProviderMessageValue(
   return retained
 }
 
+function classifyProviderMessageField(messageType: string, messageRole: string, key: string): TranscriptField | undefined {
+  if ((messageType === 'toolresult' || messageRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
+  if (messageType === 'text' && key === 'text') return 'prompts'
+  return classifyTranscriptField(key)
+}
+
 function redactEnumerableObject(
   value: object,
   policy: ResolvedTranscriptRetentionPolicy,
@@ -470,8 +476,9 @@ function redactEnumerableObject(
 ): Record<string, unknown> {
   const retained: Record<string, unknown> = {}
   seen.set(value, retained)
+  const record = value as Record<string, unknown>
   for (const [key, nestedValue] of Object.entries(value)) {
-    const field = classifyTranscriptField(key)
+    const field = classifyContextualTranscriptField(record, key)
     if (field && !policy.retainedFields[field]) continue
     setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
   }

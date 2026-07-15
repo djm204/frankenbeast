@@ -700,6 +700,28 @@ describe('transcript retention controls', () => {
     ])
   })
 
+  it('drops raw provider text blocks when prompt retention is disabled', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          messages: [
+            { type: 'text', text: 'private prompt text' },
+            { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
+          ],
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolOutputs: true },
+    })
+
+    expect(retained.spans[0].metadata['messages']).toEqual([
+      { type: 'text' },
+      { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
+    ])
+  })
+
   it('honors tool output opt-outs inside raw prompt envelopes', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({
@@ -757,6 +779,24 @@ describe('transcript retention controls', () => {
     })
 
     expect(retained.spans[0].metadata).toEqual({ role: 'tool', tool_call_id: 'call-1' })
+  })
+
+  it('honors tool output opt-outs for enumerable raw provider payload objects', () => {
+    class ToolPayload {
+      role = 'tool'
+      content = 'private enumerable tool result'
+      tool_call_id = 'call-1'
+    }
+
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { payload: new ToolPayload() } })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolOutputs: false },
+    })
+
+    expect(retained.spans[0].metadata['payload']).toEqual({ role: 'tool', tool_call_id: 'call-1' })
   })
 
   it('retains allowed tool outputs inside raw message containers when prompts are disabled', () => {
