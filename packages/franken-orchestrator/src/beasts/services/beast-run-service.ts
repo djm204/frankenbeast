@@ -329,7 +329,7 @@ export class BeastRunService {
     const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
     if (!trackedAgent || trackedAgent.status === 'deleted') return;
 
-    const activeItems = this.activeCapacityItems(run.trackedAgentId);
+    const activeItems = this.activeCapacityItems(run.id);
     const decision = this.serviceOptions.capacityPolicy.canStart(
       capacityItemFromConfig(trackedAgent.id, run.configSnapshot),
       activeItems,
@@ -364,16 +364,15 @@ export class BeastRunService {
     });
   }
 
-  private activeCapacityItems(excludeAgentId: string): CapacityReservationWorkItem[] {
-    return this.repository.listTrackedAgents()
-      .filter((agent) => agent.id !== excludeAgentId)
-      .filter((agent) => agent.status === 'dispatching'
-        || agent.status === 'awaiting_approval'
-        || agent.status === 'running')
-      .map((agent) => {
-        const linkedRun = agent.dispatchRunId ? this.repository.getRun(agent.dispatchRunId) : undefined;
-        return capacityItemFromConfig(agent.id, linkedRun?.configSnapshot ?? agent.initConfig);
-      });
+  private activeCapacityItems(excludeRunId: string): CapacityReservationWorkItem[] {
+    return this.repository.listRuns()
+      .filter(run => run.id !== excludeRunId)
+      .filter(run => run.trackedAgentId)
+      .filter(run => run.status === 'queued'
+        || run.status === 'interviewing'
+        || run.status === 'pending_approval'
+        || run.status === 'running')
+      .map(run => capacityItemFromConfig(run.trackedAgentId!, run.configSnapshot));
   }
 
   private syncTrackedAgent(run: BeastRun): void {

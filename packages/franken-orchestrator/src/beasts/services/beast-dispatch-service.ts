@@ -343,14 +343,13 @@ export class BeastDispatchService {
   }
 
   private activeCapacityItems(): CapacityReservationWorkItem[] {
-    return this.repository.listTrackedAgents()
-      .filter((agent) => agent.status === 'dispatching'
-        || agent.status === 'awaiting_approval'
-        || agent.status === 'running')
-      .map((agent) => {
-        const linkedRun = agent.dispatchRunId ? this.repository.getRun(agent.dispatchRunId) : undefined;
-        return capacityItemFromConfig(agent.id, linkedRun?.configSnapshot ?? agent.initConfig);
-      });
+    return this.repository.listRuns()
+      .filter(run => run.trackedAgentId)
+      .filter(run => run.status === 'queued'
+        || run.status === 'interviewing'
+        || run.status === 'pending_approval'
+        || run.status === 'running')
+      .map(run => capacityItemFromConfig(run.trackedAgentId!, run.configSnapshot));
   }
 
   private resolveAgentModuleConfig(trackedAgentId?: string): ModuleConfig | undefined {
