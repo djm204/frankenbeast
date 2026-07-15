@@ -924,6 +924,8 @@ When the daemon dispatches a Beast run, it spawns a subprocess managed by `Proce
 
 5. **Stop/kill escalation**: `stop()` sends SIGTERM, waits up to `defaultStopTimeoutMs` (10s), then escalates to SIGKILL. A terminal-status guard in `handleProcessExit` prevents double-writes when SIGKILL fires after `finishAttempt` has already updated the attempt.
 
+6. **Daemon drain mode**: when the daemon begins graceful shutdown it immediately enters drain mode before stopping live child runs. `/health` returns HTTP 503 with `status: "draining"`, `ok: false`, and drain metadata so supervisors/load balancers stop routing new work. Authenticated read endpoints remain available for inspection while mutating beast-control requests fail fast with `BEAST_DAEMON_DRAINING` until shutdown completes.
+
 Current beast-control routes:
 
 | Route | Purpose |

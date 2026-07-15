@@ -5,7 +5,7 @@ import type { Hono } from 'hono';
 import { createBeastServices, type BeastServiceBundle, type BeastServicePaths } from '../beasts/create-beast-services.js';
 import { isLoopbackHost } from '../network/network-config.js';
 import { localPlaintextOrSecureEndpoint } from '../network/network-url.js';
-import { createBeastDaemonApp } from './beast-daemon-app.js';
+import { createBeastDaemonApp, type BeastDaemonDrainState } from './beast-daemon-app.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 
 export interface StartBeastDaemonOptions extends BeastServicePaths {
@@ -51,6 +51,22 @@ const DEFAULT_PORT = 4050;
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 const PID_FILE_DECIMAL_PATTERN = /^\d+$/;
 
+class MutableBeastDaemonDrainState implements BeastDaemonDrainState {
+  enteredAt?: string | undefined;
+  reason?: string | undefined;
+
+  isDraining(): boolean {
+    return this.enteredAt !== undefined;
+  }
+
+  enter(reason: string): void {
+    if (!this.enteredAt) {
+      this.enteredAt = new Date().toISOString();
+      this.reason = reason;
+    }
+  }
+}
+
 export function defaultBeastDaemonPidFile(root: string): string {
   return join(root, '.frankenbeast', 'beasts-daemon.pid');
 }
@@ -67,6 +83,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
   let services: BeastServiceBundle | undefined;
   let closed = false;
   let listening = false;
+  const drainState = new MutableBeastDaemonDrainState();
 
   try {
     services = options.services ?? createBeastServices(options);
@@ -80,6 +97,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
     operatorToken: options.operatorToken,
     root: options.root,
     pid: process.pid,
+    drainState,
   });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
@@ -120,6 +138,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         return;
       }
       closed = true;
+      drainState.enter('shutdown');
       const shutdownFailures = await stopLiveRuns(services);
       services.dispose();
       if (listening) {

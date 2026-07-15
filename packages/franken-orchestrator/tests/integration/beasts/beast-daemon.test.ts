@@ -112,6 +112,67 @@ describe('beast daemon', () => {
     }
   });
 
+  it('reports drain mode in health and rejects new mutating beast work', async () => {
+    const paths = await makePaths();
+    const services = createBeastServices(paths);
+    const drainState = {
+      enteredAt: '2026-07-02T00:01:00.000Z',
+      reason: 'test-shutdown',
+      isDraining: () => true,
+    };
+    const app = createBeastDaemonApp({
+      services,
+      operatorToken,
+      startedAt: '2026-07-02T00:00:00.000Z',
+      drainState,
+    });
+
+    try {
+      const health = await app.request('/health');
+      expect(health.status).toBe(503);
+      expect(await health.json()).toMatchObject({
+        ok: false,
+        status: 'draining',
+        draining: true,
+        drain: {
+          enteredAt: '2026-07-02T00:01:00.000Z',
+          reason: 'test-shutdown',
+        },
+      });
+
+      const catalog = await app.request('/v1/beasts/catalog', {
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+      expect(catalog.status).toBe(200);
+
+      const createRun = await app.request('/v1/beasts/runs', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          definitionId: 'martin-loop',
+          config: { provider: 'codex', objective: 'Ship it', chunkDirectory: 'chunks' },
+          startNow: false,
+        }),
+      });
+      expect(createRun.status).toBe(503);
+      expect(await createRun.json()).toMatchObject({
+        error: {
+          code: 'BEAST_DAEMON_DRAINING',
+          details: {
+            status: 'draining',
+            enteredAt: '2026-07-02T00:01:00.000Z',
+            reason: 'test-shutdown',
+          },
+        },
+      });
+    } finally {
+      services.dispose();
+    }
+  });
+
   it('preserves chat attribution for daemon-created tracked runs', async () => {
     const paths = await makePaths();
     const services = createBeastServices(paths);
@@ -246,6 +307,37 @@ describe('beast daemon', () => {
     expect(stop).toHaveBeenCalledWith('run-stop', 'beasts-daemon-shutdown');
     expect(kill).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
+    expect(existsSync(paths.pidFile)).toBe(false);
+  });
+
+  it('enters drain mode while graceful child-run shutdown is in progress', async () => {
+    const paths = await makePaths();
+    const run = makeRun('run-drain', 'running');
+    let releaseStop!: () => void;
+    let markStopStarted!: () => void;
+    const stopStarted = new Promise<void>((resolve) => { markStopStarted = resolve; });
+    const { services } = makeDaemonServices([run], {
+      stop: async () => {
+        markStopStarted();
+        await new Promise<void>((release) => { releaseStop = release; });
+        return makeRun('run-drain', 'stopped');
+      },
+    });
+    const daemon = await startBeastDaemon({
+      ...paths,
+      operatorToken,
+      port: 0,
+      services,
+    });
+    const closePromise = daemon.close();
+
+    await stopStarted;
+    const health = await fetch(`${daemon.url}/health`);
+    expect(health.status).toBe(503);
+    expect(await health.json()).toMatchObject({ ok: false, status: 'draining', draining: true });
+
+    releaseStop();
+    await closePromise;
     expect(existsSync(paths.pidFile)).toBe(false);
   });
 
