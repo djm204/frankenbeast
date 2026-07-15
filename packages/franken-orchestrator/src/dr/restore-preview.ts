@@ -132,7 +132,7 @@ export function buildBackupEncryptionVerificationReport(
       });
     }
 
-    const algorithm = encryption.algorithm?.trim();
+    const algorithm = optionalString(encryption.algorithm)?.trim();
     if (algorithm === undefined || algorithm.length === 0) {
       findings.push({
         code: 'missing-algorithm',
@@ -149,7 +149,8 @@ export function buildBackupEncryptionVerificationReport(
       });
     }
 
-    if (encryption.keyRef === undefined || encryption.keyRef.trim() === '') {
+    const keyRef = optionalString(encryption.keyRef)?.trim();
+    if (keyRef === undefined || keyRef.length === 0) {
       findings.push({
         code: 'missing-key-reference',
         severity: 'warning',
@@ -158,7 +159,8 @@ export function buildBackupEncryptionVerificationReport(
       });
     }
 
-    if (encryption.artifactDigest === undefined || encryption.artifactDigest.trim() === '') {
+    const artifactDigest = optionalString(encryption.artifactDigest)?.trim();
+    if (artifactDigest === undefined || artifactDigest.length === 0) {
       findings.push({
         code: 'missing-artifact-digest',
         severity: 'warning',
@@ -222,6 +224,10 @@ function statusForEncryptionFindings(
   if (findings.some((finding) => finding.severity === 'blocker')) return 'failed';
   if (findings.some((finding) => finding.severity === 'warning')) return 'warning';
   return 'verified';
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 function operatorSummaryForEncryptionReport(

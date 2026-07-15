@@ -257,6 +257,35 @@ describe('restore preview conflict detector', () => {
     );
   });
 
+  it('returns findings instead of throwing when loaded encryption metadata has non-string fields', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      {
+        schemaVersion: 1,
+        encryption: {
+          encrypted: true,
+          algorithm: 1,
+          keyRef: ['dr/backups/prod-primary'],
+          artifactDigest: { sha256: 'abcdef' },
+        } as unknown as RestorePreviewManifest['encryption'],
+        tasks: [],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.encrypted).toBe(true);
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'missing-algorithm', severity: 'blocker' }),
+        expect.objectContaining({ code: 'missing-key-reference', severity: 'warning' }),
+        expect.objectContaining({ code: 'missing-artifact-digest', severity: 'warning' }),
+      ]),
+    );
+  });
+
   it('warns when encryption is present but the report lacks restore-critical references', () => {
     const report = buildBackupEncryptionVerificationReport(
       {
