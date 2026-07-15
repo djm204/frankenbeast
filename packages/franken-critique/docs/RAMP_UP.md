@@ -19,7 +19,7 @@
 - `packages/franken-orchestrator/src/cli/dep-factory.ts` imports `@franken/critique` lazily when `modules.critique` is enabled.
 - `createCritiqueDeps()` builds a package reviewer with guardrail, memory, observability, and known-package ports, then wraps it in `CritiquePortAdapter` for the Beast loop.
 - `packages/franken-orchestrator/src/cli/create-beast-deps.ts` also wires `ReflectionEvaluator` into heartbeat reflection when reflection is enabled.
-- Missing enabled critique packages fail closed by default. Unsafe all-pass fallback requires the explicit `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opt-out documented in the root ramp-up guide.
+- Missing enabled critique packages fail closed by default. Unsafe all-pass fallback to `stubCritique` requires the explicit `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opt-out documented in the root ramp-up guide.
 
 ## Narrow Integration Notes
 - The critique module depends on caller-provided ports for guardrails, memory, observability, known package metadata, and LLM-backed reflection.

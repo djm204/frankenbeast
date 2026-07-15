@@ -111,6 +111,7 @@ export interface CreateBeastRunRequest {
   readonly trackedAgentId?: string | undefined;
   readonly executionMode?: BeastExecutionMode | undefined;
   readonly startNow?: boolean | undefined;
+  readonly onRunCreated?: ((run: BeastRun) => void) | undefined;
   readonly moduleConfig?: ModuleConfig | undefined;
 }
 
@@ -209,15 +210,25 @@ export class BeastDispatchService {
       return createdRun;
     });
 
+    request.onRunCreated?.(run);
+
     await this.appendLogSafely(run.id, 'system', 'stdout', 'run created');
     this.metrics.recordRunCreated(run.definitionId, run.dispatchedBy);
 
     if (request.startNow) {
       try {
-        await this.executorFor(executionMode).start(run, definition);
-        const updated = this.repository.getRun(run.id);
+        const startableRun = this.repository.getRun(run.id);
+        if (!startableRun) {
+          throw new Error(`Beast run disappeared before start: ${run.id}`);
+        }
+        if (startableRun.status !== 'queued') {
+          return startableRun;
+        }
+
+        await this.executorFor(executionMode).start(startableRun, definition);
+        const updated = this.repository.getRun(startableRun.id);
         if (!updated) {
-          throw new Error(`Beast run disappeared after start: ${run.id}`);
+          throw new Error(`Beast run disappeared after start: ${startableRun.id}`);
         }
         if (updated.trackedAgentId) {
           const agentStatus = updated.status === 'running'

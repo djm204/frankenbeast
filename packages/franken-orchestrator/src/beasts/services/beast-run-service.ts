@@ -257,7 +257,14 @@ export class BeastRunService {
     const run = this.requireRun(runId);
     const attemptId = run.currentAttemptId;
     if (!attemptId) {
-      throw new Error(`Beast run has no active attempt: ${runId}`);
+      const cleanedPendingRun = await this.executorFor(run).cleanupPendingRun?.(run.id) ?? false;
+      if (cleanedPendingRun) {
+        return this.stop(runId, _actor);
+      }
+      if (run.status === 'completed' || run.status === 'failed' || run.status === 'stopped') {
+        return run;
+      }
+      return this.stop(runId, _actor);
     }
     await this.executorFor(run).kill(run.id, attemptId);
     const updated = this.requireRun(runId);

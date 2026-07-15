@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 
 type BeastControlClient = Omit<ReturnType<typeof createBeastControlClient>, 'dispose'> & {
   dispose?: () => void;
+  getAgentRunId?: (agentId: string) => string | undefined;
 };
 
 const liveRunStatuses = new Set<BeastRun['status']>([
@@ -21,6 +22,10 @@ const liveRunStatuses = new Set<BeastRun['status']>([
 
 function shouldKeepServicesAliveForRun(run: Pick<BeastRun, 'status' | 'currentAttemptId'>): boolean {
   return Boolean(run.currentAttemptId && liveRunStatuses.has(run.status));
+}
+
+function isTerminalRun(run: Pick<BeastRun, 'status'> | undefined): boolean {
+  return Boolean(run && !liveRunStatuses.has(run.status));
 }
 
 function assertContainerRuntimeAvailable(): void {
@@ -104,6 +109,49 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
   };
   const actor = process.env.USER ?? 'operator';
   let keepServicesAlive = false;
+  let liveRunId: string | undefined;
+  let signalCleanupStarted = false;
+  const exitCodeForSignal = (signal: NodeJS.Signals): number => {
+    if (signal === 'SIGINT') return 130;
+    if (signal === 'SIGHUP') return 129;
+    return 143;
+  };
+  const disposeForSignal = (signal: NodeJS.Signals): void => {
+    if (signalCleanupStarted) {
+      return;
+    }
+    signalCleanupStarted = true;
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+    process.off('SIGHUP', onSighup);
+    Promise.resolve((async () => {
+      if (!liveRunId) {
+        return;
+      }
+      const currentRun = services.runs.getRun(liveRunId);
+      if (isTerminalRun(currentRun)) {
+        return;
+      }
+      await services.runs.kill(liveRunId, actor);
+    })())
+      .catch(() => undefined)
+      .finally(() => {
+        try {
+          services.dispose();
+        } finally {
+          if (ownsControl) {
+            control?.dispose?.();
+          }
+          process.exit(exitCodeForSignal(signal));
+        }
+      });
+  };
+  const onSigint = (): void => disposeForSignal('SIGINT');
+  const onSigterm = (): void => disposeForSignal('SIGTERM');
+  const onSighup = (): void => disposeForSignal('SIGHUP');
+  process.once('SIGINT', onSigint);
+  process.once('SIGTERM', onSigterm);
+  process.once('SIGHUP', onSighup);
 
   try {
     switch (args.beastAction) {
@@ -135,9 +183,13 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           dispatchedByUser: actor,
           executionMode,
           startNow: true,
+          onRunCreated: (createdRun) => {
+            liveRunId = createdRun.id;
+          },
           ...(args.moduleConfig ? { moduleConfig: args.moduleConfig } : {}),
         });
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
+        liveRunId = keepServicesAlive ? run.id : undefined;
         print(`Spawned ${run.definitionId} as ${run.id}`);
         return;
       }
@@ -188,15 +240,20 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         if (!args.beastTarget) {
           throw new Error('beasts restart requires a run id');
         }
+        liveRunId = args.beastTarget;
         const run = await services.runs.restart(args.beastTarget, actor);
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
+        liveRunId = keepServicesAlive ? run.id : undefined;
         print(`Restarted ${run.id}`);
         return;
       }
       case 'resume': {
         if (!args.beastTarget) throw new Error('beasts resume requires an agent id');
-        const run = await getControl().resumeAgent(args.beastTarget, actor);
+        const activeControl = getControl();
+        liveRunId = activeControl.getAgentRunId?.(args.beastTarget);
+        const run = await activeControl.resumeAgent(args.beastTarget, actor);
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
+        liveRunId = keepServicesAlive ? run.id : undefined;
         print(`Resumed ${run.id}`);
         return;
       }
@@ -211,6 +268,9 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
     }
   } finally {
     if (!keepServicesAlive) {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+      process.off('SIGHUP', onSighup);
       services.dispose();
     }
     if (ownsControl && !keepServicesAlive) {

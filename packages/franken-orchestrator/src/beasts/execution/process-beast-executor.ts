@@ -1,4 +1,4 @@
-import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, chownSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { BeastLogStore } from '../events/beast-log-store.js';
 import type { BeastEventBus } from '../events/beast-event-bus.js';
@@ -255,6 +255,76 @@ function resolveRunConfigOwner(
   return typeof owner === 'function' ? owner() : owner;
 }
 
+type ProcessStartTimeReadResult =
+  | { status: 'matched'; ticks: string }
+  | { status: 'not_linux' | 'invalid_pid' | 'leader_absent' | 'unreadable' };
+
+function processStartTimeTicks(pid: number): string | undefined {
+  const result = readProcessStartTimeTicks(pid);
+  return result.status === 'matched' ? result.ticks : undefined;
+}
+
+function readProcessStartTimeTicks(pid: number): ProcessStartTimeReadResult {
+  if (pid <= 0) {
+    return { status: 'invalid_pid' };
+  }
+  if (process.platform !== 'linux') {
+    return { status: 'not_linux' };
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const endOfCommand = stat.lastIndexOf(')');
+    if (endOfCommand < 0) {
+      return { status: 'unreadable' };
+    }
+    const fieldsFromState = stat.slice(endOfCommand + 2).trim().split(/\s+/);
+    const ticks = fieldsFromState[19];
+    return typeof ticks === 'string' && ticks.length > 0
+      ? { status: 'matched', ticks }
+      : { status: 'unreadable' };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { status: 'leader_absent' }
+      : { status: 'unreadable' };
+  }
+}
+
+function processGroupExists(pid: number): boolean {
+  if (pid <= 0 || process.platform === 'win32') {
+    return false;
+  }
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'EPERM';
+  }
+}
+
+function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
+  const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
+  const pid = attempt.pid;
+  if (
+    typeof pid !== 'number'
+    || attempt.executorMetadata?.processGroupOwned !== true
+    || attempt.executorMetadata?.processGroupLeaderPid !== pid
+  ) {
+    return false;
+  }
+  if (typeof expectedStartTime !== 'string') {
+    return false;
+  }
+  const actualStartTime = readProcessStartTimeTicks(pid);
+  if (actualStartTime.status === 'matched') {
+    return actualStartTime.ticks === expectedStartTime;
+  }
+  if (actualStartTime.status === 'leader_absent') {
+    return processGroupExists(pid);
+  }
+  return false;
+}
+
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
   const root = resolve(rootDir);
   const target = resolve(configDir);
@@ -307,6 +377,8 @@ function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnaps
 export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
   private readonly stoppingAttempts = new Set<string>();
+  private readonly pendingSpawnHandles = new Map<string, { pid: number }>();
+  private readonly cancelledPendingRunIds = new Set<string>();
   private readonly pendingConfigFilePaths = new Map<string, string>();
   private readonly attemptConfigFilePaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
@@ -417,30 +489,89 @@ export class ProcessBeastExecutor implements BeastExecutor {
       this.options.onRunStatusChange?.(run.id);
       throw error;
     }
+    this.pendingSpawnHandles.set(run.id, handle);
 
     const startedAt = new Date(wallClockNow()).toISOString();
+    const processStartTime = processStartTimeTicks(handle.pid);
+    const processGroupMetadata = {
+      processGroupOwned: process.platform !== 'win32' && typeof processStartTime === 'string',
+      processGroupLeaderPid: handle.pid,
+      ...(processStartTime ? { processStartTimeTicks: processStartTime } : {}),
+    };
     let attempt: BeastRunAttempt;
     try {
+      const currentRun = typeof this.repository.getRun === 'function'
+        ? this.repository.getRun(run.id)
+        : run;
+      if (
+        !currentRun
+        || (currentRun.status === 'stopped' && currentRun.stopReason === 'operator_kill')
+      ) {
+        this.cancelledPendingRunIds.delete(run.id);
+        try {
+          await this.supervisor.kill(handle.pid);
+        } finally {
+          this.pendingSpawnHandles.delete(run.id);
+          this.cleanupRunResources(run.id);
+        }
+        return {
+          id: `${run.id}:cancelled-before-attempt`,
+          runId: run.id,
+          attemptNumber: run.attemptCount,
+          status: 'stopped',
+          startedAt,
+          finishedAt: startedAt,
+          stopReason: 'operator_kill',
+        };
+      }
+      if (this.cancelledPendingRunIds.has(run.id) || this.pendingSpawnHandles.get(run.id) !== handle) {
+        this.cancelledPendingRunIds.delete(run.id);
+        try {
+          await this.supervisor.kill(handle.pid);
+        } finally {
+          this.pendingSpawnHandles.delete(run.id);
+          this.cleanupRunResources(run.id);
+        }
+        this.repository.updateRun(run.id, {
+          status: 'stopped',
+          finishedAt: startedAt,
+          currentAttemptId: null,
+          stopReason: 'operator_kill',
+        });
+        return {
+          id: `${run.id}:cancelled-before-attempt`,
+          runId: run.id,
+          attemptNumber: run.attemptCount,
+          status: 'stopped',
+          startedAt,
+          finishedAt: startedAt,
+          stopReason: 'operator_kill',
+        };
+      }
+      const customAttemptMetadata = this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle);
       attempt = this.repository.createAttempt(run.id, {
         status: 'running',
         pid: handle.pid,
         startedAt,
-        executorMetadata: this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle) ?? {
-          backend: 'process',
-          command: processSpec.command,
-          args: [...processSpec.args],
-          ...(worktree
-            ? {
-                worktreeIsolation: true,
-                worktreePath: worktree.worktreePath,
-                worktreeBranch: worktree.branchName,
-                worktreeCreated: worktree.created,
-                worktreeAgentId: worktree.agentId,
-                worktreeExecutionCwd: worktree.executionCwd,
-                worktreeProjectRoot: worktree.projectRoot,
-              }
-            : {}),
-        },
+        executorMetadata: customAttemptMetadata
+          ? { ...customAttemptMetadata, ...processGroupMetadata }
+          : {
+              backend: 'process',
+              ...processGroupMetadata,
+              command: processSpec.command,
+              args: [...processSpec.args],
+              ...(worktree
+                ? {
+                    worktreeIsolation: true,
+                    worktreePath: worktree.worktreePath,
+                    worktreeBranch: worktree.branchName,
+                    worktreeCreated: worktree.created,
+                    worktreeAgentId: worktree.agentId,
+                    worktreeExecutionCwd: worktree.executionCwd,
+                    worktreeProjectRoot: worktree.projectRoot,
+                  }
+                : {}),
+            },
       });
     } catch (error) {
       try {
@@ -449,10 +580,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
         // Preserve the original attempt-persistence failure while still
         // releasing pre-attempt config/worktree resources below.
       } finally {
+        this.pendingSpawnHandles.delete(run.id);
         this.cleanupRunResources(run.id);
       }
       throw error;
     }
+    this.pendingSpawnHandles.delete(run.id);
 
     // Once an attempt owns the worktree, preserve it for PR/merge or debugging per ADR-028.
     // The pending allocation map is only for pre-attempt spawn failures.
@@ -515,6 +648,21 @@ export class ProcessBeastExecutor implements BeastExecutor {
       data: { runId: run.id, attemptId: attempt.id, stream: 'stdout', line: startLogLine, createdAt: startedAt },
     });
     return attempt;
+  }
+
+  async cleanupPendingRun(runId: string): Promise<boolean> {
+    const handle = this.pendingSpawnHandles.get(runId);
+    if (!handle) {
+      return false;
+    }
+    this.cancelledPendingRunIds.add(runId);
+    try {
+      await this.supervisor.kill(handle.pid);
+    } finally {
+      this.pendingSpawnHandles.delete(runId);
+      this.cleanupRunResources(runId);
+    }
+    return true;
   }
 
 
@@ -612,7 +760,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
       this.stoppingAttempts.add(attemptId);
       try {
-        await this.supervisor.stop(attempt.pid);
+        await this.supervisor.stop(attempt.pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
       } catch (error) {
         this.exitPromises.delete(attemptId);
         this.stoppingAttempts.delete(attemptId);
@@ -631,7 +779,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         if (!exited && this.exitPromises.has(attemptId)) {
           this.exitPromises.delete(attemptId);
           this.stoppingAttempts.delete(attemptId);
-          await this.supervisor.kill(pid);
+          await this.supervisor.kill(pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
         }
 
         // If process exited after an operator stop, handleProcessExit already updated status — don't overwrite
@@ -647,7 +795,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   async kill(runId: string, attemptId: string): Promise<BeastRunAttempt> {
     const attempt = this.requireAttempt(attemptId);
     if (attempt.pid !== undefined) {
-      await this.supervisor.kill(attempt.pid);
+      await this.supervisor.kill(attempt.pid, { processGroupOwned: attemptOwnsProcessGroup(attempt) });
     }
     return this.finishAttempt(runId, attempt, 'stopped', 'operator_kill');
   }

@@ -17,13 +17,33 @@ export interface ProcessCallbacks {
 export interface ProcessSupervisorLike {
   validateCwd?(cwd: string | undefined): void;
   spawn(spec: BeastProcessSpec, callbacks: ProcessCallbacks): Promise<SpawnedProcessHandle>;
-  stop(pid: number): Promise<void>;
-  kill(pid: number): Promise<void>;
+  stop(pid: number, options?: ProcessSignalOptions): Promise<void>;
+  kill(pid: number, options?: ProcessSignalOptions): Promise<void>;
+}
+
+export interface ProcessSignalOptions {
+  readonly processGroupOwned?: boolean | undefined;
 }
 
 export interface ProcessSupervisorOptions {
   readonly projectRoot?: string | undefined;
   readonly spawn?: typeof defaultSpawn;
+  readonly orphanSweeper?: OrphanProcessSweeperOptions | undefined;
+}
+
+export interface OrphanProcessSweeperOptions {
+  readonly enabled?: boolean | undefined;
+  readonly signal?: NodeJS.Signals | undefined;
+  readonly escalationDelayMs?: number | undefined;
+  readonly platform?: NodeJS.Platform | undefined;
+  readonly killProcess?: typeof process.kill | undefined;
+}
+
+export interface OrphanProcessSweepResult {
+  readonly pid: number;
+  readonly signal: NodeJS.Signals;
+  readonly swept: boolean;
+  readonly skippedReason?: 'disabled' | 'invalid_pid' | 'unsupported_platform' | 'no_process_group' | 'permission_denied' | undefined;
 }
 
 function allowlistedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
@@ -54,6 +74,51 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
   constructor(private readonly options: ProcessSupervisorOptions = {}) {}
 
+  private orphanSweeperEnabled(): boolean {
+    return this.options.orphanSweeper?.enabled !== false;
+  }
+
+  private orphanSweeperPlatform(): NodeJS.Platform {
+    return this.options.orphanSweeper?.platform ?? process.platform;
+  }
+
+  private orphanSweeperSignal(): NodeJS.Signals {
+    return this.options.orphanSweeper?.signal ?? 'SIGTERM';
+  }
+
+  private killProcess(): typeof process.kill {
+    return this.options.orphanSweeper?.killProcess ?? process.kill;
+  }
+  private shouldUseProcessGroup(): boolean {
+    return this.orphanSweeperEnabled() && this.orphanSweeperPlatform() !== 'win32';
+  }
+
+  sweepOrphanProcessGroup(pid: number, signal: NodeJS.Signals = this.orphanSweeperSignal()): OrphanProcessSweepResult {
+    if (!this.orphanSweeperEnabled()) {
+      return { pid, signal, swept: false, skippedReason: 'disabled' };
+    }
+    if (pid <= 0) {
+      return { pid, signal, swept: false, skippedReason: 'invalid_pid' };
+    }
+    if (this.orphanSweeperPlatform() === 'win32') {
+      return { pid, signal, swept: false, skippedReason: 'unsupported_platform' };
+    }
+
+    try {
+      this.killProcess()(-pid, signal);
+      return { pid, signal, swept: true };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ESRCH') {
+        return { pid, signal, swept: false, skippedReason: 'no_process_group' };
+      }
+      if (code === 'EPERM') {
+        return { pid, signal, swept: false, skippedReason: 'permission_denied' };
+      }
+      throw error;
+    }
+  }
+
   validateCwd(cwd: string | undefined): void {
     assertContainedCwd(this.options.projectRoot, cwd);
   }
@@ -83,6 +148,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
         ...allowlistedEnv(process.env),
         ...spec.env,
       },
+      detached: this.shouldUseProcessGroup(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -248,6 +314,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     recordExit = (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
+      this.sweepOrphanProcessGroup(pid);
       setImmediate(() => {
         if (!stdoutClosed) {
           forceClose.stdout?.();
@@ -265,20 +332,24 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     return { pid };
   }
 
-  async stop(pid: number): Promise<void> {
+  async stop(pid: number, options: ProcessSignalOptions = {}): Promise<void> {
     if (pid <= 0) {
       return;
     }
 
     const child = this.processes.get(pid);
     if (child) {
-      child.kill('SIGTERM');
+      this.signalTrackedProcess(child, pid, 'SIGTERM');
       return;
     }
 
-    // Fallback to PID-based kill for legacy/external processes
+    // Only process-group sweep recovered attempts that were persisted as
+    // process-group leaders. Legacy/stale attempts fall back to direct PID
+    // signaling so a reused PID cannot fan out to an unrelated group.
     try {
-      process.kill(pid, 'SIGTERM');
+      if (!options.processGroupOwned || !this.sweepOrphanProcessGroup(pid, 'SIGTERM').swept) {
+        this.killProcess()(pid, 'SIGTERM');
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ESRCH') {
@@ -287,25 +358,37 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     }
   }
 
-  async kill(pid: number): Promise<void> {
+  async kill(pid: number, options: ProcessSignalOptions = {}): Promise<void> {
     if (pid <= 0) {
       return;
     }
 
     const child = this.processes.get(pid);
     if (child) {
-      child.kill('SIGKILL');
+      this.signalTrackedProcess(child, pid, 'SIGKILL');
       return;
     }
 
-    // Fallback to PID-based kill for legacy/external processes
+    // Only process-group sweep recovered attempts that were persisted as
+    // process-group leaders. Legacy/stale attempts fall back to direct PID
+    // signaling so a reused PID cannot fan out to an unrelated group.
     try {
-      process.kill(pid, 'SIGKILL');
+      if (!options.processGroupOwned || !this.sweepOrphanProcessGroup(pid, 'SIGKILL').swept) {
+        this.killProcess()(pid, 'SIGKILL');
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ESRCH') {
         throw error;
       }
     }
+  }
+
+  private signalTrackedProcess(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
+    const sweep = this.sweepOrphanProcessGroup(pid, signal);
+    if (sweep.swept) {
+      return;
+    }
+    child.kill(signal);
   }
 }
