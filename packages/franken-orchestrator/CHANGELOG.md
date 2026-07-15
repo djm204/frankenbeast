@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.49.1...@franken/orchestrator-v0.49.2) (2026-07-15)
+
+
+### Tests
+
+* **orchestrator:** add flaky liveness replay fixture ([#2280](https://github.com/djm204/frankenbeast/issues/2280)) ([6df3e58](https://github.com/djm204/frankenbeast/commit/6df3e586c97be11e5773464e670e0ce5c381f2ed)), closes [#1806](https://github.com/djm204/frankenbeast/issues/1806)
+
 ## [0.49.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.49.0...@franken/orchestrator-v0.49.1) (2026-07-15)
 
 
