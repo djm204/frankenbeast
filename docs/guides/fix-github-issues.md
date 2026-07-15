@@ -146,6 +146,11 @@ await evaluateIssueBackpressure({
 }, context)
 ```
 
+
+## Duplicate worker-card process detector
+
+PM and liveness callers that inventory worker-card processes can call `detectDuplicateWorkerCardProcesses(snapshots)` before starting or refilling issue work. Provide one snapshot per observed worker process with `cardId`, `pid`, optional `runId`, `issueNumber`, `owner`, `status`, `alive`, `startedAt`, and `lastHeartbeatAt`. The detector ignores terminal/dead/invalid snapshots and reports only cards with two or more distinct live PIDs. Each finding is structured for automation: `cardId`, `processCount`, sorted `pids`, `runIds`, `owners`, `statuses`, timestamps, a `message`, and operator `guidance` telling the PM to keep one live owner, stop or park the duplicate, and record the survivor in liveness output.
+
 ## Scheduler fairness report
 
 Before execution starts, `IssueRunner` emits `[issues] Scheduler fairness report` with structured data that PM/liveness tooling can consume without parsing prose. The report includes:
