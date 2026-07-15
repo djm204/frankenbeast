@@ -332,7 +332,6 @@ function redactNestedTranscriptValues(
   value: unknown,
   policy: ResolvedTranscriptRetentionPolicy,
   seen: WeakMap<object, unknown>,
-  parentType = '',
 ): unknown {
   if (value === null || typeof value !== 'object') return value
   if (value instanceof Error) return policy.retainedFields.errors ? redactValue(value, policy) : DROPPED
@@ -383,10 +382,9 @@ function redactNestedTranscriptValues(
       setRecordValue(retained, key, redactProviderStreamDeltaValue(nestedValue, policy, seen))
       continue
     }
-    const field = classifyContextualTranscriptField(value, key, parentType)
+    const field = classifyContextualTranscriptField(value, key)
     if (field && !policy.retainedFields[field]) continue
-    const nestedParentType = key.replace(/[_-]/g, '').toLowerCase() === 'delta' ? recordType : ''
-    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen, nestedParentType))
+    setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
   }
   return retained
 }
