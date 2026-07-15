@@ -9,6 +9,9 @@
 - Redact destructive privacy selectors before every audit/governance sink, including proxy/envelope validation failures and governor logs; if a tool is destructive, route it through the same governance path as sibling deletion tools rather than exempting it as non-executing data.
 - Deletion guards should cover source-scope key segments and replay/hydrate should install guards before restoring user data, while allowing the tool’s own right-to-forget audit event to round-trip without blocking hydration.
 - After Codex review on right-to-forget flows, regression-test every reinsertion path it names: stale multi-instance flush, learning-event writes, key-only query matches, episodic step text, substring query semantics, terminal source-scope key segments, checkpoint deletion/guards, and forged audit-event hydration.
+- For memory review/consent queues, right-to-forget must also guard candidate edits, reviewer/note metadata, and raw nested candidate values; redaction must scrub review `memory_key` fields and count review rows in public derived-deletion totals.
+- When hydrating snapshots over an existing memory DB, clear stale review candidates/provenance/suppressions before restoring working rows so old never-store suppressions cannot block snapshot data.
+- If persistence skips writes based on an in-memory cache, re-read the current DB row first; another process may have overwritten the persisted value while this instance's cache still looks unchanged.
 
 ## 2026-07-14 — Observer classification verification
 - In fresh worktrees, build `@franken/types` before running `@franken/observer` typecheck/build because observer imports generated workspace package exports.
@@ -17,6 +20,7 @@
 ## 2026-07-14 — Restore preview conflict detector drift coverage
 - Restore preview comparisons must include record metadata (`state`, `updatedAt`) alongside content digests; digest-only equality can hide approval-state or task-timestamp drift that a restore would roll back.
 - Treat backup-only approval/session-token records as blocker-severity conflicts, not informational drift, because restoring them can reintroduce stale authorization state that live has already cleared.
+- Restore dry-run CLI outputs should be machine-stable JSON with `dryRun: true`, `wouldWrite: false`, summarized blocker/warning/info counts, and explicit operator guidance; keep manifest parsing read-only and fail closed on malformed JSON before any restore path is reachable.
 
 ## 2026-07-13 — Lesson contradiction detector Codex edge cases
 - For lesson-contradiction heuristics, compare negation per corrective/directive guidance fragment rather than across a whole lesson blob; multi-finding lessons can otherwise mask one reversed clause with an unrelated negated clause.

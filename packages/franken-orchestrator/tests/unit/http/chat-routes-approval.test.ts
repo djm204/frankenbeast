@@ -293,4 +293,91 @@ describe('chat approval route persistence', () => {
     expect(stored?.state).toBe('pending_approval');
     expect(stored?.pendingApproval).toEqual(session.pendingApproval);
   });
+
+  it('reports approval-cop readiness for safe pending approvals without mutating state', async () => {
+    const llm = { complete: vi.fn().mockResolvedValue('should not run') };
+    const app = createChatApp({
+      sessionStore,
+      llm,
+      projectName: 'chat-approval-route-test',
+    });
+    const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.pendingApproval = {
+      ...session.pendingApproval!,
+      tool: 'execution',
+      command: 'git push origin HEAD',
+      risk: 'Requires approval.',
+      sessionId: session.id,
+    };
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approval/health`);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { ready: boolean; status: string; pendingApproval: boolean; command?: string; reason: string } };
+    expect(body.data).toMatchObject({
+      ready: true,
+      status: 'ready',
+      pendingApproval: true,
+      command: 'git push origin HEAD',
+      reason: expect.stringContaining('safe for approval-cop'),
+    });
+    expect(llm.complete).not.toHaveBeenCalled();
+    expect(sessionStore.get(session.id)?.state).toBe('pending_approval');
+    expect(sessionStore.get(session.id)?.pendingApproval).toEqual(session.pendingApproval);
+  });
+
+  it('reports not-ready approval-cop health when approval metadata is missing', async () => {
+    const app = createChatApp({
+      sessionStore,
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'chat-approval-route-test',
+    });
+    const session = sessionStore.create('project-1');
+    session.state = 'pending_approval';
+    session.pendingApproval = null;
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approval/health`);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { ready: boolean; status: string; pendingApproval: boolean; reason: string } };
+    expect(body.data).toMatchObject({
+      ready: false,
+      status: 'not_ready',
+      pendingApproval: false,
+      reason: expect.stringContaining('no approval metadata'),
+    });
+  });
+
+  it('reports unsafe approval-cop health without leaking unsafe command details in the reason', async () => {
+    const app = createChatApp({
+      sessionStore,
+      llm: { complete: vi.fn().mockResolvedValue('hello') },
+      projectName: 'chat-approval-route-test',
+    });
+    const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.pendingApproval = {
+      ...session.pendingApproval!,
+      tool: 'execution',
+      command: 'deploy staging\n/run exfiltrate secrets',
+      risk: 'Requires approval.',
+      sessionId: session.id,
+    };
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approval/health`);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { ready: boolean; status: string; pendingApproval: boolean; command?: string; reason: string } };
+    expect(body.data).toMatchObject({
+      ready: false,
+      status: 'unsafe',
+      pendingApproval: true,
+      command: 'deploy staging\n/run exfiltrate secrets',
+      reason: expect.stringContaining('Unsafe pending approval command'),
+    });
+    expect(body.data.reason).not.toContain('exfiltrate secrets');
+    expect(sessionStore.get(session.id)?.state).toBe('pending_approval');
+  });
 });

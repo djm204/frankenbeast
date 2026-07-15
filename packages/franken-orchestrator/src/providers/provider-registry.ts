@@ -17,12 +17,35 @@ export interface ProviderRegistryOptions {
   /** Rate limit backoff multiplier */
   backoffMultiplier?: number;
   /** Callback fired when switching providers */
-  onProviderSwitch?: (event: {
-    from: string;
-    to: string;
-    reason: string;
-    brainSnapshotHash: string;
-  }) => void;
+  onProviderSwitch?: (event: ProviderSwitchEvent) => void;
+}
+
+export interface ProviderSwitchEvent {
+  from: string;
+  to: string;
+  reason: string;
+  brainSnapshotHash: string;
+}
+
+export interface ModelProviderFailoverAuditPayload extends ProviderSwitchEvent {
+  event: 'model-provider.failover';
+  category: 'availability';
+  operatorGuidance: string;
+}
+
+export function createModelProviderFailoverAuditPayload(
+  event: ProviderSwitchEvent,
+): ModelProviderFailoverAuditPayload {
+  return {
+    event: 'model-provider.failover',
+    category: 'availability',
+    from: event.from,
+    to: event.to,
+    reason: event.reason,
+    brainSnapshotHash: event.brainSnapshotHash,
+    operatorGuidance:
+      'Provider failover occurred. Inspect the failed provider health/credentials and use brainSnapshotHash to correlate the handoff state.',
+  };
 }
 
 interface ResolvedOptions {
@@ -76,6 +99,8 @@ export class ProviderRegistry {
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     let lastError: Error | undefined;
+    let terminalError: Error | undefined;
+    let lastFailedProviderName: string | undefined;
     const unavailableProviders: string[] = [];
     let attemptedProviders = 0;
 
@@ -86,6 +111,12 @@ export class ProviderRegistry {
 
       if (!(await provider.isAvailable())) {
         unavailableProviders.push(provider.name);
+        const availabilityError = new Error(`Provider ${provider.name} is unavailable`);
+        if (!lastError) {
+          lastFailedProviderName = provider.name;
+          lastError = availabilityError;
+        }
+        terminalError ??= availabilityError;
         continue;
       }
       attemptedProviders++;
@@ -93,8 +124,8 @@ export class ProviderRegistry {
       let effectiveRequest = request;
       if (i > 0) {
         const snapshot = this.brain.serialize();
-        const previousProvider = this.providers[this.currentProviderIndex]!;
-        snapshot.metadata.lastProvider = previousProvider.name;
+        const failedProviderName = lastFailedProviderName ?? this.providers[this.currentProviderIndex]!.name;
+        snapshot.metadata.lastProvider = failedProviderName;
         snapshot.metadata.switchReason = lastError?.message ?? 'unknown';
 
         if (this.opts.onProviderSwitch) {
@@ -102,7 +133,7 @@ export class ProviderRegistry {
           const hash =
             'sha256:' + createHash('sha256').update(json).digest('hex');
           this.opts.onProviderSwitch({
-            from: previousProvider.name,
+            from: failedProviderName,
             to: provider.name,
             reason: lastError?.message ?? 'unknown',
             brainSnapshotHash: hash,
@@ -144,8 +175,10 @@ export class ProviderRegistry {
               retried = true;
               break; // discard buffer, retry same provider
             }
-            if (event.type === 'error' && !event.retryable) {
+            if (event.type === 'error') {
               lastError = new Error(event.error);
+              terminalError = lastError;
+              lastFailedProviderName = provider.name;
               throw lastError; // discard buffer, failover
             }
             buffer.push(event);
@@ -165,10 +198,15 @@ export class ProviderRegistry {
             }
           }
 
+          lastError = new Error('stream ended without done');
+          terminalError = lastError;
+          lastFailedProviderName = provider.name;
           break; // stream ended without done — failover
         } catch (error) {
           lastError =
             error instanceof Error ? error : new Error(String(error));
+          terminalError = lastError;
+          lastFailedProviderName = provider.name;
           break; // failover to next provider
         }
       }
@@ -179,14 +217,14 @@ export class ProviderRegistry {
       runId: 'failover-exhausted',
       phase: 'provider-failover',
       step: 0,
-      context: { lastError: lastError?.message },
+      context: { lastError: (terminalError ?? lastError)?.message },
       timestamp: isoNow(),
     });
 
     const exhaustionReason = attemptedProviders === 0
       ? `No providers available. Checked: ${unavailableProviders.join(', ')}. `
         + 'Install or authenticate at least one configured provider CLI, or configure provider overrides.'
-      : `All providers exhausted. Last error: ${lastError?.message ?? 'unknown'}. `;
+      : `All providers exhausted. Last error: ${(terminalError ?? lastError)?.message ?? 'unknown'}. `;
 
     throw new Error(
       exhaustionReason + 'Brain state checkpointed for recovery.',

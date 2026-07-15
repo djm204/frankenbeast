@@ -385,6 +385,23 @@ Features:
 - **Signature verification**: Optionally validates HMAC-SHA256 signatures on responses
 - **Session tokens**: Optionally creates scoped, time-limited tokens on APPROVE
 - **Audit**: Records every decision via the `AuditRecorder` interface
+- **HTTP queue backpressure**: `createGovernorApp({ approvalQueueBackpressure })` can reject new unique approval requests with HTTP 429 when too many approvals are already pending
+
+### HTTP approval queue backpressure
+
+Standalone governor HTTP apps can put an explicit high-water mark on pending approvals so automated producers slow down instead of growing an unbounded operator queue:
+
+```typescript
+const app = createGovernorApp({
+  signingSecret: process.env.FRANKEN_GOVERNOR_SIGNING_SECRET,
+  approvalQueueBackpressure: {
+    maxPendingApprovals: 25,
+    retryAfterSeconds: 60,
+  },
+});
+```
+
+When `pendingApprovals` reaches `maxPendingApprovals`, `POST /v1/approval/request` rejects new request IDs with `429` and an `approval_queue_backpressure` error body. If `retryAfterSeconds` is set, the response includes `Retry-After`. Reposting an existing pending `requestId` is still accepted so producers can refresh visible metadata without increasing queue depth. `GET /health` reports `approvalQueueBackpressure.enabled`, `atCapacity`, `maxPendingApprovals`, and `remainingCapacity` for scheduler/liveness tooling.
 
 ## Audit Trail
 

@@ -111,6 +111,69 @@ describe('Governor Hono Server', () => {
 
       expect(res.status).toBe(400);
     });
+
+    it('applies backpressure when the pending approval queue reaches capacity', async () => {
+      const app = createGovernorApp({
+        allowUnsignedApprovalsForTests: true,
+        approvalQueueBackpressure: { maxPendingApprovals: 2, retryAfterSeconds: 45 },
+      });
+
+      for (const requestId of ['req-1', 'req-2']) {
+        const accepted = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId, taskId: 'task-1', summary: 'Deploy' }),
+        });
+        expect(accepted.status).toBe(201);
+      }
+
+      const rejected = await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: 'req-3', taskId: 'task-1', summary: 'Deploy' }),
+      });
+
+      expect(rejected.status).toBe(429);
+      expect(rejected.headers.get('Retry-After')).toBe('45');
+      const body = await rejected.json();
+      expect(body.error.code).toBe('approval_queue_backpressure');
+      expect(body.error.message).toContain('Approval queue is at capacity');
+      expect(body.error.pendingApprovals).toBe(2);
+      expect(body.error.maxPendingApprovals).toBe(2);
+
+      const healthBody = await (await app.request('/health')).json();
+      expect(healthBody.pendingApprovals).toBe(2);
+      expect(healthBody.approvalQueueBackpressure).toEqual({
+        enabled: true,
+        atCapacity: true,
+        maxPendingApprovals: 2,
+        remainingCapacity: 0,
+      });
+    });
+
+    it('allows an existing pending approval to be refreshed while the queue is at capacity', async () => {
+      const app = createGovernorApp({
+        allowUnsignedApprovalsForTests: true,
+        approvalQueueBackpressure: { maxPendingApprovals: 1 },
+      });
+
+      const created = await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: 'req-1', taskId: 'task-1', summary: 'Deploy' }),
+      });
+      expect(created.status).toBe(201);
+
+      const refreshed = await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: 'req-1', taskId: 'task-1', summary: 'Updated summary' }),
+      });
+
+      expect(refreshed.status).toBe(201);
+      const healthBody = await (await app.request('/health')).json();
+      expect(healthBody.pendingApprovals).toBe(1);
+    });
   });
 
   describe('POST /v1/approval/respond', () => {

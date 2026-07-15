@@ -1239,6 +1239,749 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('memory review and consent queue', () => {
+    it('shows proposed memory candidates with review metadata before persistence', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+
+      expect(candidate).toMatchObject({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+        status: 'pending',
+      });
+      expect(candidate.id).toMatch(/^memcand_/);
+      expect(candidate.createdAt).toMatch(/Z$/);
+      expect(brain.working.has('user.preference.response-style')).toBe(false);
+      expect(brain.memoryReview.list()).toEqual([candidate]);
+    });
+
+    it('approves a candidate atomically and stores provenance metadata', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+
+      const result = brain.memoryReview.approve(candidate.id, {
+        reviewer: 'operator',
+        note: 'Verified in repository settings.',
+      });
+
+      expect(result.status).toBe('approved');
+      expect(brain.working.get('env.repo.default-branch')).toBe('main');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'env.repo.default-branch'),
+      ).toMatchObject({
+        candidateId: candidate.id,
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+        reviewer: 'operator',
+        note: 'Verified in repository settings.',
+      });
+    });
+
+    it('edits a candidate before approval and writes the edited memory', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.tone',
+        value: 'formal',
+        source: 'chat:turn-7',
+        confidence: 0.7,
+        reason: 'Inferred from wording.',
+      });
+
+      const edited = brain.memoryReview.edit(candidate.id, {
+        value: 'direct but respectful',
+        confidence: 0.95,
+        reason: 'Operator corrected inferred tone preference.',
+      });
+      expect(edited).toMatchObject({
+        value: 'direct but respectful',
+        confidence: 0.95,
+        reason: 'Operator corrected inferred tone preference.',
+        status: 'pending',
+      });
+
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+
+      expect(brain.working.get('user.preference.tone')).toBe(
+        'direct but respectful',
+      );
+      expect(
+        brain.memoryReview.provenanceFor('working', 'user.preference.tone'),
+      ).toMatchObject({
+        value: 'direct but respectful',
+        confidence: 0.95,
+      });
+    });
+
+    it('rejects a candidate without writing memory and suppresses duplicate evidence', () => {
+      const proposal = {
+        targetStore: 'working' as const,
+        key: 'user.location.city',
+        value: 'Paris',
+        source: 'chat:turn-9',
+        evidenceId: 'msg-9',
+        confidence: 0.55,
+        reason: 'Weak inference from travel discussion.',
+      };
+      const candidate = brain.memoryReview.propose(proposal);
+
+      const rejected = brain.memoryReview.reject(candidate.id, {
+        reviewer: 'operator',
+        note: 'Travel mention is not residence.',
+      });
+
+      expect(rejected.status).toBe('rejected');
+      expect(brain.working.has('user.location.city')).toBe(false);
+      expect(brain.memoryReview.propose(proposal)).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'rejected',
+        source: 'chat:turn-9',
+        evidenceId: 'msg-9',
+      });
+    });
+
+    it('marks a candidate as never-store and suppresses future matching proposals', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.secret.api-token',
+        value: 'sk-test-redacted',
+        source: 'terminal-output',
+        confidence: 0.99,
+        reason: 'Sensitive token should not persist without consent.',
+      });
+
+      const neverStored = brain.memoryReview.neverStore(candidate.id, {
+        reviewer: 'operator',
+        note: 'Secrets must never be stored in memory.',
+      });
+
+      expect(neverStored.status).toBe('never_store');
+      expect(brain.working.has('env.secret.api-token')).toBe(false);
+      expect(brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'env.secret.api-token',
+          value: '«redacted:sk-…»',
+          source: 'later-terminal-output',
+          confidence: 0.99,
+          reason: 'Same secret appeared again.',
+        }),
+      ).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+      });
+    });
+
+    it('redacts never-store candidate and suppression payloads at rest', () => {
+      const secret = 'sk-live-secret-that-must-not-persist';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.secret.api-token',
+        value: secret,
+        source: 'terminal-output',
+        confidence: 0.99,
+        reason: 'Sensitive token should not persist without consent.',
+      });
+
+      const neverStored = brain.memoryReview.neverStore(candidate.id, {
+        reviewer: 'operator',
+      });
+
+      expect(neverStored.value).toBe('[never-store-redacted]');
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const candidateRow = db
+        .prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates WHERE id = ?`)
+        .get(candidate.id) as { value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null };
+      const suppressionRow = db
+        .prepare(`SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`)
+        .get() as { value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null };
+      expect(candidateRow.value).toBe(JSON.stringify('[never-store-redacted]'));
+      expect(suppressionRow.value).toBe(JSON.stringify('[never-store-redacted]'));
+      expect(candidateRow.value).not.toContain(secret);
+      expect(suppressionRow.value).not.toContain(secret);
+      for (const row of [candidateRow, suppressionRow]) {
+        expect(row.source).toBe('[never-store-redacted]');
+        expect(row.evidence_id).toBeNull();
+        expect(row.reason).toBe('[never-store-redacted]');
+        expect(row.reviewer).toBeNull();
+        expect(row.note).toBeNull();
+      }
+    });
+
+    it('does not let stale rejection decisions overwrite settled candidates', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-race-'));
+      const dbPath = join(dir, 'brain.db');
+      const reviewerA = new SqliteBrain(dbPath);
+      const reviewerB = new SqliteBrain(dbPath);
+
+      try {
+        const candidate = reviewerA.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.review-race',
+          value: 'keep this memory',
+          source: 'chat:turn-12',
+          confidence: 0.8,
+          reason: 'Operator-visible review race regression.',
+        });
+
+        reviewerB.memoryReview.approve(candidate.id, { reviewer: 'reviewer-b' });
+
+        expect(() =>
+          reviewerA.memoryReview.reject(candidate.id, { reviewer: 'reviewer-a' }),
+        ).toThrow(/expected pending|no longer pending/);
+        const db = (reviewerA as unknown as { db: Database.Database }).db;
+        expect(
+          db
+            .prepare(`SELECT status FROM memory_review_candidates WHERE id = ?`)
+            .get(candidate.id),
+        ).toEqual({ status: 'approved' });
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_suppressions`).get(),
+        ).toEqual({ count: 0 });
+      } finally {
+        reviewerA.close();
+        reviewerB.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('clears review candidates, provenance, and suppressions when hydrating over an existing database', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-hydrate-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const existing = new SqliteBrain(dbPath);
+        const approved = existing.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.reviewed',
+          value: 'approved memory',
+          source: 'chat:turn-13',
+          confidence: 0.9,
+          reason: 'Hydrate should clear stale provenance.',
+        });
+        existing.memoryReview.approve(approved.id, { reviewer: 'operator' });
+        const neverStored = existing.memoryReview.propose({
+          targetStore: 'working',
+          key: 'env.secret.api-token',
+          value: 'stale-secret',
+          source: 'terminal-output',
+          confidence: 0.99,
+          reason: 'Hydrate should clear stale suppressions.',
+        });
+        existing.memoryReview.neverStore(neverStored.id, { reviewer: 'operator' });
+        const snapshot = existing.serialize();
+        existing.close();
+
+        const hydrated = SqliteBrain.hydrate(snapshot, dbPath);
+        const db = (hydrated as unknown as { db: Database.Database }).db;
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_candidates`).get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_provenance`).get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare(`SELECT COUNT(*) AS count FROM memory_review_suppressions`).get(),
+        ).toEqual({ count: 0 });
+        expect(
+          hydrated.memoryReview.propose({
+            targetStore: 'working',
+            key: 'env.secret.api-token',
+            value: 'stale-secret',
+            source: 'later-terminal-output',
+            confidence: 0.99,
+            reason: 'A hydrated snapshot should not inherit stale suppression.',
+          }).status,
+        ).toBe('pending');
+        hydrated.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('suppresses already-pending duplicates before they can be approved', () => {
+      const proposal = {
+        targetStore: 'working' as const,
+        key: 'env.secret.api-token',
+        value: 'duplicate-secret',
+        source: 'terminal-output',
+        confidence: 0.99,
+        reason: 'Sensitive token should not persist without consent.',
+      };
+      const first = brain.memoryReview.propose(proposal);
+      const duplicate = brain.memoryReview.propose({
+        ...proposal,
+        source: 'later-terminal-output',
+        reason: 'Same secret appeared again.',
+      });
+
+      brain.memoryReview.neverStore(first.id, { reviewer: 'operator' });
+      const suppressedDuplicate = brain.memoryReview.list('suppressed')[0];
+
+      expect(suppressedDuplicate).toMatchObject({
+        id: duplicate.id,
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+        value: '[never-store-redacted]',
+      });
+      expect(brain.working.has('env.secret.api-token')).toBe(false);
+    });
+
+    it('purges approved working memory and provenance when a key is marked never-store', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.sensitive',
+        value: 'approved value',
+        source: 'chat:turn-14',
+        confidence: 0.9,
+        reason: 'Initially approved memory.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+      expect(brain.working.get('user.preference.sensitive')).toBe('approved value');
+      expect(
+        brain.memoryReview.provenanceFor('working', 'user.preference.sensitive'),
+      ).not.toBeNull();
+
+      const neverStored = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.sensitive',
+        value: 'do not keep this key',
+        source: 'chat:turn-15',
+        confidence: 0.99,
+        reason: 'Operator opted this key out of memory.',
+      });
+      brain.memoryReview.neverStore(neverStored.id, { reviewer: 'operator' });
+
+      expect(brain.working.has('user.preference.sensitive')).toBe(false);
+      expect(
+        brain.memoryReview.provenanceFor('working', 'user.preference.sensitive'),
+      ).toBeNull();
+    });
+
+    it('redacts review payloads that match right-to-forget selectors', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'contact.review-candidate',
+        value: `Candidate contains ${secret}`,
+        source: 'chat:turn-secret',
+        evidenceId: `evidence-${secret}`,
+        confidence: 0.9,
+        reason: `Review reason mentions ${secret}`,
+      });
+      brain.memoryReview.reject(candidate.id, {
+        reviewer: `reviewer-${secret}`,
+        note: `note ${secret}`,
+      });
+
+      const report = brain.rightToForget({ query: secret });
+
+      expect(report.remainingReferences).toBe(0);
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const rows = db.prepare(
+        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+      ).all() as Array<{ value: string; source: string; evidence_id: string | null; reason: string; reviewer: string | null; note: string | null }>;
+      expect(rows).toHaveLength(1);
+      for (const row of rows) {
+        expect(JSON.stringify(row)).not.toContain(secret);
+        expect(row.value).toBe(JSON.stringify('[never-store-redacted]'));
+        expect(row.source).toBe('[never-store-redacted]');
+        expect(row.evidence_id).toBeNull();
+        expect(row.reason).toBe('[never-store-redacted]');
+        expect(row.reviewer).toBeNull();
+        expect(row.note).toBeNull();
+      }
+    });
+
+    it('retires pending review candidates that match right-to-forget selectors', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'contact.pending-review',
+        value: `Candidate contains ${secret}`,
+        source: 'chat:turn-secret',
+        confidence: 0.9,
+        reason: 'Pending candidate should be retired by deletion.',
+      });
+
+      const report = brain.rightToForget({ query: secret });
+
+      expect(report.remainingReferences).toBe(0);
+      expect(brain.memoryReview.list()).toHaveLength(0);
+      const suppressed = brain.memoryReview.list('suppressed')[0];
+      expect(suppressed).toMatchObject({
+        id: candidate.id,
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+        value: '[never-store-redacted]',
+      });
+      brain.memoryReview.approve(candidate.id);
+      expect(brain.working.has('contact.pending-review')).toBe(false);
+    });
+
+    it('keeps never-store enforcement after redacting suppression keys', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.secret-contact',
+        value: secret,
+        source: 'chat:turn-secret',
+        confidence: 0.99,
+        reason: 'Operator opted this key out of memory.',
+      });
+      brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+
+      brain.rightToForget({ query: 'secret-contact' });
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const suppression = db
+        .prepare(`SELECT memory_key, created_at FROM memory_review_suppressions`)
+        .get() as { memory_key: string; created_at: string };
+      expect(suppression.memory_key).not.toBe('user.preference.secret-contact');
+      const legacyRedactedKey = `[never-store-redacted]:${createHash('sha256')
+        .update(`user.preference.secret-contact:${suppression.created_at}`)
+        .digest('hex')
+        .slice(0, 12)}`;
+      expect(suppression.memory_key).not.toBe(legacyRedactedKey);
+      expect(() => brain.working.set('user.preference.secret-contact', 'new value')).toThrow(
+        /never-store/,
+      );
+    });
+
+    it('checks deletion guards before returning suppressed review proposals', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.secret-contact',
+        value: secret,
+        source: 'chat:turn-secret',
+        confidence: 0.99,
+        reason: 'Operator opted this key out of memory.',
+      });
+      brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+      brain.rightToForget({ query: 'secret-contact' });
+
+      expect(() =>
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.secret-contact',
+          value: secret,
+          source: 'later-chat-turn',
+          confidence: 0.99,
+          reason: 'Suppression should not bypass right-to-forget guards.',
+        }),
+      ).toThrow(/right-to-forget/);
+    });
+
+    it('uses keyed signatures for review suppressions', () => {
+      const key = 'user.preference.low-entropy';
+      const source = 'chat:turn-17';
+      const evidenceId = 'evt-17';
+      const value = 'tiny-secret';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key,
+        value,
+        source,
+        evidenceId,
+        confidence: 0.8,
+        reason: 'Rejected candidate should use keyed lookup material.',
+      });
+
+      brain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const suppression = db
+        .prepare(`SELECT signature FROM memory_review_suppressions`)
+        .get() as { signature: string };
+      const legacySignature = createHash('sha256')
+        .update(JSON.stringify(['rejected', 'working', key, source, evidenceId, JSON.stringify(value)]))
+        .digest('hex');
+      expect(suppression.signature).not.toBe(legacySignature);
+      expect(
+        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
+      ).toEqual({ count: 1 });
+    });
+
+    it('indexes review suppression lookup by target store and memory key', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const indexes = db.prepare(`PRAGMA index_list(memory_review_suppressions)`).all() as Array<{ name: string }>;
+
+      expect(indexes.some(index => index.name === 'idx_memory_review_suppressions_target_key')).toBe(true);
+    });
+
+    it('does not create deletion hash keys while only checking suppressions', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.new-candidate',
+        value: 'safe value',
+        source: 'chat:turn-no-suppression',
+        confidence: 0.8,
+        reason: 'Normal proposals should not create suppression signing keys.',
+      });
+
+      expect(
+        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
+      ).toEqual({ count: 0 });
+      expect(brain.serialize()).not.toHaveProperty('deletionGuardHashKey');
+    });
+
+    it('deletes approved working memory when matching review provenance by source scope', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Repository metadata.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+      expect(brain.working.get('env.repo.default-branch')).toBe('main');
+
+      const report = brain.rightToForget({ sourceScope: 'repo-config' });
+
+      expect(report.deleted.working).toBe(1);
+      expect(report.remainingReferences).toBe(0);
+      expect(brain.working.has('env.repo.default-branch')).toBe(false);
+      expect(
+        brain.memoryReview.provenanceFor('working', 'env.repo.default-branch'),
+      ).toBeNull();
+    });
+
+    it('does not expose approved memory in working state when approval transaction rolls back', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.exec(`
+        CREATE TRIGGER fail_review_provenance_insert
+        BEFORE INSERT ON memory_review_provenance
+        BEGIN
+          SELECT RAISE(FAIL, 'forced provenance failure');
+        END;
+      `);
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.rollback',
+        value: 'rolled back value',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Approval failure should remain atomic.',
+      });
+
+      expect(() => brain.memoryReview.approve(candidate.id, { reviewer: 'operator' })).toThrow(
+        /forced provenance failure/,
+      );
+      expect(brain.working.has('env.repo.rollback')).toBe(false);
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM working_memory WHERE key = ?`).get('env.repo.rollback')).toEqual({ count: 0 });
+    });
+
+    it('uses persisted value normalization when signing suppressions', () => {
+      const value = { seenAt: new Date('2026-07-14T00:00:00.000Z') };
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.timestamped',
+        value,
+        source: 'chat:turn-10',
+        confidence: 0.8,
+        reason: 'Timestamped preference candidate.',
+      });
+
+      brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+
+      expect(
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.timestamped',
+          value,
+          source: 'chat:turn-11',
+          confidence: 0.8,
+          reason: 'Same timestamped preference candidate.',
+        }),
+      ).toMatchObject({
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+      });
+    });
+
+    it('blocks stale working-memory flushes from resurrecting never-store keys', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-never-store-stale-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let reviewer: SqliteBrain | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('env.secret.api-token', 'stale secret value');
+
+        reviewer = new SqliteBrain(dbPath);
+        const candidate = reviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'env.secret.api-token',
+          value: 'new secret value',
+          source: 'terminal-output',
+          confidence: 0.99,
+          reason: 'Operator opted this key out of memory.',
+        });
+        reviewer.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+
+        stale.flush();
+        stale.close();
+        stale = new SqliteBrain(dbPath);
+
+        expect(stale.working.has('env.secret.api-token')).toBe(false);
+        expect(stale.working.get('env.secret.api-token')).toBeUndefined();
+      } finally {
+        reviewer?.close();
+        stale?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rechecks deletion guards before editing or recording review decisions', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.pending',
+        value: 'safe value',
+        source: 'chat:turn-safe',
+        confidence: 0.8,
+        reason: 'Pending candidate for guard regression.',
+      });
+      brain.rightToForget({ query: 'forgotten secret', sourceScope: 'blocked-source' });
+
+      expect(() => brain.memoryReview.edit(candidate.id, {
+        value: 'contains forgotten secret',
+      })).toThrow(/right-to-forget/);
+      expect(() => brain.memoryReview.edit(candidate.id, {
+        source: 'blocked-source',
+      })).toThrow(/right-to-forget/);
+      expect(() => brain.memoryReview.approve(candidate.id, {
+        note: 'decision mentions forgotten secret',
+      })).toThrow(/right-to-forget/);
+    });
+
+    it('guards and redacts nested review candidate metadata for right-to-forget selectors', () => {
+      brain.rightToForget({ category: 'pii' });
+      expect(() => brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'review.nested-category',
+        value: { category: 'pii', email: 'alice@example.test' },
+        source: 'chat:turn-16',
+        confidence: 0.9,
+        reason: 'Nested category should be guarded.',
+      })).toThrow(/right-to-forget/);
+
+      const fresh = new SqliteBrain();
+      try {
+        fresh.memoryReview.propose({
+          targetStore: 'working',
+          key: 'review.nested-category',
+          value: { category: 'pii', email: 'alice@example.test' },
+          source: 'chat:turn-16',
+          confidence: 0.9,
+          reason: 'Nested category should be redacted.',
+        });
+        const report = fresh.rightToForget({ category: 'pii' });
+        expect(report.deleted.derived).toBe(1);
+        expect(report.remainingReferences).toBe(0);
+        const db = (fresh as unknown as { db: Database.Database }).db;
+        const row = db.prepare(`SELECT memory_key, value FROM memory_review_candidates`).get() as { memory_key: string; value: string };
+        expect(row.memory_key).not.toContain('review.nested-category');
+        expect(row.value).not.toContain('alice@example.test');
+      } finally {
+        fresh.close();
+      }
+    });
+
+    it('refreshes persisted state before approved writes skip an upsert', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-stale-persist-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let concurrent: SqliteBrain | undefined;
+      let verifier: SqliteBrain | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('preference', 'approved');
+        stale.flush();
+
+        concurrent = new SqliteBrain(dbPath);
+        concurrent.working.set('preference', 'concurrent overwrite');
+        concurrent.flush();
+
+        const candidate = stale.memoryReview.propose({
+          targetStore: 'working',
+          key: 'preference',
+          value: 'approved',
+          source: 'chat:turn-17',
+          confidence: 0.9,
+          reason: 'Approved value equals stale cache.',
+        });
+        stale.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+        stale.close();
+        stale = undefined;
+
+        verifier = new SqliteBrain(dbPath);
+        expect(verifier.working.get('preference')).toBe('approved');
+      } finally {
+        stale?.close();
+        concurrent?.close();
+        verifier?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('clears stale review suppressions before hydrating snapshot working memory', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-hydrate-stale-suppression-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const existing = new SqliteBrain(dbPath);
+        const staleSuppression = existing.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.restore',
+          value: 'old value',
+          source: 'chat:turn-18',
+          confidence: 0.9,
+          reason: 'Stale suppression from old DB state.',
+        });
+        existing.memoryReview.neverStore(staleSuppression.id, { reviewer: 'operator' });
+        existing.close();
+
+        const hydrated = SqliteBrain.hydrate({
+          version: 1,
+          timestamp: '2026-07-15T00:00:00.000Z',
+          working: { 'user.preference.restore': 'restored safe value' },
+          episodic: [],
+          checkpoint: null,
+          metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+        }, dbPath);
+        expect(hydrated.working.get('user.preference.restore')).toBe('restored safe value');
+        const db = (hydrated as unknown as { db: Database.Database }).db;
+        expect(db.prepare(`SELECT COUNT(*) AS count FROM memory_review_suppressions`).get()).toEqual({ count: 0 });
+        hydrated.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('memory schema versioning and migrations', () => {
     it('exposes store-level and record-level schema version metadata', () => {
       brain.working.set('goal', 'ship migrations');
@@ -1273,6 +2016,21 @@ describe('SqliteBrain', () => {
           store: 'checkpoints',
           version: CURRENT_MEMORY_SCHEMA_VERSION,
           recordCount: 1,
+        },
+        {
+          store: 'memory_review_candidates',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 0,
+        },
+        {
+          store: 'memory_review_provenance',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 0,
+        },
+        {
+          store: 'memory_review_suppressions',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 0,
         },
         {
           store: 'memory_deletion_guards',
@@ -1395,6 +2153,21 @@ describe('SqliteBrain', () => {
           },
           {
             store: 'checkpoints',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_review_candidates',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_review_provenance',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 0,
+          },
+          {
+            store: 'memory_review_suppressions',
             version: CURRENT_MEMORY_SCHEMA_VERSION,
             recordCount: 0,
           },
@@ -1671,6 +2444,31 @@ describe('SqliteBrain', () => {
           details: { body: 'legacy details' },
           createdAt: '2026-07-13T00:00:00.000Z',
         });
+        const approved = plaintext.memoryReview.propose({
+          targetStore: 'working',
+          key: 'review.approved',
+          value: { secret: 'approved review payload' },
+          source: 'legacy review source',
+          evidenceId: 'legacy-evidence',
+          confidence: 0.9,
+          reason: 'legacy review reason',
+        });
+        plaintext.memoryReview.approve(approved.id, {
+          reviewer: 'legacy reviewer',
+          note: 'legacy approval note',
+        });
+        const rejected = plaintext.memoryReview.propose({
+          targetStore: 'working',
+          key: 'review.rejected',
+          value: 'rejected review payload',
+          source: 'legacy rejection source',
+          confidence: 0.4,
+          reason: 'legacy rejection reason',
+        });
+        plaintext.memoryReview.reject(rejected.id, {
+          reviewer: 'legacy reviewer',
+          note: 'legacy rejection note',
+        });
         plaintext.flush();
         plaintext.close();
 
@@ -1683,6 +2481,10 @@ describe('SqliteBrain', () => {
         expect(dryRun.operations.map((op) => op.table)).toEqual([
           'working_memory',
           'episodic_events',
+          'memory_review_candidates',
+          'memory_review_provenance',
+          'memory_review_suppressions',
+          'memory_deletion_hash_keys',
         ]);
 
         const migrated = SqliteBrain.migrateMemoryEncryption(dbPath, {
@@ -1783,7 +2585,7 @@ describe('SqliteBrain', () => {
               context: { restoredSecret: 'checkpoint secret' },
               timestamp: '2026-07-13T00:00:00.000Z',
             },
-            metadata: { lastProvider: '', switchReason: '' },
+            metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
           },
           dbPath,
           undefined,

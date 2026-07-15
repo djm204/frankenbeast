@@ -1,0 +1,70 @@
+{
+  "description": "Burst dispatch load fixture for availability/backpressure tests. The first snapshot represents an overloaded refill tick; the second snapshot represents recovered capacity on the next tick.",
+  "issues": [
+    { "number": 182401, "title": "Burst issue A", "labels": ["P2", "reliability"] },
+    { "number": 182402, "title": "Burst issue B", "labels": ["P2", "reliability"] }
+  ],
+  "thresholds": {
+    "maxActiveProcesses": 3,
+    "maxFailedStarts": 1,
+    "maxInFlightBacklog": 4,
+    "maxPendingIssueCount": 10,
+    "maxOldestQueueAgeMs": 300000,
+    "maxSystemLoadAverage": 8,
+    "minProviderBudgetTokensRemaining": 100000
+  },
+  "snapshots": [
+    {
+      "name": "burst-overload",
+      "signals": {
+        "activeProcesses": 3,
+        "failedStarts": 2,
+        "inFlightBacklog": 8,
+        "pendingIssueCount": 2,
+        "oldestQueueAgeMs": 420000,
+        "systemLoadAverage": 9.5,
+        "providerBudgetTokensRemaining": 75000
+      },
+      "expectedAllowed": false,
+      "expectedReasons": [
+        "active processes 3 reached limit 3",
+        "failed starts 2 exceeds limit 1",
+        "fresh ticket creation blocked while in-flight backlog 8 exceeds limit 4",
+        "oldest queue age 420000ms exceeds limit 300000ms",
+        "system load 9.5 exceeds limit 8",
+        "provider budget remaining 75000 tokens is at or below reserve 100000"
+      ]
+    },
+    {
+      "name": "recovered-capacity",
+      "signals": {
+        "activeProcesses": 1,
+        "failedStarts": 0,
+        "inFlightBacklog": 1,
+        "pendingIssueCount": 1,
+        "oldestQueueAgeMs": 120000,
+        "systemLoadAverage": 2.25,
+        "providerBudgetTokensRemaining": 500000
+      },
+      "expectedAllowed": true,
+      "expectedReasons": []
+    }
+  ],
+  "edgeCases": [
+    {
+      "name": "queue-depth-stops-fresh-starts",
+      "thresholds": { "maxPendingIssueCount": 1 },
+      "signals": {
+        "activeProcesses": 0,
+        "failedStarts": 0,
+        "inFlightBacklog": 0,
+        "pendingIssueCount": 2,
+        "oldestQueueAgeMs": 0,
+        "systemLoadAverage": 1,
+        "providerBudgetTokensRemaining": 500000
+      },
+      "expectedAllowed": false,
+      "expectedReasons": ["queue depth 2 exceeds limit 1"]
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import type { TurnRunner } from '../../chat/turn-runner.js';
 import type {
   ApiDataEnvelope,
   ApproveResult,
+  ApprovalReadinessResult,
   ChatSocketTicketResponse,
   ChatSessionResponse,
   ChatSessionSummary,
@@ -66,6 +67,56 @@ function sessionResponse(
   session: NonNullable<ReturnType<ISessionStore['get']>>,
 ): ChatSessionResponse {
   return { ...session };
+}
+
+function approvalReadinessResponse(
+  session: NonNullable<ReturnType<ISessionStore['get']>>,
+): ApprovalReadinessResult {
+  if (!session.pendingApproval) {
+    return {
+      id: session.id,
+      ready: false,
+      status: 'not_ready',
+      state: session.state,
+      pendingApproval: false,
+      reason: session.state === 'pending_approval'
+        ? 'Session is pending approval but no approval metadata is available; reject or recover it before approval-cop can approve.'
+        : 'No pending approval exists for this session.',
+    };
+  }
+
+  try {
+    approvalRuntimeInput(session.pendingApproval);
+  } catch (error) {
+    if (error instanceof UnsafeApprovalCommandError) {
+      return {
+        id: session.id,
+        ready: false,
+        status: 'unsafe',
+        state: session.state,
+        pendingApproval: true,
+        reason: error.message,
+        requestedAt: session.pendingApproval.requestedAt,
+        ...(session.pendingApproval.tool ? { tool: session.pendingApproval.tool } : {}),
+        ...(session.pendingApproval.command ? { command: session.pendingApproval.command } : {}),
+        ...(session.pendingApproval.risk ? { risk: session.pendingApproval.risk } : {}),
+      };
+    }
+    throw error;
+  }
+
+  return {
+    id: session.id,
+    ready: true,
+    status: 'ready',
+    state: session.state,
+    pendingApproval: true,
+    reason: 'Pending approval metadata is present and safe for approval-cop to approve.',
+    requestedAt: session.pendingApproval.requestedAt,
+    ...(session.pendingApproval.tool ? { tool: session.pendingApproval.tool } : {}),
+    ...(session.pendingApproval.command ? { command: session.pendingApproval.command } : {}),
+    ...(session.pendingApproval.risk ? { risk: session.pendingApproval.risk } : {}),
+  };
 }
 
 function firstForwardedAddress(header: string | undefined): string | undefined {
@@ -164,6 +215,14 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     return c.json({
       data: { ticket: issueSocketTicket(id) },
     } satisfies ApiDataEnvelope<ChatSocketTicketResponse>);
+  });
+
+  app.get('/v1/chat/sessions/:id/approval/health', (c) => {
+    const id = validateChatSessionId(c.req.param('id'));
+    const session = getSessionOrThrow(sessionStore, id);
+    return c.json({
+      data: approvalReadinessResponse(session),
+    } satisfies ApiDataEnvelope<ApprovalReadinessResult>);
   });
 
   // Submit message

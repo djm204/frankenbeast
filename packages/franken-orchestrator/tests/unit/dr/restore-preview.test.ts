@@ -4,7 +4,10 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import {
+  buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
+  buildPointInTimeBackupManifest,
+  buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
   type RestorePreviewManifest,
 } from '../../../src/dr/restore-preview.js';
@@ -35,6 +38,95 @@ function readMissingCronJobRecoveryFixture(): MissingCronJobRecoveryFixture {
 }
 
 describe('restore preview conflict detector', () => {
+  it('builds a deterministic point-in-time manifest with record counts for explicitly captured restore areas', () => {
+    const backup: RestorePreviewManifest = {
+      schemaVersion: 1,
+      encryption: {
+        encrypted: true,
+        algorithm: 'aes-256-gcm',
+        keyRef: 'dr/backups/prod-primary',
+        artifactDigest: 'sha256:archive',
+      },
+      tasks: [{ id: 'task-1', digest: 'task-digest', value: { nested: ['kept'] } }],
+      approvals: [{ id: 'approval-1', state: 'pending', digest: 'approval-digest' }],
+      memory: [],
+    };
+    const before = clone(backup);
+
+    const manifest = buildPointInTimeBackupManifest(backup, {
+      capturedAt: '2026-07-14T12:00:00.000Z',
+      generatedAt: '2026-07-14T12:05:00.000Z',
+      source: 'prod-primary',
+      manifestDigest: 'sha256:manifest',
+    });
+
+    expect(manifest).toEqual({
+      schemaVersion: 1,
+      generatedAt: '2026-07-14T12:05:00.000Z',
+      pointInTime: {
+        capturedAt: '2026-07-14T12:00:00.000Z',
+        generatedAt: '2026-07-14T12:05:00.000Z',
+        source: 'prod-primary',
+        includedAreas: ['tasks', 'approvals', 'memory'],
+        recordCounts: {
+          tasks: 1,
+          approvals: 1,
+          memory: 0,
+        },
+        manifestDigest: 'sha256:manifest',
+      },
+      encryption: backup.encryption,
+      tasks: backup.tasks,
+      approvals: backup.approvals,
+      memory: [],
+    });
+    expect(manifest.pointInTime.includedAreas).toEqual(['tasks', 'approvals', 'memory']);
+    expect(manifest).not.toHaveProperty('cron');
+    expect(backup).toEqual(before);
+  });
+
+  it('distinguishes explicitly captured empty areas from omitted partial-backup areas', () => {
+    const manifest = buildPointInTimeBackupManifest(
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      {
+        capturedAt: '2026-07-14T12:00:00.000Z',
+        generatedAt: '2026-07-14T12:05:00.000Z',
+      },
+    );
+
+    expect(manifest.pointInTime.includedAreas).toEqual(['tasks', 'approvals', 'memory', 'cron']);
+    expect(manifest.pointInTime.recordCounts).toEqual({ tasks: 0, approvals: 0, memory: 0, cron: 0 });
+    expect(manifest.cron).toEqual([]);
+  });
+
+  it('fails explicitly when point-in-time metadata would claim a future capture', () => {
+    expect(() =>
+      buildPointInTimeBackupManifest(
+        { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+        {
+          capturedAt: '2026-07-14T12:10:00.000Z',
+          generatedAt: '2026-07-14T12:05:00.000Z',
+        },
+      ),
+    ).toThrow('capturedAt must not be later than generatedAt');
+  });
+
+  it('fails explicitly when point-in-time timestamps are malformed or normalized by JavaScript', () => {
+    expect(() =>
+      buildPointInTimeBackupManifest(
+        { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+        { capturedAt: 'not-a-timestamp', generatedAt: '2026-07-14T12:05:00.000Z' },
+      ),
+    ).toThrow('capturedAt must be a valid canonical ISO timestamp');
+
+    expect(() =>
+      buildPointInTimeBackupManifest(
+        { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+        { capturedAt: '2026-02-30T00:00:00.000Z', generatedAt: '2026-03-02T00:00:00.000Z' },
+      ),
+    ).toThrow('capturedAt must be a valid canonical ISO timestamp');
+  });
+
   it('returns a clean no-write preview when backup manifest matches live state', () => {
     const backup: RestorePreviewManifest = {
       schemaVersion: 1,
@@ -190,6 +282,66 @@ describe('restore preview conflict detector', () => {
     expect(preview.destructiveActions.blocked).toContainEqual(
       expect.objectContaining({ area: 'approvals', id: 'live-only-approval', type: 'delete-live-record' }),
     );
+  });
+
+  it('builds deterministic restore dry-run JSON output for automation', () => {
+    const backup: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [{ id: 'task-1', digest: 'old-task', updatedAt: '2026-07-14T10:00:00.000Z' }],
+      approvals: [{ id: 'approval-1', state: 'pending', digest: 'pending-token', value: 'secret-token-value' }],
+      memory: [],
+      cron: [],
+    };
+    const live: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [{ id: 'task-1', digest: 'new-task', updatedAt: '2026-07-14T11:00:00.000Z' }],
+      approvals: [],
+      memory: [{ id: 'memory:user', digest: 'live-only-memory' }],
+      cron: [],
+    };
+
+    const report = buildRestoreDryRunReport(backup, live, {
+      generatedAt: '2026-07-14T12:30:00.000Z',
+      backupPath: '/backups/manifest.json',
+      livePath: '/state/live-manifest.json',
+    });
+
+    expect(report).toEqual({
+      ok: true,
+      command: 'dr restore-dry-run',
+      formatVersion: 1,
+      generatedAt: '2026-07-14T12:30:00.000Z',
+      dryRun: true,
+      wouldWrite: false,
+      inputs: {
+        backupPath: '/backups/manifest.json',
+        livePath: '/state/live-manifest.json',
+      },
+      summary: {
+        safeToRestore: false,
+        conflictCount: 3,
+        blockerCount: 1,
+        warningCount: 1,
+        infoCount: 1,
+      },
+      preview: expect.objectContaining({
+        wouldWrite: false,
+        safeToRestore: false,
+        conflicts: expect.arrayContaining([
+          expect.objectContaining({
+            area: 'tasks',
+            backup: expect.objectContaining({ id: 'task-1', digestPresent: true }),
+          }),
+          expect.objectContaining({
+            area: 'approvals',
+            backup: { id: 'approval-1', state: 'pending', digestPresent: true, valuePresent: true },
+          }),
+        ]),
+      }),
+      operatorGuidance: expect.stringContaining('do not execute restore'),
+    });
+    expect(JSON.stringify(report)).not.toContain('secret-token-value');
+    expect(JSON.stringify(report)).not.toContain('pending-token');
   });
 
   it('treats backup-only approval tokens as blockers', () => {
@@ -462,6 +614,113 @@ describe('restore preview conflict detector', () => {
         expect.objectContaining({ code: 'missing-key-reference', severity: 'warning' }),
         expect.objectContaining({ code: 'missing-artifact-digest', severity: 'warning' }),
       ]),
+    );
+  });
+
+  it('returns a clean read-only approval ledger recovery report when approvals match', () => {
+    const backup: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [],
+      approvals: [{ id: 'approval-1', state: 'approved', digest: 'sha256:approval', updatedAt: '2026-07-14T12:00:00.000Z' }],
+      memory: [],
+      cron: [],
+    };
+
+    const report = buildApprovalLedgerRecoveryReport(backup, clone(backup), {
+      checkedAt: '2026-07-14T12:30:00.000Z',
+    });
+
+    expect(report).toEqual({
+      checkedAt: '2026-07-14T12:30:00.000Z',
+      wouldWrite: false,
+      status: 'clean',
+      safeToApplyAutomatically: false,
+      findings: [],
+      operatorSummary: 'Approval ledger recovery check is clean; no approval ledger drift was found.',
+    });
+  });
+
+  it('blocks approval ledger recovery for stale backup-only approval tokens', () => {
+    const report = buildApprovalLedgerRecoveryReport(
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-stale', state: 'approved', digest: 'sha256:stale-token' }],
+        memory: [],
+        cron: [],
+      },
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(report.safeToApplyAutomatically).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'approval-backup-only',
+        approvalId: 'approval-stale',
+        severity: 'blocker',
+        backup: { state: 'approved', digestPresent: true },
+        recommendation: expect.stringContaining('fresh human re-approval'),
+      }),
+    );
+  });
+
+  it('blocks changed approval ledger entries without echoing token values', () => {
+    const report = buildApprovalLedgerRecoveryReport(
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-drift', state: 'pending', digest: 'sha256:backup-secret-token', updatedAt: '2026-07-14T11:00:00.000Z' }],
+        memory: [],
+        cron: [],
+      },
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-drift', state: 'approved', digest: 'sha256:live-secret-token', updatedAt: '2026-07-14T12:00:00.000Z' }],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(JSON.stringify(report)).not.toContain('secret-token');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'approval-newer-live',
+        approvalId: 'approval-drift',
+        severity: 'blocker',
+        backup: { state: 'pending', digestPresent: true, updatedAt: '2026-07-14T11:00:00.000Z' },
+        live: { state: 'approved', digestPresent: true, updatedAt: '2026-07-14T12:00:00.000Z' },
+        recommendation: expect.stringContaining('fresh re-approval'),
+      }),
+    );
+  });
+
+  it('surfaces live-only approval ledger entries as operator review warnings', () => {
+    const report = buildApprovalLedgerRecoveryReport(
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      {
+        schemaVersion: 1,
+        tasks: [],
+        approvals: [{ id: 'approval-live', state: 'approved', digest: 'sha256:live-token' }],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('review-required');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'approval-live-only',
+        approvalId: 'approval-live',
+        severity: 'warning',
+        live: { state: 'approved', digestPresent: true },
+        recommendation: expect.stringContaining('Preserve the live approval ledger entry'),
+      }),
     );
   });
 });

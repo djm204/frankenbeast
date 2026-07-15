@@ -1,5 +1,8 @@
 import { SqliteBrain } from '@franken/brain';
-import { ProviderRegistry } from '../providers/provider-registry.js';
+import {
+  createModelProviderFailoverAuditPayload,
+  ProviderRegistry,
+} from '../providers/provider-registry.js';
 import { createLlmProvider, type ProviderConfig } from '../providers/provider-config.js';
 import type { EgressAuditSink, EgressPolicyConfig } from '../network/egress-policy.js';
 import { now as deterministicNow } from '@franken/types';
@@ -127,6 +130,12 @@ export function createBeastDeps(
   const providers = buildProviderList(config.providers, config.network?.egressPolicy, recordProviderEgressDecision);
   const registry = new ProviderRegistry(providers, brain, {
     onProviderSwitch: (event) => {
+      auditTrail.append(
+        createAuditEvent('model-provider.failover', createModelProviderFailoverAuditPayload(event), {
+          phase: 'execution',
+          provider: event.to,
+        }),
+      );
       auditTrail.append(
         createAuditEvent('provider.switch', event, {
           phase: 'execution',

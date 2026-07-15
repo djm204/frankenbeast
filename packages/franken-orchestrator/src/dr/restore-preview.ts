@@ -42,6 +42,77 @@ export interface BackupEncryptionVerificationOptions {
   readonly allowedAlgorithms?: readonly string[];
 }
 
+export type ApprovalLedgerRecoveryStatus = 'clean' | 'review-required' | 'blocked';
+
+export type ApprovalLedgerRecoverySeverity = 'info' | 'warning' | 'blocker';
+
+export type ApprovalLedgerRecoveryFindingCode =
+  | 'schema-mismatch'
+  | 'approval-backup-only'
+  | 'approval-live-only'
+  | 'approval-changed'
+  | 'approval-newer-live';
+
+export interface ApprovalLedgerRecordSummary {
+  readonly state?: string;
+  readonly digestPresent: boolean;
+  readonly updatedAt?: string;
+}
+
+export interface ApprovalLedgerRecoveryFinding {
+  readonly code: ApprovalLedgerRecoveryFindingCode;
+  readonly approvalId: string;
+  readonly severity: ApprovalLedgerRecoverySeverity;
+  readonly message: string;
+  readonly recommendation: string;
+  readonly backup?: ApprovalLedgerRecordSummary;
+  readonly live?: ApprovalLedgerRecordSummary;
+}
+
+export interface ApprovalLedgerRecoveryReport {
+  /** ISO timestamp for when the report was generated, supplied by callers for deterministic tests. */
+  readonly checkedAt: string;
+  /** Explicitly records that approval-ledger recovery planning is read-only and performs no restore writes. */
+  readonly wouldWrite: false;
+  readonly status: ApprovalLedgerRecoveryStatus;
+  readonly safeToApplyAutomatically: false;
+  readonly findings: readonly ApprovalLedgerRecoveryFinding[];
+  readonly operatorSummary: string;
+}
+
+export interface ApprovalLedgerRecoveryOptions {
+  readonly checkedAt?: string;
+}
+
+export interface PointInTimeBackupManifestMetadata {
+  /** Instant the backup logically represents. Restores should not assume state after this time is present. */
+  readonly capturedAt: string;
+  /** Instant this manifest was written, supplied by callers for deterministic tests and audit logs. */
+  readonly generatedAt: string;
+  /** Operator-readable source such as an environment, backup job id, or storage URI. */
+  readonly source?: string;
+  /** Restore-preview areas explicitly present in this point-in-time manifest. */
+  readonly includedAreas: readonly ComparableArea[];
+  /** Record counts for explicitly captured areas so omitted areas remain visible before restore. */
+  readonly recordCounts: Readonly<Partial<Record<ComparableArea, number>>>;
+  /** Optional digest for the manifest payload or archive that contains it. */
+  readonly manifestDigest?: string;
+}
+
+export interface PointInTimeBackupManifest extends RestorePreviewManifest {
+  readonly generatedAt: string;
+  readonly pointInTime: PointInTimeBackupManifestMetadata;
+}
+
+export interface PointInTimeBackupManifestOptions {
+  /** Instant the backup logically represents. Defaults to generatedAt when omitted. */
+  readonly capturedAt?: string;
+  /** Instant this manifest was generated. Defaults to the current wall-clock time. */
+  readonly generatedAt?: string;
+  readonly source?: string;
+  readonly manifestDigest?: string;
+}
+
 export type RestorePreviewConflictType =
   | 'schema-mismatch'
   | 'changed'
@@ -69,6 +140,8 @@ export interface RestorePreviewRecord {
 
 export interface RestorePreviewManifest {
   readonly schemaVersion: number;
+  readonly generatedAt?: string;
+  readonly pointInTime?: PointInTimeBackupManifestMetadata;
   readonly encryption?: BackupEncryptionMetadata;
   readonly tasks?: readonly RestorePreviewRecord[];
   readonly approvals?: readonly RestorePreviewRecord[];
@@ -122,6 +195,60 @@ export interface RestorePreviewResult {
   readonly conflicts: readonly RestorePreviewConflict[];
 }
 
+export interface RestoreDryRunReportOptions {
+  /** ISO timestamp for deterministic automation/tests; defaults to the current time. */
+  readonly generatedAt?: string;
+  readonly backupPath?: string;
+  readonly livePath?: string;
+}
+
+export interface RestoreDryRunConflictRecordSummary {
+  readonly id: string;
+  readonly state?: string;
+  readonly digestPresent?: boolean;
+  readonly valuePresent?: boolean;
+  readonly updatedAt?: string;
+}
+
+export interface RestoreDryRunConflict {
+  readonly area: RestorePreviewArea;
+  readonly id: string;
+  readonly type: RestorePreviewConflictType;
+  readonly severity: RestorePreviewSeverity;
+  readonly backup?: RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number };
+  readonly live?: RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number };
+  readonly recommendation: string;
+}
+
+export interface RestoreDryRunPreviewResult {
+  readonly wouldWrite: false;
+  readonly safeToRestore: boolean;
+  readonly schema: RestorePreviewResult['schema'];
+  readonly conflicts: readonly RestoreDryRunConflict[];
+}
+
+export interface RestoreDryRunReport {
+  readonly ok: true;
+  readonly command: 'dr restore-dry-run';
+  readonly formatVersion: 1;
+  readonly generatedAt: string;
+  readonly dryRun: true;
+  readonly wouldWrite: false;
+  readonly inputs: {
+    readonly backupPath?: string;
+    readonly livePath?: string;
+  };
+  readonly summary: {
+    readonly safeToRestore: boolean;
+    readonly conflictCount: number;
+    readonly blockerCount: number;
+    readonly warningCount: number;
+    readonly infoCount: number;
+  };
+  readonly preview: RestoreDryRunPreviewResult;
+  readonly operatorGuidance: string;
+}
+
 type ComparableArea = Exclude<RestorePreviewArea, 'schema'>;
 
 const AREA_ACCESSORS = {
@@ -132,6 +259,41 @@ const AREA_ACCESSORS = {
 } satisfies Record<ComparableArea, (manifest: RestorePreviewManifest) => readonly RestorePreviewRecord[]>;
 
 const DEFAULT_ALLOWED_BACKUP_ENCRYPTION_ALGORITHMS = ['aes-256-gcm', 'xchacha20-poly1305'] as const;
+
+export function buildPointInTimeBackupManifest(
+  manifest: RestorePreviewManifest,
+  options: PointInTimeBackupManifestOptions = {},
+): PointInTimeBackupManifest {
+  const generatedAt = normalizeIsoInstant(options.generatedAt ?? new Date().toISOString(), 'generatedAt');
+  const capturedAt = normalizeIsoInstant(options.capturedAt ?? generatedAt, 'capturedAt');
+
+  if (Date.parse(capturedAt) > Date.parse(generatedAt)) {
+    throw new Error('Point-in-time backup manifest capturedAt must not be later than generatedAt.');
+  }
+
+  const capturedAreas = (Object.keys(AREA_ACCESSORS) as ComparableArea[]).filter(
+    (area) => manifest[area] !== undefined,
+  );
+  const recordCounts = Object.fromEntries(
+    capturedAreas.map((area) => [area, AREA_ACCESSORS[area](manifest).length]),
+  ) as Partial<Record<ComparableArea, number>>;
+  const pointInTime: PointInTimeBackupManifestMetadata = {
+    capturedAt,
+    generatedAt,
+    ...(options.source === undefined ? {} : { source: options.source }),
+    includedAreas: capturedAreas,
+    recordCounts,
+    ...(options.manifestDigest === undefined ? {} : { manifestDigest: options.manifestDigest }),
+  };
+
+  return {
+    schemaVersion: manifest.schemaVersion,
+    generatedAt,
+    pointInTime,
+    ...(manifest.encryption === undefined ? {} : { encryption: { ...manifest.encryption } }),
+    ...copyCapturedRecords(manifest),
+  };
+}
 
 export function buildBackupEncryptionVerificationReport(
   manifest: RestorePreviewManifest,
@@ -216,6 +378,43 @@ export function buildBackupEncryptionVerificationReport(
   };
 }
 
+export function buildApprovalLedgerRecoveryReport(
+  backup: RestorePreviewManifest,
+  live: RestorePreviewManifest,
+  options: ApprovalLedgerRecoveryOptions = {},
+): ApprovalLedgerRecoveryReport {
+  const checkedAt = options.checkedAt ?? new Date().toISOString();
+  const preview = detectRestorePreviewConflicts(backup, live);
+  const findings: ApprovalLedgerRecoveryFinding[] = [];
+
+  if (!preview.schema.compatible) {
+    findings.push({
+      code: 'schema-mismatch',
+      approvalId: 'schema-version',
+      severity: 'blocker',
+      message: `Backup schema version ${preview.schema.backupVersion} does not match live schema version ${preview.schema.liveVersion}.`,
+      recommendation:
+        'Do not recover approval ledger entries until the backup has been migrated to the live schema version or the restore is run against a compatible live store.',
+    });
+  }
+
+  for (const conflict of preview.conflicts) {
+    if (conflict.area !== 'approvals') continue;
+    findings.push(findingForApprovalConflict(conflict));
+  }
+
+  const status = statusForApprovalLedgerFindings(findings);
+
+  return {
+    checkedAt,
+    wouldWrite: false,
+    status,
+    safeToApplyAutomatically: false,
+    findings,
+    operatorSummary: operatorSummaryForApprovalLedgerReport(status, findings.length),
+  };
+}
+
 export function detectRestorePreviewConflicts(
   backup: RestorePreviewManifest,
   live: RestorePreviewManifest,
@@ -256,6 +455,65 @@ export function detectRestorePreviewConflicts(
   };
 }
 
+export function buildRestoreDryRunReport(
+  backup: RestorePreviewManifest,
+  live: RestorePreviewManifest,
+  options: RestoreDryRunReportOptions = {},
+): RestoreDryRunReport {
+  const preview = detectRestorePreviewConflicts(backup, live);
+  const blockerCount = preview.conflicts.filter((conflict) => conflict.severity === 'blocker').length;
+  const warningCount = preview.conflicts.filter((conflict) => conflict.severity === 'warning').length;
+  const infoCount = preview.conflicts.filter((conflict) => conflict.severity === 'info').length;
+
+  return {
+    ok: true,
+    command: 'dr restore-dry-run',
+    formatVersion: 1,
+    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    dryRun: true,
+    wouldWrite: false,
+    inputs: {
+      ...(options.backupPath === undefined ? {} : { backupPath: options.backupPath }),
+      ...(options.livePath === undefined ? {} : { livePath: options.livePath }),
+    },
+    summary: {
+      safeToRestore: preview.safeToRestore,
+      conflictCount: preview.conflicts.length,
+      blockerCount,
+      warningCount,
+      infoCount,
+    },
+    preview: redactPreviewForDryRun(preview),
+    operatorGuidance: preview.safeToRestore
+      ? 'Dry-run only: no restore writes were performed. Review the JSON report, then execute restore separately if an operator explicitly approves it.'
+      : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts have explicit restore, merge, skip, or quarantine decisions.',
+  };
+}
+
+function redactPreviewForDryRun(preview: RestorePreviewResult): RestoreDryRunPreviewResult {
+  return {
+    ...preview,
+    conflicts: preview.conflicts.map((conflict) => ({
+      ...conflict,
+      ...(conflict.backup === undefined ? {} : { backup: redactConflictRecord(conflict.backup) }),
+      ...(conflict.live === undefined ? {} : { live: redactConflictRecord(conflict.live) }),
+    })),
+  };
+}
+
+function redactConflictRecord(
+  record: RestorePreviewRecord | { readonly schemaVersion: number },
+): RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number } {
+  if (!('id' in record)) return record;
+  return {
+    id: record.id,
+    ...(typeof record.state === 'string' ? { state: record.state } : {}),
+    ...(typeof record.digest === 'string' ? { digestPresent: true } : {}),
+    ...('value' in record && record.value !== undefined ? { valuePresent: true } : {}),
+    ...(typeof record.updatedAt === 'string' ? { updatedAt: record.updatedAt } : {}),
+  };
+}
+
 function statusForEncryptionFindings(
   findings: readonly BackupEncryptionVerificationFinding[],
 ): BackupEncryptionVerificationStatus {
@@ -264,12 +522,113 @@ function statusForEncryptionFindings(
   return 'verified';
 }
 
+function findingForApprovalConflict(conflict: RestorePreviewConflict): ApprovalLedgerRecoveryFinding {
+  const backup = summarizeApprovalRecord(conflict.backup);
+  const live = summarizeApprovalRecord(conflict.live);
+
+  switch (conflict.type) {
+    case 'backup-only':
+      return {
+        code: 'approval-backup-only',
+        approvalId: conflict.id,
+        severity: 'blocker',
+        message: 'Backup contains an approval ledger entry that is absent from live state.',
+        recommendation:
+          'Quarantine this backup approval entry and require a fresh human re-approval before any action can reuse the approval.',
+        ...(backup === undefined ? {} : { backup }),
+      };
+    case 'live-only':
+      return {
+        code: 'approval-live-only',
+        approvalId: conflict.id,
+        severity: 'warning',
+        message: 'Live state contains an approval ledger entry that is absent from the backup.',
+        recommendation:
+          'Preserve the live approval ledger entry during recovery unless an operator explicitly expires it; do not let the backup delete live approval evidence silently.',
+        ...(live === undefined ? {} : { live }),
+      };
+    case 'newer-live':
+      return {
+        code: 'approval-newer-live',
+        approvalId: conflict.id,
+        severity: 'blocker',
+        message: 'Live approval ledger state is newer than the backup copy.',
+        recommendation:
+          'Preserve the live approval state and require fresh re-approval for any action whose approval evidence differs from the backup.',
+        ...(backup === undefined ? {} : { backup }),
+        ...(live === undefined ? {} : { live }),
+      };
+    case 'changed':
+    default:
+      return {
+        code: 'approval-changed',
+        approvalId: conflict.id,
+        severity: 'blocker',
+        message: 'Backup and live approval ledger entries differ.',
+        recommendation:
+          'Do not merge or replay this approval token automatically; require fresh re-approval and keep both ledger snapshots for audit review.',
+        ...(backup === undefined ? {} : { backup }),
+        ...(live === undefined ? {} : { live }),
+      };
+  }
+}
+
+function summarizeApprovalRecord(
+  record: RestorePreviewConflict['backup'] | RestorePreviewConflict['live'],
+): ApprovalLedgerRecordSummary | undefined {
+  if (!isRecord(record) || 'schemaVersion' in record) return undefined;
+  const summarySource = record as Record<string, unknown>;
+  return {
+    ...(typeof summarySource.state === 'string' ? { state: summarySource.state } : {}),
+    digestPresent: typeof summarySource.digest === 'string' && summarySource.digest.length > 0,
+    ...(typeof summarySource.updatedAt === 'string' ? { updatedAt: summarySource.updatedAt } : {}),
+  };
+}
+
+function statusForApprovalLedgerFindings(
+  findings: readonly ApprovalLedgerRecoveryFinding[],
+): ApprovalLedgerRecoveryStatus {
+  if (findings.some((finding) => finding.severity === 'blocker')) return 'blocked';
+  if (findings.length > 0) return 'review-required';
+  return 'clean';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeIsoInstant(value: string, fieldName: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value) {
+    throw new Error(`Point-in-time backup manifest ${fieldName} must be a valid canonical ISO timestamp.`);
+  }
+  return new Date(parsed).toISOString();
+}
+
+function copyCapturedRecords(manifest: RestorePreviewManifest): Partial<Record<ComparableArea, readonly RestorePreviewRecord[]>> {
+  return Object.fromEntries(
+    (Object.keys(AREA_ACCESSORS) as ComparableArea[])
+      .filter((area) => manifest[area] !== undefined)
+      .map((area) => [area, cloneRecords(manifest[area])]),
+  ) as Partial<Record<ComparableArea, readonly RestorePreviewRecord[]>>;
+}
+
+function cloneRecords(records: readonly RestorePreviewRecord[] | undefined): readonly RestorePreviewRecord[] {
+  return (records ?? []).map((record) => ({
+    ...record,
+    ...(record.value === undefined ? {} : { value: cloneJsonValue(record.value) }),
+  }));
+}
+
+function cloneJsonValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => cloneJsonValue(item));
+  const object = value as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(object).map(([key, item]) => [key, cloneJsonValue(item)]));
 }
 
 function operatorSummaryForEncryptionReport(
@@ -342,6 +701,15 @@ function destructiveActionsForConflict(conflict: RestorePreviewConflict): Restor
       reason: 'Applying the backup record would overwrite or replace current live state.',
     },
   ];
+}
+
+function operatorSummaryForApprovalLedgerReport(
+  status: ApprovalLedgerRecoveryStatus,
+  findingCount: number,
+): string {
+  if (status === 'clean') return 'Approval ledger recovery check is clean; no approval ledger drift was found.';
+  if (status === 'review-required') return `Approval ledger recovery found ${findingCount} warning(s); preserve live approval evidence unless an operator explicitly expires it.`;
+  return `Approval ledger recovery is blocked by ${findingCount} finding(s); stale or changed approvals require fresh human re-approval before restore.`;
 }
 
 function compareRecords(

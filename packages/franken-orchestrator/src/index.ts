@@ -58,6 +58,7 @@ export type {
   IssueBackpressureSignals,
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
+  IssueCapacityWatermarkAlert,
 } from './issues/index.js';
 
 // Config
@@ -120,6 +121,15 @@ export {
   assessPmHandoffQuality,
   formatHandoff,
 } from './providers/format-handoff.js';
+export {
+  createModelProviderFailoverAuditPayload,
+  ProviderRegistry as LlmProviderRegistry,
+} from './providers/provider-registry.js';
+export type {
+  ModelProviderFailoverAuditPayload,
+  ProviderRegistryOptions as LlmProviderRegistryOptions,
+  ProviderSwitchEvent,
+} from './providers/provider-registry.js';
 export type {
   PmHandoffQualityAssessment,
   PmHandoffRubricCriterion,
@@ -218,8 +228,21 @@ export { checkModuleHealth, allHealthy } from './resilience/module-initializer.j
 export type { ModuleHealth } from './resilience/module-initializer.js';
 
 // Disaster recovery
-export { buildBackupEncryptionVerificationReport, detectRestorePreviewConflicts } from './dr/restore-preview.js';
+export {
+  buildApprovalLedgerRecoveryReport,
+  buildBackupEncryptionVerificationReport,
+  buildPointInTimeBackupManifest,
+  buildRestoreDryRunReport,
+  detectRestorePreviewConflicts,
+} from './dr/restore-preview.js';
 export type {
+  ApprovalLedgerRecordSummary,
+  ApprovalLedgerRecoveryFinding,
+  ApprovalLedgerRecoveryFindingCode,
+  ApprovalLedgerRecoveryOptions,
+  ApprovalLedgerRecoveryReport,
+  ApprovalLedgerRecoverySeverity,
+  ApprovalLedgerRecoveryStatus,
   BackupEncryptionMetadata,
   BackupEncryptionVerificationFinding,
   BackupEncryptionVerificationFindingCode,
@@ -227,6 +250,14 @@ export type {
   BackupEncryptionVerificationReport,
   BackupEncryptionVerificationSeverity,
   BackupEncryptionVerificationStatus,
+  PointInTimeBackupManifest,
+  PointInTimeBackupManifestMetadata,
+  PointInTimeBackupManifestOptions,
+  RestoreDryRunConflict,
+  RestoreDryRunConflictRecordSummary,
+  RestoreDryRunPreviewResult,
+  RestoreDryRunReport,
+  RestoreDryRunReportOptions,
   RestorePreviewArea,
   RestorePreviewConflict,
   RestorePreviewConflictType,

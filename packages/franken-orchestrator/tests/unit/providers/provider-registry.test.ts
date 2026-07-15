@@ -296,6 +296,55 @@ describe('ProviderRegistry', () => {
       );
     });
 
+    it('reports the actual failed provider during chained failover', async () => {
+      const p1 = mockProvider('primary', { failOnExecute: new Error('primary crashed') });
+      const p2 = mockProvider('secondary', { failOnExecute: new Error('secondary crashed') });
+      const p3 = mockProvider('tertiary');
+      const onSwitch = vi.fn();
+
+      const registry = new ProviderRegistry([p1, p2, p3], mockBrain(), {
+        onProviderSwitch: onSwitch,
+      });
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(onSwitch).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          from: 'primary',
+          to: 'secondary',
+          reason: 'primary crashed',
+        }),
+      );
+      expect(onSwitch).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          from: 'secondary',
+          to: 'tertiary',
+          reason: 'secondary crashed',
+        }),
+      );
+    });
+
+    it('preserves the executed failure across unavailable fallback providers', async () => {
+      const p1 = mockProvider('primary', { failOnExecute: new Error('primary crashed') });
+      const p2 = mockProvider('secondary', { available: false });
+      const p3 = mockProvider('tertiary');
+      const onSwitch = vi.fn();
+
+      const registry = new ProviderRegistry([p1, p2, p3], mockBrain(), {
+        onProviderSwitch: onSwitch,
+      });
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(onSwitch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'primary',
+          to: 'tertiary',
+          reason: 'primary crashed',
+        }),
+      );
+    });
+
     it('checkpoints brain when all providers exhausted', async () => {
       const p1 = mockProvider('p1', { failOnExecute: new Error('err1') });
       const p2 = mockProvider('p2', { failOnExecute: new Error('err2') });
@@ -363,6 +412,67 @@ describe('ProviderRegistry', () => {
       const delay2 = timestamps[2] - timestamps[1];
       expect(delay1).toBeGreaterThanOrEqual(40); // 50ms with some tolerance
       expect(delay2).toBeGreaterThanOrEqual(80); // 100ms with some tolerance
+    });
+
+    it('uses the exhausted retryable error as failover reason', async () => {
+      const p1: ILlmProvider = {
+        ...mockProvider('rate-limited'),
+        execute: vi.fn(async function* () {
+          yield { type: 'error' as const, error: 'rate limit', retryable: true };
+        }),
+      };
+      const p2 = mockProvider('backup');
+      const onSwitch = vi.fn();
+
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        maxRetriesPerProvider: 1,
+        retryDelayMs: 1,
+        onProviderSwitch: onSwitch,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(onSwitch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'rate-limited',
+          to: 'backup',
+          reason: 'rate limit',
+        }),
+      );
+    });
+
+    it('preserves execution failure as terminal error when later providers are unavailable', async () => {
+      const p1 = mockProvider('runner', { failOnExecute: new Error('runner crashed') });
+      const p2 = mockProvider('unavailable-backup', { available: false });
+      const brain = mockBrain();
+      const registry = new ProviderRegistry([p1, p2], brain);
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('runner crashed');
+      expect(brain.recovery.checkpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: { lastError: 'runner crashed' },
+        }),
+      );
+    });
+
+    it('reports no-done streams as the terminal exhaustion error', async () => {
+      const p1 = mockProvider('unavailable-primary', { available: false });
+      const p2 = mockProvider('silent', {
+        events: [{ type: 'text' as const, content: 'partial' }],
+      });
+      const brain = mockBrain();
+      const registry = new ProviderRegistry([p1, p2], brain);
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('stream ended without done');
+      expect(brain.recovery.checkpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: { lastError: 'stream ended without done' },
+        }),
+      );
     });
 
     it('discards partial output from failed provider on failover', async () => {
