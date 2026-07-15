@@ -17,7 +17,6 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_right_to_forget',
 ]);
 const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
-const MEMORY_REVIEW_DECISION_CONTEXT_REDACTION = '[memory-review-decision-context-redacted]';
 
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_store: 'memory',
@@ -211,6 +210,36 @@ function contextLooksLikeMemoryReviewDecisionArgs(context: string): boolean {
   }
 }
 
+function memoryReviewDecisionArgsFromContext(context: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    const directArgs = record['args'];
+    if (contextValueTargetsTool(record['tool'] ?? record['tool_name'] ?? record['name'], 'fbeast_memory_review_decide')
+      && directArgs !== null
+      && typeof directArgs === 'object'
+      && !Array.isArray(directArgs)) {
+      return directArgs as Record<string, unknown>;
+    }
+    const toolInput = record['tool_input'];
+    if (toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
+      const nested = toolInput as Record<string, unknown>;
+      const nestedArgs = nested['args'];
+      if (contextValueTargetsTool(nested['tool'], 'fbeast_memory_review_decide')
+        && nestedArgs !== null
+        && typeof nestedArgs === 'object'
+        && !Array.isArray(nestedArgs)) {
+        return nestedArgs as Record<string, unknown>;
+      }
+    }
+    if (typeof record['id'] === 'string' && typeof record['action'] === 'string') return record;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
   if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return context;
   return '[right-to-forget-context-redacted]';
@@ -229,10 +258,18 @@ function redactMemoryReviewProposalGovernanceContext(action: string, context: st
 
 function redactMemoryReviewDecisionGovernanceContext(action: string, context: string): string {
   const unqualified = unqualifyMcpActionName(action);
+  const decisionArgs = memoryReviewDecisionArgsFromContext(context);
   if (unqualified === 'execute_tool'
     && (contextTargetsTool(context, 'fbeast_memory_review_decide')
+      || decisionArgs !== undefined
       || contextLooksLikeMemoryReviewDecisionArgs(context))) {
-    return MEMORY_REVIEW_DECISION_CONTEXT_REDACTION;
+    return JSON.stringify({
+      tool: 'fbeast_memory_review_decide',
+      ...(typeof decisionArgs?.['id'] === 'string' ? { id: decisionArgs['id'] } : {}),
+      ...(typeof decisionArgs?.['action'] === 'string' ? { action: decisionArgs['action'] } : {}),
+      ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'reviewer') ? { reviewer: '[memory-review-decision-metadata-redacted]' } : {}),
+      ...(decisionArgs !== undefined && Object.prototype.hasOwnProperty.call(decisionArgs, 'note') ? { note: '[memory-review-decision-metadata-redacted]' } : {}),
+    });
   }
   if (unqualified !== 'fbeast_memory_review_decide') return context;
   try {
@@ -437,7 +474,10 @@ function assessAction(action: string, context: string): GovernorCheckResult {
   const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
   if (highRiskResult !== undefined) return highRiskResult;
 
-  if (unqualifiedAction === 'fbeast_memory_review_decide') {
+  const isMemoryReviewDecision = unqualifiedAction === 'fbeast_memory_review_decide'
+    || (unqualifiedAction === 'execute_tool'
+      && unqualifyMcpActionName(stringContext(parseContextObject(context), 'tool') ?? '') === 'fbeast_memory_review_decide');
+  if (isMemoryReviewDecision) {
     const parsed = parseContextObject(context);
     const reviewAction = stringContext(parsed, 'action');
     if (reviewAction === 'approve') {

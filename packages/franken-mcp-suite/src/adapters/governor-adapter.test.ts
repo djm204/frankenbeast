@@ -298,6 +298,10 @@ describe('GovernorAdapter', () => {
       .resolves.toMatchObject({ decision: 'approved' });
     await expect(governor.check({ action: 'fbeast_memory_review_decide', context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate text contains rm -rf /"}' }))
       .resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"tool_input":{"tool":"mcp__fbeast-memory__fbeast_memory_review_decide","args":{"id":"memcand_1","action":"approve","note":"candidate"}}}',
+    })).resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('ignores dangerous reviewer notes when governing memory review decisions', async () => {
