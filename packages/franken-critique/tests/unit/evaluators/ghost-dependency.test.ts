@@ -416,6 +416,9 @@ describe('GhostDependencyEvaluator', () => {
       finally { import('finally-after-object-assertion-ghost'); }
       const annotatedArrow = (): any => import('annotated-arrow-body-ghost');
       const typedArrowInitializer: (x: string) => Promise<unknown> = (x) => import('typed-arrow-initializer-ghost');
+      type TemplateAlias = string
+      const templateAfterTypeAlias = \`\${require('template-after-type-alias-ghost')}\`;
+      const angleAssertedArrow = import(<string & (() => void)>'angle-assertion-arrow-ghost');
       type DefaultExportAlias = string
       export default async function defaultLoader() { return import('export-default-after-type-ghost'); }
       type DefaultExportExpressionAlias = string
@@ -431,6 +434,7 @@ describe('GhostDependencyEvaluator', () => {
       import('chained-after-type-alias-ghost').then(load);
       const runtimeTypeofProperty = typeof import('runtime-typeof-property-ghost').then;
       const objectTypeKey = { type: import('object-type-key-ghost') };
+      const typeOptionBeforeLoader = { type: 'json', loader: import('type-option-loader-ghost') };
       const chainedObjectValue = { plugin: import('chained-object-value-ghost').then(load) };
       const chainedTernaryValue = ready ? fallback : import('chained-ternary-value-ghost').then(load);
       const awaitedTypeNamedObject = { type: await import('awaited-type-named-object-ghost') };
@@ -456,7 +460,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(99);
+    expect(result.findings).toHaveLength(102);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -533,6 +537,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('finally-after-object-assertion-ghost'),
         expect.stringContaining('annotated-arrow-body-ghost'),
         expect.stringContaining('typed-arrow-initializer-ghost'),
+        expect.stringContaining('template-after-type-alias-ghost'),
+        expect.stringContaining('angle-assertion-arrow-ghost'),
         expect.stringContaining('export-default-after-type-ghost'),
         expect.stringContaining('export-default-expression-after-type-ghost'),
         expect.stringContaining('module-exports-after-type-ghost'),
@@ -542,6 +548,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('chained-after-type-alias-ghost'),
         expect.stringContaining('runtime-typeof-property-ghost'),
         expect.stringContaining('object-type-key-ghost'),
+        expect.stringContaining('type-option-loader-ghost'),
         expect.stringContaining('chained-object-value-ghost'),
         expect.stringContaining('chained-ternary-value-ghost'),
         expect.stringContaining('awaited-type-named-object-ghost'),

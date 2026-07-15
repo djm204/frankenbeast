@@ -478,6 +478,7 @@ function isTypeOnlyTemplateString(content: string, templateIndex: number): boole
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
   if (isOpenTemplateAssertionKeyword(prefixWithoutTrailingTrivia)) return true;
+  if (/(?:^|[;{}\n])\s*(?:const|let|var)\b[\s\S]*=\s*$/.test(prefix)) return false;
   if (/(?:^|[;{}\n])\s*(?:export\s+)?type\b[\s\S]*=\s*$/.test(prefix)) return true;
   const previousIndex = skipTriviaBackward(content, templateIndex - 1);
   if (previousIndex >= 0 && /[\w$)\]]/.test(content[previousIndex] ?? '')) return false;
@@ -502,6 +503,10 @@ function findTypeScriptAngleAssertionEnd(content: string, index: number): number
   for (let i = index; i < content.length; i++) {
     const ch = content[i]!;
     if (ch === '<') depth += 1;
+    if (ch === '=' && content[i + 1] === '>') {
+      i += 1;
+      continue;
+    }
     if (ch === '>') {
       depth -= 1;
       if (depth === 0) return i;
@@ -883,6 +888,10 @@ function stripTrailingTrivia(content: string): string {
 }
 
 function isInsideTypeDeclaration(prefix: string): boolean {
+  if (/(?:^|[;{}\n])\s*(?:const|let|var)\b[\s\S]*=\s*$/.test(prefix)) {
+    return false;
+  }
+
   if (/(?:^|[;{}\n])\s*(?:type|interface)\s*[:=]\s*(?:await\b\s*)?$/.test(prefix)) {
     return false;
   }
