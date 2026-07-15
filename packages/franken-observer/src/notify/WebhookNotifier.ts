@@ -410,7 +410,6 @@ export class WebhookNotifier {
 
   async send(payload: unknown): Promise<void> {
     this.assertTargetAllowed()
-    await this.assertResolvedTargetAddressesAllowed()
 
     const maxAttempts = this.retry ? 1 + this.retry.maxRetries : 1
     let lastError: unknown
@@ -424,6 +423,8 @@ export class WebhookNotifier {
         const delay = Math.min(jittered, maxDelayMs)
         await this.sleepFn(delay)
       }
+
+      await this.assertResolvedTargetAddressesAllowed()
 
       let response: Awaited<ReturnType<FetchFn>>
       try {

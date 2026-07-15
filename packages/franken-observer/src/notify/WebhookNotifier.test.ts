@@ -584,6 +584,27 @@ describe('WebhookNotifier', () => {
       expect(sleepFn).toHaveBeenCalledTimes(1)
     })
 
+    it('revalidates DNS before each retry attempt', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const dnsLookup = vi.fn()
+        .mockResolvedValueOnce(['203.0.113.10'])
+        .mockResolvedValueOnce(['169.254.169.254'])
+      const notifier = createNotifier({
+        url: 'https://hooks.example.com/signal',
+        fetch: mockFetch,
+        dnsLookup,
+        retry: { maxRetries: 1 },
+        sleep: sleepFn,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'resolved webhook address host 169.254.169.254 is not allowed',
+      )
+      expect(dnsLookup).toHaveBeenCalledTimes(2)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
     it('throws after exhausting all retries', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
       const notifier = createNotifier({
