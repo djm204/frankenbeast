@@ -203,6 +203,42 @@ describe('CapacityReservationPolicy', () => {
     });
   });
 
+  it('renders released reservation state consumed by normal overflow as used capacity', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 4,
+      releasedReservationIds: ['security-urgent'],
+      reservations: [
+        { id: 'security-urgent', slots: 1, labels: ['security'], categories: ['availability'] },
+      ],
+    });
+
+    const state = policy.describe([
+      { id: 'normal-1', labels: ['feature'] },
+      { id: 'normal-2', labels: ['feature'] },
+      { id: 'normal-3', labels: ['feature'] },
+      { id: 'normal-4', labels: ['feature'] },
+    ]);
+
+    expect(state).toMatchObject({
+      usedSlots: 4,
+      freeSlots: 0,
+      normalSlots: { total: 3, used: 3, free: 0 },
+      reservations: [
+        { id: 'security-urgent', used: 1, free: 0, released: true },
+      ],
+    });
+    expect(policy.canStart({ id: 'security-fix', labels: ['security'] }, [
+      { id: 'normal-1', labels: ['feature'] },
+      { id: 'normal-2', labels: ['feature'] },
+      { id: 'normal-3', labels: ['feature'] },
+      { id: 'normal-4', labels: ['feature'] },
+    ])).toEqual({
+      allowed: false,
+      reason: 'capacity_full',
+      reservationId: undefined,
+    });
+  });
+
   it('renders operator-visible reservation state with used and free reserved capacity', () => {
     const policy = new CapacityReservationPolicy({
       totalSlots: 5,
