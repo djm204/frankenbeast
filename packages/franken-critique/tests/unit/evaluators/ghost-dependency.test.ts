@@ -376,6 +376,11 @@ describe('GhostDependencyEvaluator', () => {
       const runtimeTypeofProperty = typeof import('runtime-typeof-property-ghost').then;
       const objectTypeKey = { type: import('object-type-key-ghost') };
       await import('zod', { with: { type: await import('nested-type-attribute-ghost') } });
+      type DecoratedAfterType = {}
+      @dec(import('decorator-after-type-ghost'))
+      class DecoratedAfterTypeClass {}
+      type UsingAfterType = {}
+      using dep = import('using-after-type-ghost');
       function objectReturn(): { type: string } { return import('object-return-type-key-ghost'); }
       function templateAfterTypedParam(opts: { path: string }) { return \`\${require('template-after-typed-param-ghost')}\`; }
       const assertedPair = value as Foo, chained = import('chained-after-assertion-ghost').then(load);
@@ -455,6 +460,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('runtime-typeof-property-ghost'),
         expect.stringContaining('object-type-key-ghost'),
         expect.stringContaining('nested-type-attribute-ghost'),
+        expect.stringContaining('decorator-after-type-ghost'),
+        expect.stringContaining('using-after-type-ghost'),
         expect.stringContaining('object-return-type-key-ghost'),
         expect.stringContaining('template-after-typed-param-ghost'),
         expect.stringContaining('chained-after-assertion-ghost'),

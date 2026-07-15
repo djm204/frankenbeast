@@ -793,10 +793,10 @@ function isInsideTypeDeclaration(prefix: string): boolean {
   return (
     /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
-    !/\n\s*(?:export\s+)?(?:default\b|const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
+    !/\n\s*(?:export\s+)?(?:@|default\b|const|let|var|using|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b/.test(
       prefix,
     ) &&
-    !/\}\s*(?:export\s+)?(?:default\b|const|let|var|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b[\s\S]*$/.test(
+    !/\}\s*(?:export\s+)?(?:@|default\b|const|let|var|using|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class)\b[\s\S]*$/.test(
       prefix,
     ) &&
     !/\}\s*(?:export\s+)?$/.test(prefix) &&
