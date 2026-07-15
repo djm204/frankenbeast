@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.6.2...franken-governor-v0.7.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add capacity watermark alerts ([#2266](https://github.com/djm204/frankenbeast/issues/2266)) ([219ffd3](https://github.com/djm204/frankenbeast/commit/219ffd34483126e6f09b11c17b86d89226c39280))
+* **governor:** add approval queue backpressure ([#2264](https://github.com/djm204/frankenbeast/issues/2264)) ([6e3cbf2](https://github.com/djm204/frankenbeast/commit/6e3cbf2d364519f7a9252ae72f207dbc063030fc)), closes [#1822](https://github.com/djm204/frankenbeast/issues/1822)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.11.0 to 0.12.0
+
 ## [0.6.2](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.6.1...franken-governor-v0.6.2) (2026-07-14)
 
 

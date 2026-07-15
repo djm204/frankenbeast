@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.9.0...@franken/brain-v0.10.0) (2026-07-15)
+
+
+### Features
+
+* **memory:** add user-visible memory review and consent workflow ([#2240](https://github.com/djm204/frankenbeast/issues/2240)) ([93643ed](https://github.com/djm204/frankenbeast/commit/93643ed64d02b9aa3eabeba687738c97c8b4bdcc))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.11.0 to 0.12.0
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.8.1...@franken/brain-v0.9.0) (2026-07-14)
 
 
