@@ -32,7 +32,7 @@ npm --workspace @franken/orchestrator test -- tests/unit/skills
 1. Add the provider implementation under `packages/franken-orchestrator/src/providers/` following the existing provider registry/client patterns.
 2. Add config schema support under `packages/franken-orchestrator/src/config/` if the provider needs new settings.
 3. Keep secrets referenced through the configured secret backend or environment variables; do not hard-code tokens in config examples.
-4. Add unit tests for request construction, error handling, and config parsing.
+4. Add unit tests for request construction, error handling, config parsing, and failover audit metadata. API-provider failover through `ProviderRegistry` emits a `model-provider.failover` audit event with `from`, `to`, `reason`, `brainSnapshotHash`, `category: "availability"`, and operator guidance; keep that payload structured so dashboard/liveness tooling can correlate a provider outage with the handoff snapshot.
 5. Verify from the repo root:
 
 ```bash
