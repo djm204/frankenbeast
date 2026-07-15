@@ -121,5 +121,7 @@ Security-sensitive code paths should reference this threat model when they imple
 
 - `packages/franken-mcp-suite/src/servers/proxy.ts` — resolved-target validation, governance, audit, and protected mode for wrapper tool execution.
 - `packages/franken-mcp-suite/src/shared/governance-gate.ts` — central governance gate for MCP tool dispatch and non-executing-tool exemptions.
+- `packages/franken-governor/src/security/high-risk-action-policy.ts` — policy-as-code decisions for Git remote writes, GitHub mutations, cron, memory, profile writes, webhooks, and shell process control.
+- `docs/guides/high-risk-action-policy.md` — operator-facing guidance for extending high-risk action policies safely.
 - `docs/untrusted-retrieved-content.md` — prompt-data boundary for retrieved content.
 - `docs/runtime-artifact-data-classification.md` — Runtime artifact classification for the audit/export boundary covering logs, memory, traces, webhooks, and backups.
