@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -144,6 +144,60 @@ describe('atomic-file', () => {
       expect(quarantine).toHaveLength(1);
     });
 
+    it('quarantines syntactically valid journals with invalid timestamps', () => {
+      const dir = makeTmpDir('state-write-journal-invalid-time-');
+      const filePath = join(dir, 'state.json');
+      const tempPath = `${filePath}.tmp.invalid-time`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: 'not-a-date',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery?.action).toBe('quarantined-invalid-journal');
+      expect(existsSync(tempPath)).toBe(true);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+    });
+
+    it('retains active preparing journals even before the temp file exists', () => {
+      const dir = makeTmpDir('state-write-journal-active-preparing-');
+      const filePath = join(dir, 'state.json');
+      const tempPath = `${filePath}.tmp.pending`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'preparing',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery).toMatchObject({
+        action: 'retained-active-journal',
+        tempPath,
+      });
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(true);
+    });
+
     it('retains active journals so concurrent writers do not remove live temp files', () => {
       const dir = makeTmpDir('state-write-journal-active-');
       const filePath = join(dir, 'state.json');
@@ -199,6 +253,37 @@ describe('atomic-file', () => {
       expect(existsSync(victimPath)).toBe(true);
       expect(readFileSync(victimPath, 'utf-8')).toBe('{"important":true}');
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+    });
+
+    it('quarantines journals with nested paths under a matching temp prefix', () => {
+      const dir = makeTmpDir('state-write-journal-nested-temp-');
+      const filePath = join(dir, 'state.json');
+      const nestedDir = `${filePath}.tmp.backup`;
+      const nestedPath = join(nestedDir, 'important.json');
+      writeFileSync(filePath, '{"old":true}');
+      rmSync(nestedDir, { recursive: true, force: true });
+      // mkdtempSync cannot target this exact name, so create via the filesystem API.
+      writeFileSync(`${filePath}.tmp.backup-placeholder`, 'placeholder');
+      rmSync(`${filePath}.tmp.backup-placeholder`, { force: true });
+      mkdirSync(nestedDir);
+      writeFileSync(nestedPath, '{"important":true}');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath: nestedPath,
+          phase: 'writing-temp',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery?.action).toBe('quarantined-invalid-journal');
+      expect(existsSync(nestedPath)).toBe(true);
     });
 
     it('normalizes target paths before deciding whether a journal belongs to the file', () => {

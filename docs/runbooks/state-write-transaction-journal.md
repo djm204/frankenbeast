@@ -14,9 +14,9 @@ A successful write leaves only the final state file. Operators should not see `.
 
 Before the next atomic state write, Frankenbeast calls `recoverStateWriteTransaction()` for the target path. Recovery is deterministic:
 
-- If the journal names a leftover temp file and its timestamp is stale, the temp file is removed and the target remains the last complete state file, or the already-renamed replacement if the crash happened after rename.
-- If the journal names a temp file that still appears active, recovery leaves the journal and temp file in place so a concurrent writer is not disrupted.
-- If the journal records a temp path outside the expected `<state-file>.tmp.*` sidecar namespace, the journal is quarantined instead of unlinking the recorded path.
+- If the journal names a leftover temp file and its wall-clock timestamp is stale, the temp file is removed and the target remains the last complete state file, or the already-renamed replacement if the crash happened after rename.
+- If the journal names a temp file or preparing phase that still appears active, recovery leaves the journal and temp file in place so a concurrent writer is not disrupted.
+- If the journal records a temp path outside the expected direct sibling `<state-file>.tmp.*` sidecar namespace, the journal is quarantined instead of unlinking the recorded path.
 - If the journal is left behind but the temp file is gone, the journal is removed as a completed write marker.
 - If the journal JSON is malformed or unsupported, the journal is quarantined with a `.corrupt.*` suffix instead of being trusted.
 

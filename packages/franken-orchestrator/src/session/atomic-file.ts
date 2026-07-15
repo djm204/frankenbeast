@@ -75,9 +75,20 @@ function writeStateWriteJournal(filePath: string, entry: Omit<StateWriteTransact
     updatedAt: journalTimestamp(),
   };
   const journalPath = stateWriteJournalPath(filePath);
-  const journalTempPath = `${journalPath}.tmp.${writeCounter++}.${deterministicUuid('state-write-journal')}`;
   const payload = JSON.stringify(updatedEntry, null, 2);
-  const fd = openSync(journalTempPath, 'wx', 0o600);
+  let journalTempPath = `${journalPath}.tmp.${writeCounter++}.${deterministicUuid('state-write-journal')}`;
+  let fd: number;
+  for (;;) {
+    try {
+      fd = openSync(journalTempPath, 'wx', 0o600);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+      journalTempPath = `${journalPath}.tmp.${writeCounter++}.${deterministicUuid('state-write-journal')}`;
+    }
+  }
   try {
     writeAll(fd, payload);
     fsyncSync(fd);
@@ -109,8 +120,14 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
   if (typeof value.startedAt !== 'string' || value.startedAt.length === 0) {
     throw new Error(`state write journal ${journalPath} startedAt must be a non-empty string`);
   }
+  if (!Number.isFinite(Date.parse(value.startedAt))) {
+    throw new Error(`state write journal ${journalPath} startedAt must be a valid ISO timestamp`);
+  }
   if (typeof value.updatedAt !== 'string' || value.updatedAt.length === 0) {
     throw new Error(`state write journal ${journalPath} updatedAt must be a non-empty string`);
+  }
+  if (!Number.isFinite(Date.parse(value.updatedAt))) {
+    throw new Error(`state write journal ${journalPath} updatedAt must be a valid ISO timestamp`);
   }
   return {
     schemaVersion: 1,
@@ -141,15 +158,46 @@ function pathsReferenceSameFile(left: string, right: string): boolean {
 function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boolean {
   const resolvedTempPath = resolve(tempPath);
   const resolvedTargetPath = resolve(filePath);
+  if (dirname(resolvedTempPath) !== dirname(resolvedTargetPath)) {
+    return false;
+  }
   return resolvedTempPath.startsWith(`${resolvedTargetPath}.tmp.`);
 }
 
 function isStaleJournal(journal: StateWriteTransactionJournal): boolean {
   const updatedAtMs = Date.parse(journal.updatedAt);
-  if (!Number.isFinite(updatedAtMs)) {
-    return false;
+  return Date.now() - updatedAtMs >= STALE_JOURNAL_AGE_MS;
+}
+
+function sameStateWriteTransaction(
+  left: StateWriteTransactionJournal,
+  right: Omit<StateWriteTransactionJournal, 'updatedAt' | 'phase'>,
+): boolean {
+  return (
+    left.schemaVersion === right.schemaVersion &&
+    pathsReferenceSameFile(left.targetPath, right.targetPath) &&
+    pathsReferenceSameFile(left.tempPath, right.tempPath) &&
+    left.startedAt === right.startedAt
+  );
+}
+
+function removeStateWriteJournalIfCurrent(
+  filePath: string,
+  expected: Omit<StateWriteTransactionJournal, 'updatedAt' | 'phase'>,
+): void {
+  const journalPath = stateWriteJournalPath(filePath);
+  try {
+    const journal = parseStateWriteJournal(readFileSync(journalPath, 'utf8'), journalPath);
+    if (!sameStateWriteTransaction(journal, expected)) {
+      return;
+    }
+    rmSync(journalPath, { force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return;
+    }
+    throw error;
   }
-  return deterministicNow() - updatedAtMs >= STALE_JOURNAL_AGE_MS;
 }
 
 /**
@@ -207,6 +255,16 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
       tempPath: journal.tempPath,
       action: 'removed-stale-temp',
       reason: `Recovered interrupted ${journal.phase} state write by removing the journaled temp file; target remains the last complete file or the already-renamed replacement.`,
+    };
+  }
+
+  if (targetMatches && journal.phase === 'preparing' && !isStaleJournal(journal)) {
+    return {
+      journalPath,
+      targetPath: journal.targetPath,
+      tempPath: journal.tempPath,
+      action: 'retained-active-journal',
+      reason: `State write journal ${journalPath} is still preparing; refusing to remove live journal for ${journal.tempPath}.`,
     };
   }
 
@@ -270,18 +328,14 @@ export function atomicWriteFileSync(
     }
     writeStateWriteJournal(filePath, { ...journalBase, tempPath: resolve(tmpPath), phase: 'renaming' });
     renameSync(tmpPath, filePath);
-    rmSync(stateWriteJournalPath(filePath), { force: true });
+    removeStateWriteJournalIfCurrent(filePath, { ...journalBase, tempPath: resolve(tmpPath) });
   } catch (error) {
     try {
       unlinkSync(tmpPath);
     } catch {
       // Temp file never created or already renamed.
     }
-    try {
-      rmSync(stateWriteJournalPath(filePath), { force: true });
-    } catch {
-      // The journal was never written or has already been recovered.
-    }
+    removeStateWriteJournalIfCurrent(filePath, { ...journalBase, tempPath: resolve(tmpPath) });
     throw error;
   }
   fsyncDir(dirname(filePath));
