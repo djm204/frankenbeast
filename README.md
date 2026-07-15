@@ -770,6 +770,7 @@ Required HITL approvals fail closed when a run has no interactive TTY. In truste
 
 - [ADR-018](docs/adr/018-secret-store-architecture.md) — secret store design and backend selection rationale
 - [ADR-017](docs/adr/017-network-operator-control-plane.md) — network operator control plane and token auth
+- [Worker push rollback runbook](docs/runbooks/worker-push-rollback.md) — dry-run planning and approval-cop routing for failed or bad worker branch publishes
 
 ## Configuration
 
