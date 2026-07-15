@@ -394,6 +394,49 @@ describe('ProviderRegistry', () => {
       expect(delay2).toBeGreaterThanOrEqual(80); // 100ms with some tolerance
     });
 
+    it('uses the exhausted retryable error as failover reason', async () => {
+      const p1: ILlmProvider = {
+        ...mockProvider('rate-limited'),
+        execute: vi.fn(async function* () {
+          yield { type: 'error' as const, error: 'rate limit', retryable: true };
+        }),
+      };
+      const p2 = mockProvider('backup');
+      const onSwitch = vi.fn();
+
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        maxRetriesPerProvider: 1,
+        retryDelayMs: 1,
+        onProviderSwitch: onSwitch,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(onSwitch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'rate-limited',
+          to: 'backup',
+          reason: 'rate limit',
+        }),
+      );
+    });
+
+    it('preserves execution failure as terminal error when later providers are unavailable', async () => {
+      const p1 = mockProvider('runner', { failOnExecute: new Error('runner crashed') });
+      const p2 = mockProvider('unavailable-backup', { available: false });
+      const brain = mockBrain();
+      const registry = new ProviderRegistry([p1, p2], brain);
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('runner crashed');
+      expect(brain.recovery.checkpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: { lastError: 'runner crashed' },
+        }),
+      );
+    });
+
     it('discards partial output from failed provider on failover', async () => {
       // p1 streams some text then errors — those text events should NOT appear
       const p1: ILlmProvider = {

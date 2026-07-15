@@ -99,6 +99,7 @@ export class ProviderRegistry {
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     let lastError: Error | undefined;
+    let terminalError: Error | undefined;
     let lastFailedProviderName: string | undefined;
     const unavailableProviders: string[] = [];
     let attemptedProviders = 0;
@@ -110,8 +111,10 @@ export class ProviderRegistry {
 
       if (!(await provider.isAvailable())) {
         unavailableProviders.push(provider.name);
+        const availabilityError = new Error(`Provider ${provider.name} is unavailable`);
         lastFailedProviderName = provider.name;
-        lastError = new Error(`Provider ${provider.name} is unavailable`);
+        lastError = availabilityError;
+        terminalError ??= availabilityError;
         continue;
       }
       attemptedProviders++;
@@ -170,8 +173,9 @@ export class ProviderRegistry {
               retried = true;
               break; // discard buffer, retry same provider
             }
-            if (event.type === 'error' && !event.retryable) {
+            if (event.type === 'error') {
               lastError = new Error(event.error);
+              terminalError = lastError;
               lastFailedProviderName = provider.name;
               throw lastError; // discard buffer, failover
             }
@@ -198,6 +202,7 @@ export class ProviderRegistry {
         } catch (error) {
           lastError =
             error instanceof Error ? error : new Error(String(error));
+          terminalError = lastError;
           lastFailedProviderName = provider.name;
           break; // failover to next provider
         }
@@ -209,14 +214,14 @@ export class ProviderRegistry {
       runId: 'failover-exhausted',
       phase: 'provider-failover',
       step: 0,
-      context: { lastError: lastError?.message },
+      context: { lastError: (terminalError ?? lastError)?.message },
       timestamp: isoNow(),
     });
 
     const exhaustionReason = attemptedProviders === 0
       ? `No providers available. Checked: ${unavailableProviders.join(', ')}. `
         + 'Install or authenticate at least one configured provider CLI, or configure provider overrides.'
-      : `All providers exhausted. Last error: ${lastError?.message ?? 'unknown'}. `;
+      : `All providers exhausted. Last error: ${(terminalError ?? lastError)?.message ?? 'unknown'}. `;
 
     throw new Error(
       exhaustionReason + 'Brain state checkpointed for recovery.',
