@@ -140,7 +140,7 @@ When a wrapper or service manager starts `frankenbeast` from outside the target 
 
 ## 5. Beast dispatch system
 
-Beasts are named process-level runs managed by the dispatcher.
+Beasts are named process-level runs managed by the dispatcher. On daemon/chat-server startup, the dispatcher runs fail-closed integrity checks before it accepts Beast work. The checks verify that the catalog has uniquely named definitions, each definition has valid metadata/prompts/telemetry labels, and every default execution mode has a wired executor with `start`, `stop`, and `kill` lifecycle handlers. If a check fails, startup throws a `DispatcherStartupIntegrityError` with structured `errors[]` entries and operator guidance; fix the catalog or executor wiring before retrying instead of dispatching into a partially wired runtime.
 
 ```bash
 # See available Beast definitions

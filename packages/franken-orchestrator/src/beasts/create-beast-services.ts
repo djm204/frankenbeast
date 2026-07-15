@@ -9,6 +9,7 @@ import { ProcessSupervisor } from './execution/process-supervisor.js';
 import { SQLiteBeastRepository } from './repository/sqlite-beast-repository.js';
 import { BeastCatalogService } from './services/beast-catalog-service.js';
 import { BeastDispatchService } from './services/beast-dispatch-service.js';
+import { assertDispatcherStartupIntegrity } from './services/dispatcher-startup-integrity.js';
 import { BeastInterviewService } from './services/beast-interview-service.js';
 import { AgentService } from './services/agent-service.js';
 import { BeastRunService } from './services/beast-run-service.js';
@@ -68,6 +69,11 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       },
     }),
   };
+
+  assertDispatcherStartupIntegrity({
+    definitions: catalog.listDefinitions(),
+    executors,
+  });
 
   runService = new BeastRunService(repository, catalog, executors, metrics, logStore, { eventBus });
 
