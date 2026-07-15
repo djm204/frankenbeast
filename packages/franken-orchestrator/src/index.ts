@@ -59,6 +59,10 @@ export type {
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
   IssueCapacityWatermarkAlert,
+  IssueDependencyCircuitBreakerConfig,
+  IssueDependencyCircuitBreakerState,
+  IssueDependencySignal,
+  IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
 } from './issues/index.js';
