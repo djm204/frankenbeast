@@ -180,18 +180,15 @@ export class BeastDispatchService {
       ? { ...config, modules: moduleConfig }
       : config;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
-    if (request.trackedAgentId) {
-      this.repository.requireTrackedAgent(request.trackedAgentId);
-      this.assertTrackedAgentCapacity(request.trackedAgentId, {
-        ...request.config,
-        ...configSnapshot,
-      });
-    }
     const createdAt = new Date(wallClockNow()).toISOString();
     const linkedAt = new Date(wallClockNow()).toISOString();
     const run = this.repository.transaction(() => {
       if (request.trackedAgentId) {
         this.repository.requireTrackedAgent(request.trackedAgentId);
+        this.assertTrackedAgentCapacity(request.trackedAgentId, {
+          ...request.config,
+          ...configSnapshot,
+        });
       }
 
       const createdRun = this.repository.createRun({

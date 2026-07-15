@@ -152,6 +152,19 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
         ...(body.moduleConfig ? { moduleConfig: body.moduleConfig } : {}),
       });
     } catch (error) {
+      if (error instanceof CapacityReservationError) {
+        return c.json({
+          error: {
+            code: 'AGENT_CAPACITY_RESERVED',
+            message: 'Agent capacity is reserved for urgent matching work',
+            details: {
+              decision: error.decision,
+              capacity: error.state,
+              agentId: agent.id,
+            },
+          },
+        }, 409);
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[agent-routes] Dispatch failed for ${agent.id}: ${errorMessage}`);
       if (error instanceof Error && error.stack) {

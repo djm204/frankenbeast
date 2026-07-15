@@ -67,8 +67,7 @@ export class BeastRunService {
   }
 
   async start(runId: string, _actor: string): Promise<BeastRun> {
-    const run = this.requireRun(runId);
-    this.assertTrackedAgentCapacity(run);
+    const run = this.reserveTrackedAgentCapacityForStart(this.requireRun(runId));
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const priorAttemptId = run.currentAttemptId;
     const priorAttemptCount = run.attemptCount;
@@ -338,6 +337,31 @@ export class BeastRunService {
     if (!decision.allowed) {
       throw new CapacityReservationError(decision, this.serviceOptions.capacityPolicy.describe(activeItems));
     }
+  }
+
+  private reserveTrackedAgentCapacityForStart(run: BeastRun): BeastRun {
+    if (!run.trackedAgentId || !this.serviceOptions.capacityPolicy) return run;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (!trackedAgent || trackedAgent.status === 'deleted') return run;
+
+    const reservedAt = isoNow();
+    return this.repository.transaction(() => {
+      const currentRun = this.requireRun(run.id);
+      const currentTrackedAgent = this.repository.getTrackedAgent(run.trackedAgentId!);
+      if (!currentTrackedAgent || currentTrackedAgent.status === 'deleted') return currentRun;
+
+      this.assertTrackedAgentCapacity(currentRun);
+      if (currentTrackedAgent.status === 'dispatching' && currentTrackedAgent.dispatchRunId === currentRun.id) {
+        return currentRun;
+      }
+
+      this.repository.updateTrackedAgent(run.trackedAgentId!, {
+        status: 'dispatching',
+        dispatchRunId: currentRun.id,
+        updatedAt: reservedAt,
+      });
+      return currentRun;
+    });
   }
 
   private activeCapacityItems(excludeAgentId: string): CapacityReservationWorkItem[] {
