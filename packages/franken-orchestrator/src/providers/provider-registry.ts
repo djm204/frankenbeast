@@ -492,8 +492,8 @@ export class ProviderRegistry {
       .map((provider, index) => ({ provider, index }))
       .filter(({ provider }) => {
         const record = this.providerHealth.get(this.providerKey(provider));
-        return record?.state === 'open'
-          && (record.cooldownUntilMs === null || now >= record.cooldownUntilMs);
+        return (record?.state === 'open' && (record.cooldownUntilMs === null || now >= record.cooldownUntilMs))
+          || (record?.state === 'half-open' && record.halfOpenProbeCount < this.opts.circuitBreakerHalfOpenMaxProbes);
       })
       .map(({ index }) => index);
 
@@ -545,7 +545,7 @@ export class ProviderRegistry {
       attemptedProviders++;
 
       let effectiveRequest = request;
-      if (providerIndex !== this.currentProviderIndex) {
+      if (providerIndex !== this.currentProviderIndex || (i > 0 && lastError)) {
         const snapshot = this.brain.serialize();
         const failedProviderName = lastFailedProviderName ?? this.providers[this.currentProviderIndex]!.name;
         const health = this.providerHealth.get(this.providerKey(provider));
@@ -621,6 +621,9 @@ export class ProviderRegistry {
                 this.recordProviderFailure(provider, lastError, { tripHalfOpenProbe: halfOpenProbeReserved });
                 failureAlreadyRecorded = true;
               } else {
+                if (halfOpenProbeReserved) {
+                  this.releaseHalfOpenProbeWithoutHealthFailure(provider, 'half-open-probe-request-error');
+                }
                 failureAlreadyRecorded = true;
               }
               terminalError = lastError;

@@ -895,6 +895,72 @@ describe('ProviderRegistry', () => {
       expect(registry.getProviderHealth('primary')).toMatchObject({ halfOpenProbeCount: 1 });
     });
 
+    it('releases request-error event probes and reschedules idle half-open providers', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      let mode: 'outage' | 'request-error' | 'success' = 'outage';
+      const p1: ILlmProvider = {
+        ...mockProvider('primary'),
+        execute: vi.fn(async function* () {
+          if (mode === 'outage') throw new Error('provider outage');
+          if (mode === 'request-error') {
+            yield { type: 'error' as const, error: 'invalid request: context length exceeded', retryable: false };
+            return;
+          }
+          yield { type: 'text' as const, content: 'primary recovered' };
+          yield { type: 'done' as const, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+        }),
+      };
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      expect(registry.currentProvider.name).toBe('fallback');
+      now += 10_001;
+      mode = 'request-error';
+      await collectEvents(registry.execute(makeRequest()));
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'half-open',
+        halfOpenProbeCount: 0,
+        failures: 1,
+      });
+
+      mode = 'success';
+      const events = await collectEvents(registry.execute(makeRequest()));
+      expect(events[0]).toEqual({ type: 'text', content: 'primary recovered' });
+      expect(registry.currentProvider.name).toBe('primary');
+    });
+
+    it('emits failover audit metadata after a failed recovery probe returns to fallback', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      const p1 = mockProvider('primary', { failOnExecute: new Error('provider outage') });
+      const p2 = mockProvider('fallback');
+      const onSwitch = vi.fn();
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+        onProviderSwitch: onSwitch,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      expect(registry.currentProvider.name).toBe('fallback');
+      now += 10_001;
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(p2.execute).toHaveBeenCalledTimes(2);
+      expect(onSwitch).toHaveBeenLastCalledWith(expect.objectContaining({
+        from: 'primary',
+        to: 'fallback',
+        reason: 'provider outage',
+      }));
+    });
+
     it('does not count stale successes after another execution has opened the breaker', async () => {
       const p1 = mockProvider('primary');
       const registry = new ProviderRegistry([p1], mockBrain(), {
