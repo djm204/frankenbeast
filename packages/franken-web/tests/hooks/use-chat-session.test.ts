@@ -1051,7 +1051,11 @@ describe('useChatSession', () => {
     expect(result.current.sessionState).toBe('approved');
   });
 
-  it('falls back to HTTP approval when the websocket is not ready', async () => {
+  it.each([
+    ['connecting', 0],
+    ['closing', 2],
+    ['closed', 3],
+  ])('falls back to HTTP approval when the websocket is %s', async (_stateName, readyState) => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -1059,6 +1063,7 @@ describe('useChatSession', () => {
     });
 
     const socket = MockWebSocket.instances[0]!;
+    socket.readyState = readyState;
 
     act(() => {
       socket.message({
