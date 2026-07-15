@@ -1,0 +1,36 @@
+{
+  "description": "Restore preview fixture for a cron job that exists in the backup manifest but is missing from live state. Operators should review and explicitly restore, merge, or skip the job instead of silently dropping it.",
+  "backup": {
+    "schemaVersion": 1,
+    "tasks": [],
+    "approvals": [],
+    "memory": [],
+    "cron": [
+      {
+        "id": "nightly-dr-check",
+        "digest": "sha256:backup-nightly-dr-check",
+        "state": "enabled",
+        "updatedAt": "2026-07-14T02:00:00.000Z",
+        "value": {
+          "schedule": "0 2 * * *",
+          "command": "frankenbeast dr verify --manifest latest",
+          "owner": "ops"
+        }
+      }
+    ]
+  },
+  "live": {
+    "schemaVersion": 1,
+    "tasks": [],
+    "approvals": [],
+    "memory": [],
+    "cron": []
+  },
+  "expectedConflict": {
+    "area": "cron",
+    "id": "nightly-dr-check",
+    "type": "backup-only",
+    "severity": "info",
+    "recommendationIncludes": "Review cron drift and explicitly restore, merge, or skip this job"
+  }
+}
