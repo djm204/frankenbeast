@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
+  buildCrossFileStateConsistencyReport,
   buildPointInTimeBackupManifest,
   buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
@@ -224,6 +225,8 @@ describe('restore preview conflict detector', () => {
         blockerCount: 1,
         warningCount: 1,
         infoCount: 1,
+        consistencyFindingCount: 0,
+        consistencyBlockerCount: 0,
       },
       preview: expect.objectContaining({
         wouldWrite: false,
@@ -239,10 +242,119 @@ describe('restore preview conflict detector', () => {
           }),
         ]),
       }),
+      consistency: {
+        backup: expect.objectContaining({ status: 'clean', findings: [] }),
+        live: expect.objectContaining({ status: 'clean', findings: [] }),
+      },
       operatorGuidance: expect.stringContaining('do not execute restore'),
     });
     expect(JSON.stringify(report)).not.toContain('secret-token-value');
     expect(JSON.stringify(report)).not.toContain('pending-token');
+  });
+
+  it('reports a clean cross-file state consistency check when references resolve', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-1', digest: 'task-digest' }],
+        approvals: [{ id: 'approval-1', state: 'approved', value: { taskId: 'task-1' } }],
+        memory: [{ id: 'memory-1', value: { taskIds: ['task-1'] } }],
+        cron: [{ id: 'cron-1', state: 'enabled', value: { task: 'task-1' } }],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report).toEqual({
+      checkedAt: '2026-07-14T12:30:00.000Z',
+      wouldWrite: false,
+      status: 'clean',
+      findings: [],
+      operatorSummary: expect.stringContaining('clean'),
+    });
+  });
+
+  it('blocks cross-file state manifests with dangling or malformed task references', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-live', digest: 'task-digest' }],
+        approvals: [{ id: 'approval-orphan', state: 'approved', value: { taskId: 'task-missing', token: 'secret-token' } }],
+        memory: [{ id: 'memory-bad', value: { taskIds: ['task-live', 42] } }],
+        cron: [{ id: 'cron-bad', state: 'enabled', value: { task: { id: 'task-live' } } }],
+      } as unknown as RestorePreviewManifest,
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(report.wouldWrite).toBe(false);
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'dangling-task-reference',
+          area: 'approvals',
+          id: 'approval-orphan',
+          referencedTaskId: 'task-missing',
+          severity: 'blocker',
+        }),
+        expect.objectContaining({
+          code: 'malformed-task-reference',
+          area: 'memory',
+          id: 'memory-bad',
+          referenceField: 'taskIds',
+          severity: 'blocker',
+        }),
+        expect.objectContaining({
+          code: 'malformed-task-reference',
+          area: 'cron',
+          id: 'cron-bad',
+          referenceField: 'task',
+          severity: 'blocker',
+        }),
+      ]),
+    );
+    expect(JSON.stringify(report)).not.toContain('secret-token');
+  });
+
+  it('includes cross-file consistency findings in restore dry-run JSON', () => {
+    const report = buildRestoreDryRunReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-1', digest: 'task-digest' }],
+        approvals: [{ id: 'approval-orphan', value: { taskId: 'task-missing' } }],
+        memory: [],
+        cron: [],
+      },
+      { schemaVersion: 1, tasks: [{ id: 'task-1', digest: 'task-digest' }], approvals: [], memory: [], cron: [] },
+      { generatedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.summary.consistencyFindingCount).toBe(1);
+    expect(report.summary.consistencyBlockerCount).toBe(1);
+    expect(report.consistency.backup.findings).toContainEqual(
+      expect.objectContaining({ code: 'dangling-task-reference', referencedTaskId: 'task-missing' }),
+    );
+    expect(report.operatorGuidance).toContain('cross-file consistency findings');
+  });
+
+  it('warns when a record id is reused across state files', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'shared-id', digest: 'task-digest' }],
+        approvals: [{ id: 'shared-id', state: 'pending' }],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('warning');
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'duplicate-record-id-across-areas', area: 'approvals', relatedAreas: ['tasks'] }),
+        expect.objectContaining({ code: 'duplicate-record-id-across-areas', area: 'tasks', relatedAreas: ['approvals'] }),
+      ]),
+    );
   });
 
   it('treats backup-only approval tokens as blockers', () => {

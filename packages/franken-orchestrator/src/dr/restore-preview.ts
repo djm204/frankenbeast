@@ -122,6 +122,39 @@ export type RestorePreviewConflictType =
 
 export type RestorePreviewSeverity = 'info' | 'warning' | 'blocker';
 
+export type CrossFileStateConsistencyStatus = 'clean' | 'warning' | 'blocked';
+
+export type CrossFileStateConsistencyFindingCode =
+  | 'duplicate-record-id-across-areas'
+  | 'dangling-task-reference'
+  | 'malformed-task-reference';
+
+export interface CrossFileStateConsistencyFinding {
+  readonly code: CrossFileStateConsistencyFindingCode;
+  readonly severity: RestorePreviewSeverity;
+  readonly area: ComparableArea;
+  readonly id: string;
+  readonly message: string;
+  readonly recommendation: string;
+  readonly relatedAreas?: readonly ComparableArea[];
+  readonly referenceField?: string;
+  readonly referencedTaskId?: string;
+}
+
+export interface CrossFileStateConsistencyReport {
+  /** ISO timestamp for when the report was generated, supplied by callers for deterministic tests. */
+  readonly checkedAt: string;
+  /** Explicitly records that consistency checking is read-only and performs no restore writes. */
+  readonly wouldWrite: false;
+  readonly status: CrossFileStateConsistencyStatus;
+  readonly findings: readonly CrossFileStateConsistencyFinding[];
+  readonly operatorSummary: string;
+}
+
+export interface CrossFileStateConsistencyOptions {
+  readonly checkedAt?: string;
+}
+
 export interface RestorePreviewRecord {
   readonly id: string;
   readonly digest?: string;
@@ -212,8 +245,14 @@ export interface RestoreDryRunReport {
     readonly blockerCount: number;
     readonly warningCount: number;
     readonly infoCount: number;
+    readonly consistencyFindingCount: number;
+    readonly consistencyBlockerCount: number;
   };
   readonly preview: RestoreDryRunPreviewResult;
+  readonly consistency: {
+    readonly backup: CrossFileStateConsistencyReport;
+    readonly live: CrossFileStateConsistencyReport;
+  };
   readonly operatorGuidance: string;
 }
 
@@ -419,15 +458,103 @@ export function detectRestorePreviewConflicts(
   };
 }
 
+export function buildCrossFileStateConsistencyReport(
+  manifest: RestorePreviewManifest,
+  options: CrossFileStateConsistencyOptions = {},
+): CrossFileStateConsistencyReport {
+  const checkedAt = options.checkedAt ?? new Date().toISOString();
+  const findings: CrossFileStateConsistencyFinding[] = [];
+  const taskIds = new Set(AREA_ACCESSORS.tasks(manifest).map((record) => record.id));
+  const areasById = new Map<string, Set<ComparableArea>>();
+
+  for (const area of Object.keys(AREA_ACCESSORS) as ComparableArea[]) {
+    for (const record of AREA_ACCESSORS[area](manifest)) {
+      const areas = areasById.get(record.id) ?? new Set<ComparableArea>();
+      areas.add(area);
+      areasById.set(record.id, areas);
+    }
+  }
+
+  for (const [id, areas] of [...areasById.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    if (areas.size <= 1) continue;
+    const sortedAreas = [...areas].sort();
+    for (const area of sortedAreas) {
+      findings.push({
+        code: 'duplicate-record-id-across-areas',
+        severity: 'warning',
+        area,
+        id,
+        relatedAreas: sortedAreas.filter((candidate) => candidate !== area),
+        message: `Record id '${id}' appears in multiple manifest areas: ${sortedAreas.join(', ')}.`,
+        recommendation:
+          'Confirm these cross-file records intentionally describe different state objects or rename/package them so restore operators can distinguish them.',
+      });
+    }
+  }
+
+  for (const area of ['approvals', 'memory', 'cron'] as const) {
+    for (const record of AREA_ACCESSORS[area](manifest)) {
+      for (const reference of taskReferencesFor(record)) {
+        if (reference.malformed) {
+          findings.push({
+            code: 'malformed-task-reference',
+            severity: 'blocker',
+            area,
+            id: record.id,
+            referenceField: reference.field,
+            message: `Record '${record.id}' in ${area} has a malformed task reference in value.${reference.field}.`,
+            recommendation:
+              'Quarantine or repair this state record before restore so automation does not guess which task/card the cross-file record belongs to.',
+          });
+          continue;
+        }
+
+        if (reference.taskId !== undefined && !taskIds.has(reference.taskId)) {
+          findings.push({
+            code: 'dangling-task-reference',
+            severity: 'blocker',
+            area,
+            id: record.id,
+            referenceField: reference.field,
+            referencedTaskId: reference.taskId,
+            message: `Record '${record.id}' in ${area} references missing task '${reference.taskId}'.`,
+            recommendation:
+              'Do not restore this manifest blindly. Restore, recreate, or explicitly skip the referenced task/card before applying dependent approval, memory, or cron state.',
+          });
+        }
+      }
+    }
+  }
+
+  const status = statusForConsistencyFindings(findings);
+  return {
+    checkedAt,
+    wouldWrite: false,
+    status,
+    findings,
+    operatorSummary: operatorSummaryForConsistencyReport(status, findings.length),
+  };
+}
+
 export function buildRestoreDryRunReport(
   backup: RestorePreviewManifest,
   live: RestorePreviewManifest,
   options: RestoreDryRunReportOptions = {},
 ): RestoreDryRunReport {
   const preview = detectRestorePreviewConflicts(backup, live);
+  const backupConsistency = buildCrossFileStateConsistencyReport(backup, {
+    ...(options.generatedAt === undefined ? {} : { checkedAt: options.generatedAt }),
+  });
+  const liveConsistency = buildCrossFileStateConsistencyReport(live, {
+    ...(options.generatedAt === undefined ? {} : { checkedAt: options.generatedAt }),
+  });
   const blockerCount = preview.conflicts.filter((conflict) => conflict.severity === 'blocker').length;
   const warningCount = preview.conflicts.filter((conflict) => conflict.severity === 'warning').length;
   const infoCount = preview.conflicts.filter((conflict) => conflict.severity === 'info').length;
+  const consistencyFindingCount = backupConsistency.findings.length + liveConsistency.findings.length;
+  const consistencyBlockerCount = [...backupConsistency.findings, ...liveConsistency.findings].filter(
+    (finding) => finding.severity === 'blocker',
+  ).length;
 
   return {
     ok: true,
@@ -446,11 +573,17 @@ export function buildRestoreDryRunReport(
       blockerCount,
       warningCount,
       infoCount,
+      consistencyFindingCount,
+      consistencyBlockerCount,
     },
     preview: redactPreviewForDryRun(preview),
-    operatorGuidance: preview.safeToRestore
+    consistency: {
+      backup: backupConsistency,
+      live: liveConsistency,
+    },
+    operatorGuidance: preview.safeToRestore && consistencyBlockerCount === 0
       ? 'Dry-run only: no restore writes were performed. Review the JSON report, then execute restore separately if an operator explicitly approves it.'
-      : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts have explicit restore, merge, skip, or quarantine decisions.',
+      : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts and cross-file consistency findings have explicit restore, merge, skip, repair, or quarantine decisions.',
   };
 }
 
@@ -611,6 +744,60 @@ function operatorSummaryForApprovalLedgerReport(
   if (status === 'clean') return 'Approval ledger recovery check is clean; no approval ledger drift was found.';
   if (status === 'review-required') return `Approval ledger recovery found ${findingCount} warning(s); preserve live approval evidence unless an operator explicitly expires it.`;
   return `Approval ledger recovery is blocked by ${findingCount} finding(s); stale or changed approvals require fresh human re-approval before restore.`;
+}
+
+interface TaskReferenceCandidate {
+  readonly field: string;
+  readonly taskId?: string;
+  readonly malformed?: boolean;
+}
+
+function taskReferencesFor(record: RestorePreviewRecord): readonly TaskReferenceCandidate[] {
+  if (!isRecord(record.value)) return [];
+  const value = record.value;
+  const references: TaskReferenceCandidate[] = [];
+  for (const field of ['taskId', 'task_id', 'task'] as const) {
+    if (!(field in value)) continue;
+    const fieldValue = value[field];
+    if (typeof fieldValue === 'string' && fieldValue.trim().length > 0) {
+      references.push({ field, taskId: fieldValue });
+    } else {
+      references.push({ field, malformed: true });
+    }
+  }
+  for (const field of ['taskIds', 'task_ids', 'tasks'] as const) {
+    if (!(field in value)) continue;
+    const fieldValue = value[field];
+    if (!Array.isArray(fieldValue) || fieldValue.length === 0) {
+      references.push({ field, malformed: true });
+      continue;
+    }
+    for (const item of fieldValue) {
+      if (typeof item === 'string' && item.trim().length > 0) {
+        references.push({ field, taskId: item });
+      } else {
+        references.push({ field, malformed: true });
+      }
+    }
+  }
+  return references;
+}
+
+function statusForConsistencyFindings(
+  findings: readonly CrossFileStateConsistencyFinding[],
+): CrossFileStateConsistencyStatus {
+  if (findings.some((finding) => finding.severity === 'blocker')) return 'blocked';
+  if (findings.length > 0) return 'warning';
+  return 'clean';
+}
+
+function operatorSummaryForConsistencyReport(
+  status: CrossFileStateConsistencyStatus,
+  findingCount: number,
+): string {
+  if (status === 'clean') return 'Cross-file state consistency check is clean; no duplicate IDs or dangling task references were found.';
+  if (status === 'warning') return `Cross-file state consistency found ${findingCount} warning(s); review duplicate record IDs before restore.`;
+  return `Cross-file state consistency is blocked by ${findingCount} finding(s); repair or quarantine dangling/malformed task references before restore.`;
 }
 
 function compareRecords(
