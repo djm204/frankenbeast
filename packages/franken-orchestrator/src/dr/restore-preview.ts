@@ -464,6 +464,7 @@ export function buildCrossFileStateConsistencyReport(
 ): CrossFileStateConsistencyReport {
   const checkedAt = options.checkedAt ?? new Date().toISOString();
   const findings: CrossFileStateConsistencyFinding[] = [];
+  const hasTaskSnapshot = manifest.tasks !== undefined;
   const taskIds = new Set(AREA_ACCESSORS.tasks(manifest).map((record) => record.id));
   const areasById = new Map<string, Set<ComparableArea>>();
 
@@ -509,7 +510,7 @@ export function buildCrossFileStateConsistencyReport(
           continue;
         }
 
-        if (reference.taskId !== undefined && !taskIds.has(reference.taskId)) {
+        if (hasTaskSnapshot && reference.taskId !== undefined && !taskIds.has(reference.taskId)) {
           findings.push({
             code: 'dangling-task-reference',
             severity: 'blocker',
@@ -555,7 +556,7 @@ export function buildRestoreDryRunReport(
   const consistencyBlockerCount = [...backupConsistency.findings, ...liveConsistency.findings].filter(
     (finding) => finding.severity === 'blocker',
   ).length;
-  const safeToRestore = preview.safeToRestore && consistencyBlockerCount === 0;
+  const safeToRestore = preview.safeToRestore && consistencyFindingCount === 0;
 
   return {
     ok: true,
@@ -769,7 +770,7 @@ function taskReferencesFor(record: RestorePreviewRecord): readonly TaskReference
   for (const field of ['taskIds', 'task_ids'] as const) {
     if (!(field in value)) continue;
     const fieldValue = value[field];
-    if (!Array.isArray(fieldValue) || fieldValue.length === 0) {
+    if (!Array.isArray(fieldValue)) {
       references.push({ field, malformed: true });
       continue;
     }

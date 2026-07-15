@@ -358,6 +358,26 @@ describe('restore preview conflict detector', () => {
     expect(report.operatorGuidance).toContain('cross-file consistency findings');
   });
 
+  it('marks otherwise matching manifests unsafe when cross-file consistency has warnings', () => {
+    const manifest: RestorePreviewManifest = {
+      schemaVersion: 1,
+      tasks: [{ id: 'shared-id', digest: 'task-digest' }],
+      approvals: [{ id: 'shared-id', state: 'pending' }],
+      memory: [],
+      cron: [],
+    };
+
+    const report = buildRestoreDryRunReport(clone(manifest), clone(manifest), {
+      generatedAt: '2026-07-14T12:30:00.000Z',
+    });
+
+    expect(report.preview.safeToRestore).toBe(true);
+    expect(report.summary.conflictCount).toBe(0);
+    expect(report.summary.consistencyFindingCount).toBe(4);
+    expect(report.summary.consistencyBlockerCount).toBe(0);
+    expect(report.summary.safeToRestore).toBe(false);
+  });
+
   it('does not leak unverified dangling task reference values', () => {
     const report = buildCrossFileStateConsistencyReport(
       {
@@ -406,6 +426,37 @@ describe('restore preview conflict detector', () => {
         approvals: [],
         memory: [{ id: 'memory-note', value: { task: 'fix auth flow' } }],
         cron: [{ id: 'cron-domain-note', value: { task: { title: 'domain task, not a card id' } } }],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('clean');
+    expect(report.findings).toEqual([]);
+  });
+
+  it('allows empty explicit task reference arrays as no references', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-live', digest: 'task-digest' }],
+        approvals: [],
+        memory: [{ id: 'memory-empty-links', value: { taskIds: [] } }],
+        cron: [{ id: 'cron-empty-links', value: { task_ids: [] } }],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('clean');
+    expect(report.findings).toEqual([]);
+  });
+
+  it('does not report dangling task references when the tasks snapshot is omitted', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 1,
+        approvals: [{ id: 'approval-partial', value: { taskId: 'task-not-captured' } }],
+        memory: [{ id: 'memory-partial', value: { taskIds: ['task-not-captured'] } }],
+        cron: [],
       },
       { checkedAt: '2026-07-14T12:30:00.000Z' },
     );
