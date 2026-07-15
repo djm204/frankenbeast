@@ -44,8 +44,41 @@ jobs:
           CI_BOOTSTRAP_DRY_RUN: "1"
         run: npm run bootstrap:dry-run
 
+      - name: Restore dependency vulnerability SLA state
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/dependency-vulnerability-sla-state.json
+          key: dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
+          restore-keys: |
+            dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-
+            dependency-vulnerability-sla-${{ github.event.repository.default_branch }}-${{ hashFiles('package-lock.json') }}-
+            dependency-vulnerability-sla-${{ github.event.repository.default_branch }}-
+
       - name: Dependency vulnerability SLA dashboard
-        run: npm run deps:vulnerability-sla
+        run: |
+          set -euo pipefail
+          mkdir -p .cache
+          state=.cache/dependency-vulnerability-sla-state.json
+          state_args=()
+          if [ -s "$state" ]; then
+            state_args=(--state "$state")
+          fi
+
+          node scripts/check-package-manager.mjs
+          set +e
+          node scripts/dependency-vulnerability-sla.mjs "${state_args[@]}" --format json > "$state.next"
+          status=$?
+          set -e
+          node scripts/dependency-vulnerability-sla.mjs "${state_args[@]}" --format human --no-fail-on-sla
+          mv "$state.next" "$state"
+          exit "$status"
+
+      - name: Save dependency vulnerability SLA state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/dependency-vulnerability-sla-state.json
+          key: dependency-vulnerability-sla-${{ github.ref_name }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
 
       - name: Dependency vulnerability audit
         run: npm run audit:dependencies

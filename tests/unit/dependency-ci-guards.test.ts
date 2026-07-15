@@ -513,7 +513,7 @@ updates:
     expect(report.findings).toHaveLength(0);
   });
 
-  it("marks SLA age unknown without prior state and does not invent fixed versions", () => {
+  it("starts new SLA findings at the current run and does not invent fixed versions", () => {
     const result = runVulnerabilitySlaReport(
       {
         metadata: { vulnerabilities: { high: 1, total: 1 } },
@@ -534,17 +534,54 @@ updates:
     const report = JSON.parse(result.stdout) as {
       ageSource: string;
       findings: Array<{
-        ageDays: number | null;
+        ageDays: number;
+        firstSeen: string;
         fixedVersion: string | null;
         overSla: boolean;
       }>;
     };
-    expect(report.ageSource).toBe("unknown");
+    expect(report.ageSource).toBe("current-run");
     expect(report.findings[0]).toMatchObject({
-      ageDays: null,
+      ageDays: 0,
+      firstSeen: "2026-07-15",
       fixedVersion: null,
       overSla: false,
     });
+  });
+
+  it("fails closed when a requested SLA state file is missing", () => {
+    const audit = writeSlaJson({
+      metadata: { vulnerabilities: { high: 1, total: 1 } },
+      vulnerabilities: {
+        vite: {
+          severity: "high",
+          range: "<8.1.3",
+          nodes: ["node_modules/vite"],
+          fixAvailable: true,
+          via: [],
+        },
+      },
+    });
+    const missingState = join(
+      tmpdir(),
+      `franken-missing-state-${process.pid}-${Date.now()}.json`,
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        DEPENDENCY_VULNERABILITY_SLA_SCRIPT,
+        "--audit-input",
+        audit,
+        "--state",
+        missingState,
+      ],
+      { cwd: ROOT, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain(
+      "Requested dependency SLA state file does not exist",
+    );
   });
 
   it("wires dependency audit, major outdated check, dependabot guard, and SBOM artifact generation into CI", () => {
@@ -570,8 +607,13 @@ updates:
     expect(packageJson.scripts?.["check:dependabot-supply-chain"]).toBe(
       "node scripts/check-dependabot-supply-chain.mjs",
     );
+    expect(workflow).toContain("actions/cache/restore@v4");
+    expect(workflow).toContain("dependency-vulnerability-sla-state.json");
+    expect(workflow).toContain("scripts/dependency-vulnerability-sla.mjs");
+    expect(
+      workflow.indexOf("Dependency vulnerability SLA dashboard"),
+    ).toBeLessThan(workflow.indexOf("npm run audit:dependencies"));
     expect(workflow).toContain("npm run audit:dependencies");
-    expect(workflow).toContain("npm run deps:vulnerability-sla");
     expect(workflow).toContain("npm run deps:outdated:major");
     expect(workflow).toContain("npm run check:dependabot-supply-chain");
     expect(workflow).toContain("npm sbom --sbom-format cyclonedx");
