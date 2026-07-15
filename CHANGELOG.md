@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.55.0](https://github.com/djm204/frankenbeast/compare/v0.54.0...v0.55.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add degraded worker routing policy ([#2272](https://github.com/djm204/frankenbeast/issues/2272)) ([a2d8f80](https://github.com/djm204/frankenbeast/commit/a2d8f800cbc1bddd0bb04b8d6f996984eb939b68))
+
+
+### Bug Fixes
+
+* **orchestrator:** add dispatcher startup integrity checks ([#2271](https://github.com/djm204/frankenbeast/issues/2271)) ([d4c3947](https://github.com/djm204/frankenbeast/commit/d4c3947d2933276ce5ff763d5443ab86b46782d5))
+* **stability:** add stale checkpoint lock detector ([#2275](https://github.com/djm204/frankenbeast/issues/2275)) ([00e9e79](https://github.com/djm204/frankenbeast/commit/00e9e79805ef0b8c9d8db68c596fe72f53dbf1ed))
+
+
+### Tests
+
+* **brain:** add state schema migration smoke tests ([da53b03](https://github.com/djm204/frankenbeast/commit/da53b03db0cb480db12be4ef6ae9321c357d004a))
+
 ## [0.54.0](https://github.com/djm204/frankenbeast/compare/v0.53.0...v0.54.0) (2026-07-15)
 
 
