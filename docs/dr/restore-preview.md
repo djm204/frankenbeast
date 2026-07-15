@@ -80,6 +80,37 @@ Example finding:
 
 Tests cover clean approval ledgers, backup-only stale tokens, changed/newer-live ledgers, live-only warnings, and token redaction so disaster-recovery tooling remains safe for automated handoffs.
 
+## Point-in-time backup manifest
+
+`buildPointInTimeBackupManifest(manifest, options)` wraps a restore-preview manifest with deterministic point-in-time metadata so operators can tell exactly which state was captured before comparing or restoring a backup. The helper is read-only: it returns a new manifest and does not mutate the caller's source manifest.
+
+The point-in-time block includes:
+
+- `capturedAt`: the logical instant represented by the backup. Restores should assume state after this instant is absent.
+- `generatedAt`: the instant the manifest was written.
+- `includedAreas`: every restore-preview area accounted for by the manifest: `tasks`, `approvals`, `memory`, and `cron`.
+- `recordCounts`: deterministic counts for each included area, including zero-count areas, so partial backups are visible before restore.
+- optional `source` and `manifestDigest` fields for operator handoff and integrity checks.
+
+Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-14T12:05:00.000Z",
+  "pointInTime": {
+    "capturedAt": "2026-07-14T12:00:00.000Z",
+    "generatedAt": "2026-07-14T12:05:00.000Z",
+    "source": "prod-primary",
+    "includedAreas": ["tasks", "approvals", "memory", "cron"],
+    "recordCounts": { "tasks": 1, "approvals": 1, "memory": 0, "cron": 0 },
+    "manifestDigest": "sha256:..."
+  }
+}
+```
+
+Invalid timestamps fail explicitly, and `capturedAt` may not be later than `generatedAt`; that prevents a manifest from claiming future state that the backup could not contain.
+
 ## Kanban card resurrection guardrails
 
 Backup-only task records are treated as `blocker` conflicts. A backup-only task means the backup manifest contains a Kanban card that live state no longer has, so blindly restoring it could resurrect deleted, completed, reassigned, or otherwise intentionally removed work.

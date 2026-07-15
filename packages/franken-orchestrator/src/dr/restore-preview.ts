@@ -84,6 +84,39 @@ export interface ApprovalLedgerRecoveryOptions {
   readonly checkedAt?: string;
 }
 
+export interface PointInTimeBackupManifestMetadata {
+  /** Instant the backup logically represents. Restores should not assume state after this time is present. */
+  readonly capturedAt: string;
+  /** Instant this manifest was written, supplied by callers for deterministic tests and audit logs. */
+  readonly generatedAt: string;
+  /** Operator-readable source such as an environment, backup job id, or storage URI. */
+  readonly source?: string;
+  /** Every restore-preview area covered by this point-in-time manifest. */
+  readonly includedAreas: readonly ComparableArea[];
+  /** Record counts captured for each restore-preview area so partial backups are visible before restore. */
+  readonly recordCounts: Readonly<Record<ComparableArea, number>>;
+  /** Optional digest for the manifest payload or archive that contains it. */
+  readonly manifestDigest?: string;
+}
+
+export interface PointInTimeBackupManifest extends RestorePreviewManifest {
+  readonly generatedAt: string;
+  readonly pointInTime: PointInTimeBackupManifestMetadata;
+  readonly tasks: readonly RestorePreviewRecord[];
+  readonly approvals: readonly RestorePreviewRecord[];
+  readonly memory: readonly RestorePreviewRecord[];
+  readonly cron: readonly RestorePreviewRecord[];
+}
+
+export interface PointInTimeBackupManifestOptions {
+  /** Instant the backup logically represents. Defaults to generatedAt when omitted. */
+  readonly capturedAt?: string;
+  /** Instant this manifest was generated. Defaults to the current wall-clock time. */
+  readonly generatedAt?: string;
+  readonly source?: string;
+  readonly manifestDigest?: string;
+}
+
 export type RestorePreviewConflictType =
   | 'schema-mismatch'
   | 'changed'
@@ -103,6 +136,8 @@ export interface RestorePreviewRecord {
 
 export interface RestorePreviewManifest {
   readonly schemaVersion: number;
+  readonly generatedAt?: string;
+  readonly pointInTime?: PointInTimeBackupManifestMetadata;
   readonly encryption?: BackupEncryptionMetadata;
   readonly tasks?: readonly RestorePreviewRecord[];
   readonly approvals?: readonly RestorePreviewRecord[];
@@ -196,6 +231,48 @@ const AREA_ACCESSORS = {
 } satisfies Record<ComparableArea, (manifest: RestorePreviewManifest) => readonly RestorePreviewRecord[]>;
 
 const DEFAULT_ALLOWED_BACKUP_ENCRYPTION_ALGORITHMS = ['aes-256-gcm', 'xchacha20-poly1305'] as const;
+
+export function buildPointInTimeBackupManifest(
+  manifest: RestorePreviewManifest,
+  options: PointInTimeBackupManifestOptions = {},
+): PointInTimeBackupManifest {
+  const generatedAt = normalizeIsoInstant(options.generatedAt ?? new Date().toISOString(), 'generatedAt');
+  const capturedAt = normalizeIsoInstant(options.capturedAt ?? generatedAt, 'capturedAt');
+
+  if (Date.parse(capturedAt) > Date.parse(generatedAt)) {
+    throw new Error('Point-in-time backup manifest capturedAt must not be later than generatedAt.');
+  }
+
+  const tasks = cloneRecords(manifest.tasks);
+  const approvals = cloneRecords(manifest.approvals);
+  const memory = cloneRecords(manifest.memory);
+  const cron = cloneRecords(manifest.cron);
+  const recordCounts: Record<ComparableArea, number> = {
+    tasks: tasks.length,
+    approvals: approvals.length,
+    memory: memory.length,
+    cron: cron.length,
+  };
+  const pointInTime: PointInTimeBackupManifestMetadata = {
+    capturedAt,
+    generatedAt,
+    ...(options.source === undefined ? {} : { source: options.source }),
+    includedAreas: [...(Object.keys(AREA_ACCESSORS) as ComparableArea[])],
+    recordCounts,
+    ...(options.manifestDigest === undefined ? {} : { manifestDigest: options.manifestDigest }),
+  };
+
+  return {
+    schemaVersion: manifest.schemaVersion,
+    generatedAt,
+    pointInTime,
+    ...(manifest.encryption === undefined ? {} : { encryption: { ...manifest.encryption } }),
+    tasks,
+    approvals,
+    memory,
+    cron,
+  };
+}
 
 export function buildBackupEncryptionVerificationReport(
   manifest: RestorePreviewManifest,
@@ -497,6 +574,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeIsoInstant(value: string, fieldName: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Point-in-time backup manifest ${fieldName} must be a valid ISO timestamp.`);
+  }
+  return new Date(parsed).toISOString();
+}
+
+function cloneRecords(records: readonly RestorePreviewRecord[] | undefined): readonly RestorePreviewRecord[] {
+  return (records ?? []).map((record) => ({
+    ...record,
+    ...(record.value === undefined ? {} : { value: cloneJsonValue(record.value) }),
+  }));
+}
+
+function cloneJsonValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => cloneJsonValue(item));
+  const object = value as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(object).map(([key, item]) => [key, cloneJsonValue(item)]));
 }
 
 function operatorSummaryForEncryptionReport(
