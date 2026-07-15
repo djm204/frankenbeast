@@ -24,6 +24,8 @@ describe('vite dev proxy configuration', () => {
     expect(CONFIG_SOURCE).toContain('isSameOriginProxyRequest');
     expect(CONFIG_SOURCE).toContain("req.headers['sec-fetch-site']");
     expect(CONFIG_SOURCE).toContain('proxyReq.setHeader');
+    expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('x-forwarded-host', req.headers.host)");
+    expect(CONFIG_SOURCE).toContain("proxyReq.setHeader('x-forwarded-proto', requestProtocol(req))");
     expect(CONFIG_SOURCE).not.toContain('headers: { authorization');
     expect(CONFIG_SOURCE).not.toContain('operatorProxy(');
   });

@@ -55,6 +55,10 @@ function isSameOriginProxyRequest(req: IncomingMessage): boolean {
   }
 }
 
+function requestProtocol(req: IncomingMessage): 'http' | 'https' {
+  return (req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http';
+}
+
 function withServerSideOperatorAuth(target: string, operatorToken: string, extra: ProxyOptions = {}): ProxyOptions {
   return {
     target,
@@ -71,8 +75,12 @@ function withServerSideOperatorAuth(target: string, operatorToken: string, extra
       if (!operatorToken) {
         return;
       }
-      proxy.on('proxyReq', (proxyReq) => {
+      proxy.on('proxyReq', (proxyReq, req) => {
         proxyReq.setHeader('authorization', `Bearer ${operatorToken}`);
+        if (req.headers.host) {
+          proxyReq.setHeader('x-forwarded-host', req.headers.host);
+          proxyReq.setHeader('x-forwarded-proto', requestProtocol(req));
+        }
       });
     },
     ...extra,
