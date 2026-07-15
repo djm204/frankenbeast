@@ -1271,6 +1271,7 @@ export async function main(): Promise<void> {
         action: args.memoryAction,
         beforePath: args.memorySnapshotBefore,
         afterPath: args.memorySnapshotAfter,
+        backupPath: args.memoryBackupPath,
         print: printLine,
       });
     } catch (err) {
