@@ -250,6 +250,7 @@ describe('GhostDependencyEvaluator', () => {
       const parenthesizedSatisfies = value satisfies (import('ghost-package').Plugin);
       const objectTypeAssertion = value as { loader: import('ghost-package').Loader };
       const templateTypeAssertion = value as \`\${import('template-assertion-ghost').Name}\`;
+      const commentedTemplateTypeAssertion = value as /* generated */ \`\${import('template-assertion-ghost').Name}\`;
       const tupleAssertion = value as [import('ghost-package').Tuple];
       const tupleAssertionWithComma = value as [string, import('ghost-package').Tuple];
       const tupleSatisfiesWithComma = value satisfies [string, import('ghost-package').Tuple];
@@ -356,7 +357,7 @@ describe('GhostDependencyEvaluator', () => {
       const runtimeTernary = kind === 'extends' ? fallback : import('ternary-ghost');
       const lessThanRuntime = count < import('less-than-ghost');
       const compactLessThanRuntime = count<import('compact-less-than-ghost');
-      const compactLessThan = a<b, y = import('compact-less-than-ghost');
+      const compactLessThan = a<b, y = import('compact-less-than-assignment-ghost');
       const lessThanArgument = load(count < limit, import('less-than-argument-ghost'));
       const compactLessThanArgument = load(a<b, import('compact-comparison-argument-ghost'));
       const compactNamedLessThanArgument = load(count<limit, import('compact-named-comparison-argument-ghost'));
@@ -417,6 +418,8 @@ describe('GhostDependencyEvaluator', () => {
       import('chained-after-type-alias-ghost').then(load);
       const runtimeTypeofProperty = typeof import('runtime-typeof-property-ghost').then;
       const objectTypeKey = { type: import('object-type-key-ghost') };
+      const awaitedTypeNamedObject = { type: await import('awaited-type-named-object-ghost') };
+      const nestedTypeNamedObject = { type: { loader: import('nested-type-named-object-ghost') } };
       await import('zod', { with: { type: await import('nested-type-attribute-ghost') } });
       type DecoratedAfterType = {}
       @dec(import('decorator-after-type-ghost'))
@@ -426,11 +429,13 @@ describe('GhostDependencyEvaluator', () => {
       function objectReturn(): { type: string } { return import('object-return-type-key-ghost'); }
       function templateAfterTypedParam(opts: { path: string }) { return \`\${require('template-after-typed-param-ghost')}\`; }
       const assertedPair = value as Foo, chained = import('chained-after-assertion-ghost').then(load);
+      const as = String.raw; as\`\${require('as-tagged-template-ghost')}\`;
+      const satisfies = String.raw; satisfies\`\${require('satisfies-tagged-template-ghost')}\`;
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(80);
+    expect(result.findings).toHaveLength(85);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -466,6 +471,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('ternary-ghost'),
         expect.stringContaining('less-than-ghost'),
         expect.stringContaining('compact-less-than-ghost'),
+        expect.stringContaining('compact-less-than-assignment-ghost'),
         expect.stringContaining('less-than-argument-ghost'),
         expect.stringContaining('compact-comparison-argument-ghost'),
         expect.stringContaining('compact-named-comparison-argument-ghost'),
@@ -508,12 +514,16 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('chained-after-type-alias-ghost'),
         expect.stringContaining('runtime-typeof-property-ghost'),
         expect.stringContaining('object-type-key-ghost'),
+        expect.stringContaining('awaited-type-named-object-ghost'),
+        expect.stringContaining('nested-type-named-object-ghost'),
         expect.stringContaining('nested-type-attribute-ghost'),
         expect.stringContaining('decorator-after-type-ghost'),
         expect.stringContaining('using-after-type-ghost'),
         expect.stringContaining('object-return-type-key-ghost'),
         expect.stringContaining('template-after-typed-param-ghost'),
         expect.stringContaining('chained-after-assertion-ghost'),
+        expect.stringContaining('as-tagged-template-ghost'),
+        expect.stringContaining('satisfies-tagged-template-ghost'),
       ]),
     );
   });

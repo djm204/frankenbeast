@@ -476,7 +476,8 @@ function isTypeOnlyTemplateString(content: string, templateIndex: number): boole
   const statementStart = findDynamicImportStatementStart(content, templateIndex);
   const prefix = content.slice(statementStart + 1, templateIndex);
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
-  if (/(?:^|[^.])\b(?:as|satisfies)\s*$/.test(prefix.trimEnd())) return true;
+  const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
+  if (isOpenTemplateAssertionKeyword(prefixWithoutTrailingTrivia)) return true;
   if (/(?:^|[;{}\n])\s*(?:export\s+)?type\b[\s\S]*=\s*$/.test(prefix)) return true;
   const previousIndex = skipTriviaBackward(content, templateIndex - 1);
   if (previousIndex >= 0 && /[\w$)\]]/.test(content[previousIndex] ?? '')) return false;
@@ -485,6 +486,15 @@ function isTypeOnlyTemplateString(content: string, templateIndex: number): boole
     isInsideTypeDeclaration(prefix) ||
     isInsideTypeAnnotation(prefix, content, templateIndex, isTernaryBranch)
   );
+}
+
+function isOpenTemplateAssertionKeyword(prefix: string): boolean {
+  const match = /(?:^|[^.])\b(as|satisfies)$/.exec(prefix);
+  if (!match || match.index === undefined) return false;
+
+  const keywordIndex = match.index + match[0].lastIndexOf(match[1]!);
+  const previousIndex = skipTriviaBackward(prefix, keywordIndex - 1);
+  return previousIndex >= 0 && /[\w$)\]}'"`]/.test(prefix[previousIndex] ?? '');
 }
 
 function findTypeScriptAngleAssertionEnd(content: string, index: number): number {
@@ -607,7 +617,12 @@ function hasUnclosedGenericTypeArgument(trimmed: string): boolean {
   const tokenStart = findIdentifierStartBefore(trimmed, lastOpen - 1);
   if (tokenStart === -1) return false;
   const token = trimmed.slice(tokenStart, lastOpen);
-  if (token.length > 0) return true;
+  if (token.length > 0) {
+    if (/^[A-Za-z_$][\w$]*\s*,[\s\S]*=\s*$/.test(typeArgumentPrefix)) {
+      return false;
+    }
+    return true;
+  }
 
   const previousIndex = previousNonTriviaIndex(trimmed, tokenStart - 1);
   return previousIndex !== null && /[.>\]]/.test(trimmed[previousIndex]!);
@@ -852,7 +867,10 @@ function stripTrailingTrivia(content: string): string {
 }
 
 function isInsideTypeDeclaration(prefix: string): boolean {
-  if (/(?:^|[;{}\n])\s*(?:type|interface)\s*[:=]\s*(?:await\s+)?$/.test(prefix.trimEnd())) {
+  if (/(?:^|[;{}\n])\s*(?:type|interface)\s*[:=]\s*(?:await\b\s*)?$/.test(prefix)) {
+    return false;
+  }
+  if (isRuntimeTypeNamedObjectValue(prefix)) {
     return false;
   }
   if (/}\s*(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\(|\[)|module\.exports\s*=)[\s\S]*$/.test(prefix)) {
@@ -873,6 +891,18 @@ function isInsideTypeDeclaration(prefix: string): boolean {
       prefix,
     )
   );
+}
+
+function isRuntimeTypeNamedObjectValue(prefix: string): boolean {
+  const match = /(?:^|[,{])\s*(?:type|interface)\s*:\s*(?:await\b\s*)?(?:\{[\s\S]*)?$/.exec(prefix);
+  if (!match || match.index === undefined) return false;
+
+  const beforeProperty = prefix.slice(0, match.index);
+  if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(beforeProperty)) {
+    return false;
+  }
+
+  return true;
 }
 
 function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
