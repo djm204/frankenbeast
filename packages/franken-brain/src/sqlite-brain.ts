@@ -274,6 +274,10 @@ const MEMORY_STORES = [
   'memory_access_audit_events',
 ] as const;
 
+const ENCRYPTED_MEMORY_STORES = MEMORY_STORES.filter(
+  (store) => store !== 'memory_access_audit_events',
+);
+
 const MEMORY_REVIEW_PAYLOAD_COLUMNS = [
   'value',
   'source',
@@ -449,15 +453,23 @@ function stringifyWorkingMemoryValue(key: string, value: unknown): string {
   );
 }
 
-function hashMemoryAccessValue(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex');
+function hashMemoryAccessValue(
+  db: Database.Database,
+  value: string,
+  encryption?: MemoryCipher,
+): string {
+  const key = readDeletionHashKey(db, encryption);
+  return key
+    ? createHmac('sha256', key).update(value, 'utf8').digest('hex')
+    : createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
 function sanitizeMemoryAccessDetails(
   details: Record<string, unknown> | undefined,
 ): string | null {
   if (!details) return null;
-  return JSON.stringify(details, (_key, value) => {
+  return JSON.stringify(details, (key, value) => {
+    if (key === '') return value;
     if (
       value === null
       || typeof value === 'string'
@@ -497,6 +509,7 @@ function parseMemoryAccessDetails(
 function insertMemoryAccessAuditEvent(
   db: Database.Database,
   event: MemoryAccessAuditInput,
+  encryption?: MemoryCipher,
 ): void {
   db.prepare(
     `INSERT INTO memory_access_audit_events (
@@ -505,8 +518,8 @@ function insertMemoryAccessAuditEvent(
   ).run(
     event.operation,
     event.store,
-    event.key === undefined ? null : hashMemoryAccessValue(event.key),
-    event.query === undefined ? null : hashMemoryAccessValue(event.query),
+    event.key === undefined ? null : hashMemoryAccessValue(db, event.key, encryption),
+    event.query === undefined ? null : hashMemoryAccessValue(db, event.query, encryption),
     event.outcome,
     sanitizeMemoryAccessDetails(event.details),
     event.createdAt ?? isoNow(),
@@ -542,10 +555,13 @@ function rowToMemoryAccessAuditEvent(
 }
 
 export class SqliteMemoryAccessAuditTrail {
-  constructor(private db: Database.Database) {}
+  constructor(
+    private db: Database.Database,
+    private encryption?: MemoryCipher,
+  ) {}
 
   record(event: MemoryAccessAuditInput): void {
-    insertMemoryAccessAuditEvent(this.db, event);
+    insertMemoryAccessAuditEvent(this.db, event, this.encryption);
   }
 
   list(options: MemoryAccessAuditListOptions = {}): MemoryAccessAuditEvent[] {
@@ -986,41 +1002,59 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   set(key: string, value: unknown): void {
-    const { normalized, serialized, size } = this.prepareEntry(key, value);
-    assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+    let serialized: string | undefined;
+    try {
+      const prepared = this.prepareEntry(key, value);
+      serialized = prepared.serialized;
+      assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
 
-    if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
-      throw new WorkingMemoryLimitError(
-        `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
-      );
-    }
-    const newTotal = this.totalBytes - (this.sizes.get(key) ?? 0) + size;
-    if (
-      !Number.isSafeInteger(newTotal) ||
-      newTotal > this.limits.maxTotalBytes
-    ) {
-      throw new WorkingMemoryLimitError(
-        `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
-      );
-    }
+      if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
+        throw new WorkingMemoryLimitError(
+          `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
+        );
+      }
+      const newTotal = this.totalBytes - (this.sizes.get(key) ?? 0) + prepared.size;
+      if (
+        !Number.isSafeInteger(newTotal) ||
+        newTotal > this.limits.maxTotalBytes
+      ) {
+        throw new WorkingMemoryLimitError(
+          `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
+        );
+      }
 
-    this.store.set(key, normalized);
-    this.sizes.set(key, size);
-    this.serialized.set(key, serialized);
-    this.totalBytes = newTotal;
-    if (this.persistedSerialized.get(key) === serialized) {
-      this.dirtyKeys.delete(key);
-    } else {
-      this.dirtyKeys.add(key);
+      this.store.set(key, prepared.normalized);
+      this.sizes.set(key, prepared.size);
+      this.serialized.set(key, serialized);
+      this.totalBytes = newTotal;
+      if (this.persistedSerialized.get(key) === serialized) {
+        this.dirtyKeys.delete(key);
+      } else {
+        this.dirtyKeys.add(key);
+      }
+      this.deletedKeys.delete(key);
+      this.audit?.({
+        operation: 'working.set',
+        store: 'working',
+        key,
+        outcome: 'success',
+        details: { valueBytes: Buffer.byteLength(serialized, 'utf8') },
+      });
+    } catch (error) {
+      this.audit?.({
+        operation: 'working.set',
+        store: 'working',
+        key,
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          errorName: error instanceof Error ? error.name : 'Error',
+          ...(serialized === undefined
+            ? {}
+            : { valueBytes: Buffer.byteLength(serialized, 'utf8') }),
+        },
+      });
+      throw error;
     }
-    this.deletedKeys.delete(key);
-    this.audit?.({
-      operation: 'working.set',
-      store: 'working',
-      key,
-      outcome: 'success',
-      details: { valueBytes: Buffer.byteLength(serialized, 'utf8') },
-    });
   }
 
   delete(key: string): boolean {
@@ -1298,11 +1332,28 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   constructor(
     private db: Database.Database,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
   ) {}
 
   record(event: EpisodicEvent): void {
-    assertEpisodicNotDeletionGuarded(this.db, event, this.encryption);
-    this.insertEvent(event);
+    try {
+      assertEpisodicNotDeletionGuarded(this.db, event, this.encryption);
+      this.insertEvent(event);
+      this.audit?.({
+        operation: 'episodic.record',
+        store: 'episodic',
+        outcome: 'success',
+        details: { type: event.type },
+      });
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.record',
+        store: 'episodic',
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   recordLearning(
@@ -1417,6 +1468,13 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   recall(query: string, limit = 10): EpisodicEvent[] {
+    this.audit?.({
+      operation: 'episodic.recall',
+      store: 'episodic',
+      query,
+      outcome: 'success',
+      details: { limit },
+    });
     if (this.encryption) {
       return this.recallEncrypted(query, limit);
     }
@@ -1551,6 +1609,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   recentFailures(n = 10): EpisodicEvent[] {
+    this.audit?.({
+      operation: 'episodic.recentFailures',
+      store: 'episodic',
+      outcome: 'success',
+      details: { limit: n },
+    });
     const stmt = this.db.prepare(
       `SELECT * FROM episodic_events WHERE type = 'failure'
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,
@@ -1563,6 +1627,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   recent(n = 10): EpisodicEvent[] {
+    this.audit?.({
+      operation: 'episodic.recent',
+      store: 'episodic',
+      outcome: 'success',
+      details: { limit: n },
+    });
     const stmt = this.db.prepare(
       `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     );
@@ -1628,6 +1698,7 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
     private db: Database.Database,
     private flushWorkingMemory?: () => (() => void) | void,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
@@ -1652,10 +1723,21 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
 
     const result = tx() as { id: string };
     finalizeWorkingMemoryFlush.current?.();
+    this.audit?.({
+      operation: 'recovery.checkpoint',
+      store: 'recovery',
+      outcome: 'success',
+      details: { checkpointId: result.id },
+    });
     return result;
   }
 
   lastCheckpoint(): ExecutionState | null {
+    this.audit?.({
+      operation: 'recovery.lastCheckpoint',
+      store: 'recovery',
+      outcome: 'success',
+    });
     const stmt = this.db.prepare(
       `SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`,
     );
@@ -1677,6 +1759,11 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 
   listCheckpoints(): Array<{ id: string; timestamp: string }> {
+    this.audit?.({
+      operation: 'recovery.listCheckpoints',
+      store: 'recovery',
+      outcome: 'success',
+    });
     const rows = this.db
       .prepare(`SELECT id, created_at FROM checkpoints ORDER BY id ASC`)
       .all() as Array<{ id: number; created_at: string }>;
@@ -1746,6 +1833,7 @@ export class SqliteMemoryReviewQueue {
     private working: SqliteWorkingMemory,
     private dbPath: string,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
   ) {}
 
   propose(proposal: MemoryCandidateProposal): MemoryCandidate {
@@ -1790,10 +1878,23 @@ export class SqliteMemoryReviewQueue {
       result = candidate;
     });
     tx.immediate();
+    this.audit?.({
+      operation: 'review.propose',
+      store: 'review',
+      key: result!.key,
+      outcome: result!.status === 'suppressed' ? 'denied' : 'success',
+      details: { status: result!.status },
+    });
     return result!;
   }
 
   list(status: MemoryCandidateStatus = 'pending'): MemoryCandidate[] {
+    this.audit?.({
+      operation: 'review.list',
+      store: 'review',
+      outcome: 'success',
+      details: { status },
+    });
     const rows = this.db
       .prepare(
         `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
@@ -2405,7 +2506,7 @@ export class SqliteBrain implements IBrain {
     const encryption = makeMemoryCipher(options.encryption);
     this.encryption = encryption;
     assertMemoryEncryptionState(this.db, dbPath, encryption);
-    this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db);
+    this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
     this.working = new SqliteWorkingMemory(
       this.db,
       {
@@ -2416,17 +2517,23 @@ export class SqliteBrain implements IBrain {
       encryption,
       (event) => this.accessAudit.record(event),
     );
-    this.episodic = new SqliteEpisodicMemory(this.db, encryption);
+    this.episodic = new SqliteEpisodicMemory(
+      this.db,
+      encryption,
+      (event) => this.accessAudit.record(event),
+    );
     this.recovery = new SqliteRecoveryMemory(
       this.db,
       () => this.working.flushToDb(),
       encryption,
+      (event) => this.accessAudit.record(event),
     );
     this.memoryReview = new SqliteMemoryReviewQueue(
       this.db,
       this.working,
       this.dbPath,
       encryption,
+      (event) => this.accessAudit.record(event),
     );
     SqliteBrain.registerLiveBrain(this.dbPath, this);
   }
@@ -2756,6 +2863,20 @@ export class SqliteBrain implements IBrain {
         purgeDeletedSqliteContent(this.db, this.dbPath);
       }
       SqliteBrain.expireLiveWorkingMatches(this.dbPath, normalizedSelector);
+      const accessEvent: MemoryAccessAuditInput = {
+        operation: 'privacy.rightToForget',
+        store: 'privacy',
+        outcome: 'success',
+        details: {
+          selectorHash,
+          dryRun: false,
+          deletedWorking: deletedWorkingKeys.size,
+          deletedEpisodic: episodicMatchCount,
+        },
+      };
+      if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
+      if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
+      this.accessAudit.record(accessEvent);
       return {
         selectorHash,
         dryRun,
@@ -2769,6 +2890,20 @@ export class SqliteBrain implements IBrain {
       };
     }
 
+    const accessEvent: MemoryAccessAuditInput = {
+      operation: 'privacy.rightToForget',
+      store: 'privacy',
+      outcome: 'success',
+      details: {
+        selectorHash,
+        dryRun: true,
+        deletedWorking: deletedWorkingKeys.size,
+        deletedEpisodic: episodicMatchCount,
+      },
+    };
+    if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
+    if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
+    this.accessAudit.record(accessEvent);
     return {
       selectorHash,
       dryRun,
@@ -3344,7 +3479,7 @@ function migrateMemoryEncryptionDatabase(
   }
   verifyExistingEncryptedStores(db, cipher);
   const operations: MemorySchemaMigrationOperation[] = [];
-  for (const store of MEMORY_STORES) {
+  for (const store of ENCRYPTED_MEMORY_STORES) {
     if (hasPlaintextStoreRows(db, store, cipher)) {
       operations.push({
         table: store,
@@ -3473,7 +3608,7 @@ function readMemoryEncryptionMetadata(
   if (!tableExists(db, 'memory_encryption_status')) {
     return {
       algorithm: MEMORY_ENCRYPTION_ALGORITHM,
-      stores: MEMORY_STORES.map((store) => ({ store, encrypted: false })),
+      stores: ENCRYPTED_MEMORY_STORES.map((store) => ({ store, encrypted: false })),
     };
   }
   const rows = db
@@ -3484,7 +3619,7 @@ function readMemoryEncryptionMetadata(
   );
   return {
     algorithm: MEMORY_ENCRYPTION_ALGORITHM,
-    stores: MEMORY_STORES.map((store) => ({
+    stores: ENCRYPTED_MEMORY_STORES.map((store) => ({
       store,
       encrypted: encryptedByStore.get(store) ?? false,
     })),
@@ -3500,7 +3635,7 @@ function writeMemoryEncryptionStatus(
     `INSERT INTO memory_encryption_status (store, encrypted, algorithm, verifier, updated_at) VALUES (?, 1, ?, ?, ?)
      ON CONFLICT(store) DO UPDATE SET encrypted = excluded.encrypted, algorithm = excluded.algorithm, verifier = excluded.verifier, updated_at = excluded.updated_at`,
   );
-  for (const store of MEMORY_STORES) {
+  for (const store of ENCRYPTED_MEMORY_STORES) {
     upsert.run(store, cipher.algorithm, cipher.verifier(), now);
   }
 }
@@ -3512,7 +3647,7 @@ function allStoresHaveEncryptionStatus(db: Database.Database): boolean {
   const encrypted = new Set(
     rows.filter((row) => row.encrypted === 1).map((row) => row.store),
   );
-  return MEMORY_STORES.every((store) => encrypted.has(store));
+  return ENCRYPTED_MEMORY_STORES.every((store) => encrypted.has(store));
 }
 
 function hasPlaintextStoreRows(

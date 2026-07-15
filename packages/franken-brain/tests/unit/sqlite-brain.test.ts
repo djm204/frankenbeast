@@ -2042,6 +2042,11 @@ describe('SqliteBrain', () => {
           version: CURRENT_MEMORY_SCHEMA_VERSION,
           recordCount: 0,
         },
+        {
+          store: 'memory_access_audit_events',
+          version: CURRENT_MEMORY_SCHEMA_VERSION,
+          recordCount: 5,
+        },
       ]);
 
       const db = (
@@ -2180,6 +2185,11 @@ describe('SqliteBrain', () => {
             store: 'memory_deletion_hash_keys',
             version: CURRENT_MEMORY_SCHEMA_VERSION,
             recordCount: 0,
+          },
+          {
+            store: 'memory_access_audit_events',
+            version: CURRENT_MEMORY_SCHEMA_VERSION,
+            recordCount: 1,
           },
         ]);
         reopened.close();
@@ -3746,6 +3756,65 @@ describe('SqliteBrain', () => {
 
       const snapshot = brain.serialize();
       expect(() => BrainSnapshotSchema.parse(snapshot)).not.toThrow();
+    });
+  });
+
+  describe('memory access audit', () => {
+    it('hashes selectors with the deletion hash key and preserves details objects', () => {
+      brain.rightToForget({ query: 'audit seed selector' });
+      brain.working.set('api-token', 'secret-value');
+
+      const [event] = brain.accessAudit.list({ operation: 'working.set', limit: 1 });
+      expect(event).toMatchObject({
+        operation: 'working.set',
+        store: 'working',
+        outcome: 'success',
+        details: { valueBytes: '"secret-value"'.length },
+      });
+      expect(event.keyHash).toBeDefined();
+      expect(event.keyHash).not.toBe(
+        createHash('sha256').update('api-token', 'utf8').digest('hex'),
+      );
+    });
+
+    it('records accesses across persisted memory surfaces and right-to-forget', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'Audit trail event',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      });
+      brain.episodic.recall('Audit trail event', 1);
+      brain.recovery.checkpoint({
+        runId: 'audit-run',
+        phase: 'verify',
+        step: 1,
+        context: {},
+        timestamp: '2026-07-15T00:00:01.000Z',
+      });
+      brain.recovery.listCheckpoints();
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'audit-review',
+        value: 'candidate',
+        source: 'test',
+        confidence: 0.9,
+        reason: 'exercise audit trail',
+      });
+      brain.memoryReview.list();
+      brain.rightToForget({ query: 'Audit trail event', dryRun: true });
+
+      const operations = brain.accessAudit.list({ limit: 50 }).map((event) => event.operation);
+      expect(operations).toEqual(
+        expect.arrayContaining([
+          'episodic.record',
+          'episodic.recall',
+          'recovery.checkpoint',
+          'recovery.listCheckpoints',
+          'review.propose',
+          'review.list',
+          'privacy.rightToForget',
+        ]),
+      );
     });
   });
 
