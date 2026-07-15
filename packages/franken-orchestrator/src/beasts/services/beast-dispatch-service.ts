@@ -181,6 +181,7 @@ export class BeastDispatchService {
       : config;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
     if (request.trackedAgentId) {
+      this.repository.requireTrackedAgent(request.trackedAgentId);
       this.assertTrackedAgentCapacity(request.trackedAgentId, {
         ...request.config,
         ...configSnapshot,

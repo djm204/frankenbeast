@@ -11,6 +11,7 @@ import { BeastInterviewService } from '../../../src/beasts/services/beast-interv
 import { BeastDispatchService } from '../../../src/beasts/services/beast-dispatch-service.js';
 import { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import { CapacityReservationError, CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { errorHandler } from '../../../src/http/middleware.js';
 import { agentRoutes } from '../../../src/http/routes/agent-routes.js';
@@ -34,7 +35,7 @@ function expectEventsToIncludeTypes(events: AgentEvent[], requiredTypes: string[
   }
 }
 
-function createIntegratedBeastApp(opts?: { rateLimitMax?: number }) {
+function createIntegratedBeastApp(opts?: { rateLimitMax?: number; capacityPolicy?: CapacityReservationPolicy }) {
   // Intentionally exercise the route with the real repository, dispatch service,
   // run service, and event log graph. This file lives under tests/integration so
   // circular service/linking behavior is covered here rather than hidden in unit tests.
@@ -107,10 +108,16 @@ function createIntegratedBeastApp(opts?: { rateLimitMax?: number }) {
       kill: vi.fn(),
     },
   };
-  const dispatch = new BeastDispatchService(repository, catalog, executors, metrics, logStore);
-  const runs = new BeastRunService(repository, catalog, executors, metrics, logStore);
+  const dispatch = new BeastDispatchService(repository, catalog, executors, metrics, logStore, {
+    capacityPolicy: opts?.capacityPolicy,
+  });
+  const runs = new BeastRunService(repository, catalog, executors, metrics, logStore, {
+    capacityPolicy: opts?.capacityPolicy,
+  });
   const interviews = new BeastInterviewService(repository, catalog);
-  const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+  const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z', {
+    capacityPolicy: opts?.capacityPolicy,
+  });
   const security = new TransportSecurityService();
   const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
 
@@ -143,21 +150,23 @@ function createStandaloneAgentApp() {
   mkdirSync(TMP, { recursive: true });
   const repository = new SQLiteBeastRepository(join(TMP, 'standalone-beasts.db'));
   const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+  const runs = {
+    getRun: vi.fn((runId: string) => repository.getRun(runId)),
+    start: vi.fn(),
+    stop: vi.fn(),
+    kill: vi.fn(),
+    restart: vi.fn(),
+  };
   const app = new Hono();
   app.onError(errorHandler);
   app.route('/', agentRoutes({
     agents,
-    runs: {
-      start: vi.fn(),
-      stop: vi.fn(),
-      kill: vi.fn(),
-      restart: vi.fn(),
-    } as never,
+    runs: runs as never,
     operatorToken: TEST_SUPER_SECRET_OPERATOR_TOKEN,
     security: new TransportSecurityService(),
   }));
 
-  return { app };
+  return { app, agents, runs, repository };
 }
 
 describe('agent routes integration', () => {
@@ -179,6 +188,63 @@ describe('agent routes integration', () => {
     const listResponse = await app.request('/v1/beasts/agents');
 
     expect(listResponse.status).toBe(401);
+  });
+
+  it('translates capacity reservation failures from linked agent resume into 409 responses', async () => {
+    const { app, agents, runs, repository } = createStandaloneAgentApp();
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: {
+        kind: 'martin-loop',
+        command: 'martin-loop',
+        config: {
+          provider: 'claude',
+          objective: 'Resume with capacity guard',
+          chunkDirectory: 'docs/chunks',
+        },
+      },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Resume with capacity guard',
+        chunkDirectory: 'docs/chunks',
+      },
+    });
+    const linkedRun = repository.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: agent.initConfig,
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+    agents.linkRun(agent.id, linkedRun.id);
+    agents.updateAgent(agent.id, { status: 'stopped' });
+    runs.start.mockRejectedValue(new CapacityReservationError(
+      { allowed: false, reason: 'reserved_capacity_only', reservationId: 'urgent' },
+      {
+        totalSlots: 1,
+        usedSlots: 0,
+        freeSlots: 1,
+        normalSlots: { total: 0, used: 0, free: 0 },
+        reservations: [{ id: 'urgent', slots: 1, used: 0, free: 1, released: false, labels: ['urgent'], categories: [] }],
+      },
+    ));
+
+    const response = await app.request(`/v1/beasts/agents/${agent.id}/resume`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TEST_SUPER_SECRET_OPERATOR_TOKEN}` },
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'AGENT_CAPACITY_RESERVED',
+      },
+    });
   });
 
   it('returns validation errors for invalid tracked agent payloads', async () => {

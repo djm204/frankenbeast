@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
 import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../../beasts/errors.js';
+import { CapacityReservationError } from '../../beasts/services/capacity-reservation-policy.js';
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
@@ -296,6 +297,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwCapacityReservationError(error);
       throw error;
     }
   });
@@ -344,7 +346,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
       if (agent.dispatchRunId) {
         const existingRun = deps.runs.getRun(agent.dispatchRunId);
         const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)
-          ? await dispatchReplacementAgentRun(deps, agentId, existingRun)
+          ? await dispatchReplacementAgentRun(deps, agent, existingRun)
           : await restartLinkedAgentRun(deps, agent);
         deps.agents.appendEvent(agentId, {
           level: 'info',
@@ -383,6 +385,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwCapacityReservationError(error);
       throw error;
     }
   });
@@ -466,6 +469,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
           `Tracked agent '${agentId}' was not found`,
         );
       }
+      throwCapacityReservationError(error);
       throw error;
     }
   });
@@ -553,19 +557,33 @@ function shouldDispatchFreshRunForModuleConfig(
   return JSON.stringify(run.configSnapshot.modules ?? {}) !== JSON.stringify(agent.moduleConfig);
 }
 
+function throwCapacityReservationError(error: unknown): void {
+  if (error instanceof CapacityReservationError) {
+    throw new HttpError(
+      409,
+      'AGENT_CAPACITY_RESERVED',
+      'Agent capacity is reserved for urgent matching work',
+      {
+        decision: error.decision,
+        capacity: error.state,
+      },
+    );
+  }
+}
+
 async function dispatchReplacementAgentRun(
   deps: AgentRoutesDeps,
-  agentId: string,
+  agent: TrackedAgent,
   existingRun: ReturnType<BeastRunService['getRun']>,
 ) {
+  assertAgentCapacityAvailable(deps, agent);
   if (existingRun?.status === 'running') {
     await deps.runs.stop(existingRun.id, 'operator');
   }
-  return dispatchDetachedAgent(deps, agentId);
+  return dispatchDetachedAgent(deps, agent.id);
 }
 
 async function startLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): Promise<BeastRun> {
-  assertAgentCapacityAvailable(deps, agent);
   if (!agent.dispatchRunId) {
     throw new Error(`Tracked agent '${agent.id}' has no linked run`);
   }
@@ -573,7 +591,6 @@ async function startLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): 
 }
 
 async function restartLinkedAgentRun(deps: AgentRoutesDeps, agent: TrackedAgent): Promise<BeastRun> {
-  assertAgentCapacityAvailable(deps, agent);
   if (!agent.dispatchRunId) {
     throw new Error(`Tracked agent '${agent.id}' has no linked run`);
   }
