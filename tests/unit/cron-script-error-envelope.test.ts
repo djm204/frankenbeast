@@ -144,7 +144,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "process.on('SIGTERM', () => { process.stderr.write('cleanup after signal'); process.exit(0); }); setInterval(() => {}, 1000)",
+      "process.on('SIGTERM', () => { process.stderr.write('cleanup after signal'); process.exit(0); }); process.stderr.write('ready for signal\\n'); setInterval(() => {}, 1000)",
     ], {
       cwd: ROOT,
       env: { ...process.env, TZ: 'UTC' },
@@ -157,7 +157,13 @@ describe('cron script error envelope runner', () => {
       stderr += chunk;
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready for signal')) {
+          resolve();
+        }
+      });
+    });
     child.kill('SIGTERM');
 
     const status = await new Promise<number | null>((resolve) => {
