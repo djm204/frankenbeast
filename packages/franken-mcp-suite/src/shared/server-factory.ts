@@ -280,6 +280,13 @@ function redactMemoryReviewDecisionArgs(sanitized: Record<string, unknown>, reda
       sanitized[key] = redaction;
     }
   }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'id')) {
+    sanitized['id'] = redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'action')
+    && (typeof sanitized['action'] !== 'string' || !['approve', 'reject', 'never_store'].includes(sanitized['action']))) {
+    sanitized['action'] = redaction;
+  }
   return sanitized;
 }
 

@@ -183,32 +183,6 @@ function contextTargetsTool(context: string, toolName: string): boolean {
   return false;
 }
 
-function contextLooksLikeMemoryReviewProposalArgs(context: string): boolean {
-  try {
-    const parsed = JSON.parse(context) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    const record = parsed as Record<string, unknown>;
-    return typeof record['key'] === 'string'
-      && typeof record['value'] === 'string'
-      && typeof record['source'] === 'string'
-      && (typeof record['reason'] === 'string' || record['confidence'] !== undefined);
-  } catch {
-    return false;
-  }
-}
-
-function contextLooksLikeMemoryReviewDecisionArgs(context: string): boolean {
-  try {
-    const parsed = JSON.parse(context) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    const record = parsed as Record<string, unknown>;
-    return typeof record['id'] === 'string'
-      && typeof record['action'] === 'string'
-      && ['approve', 'reject', 'never_store'].includes(record['action']);
-  } catch {
-    return false;
-  }
-}
 
 function memoryReviewDecisionArgsFromContext(context: string): Record<string, unknown> | undefined {
   try {
@@ -249,8 +223,7 @@ function redactMemoryReviewProposalGovernanceContext(action: string, context: st
   const unqualified = unqualifyMcpActionName(action);
   if (unqualified !== 'fbeast_memory_review_propose'
     && !(unqualified === 'execute_tool'
-      && (contextTargetsTool(context, 'fbeast_memory_review_propose')
-        || contextLooksLikeMemoryReviewProposalArgs(context)))) {
+      && contextTargetsTool(context, 'fbeast_memory_review_propose'))) {
     return context;
   }
   return MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION;
@@ -260,9 +233,7 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
   const unqualified = unqualifyMcpActionName(action);
   const decisionArgs = memoryReviewDecisionArgsFromContext(context);
   if (unqualified === 'execute_tool'
-    && (contextTargetsTool(context, 'fbeast_memory_review_decide')
-      || decisionArgs !== undefined
-      || contextLooksLikeMemoryReviewDecisionArgs(context))) {
+    && contextTargetsTool(context, 'fbeast_memory_review_decide')) {
     return JSON.stringify({
       tool: 'fbeast_memory_review_decide',
       ...(typeof decisionArgs?.['id'] === 'string' ? { id: decisionArgs['id'] } : {}),
@@ -508,6 +479,10 @@ function assessAction(action: string, context: string): GovernorCheckResult {
         reason: 'Memory review reject decision does not persist or delete candidate content; allowed while audit metadata remains redacted.',
       };
     }
+    return {
+      decision: 'review_recommended',
+      reason: 'Memory review decision is missing a recognized action; explicit approve/reject/never_store metadata is required.',
+    };
   }
 
   // Non-executing tools are approved without payload governance, so this

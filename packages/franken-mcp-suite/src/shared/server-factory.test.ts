@@ -469,14 +469,24 @@ describe('createMcpServer', () => {
 
     it('redacts memory review decision metadata in the exported audit sanitizer', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
-        id: 'memcand_1',
+        id: 'memcand_123',
         action: 'reject',
-        reviewer: 'alice',
-        note: 'Rejected because candidate contains token abc123 and rm -rf /',
+        reviewer: 'alice@example.test',
+        note: 'Looks like token abc123',
       })).toEqual({
-        id: 'memcand_1',
+        id: '[memory-review-decision-metadata-redacted]',
         action: 'reject',
         reviewer: '[memory-review-decision-metadata-redacted]',
+        note: '[memory-review-decision-metadata-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
+        id: 'memcand_123',
+        action: 'token abc123',
+        note: 'Looks like token abc123',
+      })).toEqual({
+        id: '[memory-review-decision-metadata-redacted]',
+        action: '[memory-review-decision-metadata-redacted]',
         note: '[memory-review-decision-metadata-redacted]',
       });
 
@@ -491,7 +501,7 @@ describe('createMcpServer', () => {
       })).toEqual({
         tool: 'fbeast_memory_review_decide',
         args: {
-          id: 'memcand_1',
+          id: '[memory-review-decision-metadata-redacted]',
           action: 'reject',
           reviewer: '[memory-review-decision-metadata-redacted]',
           note: '[memory-review-decision-metadata-redacted]',

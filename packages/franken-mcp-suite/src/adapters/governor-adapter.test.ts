@@ -264,20 +264,20 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('token abc123');
   });
 
-  it('redacts proxied memory proposal args when hook context strips the target tool name', async () => {
+  it('does not hide stripped generic execute_tool payloads that only resemble memory proposals', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);
 
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
-      context: '{"key":"secret","value":"token abc123","source":"chat","reason":"remember"}',
-    })).resolves.toMatchObject({ decision: 'approved' });
+      context: '{"key":"secret","value":"rm -rf /","source":"chat","reason":"remember"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
 
     const db = new Database(dbPath);
     const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('mcp__fbeast-proxy__execute_tool') as { context: string };
     db.close();
-    expect(row.context).toBe('[memory-review-proposal-context-redacted]');
-    expect(row.context).not.toContain('token abc123');
+    expect(row.context).toContain('secret');
+    expect(row.context).toContain('rm -rf /');
   });
 
   it('does not redact arbitrary execute_tool context that merely mentions the proposal tool', async () => {
@@ -326,13 +326,13 @@ describe('GovernorAdapter', () => {
     })).resolves.toMatchObject({ decision: 'approved' });
   });
 
-  it('redacts stripped proxied memory review decision args before shared governor scanning', async () => {
+  it('does not infer memory review decisions from stripped generic execute_tool args', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
 
     await expect(governor.check({
       action: 'mcp__fbeast-proxy__execute_tool',
       context: '{"id":"memcand_1","action":"reject","note":"Rejected because candidate contains rm -rf /"}',
-    })).resolves.toMatchObject({ decision: 'approved' });
+    })).resolves.toMatchObject({ decision: 'denied' });
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {
