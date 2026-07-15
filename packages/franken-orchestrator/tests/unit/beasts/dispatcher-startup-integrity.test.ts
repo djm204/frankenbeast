@@ -92,6 +92,49 @@ describe('dispatcher startup integrity checks', () => {
         expect.objectContaining({ code: 'invalid_prompt_contract', definitionId: 'example-beast' }),
       ]));
       expect(String(error)).toContain('Beast dispatcher startup integrity check failed');
+      expect(String(error)).toContain('Fix the dispatcher catalog or executor wiring');
     }
+  });
+
+  it('treats repeated references to the same definition object as duplicate catalog ids', () => {
+    const repeated = definition();
+
+    const report = checkDispatcherStartupIntegrity({
+      definitions: [repeated, repeated],
+      executors,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'duplicate_definition_id', definitionId: 'example-beast' }),
+    ]));
+  });
+
+  it('keeps malformed telemetry diagnostics structured instead of throwing TypeError', () => {
+    const report = checkDispatcherStartupIntegrity({
+      definitions: [definition({ telemetryLabels: { family: 42 } as unknown as Record<string, string> })],
+      executors,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'invalid_telemetry_labels', definitionId: 'example-beast' }),
+    ]));
+  });
+
+  it('rejects prompt keys that the definition config schema cannot parse', () => {
+    const report = checkDispatcherStartupIntegrity({
+      definitions: [definition({
+        interviewPrompts: [
+          { key: 'goaal', prompt: 'What should this Beast do?', kind: 'string', required: true },
+        ],
+      })],
+      executors,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'invalid_prompt_contract', definitionId: 'example-beast' }),
+    ]));
   });
 });

@@ -57,7 +57,7 @@ function formatDispatcherStartupIntegrityError(report: DispatcherStartupIntegrit
     const target = finding.definitionId ? ` ${finding.definitionId}` : finding.mode ? ` ${finding.mode}` : '';
     return `${finding.code}${target}: ${finding.message}`;
   }).join('; ');
-  return `Beast dispatcher startup integrity check failed: ${details}`;
+  return `Beast dispatcher startup integrity check failed: ${details}. ${report.operatorGuidance}`;
 }
 
 function validateExecutorContracts(executors: Partial<BeastExecutors>): DispatcherStartupIntegrityFinding[] {
@@ -88,8 +88,7 @@ function validateDefinition(
     });
   }
 
-  const firstDefinition = seenIds.get(definitionId);
-  if (firstDefinition && firstDefinition !== definition) {
+  if (seenIds.has(definitionId)) {
     findings.push({
       code: 'duplicate_definition_id',
       definitionId,
@@ -139,21 +138,22 @@ function validateDefinition(
     });
   }
 
+  const shape = (definition.configSchema as { shape?: Record<string, unknown> }).shape;
   const promptKeys = new Set<string>();
   for (const prompt of definition.interviewPrompts) {
     const key = prompt.key.trim();
-    if (key.length === 0 || prompt.prompt.trim().length === 0 || promptKeys.has(key) || !VALID_PROMPT_KINDS.has(prompt.kind)) {
+    if (key.length === 0 || prompt.prompt.trim().length === 0 || promptKeys.has(key) || !VALID_PROMPT_KINDS.has(prompt.kind) || (shape && !(key in shape))) {
       findings.push({
         code: 'invalid_prompt_contract',
         definitionId,
-        message: `prompt '${prompt.key}' must have a unique non-empty key, non-empty prompt, and supported kind`,
+        message: `prompt '${prompt.key}' must have a unique non-empty key accepted by the config schema, non-empty prompt, and supported kind`,
       });
     }
     promptKeys.add(key);
   }
 
   if (!isRecord(definition.telemetryLabels)
-    || Object.entries(definition.telemetryLabels).some(([key, value]) => key.trim().length === 0 || value.trim().length === 0)) {
+    || Object.entries(definition.telemetryLabels).some(([key, value]) => key.trim().length === 0 || typeof value !== 'string' || value.trim().length === 0)) {
     findings.push({
       code: 'invalid_telemetry_labels',
       definitionId,
