@@ -34,7 +34,7 @@ Run at least one success-path inject and one negative/edge inject. Add issue-spe
 | Inject | Expected operator action | Evidence to capture |
 | --- | --- | --- |
 | Backup-only cron job | Identify the missing scheduled job and choose restore, merge, or skip explicitly. | Restore-preview output showing `area: cron`, `type: backup-only`, severity, and final decision. |
-| Live-only approval/session token | Treat restoration as blocker-risk until an approver confirms the token is safe to revive or should remain absent. | Decision log naming the approver, token class, and why restore was allowed or rejected. |
+| Live-only approval/session token | Preserve live approval state and skip token restore; require a fresh approval if the backup lacks the live token. | Decision log naming the approver or owner, token class, and why restore was skipped or re-approval was required. |
 | Corrupt backup manifest | Stop before restore, quarantine or replace the corrupt artifact, and record the failed validation path. | Validation error, quarantined artifact path or replacement source, and owner for backup repair. |
 | Partial worker state | Compare task id, branch, PR, and latest heartbeat before overwriting or merging worker state. | Current worker evidence plus the chosen recovery action. |
 
