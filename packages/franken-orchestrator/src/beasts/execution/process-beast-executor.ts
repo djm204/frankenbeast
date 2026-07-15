@@ -480,10 +480,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
     };
     let attempt: BeastRunAttempt;
     try {
-      const currentRun = this.repository.getRun(run.id);
+      const currentRun = typeof this.repository.getRun === 'function'
+        ? this.repository.getRun(run.id)
+        : run;
       if (
         !currentRun
-        || currentRun.status === 'stopped'
+        || (currentRun.status === 'stopped' && currentRun.stopReason === 'operator_kill')
       ) {
         this.cancelledPendingRunIds.delete(run.id);
         try {
