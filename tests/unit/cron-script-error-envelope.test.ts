@@ -13,6 +13,7 @@ function runCronScript(args: string[]) {
     cwd: ROOT,
     env: { ...process.env, TZ: 'UTC' },
     encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
   });
 }
 
@@ -21,6 +22,7 @@ function runCronScriptWithEnv(args: string[], env: NodeJS.ProcessEnv) {
     cwd: ROOT,
     env: { ...process.env, TZ: 'UTC', ...env },
     encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
   });
 }
 
@@ -244,6 +246,21 @@ describe('cron script error envelope runner', () => {
     expect(envelope.durationMs).toBeLessThan(1_500);
   });
 
+  it('preserves the final stderr tail when large stderr bursts hit backpressure', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'large-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, 'x'.repeat(2 * 1024 * 1024)); fs.writeSync(2, 'FINAL-TAIL-MARKER'); process.exit(12)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(12);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('FINAL-TAIL-MARKER');
+  });
+
   it('does not keep successful cron runs alive for the full stderr drain window', () => {
     const started = Date.now();
     const result = runCronScriptWithEnv([
@@ -252,7 +269,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      'process.exit(0)',
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] }).unref(); process.exit(0)",
     ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '5000' });
 
     expect(result.status).toBe(0);
