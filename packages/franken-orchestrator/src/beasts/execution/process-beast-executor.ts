@@ -285,7 +285,7 @@ function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
     return false;
   }
   const actualStartTime = processStartTimeTicks(pid);
-  return actualStartTime === undefined || actualStartTime === expectedStartTime;
+  return actualStartTime === expectedStartTime;
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
@@ -454,9 +454,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
       processGroupLeaderPid: handle.pid,
       ...(processStartTime ? { processStartTimeTicks: processStartTime } : {}),
     };
-    const customAttemptMetadata = this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle);
     let attempt: BeastRunAttempt;
     try {
+      const customAttemptMetadata = this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle);
       attempt = this.repository.createAttempt(run.id, {
         status: 'running',
         pid: handle.pid,

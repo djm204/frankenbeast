@@ -217,10 +217,18 @@ export class BeastDispatchService {
 
     if (request.startNow) {
       try {
-        await this.executorFor(executionMode).start(run, definition);
-        const updated = this.repository.getRun(run.id);
+        const startableRun = this.repository.getRun(run.id);
+        if (!startableRun) {
+          throw new Error(`Beast run disappeared before start: ${run.id}`);
+        }
+        if (startableRun.status !== 'queued') {
+          return startableRun;
+        }
+
+        await this.executorFor(executionMode).start(startableRun, definition);
+        const updated = this.repository.getRun(startableRun.id);
         if (!updated) {
-          throw new Error(`Beast run disappeared after start: ${run.id}`);
+          throw new Error(`Beast run disappeared after start: ${startableRun.id}`);
         }
         if (updated.trackedAgentId) {
           const agentStatus = updated.status === 'running'
