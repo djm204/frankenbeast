@@ -339,12 +339,12 @@ function readDynamicImportSpecifier(
   content: string,
   index: number,
 ): StringLiteralRead | null {
+  let i = skipImportTrivia(content, index);
+  if (content[i] !== '(') return null;
+
   if (!canStartNativeDynamicImport(content, index - 'import'.length)) {
     return null;
   }
-
-  let i = skipImportTrivia(content, index);
-  if (content[i] !== '(') return null;
 
   i = skipImportTrivia(content, i + 1);
 
@@ -563,6 +563,7 @@ function isTypeOnlyTemplateString(content: string, templateIndex: number): boole
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
   if (isOpenTemplateAssertionKeyword(prefixWithoutTrailingTrivia)) return true;
+  if (/(?:^|\n)\s*(?:export\s+)?type\b[^\n]*=\s*$/.test(prefix)) return true;
   if (/(?:^|[;{}\n])\s*(?:const|let|var)\b[\s\S]*=\s*$/.test(prefix)) return false;
   if (/(?:^|[;{}\n])\s*(?:static\s+)?(?:accessor\s+)?[#A-Za-z_$][\w$]*\s*=\s*$/.test(prefix)) return false;
   if (/(?:^|[;{}\n])\s*(?:export\s+)?type\b[\s\S]*=\s*$/.test(prefix)) return true;
@@ -621,7 +622,7 @@ function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boo
 
     const beforeBrace = content.slice(0, openBraceIndex);
     if (
-      /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace) ||
+      /(?:^|[;{}\n])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace) ||
       /(?:\bas\s*|\bsatisfies\s*|:)\s*$/.test(beforeBrace.trimEnd())
     ) {
       return true;
@@ -654,6 +655,8 @@ function endsInsideNestedTypeReference(
   prefix: string,
   isObjectLiteralValue = false,
 ): boolean {
+  if (hasCompletedStatementBeforeImport(prefix)) return false;
+
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
   if (/(?:^|[^.])(?:\bas(?:\s+|$)|\bsatisfies(?:\s+|$)|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
     return true;
@@ -799,7 +802,7 @@ function isInsideGenericTypeArgument(
     return false;
   }
 
-  if (content[i] === ',') return true;
+  if (content[i] === ',') return hasGenericTypeArgumentClose(content, i + 1);
 
   if (content[i] === '>') {
     const afterDelimiter = skipImportTrivia(content, i + 1);
@@ -807,6 +810,36 @@ function isInsideGenericTypeArgument(
   }
 
   return true;
+}
+
+function hasGenericTypeArgumentClose(content: string, index: number): boolean {
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  for (let i = index; i < content.length; i += 1) {
+    const ch = content[i]!;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+    if (ch === '/' && content[i + 1] === '/') break;
+    if (ch === '/' && content[i + 1] === '*') {
+      i = skipMultiLineComment(content, i + 2);
+      continue;
+    }
+    if (ch === '(') parenDepth += 1;
+    else if (ch === ')' && parenDepth > 0) parenDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']' && bracketDepth > 0) bracketDepth -= 1;
+    else if (ch === '{') braceDepth += 1;
+    else if (ch === '}' && braceDepth > 0) braceDepth -= 1;
+    else if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+      if (ch === '>') return true;
+      if (ch === ';' || ch === '\n') return false;
+    }
+  }
+
+  return false;
 }
 
 function findBalancedBracketEnd(content: string, openIndex: number): number {
@@ -854,7 +887,7 @@ function isTypeOnlyImportReferenceUse(
     return false;
   }
 
-  if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(trimmed)) {
+  if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(trimmed)) {
     return true;
   }
   if (/\b(?:declare\s+)?namespace\b[\s\S]*\{\s*(?:export\s+)?type\b[\s\S]*$/.test(trimmed)) {
@@ -1012,7 +1045,7 @@ function isInsideTypeDeclaration(prefix: string): boolean {
   }
 
   return (
-    /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
+    /(?:^|[;{}\n])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
     !/\n\s*(?:export\s+)?(?:@|else\b|catch\b|finally\b|default\b|const|let|var|using|await|return|throw|new|if|for|while|do|switch|try|function|async\s+function|class|abstract\s+class|namespace|enum)\b/.test(
       prefix,
@@ -1116,7 +1149,7 @@ function isInsideTypeAnnotation(
   }
   if (/[=;]/.test(annotationSuffix)) return false;
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
-  if (/\n\s*(?:void\s*)?$|\n\s*(?:[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\(|\[)|module\.exports\s*=|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(prefix)) {
+  if (/\n\s*(?:void\s*)?$|\n\s*(?:[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|export\s+default\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\(|\[|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])|module\.exports\s*=|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(prefix)) {
     return false;
   }
   if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {

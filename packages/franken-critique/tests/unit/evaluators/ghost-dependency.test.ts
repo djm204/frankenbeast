@@ -360,6 +360,7 @@ describe('GhostDependencyEvaluator', () => {
       interface Cfg { name: string; plugin: import('ghost-package').Plugin }
       type InlineObject = { name: string; plugin: import('ghost-package').Plugin };
       type NestedInlineObject = { nested: { ok: string }; plugin: typeof import('ghost-package') };
+      export default interface DefaultExportedInterface { plugin: import('ghost-package').Plugin }
       declare namespace N { type T = import('ghost-package').T }
       namespace ExportedTypeNamespace { export type T = import('ghost-package').T }
       type TemplateKey = \`\${import('ghost-package').Name}\`;
@@ -439,6 +440,7 @@ describe('GhostDependencyEvaluator', () => {
       const compactLessThanArgument = load(a<b, import('compact-comparison-argument-ghost'));
       const compactNamedLessThanArgument = load(count<limit, import('compact-named-comparison-argument-ghost'));
       const compactUpperLessThanArgument = load(Foo<Bar, import('compact-uppercase-comparison-argument-ghost'), baz);
+      const compactLessThanComma = foo<import('compact-less-than-comma-ghost'), bar;
       const comparisonArgument = load(count <= limit, import('comparison-argument-ghost'));
       const bitwiseRuntime = flags | import('bitwise-or-ghost');
       const bitwiseAfterAnnotation: number = flags | import('bitwise-after-annotation-ghost');
@@ -462,6 +464,10 @@ describe('GhostDependencyEvaluator', () => {
       void import('void-after-typed-decl-ghost');
       let dep3: SomeType
       import('bare-after-typed-decl-ghost');
+      let dep4: SomeType
+      true && import('true-after-typed-decl-ghost');
+      let dep5: SomeType
+      export default foo(import('export-default-after-typed-decl-ghost'));
       const cfg = value as { dep: string }
       void import('after-object-assertion-ghost');
       const cfg2 = value satisfies { dep: string }
@@ -527,11 +533,12 @@ describe('GhostDependencyEvaluator', () => {
       const satisfies = String.raw; satisfies\`\${require('satisfies-tagged-template-ghost')}\`;
       const asIdentifier = 1; as; import('as-contextual-identifier-ghost');
       const satisfiesIdentifier = 1; satisfies; import('satisfies-contextual-identifier-ghost');
+      const keyofIdentifier = 1; keyof; import('keyof-contextual-identifier-ghost');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(103);
+    expect(result.findings).toHaveLength(107);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -576,6 +583,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('compact-comparison-argument-ghost'),
         expect.stringContaining('compact-named-comparison-argument-ghost'),
         expect.stringContaining('compact-uppercase-comparison-argument-ghost'),
+        expect.stringContaining('compact-less-than-comma-ghost'),
         expect.stringContaining('comparison-argument-ghost'),
         expect.stringContaining('bitwise-or-ghost'),
         expect.stringContaining('bitwise-after-annotation-ghost'),
@@ -594,6 +602,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('tagged-template-ghost'),
         expect.stringContaining('void-after-typed-decl-ghost'),
         expect.stringContaining('bare-after-typed-decl-ghost'),
+        expect.stringContaining('true-after-typed-decl-ghost'),
+        expect.stringContaining('export-default-after-typed-decl-ghost'),
         expect.stringContaining('after-object-assertion-ghost'),
         expect.stringContaining('bare-after-object-assertion-ghost'),
         expect.stringContaining('bare-after-commented-object-assertion-ghost'),
@@ -637,6 +647,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('satisfies-tagged-template-ghost'),
         expect.stringContaining('as-contextual-identifier-ghost'),
         expect.stringContaining('satisfies-contextual-identifier-ghost'),
+        expect.stringContaining('keyof-contextual-identifier-ghost'),
       ]),
     );
   });
