@@ -6,6 +6,7 @@ import type {
   ProviderCapabilities,
   BrainSnapshot,
 } from '@franken/types';
+import { seededRandom } from '@franken/types';
 import { ProviderRegistry } from '../../../src/providers/provider-registry.js';
 
 // --- Helpers ---
@@ -453,12 +454,25 @@ describe('ProviderRegistry', () => {
         { backoffMultiplier: 0 },
         { backoffMultiplier: Number.NaN },
         { backoffMultiplier: Number.POSITIVE_INFINITY },
+        { circuitBreakerFailureThreshold: 0 },
+        { circuitBreakerFailureThreshold: 21 },
+        { circuitBreakerFailureThreshold: 1.5 },
+        { circuitBreakerCooldownMs: -1 },
+        { circuitBreakerCooldownMs: Number.NaN },
+        { circuitBreakerCooldownMs: Number.POSITIVE_INFINITY },
+        { circuitBreakerCooldownMs: 3_600_001 },
+        { circuitBreakerCooldownJitterRatio: -0.1 },
+        { circuitBreakerCooldownJitterRatio: 1.1 },
+        { circuitBreakerCooldownJitterRatio: Number.NaN },
+        { circuitBreakerHalfOpenMaxProbes: 0 },
+        { circuitBreakerHalfOpenMaxProbes: 11 },
+        { circuitBreakerHalfOpenMaxProbes: 1.5 },
       ];
 
       for (const options of invalidOptions) {
         const provider = mockProvider('guarded');
         expect(() => new ProviderRegistry([provider], mockBrain(), options)).toThrow(
-          /maxRetriesPerProvider|retryDelayMs|maxRetryDelayMs|backoffMultiplier/,
+          /maxRetriesPerProvider|retryDelayMs|maxRetryDelayMs|backoffMultiplier|circuitBreaker/,
         );
         expect(provider.execute).not.toHaveBeenCalled();
       }
@@ -489,6 +503,151 @@ describe('ProviderRegistry', () => {
           reason: 'rate limit',
         }),
       );
+    });
+
+    it('opens provider circuit breakers and routes to fallback during cooldown', async () => {
+      const onHealthChange = vi.fn();
+      const p1 = mockProvider('primary', { failOnExecute: new Error('rate limit 429') });
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => Date.UTC(2026, 0, 1),
+        onProviderHealthChange: onHealthChange,
+      });
+
+      const events = await collectEvents(registry.execute(makeRequest()));
+
+      expect(events[0]).toEqual({ type: 'text', content: 'Hello from fallback' });
+      expect(p1.execute).toHaveBeenCalledTimes(1);
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        providerName: 'primary',
+        model: null,
+        state: 'open',
+        failures: 1,
+        successes: 0,
+        consecutiveFailures: 1,
+        failureRate: 1,
+        lastErrorClass: 'rate_limit',
+        cooldownUntil: '2026-01-01T00:00:10.000Z',
+      });
+      expect(onHealthChange).toHaveBeenCalledWith(expect.objectContaining({
+        providerName: 'primary',
+        state: 'open',
+        reason: 'provider-failure-threshold',
+      }));
+    });
+
+    it('keeps an open breaker from calling the provider before cooldown expires', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      const p1 = mockProvider('primary', { failOnExecute: new Error('provider down') });
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 5_000;
+      registry.setOrder(['primary', 'fallback']);
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(p1.execute).toHaveBeenCalledTimes(1);
+      expect(p2.execute).toHaveBeenCalledTimes(2);
+      expect(registry.getProviderHealth('primary')?.state).toBe('open');
+    });
+
+    it('allows a bounded half-open probe after cooldown and closes on success', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      let primaryShouldFail = true;
+      const p1: ILlmProvider = {
+        ...mockProvider('primary'),
+        execute: vi.fn(async function* () {
+          if (primaryShouldFail) throw new Error('transient outage');
+          yield { type: 'text' as const, content: 'primary recovered' };
+          yield { type: 'done' as const, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+        }),
+      };
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      primaryShouldFail = false;
+      registry.setOrder(['primary', 'fallback']);
+      const events = await collectEvents(registry.execute(makeRequest()));
+
+      expect(events[0]).toEqual({ type: 'text', content: 'primary recovered' });
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'closed',
+        failures: 1,
+        successes: 1,
+        consecutiveFailures: 0,
+        failureRate: 0.5,
+        cooldownUntil: null,
+        halfOpenProbeCount: 0,
+      });
+    });
+
+    it('reopens the breaker when a half-open probe fails without retry storms', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      const p1: ILlmProvider = {
+        ...mockProvider('primary'),
+        execute: vi.fn(async function* () {
+          yield { type: 'error' as const, error: 'rate limit', retryable: true };
+        }),
+      };
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        maxRetriesPerProvider: 2,
+        retryDelayMs: 1,
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        circuitBreakerHalfOpenMaxProbes: 1,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      registry.setOrder(['primary', 'fallback']);
+      await collectEvents(registry.execute(makeRequest()));
+
+      expect(p1.execute).toHaveBeenCalledTimes(2);
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'open',
+        failures: 2,
+        lastErrorClass: 'rate_limit',
+        cooldownUntil: '2026-01-01T00:00:20.001Z',
+      });
+    });
+
+    it('adds bounded cooldown jitter to prevent synchronized provider retries', async () => {
+      const randomSpy = vi.spyOn(seededRandom, 'random').mockReturnValue(0.5);
+      try {
+        const p1 = mockProvider('primary', { failOnExecute: new Error('timeout') });
+        const p2 = mockProvider('fallback');
+        const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+          circuitBreakerFailureThreshold: 1,
+          circuitBreakerCooldownMs: 10_000,
+          circuitBreakerCooldownJitterRatio: 0.2,
+          now: () => Date.UTC(2026, 0, 1),
+        });
+
+        await collectEvents(registry.execute(makeRequest()));
+
+        expect(registry.getProviderHealth('primary')?.cooldownUntil).toBe('2026-01-01T00:00:11.000Z');
+      } finally {
+        randomSpy.mockRestore();
+      }
     });
 
     it('preserves execution failure as terminal error when later providers are unavailable', async () => {

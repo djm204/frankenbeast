@@ -4,7 +4,7 @@ import type {
   LlmRequest,
   LlmStreamEvent,
 } from '@franken/types';
-import { isoNow } from '@franken/types';
+import { isoNow, seededRandom, wallClockNow } from '@franken/types';
 import type { IBrain } from '@franken/types';
 import { TokenAggregator, type AggregatedTokenUsage } from './token-aggregator.js';
 import { truncateSnapshot } from './format-handoff.js';
@@ -26,6 +26,18 @@ export interface ProviderRegistryOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Callback fired when switching providers */
   onProviderSwitch?: (event: ProviderSwitchEvent) => void;
+  /** Consecutive failures before opening the provider circuit. Default: 5. */
+  circuitBreakerFailureThreshold?: number;
+  /** Base provider cool-down window in ms after a breaker opens. Default: 60s. */
+  circuitBreakerCooldownMs?: number;
+  /** Jitter ratio applied to cool-downs to avoid synchronized retry storms. Default: 0.1. */
+  circuitBreakerCooldownJitterRatio?: number;
+  /** Bounded half-open probes allowed per cool-down window. Default: 1. */
+  circuitBreakerHalfOpenMaxProbes?: number;
+  /** Injectable clock for deterministic tests. */
+  now?: () => number;
+  /** Callback fired when provider health/circuit state changes. */
+  onProviderHealthChange?: (event: ProviderHealthEvent) => void;
 }
 
 export interface ProviderSwitchEvent {
@@ -33,6 +45,45 @@ export interface ProviderSwitchEvent {
   to: string;
   reason: string;
   brainSnapshotHash: string;
+}
+
+export type ProviderCircuitState = 'closed' | 'open' | 'half-open';
+
+export interface ProviderHealthState {
+  providerName: string;
+  /** Request-level model when known; typed LlmRequest currently leaves this unspecified. */
+  model: string | null;
+  state: ProviderCircuitState;
+  failures: number;
+  successes: number;
+  consecutiveFailures: number;
+  failureRate: number;
+  lastErrorClass: string | null;
+  lastFailureAt: string | null;
+  cooldownUntil: string | null;
+  halfOpenProbeCount: number;
+  updatedAt: string;
+}
+
+export interface ProviderHealthEvent {
+  providerName: string;
+  state: ProviderCircuitState;
+  reason: string;
+  health: ProviderHealthState;
+}
+
+interface ProviderHealthRecord {
+  providerName: string;
+  model: string | null;
+  state: ProviderCircuitState;
+  failures: number;
+  successes: number;
+  consecutiveFailures: number;
+  lastErrorClass: string | null;
+  lastFailureAtMs: number | null;
+  cooldownUntilMs: number | null;
+  halfOpenProbeCount: number;
+  updatedAtMs: number;
 }
 
 export interface ModelProviderFailoverAuditPayload extends ProviderSwitchEvent {
@@ -63,10 +114,19 @@ interface ResolvedOptions {
   backoffMultiplier: number;
   sleep: (ms: number) => Promise<void>;
   onProviderSwitch?: ProviderRegistryOptions['onProviderSwitch'];
+  circuitBreakerFailureThreshold: number;
+  circuitBreakerCooldownMs: number;
+  circuitBreakerCooldownJitterRatio: number;
+  circuitBreakerHalfOpenMaxProbes: number;
+  now: () => number;
+  onProviderHealthChange?: ProviderRegistryOptions['onProviderHealthChange'];
 }
 
 const MAX_RETRIES_PER_PROVIDER = 5;
 const MAX_RETRY_DELAY_MS = 30_000;
+const MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 20;
+const MAX_CIRCUIT_BREAKER_COOLDOWN_MS = 3_600_000;
+const MAX_CIRCUIT_BREAKER_HALF_OPEN_PROBES = 10;
 
 function normalizeMaxRetriesPerProvider(value: number | undefined): number {
   const normalized = value ?? 1;
@@ -96,12 +156,53 @@ function normalizeBackoffMultiplier(value: number | undefined): number {
   return normalized;
 }
 
+function normalizePositiveInteger(
+  name: 'circuitBreakerFailureThreshold' | 'circuitBreakerHalfOpenMaxProbes',
+  value: number | undefined,
+  defaultValue: number,
+  maxValue: number,
+): number {
+  const normalized = value ?? defaultValue;
+  if (!Number.isInteger(normalized) || normalized < 1 || normalized > maxValue) {
+    throw new Error(`${name} must be an integer between 1 and ${maxValue}`);
+  }
+  return normalized;
+}
+
+function normalizeCircuitBreakerCooldownMs(value: number | undefined): number {
+  const normalized = value ?? 60_000;
+  if (!Number.isFinite(normalized) || normalized < 0 || normalized > MAX_CIRCUIT_BREAKER_COOLDOWN_MS) {
+    throw new Error(`circuitBreakerCooldownMs must be a finite number between 0 and ${MAX_CIRCUIT_BREAKER_COOLDOWN_MS}`);
+  }
+  return normalized;
+}
+
+function normalizeJitterRatio(value: number | undefined): number {
+  const normalized = value ?? 0.1;
+  if (!Number.isFinite(normalized) || normalized < 0 || normalized > 1) {
+    throw new Error('circuitBreakerCooldownJitterRatio must be a finite number between 0 and 1');
+  }
+  return normalized;
+}
+
+function classifyProviderError(error: Error | string): string {
+  const message = error instanceof Error ? error.message : error;
+  const normalized = message.toLowerCase();
+  if (normalized.includes('rate limit') || normalized.includes('429')) return 'rate_limit';
+  if (normalized.includes('auth') || normalized.includes('permission') || normalized.includes('unauthorized')) return 'auth';
+  if (normalized.includes('timeout') || normalized.includes('timed out')) return 'timeout';
+  if (normalized.includes('unavailable') || normalized.includes('enoent')) return 'unavailable';
+  if (normalized.includes('stream ended without done')) return 'stream_incomplete';
+  return 'execution_error';
+}
+
 export class ProviderRegistry {
   private providers: ILlmProvider[];
   private brain: IBrain;
   private opts: ResolvedOptions;
   private currentProviderIndex = 0;
   private readonly tokenAggregator = new TokenAggregator();
+  private readonly providerHealth = new Map<string, ProviderHealthRecord>();
 
   constructor(
     providers: ILlmProvider[],
@@ -122,6 +223,22 @@ export class ProviderRegistry {
       backoffMultiplier: normalizeBackoffMultiplier(options.backoffMultiplier),
       sleep: options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
       onProviderSwitch: options.onProviderSwitch,
+      circuitBreakerFailureThreshold: normalizePositiveInteger(
+        'circuitBreakerFailureThreshold',
+        options.circuitBreakerFailureThreshold,
+        5,
+        MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+      ),
+      circuitBreakerCooldownMs: normalizeCircuitBreakerCooldownMs(options.circuitBreakerCooldownMs),
+      circuitBreakerCooldownJitterRatio: normalizeJitterRatio(options.circuitBreakerCooldownJitterRatio),
+      circuitBreakerHalfOpenMaxProbes: normalizePositiveInteger(
+        'circuitBreakerHalfOpenMaxProbes',
+        options.circuitBreakerHalfOpenMaxProbes,
+        1,
+        MAX_CIRCUIT_BREAKER_HALF_OPEN_PROBES,
+      ),
+      now: options.now ?? wallClockNow,
+      onProviderHealthChange: options.onProviderHealthChange,
     };
   }
 
@@ -142,6 +259,135 @@ export class ProviderRegistry {
     );
   }
 
+  getProviderHealth(providerName: string): ProviderHealthState | undefined {
+    const record = this.providerHealth.get(providerName);
+    return record ? this.toHealthState(record) : undefined;
+  }
+
+  listProviderHealth(): ProviderHealthState[] {
+    return [...this.providerHealth.values()].map((record) => this.toHealthState(record));
+  }
+
+  private getOrCreateProviderHealth(providerName: string): ProviderHealthRecord {
+    const existing = this.providerHealth.get(providerName);
+    if (existing) return existing;
+    const now = this.opts.now();
+    const created: ProviderHealthRecord = {
+      providerName,
+      model: null,
+      state: 'closed',
+      failures: 0,
+      successes: 0,
+      consecutiveFailures: 0,
+      lastErrorClass: null,
+      lastFailureAtMs: null,
+      cooldownUntilMs: null,
+      halfOpenProbeCount: 0,
+      updatedAtMs: now,
+    };
+    this.providerHealth.set(providerName, created);
+    return created;
+  }
+
+  private toHealthState(record: ProviderHealthRecord): ProviderHealthState {
+    const total = record.failures + record.successes;
+    return {
+      providerName: record.providerName,
+      model: record.model,
+      state: record.state,
+      failures: record.failures,
+      successes: record.successes,
+      consecutiveFailures: record.consecutiveFailures,
+      failureRate: total === 0 ? 0 : record.failures / total,
+      lastErrorClass: record.lastErrorClass,
+      lastFailureAt: record.lastFailureAtMs === null ? null : new Date(record.lastFailureAtMs).toISOString(),
+      cooldownUntil: record.cooldownUntilMs === null ? null : new Date(record.cooldownUntilMs).toISOString(),
+      halfOpenProbeCount: record.halfOpenProbeCount,
+      updatedAt: new Date(record.updatedAtMs).toISOString(),
+    };
+  }
+
+  private emitProviderHealthChange(providerName: string, reason: string): void {
+    const record = this.providerHealth.get(providerName);
+    if (!record || !this.opts.onProviderHealthChange) return;
+    this.opts.onProviderHealthChange({
+      providerName,
+      state: record.state,
+      reason,
+      health: this.toHealthState(record),
+    });
+  }
+
+  private tripProvider(providerName: string, error: Error | string, reason: string): ProviderHealthRecord {
+    const record = this.getOrCreateProviderHealth(providerName);
+    const now = this.opts.now();
+    const jitterMs = this.opts.circuitBreakerCooldownMs
+      * this.opts.circuitBreakerCooldownJitterRatio
+      * seededRandom.random();
+    record.state = 'open';
+    record.cooldownUntilMs = now + this.opts.circuitBreakerCooldownMs + jitterMs;
+    record.halfOpenProbeCount = 0;
+    record.lastErrorClass = classifyProviderError(error);
+    record.updatedAtMs = now;
+    this.emitProviderHealthChange(providerName, reason);
+    return record;
+  }
+
+  private recordProviderFailure(providerName: string, error: Error | string): ProviderHealthRecord {
+    const record = this.getOrCreateProviderHealth(providerName);
+    const now = this.opts.now();
+    record.failures += 1;
+    record.consecutiveFailures += 1;
+    record.lastErrorClass = classifyProviderError(error);
+    record.lastFailureAtMs = now;
+    record.updatedAtMs = now;
+
+    if (record.state === 'half-open' || record.consecutiveFailures >= this.opts.circuitBreakerFailureThreshold) {
+      return this.tripProvider(providerName, error, 'provider-failure-threshold');
+    }
+
+    this.emitProviderHealthChange(providerName, 'provider-failure');
+    return record;
+  }
+
+  private recordProviderSuccess(providerName: string): void {
+    const record = this.getOrCreateProviderHealth(providerName);
+    const previousState = record.state;
+    record.successes += 1;
+    record.consecutiveFailures = 0;
+    record.state = 'closed';
+    record.cooldownUntilMs = null;
+    record.halfOpenProbeCount = 0;
+    record.updatedAtMs = this.opts.now();
+    this.emitProviderHealthChange(providerName, previousState === 'half-open' ? 'half-open-probe-succeeded' : 'provider-success');
+  }
+
+  private reserveCircuitBreakerProbe(providerName: string): Error | undefined {
+    const record = this.getOrCreateProviderHealth(providerName);
+    const now = this.opts.now();
+
+    if (record.state === 'open') {
+      if (record.cooldownUntilMs !== null && now < record.cooldownUntilMs) {
+        return new Error(`Provider ${providerName} circuit breaker is open until ${new Date(record.cooldownUntilMs).toISOString()}`);
+      }
+      record.state = 'half-open';
+      record.halfOpenProbeCount = 0;
+      record.updatedAtMs = now;
+      this.emitProviderHealthChange(providerName, 'cooldown-elapsed-half-open');
+    }
+
+    if (record.state === 'half-open') {
+      if (record.halfOpenProbeCount >= this.opts.circuitBreakerHalfOpenMaxProbes) {
+        return new Error(`Provider ${providerName} circuit breaker half-open probe limit reached`);
+      }
+      record.halfOpenProbeCount += 1;
+      record.updatedAtMs = now;
+      this.emitProviderHealthChange(providerName, 'half-open-probe-started');
+    }
+
+    return undefined;
+  }
+
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     let lastError: Error | undefined;
     let terminalError: Error | undefined;
@@ -154,9 +400,21 @@ export class ProviderRegistry {
         (this.currentProviderIndex + i) % this.providers.length;
       const provider = this.providers[providerIndex]!;
 
+      const circuitError = this.reserveCircuitBreakerProbe(provider.name);
+      if (circuitError) {
+        unavailableProviders.push(provider.name);
+        if (!lastError) {
+          lastFailedProviderName = provider.name;
+          lastError = circuitError;
+        }
+        terminalError ??= circuitError;
+        continue;
+      }
+
       if (!(await provider.isAvailable())) {
         unavailableProviders.push(provider.name);
         const availabilityError = new Error(`Provider ${provider.name} is unavailable`);
+        this.recordProviderFailure(provider.name, availabilityError);
         if (!lastError) {
           lastFailedProviderName = provider.name;
           lastError = availabilityError;
@@ -201,6 +459,7 @@ export class ProviderRegistry {
         retry <= this.opts.maxRetriesPerProvider;
         retry++
       ) {
+        let failureAlreadyRecorded = false;
         try {
           const stream = provider.execute(effectiveRequest);
           let retried = false;
@@ -213,6 +472,13 @@ export class ProviderRegistry {
               retry < this.opts.maxRetriesPerProvider
             ) {
               lastError = new Error(event.error);
+              const health = this.recordProviderFailure(provider.name, lastError);
+              failureAlreadyRecorded = true;
+              if (health.state === 'open') {
+                terminalError = lastError;
+                lastFailedProviderName = provider.name;
+                throw lastError;
+              }
               const delay = Math.min(
                 this.opts.retryDelayMs *
                 Math.pow(this.opts.backoffMultiplier, retry),
@@ -224,6 +490,8 @@ export class ProviderRegistry {
             }
             if (event.type === 'error') {
               lastError = new Error(event.error);
+              this.recordProviderFailure(provider.name, lastError);
+              failureAlreadyRecorded = true;
               terminalError = lastError;
               lastFailedProviderName = provider.name;
               throw lastError; // discard buffer, failover
@@ -237,6 +505,7 @@ export class ProviderRegistry {
           for (const event of buffer) {
             if (event.type === 'done') {
               this.tokenAggregator.record(provider.name, event.usage);
+              this.recordProviderSuccess(provider.name);
             }
             yield event;
             if (event.type === 'done') {
@@ -246,12 +515,16 @@ export class ProviderRegistry {
           }
 
           lastError = new Error('stream ended without done');
+          this.recordProviderFailure(provider.name, lastError);
           terminalError = lastError;
           lastFailedProviderName = provider.name;
           break; // stream ended without done — failover
         } catch (error) {
           lastError =
             error instanceof Error ? error : new Error(String(error));
+          if (!failureAlreadyRecorded) {
+            this.recordProviderFailure(provider.name, lastError);
+          }
           terminalError = lastError;
           lastFailedProviderName = provider.name;
           break; // failover to next provider
