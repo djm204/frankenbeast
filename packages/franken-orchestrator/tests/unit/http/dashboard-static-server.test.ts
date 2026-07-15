@@ -49,6 +49,8 @@ describe('dashboard static server', () => {
 
     await expect(index.text()).resolves.toContain('<div id="root"></div>');
     expect(index.headers.get('content-type')).toContain('text/html');
+    expect(index.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+    expect(index.headers.get('x-frame-options')).toBe('DENY');
     await expect(asset.text()).resolves.toContain('console.log("dashboard")');
     expect(asset.headers.get('content-type')).toContain('text/javascript');
   });

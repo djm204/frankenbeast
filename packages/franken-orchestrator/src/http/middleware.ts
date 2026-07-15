@@ -63,7 +63,16 @@ function isLocalControlPath(pathname: string): boolean {
   return LOCAL_CONTROL_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-function isSameOriginMutation(c: Context): boolean {
+function isTrustedOriginHost(origin: string): boolean {
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function isSameOriginMutation(c: Context, allowedOrigins: ReadonlySet<string>): boolean {
   const secFetchSite = c.req.header('sec-fetch-site')?.trim().toLowerCase();
   if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
     return false;
@@ -75,7 +84,9 @@ function isSameOriginMutation(c: Context): boolean {
   }
 
   try {
-    return new URL(origin).origin === requestOrigin(c);
+    const normalizedOrigin = new URL(origin).origin;
+    return allowedOrigins.has(normalizedOrigin)
+      || (normalizedOrigin === requestOrigin(c) && isTrustedOriginHost(normalizedOrigin));
   } catch {
     return false;
   }
@@ -88,19 +99,27 @@ function setLocalBrowserSecurityHeaders(c: Context): void {
   c.header('Referrer-Policy', 'same-origin');
 }
 
-export const localBrowserControlProtection = createMiddleware(async (c, next) => {
-  setLocalBrowserSecurityHeaders(c);
+export function localBrowserControlProtection(options: { allowedOrigins?: Iterable<string> } = {}) {
+  const allowedOrigins = new Set(
+    [...(options.allowedOrigins ?? [])]
+      .filter((origin) => origin !== '*')
+      .map((origin) => new URL(origin).origin),
+  );
 
-  const pathname = new URL(c.req.url).pathname;
-  if (UNSAFE_BROWSER_METHODS.has(c.req.method.toUpperCase())
-    && isLocalControlPath(pathname)
-    && !isSameOriginMutation(c)) {
-    throw new HttpError(403, 'FORBIDDEN', 'Local web control mutations require a same-origin browser request');
-  }
+  return createMiddleware(async (c, next) => {
+    setLocalBrowserSecurityHeaders(c);
 
-  await next();
-  setLocalBrowserSecurityHeaders(c);
-});
+    const pathname = new URL(c.req.url).pathname;
+    if (UNSAFE_BROWSER_METHODS.has(c.req.method.toUpperCase())
+      && isLocalControlPath(pathname)
+      && !isSameOriginMutation(c, allowedOrigins)) {
+      throw new HttpError(403, 'FORBIDDEN', 'Local web control mutations require a same-origin browser request');
+    }
+
+    await next();
+    setLocalBrowserSecurityHeaders(c);
+  });
+}
 
 export const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
 export const BEAST_CONTROL_MAX_BODY_SIZE = 1024 * 1024;

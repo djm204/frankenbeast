@@ -61,6 +61,10 @@ export interface DashboardStaticServerOptions extends DashboardStaticResponseOpt
 function response(body: BodyInit | null, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set('x-frankenbeast-service', SERVICE_IDENTITY);
+  headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Referrer-Policy', 'same-origin');
   return new Response(body, { ...init, headers });
 }
 

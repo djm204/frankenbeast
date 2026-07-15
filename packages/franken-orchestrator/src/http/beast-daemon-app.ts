@@ -35,7 +35,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
   const services = options.services;
 
   app.onError(errorHandler);
-  app.use('*', localBrowserControlProtection);
+  app.use('*', localBrowserControlProtection());
 
   app.get('/health', (c) => {
     c.header('x-frankenbeast-service', 'beasts-daemon');

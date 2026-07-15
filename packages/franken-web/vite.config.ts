@@ -108,6 +108,12 @@ export default defineConfig(async ({ command, mode }) => {
       __FRANKENBEAST_VERSION__: JSON.stringify(rootPackageJson.version),
     },
     server: {
+      headers: {
+        'Content-Security-Policy': "frame-ancestors 'none'",
+        'X-Frame-Options': 'DENY',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'same-origin',
+      },
       proxy: serverSideProxy,
     },
     preview: {

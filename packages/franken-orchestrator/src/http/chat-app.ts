@@ -158,7 +158,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
 
   const app = new Hono();
   app.use('*', requestId);
-  app.use('*', localBrowserControlProtection);
+  app.use('*', localBrowserControlProtection(
+    opts.allowedOrigins ? { allowedOrigins: opts.allowedOrigins } : {},
+  ));
   if (opts.allowedOrigins && opts.allowedOrigins.length > 0) {
     const allowedOrigins = new Set(opts.allowedOrigins.filter((origin) => origin !== '*'));
     if (allowedOrigins.size > 0) {
@@ -349,6 +351,8 @@ async function proxyToBeastDaemon(
   const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, daemon.baseUrl);
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
+  headers.set('x-forwarded-host', sourceUrl.host);
+  headers.set('x-forwarded-proto', sourceUrl.protocol.replace(/:$/, ''));
   if (!headers.has('authorization')) {
     const headerToken = headers.get('x-frankenbeast-operator-token')?.trim();
     const forwardedToken = operatorToken ?? (headerToken ? headerToken : undefined);
