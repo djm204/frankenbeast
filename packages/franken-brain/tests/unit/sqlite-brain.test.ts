@@ -1333,6 +1333,90 @@ describe('SqliteBrain', () => {
       ]);
     });
 
+    it('blocks normal approval of contradictory candidates until conflict is resolved', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.review-gate',
+        value: 'concise',
+        source: 'chat:turn-3a',
+        confidence: 0.9,
+        reason: 'User requested concise responses.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.review-gate',
+        value: 'verbose',
+        source: 'chat:turn-3b',
+        confidence: 0.8,
+        reason: 'Later contradictory response style inference.',
+      });
+
+      expect(() =>
+        brain.memoryReview.approve(contradictory.id, { reviewer: 'operator' }),
+      ).toThrow(/conflicts with an existing value/);
+      expect(brain.memoryReview.list('pending')).toEqual([
+        expect.objectContaining({ id: contradictory.id }),
+      ]);
+      expect(brain.working.get('user.preference.review-gate')).toBe('concise');
+    });
+
+    it('omits stale provenance when runtime memory changed outside the review queue', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.pet',
+        value: 'cat',
+        source: 'chat:turn-3c',
+        confidence: 0.9,
+        reason: 'User stated a pet preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      brain.working.set('user.preference.pet', 'fish');
+      const contradictory = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.pet',
+        value: 'dog',
+        source: 'chat:turn-3d',
+        confidence: 0.8,
+        reason: 'Later contradictory pet preference.',
+      });
+
+      expect(brain.memoryReview.conflictsFor(contradictory.id)).toEqual([
+        expect.objectContaining({
+          existingValue: 'fish',
+          proposedValue: 'dog',
+        }),
+      ]);
+      expect(
+        brain.memoryReview.conflictsFor(contradictory.id)[0]?.existingProvenance,
+      ).toBeUndefined();
+    });
+
+    it('does not resurrect pending-deleted working memory during conflict checks', () => {
+      const initial = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.removed-fact',
+        value: 'old',
+        source: 'chat:turn-3e',
+        confidence: 0.9,
+        reason: 'User stated an old preference.',
+      });
+      brain.memoryReview.approve(initial.id, { reviewer: 'operator' });
+      expect(brain.working.delete('user.preference.removed-fact')).toBe(true);
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.removed-fact',
+        value: 'new',
+        source: 'chat:turn-3f',
+        confidence: 0.8,
+        reason: 'Fresh preference after deletion.',
+      });
+
+      expect(brain.memoryReview.conflictsFor(candidate.id)).toEqual([]);
+      expect(brain.memoryReview.approve(candidate.id).status).toBe('approved');
+      expect(brain.working.get('user.preference.removed-fact')).toBe('new');
+    });
+
     it('resolves memory conflicts by keeping the existing fact', () => {
       const initial = brain.memoryReview.propose({
         targetStore: 'working',

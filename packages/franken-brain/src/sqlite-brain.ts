@@ -855,6 +855,26 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return result;
   }
 
+  runtimeValueState(key: string):
+    | { state: 'present'; value: unknown }
+    | { state: 'deleted' }
+    | { state: 'unhydrated' }
+    | { state: 'absent' } {
+    if (this.store.has(key)) {
+      return { state: 'present', value: this.get(key) };
+    }
+    if (this.deletedKeys.has(key)) return { state: 'deleted' };
+    if (this.persistedSerialized.has(key)) return { state: 'unhydrated' };
+    return { state: 'absent' };
+  }
+
+  persistedValue(key: string): unknown {
+    const serialized = this.persistedSerialized.get(key);
+    return serialized === undefined
+      ? undefined
+      : parseStoredWorkingMemoryValue(serialized);
+  }
+
   deletePersistedKeys(keys: readonly string[]): (() => void) | undefined {
     if (keys.length === 0) return;
     const deleteKey = this.db.prepare(`DELETE FROM working_memory WHERE key = ?`);
@@ -1572,6 +1592,14 @@ export class SqliteMemoryReviewQueue {
     id: string,
     options: MemoryReviewDecisionOptions = {},
   ): MemoryCandidate {
+    return this.approveCandidate(id, options, false);
+  }
+
+  private approveCandidate(
+    id: string,
+    options: MemoryReviewDecisionOptions,
+    allowConflictReplace: boolean,
+  ): MemoryCandidate {
     const now = isoNow();
     let finalizeWorkingFlush: (() => void) | undefined;
     let approvedCandidate: MemoryCandidate | undefined;
@@ -1592,6 +1620,11 @@ export class SqliteMemoryReviewQueue {
         this.markSuppressed(id, suppressionReason, now, options);
         approvedCandidate = this.requireCandidate(id);
         return;
+      }
+      if (!allowConflictReplace && this.detectConflicts(candidate).length > 0) {
+        throw new Error(
+          `Memory candidate ${id} conflicts with an existing value; call resolveConflict() with replace_existing to approve the replacement`,
+        );
       }
       finalizeWorkingFlush =
         this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
@@ -1716,10 +1749,10 @@ export class SqliteMemoryReviewQueue {
     };
 
     if (options.resolution === 'replace_existing') {
-      return this.approve(id, {
+      return this.approveCandidate(id, {
         ...decisionOptions,
         note: decisionOptions.note ?? 'Memory conflict resolved by replacing the existing value.',
-      });
+      }, true);
     }
 
     return this.reject(id, {
@@ -1737,6 +1770,10 @@ export class SqliteMemoryReviewQueue {
     const existingValue = this.existingWorkingValue(candidate.key);
     if (existingValue === undefined || memoryValuesEqual(existingValue, candidate.value)) return [];
     const existingProvenance = this.provenanceFor(candidate.targetStore, candidate.key) ?? undefined;
+    const matchingProvenance = existingProvenance &&
+      memoryValuesEqual(existingProvenance.value, existingValue)
+      ? existingProvenance
+      : undefined;
     return [
       {
         targetStore: candidate.targetStore,
@@ -1745,7 +1782,7 @@ export class SqliteMemoryReviewQueue {
         proposedCandidateId: candidate.id,
         existingValue,
         proposedValue: candidate.value,
-        ...(existingProvenance ? { existingProvenance } : {}),
+        ...(matchingProvenance ? { existingProvenance: matchingProvenance } : {}),
         guidance:
           'A pending memory candidate contradicts the current value for the same key. Resolve with keep_existing, replace_existing, or reject_candidate before treating the fact as durable.',
       },
@@ -1753,12 +1790,10 @@ export class SqliteMemoryReviewQueue {
   }
 
   private existingWorkingValue(key: string): unknown {
-    if (this.working.has(key)) return this.working.get(key);
-    const row = this.db
-      .prepare(`SELECT value FROM working_memory WHERE key = ?`)
-      .get(key) as { value: string } | undefined;
-    if (!row) return undefined;
-    return this.decodeValue(row.value);
+    const runtime = this.working.runtimeValueState(key);
+    if (runtime.state === 'present') return runtime.value;
+    if (runtime.state === 'deleted' || runtime.state === 'absent') return undefined;
+    return this.working.persistedValue(key);
   }
 
   private assertValidConflictResolution(
