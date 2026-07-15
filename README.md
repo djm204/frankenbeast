@@ -54,7 +54,7 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations. See [docs/security-json-parsing-limits.md](docs/security-json-parsing-limits.md) for JSON input limits; Beast config, run config, GitHub issue payloads, and LLM issue decomposition payloads are size/depth/fan-out bounded, and YAML is not accepted on those surfaces.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting, dependency update expectations, secret handling, HTTPS guidance, and runtime hardening recommendations. See [docs/agent-tool-execution-threat-model.md](docs/agent-tool-execution-threat-model.md) for the agent tool-execution trust boundaries that cover terminal, filesystem, GitHub, profile state, cron, and PM-swarm approval flows. See [docs/security-json-parsing-limits.md](docs/security-json-parsing-limits.md) for JSON input limits; Beast config, run config, GitHub issue payloads, and LLM issue decomposition payloads are size/depth/fan-out bounded, and YAML is not accepted on those surfaces.
 
 ## Architecture
 
