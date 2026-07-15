@@ -80,6 +80,8 @@ async function runCronScript({ name, recoverable, command }) {
   let settled = false;
   let forceKillTimer;
   let parentTerminationExitCode = null;
+  let parentTerminationSignal = null;
+  let parentTerminationMessage = null;
 
   return await new Promise((resolve) => {
     let child;
@@ -115,9 +117,10 @@ async function runCronScript({ name, recoverable, command }) {
       if (settled || parentTerminationExitCode !== null) {
         return;
       }
-      const durationMs = Date.now() - started;
       const exitCode = signalExitCode(signal);
       parentTerminationExitCode = exitCode;
+      parentTerminationSignal = signal;
+      parentTerminationMessage = `cron wrapper received ${signal} and terminated child script`;
       if (child && !child.killed) {
         child.kill(signal);
         forceKillTimer = setTimeout(() => {
@@ -125,17 +128,6 @@ async function runCronScript({ name, recoverable, command }) {
         }, 5_000);
         forceKillTimer.unref?.();
       }
-      emitEnvelope({
-        script: name,
-        command,
-        exitCode,
-        signal,
-        failureKind: 'signal',
-        message: `cron wrapper received ${signal} and terminated child script`,
-        stderrTail,
-        durationMs,
-        recoverable,
-      });
     }
 
     child = spawn(bin, args, {
@@ -146,13 +138,13 @@ async function runCronScript({ name, recoverable, command }) {
     });
 
     for (const signal of Object.keys(signalHandlers)) {
-      process.once(signal, signalHandlers[signal]);
+      process.on(signal, signalHandlers[signal]);
     }
 
     child.stderr?.on('data', (chunk) => {
       const text = chunk.toString('utf8');
       stderrTail = appendTail(stderrTail, text);
-      stderrNeedsBoundary = !text.endsWith('\n') && !text.endsWith('\r');
+      stderrNeedsBoundary = !text.endsWith('\n');
       process.stderr.write(chunk);
     });
 
@@ -176,6 +168,18 @@ async function runCronScript({ name, recoverable, command }) {
         return;
       }
       if (parentTerminationExitCode !== null) {
+        const durationMs = Date.now() - started;
+        emitEnvelope({
+          script: name,
+          command,
+          exitCode: parentTerminationExitCode,
+          signal: parentTerminationSignal,
+          failureKind: 'signal',
+          message: parentTerminationMessage,
+          stderrTail,
+          durationMs,
+          recoverable,
+        });
         finish(parentTerminationExitCode);
         return;
       }

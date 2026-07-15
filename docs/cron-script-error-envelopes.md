@@ -3,7 +3,7 @@
 Use `scripts/run-cron-script.mjs` when a scheduled or cron-owned command needs machine-readable failure output for PM/liveness tooling.
 
 ```bash
-node scripts/run-cron-script.mjs --name nightly-dr-check -- npm run dr:worker-push-rollback:dry-run
+node scripts/run-cron-script.mjs --name nightly-smoke -- npm run test:root -- tests/unit/cron-script-error-envelope.test.ts
 ```
 
 When the wrapped command exits successfully, the wrapper exits `0` and does not add extra output. When the command fails to start, exits non-zero, receives a signal, or the wrapper is invoked incorrectly, it writes one JSON object to stderr:
@@ -13,8 +13,8 @@ When the wrapped command exits successfully, the wrapper exits `0` and does not 
   "schemaVersion": 1,
   "type": "franken.cron.script.error",
   "timestamp": "2026-07-15T00:00:00.000Z",
-  "script": "nightly-dr-check",
-  "command": ["npm", "run", "dr:worker-push-rollback:dry-run"],
+  "script": "nightly-smoke",
+  "command": ["npm", "run", "test:root", "--", "tests/unit/cron-script-error-envelope.test.ts"],
   "failureKind": "exit",
   "exitCode": 1,
   "signal": null,
