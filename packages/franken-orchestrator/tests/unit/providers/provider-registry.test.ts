@@ -640,12 +640,17 @@ describe('ProviderRegistry', () => {
       });
 
       const events = await collectEvents(registry.execute(makeRequest()));
-      const states = registry.listProviderHealth().map((health) => health.state).sort();
+      const health = registry.listProviderHealth();
+      const states = health.map((entry) => entry.state).sort();
 
       expect(events[0]).toEqual({ type: 'text', content: 'Hello from openai-api' });
       expect(p1.execute).toHaveBeenCalledTimes(1);
       expect(p2.execute).toHaveBeenCalledTimes(1);
       expect(states).toEqual(['closed', 'open']);
+      expect(health.map((entry) => entry.providerKey).sort()).toEqual(['openai-api#1', 'openai-api#2']);
+      expect(registry.getProviderHealth('openai-api')).toBeUndefined();
+      expect(registry.getProviderHealth('openai-api#1')?.state).toBe('open');
+      expect(registry.getProviderHealth('openai-api#2')?.state).toBe('closed');
     });
 
     it('reports open breaker cooldowns instead of credential guidance when all providers are skipped', async () => {
@@ -663,7 +668,52 @@ describe('ProviderRegistry', () => {
 
       await expect(async () => {
         await collectEvents(registry.execute(makeRequest()));
-      }).rejects.toThrow('provider circuit breakers are open');
+      }).rejects.toThrow('Provider circuit breakers are open');
+    });
+
+    it('keeps unavailable fallback guidance with mixed open breakers and unavailable providers', async () => {
+      const p1 = mockProvider('primary', { failOnExecute: new Error('outage') });
+      const p2 = mockProvider('backup', { available: false });
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => Date.UTC(2026, 0, 1),
+      });
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow('outage');
+
+      await expect(async () => {
+        await collectEvents(registry.execute(makeRequest()));
+      }).rejects.toThrow(/Provider circuit breakers are open:.*Unavailable providers: Provider backup circuit opened after unavailable failure.*authenticate/s);
+    });
+
+    it('reopens half-open probes when consumers cancel before a terminal event', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      const p1 = mockProvider('primary', { failOnExecute: new Error('outage') });
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+      const controls = registry as unknown as {
+        reserveCircuitBreakerProbe(provider: ILlmProvider): Error | undefined;
+        releaseHalfOpenProbe(provider: ILlmProvider, reason: string): void;
+      };
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      expect(controls.reserveCircuitBreakerProbe(p1)).toBeUndefined();
+      controls.releaseHalfOpenProbe(p1, 'cancelled stream');
+
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'open',
+        cooldownUntil: '2026-01-01T00:00:20.001Z',
+      });
     });
 
     it('reopens the breaker when a half-open probe fails without retry storms', async () => {

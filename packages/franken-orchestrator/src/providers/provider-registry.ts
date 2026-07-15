@@ -50,6 +50,8 @@ export interface ProviderSwitchEvent {
 export type ProviderCircuitState = 'closed' | 'open' | 'half-open';
 
 export interface ProviderHealthState {
+  /** Stable key for one provider instance; duplicate provider names receive #2/#3 suffixes. */
+  providerKey: string;
   providerName: string;
   /** Request-level model when known; typed LlmRequest currently leaves this unspecified. */
   model: string | null;
@@ -66,6 +68,8 @@ export interface ProviderHealthState {
 }
 
 export interface ProviderHealthEvent {
+  /** Stable key for the provider instance that changed state. */
+  providerKey: string;
   providerName: string;
   state: ProviderCircuitState;
   reason: string;
@@ -263,9 +267,10 @@ export class ProviderRegistry {
   }
 
   getProviderHealth(providerNameOrKey: string): ProviderHealthState | undefined {
-    const record = this.providerHealth.get(providerNameOrKey)
-      ?? [...this.providerHealth.values()].find((health) => health.providerName === providerNameOrKey);
-    return record ? this.toHealthState(record) : undefined;
+    const exact = this.providerHealth.get(providerNameOrKey);
+    if (exact) return this.toHealthState(exact);
+    const matches = [...this.providerHealth.values()].filter((health) => health.providerName === providerNameOrKey);
+    return matches.length === 1 ? this.toHealthState(matches[0]!) : undefined;
   }
 
   listProviderHealth(): ProviderHealthState[] {
@@ -320,6 +325,7 @@ export class ProviderRegistry {
   private toHealthState(record: ProviderHealthRecord): ProviderHealthState {
     const total = record.failures + record.successes;
     return {
+      providerKey: record.providerKey,
       providerName: record.providerName,
       model: record.model,
       state: record.state,
@@ -339,6 +345,7 @@ export class ProviderRegistry {
     const record = this.providerHealth.get(this.providerKey(provider));
     if (!record || !this.opts.onProviderHealthChange) return;
     this.opts.onProviderHealthChange({
+      providerKey: record.providerKey,
       providerName: record.providerName,
       state: record.state,
       reason,
@@ -422,6 +429,17 @@ export class ProviderRegistry {
     return undefined;
   }
 
+  private hasReservedHalfOpenProbe(provider: ILlmProvider): boolean {
+    const record = this.providerHealth.get(this.providerKey(provider));
+    return record?.state === 'half-open' && record.halfOpenProbeCount > 0;
+  }
+
+  private releaseHalfOpenProbe(provider: ILlmProvider, reason: string): void {
+    const record = this.providerHealth.get(this.providerKey(provider));
+    if (record?.state !== 'half-open' || record.halfOpenProbeCount <= 0) return;
+    this.tripProvider(provider, reason, 'half-open-probe-released');
+  }
+
   private getProviderIterationOrder(): number[] {
     const normalOrder = this.providers.map((_, offset) => (this.currentProviderIndex + offset) % this.providers.length);
     const now = this.opts.now();
@@ -443,6 +461,7 @@ export class ProviderRegistry {
     let lastFailedProviderName: string | undefined;
     const unavailableProviders: string[] = [];
     const circuitErrors: string[] = [];
+    const availabilityErrors: string[] = [];
     let attemptedProviders = 0;
 
     const providerOrder = this.getProviderIterationOrder();
@@ -454,6 +473,10 @@ export class ProviderRegistry {
       if (circuitError) {
         unavailableProviders.push(provider.name);
         circuitErrors.push(circuitError.message);
+        const health = this.providerHealth.get(this.providerKey(provider));
+        if (health?.lastErrorClass === 'unavailable' || health?.lastErrorClass === 'auth') {
+          availabilityErrors.push(`Provider ${provider.name} circuit opened after ${health.lastErrorClass} failure`);
+        }
         if (!lastError) {
           lastFailedProviderName = provider.name;
           lastError = circuitError;
@@ -465,6 +488,7 @@ export class ProviderRegistry {
       if (!(await provider.isAvailable())) {
         unavailableProviders.push(provider.name);
         const availabilityError = new Error(`Provider ${provider.name} is unavailable`);
+        availabilityErrors.push(availabilityError.message);
         this.recordProviderFailure(provider, availabilityError);
         if (!lastError) {
           lastFailedProviderName = provider.name;
@@ -511,6 +535,8 @@ export class ProviderRegistry {
         retry++
       ) {
         let failureAlreadyRecorded = false;
+        let terminalEventObserved = false;
+        const halfOpenProbeReserved = this.hasReservedHalfOpenProbe(provider);
         try {
           const stream = provider.execute(effectiveRequest);
           let retried = false;
@@ -523,6 +549,7 @@ export class ProviderRegistry {
               retry < this.opts.maxRetriesPerProvider
             ) {
               lastError = new Error(event.error);
+              terminalEventObserved = true;
               const health = this.recordProviderFailure(provider, lastError);
               failureAlreadyRecorded = true;
               if (health.state === 'open') {
@@ -541,6 +568,7 @@ export class ProviderRegistry {
             }
             if (event.type === 'error') {
               lastError = new Error(event.error);
+              terminalEventObserved = true;
               this.recordProviderFailure(provider, lastError);
               failureAlreadyRecorded = true;
               terminalError = lastError;
@@ -555,6 +583,7 @@ export class ProviderRegistry {
           // Attempt completed — flush buffered events
           for (const event of buffer) {
             if (event.type === 'done') {
+              terminalEventObserved = true;
               this.tokenAggregator.record(provider.name, event.usage);
               this.recordProviderSuccess(provider);
             }
@@ -566,6 +595,7 @@ export class ProviderRegistry {
           }
 
           lastError = new Error('stream ended without done');
+          terminalEventObserved = true;
           this.recordProviderFailure(provider, lastError);
           terminalError = lastError;
           lastFailedProviderName = provider.name;
@@ -574,11 +604,16 @@ export class ProviderRegistry {
           lastError =
             error instanceof Error ? error : new Error(String(error));
           if (!failureAlreadyRecorded) {
+            terminalEventObserved = true;
             this.recordProviderFailure(provider, lastError);
           }
           terminalError = lastError;
           lastFailedProviderName = provider.name;
           break; // failover to next provider
+        } finally {
+          if (halfOpenProbeReserved && !terminalEventObserved) {
+            this.releaseHalfOpenProbe(provider, 'half-open probe stream ended before a terminal event');
+          }
         }
       }
     }
@@ -593,10 +628,18 @@ export class ProviderRegistry {
     });
 
     const exhaustionReason = attemptedProviders === 0
-      ? circuitErrors.length > 0
-        ? `No providers available because provider circuit breakers are open: ${circuitErrors.join('; ')}. `
-        : `No providers available. Checked: ${unavailableProviders.join(', ')}. `
-          + 'Install or authenticate at least one configured provider CLI, or configure provider overrides.'
+      ? [
+        `No providers available. Checked: ${unavailableProviders.join(', ')}.`,
+        circuitErrors.length > 0
+          ? `Provider circuit breakers are open: ${circuitErrors.join('; ')}.`
+          : undefined,
+        availabilityErrors.length > 0
+          ? `Unavailable providers: ${availabilityErrors.join('; ')}.`
+          : undefined,
+        availabilityErrors.length > 0
+          ? 'Install or authenticate configured provider CLIs, or configure provider overrides.'
+          : undefined,
+      ].filter((part): part is string => part !== undefined).join(' ')
       : `All providers exhausted. Last error: ${(terminalError ?? lastError)?.message ?? 'unknown'}. `;
 
     throw new Error(
