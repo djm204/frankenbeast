@@ -276,7 +276,7 @@ function compareRecords(
         area,
         id,
         type: 'backup-only',
-        severity: area === 'approvals' ? 'blocker' : 'info',
+        severity: severityForBackupOnly(area),
         backup,
         recommendation: recommendationFor(area, 'backup-only'),
       });
@@ -346,6 +346,11 @@ function liveIsNewer(backup: RestorePreviewRecord, live: RestorePreviewRecord): 
   return Number.isFinite(backupTime) && Number.isFinite(liveTime) && liveTime > backupTime;
 }
 
+function severityForBackupOnly(area: ComparableArea): RestorePreviewSeverity {
+  if (area === 'approvals' || area === 'tasks') return 'blocker';
+  return 'info';
+}
+
 function severityFor(area: ComparableArea, type: RestorePreviewConflictType): RestorePreviewSeverity {
   if (area === 'approvals') return 'blocker';
   if (type === 'newer-live') return 'warning';
@@ -355,11 +360,13 @@ function severityFor(area: ComparableArea, type: RestorePreviewConflictType): Re
 function recommendationFor(area: ComparableArea, type: RestorePreviewConflictType): string {
   switch (area) {
     case 'tasks':
-      return type === 'newer-live'
-        ? 'Review and merge task/card changes or restore only selected stale fields; do not overwrite newer live task state blindly.'
-        : type === 'live-only'
-          ? 'preserve the live task/card unless the operator explicitly chooses to delete or archive it during restore.'
-          : 'Review task/card delta and choose overwrite, merge, or skip for this item.';
+      return type === 'backup-only'
+        ? 'Do not resurrect a backup-only Kanban card automatically. Confirm whether the live card was deleted, completed, or reassigned, then explicitly recreate a new card or skip this backup record.'
+        : type === 'newer-live'
+          ? 'Review and merge task/card changes or restore only selected stale fields; do not overwrite newer live task state blindly.'
+          : type === 'live-only'
+            ? 'preserve the live task/card unless the operator explicitly chooses to delete or archive it during restore.'
+            : 'Review task/card delta and choose overwrite, merge, or skip for this item.';
     case 'approvals':
       return 'Skip approval token restore and require re-approval so stale or changed approval state cannot authorize live actions.';
     case 'memory':
