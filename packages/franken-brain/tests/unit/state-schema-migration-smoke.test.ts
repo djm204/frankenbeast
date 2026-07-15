@@ -19,6 +19,7 @@ const storeNames = [
   'memory_review_suppressions',
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
+  'memory_access_audit_events',
 ] as const;
 
 const readColumns = (db: Database.Database, table: string): string[] =>
@@ -64,7 +65,7 @@ describe('state schema migration smoke tests', () => {
         storeNames.map((store) => ({
           store,
           version: CURRENT_MEMORY_SCHEMA_VERSION,
-          recordCount: store === 'working_memory' || store === 'episodic_events' || store === 'checkpoints' ? 1 : 0,
+          recordCount: store === 'working_memory' || store === 'episodic_events' || store === 'checkpoints' || store === 'memory_access_audit_events' ? 1 : 0,
         })),
       );
       brain.close();

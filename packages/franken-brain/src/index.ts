@@ -10,6 +10,7 @@ export {
   DEFAULT_WORKING_MEMORY_LIMITS,
   CURRENT_MEMORY_SCHEMA_VERSION,
   SqliteMemoryReviewQueue,
+  SqliteMemoryAccessAuditTrail,
   type WorkingMemoryLimits,
   type SqliteBrainOptions,
   type MemoryCandidateTargetStore,
@@ -32,4 +33,9 @@ export {
   type RightToForgetSelector,
   type RightToForgetReport,
   type RightToForgetMemoryType,
+  type MemoryAccessAuditEvent,
+  type MemoryAccessAuditListOptions,
+  type MemoryAccessAuditOperation,
+  type MemoryAccessAuditOutcome,
+  type MemoryAccessAuditStore,
 } from './sqlite-brain.js';

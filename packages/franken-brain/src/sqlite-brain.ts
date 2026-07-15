@@ -162,6 +162,71 @@ export interface MemoryEncryptionMigrationResult {
   operations: MemorySchemaMigrationOperation[];
 }
 
+export type MemoryAccessAuditStore =
+  | 'working'
+  | 'episodic'
+  | 'recovery'
+  | 'review'
+  | 'privacy';
+
+export type MemoryAccessAuditOutcome = 'success' | 'miss' | 'denied' | 'error';
+
+export type MemoryAccessAuditOperation =
+  | 'working.get'
+  | 'working.set'
+  | 'working.delete'
+  | 'working.has'
+  | 'working.keys'
+  | 'working.snapshot'
+  | 'working.restore'
+  | 'working.clear'
+  | 'working.flush'
+  | 'episodic.record'
+  | 'episodic.recall'
+  | 'episodic.recent'
+  | 'episodic.recentFailures'
+  | 'recovery.checkpoint'
+  | 'recovery.lastCheckpoint'
+  | 'recovery.listCheckpoints'
+  | 'recovery.clearCheckpoints'
+  | 'review.propose'
+  | 'review.list'
+  | 'review.edit'
+  | 'review.approve'
+  | 'review.reject'
+  | 'review.neverStore'
+  | 'review.provenanceFor'
+  | 'privacy.rightToForget';
+
+export interface MemoryAccessAuditEvent {
+  id: number;
+  operation: MemoryAccessAuditOperation;
+  store: MemoryAccessAuditStore;
+  outcome: MemoryAccessAuditOutcome;
+  createdAt: string;
+  keyHash?: string;
+  queryHash?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface MemoryAccessAuditListOptions {
+  limit?: number;
+  store?: MemoryAccessAuditStore;
+  operation?: MemoryAccessAuditOperation;
+}
+
+interface MemoryAccessAuditInput {
+  operation: MemoryAccessAuditOperation;
+  store: MemoryAccessAuditStore;
+  outcome: MemoryAccessAuditOutcome;
+  key?: string;
+  query?: string;
+  details?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+type MemoryAccessAuditRecorder = (event: MemoryAccessAuditInput) => void;
+
 export class MemoryEncryptionKeyUnavailableError extends Error {
   constructor(
     message = 'Memory encryption is enabled but no key material is available',
@@ -206,6 +271,7 @@ const MEMORY_STORES = [
   'memory_review_suppressions',
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
+  'memory_access_audit_events',
 ] as const;
 
 const MEMORY_REVIEW_PAYLOAD_COLUMNS = [
@@ -383,6 +449,133 @@ function stringifyWorkingMemoryValue(key: string, value: unknown): string {
   );
 }
 
+function hashMemoryAccessValue(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function sanitizeMemoryAccessDetails(
+  details: Record<string, unknown> | undefined,
+): string | null {
+  if (!details) return null;
+  return JSON.stringify(details, (_key, value) => {
+    if (
+      value === null
+      || typeof value === 'string'
+      || typeof value === 'number'
+      || typeof value === 'boolean'
+    ) {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => {
+        if (
+          entry === null
+          || typeof entry === 'string'
+          || typeof entry === 'number'
+          || typeof entry === 'boolean'
+        ) {
+          return entry;
+        }
+        return '[redacted]';
+      });
+    }
+    return '[redacted]';
+  });
+}
+
+function parseMemoryAccessDetails(
+  details: string | null,
+): Record<string, unknown> | undefined {
+  if (!details) return undefined;
+  const parsed = safeJsonParse(details);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function insertMemoryAccessAuditEvent(
+  db: Database.Database,
+  event: MemoryAccessAuditInput,
+): void {
+  db.prepare(
+    `INSERT INTO memory_access_audit_events (
+      operation, store, key_hash, query_hash, outcome, details, created_at, schema_version
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+  ).run(
+    event.operation,
+    event.store,
+    event.key === undefined ? null : hashMemoryAccessValue(event.key),
+    event.query === undefined ? null : hashMemoryAccessValue(event.query),
+    event.outcome,
+    sanitizeMemoryAccessDetails(event.details),
+    event.createdAt ?? isoNow(),
+  );
+}
+
+interface MemoryAccessAuditRow {
+  id: number;
+  operation: MemoryAccessAuditOperation;
+  store: MemoryAccessAuditStore;
+  key_hash: string | null;
+  query_hash: string | null;
+  outcome: MemoryAccessAuditOutcome;
+  details: string | null;
+  created_at: string;
+}
+
+function rowToMemoryAccessAuditEvent(
+  row: MemoryAccessAuditRow,
+): MemoryAccessAuditEvent {
+  const event: MemoryAccessAuditEvent = {
+    id: row.id,
+    operation: row.operation,
+    store: row.store,
+    outcome: row.outcome,
+    createdAt: row.created_at,
+  };
+  if (row.key_hash) event.keyHash = row.key_hash;
+  if (row.query_hash) event.queryHash = row.query_hash;
+  const details = parseMemoryAccessDetails(row.details);
+  if (details) event.details = details;
+  return event;
+}
+
+export class SqliteMemoryAccessAuditTrail {
+  constructor(private db: Database.Database) {}
+
+  record(event: MemoryAccessAuditInput): void {
+    insertMemoryAccessAuditEvent(this.db, event);
+  }
+
+  list(options: MemoryAccessAuditListOptions = {}): MemoryAccessAuditEvent[] {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+    if (options.store) {
+      clauses.push('store = ?');
+      params.push(options.store);
+    }
+    if (options.operation) {
+      clauses.push('operation = ?');
+      params.push(options.operation);
+    }
+    const limit = options.limit ?? 100;
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new RangeError('Memory access audit limit must be a non-negative integer');
+    }
+    params.push(limit);
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.db.prepare(
+      `SELECT id, operation, store, key_hash, query_hash, outcome, details, created_at
+       FROM memory_access_audit_events
+       ${where}
+       ORDER BY id DESC
+       LIMIT ?`,
+    ).all(...params) as MemoryAccessAuditRow[];
+    return rows.map(rowToMemoryAccessAuditEvent);
+  }
+}
+
 class SqliteWorkingMemory implements IWorkingMemory {
   private store = new Map<string, unknown>();
   private sizes = new Map<string, number>();
@@ -397,6 +590,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
     private limits: WorkingMemoryLimits = DEFAULT_WORKING_MEMORY_LIMITS,
     hydrateFromDb = true,
     private encryption?: MemoryCipher,
+    private audit?: MemoryAccessAuditRecorder,
   ) {
     this.loadPersistedSerializedFromDb();
     if (hydrateFromDb) {
@@ -502,6 +696,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
     };
     const tx = this.db.transaction(applyFlush);
     const hasChanges = this.db.inTransaction ? applyFlush() : tx.immediate();
+    this.audit?.({
+      operation: 'working.flush',
+      store: 'working',
+      outcome: 'success',
+      details: { changed: hasChanges },
+    });
     if (!hasChanges) {
       return;
     }
@@ -701,7 +901,24 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   get(key: string): unknown {
-    if (this.expireRuntimeKeyIfGuarded(key)) return undefined;
+    if (this.expireRuntimeKeyIfGuarded(key)) {
+      this.audit?.({
+        operation: 'working.get',
+        store: 'working',
+        key,
+        outcome: 'miss',
+        details: { present: false, guarded: true },
+      });
+      return undefined;
+    }
+    const present = this.store.has(key);
+    this.audit?.({
+      operation: 'working.get',
+      store: 'working',
+      key,
+      outcome: present ? 'success' : 'miss',
+      details: { present },
+    });
     return cloneStoredWorkingMemoryValue(this.store.get(key));
   }
 
@@ -797,10 +1014,24 @@ class SqliteWorkingMemory implements IWorkingMemory {
       this.dirtyKeys.add(key);
     }
     this.deletedKeys.delete(key);
+    this.audit?.({
+      operation: 'working.set',
+      store: 'working',
+      key,
+      outcome: 'success',
+      details: { valueBytes: Buffer.byteLength(serialized, 'utf8') },
+    });
   }
 
   delete(key: string): boolean {
     if (!this.store.has(key)) {
+      this.audit?.({
+        operation: 'working.delete',
+        store: 'working',
+        key,
+        outcome: 'miss',
+        details: { deleted: false },
+      });
       return false;
     }
 
@@ -813,7 +1044,15 @@ class SqliteWorkingMemory implements IWorkingMemory {
     } else {
       this.deletedKeys.delete(key);
     }
-    return this.store.delete(key);
+    const deleted = this.store.delete(key);
+    this.audit?.({
+      operation: 'working.delete',
+      store: 'working',
+      key,
+      outcome: deleted ? 'success' : 'miss',
+      details: { deleted },
+    });
+    return deleted;
   }
 
   snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
@@ -916,13 +1155,37 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   has(key: string): boolean {
-    if (this.expireRuntimeKeyIfGuarded(key)) return false;
-    return this.store.has(key);
+    if (this.expireRuntimeKeyIfGuarded(key)) {
+      this.audit?.({
+        operation: 'working.has',
+        store: 'working',
+        key,
+        outcome: 'miss',
+        details: { present: false, guarded: true },
+      });
+      return false;
+    }
+    const present = this.store.has(key);
+    this.audit?.({
+      operation: 'working.has',
+      store: 'working',
+      key,
+      outcome: present ? 'success' : 'miss',
+      details: { present },
+    });
+    return present;
   }
 
   keys(): string[] {
     this.expireRuntimeKeysMatchingCurrentGuards();
-    return [...this.store.keys()];
+    const keys = [...this.store.keys()];
+    this.audit?.({
+      operation: 'working.keys',
+      store: 'working',
+      outcome: 'success',
+      details: { count: keys.length },
+    });
+    return keys;
   }
 
   private snapshotEntries(options: { expireGuardedEntries?: boolean } = {}): Record<string, unknown> {
@@ -942,7 +1205,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
   }
 
   snapshot(): Record<string, unknown> {
-    return this.snapshotEntries();
+    const snapshot = this.snapshotEntries();
+    this.audit?.({
+      operation: 'working.snapshot',
+      store: 'working',
+      outcome: 'success',
+      details: { count: Object.keys(snapshot).length },
+    });
+    return snapshot;
   }
 
   restore(snap: Record<string, unknown>): void {
@@ -980,6 +1250,12 @@ class SqliteWorkingMemory implements IWorkingMemory {
       }
     }
     this.totalBytes = total;
+    this.audit?.({
+      operation: 'working.restore',
+      store: 'working',
+      outcome: 'success',
+      details: { count: prepared.length, totalBytes: total },
+    });
   }
 
   clear(): void {
@@ -989,6 +1265,11 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.dirtyKeys.clear();
     this.deletedKeys = new Set(this.persistedSerialized.keys());
     this.totalBytes = 0;
+    this.audit?.({
+      operation: 'working.clear',
+      store: 'working',
+      outcome: 'success',
+    });
   }
 }
 
@@ -2101,6 +2382,7 @@ export class SqliteBrain implements IBrain {
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
   readonly memoryReview: SqliteMemoryReviewQueue;
+  readonly accessAudit: SqliteMemoryAccessAuditTrail;
 
   private db: Database.Database;
   private readonly dbPath: string;
@@ -2123,6 +2405,7 @@ export class SqliteBrain implements IBrain {
     const encryption = makeMemoryCipher(options.encryption);
     this.encryption = encryption;
     assertMemoryEncryptionState(this.db, dbPath, encryption);
+    this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db);
     this.working = new SqliteWorkingMemory(
       this.db,
       {
@@ -2131,6 +2414,7 @@ export class SqliteBrain implements IBrain {
       },
       options.hydrateWorkingMemoryFromDb ?? true,
       encryption,
+      (event) => this.accessAudit.record(event),
     );
     this.episodic = new SqliteEpisodicMemory(this.db, encryption);
     this.recovery = new SqliteRecoveryMemory(
@@ -2286,6 +2570,21 @@ export class SqliteBrain implements IBrain {
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE TABLE IF NOT EXISTS memory_access_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation TEXT NOT NULL,
+        store TEXT NOT NULL,
+        key_hash TEXT,
+        query_hash TEXT,
+        outcome TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_created
+        ON memory_access_audit_events(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_operation
+        ON memory_access_audit_events(store, operation, created_at DESC);
     `);
   }
 
@@ -2916,6 +3215,21 @@ function migrateMemorySchemaDatabase(
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE TABLE IF NOT EXISTS memory_access_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation TEXT NOT NULL,
+        store TEXT NOT NULL,
+        key_hash TEXT,
+        query_hash TEXT,
+        outcome TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_created
+        ON memory_access_audit_events(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_operation
+        ON memory_access_audit_events(store, operation, created_at DESC);
       CREATE TABLE IF NOT EXISTS working_memory (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
