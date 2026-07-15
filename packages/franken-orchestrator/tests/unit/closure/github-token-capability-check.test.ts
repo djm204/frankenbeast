@@ -149,7 +149,7 @@ describe('GitHub token capability check', () => {
     const result = checkGitHubTokenCapabilities({
       repo: 'djm204/frankenbeast',
       exec,
-      required: { pullRequests: 'write' },
+      required: { pullRequests: 'write', contents: 'write' },
     });
 
     expect(result.ok).toBe(true);

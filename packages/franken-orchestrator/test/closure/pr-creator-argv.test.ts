@@ -483,6 +483,32 @@ describe('PrCreator argv subprocess safety', () => {
     expect(calls.some(c => c.command === 'git' && c.args.includes('push'))).toBe(false);
   });
 
+  it.each([
+    'ssh://git@github.com:22/djm204/frankenbeast.git',
+    'https://github.com:443/djm204/frankenbeast.git',
+  ])('parses GitHub remote URLs with explicit ports: %s', async (remoteUrl) => {
+    const calls: ExecCall[] = [];
+    const exec = (command: string, args: readonly string[] = []): string => {
+      calls.push({ command, args });
+      if (command === 'git' && args.includes('--show-current')) return 'feature/ported-remote\n';
+      if (command === 'git' && args.join(' ') === 'remote get-url origin') return `${remoteUrl}\n`;
+      if (command === 'gh' && args.includes('list')) return '[]';
+      if (command === 'gh' && args.join(' ') === 'api -i /user') return 'HTTP/2 200\nx-oauth-scopes: repo\n\n{}\n';
+      if (command === 'gh' && args.join(' ') === 'api repos/djm204/frankenbeast') {
+        return JSON.stringify({ private: true, permissions: { pull: true, push: true, triage: true, maintain: false, admin: false } });
+      }
+      if (command === 'gh' && args.includes('create')) return 'https://example.com/pr/1\n';
+      return '';
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      exec,
+    );
+
+    await expect(creator.create(makeResult(), undefined, { issueNumber: 1706 })).resolves.toEqual({ url: 'https://example.com/pr/1' });
+    expect(calls.some(c => c.command === 'gh' && c.args.join(' ') === 'api repos/djm204/frankenbeast')).toBe(true);
+  });
+
   it('does not require pull-request write when reusing an existing PR', async () => {
     const calls: ExecCall[] = [];
     const exec = (command: string, args: readonly string[] = []): string => {

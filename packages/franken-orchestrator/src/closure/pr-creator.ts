@@ -356,7 +356,7 @@ export class PrCreator {
       }
       const failure = this.commandFailure('gh', 'gh pr create', error, { rawCommand: 'gh pr create' });
       if (isGhAuthFailure(error, failure)) {
-        throw buildGhAuthRequiredAction(branch, failure);
+        throw buildGhAuthRequiredAction(branch, failure, { branchPushed: true });
       }
       logger?.error('PrCreator: failed to create PR', failure);
       return null;
@@ -475,7 +475,7 @@ export class PrCreator {
         rawCommand: formatCommand('gh', args),
       });
       if (isGhAuthFailure(error, failure)) {
-        throw buildGhAuthRequiredAction(branch, failure);
+        throw buildGhAuthRequiredAction(branch, failure, { branchPushed: false });
       }
       logger?.error('PrCreator: failed to list PRs', failure);
       return null;
@@ -549,13 +549,13 @@ function formatCaughtError(error: unknown): { error: string; name?: string | und
 }
 
 function parseGitHubOwnerRepo(remoteUrl: string): string | null {
-  const match = remoteUrl.match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+  const match = remoteUrl.match(/github\.com(?::\d+)?[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
   if (!match) return null;
   return `${match[1]}/${match[2]}`;
 }
 
 function isHttpsGitHubRemote(remoteUrl: string): boolean {
-  return /^https?:\/\/(?:[^@/\s]+@)?github\.com\//i.test(remoteUrl.trim());
+  return /^https?:\/\/(?:[^@/\s]+@)?github\.com(?::\d+)?\//i.test(remoteUrl.trim());
 }
 
 interface GitContext {
@@ -802,7 +802,11 @@ function isGhAuthFailure(error: unknown, failure: { stdout?: string; stderr?: st
   return GH_AUTH_FAILURE_RE.test(text);
 }
 
-function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreationRequiredActionError {
+function buildGhAuthRequiredAction(
+  branch: string,
+  details: unknown,
+  options: { readonly branchPushed: boolean },
+): PrCreationRequiredActionError {
   const detailText = [
     stringifyError(details),
     readErrorText((details as { stderr?: unknown }).stderr),
@@ -812,12 +816,14 @@ function buildGhAuthRequiredAction(branch: string, details: unknown): PrCreation
   const isActionsTokenFailure = /GH_TOKEN|GitHub Actions workflow/i.test(detailText);
   const isIntegrationPermissionFailure = /resource not accessible by (?:integration|personal access token)/i.test(detailText);
   const isActionsPrPermissionFailure = /GitHub Actions is not permitted to create or approve pull requests/i.test(detailText);
+  const retryTarget = options.branchPushed ? 'the pushed branch' : `branch ${branch}`;
+  const pushedNote = options.branchPushed ? `branch ${branch} is pushed.` : `branch ${branch} was not pushed.`;
   const action = isActionsTokenFailure || isIntegrationPermissionFailure || isActionsPrPermissionFailure
-    ? 'Set the `GH_TOKEN` environment variable with pull-request permissions, then retry PR creation for the pushed branch.'
-    : 'Run `gh auth login`, then retry PR creation for the pushed branch.';
+    ? `Set the \`GH_TOKEN\` environment variable with pull-request permissions, then retry PR creation for ${retryTarget}.`
+    : `Run \`gh auth login\`, then retry PR creation for ${retryTarget}.`;
   const message = isActionsTokenFailure || isIntegrationPermissionFailure || isActionsPrPermissionFailure
-    ? `PR not created: set \`GH_TOKEN\` with pull-request permissions for GitHub CLI; branch ${branch} is pushed.`
-    : `PR not created: run \`gh auth login\`; branch ${branch} is pushed.`;
+    ? `PR not created: set \`GH_TOKEN\` with pull-request permissions for GitHub CLI; ${pushedNote}`
+    : `PR not created: run \`gh auth login\`; ${pushedNote}`;
 
   return new PrCreationRequiredActionError({
     message,

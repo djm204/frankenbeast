@@ -68,6 +68,7 @@ interface RepositoryInfo {
 
 interface OAuthScopeReadResult {
   readonly scopes: readonly string[];
+  readonly repositoryPermissionsTokenSpecific?: boolean | undefined;
   readonly warning?: GitHubCapabilityIssue | undefined;
 }
 
@@ -93,7 +94,7 @@ export function checkGitHubTokenCapabilities(options: GitHubTokenCapabilityCheck
     const scopeRead = readOauthScopes(options.exec);
     const repoInfo = readRepositoryInfo(options.exec, options.repo);
     const evidence = maybeProbeRequiredCapabilities(
-      buildEvidence(scopeRead.scopes, repoInfo),
+      buildEvidence(scopeRead.scopes, repoInfo, scopeRead.repositoryPermissionsTokenSpecific === true),
       options,
       repoInfo,
     );
@@ -132,11 +133,13 @@ function readOauthScopes(exec: GitHubCapabilityExec): OAuthScopeReadResult {
   try {
     output = exec('gh', ['api', '-i', '/user']);
   } catch (error) {
+    const message = sanitizeErrorMessage(error);
     return {
       scopes: [],
+      repositoryPermissionsTokenSpecific: /resource not accessible by integration|GH_TOKEN|GitHub Actions/i.test(message),
       warning: {
         code: 'github-api-unavailable',
-        message: `OAuth scope headers were unavailable from /user; continuing with repository capability evidence only. ${sanitizeErrorMessage(error)}`,
+        message: `OAuth scope headers were unavailable from /user; continuing with repository capability evidence only. ${message}`,
       },
     };
   }
@@ -169,7 +172,11 @@ function readRepositoryInfo(exec: GitHubCapabilityExec, repo: string): Repositor
   return { nodeId: parsed.node_id, isPrivate: parsed.private, permissions: parsed.permissions ?? {} };
 }
 
-function buildEvidence(scopes: readonly string[], repoInfo: RepositoryInfo): GitHubTokenCapabilityEvidence {
+function buildEvidence(
+  scopes: readonly string[],
+  repoInfo: RepositoryInfo,
+  repositoryPermissionsTokenSpecific = false,
+): GitHubTokenCapabilityEvidence {
   const { permissions } = repoInfo;
   const hasClassicRepoScope = scopes.includes('repo');
   const hasClassicPublicRepoScope = scopes.includes('public_repo');
@@ -190,6 +197,7 @@ function buildEvidence(scopes: readonly string[], repoInfo: RepositoryInfo): Git
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope || repoRoleRead,
       scopesObserved,
       roleLevel: repoRoleLevel,
+      roleTokenSpecific: repositoryPermissionsTokenSpecific,
       source: repoRoleRead ? 'repository access check' : 'not exposed by GitHub API response',
     }),
     issues: tokenAwareItem({
@@ -197,6 +205,7 @@ function buildEvidence(scopes: readonly string[], repoInfo: RepositoryInfo): Git
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
+      roleTokenSpecific: repositoryPermissionsTokenSpecific,
       source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
     }),
     pullRequests: tokenAwareItem({
@@ -204,6 +213,7 @@ function buildEvidence(scopes: readonly string[], repoInfo: RepositoryInfo): Git
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
+      roleTokenSpecific: repositoryPermissionsTokenSpecific,
       source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
     }),
     contents: tokenAwareItem({
@@ -211,6 +221,7 @@ function buildEvidence(scopes: readonly string[], repoInfo: RepositoryInfo): Git
       scopeRead: hasClassicRepoScope || hasClassicPublicRepoScope,
       scopesObserved,
       roleLevel: repoRoleLevel,
+      roleTokenSpecific: repositoryPermissionsTokenSpecific,
       source: repoRoleRead ? 'repository.permissions (actor role; not token-specific)' : 'not exposed by GitHub API response',
     }),
   };
@@ -221,6 +232,7 @@ function tokenAwareItem(options: {
   readonly scopeRead: boolean;
   readonly scopesObserved: boolean;
   readonly roleLevel: GitHubCapabilityLevel;
+  readonly roleTokenSpecific?: boolean | undefined;
   readonly source: string;
 }): GitHubCapabilityEvidenceItem {
   if (options.scopeWrite) {
@@ -246,7 +258,7 @@ function tokenAwareItem(options: {
     };
   }
   if (options.roleLevel !== 'none') {
-    return { available: true, level: options.roleLevel, source: options.source, tokenSpecific: false };
+    return { available: true, level: options.roleLevel, source: options.source, tokenSpecific: options.roleTokenSpecific === true };
   }
   return { available: false, level: 'none', source: options.source, tokenSpecific: false };
 }
