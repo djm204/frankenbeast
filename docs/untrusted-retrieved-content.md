@@ -1,6 +1,6 @@
 # Untrusted Retrieved Content
 
-Frankenbeast prompt assembly treats retrieved files, web pages, GitHub issues, PR comments, memory, and tool output as data, not instructions.
+Frankenbeast prompt assembly treats retrieved files, web pages, GitHub issues, PR comments, memory, and tool output as data, not instructions. This document implements the prompt-data boundary described in [Agent Tool Execution Threat Model](agent-tool-execution-threat-model.md) (`docs/agent-tool-execution-threat-model.md`).
 
 Use `wrapUntrustedContent()` from `@franken/orchestrator` whenever adding retrieved text to an LLM prompt. The wrapper records:
 
