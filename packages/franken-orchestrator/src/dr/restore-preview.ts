@@ -122,6 +122,45 @@ export type RestorePreviewConflictType =
 
 export type RestorePreviewSeverity = 'info' | 'warning' | 'blocker';
 
+export type CrossFileStateConsistencyStatus = 'clean' | 'warning' | 'blocked';
+
+export type CrossFileStateConsistencyFindingCode =
+  | 'unsupported-schema-version'
+  | 'malformed-record-id'
+  | 'duplicate-record-id-within-area'
+  | 'duplicate-record-id-across-areas'
+  | 'dangling-task-reference'
+  | 'malformed-task-reference';
+
+export interface CrossFileStateConsistencyFinding {
+  readonly code: CrossFileStateConsistencyFindingCode;
+  readonly severity: RestorePreviewSeverity;
+  readonly area: RestorePreviewArea;
+  readonly id: string;
+  readonly filePath?: string;
+  readonly jsonPath: string;
+  readonly message: string;
+  readonly recommendation: string;
+  readonly relatedAreas?: readonly ComparableArea[];
+  readonly referenceField?: string;
+  readonly referencedTaskId?: string;
+}
+
+export interface CrossFileStateConsistencyReport {
+  /** ISO timestamp for when the report was generated, supplied by callers for deterministic tests. */
+  readonly checkedAt: string;
+  /** Explicitly records that consistency checking is read-only and performs no restore writes. */
+  readonly wouldWrite: false;
+  readonly status: CrossFileStateConsistencyStatus;
+  readonly findings: readonly CrossFileStateConsistencyFinding[];
+  readonly operatorSummary: string;
+}
+
+export interface CrossFileStateConsistencyOptions {
+  readonly checkedAt?: string;
+  readonly manifestPath?: string;
+}
+
 export type RestorePreviewMode = 'normal' | 'recovery';
 
 export type RestorePreviewDestructiveActionType =
@@ -230,7 +269,7 @@ export interface RestoreDryRunPreviewResult {
 export interface RestoreDryRunReport {
   readonly ok: true;
   readonly command: 'dr restore-dry-run';
-  readonly formatVersion: 1;
+  readonly formatVersion: 2;
   readonly generatedAt: string;
   readonly dryRun: true;
   readonly wouldWrite: false;
@@ -244,8 +283,14 @@ export interface RestoreDryRunReport {
     readonly blockerCount: number;
     readonly warningCount: number;
     readonly infoCount: number;
+    readonly consistencyFindingCount: number;
+    readonly consistencyBlockerCount: number;
   };
   readonly preview: RestoreDryRunPreviewResult;
+  readonly consistency: {
+    readonly backup: CrossFileStateConsistencyReport;
+    readonly live: CrossFileStateConsistencyReport;
+  };
   readonly operatorGuidance: string;
 }
 
@@ -259,6 +304,7 @@ const AREA_ACCESSORS = {
 } satisfies Record<ComparableArea, (manifest: RestorePreviewManifest) => readonly RestorePreviewRecord[]>;
 
 const DEFAULT_ALLOWED_BACKUP_ENCRYPTION_ALGORITHMS = ['aes-256-gcm', 'xchacha20-poly1305'] as const;
+const SUPPORTED_RESTORE_SCHEMA_VERSION = 1;
 
 export function buildPointInTimeBackupManifest(
   manifest: RestorePreviewManifest,
@@ -455,21 +501,174 @@ export function detectRestorePreviewConflicts(
   };
 }
 
+export function buildCrossFileStateConsistencyReport(
+  manifest: RestorePreviewManifest,
+  options: CrossFileStateConsistencyOptions = {},
+): CrossFileStateConsistencyReport {
+  const checkedAt = options.checkedAt ?? new Date().toISOString();
+  const findingContext = options.manifestPath === undefined ? {} : { filePath: options.manifestPath };
+  const findings: CrossFileStateConsistencyFinding[] = [];
+  const hasTaskSnapshot = manifest.tasks !== undefined;
+  const taskIds = new Set(
+    AREA_ACCESSORS.tasks(manifest)
+      .map((record) => record.id)
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0),
+  );
+  const areasById = new Map<string, Set<ComparableArea>>();
+
+  if (manifest.schemaVersion !== SUPPORTED_RESTORE_SCHEMA_VERSION) {
+    findings.push({
+      code: 'unsupported-schema-version',
+      severity: 'blocker',
+      area: 'schema',
+      id: 'schema-version',
+      ...findingContext,
+      jsonPath: '$.schemaVersion',
+      message: `Manifest schema version ${String(manifest.schemaVersion)} is not supported by this restore checker.`,
+      recommendation:
+        'Do not restore this manifest until it has been migrated to the supported restore schema version or the checker has explicit compatibility support for that version.',
+    });
+  }
+
+  for (const area of Object.keys(AREA_ACCESSORS) as ComparableArea[]) {
+    const idsInArea = new Map<string, number>();
+    AREA_ACCESSORS[area](manifest).forEach((record, index) => {
+      if (typeof record.id !== 'string' || record.id.trim().length === 0) {
+        findings.push({
+          code: 'malformed-record-id',
+          severity: 'blocker',
+          area,
+          id: '<missing>',
+          ...findingContext,
+          jsonPath: areaRecordJsonPath(area, index, 'id'),
+          message: `Record at ${area}[${index}] is missing a non-empty string id.`,
+          recommendation:
+            'Repair the manifest record id before restore so cross-file references can be checked deterministically.',
+        });
+        return;
+      }
+
+      const firstIndex = idsInArea.get(record.id);
+      if (firstIndex !== undefined) {
+        findings.push({
+          code: 'duplicate-record-id-within-area',
+          severity: 'blocker',
+          area,
+          id: record.id,
+          ...findingContext,
+          jsonPath: areaRecordJsonPath(area, index, 'id'),
+          message: `Record id '${record.id}' appears more than once in ${area}.`,
+          recommendation:
+            'Deduplicate or rename repeated records before restore; otherwise the restore plan cannot determine which record owns dependent state.',
+        });
+      } else {
+        idsInArea.set(record.id, index);
+      }
+
+      const areas = areasById.get(record.id) ?? new Set<ComparableArea>();
+      areas.add(area);
+      areasById.set(record.id, areas);
+    });
+  }
+
+  for (const [id, areas] of [...areasById.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    if (areas.size <= 1) continue;
+    const sortedAreas = [...areas].sort();
+    for (const area of sortedAreas) {
+      const recordIndex = AREA_ACCESSORS[area](manifest).findIndex((record) => record.id === id);
+      findings.push({
+        code: 'duplicate-record-id-across-areas',
+        severity: 'warning',
+        area,
+        id,
+        ...findingContext,
+        jsonPath: areaRecordJsonPath(area, recordIndex, 'id'),
+        relatedAreas: sortedAreas.filter((candidate) => candidate !== area),
+        message: `Record id '${id}' appears in multiple manifest areas: ${sortedAreas.join(', ')}.`,
+        recommendation:
+          'Confirm these cross-file records intentionally describe different state objects or rename/package them so restore operators can distinguish them.',
+      });
+    }
+  }
+
+  for (const area of ['approvals', 'memory', 'cron'] as const) {
+    AREA_ACCESSORS[area](manifest).forEach((record, index) => {
+      const recordIdForFinding =
+        typeof record.id === 'string' && record.id.trim().length > 0 ? record.id : '<missing>';
+      for (const reference of taskReferencesFor(record, area, index)) {
+        if (reference.malformed) {
+          findings.push({
+            code: 'malformed-task-reference',
+            severity: 'blocker',
+            area,
+            id: recordIdForFinding,
+            ...findingContext,
+            jsonPath: reference.jsonPath,
+            referenceField: reference.field,
+            message: `Record '${recordIdForFinding}' in ${area} has a malformed task reference in value.${reference.field}.`,
+            recommendation:
+              'Quarantine or repair this state record before restore so automation does not guess which task/card the cross-file record belongs to.',
+          });
+          continue;
+        }
+
+        if (hasTaskSnapshot && reference.taskId !== undefined && !taskIds.has(reference.taskId)) {
+          findings.push({
+            code: 'dangling-task-reference',
+            severity: 'blocker',
+            area,
+            id: recordIdForFinding,
+            ...findingContext,
+            jsonPath: reference.jsonPath,
+            referenceField: reference.field,
+            message: `Record '${recordIdForFinding}' in ${area} references a task that is missing from the manifest.`,
+            recommendation:
+              'Do not restore this manifest blindly. Restore, recreate, or explicitly skip the referenced task/card before applying dependent approval, memory, or cron state.',
+          });
+        }
+      }
+    });
+  }
+
+  const status = statusForConsistencyFindings(findings);
+  return {
+    checkedAt,
+    wouldWrite: false,
+    status,
+    findings,
+    operatorSummary: operatorSummaryForConsistencyReport(status, findings.length),
+  };
+}
+
 export function buildRestoreDryRunReport(
   backup: RestorePreviewManifest,
   live: RestorePreviewManifest,
   options: RestoreDryRunReportOptions = {},
 ): RestoreDryRunReport {
   const preview = detectRestorePreviewConflicts(backup, live);
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const backupConsistency = buildCrossFileStateConsistencyReport(backup, {
+    checkedAt: generatedAt,
+    ...(options.backupPath === undefined ? {} : { manifestPath: options.backupPath }),
+  });
+  const liveConsistency = buildCrossFileStateConsistencyReport(live, {
+    checkedAt: generatedAt,
+    ...(options.livePath === undefined ? {} : { manifestPath: options.livePath }),
+  });
   const blockerCount = preview.conflicts.filter((conflict) => conflict.severity === 'blocker').length;
   const warningCount = preview.conflicts.filter((conflict) => conflict.severity === 'warning').length;
   const infoCount = preview.conflicts.filter((conflict) => conflict.severity === 'info').length;
+  const consistencyFindingCount = backupConsistency.findings.length + liveConsistency.findings.length;
+  const consistencyBlockerCount = [...backupConsistency.findings, ...liveConsistency.findings].filter(
+    (finding) => finding.severity === 'blocker',
+  ).length;
+  const safeToRestore = preview.safeToRestore && consistencyFindingCount === 0;
 
   return {
     ok: true,
     command: 'dr restore-dry-run',
-    formatVersion: 1,
-    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    formatVersion: 2,
+    generatedAt,
     dryRun: true,
     wouldWrite: false,
     inputs: {
@@ -477,16 +676,22 @@ export function buildRestoreDryRunReport(
       ...(options.livePath === undefined ? {} : { livePath: options.livePath }),
     },
     summary: {
-      safeToRestore: preview.safeToRestore,
+      safeToRestore,
       conflictCount: preview.conflicts.length,
       blockerCount,
       warningCount,
       infoCount,
+      consistencyFindingCount,
+      consistencyBlockerCount,
     },
     preview: redactPreviewForDryRun(preview),
-    operatorGuidance: preview.safeToRestore
+    consistency: {
+      backup: backupConsistency,
+      live: liveConsistency,
+    },
+    operatorGuidance: safeToRestore
       ? 'Dry-run only: no restore writes were performed. Review the JSON report, then execute restore separately if an operator explicitly approves it.'
-      : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts have explicit restore, merge, skip, or quarantine decisions.',
+      : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts and cross-file consistency findings have explicit restore, merge, skip, repair, or quarantine decisions.',
   };
 }
 
@@ -712,6 +917,72 @@ function operatorSummaryForApprovalLedgerReport(
   return `Approval ledger recovery is blocked by ${findingCount} finding(s); stale or changed approvals require fresh human re-approval before restore.`;
 }
 
+interface TaskReferenceCandidate {
+  readonly field: string;
+  readonly jsonPath: string;
+  readonly taskId?: string;
+  readonly malformed?: boolean;
+}
+
+function taskReferencesFor(
+  record: RestorePreviewRecord,
+  area: ComparableArea,
+  recordIndex: number,
+): readonly TaskReferenceCandidate[] {
+  if (!isRecord(record.value)) return [];
+  const value = record.value;
+  const references: TaskReferenceCandidate[] = [];
+  for (const field of ['taskId', 'task_id'] as const) {
+    if (!(field in value)) continue;
+    const fieldValue = value[field];
+    const jsonPath = areaRecordJsonPath(area, recordIndex, `value.${field}`);
+    if (typeof fieldValue === 'string' && fieldValue.trim().length > 0) {
+      references.push({ field, jsonPath, taskId: fieldValue });
+    } else {
+      references.push({ field, jsonPath, malformed: true });
+    }
+  }
+  for (const field of ['taskIds', 'task_ids'] as const) {
+    if (!(field in value)) continue;
+    const fieldValue = value[field];
+    if (!Array.isArray(fieldValue)) {
+      references.push({ field, jsonPath: areaRecordJsonPath(area, recordIndex, `value.${field}`), malformed: true });
+      continue;
+    }
+    fieldValue.forEach((item, itemIndex) => {
+      const jsonPath = areaRecordJsonPath(area, recordIndex, `value.${field}[${itemIndex}]`);
+      if (typeof item === 'string' && item.trim().length > 0) {
+        references.push({ field, jsonPath, taskId: item });
+      } else {
+        references.push({ field, jsonPath, malformed: true });
+      }
+    });
+  }
+  return references;
+}
+
+function areaRecordJsonPath(area: ComparableArea, recordIndex: number, suffix: string): string {
+  const normalizedIndex = recordIndex >= 0 ? recordIndex : 0;
+  return `$.${area}[${normalizedIndex}].${suffix}`;
+}
+
+function statusForConsistencyFindings(
+  findings: readonly CrossFileStateConsistencyFinding[],
+): CrossFileStateConsistencyStatus {
+  if (findings.some((finding) => finding.severity === 'blocker')) return 'blocked';
+  if (findings.length > 0) return 'warning';
+  return 'clean';
+}
+
+function operatorSummaryForConsistencyReport(
+  status: CrossFileStateConsistencyStatus,
+  findingCount: number,
+): string {
+  if (status === 'clean') return 'Cross-file state consistency check is clean; no duplicate IDs or dangling task references were found.';
+  if (status === 'warning') return `Cross-file state consistency found ${findingCount} warning(s); review duplicate record IDs before restore.`;
+  return `Cross-file state consistency is blocked by ${findingCount} finding(s); repair or quarantine dangling/malformed task references before restore.`;
+}
+
 function compareRecords(
   area: ComparableArea,
   backupRecords: readonly RestorePreviewRecord[],
@@ -772,6 +1043,7 @@ function compareRecords(
 function indexById(records: readonly RestorePreviewRecord[]): Map<string, RestorePreviewRecord> {
   const byId = new Map<string, RestorePreviewRecord>();
   for (const record of records) {
+    if (typeof record.id !== 'string' || record.id.trim().length === 0) continue;
     byId.set(record.id, record);
   }
   return byId;
