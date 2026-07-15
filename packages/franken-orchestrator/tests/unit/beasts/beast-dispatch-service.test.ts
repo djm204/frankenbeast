@@ -9,6 +9,7 @@ import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
+import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 
 describe('BeastDispatchService', () => {
   let workDir: string | undefined;
@@ -207,6 +208,68 @@ describe('BeastDispatchService', () => {
       status: 'dispatching',
       dispatchRunId: run.id,
     });
+  });
+
+  it('counts an existing active run for the same tracked agent when dispatching another run', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-11T00:00:00.000Z');
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      capacityPolicy: new CapacityReservationPolicy({ totalSlots: 1, reservations: [] }),
+    });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { labels: ['availability'] },
+    });
+    const firstRun = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'First active run',
+        chunkDirectory: 'docs/chunks',
+        labels: ['availability'],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: true,
+    });
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Second concurrent run',
+        chunkDirectory: 'docs/chunks',
+        labels: ['availability'],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: false,
+    })).rejects.toMatchObject({ name: 'CapacityReservationError' });
+
+    expect(repo.listRuns()).toHaveLength(1);
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({ status: 'running', dispatchRunId: firstRun.id });
   });
 
   it('rejects unknown tracked agents before persisting a run', async () => {

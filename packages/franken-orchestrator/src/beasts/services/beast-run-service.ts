@@ -276,6 +276,7 @@ export class BeastRunService {
   async restart(runId: string, actor: string): Promise<BeastRun> {
     const run = this.requireRun(runId);
     if (run.status === 'running') {
+      this.assertTrackedAgentCapacity(run);
       await this.stop(runId, actor);
     }
     return this.start(runId, actor);

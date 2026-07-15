@@ -327,6 +327,69 @@ describe('BeastRunService', () => {
     });
   });
 
+  it('rejects running tracked-agent restarts before stopping the active attempt when capacity is reserved', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-11T00:00:00.000Z');
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, {
+          status: 'running',
+          pid: 2001,
+          startedAt: '2026-03-10T00:03:00.000Z',
+        })),
+        stop: vi.fn(async (runId: string, attemptId: string) => {
+          repo.updateAttempt(attemptId, { status: 'stopped' });
+          return repo.updateRun(runId, { status: 'stopped', stopReason: 'operator_stop' });
+        }),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs, {
+      capacityPolicy: new CapacityReservationPolicy({
+        totalSlots: 1,
+        reservations: [{ id: 'security-urgent', slots: 1, labels: ['security'] }],
+      }),
+    });
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { labels: ['feature'] },
+    });
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Restart safely',
+        chunkDirectory: 'docs/chunks',
+        labels: ['feature'],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      executionMode: 'process',
+      startNow: true,
+    });
+
+    await expect(runs.restart(run.id, 'operator')).rejects.toMatchObject({
+      name: 'CapacityReservationError',
+    });
+
+    expect(executors.process.stop).not.toHaveBeenCalled();
+    expect(repo.getRun(run.id)).toMatchObject({ id: run.id, status: 'running' });
+    expect(repo.getTrackedAgent(agent.id)).toMatchObject({ status: 'running', dispatchRunId: run.id });
+  });
+
   it('starts queued linked runs using reservation metadata from the run config snapshot', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

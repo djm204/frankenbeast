@@ -335,7 +335,7 @@ export class BeastDispatchService {
     candidateConfig: Readonly<Record<string, unknown>>,
   ): void {
     if (!this.options.capacityPolicy) return;
-    const activeItems = this.activeCapacityItems(trackedAgentId);
+    const activeItems = this.activeCapacityItems();
     const decision = this.options.capacityPolicy.canStart(
       capacityItemFromConfig(trackedAgentId, candidateConfig),
       activeItems,
@@ -345,9 +345,8 @@ export class BeastDispatchService {
     }
   }
 
-  private activeCapacityItems(excludeAgentId: string): CapacityReservationWorkItem[] {
+  private activeCapacityItems(): CapacityReservationWorkItem[] {
     return this.repository.listTrackedAgents()
-      .filter((agent) => agent.id !== excludeAgentId)
       .filter((agent) => agent.status === 'dispatching'
         || agent.status === 'awaiting_approval'
         || agent.status === 'running')
