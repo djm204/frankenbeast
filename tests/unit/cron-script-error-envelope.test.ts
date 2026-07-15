@@ -281,6 +281,23 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
   });
 
+  it('redacts quoted JSON secrets before truncating stderr tails', () => {
+    const leakedSuffix = 'json-secret-tail-fragment';
+    const result = runCronScriptWithEnv([
+      '--name',
+      'json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"password":"${'x'.repeat(8192)}${leakedSuffix}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain(leakedSuffix);
+    expect(envelope.stderrTail).toContain('"password":"[REDACTED]');
+  });
+
   it('preserves buffered stderr for successful cron runs', () => {
     const result = runCronScriptWithEnv([
       '--name',
