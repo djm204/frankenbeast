@@ -13,8 +13,86 @@ describe('lane egress policy', () => {
     expect(defaultLaneEgressPolicies.docs.allowedDestinationClasses).toEqual(['github', 'local']);
     expect(defaultLaneEgressPolicies.triage.allowedDestinationClasses).toEqual(['github', 'local']);
     expect(defaultLaneEgressPolicies.fallback.allowedDestinationClasses).toEqual(['github', 'provider', 'local']);
+    expect(defaultLaneEgressPolicies.provider.allowedDestinationClasses).toEqual(['provider']);
     expect(defaultLaneEgressPolicies.operator.allowedDestinationClasses).toContain('messaging');
     expect(defaultLaneEgressPolicies.docs.allowedMethods).toEqual(['GET', 'HEAD']);
+  });
+
+  it('blocks unsafe provider endpoint URLs by default without echoing URL secrets', () => {
+    const unsafeUrls = [
+      'http://localhost:11434/v1/chat/completions',
+      'http://127.0.0.1:11434/v1/chat/completions',
+      'http://10.0.0.5/v1/chat/completions',
+      'http://172.16.1.10/v1/chat/completions',
+      'http://192.168.1.20/v1/chat/completions',
+      'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+      'http://[::1]/v1/chat/completions',
+      'http://[fd00::1]/v1/chat/completions',
+      'http://[fe90::1]/v1/chat/completions',
+      'http://[::ffff:10.0.0.5]/v1/chat/completions',
+      'http://[::ffff:169.254.169.254]/latest/meta-data/iam/security-credentials/',
+      'file:///etc/passwd',
+      'data:text/plain,secret',
+      'not a url',
+      'https://127.0.0.1.nip.io/v1/chat/completions',
+      'https://lvh.me/v1/chat/completions',
+      'https://foo.lvh.me/v1/chat/completions',
+      'https://metadata.google.internal/computeMetadata/v1',
+      'https://api.openai.com:token@example.com/v1/chat/completions',
+    ];
+
+    for (const url of unsafeUrls) {
+      const decision = evaluateEgressPolicy({ lane: 'provider', url, method: 'POST' });
+      expect(decision.allowed, url).toBe(false);
+      expect(JSON.stringify(redactEgressDecisionForLog(decision))).not.toMatch(/token|secret|meta-data|passwd|chat\/completions/u);
+    }
+  });
+
+  it('allows audited explicit provider allowlist entries for trusted private deployments', () => {
+    expect(evaluateEgressPolicy({
+      lane: 'provider',
+      url: 'https://10.0.0.5/v1/chat/completions?api_key=secret',
+      method: 'POST',
+      policy: {
+        lanes: {
+          provider: {
+            allowedDestinationClasses: ['provider'],
+            allowedDomains: ['10.0.0.5'],
+            allowedMethods: ['POST'],
+          },
+        },
+      },
+    })).toMatchObject({ allowed: true, destinationClass: 'private-network', host: '10.0.0.5' });
+
+    expect(evaluateEgressPolicy({
+      lane: 'provider',
+      url: 'https://worker.models.corp.example/v1/chat/completions',
+      method: 'POST',
+      policy: {
+        lanes: {
+          provider: {
+            allowedDestinationClasses: ['provider'],
+            allowedDomains: ['models.corp.example'],
+            allowedMethods: ['POST'],
+          },
+        },
+      },
+    })).toMatchObject({ allowed: false, host: 'worker.models.corp.example', reason: 'destination-class-not-allowed' });
+
+    expect(evaluateEgressPolicy({
+      lane: 'provider',
+      url: 'https://worker.models.corp.example/v1/chat/completions',
+      method: 'POST',
+      policy: {
+        lanes: {
+          provider: {
+            allowedDestinationClasses: ['provider'],
+            allowedDomains: ['*.models.corp.example'],
+            allowedMethods: ['POST'],
+          },
+        },
+      },
+    })).toMatchObject({ allowed: true, host: 'worker.models.corp.example' });
   });
 
   it('allows low-risk lanes to reach GitHub without allowing provider access', () => {
@@ -45,17 +123,37 @@ describe('lane egress policy', () => {
       destinationClass: 'provider',
       reason: 'destination-class-not-allowed',
     });
+
+    expect(evaluateEgressPolicy({
+      lane: 'triage',
+      url: 'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+      method: 'GET',
+    })).toMatchObject({
+      allowed: false,
+      destinationClass: 'private-network',
+      reason: 'destination-class-not-allowed',
+    });
+
+    expect(evaluateEgressPolicy({
+      lane: 'triage',
+      url: 'https://172.217.1.14.nip.io/search',
+      method: 'GET',
+    })).toMatchObject({
+      allowed: false,
+      destinationClass: 'arbitrary',
+      reason: 'destination-class-not-allowed',
+    });
   });
 
-  it('allows fallback lanes to reach model providers without allowing arbitrary web hosts', () => {
+  it('allows provider lanes to reach model providers without allowing arbitrary web hosts', () => {
     expect(evaluateEgressPolicy({
-      lane: 'fallback',
+      lane: 'provider',
       url: 'https://api.anthropic.com/v1/messages',
       method: 'POST',
     })).toMatchObject({ allowed: true, destinationClass: 'provider' });
 
     expect(evaluateEgressPolicy({
-      lane: 'fallback',
+      lane: 'provider',
       url: 'https://example.com/collect?secret=do-not-log',
       method: 'POST',
     })).toMatchObject({

@@ -38,9 +38,9 @@ export class AnthropicApiAdapter implements ILlmProvider {
 
   constructor(private options: AnthropicApiOptions = {}) {
     this.client = new Anthropic({
-      apiKey: options.apiKey ?? process.env['ANTHROPIC_API_KEY'],
+      apiKey: this.options.apiKey ?? process.env['ANTHROPIC_API_KEY'],
       fetch: createEgressGuardedFetch({
-        lane: 'implementation',
+        lane: 'provider',
         policy: options.egressPolicy,
         audit: options.egressAudit,
       }),

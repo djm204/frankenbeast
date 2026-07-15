@@ -44,6 +44,13 @@ describe('network-config-paths', () => {
       '["docs.example.org"]',
     );
     expect(next.network.egressPolicy.lanes?.docs?.allowedDomains).toEqual(['docs.example.org']);
+
+    const provider = setNetworkConfigValue(
+      defaultConfig(),
+      'network.egressPolicy.lanes.provider.allowedDomains',
+      '["10.0.0.5"]',
+    );
+    expect(provider.network.egressPolicy.lanes?.provider?.allowedDomains).toEqual(['10.0.0.5']);
   });
 
   it('applies multiple --set assignments', () => {

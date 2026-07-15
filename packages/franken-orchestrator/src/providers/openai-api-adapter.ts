@@ -52,7 +52,7 @@ export class OpenAiApiAdapter implements ILlmProvider {
 
   private createProviderFetch(): typeof fetch {
     return createEgressGuardedFetch({
-      lane: 'implementation',
+      lane: 'provider',
       policy: this.options.egressPolicy,
       audit: this.options.egressAudit,
     });

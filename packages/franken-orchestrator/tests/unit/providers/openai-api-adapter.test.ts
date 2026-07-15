@@ -50,8 +50,8 @@ describe('OpenAiApiAdapter', () => {
     it('audits redacted provider egress denials', async () => {
       const audit = vi.fn();
       const adapter = new OpenAiApiAdapter({
-        apiKey: 'test-secure',
-        egressPolicy: { lanes: { implementation: { allowedDestinationClasses: ['github'] } } },
+        apiKey: 'test-secret',
+        egressPolicy: { lanes: { provider: { allowedDestinationClasses: ['github'] } } },
         egressAudit: audit,
       });
       const guardedFetch = (adapter as unknown as { createProviderFetch(): typeof fetch }).createProviderFetch();
@@ -61,7 +61,7 @@ describe('OpenAiApiAdapter', () => {
       );
 
       expect(audit).toHaveBeenCalledWith({
-        lane: 'implementation',
+        lane: 'provider',
         destinationClass: 'provider',
         host: 'api.openai.com',
         method: 'POST',
