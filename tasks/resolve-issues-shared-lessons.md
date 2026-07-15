@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Beast process cleanup review fixes
+- For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
+- Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
+- CLI signal cleanup should register and unregister all handled signals symmetrically, and long-running `restart` commands should track the target run before awaiting restart so SIGINT/SIGHUP can clean up in-flight work.
+
 ## 2026-07-14 — Type-safety hardening regressions
 - For removing unsafe TypeScript double-casts, pair the runtime regression with a source-inspection guard that names the exact bypass (`as unknown as ...`) and the intended type-coupling construct (`satisfies z.ZodType<...>` or typed null-object helpers) so future changes cannot silently reintroduce the cast while preserving behavior.
 - Disabled/null-object implementations should return structurally complete domain objects rather than partial objects cast through `unknown`; include required lifecycle/status/time fields in the helper so `tsc --noEmit` enforces drift against upstream type changes.

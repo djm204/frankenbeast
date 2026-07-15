@@ -261,7 +261,7 @@ export class BeastRunService {
       if (cleanedPendingRun) {
         return this.stop(runId, _actor);
       }
-      throw new Error(`Beast run has no active attempt: ${runId}`);
+      return this.stop(runId, _actor);
     }
     await this.executorFor(run).kill(run.id, attemptId);
     const updated = this.requireRun(runId);

@@ -367,8 +367,6 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     try {
       if (!options.processGroupOwned || !this.sweepOrphanProcessGroup(pid, 'SIGTERM').swept) {
         this.killProcess()(pid, 'SIGTERM');
-      } else {
-        this.scheduleOrphanKillEscalation(pid);
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;

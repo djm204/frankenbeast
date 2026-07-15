@@ -226,6 +226,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
         if (!args.beastTarget) {
           throw new Error('beasts restart requires a run id');
         }
+        liveRunId = args.beastTarget;
         const run = await services.runs.restart(args.beastTarget, actor);
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
         liveRunId = keepServicesAlive ? run.id : undefined;
@@ -253,6 +254,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
     if (!keepServicesAlive) {
       process.off('SIGINT', onSigint);
       process.off('SIGTERM', onSigterm);
+      process.off('SIGHUP', onSighup);
       services.dispose();
     }
     if (ownsControl && !keepServicesAlive) {

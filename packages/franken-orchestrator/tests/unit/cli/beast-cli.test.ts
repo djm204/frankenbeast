@@ -98,6 +98,17 @@ describe('handleBeastCommand() catalog', () => {
     expect(deps.print).toHaveBeenCalledWith('design-interview: Design interview\nchunk-plan: Chunk plan');
     expect(mockServices.dispose).toHaveBeenCalledTimes(1);
   });
+
+  it('removes the SIGHUP cleanup handler after short-lived commands finish', async () => {
+    mockServices.catalog.listDefinitions.mockReturnValue([]);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'catalog' } as CliArgs,
+    });
+
+    await handleBeastCommand(deps);
+
+    expect(process.listeners('SIGHUP')).toEqual(baselineSighupListeners);
+  });
 });
 
 describe('handleBeastCommand() spawn', () => {
@@ -307,6 +318,32 @@ describe('handleBeastCommand() spawn', () => {
         expect(mockServices.dispose).toHaveBeenCalledTimes(1);
         expect(exit).toHaveBeenCalledWith(129);
       });
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
+  it('tracks the restart target before restart finishes so SIGINT can stop the old run', async () => {
+    let resolveRestart: ((run: unknown) => void) | undefined;
+    mockServices.runs.restart.mockImplementation(async () => await new Promise((resolve) => {
+      resolveRestart = resolve;
+    }));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'restart', beastTarget: 'run-1' } as CliArgs,
+    });
+
+    try {
+      const command = handleBeastCommand(deps);
+      await vi.waitFor(() => expect(mockServices.runs.restart).toHaveBeenCalledWith('run-1', expect.any(String)));
+      process.emit('SIGINT');
+      await vi.waitFor(() => {
+        expect(mockServices.runs.kill).toHaveBeenCalledWith('run-1', expect.any(String));
+        expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+        expect(exit).toHaveBeenCalledWith(130);
+      });
+      resolveRestart?.({ id: 'run-1', status: 'stopped' });
+      await command;
     } finally {
       exit.mockRestore();
     }

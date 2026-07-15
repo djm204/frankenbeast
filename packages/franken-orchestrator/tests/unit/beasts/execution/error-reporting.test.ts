@@ -330,9 +330,9 @@ describe('Error Reporting to Dashboard', () => {
       // Wait for the timeout to fire
       await new Promise((r) => setTimeout(r, 200));
 
-      // supervisor.kill should escalate the whole owned process group for a
-      // stuck supervised process so detached descendants are not orphaned.
-      expect(supervisor.kill).toHaveBeenCalledWith(5555, { processGroupOwned: true });
+      // Without a verified persisted process start time, recovered process
+      // cleanup must fail closed to direct PID signaling.
+      expect(supervisor.kill).toHaveBeenCalledWith(5555, { processGroupOwned: false });
     });
 
     it('applies default timeout when no timeoutMs is provided (escalates stuck process)', async () => {
@@ -367,9 +367,9 @@ describe('Error Reporting to Dashboard', () => {
       // Wait for timeout to fire
       await new Promise((r) => setTimeout(r, 200));
 
-      // supervisor.kill should escalate the whole owned process group for a
-      // stuck supervised process so detached descendants are not orphaned.
-      expect(supervisor.kill).toHaveBeenCalledWith(7777, { processGroupOwned: true });
+      // Without a verified persisted process start time, recovered process
+      // cleanup must fail closed to direct PID signaling.
+      expect(supervisor.kill).toHaveBeenCalledWith(7777, { processGroupOwned: false });
     });
 
     it('does not escalate to kill when process exits before timeout', async () => {

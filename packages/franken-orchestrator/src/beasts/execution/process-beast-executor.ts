@@ -282,10 +282,10 @@ function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
     return false;
   }
   if (typeof expectedStartTime !== 'string') {
-    return true;
+    return false;
   }
   const actualStartTime = processStartTimeTicks(pid);
-  return actualStartTime === undefined || actualStartTime === expectedStartTime;
+  return actualStartTime === expectedStartTime;
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
@@ -482,6 +482,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         // Preserve the original attempt-persistence failure while still
         // releasing pre-attempt config/worktree resources below.
       } finally {
+        this.pendingSpawnHandles.delete(run.id);
         this.cleanupRunResources(run.id);
       }
       throw error;
