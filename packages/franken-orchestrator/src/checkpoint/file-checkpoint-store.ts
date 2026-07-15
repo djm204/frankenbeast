@@ -137,12 +137,14 @@ export function detectCheckpointLock(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const before = statSync(lockPath);
-      owner = readFileSync(lockPath, 'utf-8');
+      const sampledOwner = readFileSync(lockPath, 'utf-8');
       const after = statSync(lockPath);
       if (before.mtimeMs === after.mtimeMs && before.size === after.size) {
+        owner = sampledOwner;
         ageMs = (options.nowMs ?? Date.now()) - after.mtimeMs;
         break;
       }
+      owner = undefined;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         if (attempt === 0) continue;
