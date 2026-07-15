@@ -249,6 +249,7 @@ describe('GhostDependencyEvaluator', () => {
       const parenthesizedCast = value as (import('ghost-package').Plugin);
       const parenthesizedSatisfies = value satisfies (import('ghost-package').Plugin);
       const objectTypeAssertion = value as { loader: import('ghost-package').Loader };
+      const templateTypeAssertion = value as \`\${import('template-assertion-ghost').Name}\`;
       const tupleAssertion = value as [import('ghost-package').Tuple];
       const tupleAssertionWithComma = value as [string, import('ghost-package').Tuple];
       const tupleSatisfiesWithComma = value satisfies [string, import('ghost-package').Tuple];
@@ -335,6 +336,10 @@ describe('GhostDependencyEvaluator', () => {
       interface NewAfterType {}
       new Loader(import('new-after-type-ghost'));
       interface SameLine {} import('same-line-interface-ghost');
+      interface NamespaceMerge {}
+      namespace NamespaceMerge { export const plugin = import('namespace-merge-ghost'); }
+      interface AbstractMerge {}
+      abstract class AbstractRuntime { static plugin = import('abstract-class-ghost'); }
       async function awaited(): Promise<void> { await import('awaited-function-ghost'); }
       const arrow = (opts: Options) => import('arrow-body-ghost');
       switch (kind) { case 'plugin': return import('switch-case-ghost'); }
@@ -391,6 +396,10 @@ describe('GhostDependencyEvaluator', () => {
       (value as { dep: string }).load(import('method-after-object-assertion-ghost'));
       (value as { dep: string }) && import('logical-after-object-assertion-ghost');
       const cfg6 = value as { dep: string }, cfg7 = import('comma-after-object-assertion-ghost');
+      const cfg8 = value as { dep: string }
+      try { import('try-after-object-assertion-ghost'); } catch {}
+      const cfg9 = value satisfies { dep: string }
+      do { import('do-after-object-assertion-ghost'); } while (false);
       const annotatedArrow = (): any => import('annotated-arrow-body-ghost');
       type DefaultExportAlias = string
       export default async function defaultLoader() { return import('export-default-after-type-ghost'); }
@@ -420,7 +429,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(76);
+    expect(result.findings).toHaveLength(80);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -439,6 +448,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('decorator-after-type-ghost'),
         expect.stringContaining('using-after-type-ghost'),
         expect.stringContaining('new-after-type-ghost'),
+        expect.stringContaining('namespace-merge-ghost'),
+        expect.stringContaining('abstract-class-ghost'),
         expect.stringContaining('awaited-function-ghost'),
         expect.stringContaining('arrow-body-ghost'),
         expect.stringContaining('switch-case-ghost'),
@@ -484,6 +495,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('method-after-object-assertion-ghost'),
         expect.stringContaining('logical-after-object-assertion-ghost'),
         expect.stringContaining('comma-after-object-assertion-ghost'),
+        expect.stringContaining('try-after-object-assertion-ghost'),
+        expect.stringContaining('do-after-object-assertion-ghost'),
         expect.stringContaining('annotated-arrow-body-ghost'),
         expect.stringContaining('export-default-after-type-ghost'),
         expect.stringContaining('export-default-expression-after-type-ghost'),
