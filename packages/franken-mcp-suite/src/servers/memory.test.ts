@@ -26,7 +26,7 @@ describe("Memory Server", () => {
       (t) => t.name === "fbeast_memory_store",
     )!;
     expect(storeTool.description).toBe(
-      "Store key/value in working or episodic memory",
+      "Store memory; optional TTL for temporary working facts",
     );
   });
 

@@ -90,7 +90,7 @@ That means the current path is:
 
 - real ingestion sanitization through `MiddlewareChainFirewallAdapter` (the security middleware chain)
 - real local skill discovery through `SkillManagerAdapter`; `cli:*` execution is dispatched by `CliSkillExecutor`, MCP execution requires an `IMcpModule`, and non-CLI `function`/`llm` execution still requires an `ISkillsModule.execute(...)` implementation outside `SkillManagerAdapter`
-- real episodic memory persistence through `SqliteBrainMemoryAdapter` (`@franken/brain`)
+- real episodic memory persistence through `SqliteBrainMemoryAdapter` (`@franken/brain`); working-memory entries that represent temporary operational facts may include an `expiresAt` timestamp and are purged lazily on read/list/hydration after that TTL passes
 - graph-builder-driven planning for chunk files or design-doc decomposition; the planner port itself is `stubPlanner`, which throws if invoked
 - real plan critique through `CritiquePortAdapter` over `@franken/critique`, and real HITL approval through `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (non-TTY runs default to reject). If either safety module is enabled but not installed, the dep factory fails closed unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1`
 - real reflection heartbeat through `ReflectionHeartbeatAdapter`; `McpSdkAdapter` is always constructed but fails closed until an MCP transport is configured
@@ -420,7 +420,7 @@ flowchart TD
 | `.fbeast/.build/beasts.db` | agent, dispatch, run, interview services | dashboard Beast pages, process executor | tracked agents, runs, attempts, events, interview sessions |
 | `.fbeast/.build/beasts/logs/*` | process executor, run service | dashboard logs panel | per-attempt structured log lines |
 | `.fbeast/.build/build-traces.db` | observer bridge / trace viewer | trace viewer | spans, token usage, cost telemetry |
-| `.fbeast/beast.db` | episodic memory adapter (`SqliteBrainMemoryAdapter` over `SqliteBrain`) | hydration and trace recording | episodic execution memory |
+| `.fbeast/beast.db` | episodic memory adapter (`SqliteBrainMemoryAdapter` over `SqliteBrain`) | hydration and trace recording | episodic execution memory plus working-memory facts; temporary operational working facts with `expiresAt` are TTL-purged |
 | `.fbeast/.build/*.checkpoint` | execution phase, issue runner | resume logic | task completion markers and recovery checkpoints |
 | `.fbeast/.build/chunk-sessions/*` | MartinLoop | MartinLoop, renderer, compactor | canonical chunk conversation state |
 | `.fbeast/.build/chunk-session-snapshots/*` | MartinLoop | recovery and rollback | pre-compaction rollback points |
@@ -626,7 +626,7 @@ The target goal is one canonical service control model across CLI and dashboard,
 | Area | Current | Target |
 |---|---|---|
 | Ingestion | real firewall (`MiddlewareChainFirewallAdapter`) wired unconditionally | fully wired firewall in all entry modes |
-| Memory | real SQLite-backed episodic memory (`SqliteBrainMemoryAdapter`) | full working + episodic + semantic memory |
+| Memory | real SQLite-backed episodic memory (`SqliteBrainMemoryAdapter`) with TTL cleanup for temporary operational working facts | full working + episodic + semantic memory |
 | Planning | graph-builder driven; the planner port is a stub that throws if invoked | planner owns graph generation with critique loop |
 | Critique | real critique loop (`CritiquePortAdapter` over `@franken/critique`); graph-builder plans included since #462 | real critique loop with escalation |
 | Execution | real CLI execution, chunk sessions, checkpoints, observer | same plus broader tool and policy integrations |

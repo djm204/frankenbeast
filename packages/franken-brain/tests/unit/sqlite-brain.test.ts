@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { BrainSnapshotSchema } from '@franken/types';
 import type {
   EpisodicEvent,
@@ -71,6 +71,96 @@ describe('SqliteBrain', () => {
       expect(brain.working.has('x')).toBe(true);
       expect(brain.working.has('y')).toBe(false);
       expect(brain.working.keys()).toEqual(['x']);
+    });
+
+    it('expires temporary operational working facts after their expiresAt timestamp', () => {
+      brain.working.set('session:temp', {
+        value: 'temporary process id',
+        category: 'temporary-operational',
+        sourceScope: 'runtime',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.working.set('lesson:durable', {
+        value: 'durable lesson',
+        category: 'lesson',
+      });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+      try {
+        expect(brain.working.get('session:temp')).toBeUndefined();
+        expect(brain.working.has('session:temp')).toBe(false);
+        expect(brain.working.keys()).toEqual(['lesson:durable']);
+        expect(brain.working.snapshot()).toEqual({
+          'lesson:durable': { value: 'durable lesson', category: 'lesson' },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not expire durable episodic memories when working facts expire', () => {
+      brain.working.set('handoff:temp', {
+        value: 'temporary handoff',
+        category: 'temporary-operational',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'learning',
+        summary: 'Durable lesson survives working TTL cleanup',
+        details: { category: 'lesson' },
+        createdAt: '2025-12-31T23:59:00.000Z',
+      });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+      try {
+        expect(brain.working.has('handoff:temp')).toBe(false);
+        expect(brain.episodic.recall('Durable lesson', 5)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('purges expired persisted working facts during hydration', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-'));
+      const dbPath = join(dir, 'brain.db');
+      const originalBrain = new SqliteBrain(dbPath);
+      originalBrain.working.set('op:expired', {
+        value: 'stale job output',
+        category: 'temporary-operational',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+      originalBrain.working.set('op:active', {
+        value: 'current job output',
+        category: 'temporary-operational',
+        expiresAt: '2099-01-01T00:10:00.000Z',
+      });
+      originalBrain.flush();
+      originalBrain.close();
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
+      const hydratedBrain = new SqliteBrain(dbPath);
+      try {
+        expect(hydratedBrain.working.has('op:expired')).toBe(false);
+        expect(hydratedBrain.working.get('op:active')).toEqual({
+          value: 'current job output',
+          category: 'temporary-operational',
+          expiresAt: '2099-01-01T00:10:00.000Z',
+        });
+        const db = new Database(dbPath, { readonly: true });
+        try {
+          const rows = db.prepare('SELECT key FROM working_memory ORDER BY key').all() as Array<{ key: string }>;
+          expect(rows.map(row => row.key)).toEqual(['op:active']);
+        } finally {
+          db.close();
+        }
+      } finally {
+        hydratedBrain.close();
+        vi.useRealTimers();
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('delete() removes a key and returns true', () => {

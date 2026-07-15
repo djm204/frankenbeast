@@ -179,6 +179,40 @@ describe("createBrainAdapter", () => {
     expect(episodicResult.some((row) => row.type === "episodic")).toBe(true);
   });
 
+  it("stores temporary operational working facts with expiresAt metadata when ttlMs is provided", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      const brain = createBrainAdapter("/tmp/beast.db");
+      await brain.store({ key: "run:tmp", value: "short-lived status", type: "working", ttlMs: 60_000 });
+
+      const mockBrain = brainInstances[0];
+      expect(mockBrain.working.set).toHaveBeenCalledWith("run:tmp", {
+        value: "short-lived status",
+        category: "temporary-operational",
+        sourceScope: "mcp-memory-store",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      });
+      expect(mockBrain.flush).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects unsafe working-memory TTLs before writing memory", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    for (const invalidTtlMs of [NaN, Infinity, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(
+        brain.store({ key: "run:tmp", value: "status", type: "working", ttlMs: invalidTtlMs as number }),
+      ).rejects.toThrow("ttlMs must be a positive integer");
+    }
+
+    expect(mockBrain.working.set).not.toHaveBeenCalled();
+    expect(mockBrain.flush).not.toHaveBeenCalled();
+  });
+
   it("rejects unsafe query limits before reading memory", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     const mockBrain = brainInstances[0];
