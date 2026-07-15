@@ -158,7 +158,7 @@ Example blocker finding:
 }
 ```
 
-The report intentionally emits only task ids, normalized status, current-run ids, JSON paths, and guidance. It does not echo task bodies, comments, secrets, or other record payloads.
+The report intentionally emits only task ids, normalized status, current-run/dispatch-run ids, JSON paths, and guidance. It does not echo task bodies, comments, secrets, or other record payloads.
 
 ## Kanban card resurrection guardrails
 

@@ -704,11 +704,34 @@ export function buildKanbanPartialWriteRecoveryReport(
     const valueStatusCandidate = value !== undefined && 'status' in value ? value.status : undefined;
     const stateStatusCandidate = record.state;
     const statusCandidate = valueStatusCandidate ?? stateStatusCandidate;
-    const statusPath = valueStatusCandidate !== undefined ? areaRecordJsonPath('tasks', index, 'value.status') : areaRecordJsonPath('tasks', index, 'state');
     const status = normalizeTaskStatus(statusCandidate);
     const valueStatus = normalizeTaskStatus(valueStatusCandidate);
     const stateStatus = normalizeTaskStatus(stateStatusCandidate);
     const currentRun = currentRunCandidate(value);
+
+    if (valueStatusCandidate !== undefined && valueStatus === undefined) {
+      findings.push({
+        code: 'malformed-task-status',
+        severity: 'blocker',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, 'value.status'),
+        message: `Kanban task '${taskId}' has a malformed value.status alias.`,
+        recommendation:
+          'Repair or remove the malformed status alias before recovery so automation does not ignore a corrupt partial write.',
+      });
+    }
+
+    if (stateStatusCandidate !== undefined && stateStatus === undefined) {
+      findings.push({
+        code: 'malformed-task-status',
+        severity: 'blocker',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, 'state'),
+        message: `Kanban task '${taskId}' has a malformed state alias.`,
+        recommendation:
+          'Repair or remove the malformed status alias before recovery so automation does not ignore a corrupt partial write.',
+      });
+    }
 
     if (valueStatus !== undefined && stateStatus !== undefined && valueStatus !== stateStatus) {
       findings.push({
@@ -720,18 +743,6 @@ export function buildKanbanPartialWriteRecoveryReport(
         message: `Kanban task '${taskId}' has conflicting task status fields: value.status='${valueStatus}' and state='${stateStatus}'.`,
         recommendation:
           'Repair the partial write so value.status and state agree before recovery tooling trusts task lifecycle state.',
-      });
-    }
-
-    if (statusCandidate !== undefined && status === undefined) {
-      findings.push({
-        code: 'malformed-task-status',
-        severity: 'blocker',
-        taskId,
-        jsonPath: statusPath,
-        message: `Kanban task '${taskId}' has a malformed status value.`,
-        recommendation:
-          'Quarantine or repair this task before recovery so automation does not guess whether the card should run, block, or remain terminal.',
       });
     }
 
@@ -1194,6 +1205,8 @@ function currentRunCandidate(value: Record<string, unknown> | undefined): Curren
     ['current_run_id', value.current_run_id],
     ['currentRunId', value.currentRunId],
     ['currentRun', value.currentRun],
+    ['dispatch_run_id', value.dispatch_run_id],
+    ['dispatchRunId', value.dispatchRunId],
   ] as const) {
     if (raw === undefined || raw === null) continue;
     const jsonPathField = `value.${field}`;
@@ -1220,7 +1233,7 @@ function normalizeTaskStatus(value: unknown): string | undefined {
 }
 
 function isTerminalKanbanStatus(status: string): boolean {
-  return ['done', 'completed', 'blocked', 'archived', 'cancelled', 'failed', 'stopped'].includes(status);
+  return ['done', 'completed', 'blocked', 'archived', 'cancelled', 'deleted', 'failed', 'stopped'].includes(status);
 }
 
 function statusForKanbanPartialWriteFindings(

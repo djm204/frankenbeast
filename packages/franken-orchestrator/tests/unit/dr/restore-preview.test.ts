@@ -447,7 +447,7 @@ describe('restore preview conflict detector', () => {
         severity: 'blocker',
         taskId: 'bad-status',
         jsonPath: '$.tasks[0].value.status',
-        recommendation: expect.stringContaining('Quarantine or repair'),
+        recommendation: expect.stringContaining('Repair or remove'),
       }),
     );
   });
@@ -501,21 +501,67 @@ describe('restore preview conflict detector', () => {
     );
   });
 
-  it('treats stopped Kanban tasks with current runs as terminal stale pointers', () => {
+  it('treats stopped and deleted Kanban tasks with current runs as terminal stale pointers', () => {
     const report = buildKanbanPartialWriteRecoveryReport({
       schemaVersion: 1,
-      tasks: [{ id: 'stopped-card', value: { status: 'stopped', current_run_id: 'run-stale' } }],
+      tasks: [
+        { id: 'stopped-card', value: { status: 'stopped', current_run_id: 'run-stale' } },
+        { id: 'deleted-card', value: { status: 'deleted', current_run_id: 'run-deleted' } },
+      ],
     });
 
     expect(report.status).toBe('blocked');
-    expect(report.findings).toContainEqual(
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'terminal-task-has-current-run',
+          severity: 'blocker',
+          taskId: 'stopped-card',
+          status: 'stopped',
+          currentRunId: 'run-stale',
+        }),
+        expect.objectContaining({
+          code: 'terminal-task-has-current-run',
+          severity: 'blocker',
+          taskId: 'deleted-card',
+          status: 'deleted',
+          currentRunId: 'run-deleted',
+        }),
+      ]),
+    );
+  });
+
+  it('accepts dispatch-run aliases as current run pointers and flags malformed status aliases', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({
+      schemaVersion: 1,
+      tasks: [
+        { id: 'running-dispatch', value: { status: 'running', dispatchRunId: 'dispatch-1' } },
+        { id: 'terminal-dispatch', value: { status: 'done', dispatch_run_id: 'dispatch-stale' } },
+        { id: 'bad-state-alias', state: '', value: { status: 'running', dispatchRunId: 'dispatch-2' } },
+      ],
+    });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).not.toContainEqual(
       expect.objectContaining({
-        code: 'terminal-task-has-current-run',
-        severity: 'blocker',
-        taskId: 'stopped-card',
-        status: 'stopped',
-        currentRunId: 'run-stale',
+        code: 'running-task-missing-current-run',
+        taskId: 'running-dispatch',
       }),
+    );
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'terminal-task-has-current-run',
+          taskId: 'terminal-dispatch',
+          currentRunId: 'dispatch-stale',
+          jsonPath: '$.tasks[1].value.dispatch_run_id',
+        }),
+        expect.objectContaining({
+          code: 'malformed-task-status',
+          taskId: 'bad-state-alias',
+          jsonPath: '$.tasks[2].state',
+        }),
+      ]),
     );
   });
 
