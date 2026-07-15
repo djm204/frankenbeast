@@ -271,6 +271,19 @@ function processStartTimeTicks(pid: number): string | undefined {
   }
 }
 
+function processGroupExists(pid: number): boolean {
+  if (pid <= 0 || process.platform === 'win32') {
+    return false;
+  }
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'EPERM';
+  }
+}
+
 function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
   const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
   const pid = attempt.pid;
@@ -285,6 +298,9 @@ function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
     return false;
   }
   const actualStartTime = processStartTimeTicks(pid);
+  if (actualStartTime === undefined) {
+    return processGroupExists(pid);
+  }
   return actualStartTime === expectedStartTime;
 }
 
@@ -451,15 +467,42 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const startedAt = new Date(wallClockNow()).toISOString();
     const processStartTime = processStartTimeTicks(handle.pid);
     const processGroupMetadata = {
-      processGroupOwned: process.platform !== 'win32',
+      processGroupOwned: process.platform !== 'win32' && typeof processStartTime === 'string',
       processGroupLeaderPid: handle.pid,
       ...(processStartTime ? { processStartTimeTicks: processStartTime } : {}),
     };
     let attempt: BeastRunAttempt;
     try {
-      const customAttemptMetadata = this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle);
+      const currentRun = this.repository.getRun(run.id);
+      if (
+        !currentRun
+        || currentRun.status === 'stopped'
+      ) {
+        this.cancelledPendingRunIds.delete(run.id);
+        try {
+          await this.supervisor.kill(handle.pid);
+        } finally {
+          this.pendingSpawnHandles.delete(run.id);
+          this.cleanupRunResources(run.id);
+        }
+        return {
+          id: `${run.id}:cancelled-before-attempt`,
+          runId: run.id,
+          attemptNumber: run.attemptCount,
+          status: 'stopped',
+          startedAt,
+          finishedAt: startedAt,
+          stopReason: 'operator_kill',
+        };
+      }
       if (this.cancelledPendingRunIds.has(run.id) || this.pendingSpawnHandles.get(run.id) !== handle) {
         this.cancelledPendingRunIds.delete(run.id);
+        try {
+          await this.supervisor.kill(handle.pid);
+        } finally {
+          this.pendingSpawnHandles.delete(run.id);
+          this.cleanupRunResources(run.id);
+        }
         this.repository.updateRun(run.id, {
           status: 'stopped',
           finishedAt: startedAt,
@@ -476,6 +519,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           stopReason: 'operator_kill',
         };
       }
+      const customAttemptMetadata = this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle);
       attempt = this.repository.createAttempt(run.id, {
         status: 'running',
         pid: handle.pid,

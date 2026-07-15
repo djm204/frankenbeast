@@ -133,7 +133,7 @@ describe('ProcessBeastExecutor', () => {
     expect(attempt.executorMetadata).toMatchObject({
       backend: 'container',
       containerName: 'beast-run-1',
-      processGroupOwned: process.platform !== 'win32',
+      processGroupOwned: typeof attempt.executorMetadata?.processStartTimeTicks === 'string',
       processGroupLeaderPid: 4242,
     });
   });
@@ -188,6 +188,40 @@ describe('ProcessBeastExecutor', () => {
     expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: false });
   });
 
+  it('sweeps a recovered process group when the original leader exited but the group still exists', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+    const attempt = await executor.start(run, martinLoopDefinition);
+    repo.updateAttempt(attempt.id, {
+      executorMetadata: {
+        ...attempt.executorMetadata,
+        processGroupOwned: true,
+        processGroupLeaderPid: attempt.pid,
+        processStartTimeTicks: 'known-original-start-time',
+      },
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === -4242 && signal === 0) {
+        return true;
+      }
+      const error = new Error('missing process') as NodeJS.ErrnoException;
+      error.code = 'ESRCH';
+      throw error;
+    }) as typeof process.kill);
+
+    try {
+      await executor.kill(run.id, attempt.id);
+    } finally {
+      killSpy.mockRestore();
+    }
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: true });
+  });
+
   it('kills a spawned process when attempt creation fails', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
@@ -204,6 +238,44 @@ describe('ProcessBeastExecutor', () => {
     expect(supervisor.kill).toHaveBeenCalledWith(4242);
     expect(repo.getRun(run.id)).toMatchObject({
       status: 'queued',
+      attemptCount: 0,
+    });
+    expect(repo.getRun(run.id)?.currentAttemptId).toBeUndefined();
+  });
+
+  it('kills a process that finishes spawning after the run was cancelled before attempt creation', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let resolveSpawn: ((handle: { pid: number }) => void) | undefined;
+    const supervisor = {
+      spawn: vi.fn(() => new Promise<{ pid: number }>((resolve) => {
+        resolveSpawn = resolve;
+      })),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+
+    const startPromise = executor.start(run, martinLoopDefinition);
+    repo.updateRun(run.id, {
+      status: 'stopped',
+      finishedAt: '2026-03-10T00:00:01.000Z',
+      stopReason: 'operator_kill',
+    });
+    resolveSpawn?.({ pid: 4242 });
+    const cancelledAttempt = await startPromise;
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242);
+    expect(cancelledAttempt).toMatchObject({
+      runId: run.id,
+      status: 'stopped',
+      stopReason: 'operator_kill',
+    });
+    expect(repo.listAttempts(run.id)).toEqual([]);
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'stopped',
       attemptCount: 0,
     });
     expect(repo.getRun(run.id)?.currentAttemptId).toBeUndefined();
