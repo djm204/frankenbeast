@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { describe, expect, it, afterEach } from 'vitest';
 
 import {
@@ -13,6 +14,7 @@ import {
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const SCRIPT = resolve(ROOT, 'scripts/runtime-config-rollback-plan.mjs');
+const jsonSha = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 let workDir: string | undefined;
 
@@ -47,12 +49,16 @@ describe('runtime config rollback plan dry-run helper', () => {
   });
 
   it('builds a dry-run rollback plan that restores the before snapshot through approval-cop', () => {
+    const before = { provider: 'claude', modules: { planner: true } };
+    const after = { provider: 'openai', modules: { planner: false, memory: true } };
     const plan = buildRuntimeConfigRollbackPlan({
       beforePath: 'snapshots/run-123.before.json',
       afterPath: 'snapshots/run-123.after.json',
       targetPath: '.fbeast/.build/run-configs/run-123.json',
-      before: { provider: 'claude', modules: { planner: true } },
-      after: { provider: 'openai', modules: { planner: false, memory: true } },
+      before,
+      after,
+      beforeSha256: jsonSha(before),
+      afterSha256: jsonSha(after),
       evidenceDir: 'rollback-evidence/runtime-run-123',
     });
 
@@ -65,6 +71,7 @@ describe('runtime config rollback plan dry-run helper', () => {
     ]));
     expect(plan.readOnlyCapture[0].join(' ')).toContain('Refusing symlinked evidence path component');
     expect(plan.readOnlyCapture[1].join(' ')).toContain('copyFileNoFollow(process.argv[1], process.argv[2])');
+    expect(plan.readOnlyCapture[1].join(' ')).toContain('file://');
     expect(plan.readOnlyCapture[1]).toEqual(expect.arrayContaining([
       'snapshots/run-123.before.json',
       'rollback-evidence/runtime-run-123/rollback-config.json',
@@ -76,8 +83,8 @@ describe('runtime config rollback plan dry-run helper', () => {
     ]));
     expect(plan.readOnlyCapture[3]).toEqual(expect.arrayContaining([
       'rollback-evidence/runtime-run-123/runtime-config-changes.json',
-      'snapshots/run-123.before.json',
-      'snapshots/run-123.after.json',
+      'rollback-evidence/runtime-run-123/rollback-config.json',
+      'rollback-evidence/runtime-run-123/after-config.json',
       '.fbeast/.build/run-configs/run-123.json',
       'rollback-evidence/runtime-run-123',
     ]));
@@ -101,6 +108,16 @@ describe('runtime config rollback plan dry-run helper', () => {
     );
     expect(plan.notes.join('\n')).toContain('dry-run only');
     expect(plan.notes.join('\n')).toContain('Snapshot parsing is bounded');
+  });
+
+  it('requires caller-provided snapshot file hashes for approval-gated plans', () => {
+    expect(() => buildRuntimeConfigRollbackPlan({
+      beforePath: 'before.json',
+      afterPath: 'after.json',
+      targetPath: 'current.json',
+      before: { provider: 'claude' },
+      after: { provider: 'openai' },
+    })).toThrow(/beforeSha256 and afterSha256 are required/u);
   });
 
   it('rejects snapshots with no runtime config change', () => {
@@ -202,6 +219,47 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(markdownResult.stdout).toContain('## 1. Capture read-only rollback evidence');
     expect(markdownResult.stdout).toContain('approval-cop run -- node');
     expect(markdownResult.stdout).toContain('Refusing symlinked evidence path component');
+  });
+
+  it('emits capture commands that work outside the repository root and describe captured evidence', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-rollback-cwd-'));
+    const before = join(workDir, 'before.json');
+    const after = join(workDir, 'after.json');
+    const target = join(workDir, 'current.json');
+    const evidence = join(workDir, 'evidence');
+    const operatorCwd = join(workDir, 'operator');
+    await mkdir(operatorCwd);
+    await writeFile(before, `${JSON.stringify({ provider: 'claude' }, null, 2)}\n`);
+    await writeFile(after, `${JSON.stringify({ provider: 'openai' }, null, 2)}\n`);
+    await writeFile(target, `${JSON.stringify({ provider: 'openai' }, null, 2)}\n`);
+
+    const jsonResult = spawnSync(process.execPath, [
+      SCRIPT,
+      '--dry-run',
+      '--format', 'json',
+      '--before', before,
+      '--after', after,
+      '--target', target,
+      '--evidence-dir', evidence,
+    ], { cwd: operatorCwd, encoding: 'utf8' });
+
+    expect(jsonResult.status).toBe(0);
+    const parsed = JSON.parse(jsonResult.stdout);
+    for (const command of parsed.readOnlyCapture.slice(0, 3)) {
+      const result = spawnSync(command[0], command.slice(1), { cwd: operatorCwd, encoding: 'utf8' });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+    }
+
+    await writeFile(before, `${JSON.stringify({ provider: 'mutated-source' }, null, 2)}\n`);
+    for (const command of parsed.readOnlyCapture.slice(3)) {
+      const result = spawnSync(command[0], command.slice(1), { cwd: operatorCwd, encoding: 'utf8' });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+    }
+
+    const changes = JSON.parse(await readFile(join(evidence, 'runtime-config-changes.json'), 'utf8'));
+    expect(changes).toEqual([{ path: '/provider', type: 'changed' }]);
+    await expect(readFile(join(evidence, 'rollback-config.json'), 'utf8')).resolves.toContain('claude');
+    await expect(readFile(join(evidence, 'rollback-comment.md'), 'utf8')).resolves.toContain('Changed paths: "/provider"');
   });
 
   it('encodes markdown control characters in rendered changed paths', async () => {
