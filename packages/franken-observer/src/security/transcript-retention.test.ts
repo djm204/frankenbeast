@@ -412,6 +412,34 @@ describe('transcript retention controls', () => {
     })
   })
 
+  it('preserves binary views instead of applying custom JSON serialization', () => {
+    const bytes = Buffer.from([1, 2, 3])
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { bytes } })],
+    }))
+
+    expect(retained.spans[0].metadata['bytes']).toBe(bytes)
+  })
+
+  it('reuses retained custom JSON clones for repeated metadata references', () => {
+    class SharedPayload {
+      toJSON(): Record<string, unknown> {
+        return { safeCounter: 1 }
+      }
+    }
+    const payload = new SharedPayload()
+
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata: { first: payload, second: payload } })],
+    }))
+
+    expect(retained.spans[0].metadata).toEqual({
+      first: { safeCounter: 1 },
+      second: { safeCounter: 1 },
+    })
+    expect(retained.spans[0].metadata['second']).toBe(retained.spans[0].metadata['first'])
+  })
+
   it('redacts delegated summary goals nested under opaque metadata keys', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({
@@ -661,6 +689,8 @@ describe('transcript retention controls', () => {
       spans: [makeSpan({
         metadata: {
           promptTokens: 12,
+          promptTokenCount: 13,
+          prompt_tokens_details: { cached_tokens: 4 },
           completionTokens: 3,
           messages: [{ role: 'user', content: 'private chat prompt' }],
           transcript: ['private transcript line'],
@@ -670,6 +700,8 @@ describe('transcript retention controls', () => {
     }))
 
     expect(retained.spans[0].metadata['promptTokens']).toBe(12)
+    expect(retained.spans[0].metadata['promptTokenCount']).toBe(13)
+    expect(retained.spans[0].metadata['prompt_tokens_details']).toEqual({ cached_tokens: 4 })
     expect(retained.spans[0].metadata['completionTokens']).toBe(3)
     expect(retained.spans[0].metadata['messages']).toBe('[REDACTED_TRANSCRIPT]')
     expect(retained.spans[0].metadata['transcript']).toBe('[REDACTED_TRANSCRIPT]')
@@ -706,6 +738,7 @@ describe('transcript retention controls', () => {
         metadata: {
           messages: [
             { type: 'text', text: 'private prompt text' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,private' } },
             { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
           ],
         },
@@ -718,6 +751,7 @@ describe('transcript retention controls', () => {
 
     expect(retained.spans[0].metadata['messages']).toEqual([
       { type: 'text' },
+      { type: 'image_url' },
       { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
     ])
   })

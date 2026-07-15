@@ -76,7 +76,19 @@ const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'input', 'inputs', '
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
 const SUMMARY_KEYS = new Set(['summary', 'summaries'])
-const NON_TRANSCRIPT_TOKEN_KEYS = new Set(['prompttokens', 'completiontokens', 'totaltokens'])
+const NON_TRANSCRIPT_TOKEN_KEYS = new Set([
+  'prompttokens',
+  'prompttokencount',
+  'prompttokenscount',
+  'prompttokensdetails',
+  'completiontokens',
+  'completiontokencount',
+  'completiontokenscount',
+  'completiontokensdetails',
+  'totaltokens',
+  'totaltokencount',
+  'totaltokenscount',
+])
 const CHAT_TRANSCRIPT_KEYS = new Set(['message', 'messages', 'content', 'contents'])
 
 export class TranscriptRetentionAdapter implements ExportAdapter {
@@ -340,10 +352,13 @@ function redactNestedTranscriptValues(
   }
   if (value instanceof Date) return new Date(value.getTime())
   if (value instanceof URL) return cloneValue(value)
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return cloneValue(value)
   if (!isPlainRecord(value)) {
     if (hasCustomToJSON(value)) {
       seen.set(value, DROPPED)
-      return redactNestedTranscriptValues(value.toJSON(), policy, seen)
+      const retained = redactNestedTranscriptValues(value.toJSON(), policy, seen)
+      seen.set(value, retained)
+      return retained
     }
     return shouldRedactEnumerableObject(value)
       ? redactEnumerableObject(value, policy, seen)
@@ -364,7 +379,7 @@ function classifyContextualTranscriptField(record: Record<string, unknown>, key:
   const recordType = typeof record['type'] === 'string' ? record['type'].replace(/[_-]/g, '').toLowerCase() : ''
   const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
   if ((recordType === 'toolresult' || recordRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
-  if (recordType === 'text' && key === 'text') return 'prompts'
+  if (isPromptBlockContentField(recordType, key)) return 'prompts'
   return classifyTranscriptField(key)
 }
 
@@ -467,8 +482,16 @@ function redactProviderMessageValue(
 
 function classifyProviderMessageField(messageType: string, messageRole: string, key: string): TranscriptField | undefined {
   if ((messageType === 'toolresult' || messageRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
-  if (messageType === 'text' && key === 'text') return 'prompts'
+  if (isPromptBlockContentField(messageType, key)) return 'prompts'
   return classifyTranscriptField(key)
+}
+
+function isPromptBlockContentField(messageType: string, key: string): boolean {
+  const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+  return (
+    ((messageType === 'text' || messageType === 'inputtext') && normalizedKey === 'text') ||
+    ((messageType === 'imageurl' || messageType === 'inputimage') && (normalizedKey === 'imageurl' || normalizedKey === 'url'))
+  )
 }
 
 function redactEnumerableObject(
