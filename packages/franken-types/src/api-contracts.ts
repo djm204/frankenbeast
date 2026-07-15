@@ -104,6 +104,20 @@ export const ApproveResultSchema = z.object({
 });
 export type ApproveResult = z.infer<typeof ApproveResultSchema>;
 
+export const ApprovalReadinessResultSchema = z.object({
+  id: z.string(),
+  ready: z.boolean(),
+  status: z.enum(['ready', 'not_ready', 'unsafe']),
+  state: z.string(),
+  pendingApproval: z.boolean(),
+  reason: z.string(),
+  requestedAt: z.string().optional(),
+  tool: z.string().optional(),
+  command: z.string().optional(),
+  risk: z.string().optional(),
+});
+export type ApprovalReadinessResult = z.infer<typeof ApprovalReadinessResultSchema>;
+
 export interface BeastInterviewPrompt {
   key: string;
   prompt: string;
