@@ -212,7 +212,8 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
     this.retained.delete(traceId)
     this.expiredTraceIds.add(traceId)
     try {
-      await deleteTraceFromAdapter(this.inner, traceId)
+      const deleted = await deleteTraceFromAdapter(this.inner, traceId)
+      if (deleted) this.expiredTraceIds.delete(traceId)
       this.deleteFailedTraceIds.delete(traceId)
     } catch (error) {
       this.deleteFailedTraceIds.add(traceId)
@@ -297,7 +298,7 @@ function retainMetadata(
   for (const [key, value] of Object.entries(metadata)) {
     const field = classifyContextualTranscriptField(metadata, key)
     if (field && !policy.retainedFields[field]) {
-      if (field === 'prompts' && value !== null && typeof value === 'object') {
+      if (field === 'prompts' && isChatTranscriptContainerKey(key) && value !== null && typeof value === 'object') {
         setRecordValue(retained, key, redactFieldValue(value, field, policy, seen))
       }
       continue
@@ -338,7 +339,12 @@ function redactNestedTranscriptValues(
     return retained
   }
   if (value instanceof Date) return new Date(value.getTime())
+  if (value instanceof URL) return cloneValue(value)
   if (!isPlainRecord(value)) {
+    if (hasCustomToJSON(value)) {
+      seen.set(value, DROPPED)
+      return redactNestedTranscriptValues(value.toJSON(), policy, seen)
+    }
     return shouldRedactEnumerableObject(value)
       ? redactEnumerableObject(value, policy, seen)
       : cloneValue(value)
@@ -400,6 +406,10 @@ function classifyTranscriptField(key: string): TranscriptField | undefined {
   ) return 'errors'
   if (SUMMARY_KEYS.has(normalized) || normalized.includes('summary')) return 'summaries'
   return undefined
+}
+
+function isChatTranscriptContainerKey(key: string): boolean {
+  return CHAT_TRANSCRIPT_KEYS.has(key.replace(/[_-]/g, '').toLowerCase())
 }
 
 function redactValue(value: unknown, policy: ResolvedTranscriptRetentionPolicy): unknown {
@@ -487,6 +497,10 @@ function shouldRedactEnumerableObject(value: object): boolean {
     !(value instanceof Promise) &&
     !(value instanceof WeakMap) &&
     !(value instanceof WeakSet)
+}
+
+function hasCustomToJSON(value: object): value is { toJSON: () => unknown } {
+  return typeof (value as { toJSON?: unknown }).toJSON === 'function'
 }
 
 function redactString(value: string | undefined, policy: ResolvedTranscriptRetentionPolicy): string | undefined {

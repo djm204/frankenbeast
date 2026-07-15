@@ -253,6 +253,18 @@ describe('transcript retention controls', () => {
     expect(await inner.listTraceIds()).toEqual([])
   })
 
+  it('does not retain expired IDs after successful backend deletes', async () => {
+    let now = 10
+    const inner = new InMemoryAdapter()
+    const adapter = new TranscriptRetentionAdapter({ adapter: inner, ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
+    now = 16
+
+    expect(await adapter.cleanupExpired()).toEqual(['trace-1'])
+    expect((adapter as unknown as { expiredTraceIds: Set<string> }).expiredTraceIds.has('trace-1')).toBe(false)
+  })
+
   it('keeps expired traces hidden when the wrapped backend cannot delete them', async () => {
     let now = 10
     const adapter = new TranscriptRetentionAdapter({ adapter: new NonDeletingAdapter(), ttlMs: 5, now: () => now })
@@ -377,6 +389,25 @@ describe('transcript retention controls', () => {
 
     expect(retained.spans[0].metadata).toEqual({
       payload: '[REDACTED_TRANSCRIPT]',
+      safeCounter: 1,
+    })
+  })
+
+  it('redacts transcript fields exposed only through custom JSON serialization', () => {
+    class ProviderPayload {
+      toJSON(): Record<string, unknown> {
+        return { prompt: 'private serialized prompt', safeCounter: 1 }
+      }
+    }
+
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: { payload: new ProviderPayload() },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata['payload']).toEqual({
+      prompt: '[REDACTED_TRANSCRIPT]',
       safeCounter: 1,
     })
   })
@@ -746,6 +777,26 @@ describe('transcript retention controls', () => {
 
     expect(retained.spans[0].metadata['messages']).toEqual([
       { role: 'user' },
+      { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
+    ])
+  })
+
+  it('drops object-valued prompt fields when raw prompt retention is disabled', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          prompt: { text: 'private prompt text', safeCounter: 1 },
+          messages: [{ role: 'tool', content: 'private tool result', tool_call_id: 'call-1' }],
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolOutputs: true },
+    })
+
+    expect(retained.spans[0].metadata).not.toHaveProperty('prompt')
+    expect(retained.spans[0].metadata['messages']).toEqual([
       { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
     ])
   })
