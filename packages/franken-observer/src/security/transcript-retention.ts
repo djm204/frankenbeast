@@ -340,7 +340,8 @@ function redactNestedTranscriptValues(
     for (const [key, nestedValue] of value.entries()) {
       const field = typeof key === 'string' ? classifyTranscriptField(key) : undefined
       if (field && !policy.retainedFields[field]) continue
-      retained.set(cloneValue(key), field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
+      const retainedKey = typeof key === 'string' ? cloneValue(key) : redactNestedTranscriptValues(key, policy, seen)
+      retained.set(retainedKey, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
     }
     return retained
   }
@@ -379,6 +380,7 @@ function classifyContextualTranscriptField(record: Record<string, unknown>, key:
   const recordType = typeof record['type'] === 'string' ? record['type'].replace(/[_-]/g, '').toLowerCase() : ''
   const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
   if ((recordType === 'toolresult' || recordRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
+  if (recordType === 'inputjsondelta' && key.replace(/[_-]/g, '').toLowerCase() === 'partialjson') return 'toolInputs'
   if (isPromptBlockContentField(recordType, key)) return 'prompts'
   return classifyTranscriptField(key)
 }
@@ -482,6 +484,7 @@ function redactProviderMessageValue(
 
 function classifyProviderMessageField(messageType: string, messageRole: string, key: string): TranscriptField | undefined {
   if ((messageType === 'toolresult' || messageRole === 'tool') && (key === 'content' || key === 'text')) return 'toolOutputs'
+  if (messageType === 'inputjsondelta' && key.replace(/[_-]/g, '').toLowerCase() === 'partialjson') return 'toolInputs'
   if (isPromptBlockContentField(messageType, key)) return 'prompts'
   return classifyTranscriptField(key)
 }
@@ -489,7 +492,7 @@ function classifyProviderMessageField(messageType: string, messageRole: string, 
 function isPromptBlockContentField(messageType: string, key: string): boolean {
   const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
   if ((messageType === 'textdelta' || messageType === 'outputtextdelta') && normalizedKey === 'text') return true
-  if (messageType === 'inputjsondelta' && normalizedKey === 'partialjson') return true
+  if (messageType === 'thinkingdelta' && normalizedKey === 'thinking') return true
   if (
     isMultimodalPromptBlockType(messageType) &&
     MULTIMODAL_PROMPT_CONTENT_KEYS.has(normalizedKey)

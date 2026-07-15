@@ -764,25 +764,55 @@ describe('transcript retention controls', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({
         metadata: {
-          event: {
+          streamEvent: {
             type: 'content_block_delta',
-            delta: { type: 'text_delta', text: 'private streamed prompt text' },
+            delta: { type: 'text_delta', text: 'private streamed prompt' },
           },
           toolEvent: {
             type: 'content_block_delta',
-            delta: { type: 'input_json_delta', partial_json: '{"secret":"tool input"}' },
+            delta: { type: 'input_json_delta', partial_json: '{"secret":"tool args"}' },
+          },
+          thinkingEvent: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: 'private chain of thought' },
           },
         },
       })],
     }))
 
-    expect(retained.spans[0].metadata['event']).toEqual({
+    expect(retained.spans[0].metadata['streamEvent']).toEqual({
       type: 'content_block_delta',
       delta: { type: 'text_delta', text: '[REDACTED_TRANSCRIPT]' },
     })
     expect(retained.spans[0].metadata['toolEvent']).toEqual({
       type: 'content_block_delta',
       delta: { type: 'input_json_delta', partial_json: '[REDACTED_TRANSCRIPT]' },
+    })
+    expect(retained.spans[0].metadata['thinkingEvent']).toEqual({
+      type: 'content_block_delta',
+      delta: { type: 'thinking_delta', thinking: '[REDACTED_TRANSCRIPT]' },
+    })
+  })
+
+  it('honors tool input opt-outs for raw provider stream deltas', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          toolEvent: {
+            type: 'content_block_delta',
+            delta: { type: 'input_json_delta', partial_json: '{"secret":"tool args"}' },
+          },
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolInputs: false },
+    })
+
+    expect(retained.spans[0].metadata['toolEvent']).toEqual({
+      type: 'content_block_delta',
+      delta: { type: 'input_json_delta' },
     })
   })
 
@@ -993,6 +1023,7 @@ describe('transcript retention controls', () => {
             ['safeCounter', 1],
             ['nested', { tool_output: 'private nested output' }],
           ]),
+          keyedPayload: new Map<object, string>([[{ prompt: 'private key prompt' }, 'safe value']]),
           records: new Set<unknown>([{ transcript: 'private set transcript' }, { safeCounter: 2 }]),
         },
       })],
@@ -1005,6 +1036,10 @@ describe('transcript retention controls', () => {
     expect(payload.get('prompt')).toBe('[REDACTED_TRANSCRIPT]')
     expect(payload.get('safeCounter')).toBe(1)
     expect(payload.get('nested')).toEqual({ tool_output: '[REDACTED_TRANSCRIPT]' })
+    const keyedPayload = retained.spans[0].metadata['keyedPayload'] as Map<Record<string, unknown>, string>
+    expect(keyedPayload).toBeInstanceOf(Map)
+    expect([...keyedPayload.keys()]).toEqual([{ prompt: '[REDACTED_TRANSCRIPT]' }])
+    expect([...keyedPayload.values()]).toEqual(['safe value'])
     expect(records).toBeInstanceOf(Set)
     expect([...records]).toEqual([{ transcript: '[REDACTED_TRANSCRIPT]' }, { safeCounter: 2 }])
   })
