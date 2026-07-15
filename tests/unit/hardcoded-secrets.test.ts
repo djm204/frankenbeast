@@ -23,6 +23,14 @@ function runScanner(root: string) {
   });
 }
 
+function runScannerWithLimits(root: string, limits: Record<string, string>) {
+  return spawnSync(process.execPath, [SCRIPT], {
+    cwd: ROOT,
+    env: { ...process.env, FRANKENBEAST_SECRETS_SCAN_ROOT: root, ...limits },
+    encoding: 'utf8',
+  });
+}
+
 describe('hard-coded example secret scanner', () => {
   it('is included in the root security lint script', () => {
     const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')) as {
@@ -315,5 +323,37 @@ describe('hard-coded example secret scanner', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('No hard-coded example secret values found');
+  });
+
+  it('fails closed on oversized source lines before regex scanners inspect untrusted text', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    const oversizedPayload = 'a'.repeat(80);
+    writeFileSync(
+      join(sourceDir, 'config.ts'),
+      `const jwtSecret = '${oversizedPayload}';\n`,
+      'utf8',
+    );
+
+    const result = runScannerWithLimits(root, { FRANKENBEAST_SECRETS_SCAN_MAX_LINE_CHARS: '40' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).toContain('parser=secret-source-scanner input=line-too-large');
+    expect(result.stderr).not.toContain(oversizedPayload);
+  });
+
+  it('fails closed on oversized environment examples with parser and input-class details only', () => {
+    const root = makeFixtureRoot();
+    const oversizedPayload = 'b'.repeat(120);
+    writeFileSync(join(root, '.env.example'), `${sensitiveName('JWT', 'SECRET')}=${oversizedPayload}\n`, 'utf8');
+
+    const result = runScannerWithLimits(root, { FRANKENBEAST_SECRETS_SCAN_MAX_FILE_BYTES: '60' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('.env.example');
+    expect(result.stderr).toContain('parser=secret-env-scanner input=file-too-large');
+    expect(result.stderr).not.toContain(oversizedPayload);
   });
 });

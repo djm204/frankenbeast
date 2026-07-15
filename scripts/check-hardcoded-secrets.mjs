@@ -30,9 +30,64 @@ const sensitiveEnvNames = [
 const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
 const stringLiteralPattern = /(['"`])((?:\\.|(?!\1).)*)\1/g;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
+const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
+const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
+const maxScannedFileBytes = parsePositiveInteger(
+  process.env.FRANKENBEAST_SECRETS_SCAN_MAX_FILE_BYTES,
+  DEFAULT_MAX_SCANNED_FILE_BYTES,
+);
+const maxScannedLineChars = parsePositiveInteger(
+  process.env.FRANKENBEAST_SECRETS_SCAN_MAX_LINE_CHARS,
+  DEFAULT_MAX_SCANNED_LINE_CHARS,
+);
 
 function printLine(...args) {
   console.info(...args);
+}
+
+function parsePositiveInteger(value, fallback) {
+  if (value === undefined || value === '') {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function boundedScannerFinding(parserName, inputClass, file, lineNumber, detail) {
+  const location = lineNumber === undefined ? toRepoPath(file) : `${toRepoPath(file)}:${lineNumber}`;
+  return `${location}: parser=${parserName} input=${inputClass} ${detail}`;
+}
+
+function boundedSplitLines(content, parserName, file, findings) {
+  if (Buffer.byteLength(content, 'utf8') > maxScannedFileBytes) {
+    findings.push(
+      boundedScannerFinding(
+        parserName,
+        'file-too-large',
+        file,
+        undefined,
+        `limit=${maxScannedFileBytes}B`,
+      ),
+    );
+    return null;
+  }
+
+  const lines = content.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
+    if (line.length > maxScannedLineChars) {
+      findings.push(
+        boundedScannerFinding(
+          parserName,
+          'line-too-large',
+          file,
+          index + 1,
+          `limit=${maxScannedLineChars}chars`,
+        ),
+      );
+      return null;
+    }
+  }
+  return lines;
 }
 
 function extensionOf(path) {
@@ -246,7 +301,8 @@ function leavesSensitiveFallbackOpen(line) {
 
 async function scanEnvironmentFile(file, findings) {
   const content = await readFile(file, 'utf8');
-  const lines = content.split(/\r?\n/);
+  const lines = boundedSplitLines(content, 'secret-env-scanner', file, findings);
+  if (!lines) return;
   for (const [index, line] of lines.entries()) {
     const redacted = hardcodedSensitiveEnvFinding(line);
     if (redacted) {
@@ -257,7 +313,8 @@ async function scanEnvironmentFile(file, findings) {
 
 async function scanSourceFile(file, findings) {
   const content = await readFile(file, 'utf8');
-  const lines = content.split(/\r?\n/);
+  const lines = boundedSplitLines(content, 'secret-source-scanner', file, findings);
+  if (!lines) return;
   const commentState = { inBlockComment: false };
   let pendingSensitiveFallbackLine = null;
 
