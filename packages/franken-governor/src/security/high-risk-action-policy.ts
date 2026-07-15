@@ -42,6 +42,10 @@ export interface HighRiskActionPolicyDecision {
 
 type PolicyRule = (evidence: HighRiskActionEvidence) => Omit<HighRiskActionPolicyDecision, 'actionClass' | 'evidence'>;
 
+function hasText(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
+}
+
 const HIGH_RISK_POLICY_RULES: Record<HighRiskActionClass, PolicyRule> = {
   'git-remote-write': evaluateGitRemoteWrite,
   'github-mutation': evaluateGithubMutation,
@@ -77,7 +81,10 @@ function evaluateGitRemoteWrite(evidence: HighRiskActionEvidence): Omit<HighRisk
   if (evidence.readOnly === true || evidence.dryRun === true) {
     return { decision: 'allow', reason: 'Read-only or dry-run git operation has no remote write side effect.' };
   }
-  if (evidence.target === undefined || evidence.target.trim() === '') {
+  if (!hasText(evidence.command)) {
+    return { decision: 'deny', reason: 'Git remote write is missing the exact git command.' };
+  }
+  if (!hasText(evidence.target)) {
     return { decision: 'deny', reason: 'Git remote write is missing a concrete remote/ref target.' };
   }
   return {
@@ -92,8 +99,11 @@ function evaluateGithubMutation(evidence: HighRiskActionEvidence): Omit<HighRisk
   if (evidence.readOnly === true || evidence.operation === 'read') {
     return { decision: 'allow', reason: 'Read-only GitHub API operation does not mutate repository state.' };
   }
-  if (evidence.operation === undefined || evidence.operation.trim() === '') {
+  if (!hasText(evidence.operation)) {
     return { decision: 'deny', reason: 'GitHub mutation is missing the mutation operation name.' };
+  }
+  if (!hasText(evidence.target)) {
+    return { decision: 'deny', reason: 'GitHub mutation is missing the issue, PR, workflow, or repository target.' };
   }
   return { decision: 'needs-approval', reason: 'GitHub mutation can change issues, PRs, checks, labels, or repo settings.' };
 }
@@ -102,8 +112,11 @@ function evaluateCronChange(evidence: HighRiskActionEvidence): Omit<HighRiskActi
   if (evidence.readOnly === true || evidence.operation === 'list') {
     return { decision: 'allow', reason: 'Cron listing is read-only.' };
   }
-  if (evidence.operation === undefined || evidence.operation.trim() === '') {
+  if (!hasText(evidence.operation)) {
     return { decision: 'deny', reason: 'Cron policy requires an explicit create, update, pause, resume, remove, or run operation.' };
+  }
+  if (!hasText(evidence.target)) {
+    return { decision: 'deny', reason: 'Cron policy requires a concrete job id or schedule target.' };
   }
   return { decision: 'needs-approval', reason: 'Cron changes can create durable autonomous execution.' };
 }
@@ -112,8 +125,20 @@ function evaluateMemoryChange(evidence: HighRiskActionEvidence): Omit<HighRiskAc
   if (evidence.readOnly === true || evidence.operation === 'read') {
     return { decision: 'allow', reason: 'Memory read does not alter durable agent context.' };
   }
+  if (evidence.dryRun === true) {
+    return { decision: 'allow', reason: 'Memory dry-run does not alter durable agent context.' };
+  }
   if (evidence.crossProfile === true) {
     return { decision: 'deny', reason: 'Cross-profile memory edits are denied unless routed through an explicit profile-owner workflow.' };
+  }
+  if (hasText(evidence.profile) && hasText(evidence.activeProfile) && evidence.profile!.trim() !== evidence.activeProfile!.trim()) {
+    return { decision: 'deny', reason: 'Cross-profile memory edits are denied unless routed through an explicit profile-owner workflow.' };
+  }
+  if ((hasText(evidence.profile) && !hasText(evidence.activeProfile)) || (!hasText(evidence.profile) && hasText(evidence.activeProfile))) {
+    return { decision: 'deny', reason: 'Memory policy requires both requested and active profile evidence when profile scope is provided.' };
+  }
+  if (!hasText(evidence.operation)) {
+    return { decision: 'deny', reason: 'Memory edit is missing an explicit add, replace, delete, or right-to-forget operation.' };
   }
   return { decision: 'needs-approval', reason: 'Memory edits persist across future sessions and require reviewable approval.' };
 }
@@ -125,11 +150,17 @@ function evaluateProfileWrite(evidence: HighRiskActionEvidence): Omit<HighRiskAc
   if (evidence.readOnly === true) {
     return { decision: 'allow', reason: 'Profile inspection is read-only.' };
   }
-  if (requestedProfile !== undefined && activeProfile !== undefined && requestedProfile !== activeProfile) {
-    return { decision: 'deny', reason: 'Cross-profile writes are denied by default.' };
-  }
   if (evidence.crossProfile === true) {
     return { decision: 'deny', reason: 'Cross-profile writes are denied by default.' };
+  }
+  if (!hasText(requestedProfile) || !hasText(activeProfile)) {
+    return { decision: 'deny', reason: 'Profile-write policy requires both requested and active profile evidence.' };
+  }
+  if (requestedProfile !== activeProfile) {
+    return { decision: 'deny', reason: 'Cross-profile writes are denied by default.' };
+  }
+  if (!hasText(evidence.operation)) {
+    return { decision: 'deny', reason: 'Profile-write policy requires an explicit write intent such as skill, plugin, credential, cron, or config update.' };
   }
   return { decision: 'needs-approval', reason: 'Profile writes can alter skills, plugins, credentials, or runtime behavior.' };
 }

@@ -45,6 +45,12 @@ describe('high-risk action policy', () => {
     },
     {
       actionClass: 'git-remote-write',
+      decision: 'deny',
+      evidence: { target: 'origin main', force: true },
+      reason: /missing the exact git command/u,
+    },
+    {
+      actionClass: 'git-remote-write',
       decision: 'needs-approval',
       evidence: { target: 'origin main', command: 'git push --force-with-lease origin HEAD:main', force: true },
       reason: /force-push|history rewrite/u,
@@ -60,6 +66,12 @@ describe('high-risk action policy', () => {
       decision: 'deny',
       evidence: { target: 'issues/1704' },
       reason: /missing the mutation operation/u,
+    },
+    {
+      actionClass: 'github-mutation',
+      decision: 'deny',
+      evidence: { operation: 'merge-pr' },
+      reason: /missing the issue, PR, workflow, or repository target/u,
     },
     {
       actionClass: 'github-mutation',
@@ -81,6 +93,12 @@ describe('high-risk action policy', () => {
     },
     {
       actionClass: 'cron',
+      decision: 'deny',
+      evidence: { operation: 'remove' },
+      reason: /concrete job id or schedule target/u,
+    },
+    {
+      actionClass: 'cron',
       decision: 'needs-approval',
       evidence: { operation: 'create', target: 'every 10m' },
       reason: /durable autonomous execution/u,
@@ -99,8 +117,20 @@ describe('high-risk action policy', () => {
     },
     {
       actionClass: 'memory',
+      decision: 'deny',
+      evidence: { operation: 'replace', profile: 'other', activeProfile: 'default' },
+      reason: /Cross-profile memory edits/u,
+    },
+    {
+      actionClass: 'memory',
+      decision: 'deny',
+      evidence: { profile: 'default', activeProfile: 'default' },
+      reason: /missing an explicit add, replace, delete, or right-to-forget operation/u,
+    },
+    {
+      actionClass: 'memory',
       decision: 'needs-approval',
-      evidence: { operation: 'replace', profile: 'default' },
+      evidence: { operation: 'replace', profile: 'default', activeProfile: 'default' },
       reason: /persist across future sessions/u,
     },
     {
@@ -114,6 +144,18 @@ describe('high-risk action policy', () => {
       decision: 'deny',
       evidence: { profile: 'other', activeProfile: 'default' },
       reason: /Cross-profile writes/u,
+    },
+    {
+      actionClass: 'profile-write',
+      decision: 'deny',
+      evidence: { profile: 'default' },
+      reason: /requires both requested and active profile evidence/u,
+    },
+    {
+      actionClass: 'profile-write',
+      decision: 'deny',
+      evidence: { profile: 'default', activeProfile: 'default' },
+      reason: /requires an explicit write intent/u,
     },
     {
       actionClass: 'profile-write',

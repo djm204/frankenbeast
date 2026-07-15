@@ -33,7 +33,6 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_firewall_scan_file',
   'fbeast_governor_check',
   'fbeast_governor_budget',
-  'fbeast_memory_store',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_plan_decompose',

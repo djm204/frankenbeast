@@ -48,7 +48,6 @@ describe('createGovernanceGate', () => {
       'fbeast_firewall_scan_file',
       'fbeast_governor_check',
       'fbeast_governor_budget',
-      'fbeast_memory_store',
       'fbeast_memory_query',
       'fbeast_memory_frontload',
       'fbeast_plan_decompose',
@@ -87,36 +86,48 @@ describe('createGovernanceGate', () => {
     expect(seen).toHaveLength(1);
   });
 
-  it('routes right-to-forget through governance with redacted selector context', async () => {
+  it('routes right-to-forget mutations through high-risk policy with selector evidence', async () => {
     const { governor, seen } = spyGovernor('denied');
     const gate = createGovernanceGate(governor);
     const result = await gate.check({
       tool: 'fbeast_memory_right_to_forget',
       args: { query: 'alice@example.test', category: 'pii', dryRun: false },
     });
-    expect(result.decision).toBe('denied');
-    expect(seen).toEqual([
-      {
-        action: 'fbeast_memory_right_to_forget',
-        context: JSON.stringify({
-          query: '[right-to-forget-selector-redacted]',
-          category: '[right-to-forget-selector-redacted]',
-          dryRun: false,
-        }),
-      },
-    ]);
-    expect(seen[0]!.context).not.toContain('alice@example.test');
+    expect(result.decision).toBe('review_recommended');
+    expect(result.reason).toContain('High-risk policy requires approval for fbeast_memory_right_to_forget');
+    expect(seen).toHaveLength(0);
   });
 
-  it('routes a destructive tool through the shared governor without a gate-level override', async () => {
-    // Classification now lives in the governor adapter, not the gate. The gate
-    // must NOT exempt or re-decide fbeast_memory_forget: it passes the call to
-    // the governor and returns the governor's decision verbatim, so every caller
-    // agrees on the same answer.
-    const { governor, seen } = spyGovernor('review_recommended');
+  it('applies high-risk policy before the heuristic governor for durable memory writes', async () => {
+    const { governor, seen } = spyGovernor('approved');
+    const gate = createGovernanceGate(governor);
+
+    const result = await gate.check({ tool: 'fbeast_memory_store', args: { key: 'lesson', value: 'x', type: 'working' } });
+
+    expect(result).toEqual({
+      decision: 'review_recommended',
+      reason: expect.stringContaining('High-risk policy requires approval for fbeast_memory_store'),
+    });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('allows right-to-forget dry-runs through high-risk policy without heuristic approval', async () => {
+    const { governor, seen } = spyGovernor('denied');
+    const gate = createGovernanceGate(governor);
+
+    const result = await gate.check({ tool: 'fbeast_memory_right_to_forget', args: { query: 'alice@example.test', dryRun: true } });
+
+    expect(result.decision).toBe('approved');
+    expect(result.reason).toContain('Memory dry-run');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('routes a destructive tool through high-risk policy instead of the heuristic governor', async () => {
+    const { governor, seen } = spyGovernor('approved');
     const gate = createGovernanceGate(governor);
     const result = await gate.check({ tool: 'fbeast_memory_forget', args: { key: 'note' } });
     expect(result.decision).toBe('review_recommended');
-    expect(seen).toEqual([{ action: 'fbeast_memory_forget', context: JSON.stringify({ key: 'note' }) }]);
+    expect(result.reason).toContain('High-risk policy requires approval for fbeast_memory_forget');
+    expect(seen).toHaveLength(0);
   });
 });
