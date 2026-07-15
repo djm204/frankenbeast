@@ -166,6 +166,18 @@ function parseScopedWorkingEntry(
   key: string,
   value: unknown,
 ): { key: string; value: string; agentId?: string } {
+  const entry = parseScopedWorkingExportEntry(key, value);
+  return {
+    key: entry.key,
+    value: typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value),
+    ...(entry.agentId === undefined ? {} : { agentId: entry.agentId }),
+  };
+}
+
+function parseScopedWorkingExportEntry(
+  key: string,
+  value: unknown,
+): { key: string; value: unknown; agentId?: string } {
   if (
     key.startsWith(AGENT_WORKING_KEY_PREFIX) &&
     isAgentScopedWorkingValue(value)
@@ -184,10 +196,7 @@ function parseScopedWorkingEntry(
       }
     }
   }
-  return {
-    key,
-    value: typeof value === "string" ? value : JSON.stringify(value),
-  };
+  return { key, value };
 }
 
 function parseAgentFromEpisodicDetails(
@@ -268,6 +277,7 @@ function resolveExportLimit(limit: number | undefined): number {
 const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
+  [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
   [/\b(?:sk|gho|ghp)_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]"],
@@ -302,7 +312,9 @@ function redactExportValue(
   }
   const output: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
-    const outputKey = SENSITIVE_EXPORT_KEY.test(key) ? stableRedactedKey(key) : key;
+    const outputKey = SENSITIVE_EXPORT_KEY.test(key)
+      ? stableRedactedKey(key)
+      : redactExportString(key);
     output[outputKey] = redactExportValue(nested, key, seen);
   }
   return output;
@@ -477,7 +489,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       const limit = resolveExportLimit(input.limit);
       const snapshot = brain.working.snapshot();
       const working = Object.entries(snapshot)
-        .map(([key, value]) => parseScopedWorkingEntry(key, value))
+        .map(([key, value]) => parseScopedWorkingExportEntry(key, value))
         .filter((entry) => canReadMemoryEntry(entry.agentId, readScope))
         .slice(0, limit)
         .map((entry) => {
@@ -485,7 +497,13 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
             key: redactExportKey(entry.key, redaction),
             value: redactExportField(entry.value, redaction, entry.key),
           };
-          if (entry.agentId !== undefined) exported.agentId = entry.agentId;
+          if (entry.agentId !== undefined) {
+            exported.agentId = redactExportField(
+              entry.agentId,
+              redaction,
+              "agentId",
+            ) as string;
+          }
           return exported;
         });
 
@@ -510,7 +528,15 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           ...(event.details === undefined
             ? {}
             : { details: redactExportField(event.details, redaction, "details") }),
-          ...(entryAgentId === undefined ? {} : { agentId: entryAgentId }),
+          ...(entryAgentId === undefined
+            ? {}
+            : {
+                agentId: redactExportField(
+                  entryAgentId,
+                  redaction,
+                  "agentId",
+                ) as string,
+              }),
           createdAt: event.createdAt,
         };
         return exported;

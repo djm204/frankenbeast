@@ -52,6 +52,15 @@ vi.mock("@franken/brain", () => ({
           "task-1": "working entry",
           "agents/oncall/runbook": "shared runbook",
           "github-token": "ghp_" + "supersecretvalue123456",
+          "public-key": "sk-" + "secretvalue123456",
+          profile: {
+            password: "hunter2",
+            "alice@example.com": "oncall",
+          },
+          "object-secret": {
+            password: "hunter2",
+            "alice@example.com": "oncall",
+          },
           "__fbeast_agent_memory__/alpha/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
             agentId: "alpha",
@@ -81,7 +90,12 @@ vi.mock("@franken/brain", () => ({
             id: "evt-shared",
             type: "success",
             summary: "shared episode",
-            details: { apiKey: "sk_" + "secretvalue123456" },
+            details: {
+              apiKey: "sk_" + "secretvalue123456",
+              "bob@example.com": "operator",
+              __fbeastMemoryScope: "fbeast:agent-memory",
+              agentId: "alice@example.com",
+            },
             createdAt: "2026-07-06T00:00:00.000Z",
           },
           {
@@ -263,7 +277,10 @@ describe("createBrainAdapter", () => {
     expect(exported.working.map((entry) => entry.value)).not.toContain("beta entry");
     expect(serialized).toContain("[redacted]");
     expect(serialized).not.toContain("ghp_" + "supersecretvalue123456");
+    expect(serialized).not.toContain("sk-" + "secretvalue123456");
     expect(serialized).not.toContain("sk_" + "secretvalue123456");
+    expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("alice@example.com");
     expect(serialized).not.toContain("apiKey");
   });
 
