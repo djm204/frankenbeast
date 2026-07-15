@@ -8,7 +8,7 @@ function printLine(...args: unknown[]): void {
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
@@ -584,24 +584,25 @@ function firstNonEmptyEnv(...names: readonly string[]): string | undefined {
 
 function resolveDashboardProviderCommand(name: string, type: string, config: OrchestratorConfig): string | undefined {
   const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
-  const registryName = resolveDashboardProviderRegistryName(name, type);
-  const overrideCommand = config.providers.overrides?.[name]?.command
-    ?? (registryName ? config.providers.overrides?.[registryName]?.command : undefined)
-    ?? config.providers.overrides?.[type]?.command;
+  if (consolidatedProvider?.cliPath) return consolidatedProvider.cliPath;
 
-  return overrideCommand
-    ?? consolidatedProvider?.cliPath
-    ?? resolveDashboardProviderDefaultCommand(name, type);
+  const providerRegistryName = resolveDashboardProviderRegistryName(name, type);
+  const overrideCommand = config.providers.overrides?.[name]?.command
+    ?? (providerRegistryName ? config.providers.overrides?.[providerRegistryName]?.command : undefined)
+    ?? config.providers.overrides?.[type]?.command;
+  if (overrideCommand) return overrideCommand;
+
+  return resolveDashboardProviderDefaultCommand(name, type);
 }
 
 function resolveDashboardProviderAvailability(name: string, type: string, config: OrchestratorConfig): boolean {
   if (type.endsWith('-cli')) {
     const command = resolveDashboardProviderCommand(name, type, config);
-    return Boolean(command && isCommandAvailable(command));
+    return Boolean(command && isCommandHealthy(command));
   }
 
   const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
-  if (consolidatedProvider?.apiKey) return true;
+  if (consolidatedProvider?.apiKey?.trim()) return true;
 
   if (type === 'anthropic-api') return Boolean(firstNonEmptyEnv('ANTHROPIC_API_KEY'));
   if (type === 'openai-api') return Boolean(firstNonEmptyEnv('OPENAI_API_KEY'));
@@ -668,6 +669,20 @@ export function buildDashboardProviderSnapshot(
       ...(model ? { model } : {}),
     };
   });
+}
+
+function isCommandHealthy(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  try {
+    const result = spawnSync(trimmed, ['--version'], {
+      stdio: 'ignore',
+      timeout: 5_000,
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 function isCommandAvailable(command: string): boolean {
