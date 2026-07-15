@@ -780,12 +780,10 @@ async function resolveDetectedBeastsDaemonUrl(
     return candidateUrl;
   }
   if (endpointState === 'draining') {
-    logger.warn(
+    throw new Error(
       `Detected a draining beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)}; `
-      + 'chat-server will not start standalone in-process Beast services until the daemon exits.',
-      'beasts-daemon',
+      + 'refusing to start chat-server until the daemon exits to avoid split-brain Beast control.',
     );
-    return 'draining';
   }
   logger.warn(
     `Ignoring live-looking beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)} because `
@@ -1172,9 +1170,8 @@ async function runChatCommandIfRequested(
     const detectedBeastDaemonUrl = !explicitBeastDaemonUrl && beastOperatorToken
       ? await resolveDetectedBeastsDaemonUrl(root, config, logger)
       : undefined;
-    const beastDaemonUrl = explicitBeastDaemonUrl ?? (detectedBeastDaemonUrl === 'draining' ? undefined : detectedBeastDaemonUrl);
-    const suppressLocalBeastServices = detectedBeastDaemonUrl === 'draining';
-    const localBeastServices = beastOperatorToken && !beastDaemonUrl && !suppressLocalBeastServices
+    const beastDaemonUrl = explicitBeastDaemonUrl ?? detectedBeastDaemonUrl;
+    const localBeastServices = beastOperatorToken && !beastDaemonUrl
       ? createBeastServices({
           beastsDb: join(paths.frankenbeastDir, 'beast.db'),
           beastLogsDir: paths.beastLogsDir,

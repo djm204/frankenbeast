@@ -42,6 +42,13 @@ export class BeastDaemonShutdownError extends Error {
   }
 }
 
+export class BeastDaemonDrainTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Beast daemon timed out after ${timeoutMs}ms waiting for in-flight mutating requests to finish during shutdown`);
+    this.name = 'BeastDaemonDrainTimeoutError';
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -181,7 +188,14 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
       }
       closed = true;
       drainState.enter('shutdown');
-      await drainState.waitForMutations();
+      if (!await drainState.waitForMutations()) {
+        if (listening) {
+          const closedServer = closeHttpServer(server);
+          server.closeAllConnections();
+          await closedServer;
+        }
+        throw new BeastDaemonDrainTimeoutError(MUTATION_DRAIN_WAIT_TIMEOUT_MS);
+      }
       const shutdownFailures = await stopLiveRuns(services);
       services.dispose();
       if (listening) {
