@@ -452,6 +452,73 @@ describe('restore preview conflict detector', () => {
     );
   });
 
+  it('fails closed for unsupported Kanban manifest schemas', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({ schemaVersion: 99, tasks: [] });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'unsupported-schema-version',
+        severity: 'blocker',
+        taskId: '<manifest>',
+        jsonPath: '$.schemaVersion',
+      }),
+    );
+  });
+
+  it('blocks missing and conflicting Kanban status/current-run aliases', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({
+      schemaVersion: 1,
+      tasks: [
+        { id: 'missing-status', value: { current_run_id: 'run-present' } },
+        { id: 'status-conflict', state: 'ready', value: { status: 'running', current_run_id: 'run-1' } },
+        { id: 'run-conflict', value: { status: 'running', current_run_id: 'run-a', currentRunId: 'run-b' } },
+      ],
+    });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'missing-task-status',
+          severity: 'blocker',
+          taskId: 'missing-status',
+          currentRunId: 'run-present',
+        }),
+        expect.objectContaining({
+          code: 'conflicting-task-status',
+          severity: 'blocker',
+          taskId: 'status-conflict',
+          status: 'running',
+        }),
+        expect.objectContaining({
+          code: 'conflicting-current-run',
+          severity: 'blocker',
+          taskId: 'run-conflict',
+          currentRunId: 'run-a',
+        }),
+      ]),
+    );
+  });
+
+  it('treats stopped Kanban tasks with current runs as terminal stale pointers', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({
+      schemaVersion: 1,
+      tasks: [{ id: 'stopped-card', value: { status: 'stopped', current_run_id: 'run-stale' } }],
+    });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'terminal-task-has-current-run',
+        severity: 'blocker',
+        taskId: 'stopped-card',
+        status: 'stopped',
+        currentRunId: 'run-stale',
+      }),
+    );
+  });
+
   it('reports a clean cross-file state consistency check when references resolve', () => {
     const report = buildCrossFileStateConsistencyReport(
       {

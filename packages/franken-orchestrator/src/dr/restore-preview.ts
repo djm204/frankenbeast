@@ -164,8 +164,12 @@ export interface CrossFileStateConsistencyOptions {
 export type KanbanPartialWriteRecoveryStatus = 'clean' | 'review-required' | 'blocked';
 
 export type KanbanPartialWriteRecoveryFindingCode =
+  | 'unsupported-schema-version'
   | 'malformed-task-status'
+  | 'missing-task-status'
+  | 'conflicting-task-status'
   | 'malformed-current-run'
+  | 'conflicting-current-run'
   | 'running-task-missing-current-run'
   | 'terminal-task-has-current-run'
   | 'non-running-task-has-current-run';
@@ -682,13 +686,42 @@ export function buildKanbanPartialWriteRecoveryReport(
   const checkedAt = options.checkedAt ?? new Date().toISOString();
   const findings: KanbanPartialWriteRecoveryFinding[] = [];
 
+  if (manifest.schemaVersion !== SUPPORTED_RESTORE_SCHEMA_VERSION) {
+    findings.push({
+      code: 'unsupported-schema-version',
+      severity: 'blocker',
+      taskId: '<manifest>',
+      jsonPath: '$.schemaVersion',
+      message: `Manifest schema version ${String(manifest.schemaVersion)} is not supported by this Kanban recovery checker.`,
+      recommendation:
+        'Do not infer Kanban task/run recovery state until the manifest is migrated to the supported restore schema version or the checker has explicit compatibility support.',
+    });
+  }
+
   AREA_ACCESSORS.tasks(manifest).forEach((record, index) => {
     const taskId = typeof record.id === 'string' && record.id.trim().length > 0 ? record.id : '<missing>';
     const value = isRecord(record.value) ? record.value : undefined;
-    const statusCandidate = value !== undefined && 'status' in value ? value.status : record.state;
-    const statusPath = value !== undefined && 'status' in value ? areaRecordJsonPath('tasks', index, 'value.status') : areaRecordJsonPath('tasks', index, 'state');
+    const valueStatusCandidate = value !== undefined && 'status' in value ? value.status : undefined;
+    const stateStatusCandidate = record.state;
+    const statusCandidate = valueStatusCandidate ?? stateStatusCandidate;
+    const statusPath = valueStatusCandidate !== undefined ? areaRecordJsonPath('tasks', index, 'value.status') : areaRecordJsonPath('tasks', index, 'state');
     const status = normalizeTaskStatus(statusCandidate);
+    const valueStatus = normalizeTaskStatus(valueStatusCandidate);
+    const stateStatus = normalizeTaskStatus(stateStatusCandidate);
     const currentRun = currentRunCandidate(value);
+
+    if (valueStatus !== undefined && stateStatus !== undefined && valueStatus !== stateStatus) {
+      findings.push({
+        code: 'conflicting-task-status',
+        severity: 'blocker',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, 'value.status'),
+        status: valueStatus,
+        message: `Kanban task '${taskId}' has conflicting task status fields: value.status='${valueStatus}' and state='${stateStatus}'.`,
+        recommendation:
+          'Repair the partial write so value.status and state agree before recovery tooling trusts task lifecycle state.',
+      });
+    }
 
     if (statusCandidate !== undefined && status === undefined) {
       findings.push({
@@ -700,6 +733,21 @@ export function buildKanbanPartialWriteRecoveryReport(
         recommendation:
           'Quarantine or repair this task before recovery so automation does not guess whether the card should run, block, or remain terminal.',
       });
+    }
+
+    if (currentRun.conflicting) {
+      findings.push({
+        code: 'conflicting-current-run',
+        severity: 'blocker',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, currentRun.jsonPath ?? 'value.current_run_id'),
+        ...(status === undefined ? {} : { status }),
+        ...(currentRun.id === undefined ? {} : { currentRunId: currentRun.id }),
+        message: `Kanban task '${taskId}' has conflicting current run pointer aliases.`,
+        recommendation:
+          'Repair the partial write so all current-run aliases agree before recovery tooling decides whether the task is live or stale.',
+      });
+      return;
     }
 
     if (currentRun.malformed) {
@@ -716,7 +764,21 @@ export function buildKanbanPartialWriteRecoveryReport(
       return;
     }
 
-    if (status === undefined) return;
+    if (status === undefined) {
+      if (currentRun.id !== undefined) {
+        findings.push({
+          code: 'missing-task-status',
+          severity: 'blocker',
+          taskId,
+          jsonPath: areaRecordJsonPath('tasks', index, 'value.status'),
+          currentRunId: currentRun.id,
+          message: `Kanban task '${taskId}' has a current run pointer but no task status.`,
+          recommendation:
+            'Treat this as a partial Kanban write: recover or repair the task status before deciding whether the current run pointer is active or stale.',
+        });
+      }
+      return;
+    }
 
     if (status === 'running' && currentRun.id === undefined) {
       findings.push({
@@ -1122,10 +1184,12 @@ interface CurrentRunCandidate {
   readonly id?: string;
   readonly jsonPath?: string;
   readonly malformed?: boolean;
+  readonly conflicting?: boolean;
 }
 
 function currentRunCandidate(value: Record<string, unknown> | undefined): CurrentRunCandidate {
   if (value === undefined) return {};
+  const valid: Array<{ id: string; jsonPath: string }> = [];
   for (const [field, raw] of [
     ['current_run_id', value.current_run_id],
     ['currentRunId', value.currentRunId],
@@ -1133,11 +1197,22 @@ function currentRunCandidate(value: Record<string, unknown> | undefined): Curren
   ] as const) {
     if (raw === undefined || raw === null) continue;
     const jsonPathField = `value.${field}`;
-    if (typeof raw === 'string' && raw.trim().length > 0) return { id: raw, jsonPath: jsonPathField };
-    if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0) return { id: String(raw), jsonPath: jsonPathField };
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      valid.push({ id: raw, jsonPath: jsonPathField });
+      continue;
+    }
+    if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0) {
+      valid.push({ id: String(raw), jsonPath: jsonPathField });
+      continue;
+    }
     return { jsonPath: jsonPathField, malformed: true };
   }
-  return {};
+  const [first] = valid;
+  if (first === undefined) return {};
+  if (valid.some((candidate) => candidate.id !== first.id)) {
+    return { id: first.id, jsonPath: first.jsonPath, conflicting: true };
+  }
+  return first;
 }
 
 function normalizeTaskStatus(value: unknown): string | undefined {
@@ -1145,7 +1220,7 @@ function normalizeTaskStatus(value: unknown): string | undefined {
 }
 
 function isTerminalKanbanStatus(status: string): boolean {
-  return ['done', 'completed', 'blocked', 'archived', 'cancelled', 'failed'].includes(status);
+  return ['done', 'completed', 'blocked', 'archived', 'cancelled', 'failed', 'stopped'].includes(status);
 }
 
 function statusForKanbanPartialWriteFindings(

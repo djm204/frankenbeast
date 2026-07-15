@@ -144,7 +144,7 @@ Interpretation guidance:
 
 - `clean`: running cards have a current-run pointer and terminal cards have none.
 - `review-required`: a non-running, non-terminal card still has a current-run pointer. Reconcile or clear it before liveness automation acts.
-- `blocked`: a running card has no current run, a terminal card still has a current run, or status/current-run fields are malformed. Treat this as a partial Kanban write: quarantine the record, reclaim the card to a safe queue, or recreate/relink the missing run evidence before dispatch resumes.
+- `blocked`: an unsupported manifest schema is supplied, a running card has no current run, a card has a current run but no status, status/current-run aliases conflict, a terminal card still has a current run, or status/current-run fields are malformed. Treat this as a partial Kanban write: quarantine the record, reclaim the card to a safe queue, or recreate/relink the missing run evidence before dispatch resumes.
 
 Example blocker finding:
 
