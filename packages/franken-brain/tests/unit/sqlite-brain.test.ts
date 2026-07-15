@@ -1652,12 +1652,42 @@ describe('SqliteBrain', () => {
 
       const db = (brain as unknown as { db: Database.Database }).db;
       const suppression = db
-        .prepare(`SELECT memory_key FROM memory_review_suppressions`)
-        .get() as { memory_key: string };
+        .prepare(`SELECT memory_key, created_at FROM memory_review_suppressions`)
+        .get() as { memory_key: string; created_at: string };
       expect(suppression.memory_key).not.toBe('user.preference.secret-contact');
+      const legacyRedactedKey = `[never-store-redacted]:${createHash('sha256')
+        .update(`user.preference.secret-contact:${suppression.created_at}`)
+        .digest('hex')
+        .slice(0, 12)}`;
+      expect(suppression.memory_key).not.toBe(legacyRedactedKey);
       expect(() => brain.working.set('user.preference.secret-contact', 'new value')).toThrow(
         /never-store/,
       );
+    });
+
+    it('checks deletion guards before returning suppressed review proposals', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.secret-contact',
+        value: secret,
+        source: 'chat:turn-secret',
+        confidence: 0.99,
+        reason: 'Operator opted this key out of memory.',
+      });
+      brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+      brain.rightToForget({ query: 'secret-contact' });
+
+      expect(() =>
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.secret-contact',
+          value: secret,
+          source: 'later-chat-turn',
+          confidence: 0.99,
+          reason: 'Suppression should not bypass right-to-forget guards.',
+        }),
+      ).toThrow(/right-to-forget/);
     });
 
     it('uses keyed signatures for review suppressions', () => {
@@ -1688,6 +1718,13 @@ describe('SqliteBrain', () => {
       expect(
         db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
       ).toEqual({ count: 1 });
+    });
+
+    it('indexes review suppression lookup by target store and memory key', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const indexes = db.prepare(`PRAGMA index_list(memory_review_suppressions)`).all() as Array<{ name: string }>;
+
+      expect(indexes.some(index => index.name === 'idx_memory_review_suppressions_target_key')).toBe(true);
     });
 
     it('uses persisted value normalization when signing suppressions', () => {

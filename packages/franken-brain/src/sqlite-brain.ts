@@ -1416,12 +1416,12 @@ export class SqliteMemoryReviewQueue {
     this.validateProposal(proposal);
     let result: MemoryCandidate | undefined;
     const tx = this.db.transaction(() => {
+      assertMemoryCandidateNotDeletionGuarded(this.db, proposal, this.encryption, { checkNeverStore: false });
       const suppression = this.findCandidateSuppression(proposal);
       if (suppression) {
         result = this.suppressedCandidate(proposal, suppression);
         return;
       }
-      assertMemoryCandidateNotDeletionGuarded(this.db, proposal, this.encryption);
       const now = isoNow();
       const candidate: MemoryCandidate = {
         ...proposal,
@@ -1840,8 +1840,8 @@ export class SqliteMemoryReviewQueue {
   ): MemorySuppressionReason | null {
     const candidateValue = stableStringify(canonicalMemoryValue(candidate.value));
     const rows = this.db
-      .prepare(`SELECT * FROM memory_review_suppressions`)
-      .all() as Array<{
+      .prepare(`SELECT * FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ?`)
+      .all(candidate.targetStore, candidate.key) as Array<{
         suppression_reason: MemorySuppressionReason;
         target_store: MemoryCandidateTargetStore;
         memory_key: string;
@@ -1850,9 +1850,6 @@ export class SqliteMemoryReviewQueue {
         evidence_id: string | null;
       }>;
     for (const row of rows) {
-      if (row.target_store !== candidate.targetStore || row.memory_key !== candidate.key) {
-        continue;
-      }
       if (row.suppression_reason === 'never_store') return 'never_store';
       if (stableStringify(canonicalMemoryValue(this.decodeValue(row.value))) !== candidateValue) {
         continue;
@@ -2197,6 +2194,8 @@ export class SqliteBrain implements IBrain {
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE INDEX IF NOT EXISTS idx_memory_review_suppressions_target_key
+        ON memory_review_suppressions(target_store, memory_key);
       CREATE TABLE IF NOT EXISTS memory_deletion_guards (
         selector_hash TEXT NOT NULL,
         guard_kind TEXT NOT NULL,
@@ -2521,11 +2520,8 @@ export class SqliteBrain implements IBrain {
     }
   }
 
-  private redactedReviewKey(key: string, redactedAt: string): string {
-    const suffix = createHash('sha256')
-      .update(`${key}:${redactedAt}`)
-      .digest('hex')
-      .slice(0, 12);
+  private redactedReviewKey(_key: string, _redactedAt: string): string {
+    const suffix = randomBytes(12).toString('base64url');
     return `${NEVER_STORE_REDACTED_VALUE}:${suffix}`;
   }
 
@@ -2896,6 +2892,8 @@ function migrateMemorySchemaDatabase(
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE INDEX IF NOT EXISTS idx_memory_review_suppressions_target_key
+        ON memory_review_suppressions(target_store, memory_key);
     `);
     for (const store of stores) {
       const columnRows = db
@@ -3778,12 +3776,18 @@ function keyPrefixCandidates(key: string): string[] {
   return Array.from(candidates);
 }
 
-function assertMemoryCandidateNotDeletionGuarded(db: Database.Database, proposal: MemoryCandidateProposal, encryption?: MemoryCipher): void {
+function assertMemoryCandidateNotDeletionGuarded(
+  db: Database.Database,
+  proposal: MemoryCandidateProposal,
+  encryption?: MemoryCipher,
+  options: { checkNeverStore?: boolean } = {},
+): void {
   assertNotDeletionGuarded(
     db,
     proposal.key,
     stringifyWorkingMemoryValue(proposal.key, proposal.value),
     encryption,
+    options,
   );
   assertNotDeletionGuarded(
     db,
@@ -3795,6 +3799,7 @@ function assertMemoryCandidateNotDeletionGuarded(db: Database.Database, proposal
       reason: proposal.reason,
     }),
     encryption,
+    options,
   );
 }
 
@@ -3816,8 +3821,14 @@ function reviewPayloadMatchesSelector(
   );
 }
 
-function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string, encryption?: MemoryCipher): void {
-  if (hasNeverStoreSuppressionForKey(db, 'working', key, encryption)) {
+function assertNotDeletionGuarded(
+  db: Database.Database,
+  key: string,
+  serializedValue: string,
+  encryption?: MemoryCipher,
+  options: { checkNeverStore?: boolean } = {},
+): void {
+  if (options.checkNeverStore !== false && hasNeverStoreSuppressionForKey(db, 'working', key, encryption)) {
     throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior never-store review decision');
   }
   const parsed = safeJsonParse(serializedValue);
