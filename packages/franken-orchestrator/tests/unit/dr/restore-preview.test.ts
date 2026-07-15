@@ -7,6 +7,7 @@ import {
   buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
   buildCrossFileStateConsistencyReport,
+  buildKanbanPartialWriteRecoveryReport,
   buildPointInTimeBackupManifest,
   buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
@@ -349,6 +350,219 @@ describe('restore preview conflict detector', () => {
     });
     expect(JSON.stringify(report)).not.toContain('secret-token-value');
     expect(JSON.stringify(report)).not.toContain('pending-token');
+  });
+
+  it('reports clean Kanban task/run state for complete running and terminal cards', () => {
+    const report = buildKanbanPartialWriteRecoveryReport(
+      {
+        schemaVersion: 1,
+        tasks: [
+          { id: 'task-running', value: { status: 'running', current_run_id: 'run-1' } },
+          { id: 'task-done', value: { status: 'done' } },
+        ],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:45:00.000Z' },
+    );
+
+    expect(report).toEqual({
+      checkedAt: '2026-07-14T12:45:00.000Z',
+      wouldWrite: false,
+      status: 'clean',
+      safeToApplyAutomatically: false,
+      findings: [],
+      operatorSummary: expect.stringContaining('clean'),
+    });
+  });
+
+  it('blocks recovery for partial Kanban writes and reports stale run pointers', () => {
+    const report = buildKanbanPartialWriteRecoveryReport(
+      {
+        schemaVersion: 1,
+        tasks: [
+          { id: 'running-without-run', value: { status: 'running' } },
+          { id: 'done-with-run', value: { status: 'done', current_run_id: 'run-stale' } },
+          { id: 'ready-with-run', value: { status: 'ready', currentRunId: 42 } },
+          { id: 'bad-run', value: { status: 'running', current_run_id: '' } },
+        ],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:46:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(report.wouldWrite).toBe(false);
+    expect(report.safeToApplyAutomatically).toBe(false);
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'running-task-missing-current-run',
+          severity: 'blocker',
+          taskId: 'running-without-run',
+          jsonPath: '$.tasks[0].value.current_run_id',
+          recommendation: expect.stringContaining('partial Kanban write'),
+        }),
+        expect.objectContaining({
+          code: 'terminal-task-has-current-run',
+          severity: 'blocker',
+          taskId: 'done-with-run',
+          currentRunId: 'run-stale',
+          jsonPath: '$.tasks[1].value.current_run_id',
+        }),
+        expect.objectContaining({
+          code: 'non-running-task-has-current-run',
+          severity: 'warning',
+          taskId: 'ready-with-run',
+          currentRunId: '42',
+          jsonPath: '$.tasks[2].value.currentRunId',
+        }),
+        expect.objectContaining({
+          code: 'malformed-current-run',
+          severity: 'blocker',
+          taskId: 'bad-run',
+          jsonPath: '$.tasks[3].value.current_run_id',
+        }),
+      ]),
+    );
+    expect(report.operatorSummary).toContain('blocked');
+  });
+
+  it('reports malformed Kanban task status as an explicit edge-case blocker', () => {
+    const report = buildKanbanPartialWriteRecoveryReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'bad-status', value: { status: '', current_run_id: 'run-1' } }],
+      },
+      { checkedAt: '2026-07-14T12:47:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'malformed-task-status',
+        severity: 'blocker',
+        taskId: 'bad-status',
+        jsonPath: '$.tasks[0].value.status',
+        recommendation: expect.stringContaining('Repair or remove'),
+      }),
+    );
+  });
+
+  it('fails closed for unsupported Kanban manifest schemas', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({ schemaVersion: 99, tasks: [] });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'unsupported-schema-version',
+        severity: 'blocker',
+        taskId: '<manifest>',
+        jsonPath: '$.schemaVersion',
+      }),
+    );
+  });
+
+  it('blocks missing and conflicting Kanban status/current-run aliases', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({
+      schemaVersion: 1,
+      tasks: [
+        { id: 'missing-status', value: { current_run_id: 'run-present' } },
+        { id: 'status-conflict', state: 'ready', value: { status: 'running', current_run_id: 'run-1' } },
+        { id: 'run-conflict', value: { status: 'running', current_run_id: 'run-a', currentRunId: 'run-b' } },
+      ],
+    });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'missing-task-status',
+          severity: 'blocker',
+          taskId: 'missing-status',
+          currentRunId: 'run-present',
+        }),
+        expect.objectContaining({
+          code: 'conflicting-task-status',
+          severity: 'blocker',
+          taskId: 'status-conflict',
+          status: 'running',
+        }),
+        expect.objectContaining({
+          code: 'conflicting-current-run',
+          severity: 'blocker',
+          taskId: 'run-conflict',
+          currentRunId: 'run-a',
+        }),
+      ]),
+    );
+  });
+
+  it('treats stopped and deleted Kanban tasks with current runs as terminal stale pointers', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({
+      schemaVersion: 1,
+      tasks: [
+        { id: 'stopped-card', value: { status: 'stopped', current_run_id: 'run-stale' } },
+        { id: 'deleted-card', value: { status: 'deleted', current_run_id: 'run-deleted' } },
+      ],
+    });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'terminal-task-has-current-run',
+          severity: 'blocker',
+          taskId: 'stopped-card',
+          status: 'stopped',
+          currentRunId: 'run-stale',
+        }),
+        expect.objectContaining({
+          code: 'terminal-task-has-current-run',
+          severity: 'blocker',
+          taskId: 'deleted-card',
+          status: 'deleted',
+          currentRunId: 'run-deleted',
+        }),
+      ]),
+    );
+  });
+
+  it('accepts dispatch-run aliases as current run pointers and flags malformed status aliases', () => {
+    const report = buildKanbanPartialWriteRecoveryReport({
+      schemaVersion: 1,
+      tasks: [
+        { id: 'running-dispatch', value: { status: 'running', dispatchRunId: 'dispatch-1' } },
+        { id: 'terminal-dispatch', value: { status: 'done', dispatch_run_id: 'dispatch-stale' } },
+        { id: 'bad-state-alias', state: '', value: { status: 'running', dispatchRunId: 'dispatch-2' } },
+      ],
+    });
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({
+        code: 'running-task-missing-current-run',
+        taskId: 'running-dispatch',
+      }),
+    );
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'terminal-task-has-current-run',
+          taskId: 'terminal-dispatch',
+          currentRunId: 'dispatch-stale',
+          jsonPath: '$.tasks[1].value.dispatch_run_id',
+        }),
+        expect.objectContaining({
+          code: 'malformed-task-status',
+          taskId: 'bad-state-alias',
+          jsonPath: '$.tasks[2].state',
+        }),
+      ]),
+    );
   });
 
   it('reports a clean cross-file state consistency check when references resolve', () => {

@@ -1,6 +1,6 @@
 {
   "name": "frankenbeast",
-  "version": "0.55.0",
+  "version": "0.55.3",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -17,6 +17,7 @@
     "check:package-manager": "node scripts/check-package-manager.mjs",
     "check:dependabot-supply-chain": "node scripts/check-dependabot-supply-chain.mjs",
     "dr:worker-push-rollback:dry-run": "node scripts/worker-push-rollback-plan.mjs --dry-run",
+    "dr:runtime-config-rollback:dry-run": "node scripts/runtime-config-rollback-plan.mjs --dry-run",
     "create:project": "bash scripts/create-project.sh",
     "deps:outdated:major": "node scripts/check-major-outdated.mjs",
     "lint": "node scripts/check-workspace-lint-coverage.mjs && turbo run lint",

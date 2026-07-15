@@ -153,6 +153,41 @@ export interface IssueDegradedModeWorkerRouteInput {
   readonly stopRemainingReason?: string | undefined;
 }
 
+
+export interface IssueWorkerCardProcessSnapshot {
+  /** Stable Kanban/PM worker card id that owns this process. */
+  readonly cardId: string;
+  /** Operating-system process id observed by liveness tooling. */
+  readonly pid: number;
+  /** Optional run id for tools that distinguish multiple attempts on one card. */
+  readonly runId?: string | undefined;
+  /** Optional linked GitHub issue for operator summaries. */
+  readonly issueNumber?: number | undefined;
+  /** Worker owner, profile, or host label that reported the process. */
+  readonly owner?: string | undefined;
+  /** Runtime status reported by the worker/card process monitor. */
+  readonly status?: string | undefined;
+  /** Explicit liveness probe result; omitted means the snapshot is considered live. */
+  readonly alive?: boolean | undefined;
+  readonly startedAt?: string | number | Date | undefined;
+  readonly lastHeartbeatAt?: string | number | Date | undefined;
+}
+
+export interface DuplicateWorkerCardProcessFinding {
+  readonly cardId: string;
+  readonly severity: 'warning';
+  readonly processCount: number;
+  readonly pids: readonly number[];
+  readonly runIds: readonly string[];
+  readonly issueNumbers: readonly number[];
+  readonly owners: readonly string[];
+  readonly statuses: readonly string[];
+  readonly newestStartedAt?: string | undefined;
+  readonly lastHeartbeatAt?: string | undefined;
+  readonly message: string;
+  readonly guidance: string;
+}
+
 export interface IssueSchedulerFairnessBucket {
   readonly severity: 'critical' | 'high' | 'medium' | 'low' | 'unprioritized';
   readonly issueNumbers: readonly number[];
@@ -467,6 +502,108 @@ export async function evaluateIssueBackpressure(
     alerts,
     dependencyCircuitBreakers,
   };
+}
+
+
+const TERMINAL_WORKER_CARD_STATUSES = new Set([
+  'archived',
+  'cancelled',
+  'canceled',
+  'closed',
+  'complete',
+  'completed',
+  'crashed',
+  'deleted',
+  'done',
+  'exited',
+  'failed',
+  'merged',
+  'removed',
+  'skipped',
+  'stopped',
+]);
+
+function activeWorkerCardProcess(snapshot: IssueWorkerCardProcessSnapshot): boolean {
+  if (snapshot.alive === false) return false;
+  if (!snapshot.cardId.trim()) return false;
+  if (!Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) return false;
+  const status = snapshot.status?.trim().toLowerCase();
+  return status === undefined || !TERMINAL_WORKER_CARD_STATUSES.has(status);
+}
+
+function isoTimestamp(value: string | number | Date | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
+function uniqueSortedNumbers(values: Iterable<number | undefined>): number[] {
+  return [...new Set([...values].filter((value): value is number => Number.isSafeInteger(value)))]
+    .sort((a, b) => a - b);
+}
+
+function uniqueSortedStrings(values: Iterable<string | undefined>): string[] {
+  return [...new Set([...values]
+    .map(value => value?.trim())
+    .filter((value): value is string => value !== undefined && value.length > 0))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function maxIsoTimestamp(values: Iterable<string | number | Date | undefined>): string | undefined {
+  let maxMs = Number.NEGATIVE_INFINITY;
+  let maxIso: string | undefined;
+  for (const value of values) {
+    const iso = isoTimestamp(value);
+    if (!iso) continue;
+    const ms = new Date(iso).getTime();
+    if (ms > maxMs) {
+      maxMs = ms;
+      maxIso = iso;
+    }
+  }
+  return maxIso;
+}
+
+export function detectDuplicateWorkerCardProcesses(
+  snapshots: readonly IssueWorkerCardProcessSnapshot[],
+): DuplicateWorkerCardProcessFinding[] {
+  const byCard = new Map<string, IssueWorkerCardProcessSnapshot[]>();
+
+  for (const snapshot of snapshots) {
+    if (!activeWorkerCardProcess(snapshot)) continue;
+    const cardId = snapshot.cardId.trim();
+    const existingForCard = byCard.get(cardId);
+    if (existingForCard) {
+      existingForCard.push(snapshot);
+    } else {
+      byCard.set(cardId, [snapshot]);
+    }
+  }
+
+  const findings: DuplicateWorkerCardProcessFinding[] = [];
+  for (const [cardId, cardSnapshots] of byCard) {
+    const pids = uniqueSortedNumbers(cardSnapshots.map(snapshot => snapshot.pid));
+    if (pids.length < 2) continue;
+
+    const issueNumbers = uniqueSortedNumbers(cardSnapshots.map(snapshot => snapshot.issueNumber));
+    findings.push({
+      cardId,
+      severity: 'warning',
+      processCount: pids.length,
+      pids,
+      runIds: uniqueSortedStrings(cardSnapshots.map(snapshot => snapshot.runId)),
+      issueNumbers,
+      owners: uniqueSortedStrings(cardSnapshots.map(snapshot => snapshot.owner)),
+      statuses: uniqueSortedStrings(cardSnapshots.map(snapshot => snapshot.status)),
+      newestStartedAt: maxIsoTimestamp(cardSnapshots.map(snapshot => snapshot.startedAt)),
+      lastHeartbeatAt: maxIsoTimestamp(cardSnapshots.map(snapshot => snapshot.lastHeartbeatAt)),
+      message: `Worker card ${cardId} has ${pids.length} live processes: ${pids.join(', ')}`,
+      guidance: 'Keep one live owner for the worker card, stop or park the duplicate process, then record the surviving PID/run id in PM/liveness output.',
+    });
+  }
+
+  return findings.sort((a, b) => a.cardId.localeCompare(b.cardId));
 }
 
 function extractSeverity(labels: readonly string[]): number {

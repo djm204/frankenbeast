@@ -586,6 +586,17 @@ describe('ProcessBeastExecutor', () => {
 
     await expect(executor.start(run, createDefinitionWithCwd(workDir))).rejects.toThrow('spawn failed');
 
+    const spawnFailedEvent = repo.listEvents(run.id).find((event) => event.type === 'run.spawn_failed');
+    expect(spawnFailedEvent?.payload).toMatchObject({
+      error: 'spawn failed',
+      crashClassification: {
+        kind: 'spawn_failure',
+        severity: 'error',
+        retryable: false,
+        operatorGuidance: expect.stringContaining('command path'),
+      },
+    });
+
     const expectedWorktree = join(workDir, '.frankenbeast', '.worktrees', agent.id);
     expect(runGit).toHaveBeenCalledWith(['worktree', 'remove', '--force', expectedWorktree], workDir);
     expect(runGit).toHaveBeenCalledWith(['branch', '-D', `beast/${agent.id}`], workDir);
@@ -876,6 +887,15 @@ describe('ProcessBeastExecutor', () => {
       id: attempt.id,
       status: 'stopped',
       stopReason: 'operator_stop',
+    });
+    const stoppedEvent = repo.listEvents(run.id).find((event) => event.type === 'attempt.stopped');
+    expect(stoppedEvent?.payload).toMatchObject({
+      stopReason: 'operator_stop',
+      crashClassification: {
+        kind: 'operator_stop',
+        severity: 'info',
+        retryable: false,
+      },
     });
   });
 
@@ -1493,7 +1513,13 @@ describe('ProcessBeastExecutor', () => {
       expect(failEvent!.payload).toMatchObject({
         exitCode: 1,
         lastStderrLines: ['Error: something broke'],
-        summary: 'Process exited with code 1',
+        summary: 'Worker process exited with code 1 after emitting runtime error output.',
+        crashClassification: {
+          kind: 'runtime_error',
+          severity: 'error',
+          retryable: true,
+          operatorGuidance: expect.stringContaining('stderr tail'),
+        },
       });
     });
 

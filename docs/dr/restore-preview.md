@@ -130,6 +130,36 @@ Interpretation guidance:
 
 The checker only emits safe metadata; it does not echo record `value` payloads, approval tokens, memory content, cron command bodies, or unverified dangling task-reference values.
 
+## Kanban partial-write recovery report
+
+`buildKanbanPartialWriteRecoveryReport(manifest, options)` is a read-only guard for damaged or partially written Kanban task snapshots. It inspects task status and current-run pointers without mutating state and returns structured output for PM/liveness tooling:
+
+- `status`: `clean`, `review-required`, or `blocked`
+- `wouldWrite`: always `false`
+- `safeToApplyAutomatically`: always `false`; recovery requires an operator or explicit repair step
+- `findings`: machine-readable task records with `code`, `severity`, `taskId`, `jsonPath`, and repair guidance
+- `operatorSummary`: a concise handoff for the restore operator
+
+Interpretation guidance:
+
+- `clean`: running cards have a current-run pointer and terminal cards have none.
+- `review-required`: a non-running, non-terminal card still has a current-run pointer. Reconcile or clear it before liveness automation acts.
+- `blocked`: an unsupported manifest schema is supplied, a running card has no current run, a card has a current run but no status, status/current-run aliases conflict, a terminal card still has a current run, or status/current-run fields are malformed. Treat this as a partial Kanban write: quarantine the record, reclaim the card to a safe queue, or recreate/relink the missing run evidence before dispatch resumes.
+
+Example blocker finding:
+
+```json
+{
+  "code": "running-task-missing-current-run",
+  "severity": "blocker",
+  "taskId": "t_1234",
+  "jsonPath": "$.tasks[0].value.current_run_id",
+  "recommendation": "Treat this as a partial Kanban write: reclaim the card to ready or create/relink the missing run record before dispatch resumes."
+}
+```
+
+The report intentionally emits only task ids, normalized status, current-run/dispatch-run ids, JSON paths, and guidance. It does not echo task bodies, comments, secrets, or other record payloads.
+
 ## Kanban card resurrection guardrails
 
 Backup-only task records are treated as `blocker` conflicts. A backup-only task means the backup manifest contains a Kanban card that live state no longer has, so blindly restoring it could resurrect deleted, completed, reassigned, or otherwise intentionally removed work.

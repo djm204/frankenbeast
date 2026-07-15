@@ -11,7 +11,7 @@ export type {
 export { IssueFetcher } from './issue-fetcher.js';
 export { IssueTriage } from './issue-triage.js';
 export { IssueGraphBuilder } from './issue-graph-builder.js';
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode } from './issue-runner.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from './issue-runner.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -30,6 +30,8 @@ export type {
   IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
+  IssueWorkerCardProcessSnapshot,
+  DuplicateWorkerCardProcessFinding,
 } from './issue-runner.js';
 export { IssueReview } from './issue-review.js';
 export type { ReviewIO, ReviewDecision, IssueReviewOptions } from './issue-review.js';

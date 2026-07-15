@@ -10,12 +10,20 @@ import { TokenAggregator, type AggregatedTokenUsage } from './token-aggregator.j
 import { truncateSnapshot } from './format-handoff.js';
 
 export interface ProviderRegistryOptions {
-  /** Maximum retries per provider before failing over */
+  /**
+   * Maximum retries per provider before failing over. Default: 1.
+   * Must be an integer between 0 and 5 so provider outages cannot create
+   * unbounded retry loops across long fallback chains.
+   */
   maxRetriesPerProvider?: number;
-  /** Delay between retries in ms */
+  /** Initial delay between retries in ms */
   retryDelayMs?: number;
+  /** Maximum delay between retries in ms */
+  maxRetryDelayMs?: number;
   /** Rate limit backoff multiplier */
   backoffMultiplier?: number;
+  /** Injectable sleep for deterministic tests */
+  sleep?: (ms: number) => Promise<void>;
   /** Callback fired when switching providers */
   onProviderSwitch?: (event: ProviderSwitchEvent) => void;
 }
@@ -51,8 +59,41 @@ export function createModelProviderFailoverAuditPayload(
 interface ResolvedOptions {
   maxRetriesPerProvider: number;
   retryDelayMs: number;
+  maxRetryDelayMs: number;
   backoffMultiplier: number;
+  sleep: (ms: number) => Promise<void>;
   onProviderSwitch?: ProviderRegistryOptions['onProviderSwitch'];
+}
+
+const MAX_RETRIES_PER_PROVIDER = 5;
+const MAX_RETRY_DELAY_MS = 30_000;
+
+function normalizeMaxRetriesPerProvider(value: number | undefined): number {
+  const normalized = value ?? 1;
+  if (!Number.isInteger(normalized) || normalized < 0 || normalized > MAX_RETRIES_PER_PROVIDER) {
+    throw new Error(`maxRetriesPerProvider must be an integer between 0 and ${MAX_RETRIES_PER_PROVIDER}`);
+  }
+  return normalized;
+}
+
+function normalizeNonNegativeFinite(
+  name: 'retryDelayMs' | 'maxRetryDelayMs',
+  value: number | undefined,
+  defaultValue: number,
+): number {
+  const normalized = value ?? defaultValue;
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    throw new Error(`${name} must be a finite non-negative number`);
+  }
+  return normalized;
+}
+
+function normalizeBackoffMultiplier(value: number | undefined): number {
+  const normalized = value ?? 2;
+  if (!Number.isFinite(normalized) || normalized < 1) {
+    throw new Error('backoffMultiplier must be a finite number greater than or equal to 1');
+  }
+  return normalized;
 }
 
 export class ProviderRegistry {
@@ -72,10 +113,14 @@ export class ProviderRegistry {
     }
     this.providers = providers;
     this.brain = brain;
+    const retryDelayMs = normalizeNonNegativeFinite('retryDelayMs', options.retryDelayMs, 1000);
+    const maxRetryDelayMs = normalizeNonNegativeFinite('maxRetryDelayMs', options.maxRetryDelayMs, MAX_RETRY_DELAY_MS);
     this.opts = {
-      maxRetriesPerProvider: options.maxRetriesPerProvider ?? 1,
-      retryDelayMs: options.retryDelayMs ?? 1000,
-      backoffMultiplier: options.backoffMultiplier ?? 2,
+      maxRetriesPerProvider: normalizeMaxRetriesPerProvider(options.maxRetriesPerProvider),
+      retryDelayMs,
+      maxRetryDelayMs,
+      backoffMultiplier: normalizeBackoffMultiplier(options.backoffMultiplier),
+      sleep: options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
       onProviderSwitch: options.onProviderSwitch,
     };
   }
@@ -168,10 +213,12 @@ export class ProviderRegistry {
               retry < this.opts.maxRetriesPerProvider
             ) {
               lastError = new Error(event.error);
-              const delay =
+              const delay = Math.min(
                 this.opts.retryDelayMs *
-                Math.pow(this.opts.backoffMultiplier, retry);
-              await new Promise((resolve) => setTimeout(resolve, delay));
+                Math.pow(this.opts.backoffMultiplier, retry),
+                this.opts.maxRetryDelayMs,
+              );
+              await this.opts.sleep(delay);
               retried = true;
               break; // discard buffer, retry same provider
             }

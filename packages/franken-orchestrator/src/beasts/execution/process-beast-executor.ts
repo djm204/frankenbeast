@@ -12,6 +12,7 @@ import {
 } from './git-worktree-isolation.js';
 import { wallClockNow } from '@franken/types';
 import type { ProcessSupervisorLike } from './process-supervisor.js';
+import { classifyWorkerCrash } from './worker-crash-classification.js';
 import type { BeastDefinition, BeastProcessSpec, BeastRun, BeastRunAttempt, BeastRunStatus, ModuleConfig } from '../types.js';
 
 const STDERR_BUFFER_SIZE = 50;
@@ -435,6 +436,11 @@ export class ProcessBeastExecutor implements BeastExecutor {
         stopReason: 'spawn_failed',
       });
 
+      const crashClassification = classifyWorkerCrash({
+        stopReason: 'spawn_failed',
+        spawnErrorCode: errorCode,
+        stderrTail: earlyStderrLines,
+      });
       const spawnFailedEvent = {
         type: 'run.spawn_failed' as const,
         payload: {
@@ -442,6 +448,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
           ...(errorCode ? { code: errorCode } : {}),
           command: processSpec.command,
           args: [...processSpec.args],
+          crashClassification,
         },
         createdAt: failedAt,
       };
@@ -827,6 +834,12 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const attemptRecord = this.repository.getAttempt(attemptId);
     const durationMs = attemptRecord?.startedAt ? finishedAtMs - new Date(attemptRecord.startedAt).getTime() : undefined;
     const redactedStderrTail = code !== 0 ? redactFailureStderrTail(stderrTail, configuredSecrets) : [];
+    const crashClassification = classifyWorkerCrash({
+      code,
+      signal,
+      stopReason,
+      stderrTail: redactedStderrTail,
+    });
     const exitEvent = {
       attemptId,
       type: eventType,
@@ -834,7 +847,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
         exitCode: code,
         signal,
         ...(durationMs !== undefined ? { durationMs } : {}),
-        ...(code !== 0 ? { lastStderrLines: redactedStderrTail, summary: `Process exited with code ${code}` } : {}),
+        ...(code !== 0 ? { lastStderrLines: redactedStderrTail, summary: crashClassification.summary } : {}),
+        crashClassification,
       },
       createdAt: finishedAt,
     };
@@ -919,7 +933,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const finishEvent = {
       attemptId: attempt.id,
       type: (status === 'stopped' ? 'attempt.stopped' : 'attempt.finished') as string,
-      payload: { stopReason },
+      payload: {
+        stopReason,
+        crashClassification: classifyWorkerCrash({ stopReason }),
+      },
       createdAt: finishedAt,
     };
     this.repository.appendEvent(runId, finishEvent);

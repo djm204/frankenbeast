@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode } from '../../../src/issues/issue-runner.js';
+import { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from '../../../src/issues/issue-runner.js';
 import type { IssueBackpressureSignals, IssueBackpressureThresholds, IssueRunnerConfig } from '../../../src/issues/issue-runner.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
 import type { PlanGraph, ICheckpointStore, ILogger, BeastLoopDeps } from '../../../src/deps.js';
@@ -53,10 +53,41 @@ interface BurstDispatchLoadFixture {
   readonly edgeCases: readonly BurstDispatchLoadFixtureCase[];
 }
 
+interface FlakyLivenessReplayRouteExpectation {
+  readonly mode: 'normal' | 'degraded';
+  readonly action: 'start-fresh' | 'resume-checkpointed' | 'complete-checkpointed' | 'defer-fresh-start';
+  readonly reason?: string;
+}
+
+interface FlakyLivenessReplaySnapshot {
+  readonly name: string;
+  readonly checkpointHasIssueProgress: boolean;
+  readonly graphHasCheckpointProgress: boolean;
+  readonly stopRemainingReason?: string;
+  readonly signals: IssueBackpressureSignals;
+  readonly expectedAllowed: boolean;
+  readonly expectedReasons: readonly string[];
+  readonly expectedRoute: FlakyLivenessReplayRouteExpectation;
+}
+
+interface FlakyLivenessReplayFixture {
+  readonly description: string;
+  readonly issue: BurstDispatchIssueFixture;
+  readonly thresholds: IssueBackpressureThresholds;
+  readonly snapshots: readonly FlakyLivenessReplaySnapshot[];
+  readonly edgeCases: readonly FlakyLivenessReplaySnapshot[];
+}
+
 function readBurstDispatchLoadFixture(): BurstDispatchLoadFixture {
   return JSON.parse(
     readFileSync(join(__dirname, 'fixtures', 'burst-dispatch-load.json'), 'utf8'),
   ) as BurstDispatchLoadFixture;
+}
+
+function readFlakyLivenessReplayFixture(): FlakyLivenessReplayFixture {
+  return JSON.parse(
+    readFileSync(join(__dirname, 'fixtures', 'flaky-liveness-replay.json'), 'utf8'),
+  ) as FlakyLivenessReplayFixture;
 }
 
 vi.mock('../../../src/beast-loop.js', () => {
@@ -86,6 +117,14 @@ function makeIssue(overrides: Partial<GithubIssue> & { number: number }): Github
     url: `https://github.com/org/repo/issues/${overrides.number}`,
     ...overrides,
   };
+}
+
+function makeFixtureIssue(fixtureIssue: BurstDispatchIssueFixture): GithubIssue {
+  return makeIssue({
+    number: fixtureIssue.number,
+    title: fixtureIssue.title,
+    labels: [...fixtureIssue.labels],
+  });
 }
 
 function makeTriage(issueNumber: number, complexity: 'one-shot' | 'chunked' = 'one-shot'): TriageResult {
@@ -220,6 +259,88 @@ function makeIssueRuntimeSupport(): IssueRuntimeSupport {
     })),
   };
 }
+
+
+describe('duplicate worker-card process detector', () => {
+  it('reports duplicate live process ownership for the same worker card with structured guidance', () => {
+    const findings = detectDuplicateWorkerCardProcesses([
+      {
+        cardId: 't_worker_1',
+        pid: 4202,
+        runId: 'run-10',
+        issueNumber: 1809,
+        owner: 'worker-a',
+        status: 'running',
+        startedAt: '2026-07-15T09:00:00.000Z',
+        lastHeartbeatAt: '2026-07-15T09:10:00.000Z',
+      },
+      {
+        cardId: 't_worker_1',
+        pid: 4201,
+        runId: 'run-9',
+        issueNumber: 1809,
+        owner: 'worker-b',
+        status: 'claimed',
+        startedAt: '2026-07-15T09:05:00.000Z',
+        lastHeartbeatAt: '2026-07-15T09:12:00.000Z',
+      },
+      { cardId: 't_worker_2', pid: 4300, runId: 'run-11', issueNumber: 1810, owner: 'worker-c', status: 'running' },
+    ]);
+
+    expect(findings).toEqual([
+      {
+        cardId: 't_worker_1',
+        severity: 'warning',
+        processCount: 2,
+        pids: [4201, 4202],
+        runIds: ['run-10', 'run-9'],
+        issueNumbers: [1809],
+        owners: ['worker-a', 'worker-b'],
+        statuses: ['claimed', 'running'],
+        newestStartedAt: '2026-07-15T09:05:00.000Z',
+        lastHeartbeatAt: '2026-07-15T09:12:00.000Z',
+        message: 'Worker card t_worker_1 has 2 live processes: 4201, 4202',
+        guidance: 'Keep one live owner for the worker card, stop or park the duplicate process, then record the surviving PID/run id in PM/liveness output.',
+      },
+    ]);
+  });
+
+
+
+  it('keeps blocked live workers visible while ignoring stopped or deleted cards', () => {
+    const findings = detectDuplicateWorkerCardProcesses([
+      { cardId: 't_blocked', pid: 5101, status: 'blocked', alive: true, runId: 'run-blocked-a' },
+      { cardId: 't_blocked', pid: 5102, status: 'blocked', alive: true, runId: 'run-blocked-b' },
+      { cardId: 't_stopped', pid: 5103, status: 'stopped' },
+      { cardId: 't_stopped', pid: 5104, status: 'deleted' },
+    ]);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      cardId: 't_blocked',
+      pids: [5101, 5102],
+      runIds: ['run-blocked-a', 'run-blocked-b'],
+      statuses: ['blocked'],
+    });
+  });
+
+  it('ignores terminal, dead, invalid, and repeated-PID snapshots so false positives stay quiet', () => {
+    const findings = detectDuplicateWorkerCardProcesses([
+      { cardId: 't_complete', pid: 5001, status: 'completed' },
+      { cardId: 't_complete', pid: 5002, status: 'done' },
+      { cardId: 't_stopped', pid: 5011, status: 'stopped' },
+      { cardId: 't_stopped', pid: 5012, status: 'deleted' },
+      { cardId: 't_dead', pid: 5003, alive: false, status: 'running' },
+      { cardId: 't_dead', pid: 5004, alive: false, status: 'claimed' },
+      { cardId: 't_same_pid', pid: 5005, status: 'running' },
+      { cardId: 't_same_pid', pid: 5005, status: 'claimed' },
+      { cardId: '', pid: 5006, status: 'running' },
+      { cardId: 't_invalid_pid', pid: 0, status: 'running' },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+});
 
 describe('degraded-mode worker routing policy', () => {
   it('defers fresh worker starts during degraded backpressure with operator guidance', () => {
@@ -551,7 +672,7 @@ describe('IssueRunner', () => {
         const decision = await evaluateIssueBackpressure(
           { thresholds: fixture.thresholds, signals: () => snapshot.signals },
           {
-            issue: makeIssue(fixture.issues[0]!),
+            issue: makeFixtureIssue(fixture.issues[0]!),
             index: 0,
             totalIssues: fixture.issues.length,
             pendingIssueCount: fixture.issues.length,
@@ -574,7 +695,7 @@ describe('IssueRunner', () => {
       const decision = await evaluateIssueBackpressure(
         { thresholds: edgeCase!.thresholds, signals: () => edgeCase!.signals },
         {
-          issue: makeIssue(fixture.issues[0]!),
+          issue: makeFixtureIssue(fixture.issues[0]!),
           index: 0,
           totalIssues: fixture.issues.length,
           pendingIssueCount: fixture.issues.length,
@@ -586,6 +707,46 @@ describe('IssueRunner', () => {
 
       expect(decision.allowed).toBe(false);
       expect(decision.reasons).toEqual(edgeCase!.expectedReasons);
+    });
+
+    it('replays flaky liveness fixture snapshots into worker routing decisions', async () => {
+      const fixture = readFlakyLivenessReplayFixture();
+      const replayCases = [...fixture.snapshots, ...fixture.edgeCases];
+
+      expect(fixture.description).toContain('Flaky liveness replay fixture');
+      expect(fixture.issue.number).toBe(1806);
+      expect(replayCases.map(testCase => testCase.name)).toEqual(expect.arrayContaining([
+        'process-capacity-spike-defers-fresh-worker',
+        'github-flake-resumes-checkpointed-worker',
+        'recovered-liveness-starts-fresh-worker',
+        'unconfigured-unrelated-dependency-does-not-pause-liveness',
+      ]));
+
+      for (const testCase of replayCases) {
+        const decision = await evaluateIssueBackpressure(
+          { thresholds: fixture.thresholds, signals: () => testCase.signals },
+          {
+            issue: makeFixtureIssue(fixture.issue),
+            index: 0,
+            totalIssues: 1,
+            pendingIssueCount: 1,
+            cumulativeTokens: 0,
+            budgetTokens: 1_000_000,
+            providerBudgetTokensRemaining: 1_000_000,
+          },
+        );
+        const route = routeIssueWorkerForDegradedMode({
+          issue: makeFixtureIssue(fixture.issue),
+          checkpointHasIssueProgress: testCase.checkpointHasIssueProgress,
+          graphHasCheckpointProgress: testCase.graphHasCheckpointProgress,
+          backpressureDecision: decision,
+          stopRemainingReason: testCase.stopRemainingReason,
+        });
+
+        expect(decision.allowed, testCase.name).toBe(testCase.expectedAllowed);
+        expect(decision.reasons, testCase.name).toEqual(testCase.expectedReasons);
+        expect(route, testCase.name).toMatchObject(testCase.expectedRoute);
+      }
     });
 
     it('skips fresh issue starts when active process capacity is exhausted and explains the throttle', async () => {

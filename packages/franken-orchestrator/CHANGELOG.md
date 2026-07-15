@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.49.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.49.1...@franken/orchestrator-v0.49.2) (2026-07-15)
+
+
+### Tests
+
+* **orchestrator:** add flaky liveness replay fixture ([#2280](https://github.com/djm204/frankenbeast/issues/2280)) ([6df3e58](https://github.com/djm204/frankenbeast/commit/6df3e586c97be11e5773464e670e0ce5c381f2ed)), closes [#1806](https://github.com/djm204/frankenbeast/issues/1806)
+
+## [0.49.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.49.0...@franken/orchestrator-v0.49.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **orchestrator:** bound provider failure retries ([33718ea](https://github.com/djm204/frankenbeast/commit/33718ea2484d2fe8a21dc48a1ebfb7e8fdc73ba8)), closes [#1807](https://github.com/djm204/frankenbeast/issues/1807)
+* **orchestrator:** detect duplicate worker-card processes ([#2281](https://github.com/djm204/frankenbeast/issues/2281)) ([0ef8ec6](https://github.com/djm204/frankenbeast/commit/0ef8ec64345bc33f3d5a665a04be21821018385a))
+* **stability:** classify worker crash outcomes ([#2285](https://github.com/djm204/frankenbeast/issues/2285)) ([1bbbd84](https://github.com/djm204/frankenbeast/commit/1bbbd8461d705a5ef9fc283c7705e46c6aac4175))
+
 ## [0.49.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.48.0...@franken/orchestrator-v0.49.0) (2026-07-15)
 
 

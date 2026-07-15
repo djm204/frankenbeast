@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -68,6 +68,8 @@ export type {
   IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
+  IssueWorkerCardProcessSnapshot,
+  DuplicateWorkerCardProcessFinding,
 } from './issues/index.js';
 
 // Config
@@ -242,6 +244,7 @@ export {
   buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
   buildCrossFileStateConsistencyReport,
+  buildKanbanPartialWriteRecoveryReport,
   buildPointInTimeBackupManifest,
   buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
@@ -266,6 +269,11 @@ export type {
   CrossFileStateConsistencyOptions,
   CrossFileStateConsistencyReport,
   CrossFileStateConsistencyStatus,
+  KanbanPartialWriteRecoveryFinding,
+  KanbanPartialWriteRecoveryFindingCode,
+  KanbanPartialWriteRecoveryOptions,
+  KanbanPartialWriteRecoveryReport,
+  KanbanPartialWriteRecoveryStatus,
   PointInTimeBackupManifest,
   PointInTimeBackupManifestMetadata,
   PointInTimeBackupManifestOptions,
