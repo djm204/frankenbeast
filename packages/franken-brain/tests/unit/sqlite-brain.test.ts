@@ -1610,6 +1610,86 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('retires pending review candidates that match right-to-forget selectors', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'contact.pending-review',
+        value: `Candidate contains ${secret}`,
+        source: 'chat:turn-secret',
+        confidence: 0.9,
+        reason: 'Pending candidate should be retired by deletion.',
+      });
+
+      const report = brain.rightToForget({ query: secret });
+
+      expect(report.remainingReferences).toBe(0);
+      expect(brain.memoryReview.list()).toHaveLength(0);
+      const suppressed = brain.memoryReview.list('suppressed')[0];
+      expect(suppressed).toMatchObject({
+        id: candidate.id,
+        status: 'suppressed',
+        suppressionReason: 'never_store',
+        value: '[never-store-redacted]',
+      });
+      brain.memoryReview.approve(candidate.id);
+      expect(brain.working.has('contact.pending-review')).toBe(false);
+    });
+
+    it('keeps never-store enforcement after redacting suppression keys', () => {
+      const secret = 'alice@example.test';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.secret-contact',
+        value: secret,
+        source: 'chat:turn-secret',
+        confidence: 0.99,
+        reason: 'Operator opted this key out of memory.',
+      });
+      brain.memoryReview.neverStore(candidate.id, { reviewer: 'operator' });
+
+      brain.rightToForget({ query: 'secret-contact' });
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const suppression = db
+        .prepare(`SELECT memory_key FROM memory_review_suppressions`)
+        .get() as { memory_key: string };
+      expect(suppression.memory_key).not.toBe('user.preference.secret-contact');
+      expect(() => brain.working.set('user.preference.secret-contact', 'new value')).toThrow(
+        /never-store/,
+      );
+    });
+
+    it('uses keyed signatures for review suppressions', () => {
+      const key = 'user.preference.low-entropy';
+      const source = 'chat:turn-17';
+      const evidenceId = 'evt-17';
+      const value = 'tiny-secret';
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key,
+        value,
+        source,
+        evidenceId,
+        confidence: 0.8,
+        reason: 'Rejected candidate should use keyed lookup material.',
+      });
+
+      brain.memoryReview.reject(candidate.id, { reviewer: 'operator' });
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const suppression = db
+        .prepare(`SELECT signature FROM memory_review_suppressions`)
+        .get() as { signature: string };
+      const legacySignature = createHash('sha256')
+        .update(JSON.stringify(['rejected', 'working', key, source, evidenceId, JSON.stringify(value)]))
+        .digest('hex');
+      expect(suppression.signature).not.toBe(legacySignature);
+      expect(
+        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
+      ).toEqual({ count: 1 });
+    });
+
     it('uses persisted value normalization when signing suppressions', () => {
       const value = { seenAt: new Date('2026-07-14T00:00:00.000Z') };
       const candidate = brain.memoryReview.propose({
@@ -2302,6 +2382,7 @@ describe('SqliteBrain', () => {
           'memory_review_candidates',
           'memory_review_provenance',
           'memory_review_suppressions',
+          'memory_deletion_hash_keys',
         ]);
 
         const migrated = SqliteBrain.migrateMemoryEncryption(dbPath, {

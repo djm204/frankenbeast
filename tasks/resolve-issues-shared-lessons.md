@@ -5,6 +5,9 @@
 - Redact destructive privacy selectors before every audit/governance sink, including proxy/envelope validation failures and governor logs; if a tool is destructive, route it through the same governance path as sibling deletion tools rather than exempting it as non-executing data.
 - Deletion guards should cover source-scope key segments and replay/hydrate should install guards before restoring user data, while allowing the tool’s own right-to-forget audit event to round-trip without blocking hydration.
 - After Codex review on right-to-forget flows, regression-test every reinsertion path it names: stale multi-instance flush, learning-event writes, key-only query matches, episodic step text, substring query semantics, terminal source-scope key segments, checkpoint deletion/guards, and forged audit-event hydration.
+- For memory review/consent queues, right-to-forget must also guard candidate edits, reviewer/note metadata, and raw nested candidate values; redaction must scrub review `memory_key` fields and count review rows in public derived-deletion totals.
+- When hydrating snapshots over an existing memory DB, clear stale review candidates/provenance/suppressions before restoring working rows so old never-store suppressions cannot block snapshot data.
+- If persistence skips writes based on an in-memory cache, re-read the current DB row first; another process may have overwritten the persisted value while this instance's cache still looks unchanged.
 
 ## 2026-07-14 — Observer classification verification
 - In fresh worktrees, build `@franken/types` before running `@franken/observer` typecheck/build because observer imports generated workspace package exports.
