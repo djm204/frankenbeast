@@ -232,6 +232,31 @@ describe('restore preview conflict detector', () => {
     );
   });
 
+  it('fails closed when loaded encryption metadata has a non-boolean encrypted flag', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      {
+        schemaVersion: 1,
+        encryption: {
+          encrypted: 'false',
+          algorithm: 'aes-256-gcm',
+          keyRef: 'dr/backups/prod-primary',
+          artifactDigest: 'sha256:abcdef',
+        } as unknown as RestorePreviewManifest['encryption'],
+        tasks: [],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.encrypted).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'backup-not-encrypted', severity: 'blocker' }),
+    );
+  });
+
   it('warns when encryption is present but the report lacks restore-critical references', () => {
     const report = buildBackupEncryptionVerificationReport(
       {

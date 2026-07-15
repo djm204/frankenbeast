@@ -123,11 +123,11 @@ export function buildBackupEncryptionVerificationReport(
         'Do not restore or archive this backup as verified; regenerate it with encryption metadata before proceeding.',
     });
   } else {
-    if (!encryption.encrypted) {
+    if (encryption.encrypted !== true) {
       findings.push({
         code: 'backup-not-encrypted',
         severity: 'blocker',
-        message: 'Backup manifest explicitly reports that the backup artifact is not encrypted.',
+        message: 'Backup manifest does not explicitly report that the backup artifact is encrypted.',
         recommendation: 'Regenerate the backup with encryption enabled before using it for disaster recovery.',
       });
     }
