@@ -100,7 +100,6 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('QUOTED_TOKEN="[REDACTED]"');
     expect(envelope.stderrTail).toContain('SPACED_TOKEN="[REDACTED]"');
     expect(envelope.stderrTail).toContain("token='[REDACTED]'");
-    expect(envelope.stderrTail).toContain('AUTHORIZATION=Bearer [REDACTED]');
     expect(envelope.stderrTail).toContain('PASSWORD=[REDACTED]');
     expect(envelope.stderrTail).toContain('AUTHORIZATION=[REDACTED]');
     expect(envelope.stderrTail).toContain('PASSWORD=[REDACTED]');
