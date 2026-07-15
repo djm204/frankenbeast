@@ -390,6 +390,16 @@ describe('WebhookNotifier', () => {
         fetch: mockFetch,
       })).toThrow('url host ::1 is not allowed')
       expect(() => new WebhookNotifier({
+        url: 'https://[::ffff:192.168.1.10]/api/webhooks/123/secret',
+        allowedTargets: ['https://[::ffff:192.168.1.10]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host ::ffff:c0a8:10a is not allowed')
+      expect(() => new WebhookNotifier({
+        url: 'https://[fe90::1]/api/webhooks/123/secret',
+        allowedTargets: ['https://[fe90::1]/api/webhooks/'],
+        fetch: mockFetch,
+      })).toThrow('url host fe90::1 is not allowed')
+      expect(() => new WebhookNotifier({
         url: 'https://192.168.1.10/api/webhooks/123/secret',
         allowedTargets: ['https://192.168.1.10/api/webhooks/'],
         fetch: mockFetch,

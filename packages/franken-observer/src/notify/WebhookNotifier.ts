@@ -146,13 +146,13 @@ function validatePublicWebhookHost(url: URL, fieldName: string): void {
   }
 
   if (ipVersion === 6) {
-    const normalized = hostname.replace(/^\[|\]$/g, '').toLowerCase()
-    if (
-      normalized === '::1' ||
-      normalized.startsWith('fc') ||
-      normalized.startsWith('fd') ||
-      normalized.startsWith('fe80:')
-    ) {
+    const normalized = hostname.toLowerCase()
+    const firstHextet = Number.parseInt(normalized.split(':', 1)[0] || '0', 16)
+    const isLoopback = normalized === '::1'
+    const isUniqueLocal = firstHextet >= 0xfc00 && firstHextet <= 0xfdff
+    const isLinkLocal = firstHextet >= 0xfe80 && firstHextet <= 0xfebf
+    const isIpv4Mapped = normalized.includes('::ffff:')
+    if (isLoopback || isUniqueLocal || isLinkLocal || isIpv4Mapped) {
       throw new TypeError(`${fieldName} host ${hostname} is not allowed`)
     }
   }
