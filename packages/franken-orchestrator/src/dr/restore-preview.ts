@@ -1,5 +1,47 @@
 export type RestorePreviewArea = 'schema' | 'tasks' | 'approvals' | 'memory' | 'cron';
 
+export type BackupEncryptionVerificationStatus = 'verified' | 'warning' | 'failed';
+
+export type BackupEncryptionVerificationSeverity = 'info' | 'warning' | 'blocker';
+
+export type BackupEncryptionVerificationFindingCode =
+  | 'missing-encryption-metadata'
+  | 'backup-not-encrypted'
+  | 'missing-algorithm'
+  | 'unsupported-algorithm'
+  | 'missing-key-reference'
+  | 'missing-artifact-digest';
+
+export interface BackupEncryptionMetadata {
+  readonly encrypted: boolean;
+  readonly algorithm?: string;
+  readonly keyRef?: string;
+  readonly artifactDigest?: string;
+  readonly generatedAt?: string;
+}
+
+export interface BackupEncryptionVerificationFinding {
+  readonly code: BackupEncryptionVerificationFindingCode;
+  readonly severity: BackupEncryptionVerificationSeverity;
+  readonly message: string;
+  readonly recommendation: string;
+}
+
+export interface BackupEncryptionVerificationReport {
+  /** ISO timestamp for when the report was generated, supplied by callers for deterministic tests. */
+  readonly checkedAt: string;
+  readonly status: BackupEncryptionVerificationStatus;
+  readonly encrypted: boolean;
+  readonly metadata?: BackupEncryptionMetadata;
+  readonly findings: readonly BackupEncryptionVerificationFinding[];
+  readonly operatorSummary: string;
+}
+
+export interface BackupEncryptionVerificationOptions {
+  readonly checkedAt?: string;
+  readonly allowedAlgorithms?: readonly string[];
+}
+
 export type RestorePreviewConflictType =
   | 'schema-mismatch'
   | 'changed'
@@ -19,6 +61,7 @@ export interface RestorePreviewRecord {
 
 export interface RestorePreviewManifest {
   readonly schemaVersion: number;
+  readonly encryption?: BackupEncryptionMetadata;
   readonly tasks?: readonly RestorePreviewRecord[];
   readonly approvals?: readonly RestorePreviewRecord[];
   readonly memory?: readonly RestorePreviewRecord[];
@@ -56,6 +99,87 @@ const AREA_ACCESSORS = {
   cron: (manifest: RestorePreviewManifest) => manifest.cron ?? [],
 } satisfies Record<ComparableArea, (manifest: RestorePreviewManifest) => readonly RestorePreviewRecord[]>;
 
+const DEFAULT_ALLOWED_BACKUP_ENCRYPTION_ALGORITHMS = ['aes-256-gcm', 'xchacha20-poly1305'] as const;
+
+export function buildBackupEncryptionVerificationReport(
+  manifest: RestorePreviewManifest,
+  options: BackupEncryptionVerificationOptions = {},
+): BackupEncryptionVerificationReport {
+  const checkedAt = options.checkedAt ?? new Date().toISOString();
+  const encryption = manifest.encryption;
+  const findings: BackupEncryptionVerificationFinding[] = [];
+  const allowedAlgorithms = new Set(
+    (options.allowedAlgorithms ?? DEFAULT_ALLOWED_BACKUP_ENCRYPTION_ALGORITHMS).map((algorithm) =>
+      algorithm.toLowerCase(),
+    ),
+  );
+
+  if (encryption === undefined) {
+    findings.push({
+      code: 'missing-encryption-metadata',
+      severity: 'blocker',
+      message: 'Backup manifest does not include encryption metadata.',
+      recommendation:
+        'Do not restore or archive this backup as verified; regenerate it with encryption metadata before proceeding.',
+    });
+  } else {
+    if (!encryption.encrypted) {
+      findings.push({
+        code: 'backup-not-encrypted',
+        severity: 'blocker',
+        message: 'Backup manifest explicitly reports that the backup artifact is not encrypted.',
+        recommendation: 'Regenerate the backup with encryption enabled before using it for disaster recovery.',
+      });
+    }
+
+    const algorithm = encryption.algorithm?.trim();
+    if (algorithm === undefined || algorithm.length === 0) {
+      findings.push({
+        code: 'missing-algorithm',
+        severity: 'blocker',
+        message: 'Backup encryption metadata is missing the encryption algorithm.',
+        recommendation: 'Record the cipher suite used for the backup so operators can verify it before restore.',
+      });
+    } else if (!allowedAlgorithms.has(algorithm.toLowerCase())) {
+      findings.push({
+        code: 'unsupported-algorithm',
+        severity: 'warning',
+        message: `Backup encryption algorithm ${algorithm} is not in the allowed algorithm list.`,
+        recommendation: `Use one of: ${[...allowedAlgorithms].sort().join(', ')}; otherwise require an explicit operator exception.`,
+      });
+    }
+
+    if (encryption.keyRef === undefined || encryption.keyRef.trim() === '') {
+      findings.push({
+        code: 'missing-key-reference',
+        severity: 'warning',
+        message: 'Backup encryption metadata is missing the logical key reference.',
+        recommendation: 'Record the logical key reference so restore operators can locate the correct decrypt key.',
+      });
+    }
+
+    if (encryption.artifactDigest === undefined || encryption.artifactDigest.trim() === '') {
+      findings.push({
+        code: 'missing-artifact-digest',
+        severity: 'warning',
+        message: 'Backup encryption metadata is missing the encrypted artifact digest.',
+        recommendation: 'Record the encrypted artifact digest so operators can detect tampering or partial backups.',
+      });
+    }
+  }
+
+  const status = statusForEncryptionFindings(findings);
+
+  return {
+    checkedAt,
+    status,
+    encrypted: encryption?.encrypted === true,
+    ...(encryption === undefined ? {} : { metadata: { ...encryption } }),
+    findings,
+    operatorSummary: operatorSummaryForEncryptionReport(status, findings.length),
+  };
+}
+
 export function detectRestorePreviewConflicts(
   backup: RestorePreviewManifest,
   live: RestorePreviewManifest,
@@ -90,6 +214,23 @@ export function detectRestorePreviewConflicts(
     },
     conflicts,
   };
+}
+
+function statusForEncryptionFindings(
+  findings: readonly BackupEncryptionVerificationFinding[],
+): BackupEncryptionVerificationStatus {
+  if (findings.some((finding) => finding.severity === 'blocker')) return 'failed';
+  if (findings.some((finding) => finding.severity === 'warning')) return 'warning';
+  return 'verified';
+}
+
+function operatorSummaryForEncryptionReport(
+  status: BackupEncryptionVerificationStatus,
+  findingCount: number,
+): string {
+  if (status === 'verified') return 'Backup encryption is verified; no encryption blockers or warnings were found.';
+  if (status === 'warning') return `Backup encryption is present but has ${findingCount} warning(s) requiring operator review.`;
+  return `Backup encryption verification failed with ${findingCount} blocker/warning finding(s); do not restore blindly.`;
 }
 
 function compareRecords(
