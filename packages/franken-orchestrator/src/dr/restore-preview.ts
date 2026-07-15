@@ -161,6 +161,41 @@ export interface CrossFileStateConsistencyOptions {
   readonly manifestPath?: string;
 }
 
+export type KanbanPartialWriteRecoveryStatus = 'clean' | 'review-required' | 'blocked';
+
+export type KanbanPartialWriteRecoveryFindingCode =
+  | 'malformed-task-status'
+  | 'malformed-current-run'
+  | 'running-task-missing-current-run'
+  | 'terminal-task-has-current-run'
+  | 'non-running-task-has-current-run';
+
+export interface KanbanPartialWriteRecoveryFinding {
+  readonly code: KanbanPartialWriteRecoveryFindingCode;
+  readonly severity: RestorePreviewSeverity;
+  readonly taskId: string;
+  readonly jsonPath: string;
+  readonly status?: string;
+  readonly currentRunId?: string;
+  readonly message: string;
+  readonly recommendation: string;
+}
+
+export interface KanbanPartialWriteRecoveryReport {
+  /** ISO timestamp for when the report was generated, supplied by callers for deterministic tests. */
+  readonly checkedAt: string;
+  /** Explicitly records that partial-write recovery planning is read-only and performs no restore writes. */
+  readonly wouldWrite: false;
+  readonly status: KanbanPartialWriteRecoveryStatus;
+  readonly safeToApplyAutomatically: false;
+  readonly findings: readonly KanbanPartialWriteRecoveryFinding[];
+  readonly operatorSummary: string;
+}
+
+export interface KanbanPartialWriteRecoveryOptions {
+  readonly checkedAt?: string;
+}
+
 export type RestorePreviewMode = 'normal' | 'recovery';
 
 export type RestorePreviewDestructiveActionType =
@@ -640,6 +675,106 @@ export function buildCrossFileStateConsistencyReport(
   };
 }
 
+export function buildKanbanPartialWriteRecoveryReport(
+  manifest: RestorePreviewManifest,
+  options: KanbanPartialWriteRecoveryOptions = {},
+): KanbanPartialWriteRecoveryReport {
+  const checkedAt = options.checkedAt ?? new Date().toISOString();
+  const findings: KanbanPartialWriteRecoveryFinding[] = [];
+
+  AREA_ACCESSORS.tasks(manifest).forEach((record, index) => {
+    const taskId = typeof record.id === 'string' && record.id.trim().length > 0 ? record.id : '<missing>';
+    const value = isRecord(record.value) ? record.value : undefined;
+    const statusCandidate = value !== undefined && 'status' in value ? value.status : record.state;
+    const statusPath = value !== undefined && 'status' in value ? areaRecordJsonPath('tasks', index, 'value.status') : areaRecordJsonPath('tasks', index, 'state');
+    const status = normalizeTaskStatus(statusCandidate);
+    const currentRun = currentRunCandidate(value);
+
+    if (statusCandidate !== undefined && status === undefined) {
+      findings.push({
+        code: 'malformed-task-status',
+        severity: 'blocker',
+        taskId,
+        jsonPath: statusPath,
+        message: `Kanban task '${taskId}' has a malformed status value.`,
+        recommendation:
+          'Quarantine or repair this task before recovery so automation does not guess whether the card should run, block, or remain terminal.',
+      });
+    }
+
+    if (currentRun.malformed) {
+      findings.push({
+        code: 'malformed-current-run',
+        severity: 'blocker',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, currentRun.jsonPath ?? 'value.current_run_id'),
+        ...(status === undefined ? {} : { status }),
+        message: `Kanban task '${taskId}' has a malformed current run pointer.`,
+        recommendation:
+          'Repair or clear the current run pointer before resuming dispatch; otherwise recovery tooling cannot distinguish a live worker from a partial write.',
+      });
+      return;
+    }
+
+    if (status === undefined) return;
+
+    if (status === 'running' && currentRun.id === undefined) {
+      findings.push({
+        code: 'running-task-missing-current-run',
+        severity: 'blocker',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, 'value.current_run_id'),
+        status,
+        message: `Kanban task '${taskId}' is running but has no current run pointer.`,
+        recommendation:
+          'Treat this as a partial Kanban write: reclaim the card to ready or create/relink the missing run record before dispatch resumes.',
+      });
+      return;
+    }
+
+    if (currentRun.id === undefined) return;
+
+    if (isTerminalKanbanStatus(status)) {
+      findings.push({
+        code: 'terminal-task-has-current-run',
+        severity: 'blocker',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, currentRun.jsonPath ?? 'value.current_run_id'),
+        status,
+        currentRunId: currentRun.id,
+        message: `Terminal Kanban task '${taskId}' still points at current run '${currentRun.id}'.`,
+        recommendation:
+          'Clear the stale current run pointer before restore or dispatch so terminal cards are not resurrected by a partial write.',
+      });
+      return;
+    }
+
+    if (status !== 'running') {
+      findings.push({
+        code: 'non-running-task-has-current-run',
+        severity: 'warning',
+        taskId,
+        jsonPath: areaRecordJsonPath('tasks', index, currentRun.jsonPath ?? 'value.current_run_id'),
+        status,
+        currentRunId: currentRun.id,
+        message: `Non-running Kanban task '${taskId}' still points at current run '${currentRun.id}'.`,
+        recommendation:
+          'Inspect the worker lifecycle and clear or reconcile the current run pointer before allowing liveness tooling to act on this card.',
+      });
+    }
+  });
+
+  const status = statusForKanbanPartialWriteFindings(findings);
+  return {
+    checkedAt,
+    wouldWrite: false,
+    status,
+    safeToApplyAutomatically: false,
+    findings,
+    operatorSummary: operatorSummaryForKanbanPartialWriteRecoveryReport(status, findings.length),
+  };
+}
+
 export function buildRestoreDryRunReport(
   backup: RestorePreviewManifest,
   live: RestorePreviewManifest,
@@ -981,6 +1116,53 @@ function operatorSummaryForConsistencyReport(
   if (status === 'clean') return 'Cross-file state consistency check is clean; no duplicate IDs or dangling task references were found.';
   if (status === 'warning') return `Cross-file state consistency found ${findingCount} warning(s); review duplicate record IDs before restore.`;
   return `Cross-file state consistency is blocked by ${findingCount} finding(s); repair or quarantine dangling/malformed task references before restore.`;
+}
+
+interface CurrentRunCandidate {
+  readonly id?: string;
+  readonly jsonPath?: string;
+  readonly malformed?: boolean;
+}
+
+function currentRunCandidate(value: Record<string, unknown> | undefined): CurrentRunCandidate {
+  if (value === undefined) return {};
+  for (const [field, raw] of [
+    ['current_run_id', value.current_run_id],
+    ['currentRunId', value.currentRunId],
+    ['currentRun', value.currentRun],
+  ] as const) {
+    if (raw === undefined || raw === null) continue;
+    const jsonPathField = `value.${field}`;
+    if (typeof raw === 'string' && raw.trim().length > 0) return { id: raw, jsonPath: jsonPathField };
+    if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0) return { id: String(raw), jsonPath: jsonPathField };
+    return { jsonPath: jsonPathField, malformed: true };
+  }
+  return {};
+}
+
+function normalizeTaskStatus(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : undefined;
+}
+
+function isTerminalKanbanStatus(status: string): boolean {
+  return ['done', 'completed', 'blocked', 'archived', 'cancelled', 'failed'].includes(status);
+}
+
+function statusForKanbanPartialWriteFindings(
+  findings: readonly KanbanPartialWriteRecoveryFinding[],
+): KanbanPartialWriteRecoveryStatus {
+  if (findings.some((finding) => finding.severity === 'blocker')) return 'blocked';
+  if (findings.length > 0) return 'review-required';
+  return 'clean';
+}
+
+function operatorSummaryForKanbanPartialWriteRecoveryReport(
+  status: KanbanPartialWriteRecoveryStatus,
+  findingCount: number,
+): string {
+  if (status === 'clean') return 'Kanban partial-write recovery check is clean; no task/current-run inconsistencies were found.';
+  if (status === 'review-required') return `Kanban partial-write recovery found ${findingCount} warning(s); reconcile stale run pointers before liveness automation acts.`;
+  return `Kanban partial-write recovery is blocked by ${findingCount} finding(s); repair or quarantine inconsistent task/run state before dispatch resumes.`;
 }
 
 function compareRecords(
