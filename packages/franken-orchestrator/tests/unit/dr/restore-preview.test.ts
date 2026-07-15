@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import {
+  buildBackupEncryptionVerificationReport,
   detectRestorePreviewConflicts,
   type RestorePreviewManifest,
 } from '../../../src/dr/restore-preview.js';
@@ -210,6 +211,158 @@ describe('restore preview conflict detector', () => {
         severity: 'blocker',
         recommendation: expect.stringContaining('Do not restore'),
       }),
+    );
+  });
+
+  it('reports verified backup encryption metadata for operator handoff', () => {
+    const manifest: RestorePreviewManifest = {
+      schemaVersion: 1,
+      encryption: {
+        encrypted: true,
+        algorithm: 'aes-256-gcm',
+        keyRef: 'dr/backups/prod-primary',
+        artifactDigest: 'sha256:abcdef',
+        generatedAt: '2026-07-14T12:00:00.000Z',
+      },
+      tasks: [],
+      approvals: [],
+      memory: [],
+      cron: [],
+    };
+
+    const before = clone(manifest);
+    const report = buildBackupEncryptionVerificationReport(manifest, {
+      checkedAt: '2026-07-14T12:30:00.000Z',
+    });
+
+    expect(report).toEqual({
+      checkedAt: '2026-07-14T12:30:00.000Z',
+      status: 'verified',
+      encrypted: true,
+      metadata: manifest.encryption,
+      findings: [],
+      operatorSummary: 'Backup encryption is verified; no encryption blockers or warnings were found.',
+    });
+    expect(manifest).toEqual(before);
+  });
+
+  it('fails backup encryption verification when encryption metadata is missing', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.encrypted).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'missing-encryption-metadata',
+        severity: 'blocker',
+        recommendation: expect.stringContaining('regenerate'),
+      }),
+    );
+  });
+
+  it('fails backup encryption verification instead of throwing when encryption metadata is null', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      {
+        schemaVersion: 1,
+        encryption: null,
+        tasks: [],
+        approvals: [],
+        memory: [],
+        cron: [],
+      } as unknown as RestorePreviewManifest,
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.encrypted).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'missing-encryption-metadata', severity: 'blocker' }),
+    );
+  });
+
+  it('fails closed when loaded encryption metadata has a non-boolean encrypted flag', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      {
+        schemaVersion: 1,
+        encryption: {
+          encrypted: 'false',
+          algorithm: 'aes-256-gcm',
+          keyRef: 'dr/backups/prod-primary',
+          artifactDigest: 'sha256:abcdef',
+        } as unknown as RestorePreviewManifest['encryption'],
+        tasks: [],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.encrypted).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'backup-not-encrypted', severity: 'blocker' }),
+    );
+  });
+
+  it('returns findings instead of throwing when loaded encryption metadata has non-string fields', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      {
+        schemaVersion: 1,
+        encryption: {
+          encrypted: true,
+          algorithm: 1,
+          keyRef: ['dr/backups/prod-primary'],
+          artifactDigest: { sha256: 'abcdef' },
+        } as unknown as RestorePreviewManifest['encryption'],
+        tasks: [],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.encrypted).toBe(true);
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'missing-algorithm', severity: 'blocker' }),
+        expect.objectContaining({ code: 'missing-key-reference', severity: 'warning' }),
+        expect.objectContaining({ code: 'missing-artifact-digest', severity: 'warning' }),
+      ]),
+    );
+  });
+
+  it('warns when encryption is present but the report lacks restore-critical references', () => {
+    const report = buildBackupEncryptionVerificationReport(
+      {
+        schemaVersion: 1,
+        encryption: {
+          encrypted: true,
+          algorithm: 'aes-128-cbc',
+          keyRef: '',
+          artifactDigest: '',
+        },
+        tasks: [],
+        approvals: [],
+        memory: [],
+        cron: [],
+      },
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('warning');
+    expect(report.encrypted).toBe(true);
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'unsupported-algorithm', severity: 'warning' }),
+        expect.objectContaining({ code: 'missing-key-reference', severity: 'warning' }),
+        expect.objectContaining({ code: 'missing-artifact-digest', severity: 'warning' }),
+      ]),
     );
   });
 });

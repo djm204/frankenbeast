@@ -218,8 +218,15 @@ export { checkModuleHealth, allHealthy } from './resilience/module-initializer.j
 export type { ModuleHealth } from './resilience/module-initializer.js';
 
 // Disaster recovery
-export { detectRestorePreviewConflicts } from './dr/restore-preview.js';
+export { buildBackupEncryptionVerificationReport, detectRestorePreviewConflicts } from './dr/restore-preview.js';
 export type {
+  BackupEncryptionMetadata,
+  BackupEncryptionVerificationFinding,
+  BackupEncryptionVerificationFindingCode,
+  BackupEncryptionVerificationOptions,
+  BackupEncryptionVerificationReport,
+  BackupEncryptionVerificationSeverity,
+  BackupEncryptionVerificationStatus,
   RestorePreviewArea,
   RestorePreviewConflict,
   RestorePreviewConflictType,
