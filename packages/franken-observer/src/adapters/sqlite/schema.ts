@@ -67,3 +67,6 @@ export const SELECT_TRACE_SUMMARIES = `
   GROUP BY traces.id
   ORDER BY traces.startedAt ASC
 `
+
+export const DELETE_SPANS_BY_TRACE = `DELETE FROM spans WHERE traceId = ?`
+export const DELETE_TRACE = `DELETE FROM traces WHERE id = ?`

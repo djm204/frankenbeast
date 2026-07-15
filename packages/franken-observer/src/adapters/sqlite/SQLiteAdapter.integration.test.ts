@@ -111,6 +111,27 @@ describe('SQLiteAdapter', () => {
       expect(result).toBeNull()
     })
 
+    it('deletes traces and spans by trace id', async () => {
+      const trace = TraceContext.createTrace('delete me')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      SpanLifecycle.setMetadata(span, { prompt: 'private prompt' })
+      TraceContext.endSpan(span)
+      TraceContext.endTrace(trace)
+      await adapter.flush(trace)
+
+      await adapter.deleteTrace(trace.id)
+
+      expect(await adapter.queryByTraceId(trace.id)).toBeNull()
+      expect(await adapter.listTraceIds()).toEqual([])
+      const raw = new Database(dbPath)
+      try {
+        expect(raw.prepare('SELECT COUNT(*) AS count FROM spans WHERE traceId = ?').get(trace.id)).toMatchObject({ count: 0 })
+        expect(raw.prepare('SELECT COUNT(*) AS count FROM traces WHERE id = ?').get(trace.id)).toMatchObject({ count: 0 })
+      } finally {
+        raw.close()
+      }
+    })
+
     it('upserts — re-flushing a trace overwrites the stored version', async () => {
       const trace = TraceContext.createTrace('original')
       TraceContext.endTrace(trace)
