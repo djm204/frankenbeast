@@ -58,7 +58,7 @@ const UrlSchema = z.string().url();
 export const NetworkModeSchema = z.enum(['secure', 'insecure']);
 
 export const EgressLaneSchema = z.enum(['docs', 'triage', 'test', 'fallback', 'implementation', 'provider', 'operator', 'unrestricted']);
-export const EgressDestinationClassSchema = z.enum(['github', 'provider', 'messaging', 'local', 'arbitrary']);
+export const EgressDestinationClassSchema = z.enum(['github', 'provider', 'messaging', 'local', 'private-network', 'arbitrary']);
 export const LaneEgressPolicySchema = z.object({
   allowedDestinationClasses: z.array(EgressDestinationClassSchema).optional(),
   allowedDomains: z.array(z.string().min(1)).optional(),

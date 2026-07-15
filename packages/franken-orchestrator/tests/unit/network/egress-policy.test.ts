@@ -57,7 +57,37 @@ describe('lane egress policy', () => {
           },
         },
       },
-    })).toMatchObject({ allowed: true, destinationClass: 'local', host: '10.0.0.5' });
+    })).toMatchObject({ allowed: true, destinationClass: 'private-network', host: '10.0.0.5' });
+
+    expect(evaluateEgressPolicy({
+      lane: 'provider',
+      url: 'https://worker.models.corp.example/v1/chat/completions',
+      method: 'POST',
+      policy: {
+        lanes: {
+          provider: {
+            allowedDestinationClasses: ['provider'],
+            allowedDomains: ['models.corp.example'],
+            allowedMethods: ['POST'],
+          },
+        },
+      },
+    })).toMatchObject({ allowed: false, host: 'worker.models.corp.example', reason: 'destination-class-not-allowed' });
+
+    expect(evaluateEgressPolicy({
+      lane: 'provider',
+      url: 'https://worker.models.corp.example/v1/chat/completions',
+      method: 'POST',
+      policy: {
+        lanes: {
+          provider: {
+            allowedDestinationClasses: ['provider'],
+            allowedDomains: ['*.models.corp.example'],
+            allowedMethods: ['POST'],
+          },
+        },
+      },
+    })).toMatchObject({ allowed: true, host: 'worker.models.corp.example' });
   });
 
   it('allows low-risk lanes to reach GitHub without allowing provider access', () => {
@@ -86,6 +116,26 @@ describe('lane egress policy', () => {
     })).toMatchObject({
       allowed: false,
       destinationClass: 'provider',
+      reason: 'destination-class-not-allowed',
+    });
+
+    expect(evaluateEgressPolicy({
+      lane: 'triage',
+      url: 'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+      method: 'GET',
+    })).toMatchObject({
+      allowed: false,
+      destinationClass: 'private-network',
+      reason: 'destination-class-not-allowed',
+    });
+
+    expect(evaluateEgressPolicy({
+      lane: 'triage',
+      url: 'https://172.217.1.14.nip.io/search',
+      method: 'GET',
+    })).toMatchObject({
+      allowed: false,
+      destinationClass: 'arbitrary',
       reason: 'destination-class-not-allowed',
     });
   });

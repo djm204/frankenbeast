@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 
 export type EgressLane = 'docs' | 'triage' | 'test' | 'fallback' | 'implementation' | 'provider' | 'operator' | 'unrestricted';
-export type EgressDestinationClass = 'github' | 'provider' | 'messaging' | 'local' | 'arbitrary';
+export type EgressDestinationClass = 'github' | 'provider' | 'messaging' | 'local' | 'private-network' | 'arbitrary';
 export type EgressDecisionReason =
   | 'allowed'
   | 'explicit-override'
@@ -176,7 +176,7 @@ export function evaluateEgressPolicy(request: EgressPolicyRequest): EgressDecisi
     return { lane: request.lane, destinationClass, host, method, allowed: true, reason: 'allowed' };
   }
 
-  if (lanePolicy.allowedDomains.some((domain) => hostMatchesDomain(host, domain))) {
+  if (lanePolicy.allowedDomains.some((domain) => hostMatchesAllowedDomain(host, domain))) {
     return { lane: request.lane, destinationClass, host, method, allowed: true, reason: 'allowed' };
   }
 
@@ -272,7 +272,8 @@ function enforceEgressDecision(request: EgressPolicyRequest, audit: EgressAuditS
 
 export function classifyEgressDestination(url: URL): EgressDestinationClass {
   const host = normalizeEgressHostname(url.hostname);
-  if (isPrivateNetworkHost(host)) return 'local';
+  if (isLocalHost(host)) return 'local';
+  if (isPrivateNetworkHost(host)) return 'private-network';
   if (GITHUB_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'github';
   if (PROVIDER_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'provider';
   if (MESSAGING_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'messaging';
@@ -321,13 +322,31 @@ function hostMatchesDomain(host: string, domain: string): boolean {
   return host === normalizedDomain || host.endsWith(`.${normalizedDomain}`);
 }
 
+function hostMatchesAllowedDomain(host: string, domain: string): boolean {
+  const normalizedDomain = domain.toLowerCase();
+  if (normalizedDomain === '*') return true;
+  if (normalizedDomain.startsWith('*.')) {
+    const suffix = normalizedDomain.slice(1);
+    return host.endsWith(suffix) && host.length > suffix.length;
+  }
+  return host === normalizedDomain;
+}
+
+function isLocalHost(host: string): boolean {
+  const normalized = host.replace(/^\[|\]$/g, '').toLowerCase();
+  return normalized === 'localhost'
+    || normalized === '::1'
+    || normalized === '0:0:0:0:0:0:0:1'
+    || normalized.endsWith('.localhost')
+    || isLoopbackIpv4Literal(normalized)
+    || isLoopbackShortcutHostname(normalized);
+}
+
 function isPrivateNetworkHost(host: string): boolean {
   const normalized = host.replace(/^\[|\]$/g, '').toLowerCase();
-  if (normalized === 'localhost'
-    || normalized === 'metadata'
+  if (normalized === 'metadata'
     || normalized === 'instance-data'
     || normalized === 'metadata.google.internal'
-    || normalized.endsWith('.localhost')
     || normalized.endsWith('.local')
     || normalized.endsWith('.internal')
     || normalized.endsWith('.svc')
@@ -344,9 +363,31 @@ function isPrivateNetworkHost(host: string): boolean {
 }
 
 function isIpv4MappedHostname(host: string): boolean {
+  const octets = extractShortcutIpv4Octets(host);
+  if (!octets) return false;
+  return isPrivateIpv4(octets.join('.'));
+}
+
+function isLoopbackShortcutHostname(host: string): boolean {
+  const octets = extractShortcutIpv4Octets(host);
+  return octets !== undefined && octets[0] === 127;
+}
+
+function extractShortcutIpv4Octets(host: string): [number, number, number, number] | undefined {
   const suffixes = ['.nip.io', '.sslip.io', '.xip.io', '.lvh.me'];
-  if (!suffixes.some((suffix) => host.endsWith(suffix))) return false;
-  return /(?:^|[-.])(?:127|10|172|192|169|0)[-.]\d{1,3}[-.]\d{1,3}[-.]\d{1,3}(?:\.|-|$)/u.test(host);
+  const suffix = suffixes.find((candidate) => host.endsWith(candidate));
+  if (!suffix) return undefined;
+  const labels = host.slice(0, -suffix.length).split(/[.-]/u).filter(Boolean);
+  const octets = labels.slice(-4).map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return undefined;
+  return octets as [number, number, number, number];
+}
+
+function isLoopbackIpv4Literal(ip: string): boolean {
+  const octets = ip.split('.').map(Number);
+  return octets.length === 4
+    && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+    && octets[0] === 127;
 }
 
 function isPrivateIpv4(ip: string): boolean {
