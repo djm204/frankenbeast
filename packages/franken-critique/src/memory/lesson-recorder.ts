@@ -136,13 +136,13 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
     kind: 'task-state',
     label: 'task-reference',
     pattern:
-      /\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,})\b/gi,
+      /\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,}|(?:impl|harden):issue-\d+|issue-\d+)\b/gi,
     replacement: '[REDACTED_TASK_REFERENCE]',
   },
 ];
 
 const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
-  /\bcustomer(?:\s+account)?\b/i,
+  /\bcustomer\s+(?:account\s+)?(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s+)?[A-Za-z0-9][A-Za-z0-9_.:-]*\b/i,
   /\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*\b/,
   /\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)\b/,
   /\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
@@ -155,6 +155,8 @@ const TASK_STATE_PATTERNS: readonly RegExp[] = [
   /\b(?:merged|opened|closed|pushed|committed)\s+(?:PR|pull request|branch|commit)\b/i,
   /\b(?:commit|sha)\s+[0-9a-f]{7,40}\b/i,
   /\btask\s+t_[0-9a-f]{6,}\b/i,
+  /\b(?:impl|harden):issue-\d+\b/i,
+  /\bissue-\d+\b/i,
 ];
 
 const PREFERENCE_PATTERNS: readonly RegExp[] = [
@@ -1933,9 +1935,7 @@ function createLessonPrivacyFilterResult(
   }[],
 ): LessonCandidatePrivacyFilterResult {
   const metadataText = [taskId, evaluatorName].join('\n');
-  const metadataDecision = createPrivacyDecision(metadataText, {
-    flagCustomerData: false,
-  });
+  const metadataDecision = createPrivacyDecision(metadataText);
   if (metadataDecision.sensitive) {
     return {
       decision: {
@@ -2089,10 +2089,18 @@ function createPrivacyDecision(
 }
 
 function extractCustomerSegments(text: string): string[] {
-  const segments = text.match(
-    /\b[Cc]ustomer(?:\s+account)?(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
-  );
-  return segments ?? [];
+  const segments =
+    text.match(
+      /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\s+[A-Za-z0-9_.:-]+){1,3}\b|\b[Tt]enant\s+[A-Za-z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+(?![A-Za-z0-9._%+-]+@)[A-Za-z0-9_.:-]+){0,3}\b/g,
+    ) ?? [];
+  return segments.flatMap((segment) => {
+    const emailMatch = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(segment);
+    if (!emailMatch) {
+      return [segment];
+    }
+    const trailingIdentifier = segment.slice(emailMatch.index + emailMatch[0].length).trim();
+    return trailingIdentifier ? [trailingIdentifier] : [];
+  });
 }
 
 function createFindingPrivacyText(finding: {
@@ -2100,7 +2108,7 @@ function createFindingPrivacyText(finding: {
   readonly location?: string | undefined;
   readonly suggestion?: string | undefined;
 }): string {
-  return [finding.message, finding.location ?? '', finding.suggestion ?? ''].join(
+  return [finding.message, finding.suggestion ?? '', finding.location ?? ''].join(
     '\n',
   );
 }
@@ -2167,16 +2175,19 @@ function classifyLessonCandidate(text: string): LessonCandidateCategory {
 }
 
 function containsReusableLessonSignal(text: string): boolean {
-  if (/\b(?:merged|opened|closed|pushed|committed)\b/i.test(text)) {
-    return false;
-  }
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
   }
   if (ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
   }
-  return /\b(?:always|avoid|before|check|ensure|prefer|require|run|validate|verify)\b/i.test(
+  if (/\b(?:always|avoid|ensure|prefer|require|validate|verify)\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:merged|opened|closed|pushed|committed)\b/i.test(text)) {
+    return false;
+  }
+  return /\b(?:before|check|run)\b/i.test(
     text,
   );
 }
