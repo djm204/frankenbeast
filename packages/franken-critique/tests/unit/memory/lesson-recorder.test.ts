@@ -875,6 +875,24 @@ describe('LessonRecorder', () => {
     });
     expect(isLessonApplicable(directlyApproved)).toBe(true);
 
+    const approvedLegacySandboxed = applyHumanFeedbackToLesson(
+      { ...lesson, lifecycleStatus: 'active' },
+      {
+        source: 'explicit-user-approval',
+        reason: 'User approved legacy active sandboxed guidance.',
+        observedAt: '2026-07-12T01:43:00.000Z',
+        evidence: [
+          {
+            kind: 'operator-report',
+            reference: 'https://github.com/djm204/frankenbeast/issues/1763#legacy-sandbox',
+          },
+        ],
+      },
+    );
+    expect(approvedLegacySandboxed.lifecycleStatus).toBe('active');
+    expect(approvedLegacySandboxed.experimentSandbox).toBeUndefined();
+    expect(isLessonApplicable(approvedLegacySandboxed)).toBe(true);
+
     const approvedAfterCorrection = applyHumanFeedbackToLesson(corrected, {
       source: 'explicit-user-approval',
       reason: 'User approved the revised lesson after reviewing correction evidence.',

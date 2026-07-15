@@ -325,7 +325,7 @@ export function applyHumanFeedbackToLesson(
   const { experimentSandbox, ...lessonWithoutSandbox } = lesson;
   void experimentSandbox;
   return {
-    ...(lesson.lifecycleStatus === 'candidate' ? lessonWithoutSandbox : lesson),
+    ...(shouldActivateApprovedLesson ? lessonWithoutSandbox : lesson),
     lifecycleStatus: shouldActivateApprovedLesson
       ? 'active'
       : lesson.lifecycleStatus,
