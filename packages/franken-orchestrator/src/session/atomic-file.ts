@@ -213,6 +213,9 @@ function journalTempIsEmptyGeneratedSidecar(tempPath: string, filePath: string):
   if (!journalTempPathBelongsToTarget(tempPath, filePath)) {
     return false;
   }
+  if (!generatedStateTempPattern(filePath).test(basename(tempPath))) {
+    return false;
+  }
   try {
     return statSync(tempPath).size === 0;
   } catch {
@@ -314,7 +317,7 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
     };
   }
 
-  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath) || journalPath === stateWriteJournalPath(filePath);
+  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath);
   if (targetMatches && !journalTempPathBelongsToTarget(journal.tempPath, filePath)) {
     const quarantinePath = quarantineFile(journalPath);
     return {

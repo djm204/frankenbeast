@@ -229,6 +229,35 @@ describe('atomic-file', () => {
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
     });
 
+    it('removes empty generated temp files from stale preparing journals', () => {
+      const dir = makeTmpDir('state-write-journal-stale-preparing-owned-');
+      const filePath = join(dir, 'state.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000000`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'preparing',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(filePath);
+
+      expect(recovery).toMatchObject({
+        action: 'removed-stale-temp',
+        tempPath,
+      });
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+    });
+
     it('removes stale journal temp files that never reached the final journal rename', () => {
       const dir = makeTmpDir('state-write-journal-temp-orphan-');
       const filePath = join(dir, 'state.json');
@@ -267,7 +296,7 @@ describe('atomic-file', () => {
       symlinkSync(realDir, symlinkDir, 'dir');
       const realFilePath = join(realDir, 'state.json');
       const symlinkFilePath = join(symlinkDir, 'state.json');
-      const tempPath = `${symlinkFilePath}.tmp.live`;
+      const tempPath = `${realFilePath}.tmp.live`;
       writeFileSync(realFilePath, '{"old":true}');
       writeFileSync(tempPath, '{"new":');
       writeFileSync(
