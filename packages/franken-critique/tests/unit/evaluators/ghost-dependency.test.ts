@@ -143,6 +143,8 @@ describe('GhostDependencyEvaluator', () => {
       const windowsLocal = await import('C:\\tmp\\generated\\plugin.mjs');
       const importMap = await import('#internal/tool');
       const fs = await import('node:fs/promises');
+      const fsWithQuery = await import('node:fs/promises?raw');
+      const pathWithFragment = require('path/posix#worker');
       const escapedKnown = await import('z\\u006fd');
     `;
     const result = await evaluator.evaluate(createInput(content));
@@ -418,6 +420,8 @@ describe('GhostDependencyEvaluator', () => {
       const typedArrowInitializer: (x: string) => Promise<unknown> = (x) => import('typed-arrow-initializer-ghost');
       type TemplateAlias = string
       const templateAfterTypeAlias = \`\${require('template-after-type-alias-ghost')}\`;
+      type ClassFieldTemplateAlias = string
+      class ClassFieldTemplateAfterType { loader = \`\${import('class-field-template-after-type-ghost')}\` }
       const angleAssertedArrow = import(<string & (() => void)>'angle-assertion-arrow-ghost');
       type DefaultExportAlias = string
       export default async function defaultLoader() { return import('export-default-after-type-ghost'); }
@@ -460,7 +464,7 @@ describe('GhostDependencyEvaluator', () => {
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(102);
+    expect(result.findings).toHaveLength(103);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -538,6 +542,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('annotated-arrow-body-ghost'),
         expect.stringContaining('typed-arrow-initializer-ghost'),
         expect.stringContaining('template-after-type-alias-ghost'),
+        expect.stringContaining('class-field-template-after-type-ghost'),
         expect.stringContaining('angle-assertion-arrow-ghost'),
         expect.stringContaining('export-default-after-type-ghost'),
         expect.stringContaining('export-default-expression-after-type-ghost'),

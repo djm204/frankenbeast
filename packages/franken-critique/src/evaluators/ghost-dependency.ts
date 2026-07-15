@@ -35,15 +35,15 @@ export class GhostDependencyEvaluator implements Evaluator {
     const seen = new Set<string>();
 
     for (const specifier of extractDependencySpecifiers(input.content)) {
-      // Skip local imports, including absolute paths/URLs used by dynamic loaders.
-      if (isLocalImportSpecifier(specifier)) continue;
-
-      // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
-      if (isNodeBuiltinSpecifier(specifier)) continue;
-
       const packageSpecifier = stripSpecifierResourceSuffix(
         normalizePackageUrlSpecifier(specifier),
       );
+
+      // Skip local imports, including absolute paths/URLs used by dynamic loaders.
+      if (isLocalImportSpecifier(packageSpecifier)) continue;
+
+      // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
+      if (isNodeBuiltinSpecifier(packageSpecifier)) continue;
 
       // Extract package name (handle scoped packages and subpath imports)
       const packageName = packageSpecifier.startsWith('@')
@@ -87,8 +87,12 @@ function normalizePackageUrlSpecifier(specifier: string): string {
 }
 
 function stripSpecifierResourceSuffix(specifier: string): string {
-  const queryIndex = specifier.search(/[?#]/);
-  return queryIndex === -1 ? specifier : specifier.slice(0, queryIndex);
+  const queryIndex = specifier.indexOf('?');
+  const fragmentIndex = specifier.indexOf('#', 1);
+  const suffixIndex = [queryIndex, fragmentIndex]
+    .filter((index) => index !== -1)
+    .sort((left, right) => left - right)[0];
+  return suffixIndex === undefined ? specifier : specifier.slice(0, suffixIndex);
 }
 
 function isLocalImportSpecifier(specifier: string): boolean {
@@ -479,6 +483,7 @@ function isTypeOnlyTemplateString(content: string, templateIndex: number): boole
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
   if (isOpenTemplateAssertionKeyword(prefixWithoutTrailingTrivia)) return true;
   if (/(?:^|[;{}\n])\s*(?:const|let|var)\b[\s\S]*=\s*$/.test(prefix)) return false;
+  if (/(?:^|[;{}\n])\s*(?:static\s+)?(?:accessor\s+)?[#A-Za-z_$][\w$]*\s*=\s*$/.test(prefix)) return false;
   if (/(?:^|[;{}\n])\s*(?:export\s+)?type\b[\s\S]*=\s*$/.test(prefix)) return true;
   const previousIndex = skipTriviaBackward(content, templateIndex - 1);
   if (previousIndex >= 0 && /[\w$)\]]/.test(content[previousIndex] ?? '')) return false;
