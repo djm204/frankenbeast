@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { McpConfigSchema } from '@franken/types';
@@ -362,8 +362,12 @@ describe('SkillManager', () => {
       expect(() => manager.remove('../../tmp')).toThrow('Invalid skill name');
     });
 
-    it('rejects names with slashes', () => {
-      expect(() => manager.enable('foo/bar')).toThrow('Invalid skill name');
+    it('rejects names with slashes', async () => {
+      await expect(manager.installCustom('foo/bar', { command: 'node' })).rejects.toThrow(/Invalid skill name/);
+    });
+
+    it('rejects absolute path names', async () => {
+      await expect(manager.installCustom(join(tempDir, 'outside-skill'), { command: 'node' })).rejects.toThrow(/Invalid skill name/);
     });
 
     it('rejects names with dots only', () => {
@@ -377,6 +381,49 @@ describe('SkillManager', () => {
 
     it('exists returns false for invalid names without throwing', () => {
       expect(manager.exists('../etc')).toBe(false);
+    });
+
+    it('rejects installing into a symlinked skill directory without writing outside the skills root', async () => {
+      const outsideDir = join(tempDir, 'other-profile-skill');
+      mkdirSync(outsideDir, { recursive: true });
+      symlinkSync(outsideDir, join(skillsDir, 'escaped'), 'dir');
+
+      await expect(manager.installCustom('escaped', { command: 'node' }))
+        .rejects.toThrow(/Unsafe skill path/);
+
+      expect(existsSync(join(outsideDir, 'mcp.json'))).toBe(false);
+    });
+
+    it('rejects catalog installs when mcp.json is a symlink outside the skill directory', async () => {
+      const outsideFile = join(tempDir, 'other-profile-mcp.json');
+      mkdirSync(join(skillsDir, 'github'), { recursive: true });
+      symlinkSync(outsideFile, join(skillsDir, 'github', 'mcp.json'));
+
+      await expect(manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      })).rejects.toThrow(/Unsafe skill path/);
+
+      expect(existsSync(outsideFile)).toBe(false);
+    });
+
+    it('rejects context writes when context.md is a symlink outside the skill directory', async () => {
+      await manager.installCustom('github', { command: 'node' });
+      const outsideFile = join(tempDir, 'outside-context.md');
+      symlinkSync(outsideFile, join(skillsDir, 'github', 'context.md'));
+
+      expect(() => manager.writeContext('github', '# escaped')).toThrow(/Unsafe skill path/);
+      expect(existsSync(outsideFile)).toBe(false);
+    });
+
+    it('rejects installing when the target skill path is an existing file', async () => {
+      writeFileSync(join(skillsDir, 'file-skill'), 'not a directory');
+
+      await expect(manager.installCustom('file-skill', { command: 'node' }))
+        .rejects.toThrow(/not a directory/);
     });
   });
 });
