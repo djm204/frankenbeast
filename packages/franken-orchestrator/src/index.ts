@@ -62,6 +62,10 @@ export type {
   IssueDegradedModeWorkerRoute,
   IssueDegradedModeWorkerRouteAction,
   IssueDegradedModeWorkerRouteInput,
+  IssueDependencyCircuitBreakerConfig,
+  IssueDependencyCircuitBreakerState,
+  IssueDependencySignal,
+  IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
 } from './issues/index.js';

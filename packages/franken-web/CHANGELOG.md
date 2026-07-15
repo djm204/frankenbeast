@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.11](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.10...franken-web-v0.2.11) (2026-07-15)
+
+
+### Refactoring
+
+* **web:** decompose chat shell and session helpers ([d4808a9](https://github.com/djm204/frankenbeast/commit/d4808a9c77217371fa5c803c9a755f2182f915c2)), closes [#2228](https://github.com/djm204/frankenbeast/issues/2228)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.11.0 to 0.12.0
+
 ## [0.2.10](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.9...franken-web-v0.2.10) (2026-07-14)
 
 

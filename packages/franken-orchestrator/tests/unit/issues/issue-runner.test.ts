@@ -656,6 +656,82 @@ describe('IssueRunner', () => {
       });
     });
 
+    it('opens dependency-specific circuit breakers without blocking unrelated degraded dependencies', async () => {
+      const decision = await evaluateIssueBackpressure(
+        {
+          thresholds: {
+            dependencyCircuitBreakers: {
+              github: { maxConsecutiveFailures: 3 },
+            },
+          },
+          signals: () => ({
+            activeProcesses: 0,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            dependencyStatuses: [
+              { dependency: 'github', status: 'degraded', consecutiveFailures: 3 },
+              { dependency: 'grafana', status: 'unavailable', consecutiveFailures: 99 },
+            ],
+          }),
+        },
+        {
+          issue: makeIssue({ number: 16 }),
+          index: 0,
+          totalIssues: 1,
+          pendingIssueCount: 1,
+          cumulativeTokens: 0,
+          budgetTokens: 1_000_000,
+          providerBudgetTokensRemaining: 1_000_000,
+        },
+      );
+
+      expect(decision.allowed).toBe(false);
+      expect(decision.reasons).toEqual([
+        'github consecutive failures 3 reached circuit breaker limit 3',
+      ]);
+      expect(decision.dependencyCircuitBreakers).toEqual([
+        expect.objectContaining({ dependency: 'github', status: 'degraded', state: 'open' }),
+      ]);
+    });
+
+    it('honors explicit dependency open-until windows as an edge-case pause', async () => {
+      const decision = await evaluateIssueBackpressure(
+        {
+          thresholds: {
+            dependencyCircuitBreakers: {
+              slack: { pauseOnStatuses: ['unavailable'] },
+            },
+          },
+          signals: () => ({
+            activeProcesses: 0,
+            failedStarts: 0,
+            inFlightBacklog: 0,
+            dependencyStatuses: [
+              { dependency: 'slack', status: 'healthy', openUntil: Date.now() + 60_000 },
+            ],
+          }),
+        },
+        {
+          issue: makeIssue({ number: 17 }),
+          index: 0,
+          totalIssues: 1,
+          pendingIssueCount: 1,
+          cumulativeTokens: 0,
+          budgetTokens: 1_000_000,
+          providerBudgetTokensRemaining: 1_000_000,
+        },
+      );
+
+      expect(decision.allowed).toBe(false);
+      expect(decision.reasons[0]).toContain('slack circuit breaker is open for another');
+      expect(decision.dependencyCircuitBreakers[0]).toEqual(expect.objectContaining({
+        dependency: 'slack',
+        status: 'healthy',
+        state: 'open',
+        retryAfterMs: expect.any(Number),
+      }));
+    });
+
     it('recovers automatically when backpressure signals return to normal on the next issue', async () => {
       const snapshots = [
         { activeProcesses: 0, failedStarts: 3, inFlightBacklog: 0, oldestQueueAgeMs: 0 },

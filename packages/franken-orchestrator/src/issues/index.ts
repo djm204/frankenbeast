@@ -24,6 +24,10 @@ export type {
   IssueDegradedModeWorkerRoute,
   IssueDegradedModeWorkerRouteAction,
   IssueDegradedModeWorkerRouteInput,
+  IssueDependencyCircuitBreakerConfig,
+  IssueDependencyCircuitBreakerState,
+  IssueDependencySignal,
+  IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
 } from './issue-runner.js';

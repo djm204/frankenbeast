@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.11.0...franken-types-v0.12.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add capacity watermark alerts ([#2266](https://github.com/djm204/frankenbeast/issues/2266)) ([219ffd3](https://github.com/djm204/frankenbeast/commit/219ffd34483126e6f09b11c17b86d89226c39280))
+* **orchestrator:** add approval readiness health endpoint ([#2262](https://github.com/djm204/frankenbeast/issues/2262)) ([e5ba904](https://github.com/djm204/frankenbeast/commit/e5ba904987618708bacc27731ae6f565d90e02d6))
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.10.1...franken-types-v0.11.0) (2026-07-14)
 
 

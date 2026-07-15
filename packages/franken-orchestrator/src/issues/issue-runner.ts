@@ -43,6 +43,22 @@ export interface IssueBackpressureSignals {
   readonly systemLoadAverage?: number | undefined;
   readonly providerBudgetTokensRemaining?: number | undefined;
   readonly pendingIssueCount?: number | undefined;
+  readonly dependencyStatuses?: readonly IssueDependencySignal[] | undefined;
+}
+
+export type IssueDependencyStatus = 'healthy' | 'degraded' | 'unavailable';
+
+export interface IssueDependencySignal {
+  readonly dependency: string;
+  readonly status: IssueDependencyStatus;
+  readonly consecutiveFailures?: number | undefined;
+  readonly openUntil?: string | number | Date | undefined;
+  readonly error?: string | undefined;
+}
+
+export interface IssueDependencyCircuitBreakerConfig {
+  readonly maxConsecutiveFailures?: number | undefined;
+  readonly pauseOnStatuses?: readonly IssueDependencyStatus[] | undefined;
 }
 
 export interface IssueBackpressureSignalContext {
@@ -67,6 +83,13 @@ export interface IssueBackpressureThresholds {
   readonly maxOldestQueueAgeMs?: number | undefined;
   readonly maxSystemLoadAverage?: number | undefined;
   readonly minProviderBudgetTokensRemaining?: number | undefined;
+  /**
+   * Optional dependency-specific circuit breakers. Each key is a dependency
+   * name reported by `signals().dependencyStatuses`; only matching dependencies
+   * can pause fresh starts, so a degraded non-critical dependency does not
+   * silently stop unrelated work.
+   */
+  readonly dependencyCircuitBreakers?: Readonly<Record<string, IssueDependencyCircuitBreakerConfig>> | undefined;
   /**
    * Optional live alert ratio for capacity-style limits. For example, 0.8 emits
    * a warning when a signal reaches 80% of its configured limit while still
@@ -93,6 +116,15 @@ export interface IssueBackpressureDecision {
   readonly reasons: readonly string[];
   readonly signals: IssueBackpressureSignals;
   readonly alerts: readonly IssueCapacityWatermarkAlert[];
+  readonly dependencyCircuitBreakers: readonly IssueDependencyCircuitBreakerState[];
+}
+
+export interface IssueDependencyCircuitBreakerState {
+  readonly dependency: string;
+  readonly status: IssueDependencyStatus;
+  readonly state: 'closed' | 'open';
+  readonly reason?: string | undefined;
+  readonly retryAfterMs?: number | undefined;
 }
 
 export type IssueDegradedModeWorkerRouteAction =
@@ -176,6 +208,80 @@ function providerBudgetAtReserve(value: number | undefined, reserve: number | un
 
 function validWatermarkRatio(value: number | undefined): value is number {
   return value !== undefined && Number.isFinite(value) && value > 0 && value < 1;
+}
+
+function configuredPauseStatuses(
+  config: IssueDependencyCircuitBreakerConfig,
+): readonly IssueDependencyStatus[] {
+  return config.pauseOnStatuses ?? ['unavailable'];
+}
+
+function retryAfterMs(openUntil: string | number | Date | undefined, nowMs: number): number | undefined {
+  if (openUntil === undefined) return undefined;
+  const untilMs = openUntil instanceof Date ? openUntil.getTime() : new Date(openUntil).getTime();
+  if (!Number.isFinite(untilMs) || untilMs <= nowMs) return undefined;
+  return untilMs - nowMs;
+}
+
+function evaluateDependencyCircuitBreakers(
+  signals: IssueBackpressureSignals,
+  thresholds: IssueBackpressureThresholds,
+  nowMs: number = Date.now(),
+): IssueDependencyCircuitBreakerState[] {
+  const configs = thresholds.dependencyCircuitBreakers ?? {};
+  const states: IssueDependencyCircuitBreakerState[] = [];
+
+  for (const signal of signals.dependencyStatuses ?? []) {
+    const config = configs[signal.dependency];
+    if (!config) continue;
+
+    const retryMs = retryAfterMs(signal.openUntil, nowMs);
+    if (retryMs !== undefined) {
+      states.push({
+        dependency: signal.dependency,
+        status: signal.status,
+        state: 'open',
+        retryAfterMs: retryMs,
+        reason: `${signal.dependency} circuit breaker is open for another ${retryMs}ms`,
+      });
+      continue;
+    }
+
+    const maxFailures = config.maxConsecutiveFailures;
+    if (
+      maxFailures !== undefined
+      && maxFailures > 0
+      && signal.consecutiveFailures !== undefined
+      && signal.consecutiveFailures >= maxFailures
+    ) {
+      states.push({
+        dependency: signal.dependency,
+        status: signal.status,
+        state: 'open',
+        reason: `${signal.dependency} consecutive failures ${signal.consecutiveFailures} reached circuit breaker limit ${maxFailures}`,
+      });
+      continue;
+    }
+
+    const pauseStatuses = configuredPauseStatuses(config);
+    if (pauseStatuses.includes(signal.status)) {
+      states.push({
+        dependency: signal.dependency,
+        status: signal.status,
+        state: 'open',
+        reason: `${signal.dependency} dependency status ${signal.status} opened circuit breaker`,
+      });
+      continue;
+    }
+
+    states.push({
+      dependency: signal.dependency,
+      status: signal.status,
+      state: 'closed',
+    });
+  }
+
+  return states;
 }
 
 function capacityAlert(
@@ -347,12 +453,19 @@ export async function evaluateIssueBackpressure(
       `provider budget remaining ${signals.providerBudgetTokensRemaining} tokens is at or below reserve ${thresholds.minProviderBudgetTokensRemaining}`,
     );
   }
+  const dependencyCircuitBreakers = evaluateDependencyCircuitBreakers(signals, thresholds);
+  for (const breaker of dependencyCircuitBreakers) {
+    if (breaker.state === 'open' && breaker.reason) {
+      reasons.push(breaker.reason);
+    }
+  }
 
   return {
     allowed: reasons.length === 0,
     reasons,
     signals,
     alerts,
+    dependencyCircuitBreakers,
   };
 }
 
@@ -766,6 +879,7 @@ export class IssueRunner {
           reasons: backpressureDecision.reasons,
           signals: backpressureDecision.signals,
           workerRoute: route,
+          dependencyCircuitBreakers: backpressureDecision.dependencyCircuitBreakers,
         },
         'issues',
       );
