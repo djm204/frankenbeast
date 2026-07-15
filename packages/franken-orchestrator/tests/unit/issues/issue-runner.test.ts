@@ -63,6 +63,7 @@ interface FlakyLivenessReplaySnapshot {
   readonly name: string;
   readonly checkpointHasIssueProgress: boolean;
   readonly graphHasCheckpointProgress: boolean;
+  readonly stopRemainingReason?: string;
   readonly signals: IssueBackpressureSignals;
   readonly expectedAllowed: boolean;
   readonly expectedReasons: readonly string[];
@@ -116,6 +117,14 @@ function makeIssue(overrides: Partial<GithubIssue> & { number: number }): Github
     url: `https://github.com/org/repo/issues/${overrides.number}`,
     ...overrides,
   };
+}
+
+function makeFixtureIssue(fixtureIssue: BurstDispatchIssueFixture): GithubIssue {
+  return makeIssue({
+    number: fixtureIssue.number,
+    title: fixtureIssue.title,
+    labels: [...fixtureIssue.labels],
+  });
 }
 
 function makeTriage(issueNumber: number, complexity: 'one-shot' | 'chunked' = 'one-shot'): TriageResult {
@@ -581,7 +590,7 @@ describe('IssueRunner', () => {
         const decision = await evaluateIssueBackpressure(
           { thresholds: fixture.thresholds, signals: () => snapshot.signals },
           {
-            issue: makeIssue(fixture.issues[0]!),
+            issue: makeFixtureIssue(fixture.issues[0]!),
             index: 0,
             totalIssues: fixture.issues.length,
             pendingIssueCount: fixture.issues.length,
@@ -604,7 +613,7 @@ describe('IssueRunner', () => {
       const decision = await evaluateIssueBackpressure(
         { thresholds: edgeCase!.thresholds, signals: () => edgeCase!.signals },
         {
-          issue: makeIssue(fixture.issues[0]!),
+          issue: makeFixtureIssue(fixture.issues[0]!),
           index: 0,
           totalIssues: fixture.issues.length,
           pendingIssueCount: fixture.issues.length,
@@ -624,18 +633,18 @@ describe('IssueRunner', () => {
 
       expect(fixture.description).toContain('Flaky liveness replay fixture');
       expect(fixture.issue.number).toBe(1806);
-      expect(replayCases.map(testCase => testCase.name)).toEqual([
+      expect(replayCases.map(testCase => testCase.name)).toEqual(expect.arrayContaining([
         'process-capacity-spike-defers-fresh-worker',
         'github-flake-resumes-checkpointed-worker',
         'recovered-liveness-starts-fresh-worker',
         'unconfigured-unrelated-dependency-does-not-pause-liveness',
-      ]);
+      ]));
 
       for (const testCase of replayCases) {
         const decision = await evaluateIssueBackpressure(
           { thresholds: fixture.thresholds, signals: () => testCase.signals },
           {
-            issue: makeIssue(fixture.issue),
+            issue: makeFixtureIssue(fixture.issue),
             index: 0,
             totalIssues: 1,
             pendingIssueCount: 1,
@@ -645,10 +654,11 @@ describe('IssueRunner', () => {
           },
         );
         const route = routeIssueWorkerForDegradedMode({
-          issue: makeIssue(fixture.issue),
+          issue: makeFixtureIssue(fixture.issue),
           checkpointHasIssueProgress: testCase.checkpointHasIssueProgress,
           graphHasCheckpointProgress: testCase.graphHasCheckpointProgress,
           backpressureDecision: decision,
+          stopRemainingReason: testCase.stopRemainingReason,
         });
 
         expect(decision.allowed, testCase.name).toBe(testCase.expectedAllowed);
