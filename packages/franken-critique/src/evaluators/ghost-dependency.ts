@@ -147,6 +147,11 @@ function extractDependencySpecifiers(content: string): string[] {
     }
 
     if (startsWithKeyword(content, i, 'import')) {
+      if (isInsideJsxText(content, i)) {
+        i += 'import'.length;
+        continue;
+      }
+
       const dynamicallyImported = readDynamicImportSpecifier(
         content,
         i + 'import'.length,
@@ -200,6 +205,25 @@ function startsWithKeyword(
     (!before || !IDENTIFIER_PATTERN.test(before)) &&
     (!after || !IDENTIFIER_PATTERN.test(after))
   );
+}
+
+function isInsideJsxText(content: string, index: number): boolean {
+  const previousOpen = content.lastIndexOf('<', index);
+  if (previousOpen === -1 || content[previousOpen + 1] === '/' || content[previousOpen + 1] === '!') return false;
+  if (isIdentifierCharacter(content[previousOpen - 1] ?? '') || content[previousOpen - 1] === ')') return false;
+
+  const previousClose = content.lastIndexOf('>', index);
+  if (previousClose <= previousOpen) return false;
+
+  const openingTag = content.slice(previousOpen, previousClose + 1);
+  const tagMatch = openingTag.match(/^<([A-Za-z][\w.:]*)(?:\s[^<>]*)?>$/);
+  if (!tagMatch) return false;
+  const nextClosingTag = content.indexOf(`</${tagMatch[1]}>`, index);
+  if (nextClosingTag === -1) return false;
+
+  const previousExpressionOpen = content.lastIndexOf('{', index);
+  const previousExpressionClose = content.lastIndexOf('}', index);
+  return previousExpressionOpen <= previousClose || previousExpressionClose > previousExpressionOpen;
 }
 
 function readStaticImportSpecifier(
@@ -614,7 +638,8 @@ function hasUnclosedGenericTypeArgument(trimmed: string): boolean {
   if (/^[A-Za-z_$][\w$]*\s*,\s*$/.test(typeArgumentPrefix)) {
     const tokenStart = findIdentifierStartBefore(trimmed, lastOpen - 1);
     const previousIndex = tokenStart === -1 ? null : previousNonTriviaIndex(trimmed, tokenStart - 1);
-    if (previousIndex !== null && trimmed[previousIndex] === '(') return false;
+    if (previousIndex === null || /[(\[=,{;]/.test(trimmed[previousIndex]!)) return false;
+    if (/\breturn\s*$/.test(trimmed.slice(0, previousIndex + 1))) return false;
   }
 
   const beforeOpen = trimmed[lastOpen - 1];
@@ -650,6 +675,20 @@ function findUnclosedAngleBracketIndex(trimmed: string): number {
 
   for (let i = trimmed.length - 1; i >= 0; i -= 1) {
     const ch = trimmed[i]!;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipQuotedKeyBackward(trimmed, i);
+      continue;
+    }
+    if (ch === '/' && trimmed[i - 1] === '*') {
+      i -= 2;
+      while (i >= 1 && !(trimmed[i - 1] === '/' && trimmed[i] === '*')) i -= 1;
+      i -= 1;
+      continue;
+    }
+    if (isInsideLineCommentBackward(trimmed, i)) {
+      while (i >= 0 && trimmed[i] !== '\n') i -= 1;
+      continue;
+    }
     if (ch === '>') {
       if (trimmed[i - 1] === '=') continue;
       depth += 1;
@@ -1026,17 +1065,39 @@ function isInsideTypeAnnotation(
 }
 
 function findActiveTypeAnnotationIndex(prefix: string): number {
-  const annotationIndex = prefix.lastIndexOf(':');
+  const annotationIndex = findLastCodeColon(prefix);
   if (annotationIndex === -1) return -1;
 
   const annotationSuffix = prefix.slice(annotationIndex + 1);
   if (!/=>\s*$/.test(annotationSuffix)) return annotationIndex;
 
-  const outerAnnotationIndex = prefix.slice(0, annotationIndex).lastIndexOf(':');
+  const outerAnnotationIndex = findLastCodeColon(prefix.slice(0, annotationIndex));
   if (outerAnnotationIndex === -1) return annotationIndex;
 
   const outerSuffix = prefix.slice(outerAnnotationIndex + 1);
   return /=>\s*$/.test(outerSuffix) ? outerAnnotationIndex : annotationIndex;
+}
+
+function findLastCodeColon(content: string): number {
+  for (let i = content.length - 1; i >= 0; i -= 1) {
+    const ch = content[i]!;
+    if (ch === ':') return i;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipQuotedKeyBackward(content, i);
+      continue;
+    }
+    if (ch === '/' && content[i - 1] === '*') {
+      i -= 2;
+      while (i >= 1 && !(content[i - 1] === '/' && content[i] === '*')) i -= 1;
+      i -= 1;
+      continue;
+    }
+    if (isInsideLineCommentBackward(content, i)) {
+      while (i >= 0 && content[i] !== '\n') i -= 1;
+    }
+  }
+
+  return -1;
 }
 
 function hasRuntimeAfterAnnotation(prefix: string, annotationIndex: number): boolean {
@@ -1212,8 +1273,9 @@ function readNoSubstitutionTemplateString(
     if (ch === '\\') {
       const escaped = content[i + 1];
       if (escaped) {
-        value += escaped;
-        i += 1;
+        const decoded = decodeStringEscape(content, i);
+        value += decoded.value;
+        i = decoded.endIndex;
       }
       continue;
     }
@@ -1280,6 +1342,14 @@ function decodeStringEscape(content: string, slashIndex: number): { value: strin
     if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
       return { value: String.fromCharCode(parseInt(hex, 16)), endIndex: slashIndex + 3 };
     }
+  }
+
+  if (escaped === '\n') return { value: '', endIndex: slashIndex + 1 };
+  if (escaped === '\r') {
+    return {
+      value: '',
+      endIndex: content[slashIndex + 2] === '\n' ? slashIndex + 2 : slashIndex + 1,
+    };
   }
 
   const simpleEscapes: Record<string, string> = {

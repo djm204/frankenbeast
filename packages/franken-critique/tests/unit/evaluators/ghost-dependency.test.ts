@@ -218,6 +218,53 @@ describe('GhostDependencyEvaluator', () => {
     expect(result.findings[0]!.message).toContain('ghost-package');
   });
 
+  it('decodes escaped no-substitution template import specifiers', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const known = await evaluator.evaluate(
+      createInput(
+        "const templateKnown = await import(`z\\u006fd`);\n" +
+          "const escapedLocal = await import(`\\u002e/local-plugin.js`);",
+      ),
+    );
+    const unknown = await evaluator.evaluate(
+      createInput("const templateUnknown = await import(`gh\\u006fst-package`);"),
+    );
+
+    expect(known.verdict).toBe('pass');
+    expect(known.findings).toHaveLength(0);
+    expect(unknown.verdict).toBe('fail');
+    expect(unknown.findings).toHaveLength(1);
+    expect(unknown.findings[0]!.message).toContain('ghost-package');
+  });
+
+  it('handles Codex scanner regression cases without hiding runtime imports', async () => {
+    const evaluator = new GhostDependencyEvaluator(knownPackages);
+    const content =
+      "foo('x<y', import('string-angle-ghost'));\n" +
+      "const deps = [a<b, import('array-comparison-ghost')];\n" +
+      "return a<b, import('return-comparison-ghost');\n" +
+      "load('https://example.invalid', import('colon-string-ghost'));\n" +
+      "const el = <div>import('jsx-text-ghost'){import('jsx-expression-ghost')}</div>;\n" +
+      "await import('z\\\n" +
+      "od');";
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('fail');
+    expect(result.findings).toHaveLength(5);
+    expect(result.findings.map((finding) => finding.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('string-angle-ghost'),
+        expect.stringContaining('array-comparison-ghost'),
+        expect.stringContaining('return-comparison-ghost'),
+        expect.stringContaining('colon-string-ghost'),
+        expect.stringContaining('jsx-expression-ghost'),
+      ]),
+    );
+    expect(result.findings.map((finding) => finding.message)).not.toEqual(
+      expect.arrayContaining([expect.stringContaining('jsx-text-ghost')]),
+    );
+  });
+
   it('ignores method calls and TypeScript import types', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const content = `
