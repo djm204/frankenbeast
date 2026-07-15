@@ -153,7 +153,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   describePolicy(): TranscriptRetentionPolicyReport {
-    return describeTranscriptRetentionPolicy(this.policy)
+    return describeTranscriptRetentionPolicy(this.policy, this.now)
   }
 
   async cleanupExpired(): Promise<string[]> {
@@ -236,12 +236,13 @@ export function resolveTranscriptRetentionPolicy(
 
 export function describeTranscriptRetentionPolicy(
   policy: TranscriptRetentionPolicy = {},
+  now: () => number = policy.now ?? Date.now,
 ): TranscriptRetentionPolicyReport {
   const resolved = resolveTranscriptRetentionPolicy(policy)
   return Object.freeze({
     ...resolved,
     storesRawTranscriptContent: resolved.mode === 'raw' || resolved.redactionLevel === 'none',
-    ...(resolved.ttlMs > 0 ? { expiresAt: Date.now() + resolved.ttlMs } : {}),
+    ...(resolved.ttlMs > 0 ? { expiresAt: now() + resolved.ttlMs } : {}),
   })
 }
 
@@ -348,7 +349,14 @@ function classifyTranscriptField(key: string): TranscriptField | undefined {
   const normalized = key.replace(/[_-]/g, '').toLowerCase()
   if (NON_TRANSCRIPT_TOKEN_KEYS.has(normalized)) return undefined
   if (CHAT_TRANSCRIPT_KEYS.has(normalized)) return 'prompts'
-  if (PROMPT_KEYS.has(normalized) || normalized.includes('prompt') || normalized.endsWith('goal') || normalized.endsWith('goals')) return 'prompts'
+  if (
+    PROMPT_KEYS.has(normalized) ||
+    normalized.includes('prompt') ||
+    normalized.includes('instruction') ||
+    normalized.includes('transcript') ||
+    normalized.endsWith('goal') ||
+    normalized.endsWith('goals')
+  ) return 'prompts'
   if (
     TOOL_INPUT_KEYS.has(normalized) ||
     normalized === 'query' ||
@@ -409,8 +417,9 @@ function redactProviderMessageValue(
   const retained: Record<string, unknown> = {}
   seen.set(value, retained)
   const messageType = typeof value['type'] === 'string' ? value['type'].replace(/[_-]/g, '').toLowerCase() : ''
+  const messageRole = typeof value['role'] === 'string' ? value['role'].replace(/[_-]/g, '').toLowerCase() : ''
   for (const [key, nestedValue] of Object.entries(value)) {
-    const contextualField = messageType === 'toolresult' && key === 'content' ? 'toolOutputs' : classifyTranscriptField(key)
+    const contextualField = (messageType === 'toolresult' || messageRole === 'tool') && key === 'content' ? 'toolOutputs' : classifyTranscriptField(key)
     if (contextualField && !policy.retainedFields[contextualField]) continue
     setRecordValue(
       retained,

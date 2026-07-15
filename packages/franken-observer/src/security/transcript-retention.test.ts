@@ -194,6 +194,7 @@ describe('transcript retention controls', () => {
       ttlMs: 60_000,
       accessLevel: 'restricted',
       retainedFields: { toolOutputs: false },
+      now: () => 1_000,
     })
 
     expect(report).toMatchObject({
@@ -209,6 +210,7 @@ describe('transcript retention controls', () => {
         summaries: true,
       },
       storesRawTranscriptContent: false,
+      expiresAt: 61_000,
     })
   })
 
@@ -309,6 +311,26 @@ describe('transcript retention controls', () => {
       systemPromptAddition: '[REDACTED_TRANSCRIPT]',
       tool_input_json: '[REDACTED_TRANSCRIPT]',
       toolResultPayload: '[REDACTED_TRANSCRIPT]',
+      safeCounter: 1,
+    })
+  })
+
+  it('redacts instruction and transcript variant metadata keys', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          systemInstruction: 'private system instruction',
+          custom_instructions: 'private custom instructions',
+          transcriptText: 'private transcript text',
+          safeCounter: 1,
+        },
+      })],
+    }))
+
+    expect(retained.spans[0].metadata).toEqual({
+      systemInstruction: '[REDACTED_TRANSCRIPT]',
+      custom_instructions: '[REDACTED_TRANSCRIPT]',
+      transcriptText: '[REDACTED_TRANSCRIPT]',
       safeCounter: 1,
     })
   })
@@ -579,6 +601,7 @@ describe('transcript retention controls', () => {
         metadata: {
           messages: [
             { role: 'user', content: 'private prompt' },
+            { role: 'tool', content: 'private role-only tool result', tool_call_id: 'call-0' },
             { role: 'tool', type: 'tool_result', content: 'private tool result', tool_call_id: 'call-1' },
           ],
         },
@@ -591,6 +614,7 @@ describe('transcript retention controls', () => {
 
     expect(retained.spans[0].metadata['messages']).toEqual([
       { role: 'user', content: 'private prompt' },
+      { role: 'tool', tool_call_id: 'call-0' },
       { role: 'tool', type: 'tool_result', tool_call_id: 'call-1' },
     ])
   })
