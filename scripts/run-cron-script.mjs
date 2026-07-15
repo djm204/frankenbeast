@@ -393,7 +393,11 @@ async function runCronScript({ name, recoverable, command }) {
     };
 
     const scheduleExitDrainFinish = () => {
-      if (!exitResult) {
+      if (stderrTail.length >= STDERR_TAIL_LIMIT) {
+        if (exitDrainTimer) {
+          clearTimeout(exitDrainTimer);
+          exitDrainTimer = null;
+        }
         return;
       }
       if (exitDrainTimer) {
