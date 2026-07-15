@@ -145,8 +145,16 @@ async function resolveBackupRoot(stateDir: string): Promise<string> {
   return root;
 }
 
+async function discoverBackupFiles(requestedStateDir: string, root: string): Promise<string[]> {
+  const requestedRoot = resolve(requestedStateDir);
+  if (root !== requestedRoot && basename(requestedRoot) === 'state') {
+    return [join(root, 'beast.db'), ...await walkFiles(requestedRoot)].sort();
+  }
+  return walkFiles(root);
+}
+
 function assertNoLiveSqliteSidecars(relativePaths: readonly string[]): void {
-  const sidecar = relativePaths.find((path) => path.endsWith('-wal') || path.endsWith('-shm'));
+  const sidecar = relativePaths.find((path) => path.endsWith('-wal') || path.endsWith('-shm') || path.endsWith('-journal'));
   if (sidecar) {
     throw new Error(`Refusing to back up live SQLite sidecar ${sidecar}; checkpoint or quiesce SQLite state before DR backup`);
   }
@@ -174,7 +182,7 @@ async function buildPayload(stateDir: string, generatedAt: string, outputPath: s
   }
 
   const categories = emptyCategoryCounts();
-  const discoveredFiles = await walkFiles(root);
+  const discoveredFiles = await discoverBackupFiles(stateDir, root);
   if (discoveredFiles.some((absolutePath) => resolve(absolutePath) === output) && !await isExistingBackupArtifact(output)) {
     throw new Error('DR backup output path aliases a live input file; choose a separate backup artifact path');
   }
@@ -343,7 +351,7 @@ async function assertNoSymlinkParents(targetDir: string, targetPath: string): Pr
   }
 }
 
-async function assertEmptyRestoreTarget(targetDir: string): Promise<void> {
+async function assertRestoreTargetReady(targetDir: string, createIfMissing: boolean): Promise<void> {
   try {
     const stats = await lstat(targetDir);
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
@@ -355,11 +363,15 @@ async function assertEmptyRestoreTarget(targetDir: string): Promise<void> {
     }
   } catch (error: unknown) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      await mkdir(targetDir, { recursive: true, mode: 0o700 });
+      if (createIfMissing) await mkdir(targetDir, { recursive: true, mode: 0o700 });
       return;
     }
     throw error;
   }
+}
+
+function restorePathForFile(file: StateBackupFileManifest): string {
+  return file.category === 'approvals' ? join('_quarantine', 'approvals', file.path) : file.path;
 }
 
 export async function verifyEncryptedStateBackup(backupPath: string, keyFilePath: string): Promise<VerifyStateBackupReport> {
@@ -381,10 +393,11 @@ export async function restoreEncryptedStateBackup(options: RestoreStateBackupOpt
   }
   const dryRun = options.dryRun === true;
   const targetDir = resolve(options.targetDir);
+  await assertRestoreTargetReady(targetDir, !dryRun);
+  const restoredFiles = payload.files.map((file) => ({ ...file, path: restorePathForFile(file) }));
   if (!dryRun) {
-    await assertEmptyRestoreTarget(targetDir);
     for (const file of payload.files) {
-      const restorePath = file.category === 'approvals' ? join('_quarantine', 'approvals', file.path) : file.path;
+      const restorePath = restorePathForFile(file);
       const targetPath = resolve(targetDir, restorePath);
       if (!targetPath.startsWith(`${targetDir}${sep}`)) {
         throw new Error(`Unsafe backup entry path: ${file.path}`);
@@ -406,6 +419,6 @@ export async function restoreEncryptedStateBackup(options: RestoreStateBackupOpt
     backupPath: resolve(options.backupPath),
     targetDir,
     manifest: payload.manifest,
-    restoredFiles: payload.manifest.files,
+    restoredFiles,
   };
 }

@@ -90,6 +90,7 @@ describe('encrypted DR state backups', () => {
       await createEncryptedStateBackup({ stateDir: join(dir, 'state'), outputPath: backupPath, keyFilePath: keyFile });
       const dryRun = await restoreEncryptedStateBackup({ backupPath, targetDir: restoreDir, keyFilePath: keyFile, dryRun: true });
       expect(dryRun.wouldWrite).toBe(false);
+      expect(dryRun.restoredFiles.some((file) => file.path === '_quarantine/approvals/approvals/ledger.json')).toBe(true);
       await expect(stat(join(restoreDir, 'kanban.db'))).rejects.toThrow();
 
       const restored = await restoreEncryptedStateBackup({ backupPath, targetDir: restoreDir, keyFilePath: keyFile });
@@ -109,6 +110,8 @@ describe('encrypted DR state backups', () => {
 
     try {
       await writeFile(join(dir, 'beast.db'), 'project sqlite bytes', 'utf8');
+      await mkdir(join(dir, '.cache'), { recursive: true });
+      await writeFile(join(dir, '.cache', 'unrelated-secret.log'), 'not state', 'utf8');
       await writeFile(join(dir, 'dr.key'), 'embedded key should be excluded', 'utf8');
       await writeFile(inTreeBackupPath, JSON.stringify({ format: 'frankenbeast-dr-state-backup', schemaVersion: 1 }), 'utf8');
       const envelope = await createEncryptedStateBackup({
@@ -119,6 +122,7 @@ describe('encrypted DR state backups', () => {
       const paths = envelope.manifest.files.map((file) => file.path);
       expect(paths).not.toContain('state/backup.franken-dr.json');
       expect(paths).not.toContain('dr.key');
+      expect(paths).not.toContain('.cache/unrelated-secret.log');
       expect(paths).toContain('beast.db');
       expect(paths).toContain('state/kanban.db');
 
@@ -139,7 +143,7 @@ describe('encrypted DR state backups', () => {
   it('refuses live SQLite WAL/SHM sidecars until state is quiesced', async () => {
     const { dir, keyFile } = await makeFixtureState();
     try {
-      await writeFile(join(dir, 'state', 'kanban.db-wal'), 'live wal bytes', 'utf8');
+      await writeFile(join(dir, 'state', 'kanban.db-journal'), 'live journal bytes', 'utf8');
       await expect(createEncryptedStateBackup({
         stateDir: join(dir, 'state'),
         outputPath: join(dir, 'backup.franken-dr.json'),
