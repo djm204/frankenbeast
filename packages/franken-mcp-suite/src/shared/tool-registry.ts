@@ -44,6 +44,15 @@ const MAX_MEMORY_QUERY_LIMIT = 1000;
 
 function parseMemoryQueryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (value === undefined) return { ok: true, value: DEFAULT_MEMORY_QUERY_LIMIT };
+  return parsePositiveMemoryLimit(value);
+}
+
+function parseMemoryExportLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: MAX_MEMORY_QUERY_LIMIT };
+  return parsePositiveMemoryLimit(value);
+}
+
+function parsePositiveMemoryLimit(value: unknown): { ok: true; value: number } | { ok: false; message: string } {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return { ok: false, message: `limit must be a positive integer between 1 and ${MAX_MEMORY_QUERY_LIMIT}` };
   }
@@ -75,6 +84,15 @@ function parseMemoryReadScopeArgs(args: Record<string, unknown>): { ok: true; va
     return { ok: false, message: 'agentId is required when readScope is agent' };
   }
   return { ok: true, value: { ...(readScope ? { readScope: readScope as 'all' | 'shared' | 'agent' } : {}), ...(agentId ? { agentId } : {}) } };
+}
+
+function parseMemoryExportRedaction(value: unknown): { ok: true; value?: 'safe' | 'none' } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  const redaction = String(value);
+  if (redaction === 'safe' || redaction === 'none') {
+    return { ok: true, value: redaction };
+  }
+  return { ok: false, message: 'redaction must be one of: safe, none' };
 }
 
 function parseOptionalAgentIdArg(args: Record<string, unknown>): { ok: true; value?: string } | { ok: false; message: string } {
@@ -194,6 +212,41 @@ const TOOLS: ToolFull[] = [
       }
       const text = sections.map((section) => `## ${section.type}\n${section.entries.map((entry) => `  ${entry}`).join('\n')}`).join('\n\n');
       return { content: [{ type: 'text', text }] };
+    },
+  },
+  {
+    name: 'fbeast_memory_export',
+    server: 'memory',
+    description: 'Export project memory as structured JSON with safe redaction by default',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Optional legacy project identifier; export is database-scoped' },
+        readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
+        redaction: { type: 'string', description: 'Redaction mode: safe (default) masks secrets/PII; none emits raw values for trusted operator-only exports', enum: ['safe', 'none'] },
+        limit: { type: 'string', description: 'Max entries per memory store (default 1000)' },
+      },
+    },
+    makeHandler: ({ brain }) => async (args) => {
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_export ${scopeArgs.message}` }], isError: true };
+      }
+      const parsedLimit = parseMemoryExportLimit(args['limit']);
+      if (!parsedLimit.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_export ${parsedLimit.message}` }], isError: true };
+      }
+      const redaction = parseMemoryExportRedaction(args['redaction']);
+      if (!redaction.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_export ${redaction.message}` }], isError: true };
+      }
+      const result = await brain.exportProjectMemory({
+        ...scopeArgs.value,
+        ...(redaction.value ? { redaction: redaction.value } : {}),
+        limit: parsedLimit.value,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     },
   },
   {

@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import {
   SqliteBrain,
   type RightToForgetReport,
   type RightToForgetSelector,
 } from "@franken/brain";
 import Database from "better-sqlite3";
-import { isoNow } from "@franken/types";
+import { isoNow, type EpisodicEvent } from "@franken/types";
 
 function configureBrainAdapterDb(db: Database.Database): void {
   db.pragma("journal_mode = WAL");
@@ -47,6 +48,41 @@ export interface BrainFrontloadSection {
   entries: string[];
 }
 
+export type MemoryExportRedactionMode = "safe" | "none";
+
+export interface MemoryExportInput extends MemoryScopeInput {
+  /** Defaults to safe. Use none only for trusted operator-only exports. */
+  redaction?: MemoryExportRedactionMode;
+  /** Maximum entries returned from each store. Defaults to 1000. */
+  limit?: number;
+}
+
+export interface MemoryExportWorkingEntry {
+  key: string;
+  value: unknown;
+  agentId?: string;
+}
+
+export interface MemoryExportEpisodicEntry {
+  id?: number | string;
+  eventType: string;
+  step?: string;
+  summary: string;
+  details?: unknown;
+  agentId?: string;
+  createdAt: string;
+}
+
+export interface ProjectMemoryExport {
+  version: 1;
+  exportedAt: string;
+  scope: { readScope: MemoryReadScope; agentId?: string };
+  redaction: MemoryExportRedactionMode;
+  counts: { working: number; episodic: number };
+  working: MemoryExportWorkingEntry[];
+  episodic: MemoryExportEpisodicEntry[];
+}
+
 export interface BrainAdapter {
   query(input: BrainQueryInput): Promise<BrainMemoryEntry[]>;
   store(input: {
@@ -56,6 +92,7 @@ export interface BrainAdapter {
     agentId?: string;
   }): Promise<void>;
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
+  exportProjectMemory(input?: MemoryExportInput): Promise<ProjectMemoryExport>;
   forget(key: string, input?: AgentScopedInput): Promise<boolean>;
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
@@ -224,6 +261,66 @@ function resolveQueryLimit(limit: number | undefined): number {
   return limit;
 }
 
+function resolveExportLimit(limit: number | undefined): number {
+  return resolveQueryLimit(limit ?? MAX_QUERY_LIMIT);
+}
+
+const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
+const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
+  [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
+  [/\b(?:sk|gho|ghp)_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
+  [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
+  [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]"],
+];
+
+function stableRedactedKey(key: string): string {
+  const digest = createHash("sha256").update(key).digest("hex").slice(0, 12);
+  return `[redacted-key:${digest}]`;
+}
+
+function redactExportString(value: string): string {
+  return SECRET_EXPORT_VALUES.reduce(
+    (current, [pattern, replacement]) => current.replace(pattern, replacement),
+    value,
+  );
+}
+
+function redactExportValue(
+  value: unknown,
+  keyHint?: string,
+  seen: WeakSet<object> = new WeakSet(),
+): unknown {
+  if (keyHint && SENSITIVE_EXPORT_KEY.test(keyHint)) {
+    return "[redacted]";
+  }
+  if (typeof value === "string") return redactExportString(value);
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[redacted-circular]";
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => redactExportValue(item, undefined, seen));
+  }
+  const output: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    const outputKey = SENSITIVE_EXPORT_KEY.test(key) ? stableRedactedKey(key) : key;
+    output[outputKey] = redactExportValue(nested, key, seen);
+  }
+  return output;
+}
+
+function redactExportKey(key: string, redaction: MemoryExportRedactionMode): string {
+  if (redaction === "none") return key;
+  return SENSITIVE_EXPORT_KEY.test(key) ? stableRedactedKey(key) : redactExportString(key);
+}
+
+function redactExportField<T>(
+  value: T,
+  redaction: MemoryExportRedactionMode,
+  keyHint?: string,
+): T | unknown {
+  return redaction === "none" ? value : redactExportValue(value, keyHint);
+}
+
 export function createBrainAdapter(dbPath: string): BrainAdapter {
   const brain = new SqliteBrain(dbPath);
 
@@ -276,7 +373,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       if (!memoryType || memoryType === "episodic") {
         const episodicLimit = readScope.readScope === "all" ? limit : -1;
         const events = takeVisibleEntries(
-          brain.episodic.recall(input.query, episodicLimit),
+          brain.episodic.recall(input.query, episodicLimit) as EpisodicEvent[],
           limit,
           (event) =>
             canReadMemoryEntry(
@@ -355,7 +452,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       // Recent episodic events
       const episodicLimit = readScope.readScope === "all" ? 100 : -1;
       const events = takeVisibleEntries(
-        brain.episodic.recent(episodicLimit),
+        brain.episodic.recent(episodicLimit) as EpisodicEvent[],
         100,
         (event) =>
           canReadMemoryEntry(
@@ -369,6 +466,65 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
       }
 
       return sections;
+    },
+
+    async exportProjectMemory(input = {}) {
+      const readScope = resolveMemoryReadScope(input);
+      const redaction = input.redaction ?? "safe";
+      if (redaction !== "safe" && redaction !== "none") {
+        throw new Error("redaction must be one of: safe, none");
+      }
+      const limit = resolveExportLimit(input.limit);
+      const snapshot = brain.working.snapshot();
+      const working = Object.entries(snapshot)
+        .map(([key, value]) => parseScopedWorkingEntry(key, value))
+        .filter((entry) => canReadMemoryEntry(entry.agentId, readScope))
+        .slice(0, limit)
+        .map((entry) => {
+          const exported: MemoryExportWorkingEntry = {
+            key: redactExportKey(entry.key, redaction),
+            value: redactExportField(entry.value, redaction, entry.key),
+          };
+          if (entry.agentId !== undefined) exported.agentId = entry.agentId;
+          return exported;
+        });
+
+      const episodicLimit = readScope.readScope === "all" ? limit : -1;
+      const episodic = takeVisibleEntries(
+        brain.episodic.recent(episodicLimit) as EpisodicEvent[],
+        limit,
+        (event) =>
+          canReadMemoryEntry(
+            parseAgentFromEpisodicDetails(event.details),
+            readScope,
+          ),
+      ).map((event) => {
+        const entryAgentId = parseAgentFromEpisodicDetails(event.details);
+        const exported: MemoryExportEpisodicEntry = {
+          ...(event.id === undefined ? {} : { id: event.id }),
+          eventType: event.type,
+          ...(event.step === undefined
+            ? {}
+            : { step: redactExportField(event.step, redaction, "step") as string }),
+          summary: redactExportField(event.summary, redaction, "summary") as string,
+          ...(event.details === undefined
+            ? {}
+            : { details: redactExportField(event.details, redaction, "details") }),
+          ...(entryAgentId === undefined ? {} : { agentId: entryAgentId }),
+          createdAt: event.createdAt,
+        };
+        return exported;
+      });
+
+      return {
+        version: 1,
+        exportedAt: isoNow(),
+        scope: readScope,
+        redaction,
+        counts: { working: working.length, episodic: episodic.length },
+        working,
+        episodic,
+      };
     },
 
     async forget(key, input = {}) {

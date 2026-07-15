@@ -51,6 +51,7 @@ vi.mock("@franken/brain", () => ({
         snapshot: vi.fn(() => ({
           "task-1": "working entry",
           "agents/oncall/runbook": "shared runbook",
+          "github-token": "ghp_" + "supersecretvalue123456",
           "__fbeast_agent_memory__/alpha/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
             agentId: "alpha",
@@ -70,6 +71,7 @@ vi.mock("@franken/brain", () => ({
         recall: vi.fn(() => [
           {
             id: "evt-1",
+            type: "success",
             summary: "episode summary",
             createdAt: "2026-07-06T00:00:00.000Z",
           },
@@ -77,11 +79,14 @@ vi.mock("@franken/brain", () => ({
         recent: vi.fn(() => [
           {
             id: "evt-shared",
+            type: "success",
             summary: "shared episode",
+            details: { apiKey: "sk_" + "secretvalue123456" },
             createdAt: "2026-07-06T00:00:00.000Z",
           },
           {
             id: "evt-alpha",
+            type: "success",
             summary: "alpha episode",
             details: {
               __fbeastMemoryScope: "fbeast:agent-memory",
@@ -91,6 +96,7 @@ vi.mock("@franken/brain", () => ({
           },
           {
             id: "evt-beta",
+            type: "success",
             summary: "beta episode",
             details: {
               __fbeastMemoryScope: "fbeast:agent-memory",
@@ -238,6 +244,27 @@ describe("createBrainAdapter", () => {
     const mockBrain = brainInstances[0];
     expect(mockBrain.episodic.recall).toHaveBeenCalledWith("entry", -1);
     expect(mockBrain.episodic.recent).toHaveBeenCalledWith(-1);
+  });
+
+  it("exports scoped project memory with safe redaction by default", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+
+    const exported = await brain.exportProjectMemory({
+      readScope: "shared",
+      limit: 10,
+    });
+    const serialized = JSON.stringify(exported);
+
+    expect(exported.version).toBe(1);
+    expect(exported.redaction).toBe("safe");
+    expect(exported.scope).toEqual({ readScope: "shared" });
+    expect(exported.working.map((entry) => entry.key)).toContain("task-1");
+    expect(exported.working.map((entry) => entry.key)).toContain("agents/oncall/runbook");
+    expect(exported.working.map((entry) => entry.value)).not.toContain("beta entry");
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toContain("ghp_" + "supersecretvalue123456");
+    expect(serialized).not.toContain("sk_" + "secretvalue123456");
+    expect(serialized).not.toContain("apiKey");
   });
 
   it("rejects agent read scope without an agent id before reading memory", async () => {

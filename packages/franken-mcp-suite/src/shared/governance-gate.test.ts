@@ -50,6 +50,7 @@ describe('createGovernanceGate', () => {
       'fbeast_governor_budget',
       'fbeast_memory_query',
       'fbeast_memory_frontload',
+      'fbeast_memory_export',
       'fbeast_plan_decompose',
       'fbeast_plan_status',
       'fbeast_plan_validate',

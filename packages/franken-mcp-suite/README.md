@@ -90,7 +90,7 @@ For Beast controls, run the orchestrator/backend setup flow with `frankenbeast i
 
 | Server | Tools | Description |
 |--------|-------|-------------|
-| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget` | Key-value, episodic, and auditable deletion memory via SqliteBrain |
+| `fbeast-memory` | `fbeast_memory_store`, `fbeast_memory_query`, `fbeast_memory_frontload`, `fbeast_memory_export`, `fbeast_memory_forget`, `fbeast_memory_right_to_forget` | Key-value, episodic, redacted project export, and auditable deletion memory via SqliteBrain |
 | `fbeast-observer` | `fbeast_observer_log`, `fbeast_observer_log_cost`, `fbeast_observer_cost`, `fbeast_observer_trail`, `fbeast_observer_verify` | Audit trail with chained hashes, token/cost logging and summaries |
 | `fbeast-governor` | `fbeast_governor_check`, `fbeast_governor_budget` | Action safety assessment and budget status |
 | `fbeast-planner` | `fbeast_plan_decompose`, `fbeast_plan_status`, `fbeast_plan_validate` | Task DAG planning, status visualization, and validation |
@@ -107,6 +107,8 @@ Memory reads support explicit per-agent scope controls on `fbeast_memory_query` 
 - set `readScope: "agent"` with `agentId` to return shared entries plus entries for that agent only.
 
 To create agent-scoped entries through `fbeast_memory_store`, pass `agentId`; working-memory entries are stored under an internal reserved key with explicit scope metadata, and episodic entries carry the same metadata in event details. `fbeast_memory_forget` accepts the same optional `agentId` so callers can delete scoped working-memory entries using the logical key they stored. `readScope: "agent"` requires a non-empty `agentId` and rejects the request before touching memory when the id is missing, making failures deterministic and preventing accidental broad reads.
+
+`fbeast_memory_export` returns a structured JSON export of the same database-scoped project memory with `redaction: "safe"` by default. Safe redaction masks sensitive keys and values such as passwords, API keys, bearer tokens, session cookies, private keys, and email addresses before returning working and episodic memory entries. Use `redaction: "none"` only for trusted operator-only exports; `readScope` and `agentId` use the same scope rules as query/frontload.
 
 `fbeast_memory_right_to_forget` performs user-directed memory deletion by exact key, category metadata, source scope, or sensitive query text. The report returns only a selector hash, deleted counts, remaining-reference count, and optional audit event id; it does not echo the deleted content. Non-dry-run deletions also install hashed reinference guards so future working-memory writes matching forgotten keys, categories, source scopes, or query tokens are rejected.
 
