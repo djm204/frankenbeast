@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
@@ -11,6 +11,7 @@ import {
 } from '../../../src/security/safe-archive-extractor.js';
 
 const tempDirs: string[] = [];
+const CRC32_TABLE = makeCrc32Table();
 
 async function tempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'franken-safe-archive-'));
@@ -37,6 +38,7 @@ function createZip(entries: readonly ZipEntryFixture[]): Buffer {
     const method = entry.method ?? 8;
     const name = Buffer.from(entry.name, 'utf8');
     const compressed = method === 8 ? deflateRawSync(entry.body) : entry.body;
+    const entryCrc32 = crc32(entry.body);
 
     const local = Buffer.alloc(30 + name.length);
     local.writeUInt32LE(0x04034b50, 0);
@@ -44,7 +46,7 @@ function createZip(entries: readonly ZipEntryFixture[]): Buffer {
     local.writeUInt16LE(0, 6);
     local.writeUInt16LE(method, 8);
     local.writeUInt32LE(0, 10);
-    local.writeUInt32LE(0, 14);
+    local.writeUInt32LE(entryCrc32, 14);
     local.writeUInt32LE(compressed.length, 18);
     local.writeUInt32LE(entry.body.length, 22);
     local.writeUInt16LE(name.length, 26);
@@ -58,7 +60,7 @@ function createZip(entries: readonly ZipEntryFixture[]): Buffer {
     central.writeUInt16LE(0, 8);
     central.writeUInt16LE(method, 10);
     central.writeUInt32LE(0, 12);
-    central.writeUInt32LE(0, 16);
+    central.writeUInt32LE(entryCrc32, 16);
     central.writeUInt32LE(compressed.length, 20);
     central.writeUInt32LE(entry.body.length, 24);
     central.writeUInt16LE(name.length, 28);
@@ -88,6 +90,26 @@ function createZip(entries: readonly ZipEntryFixture[]): Buffer {
   end.writeUInt16LE(0, 20);
 
   return Buffer.concat([...localParts, centralDirectory, end]);
+}
+
+function makeCrc32Table(): Uint32Array {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+function crc32(data: Buffer): number {
+  let value = 0xffffffff;
+  for (const byte of data) {
+    value = CRC32_TABLE[(value ^ byte) & 0xff]! ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
 }
 
 describe('safe archive extraction', () => {
@@ -166,7 +188,7 @@ describe('safe archive extraction', () => {
   });
 
   it('rejects Windows-special path segments before writing', async () => {
-    for (const name of ['docs/victim.txt:payload', 'docs/NUL', 'docs/name. ', 'docs/trailing.']) {
+    for (const name of ['docs/victim.txt:payload', 'docs/NUL', 'docs/COM¹', 'docs/name. ', 'docs/trailing.']) {
       const destination = await tempDir();
       await expect(extractZipArchive(createZip([{ name, body: Buffer.from('x') }]), destination)).rejects.toThrow(
         /Windows-special/i,
@@ -199,6 +221,40 @@ describe('safe archive extraction', () => {
       ),
     ).rejects.toThrow(/collision/i);
     await expect(readdir(prefixDestination)).resolves.toEqual([]);
+
+    const caseInsensitiveDestination = await tempDir();
+    await expect(
+      extractZipArchive(
+        createZip([
+          { name: 'Readme.txt', body: Buffer.from('first') },
+          { name: 'README.txt', body: Buffer.from('second') },
+        ]),
+        caseInsensitiveDestination,
+      ),
+    ).rejects.toThrow(/collision/i);
+    await expect(readdir(caseInsensitiveDestination)).resolves.toEqual([]);
+  });
+
+  it('rejects symlinked destination ancestors before creating the extraction root', async () => {
+    const parent = await tempDir();
+    const outside = await tempDir();
+    await mkdir(join(parent, 'staging'));
+    await symlink(outside, join(parent, 'staging', 'link'));
+
+    await expect(
+      extractZipArchive(createZip([{ name: 'safe.txt', body: Buffer.from('owned') }]), join(parent, 'staging', 'link', 'run')),
+    ).rejects.toThrow(/symlink/i);
+    await expect(stat(join(outside, 'run', 'safe.txt'))).rejects.toThrow();
+  });
+
+  it('rejects excessive path component counts before collision checks', async () => {
+    const destination = await tempDir();
+    const longPath = `${Array.from({ length: 257 }, (_, index) => `p${index}`).join('/')}/file.txt`;
+
+    await expect(extractZipArchive(createZip([{ name: longPath, body: Buffer.from('x') }]), destination)).rejects.toThrow(
+      /segments/i,
+    );
+    await expect(readdir(destination)).resolves.toEqual([]);
   });
 
   it('wraps corrupt deflate payloads as safe archive errors', async () => {
@@ -210,6 +266,17 @@ describe('safe archive extraction', () => {
     archive[corruptIndex] = 0xff;
 
     await expect(extractZipArchive(archive, destination)).rejects.toThrow(SafeArchiveExtractionError);
+    await expect(readdir(destination)).resolves.toEqual([]);
+  });
+
+  it('rejects entries whose payload does not match the central directory CRC', async () => {
+    const destination = await tempDir();
+    const archive = Buffer.from(createZip([{ name: 'stored.txt', body: Buffer.from('abc'), method: 0 }]));
+    const payloadOffset = archive.indexOf(Buffer.from('abc'));
+    expect(payloadOffset).toBeGreaterThanOrEqual(0);
+    archive[payloadOffset] = 'z'.charCodeAt(0);
+
+    await expect(extractZipArchive(archive, destination)).rejects.toThrow(/CRC/i);
     await expect(readdir(destination)).resolves.toEqual([]);
   });
 

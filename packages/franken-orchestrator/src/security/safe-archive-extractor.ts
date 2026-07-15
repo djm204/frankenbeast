@@ -1,5 +1,5 @@
 import { lstat, mkdir, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, resolve, sep } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
 export interface SafeArchiveLimits {
@@ -52,6 +52,7 @@ interface ZipCentralDirectoryEntry {
   readonly uncompressedBytes: number;
   readonly localHeaderOffset: number;
   readonly externalAttributes: number;
+  readonly crc32: number;
   readonly isDirectory: boolean;
   readonly targetPath: string;
 }
@@ -64,9 +65,11 @@ const ZIP64_SENTINEL_32 = 0xffffffff;
 const MAX_EOCD_SEARCH = 22 + 65_535;
 const SYMLINK_FILE_TYPE = 0o120000;
 const FILE_TYPE_MASK = 0o170000;
+const MAX_ARCHIVE_PATH_SEGMENTS = 256;
 
 const ARCHIVE_ENTRY_PATTERN = /(?:^|[/\\])[^/\\]+\.(?:zip|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz|gz|bz2|xz)$/iu;
-const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/iu;
+const CRC32_TABLE = makeCrc32Table();
 
 export async function extractZipArchive(
   archive: Buffer | Uint8Array,
@@ -82,6 +85,7 @@ export async function extractZipArchive(
   }
 
   const destinationRoot = resolve(destination);
+  await rejectSymlinkedExistingAncestors(destinationRoot);
   const entries = parseZipCentralDirectory(buffer, destinationRoot);
   const files = preflightEntries(entries, limits);
 
@@ -150,6 +154,7 @@ function parseZipCentralDirectory(buffer: Buffer, destinationRoot: string): ZipC
 
     const flags = buffer.readUInt16LE(cursor + 8);
     const method = buffer.readUInt16LE(cursor + 10);
+    const crc32 = buffer.readUInt32LE(cursor + 16);
     const compressedBytes = buffer.readUInt32LE(cursor + 20);
     const uncompressedBytes = buffer.readUInt32LE(cursor + 24);
     const nameLength = buffer.readUInt16LE(cursor + 28);
@@ -174,6 +179,7 @@ function parseZipCentralDirectory(buffer: Buffer, destinationRoot: string): ZipC
       uncompressedBytes,
       localHeaderOffset,
       externalAttributes,
+      crc32,
       isDirectory,
       targetPath: normalizedPath.targetPath,
     });
@@ -205,6 +211,11 @@ function normalizeArchivePath(rawPath: string, destinationRoot: string): { relat
     throw new SafeArchiveExtractionError(`Archive entry path traversal is not allowed: ${rawPath}`);
   }
   const parts = relativePath.split('/');
+  if (parts.length > MAX_ARCHIVE_PATH_SEGMENTS) {
+    throw new SafeArchiveExtractionError(
+      `Archive entry path has ${parts.length} segments, exceeding limit ${MAX_ARCHIVE_PATH_SEGMENTS}: ${rawPath}`,
+    );
+  }
   if (parts.some((part) => part === '' || part === '.' || part === '..')) {
     throw new SafeArchiveExtractionError(`Archive entry path traversal is not allowed: ${rawPath}`);
   }
@@ -270,28 +281,35 @@ function isWindowsSpecialSegment(segment: string): boolean {
 function rejectPathCollisions(files: readonly ZipCentralDirectoryEntry[], explicitDirectories: readonly string[]): void {
   const filePaths = new Set<string>();
   const ancestorDirectories = new Set<string>();
-  const directoryPaths = new Set(explicitDirectories);
+  const directoryPaths = new Set(explicitDirectories.map((path) => collisionKey(path)));
 
   for (const entry of files) {
-    if (filePaths.has(entry.path) || directoryPaths.has(entry.path) || ancestorDirectories.has(entry.path)) {
+    const entryKey = collisionKey(entry.path);
+    if (filePaths.has(entryKey) || directoryPaths.has(entryKey) || ancestorDirectories.has(entryKey)) {
       throw new SafeArchiveExtractionError(`Archive path collision is not allowed: ${entry.path}`);
     }
 
     const parts = entry.path.split('/');
     const ancestors: string[] = [];
-    for (let index = 1; index < parts.length; index += 1) {
-      const ancestor = parts.slice(0, index).join('/');
-      if (filePaths.has(ancestor)) {
+    let ancestor = '';
+    for (const part of parts.slice(0, -1)) {
+      ancestor = ancestor.length === 0 ? part : `${ancestor}/${part}`;
+      const ancestorKey = collisionKey(ancestor);
+      if (filePaths.has(ancestorKey)) {
         throw new SafeArchiveExtractionError(`Archive path collision is not allowed: ${entry.path}`);
       }
-      ancestors.push(ancestor);
+      ancestors.push(ancestorKey);
     }
 
-    filePaths.add(entry.path);
-    for (const ancestor of ancestors) {
-      ancestorDirectories.add(ancestor);
+    filePaths.add(entryKey);
+    for (const ancestorKey of ancestors) {
+      ancestorDirectories.add(ancestorKey);
     }
   }
+}
+
+function collisionKey(path: string): string {
+  return path.toLocaleLowerCase('en-US');
 }
 
 async function rejectSymlinkedPathComponents(destinationRoot: string, targetPath: string): Promise<void> {
@@ -302,6 +320,16 @@ async function rejectSymlinkedPathComponents(destinationRoot: string, targetPath
   for (const part of parts.slice(0, -1)) {
     current = resolve(current, part);
     await rejectSymlink(current, destinationRoot);
+  }
+}
+
+async function rejectSymlinkedExistingAncestors(path: string): Promise<void> {
+  const root = parse(path).root;
+  const relativeParts = path.slice(root.length).split(sep).filter(Boolean);
+  let current = root;
+  for (const part of relativeParts) {
+    current = resolve(current, part);
+    await rejectSymlink(current, path);
   }
 }
 
@@ -353,5 +381,29 @@ function readZipEntry(buffer: Buffer, entry: ZipCentralDirectoryEntry, limits: S
   if (data.byteLength > limits.maxFileBytes) {
     throw new SafeArchiveExtractionError(`ZIP entry ${entry.path} exceeds per-file limit ${limits.maxFileBytes} bytes`);
   }
+  const actualCrc32 = crc32(data);
+  if (actualCrc32 !== entry.crc32) {
+    throw new SafeArchiveExtractionError(`ZIP entry ${entry.path} failed CRC validation`);
+  }
   return data;
+}
+
+function makeCrc32Table(): Uint32Array {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+function crc32(data: Buffer): number {
+  let value = 0xffffffff;
+  for (const byte of data) {
+    value = CRC32_TABLE[(value ^ byte) & 0xff]! ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
 }
