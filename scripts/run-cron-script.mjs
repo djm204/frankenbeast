@@ -68,6 +68,25 @@ function processGroupAlive(pid) {
   }
 }
 
+function processAlive(pid) {
+  if (!pid) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    try {
+      if (readFileSync(`/proc/${pid}/stat`, 'utf8').split(' ')[2] === 'Z') {
+        return false;
+      }
+    } catch {
+      // Non-Linux or racing /proc; process.kill succeeded, so treat it as alive.
+    }
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
 function signalExitCode(signal) {
   const signalNumber = osConstants.signals[signal];
   return typeof signalNumber === 'number' ? 128 + signalNumber : 128;
@@ -121,15 +140,20 @@ function signalChildTree(child, signal) {
   }
 
   const signaledPids = [];
+  let signaledProcessGroup = false;
   if (process.platform !== 'win32') {
     try {
       process.kill(-child.pid, signal);
       signaledPids.push(-child.pid);
+      signaledProcessGroup = true;
     } catch (error) {
       if (error?.code !== 'ESRCH') {
         // Fall back to explicit descendant signaling below.
       }
     }
+  }
+
+  if (!signaledProcessGroup) {
     for (const pid of collectDescendantPids(child.pid).reverse()) {
       try {
         process.kill(pid, signal);
@@ -140,14 +164,14 @@ function signalChildTree(child, signal) {
         }
       }
     }
-  }
 
-  try {
-    child.kill(signal);
-    signaledPids.push(child.pid);
-  } catch (error) {
-    if (error?.code !== 'ESRCH') {
-      throw error;
+    try {
+      child.kill(signal);
+      signaledPids.push(child.pid);
+    } catch (error) {
+      if (error?.code !== 'ESRCH') {
+        throw error;
+      }
     }
   }
   return signaledPids;
@@ -164,7 +188,9 @@ function isAuthScheme(value) {
 function redactSensitiveText(value) {
   const raw = typeof value === 'string' ? value : String(value ?? '');
   return raw
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/(["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/(["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)["']\s*:\s*)(["'])([\s\S]*)/gi, '$1$2[REDACTED]')
     .replace(/(\\["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)\\["']\s*:\s*\\["'])(.*?)(\\["'])/gi, '$1[REDACTED]$3')
     .replace(/\b([A-Z0-9_]*(?:AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+([^\s"']+)/gi, '$1$2 [REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)([^\n\r,;]+)/gi, '$1[REDACTED]')
@@ -177,8 +203,7 @@ function redactSensitiveText(value) {
     .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key)\s*[:=]\s*)([^\s"']+)/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=\\(["'])(.*?)\\\2/gi, '$1=\\$2[REDACTED]\\$2')
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=(["'])(.*?)\2/gi, '$1=$2[REDACTED]$2')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]')
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]');
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]');
 }
 
 function redactCommand(command) {
@@ -264,7 +289,7 @@ async function runCronScript({ name, recoverable, command }) {
   let parentTerminationEnvelopeEmitted = false;
   let parentTerminationPids = [];
   let parentTerminationProcessGroup = null;
-  let stderrTailSecretContinuation = false;
+  let stderrTailSecretContinuation = null;
 
   return await new Promise((resolve) => {
     let child;
@@ -393,7 +418,11 @@ async function runCronScript({ name, recoverable, command }) {
       if (parentTerminationExitCode !== null) {
         emitParentTerminationEnvelope();
         if (forceKillTimer) {
-          return;
+          if (processGroupAlive(parentTerminationProcessGroup) || trackedParentTerminationPids().some(processAlive)) {
+            return;
+          }
+          clearTimeout(forceKillTimer);
+          forceKillTimer = null;
         }
         finish(parentTerminationExitCode);
         return;
@@ -432,19 +461,51 @@ async function runCronScript({ name, recoverable, command }) {
       const text = chunk.toString('utf8');
       let redactedTailChunk;
       if (stderrTailSecretContinuation) {
-        const delimiterIndex = text.search(/[;,]/);
-        if (delimiterIndex === -1) {
-          redactedTailChunk = '[REDACTED]';
+        if (stderrTailSecretContinuation.kind === 'json') {
+          const closingQuoteIndex = text.indexOf(stderrTailSecretContinuation.delimiter);
+          if (closingQuoteIndex === -1) {
+            redactedTailChunk = '[REDACTED]';
+          } else {
+            stderrTailSecretContinuation = null;
+            redactedTailChunk = `[REDACTED]${redactSensitiveText(text.slice(closingQuoteIndex))}`;
+          }
         } else {
-          stderrTailSecretContinuation = false;
-          redactedTailChunk = `[REDACTED]${redactSensitiveText(text.slice(delimiterIndex))}`;
+          const delimiterIndex = text.search(/[;,]/);
+          if (delimiterIndex === -1) {
+            redactedTailChunk = '[REDACTED]';
+          } else {
+            stderrTailSecretContinuation = null;
+            redactedTailChunk = `[REDACTED]${redactSensitiveText(text.slice(delimiterIndex))}`;
+          }
         }
       } else {
-        const secretStart = text.search(/\b[A-Z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]/i);
-        if (secretStart !== -1 && text.slice(secretStart).search(/[;,]/) === -1) {
-          stderrTailSecretContinuation = true;
-          const redactedSecret = text.slice(secretStart).replace(/(\b[A-Z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)[\s\S]*/i, '$1[REDACTED]');
-          redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${redactedSecret}`;
+        const secretJsonMatch = /(\\?["'](?:token|password|passwd|secret|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)\\?["']\s*:\s*(\\?["']))/i.exec(text);
+        const secretAssignMatch = /(\b[A-Z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)/i.exec(text);
+        const useJson = secretJsonMatch && (!secretAssignMatch || secretJsonMatch.index <= secretAssignMatch.index);
+        const match = useJson ? secretJsonMatch : secretAssignMatch;
+        if (match) {
+          const secretStart = match.index;
+          const valueStart = secretStart + match[0].length;
+          if (useJson) {
+            const delimiter = secretJsonMatch[2];
+            const closingQuoteIndex = text.slice(valueStart).indexOf(delimiter);
+            if (closingQuoteIndex === -1) {
+              stderrTailSecretContinuation = { kind: 'json', delimiter };
+              redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]`;
+            } else {
+              const end = valueStart + closingQuoteIndex;
+              redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]${redactSensitiveText(text.slice(end))}`;
+            }
+          } else {
+            const delimiterIndex = text.slice(valueStart).search(/[;,]/);
+            if (delimiterIndex === -1) {
+              stderrTailSecretContinuation = { kind: 'assignment' };
+              redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]`;
+            } else {
+              const end = valueStart + delimiterIndex;
+              redactedTailChunk = `${redactSensitiveText(text.slice(0, secretStart))}${match[0]}[REDACTED]${redactSensitiveText(text.slice(end))}`;
+            }
+          }
         } else {
           redactedTailChunk = appendRedactedTail(stderrTail, text);
           stderrTail = '';
