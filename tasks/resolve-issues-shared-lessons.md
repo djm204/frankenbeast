@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Graceful shutdown drain gates
+- For daemon drain modes, make one outer mutation-admission middleware own both the draining check and in-flight counter; nested route-specific re-checks can reject already-admitted requests after shutdown begins.
+- If shutdown times out waiting for in-flight mutations, do not release ownership markers such as pid files until mutations are quiesced or definitively aborted; otherwise a replacement daemon can start while the old handler still mutates shared state.
+- Treat draining sibling daemons as fail-fast for chat-server startup rather than proxying to a 503 daemon or starting route-less/local Beast control that will not recover without restart.
+
 ## 2026-07-14 — Type-safety hardening regressions
 - For removing unsafe TypeScript double-casts, pair the runtime regression with a source-inspection guard that names the exact bypass (`as unknown as ...`) and the intended type-coupling construct (`satisfies z.ZodType<...>` or typed null-object helpers) so future changes cannot silently reintroduce the cast while preserving behavior.
 - Disabled/null-object implementations should return structurally complete domain objects rather than partial objects cast through `unknown`; include required lifecycle/status/time fields in the helper so `tsc --noEmit` enforces drift against upstream type changes.
