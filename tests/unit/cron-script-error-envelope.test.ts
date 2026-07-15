@@ -423,6 +423,96 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('secret-value');
   });
 
+  it('does not reset the stderr drain deadline after child exit', () => {
+    const started = Date.now();
+    const result = runCronScriptWithEnv([
+      '--name',
+      'noisy-helper-after-exit',
+      '--',
+      process.execPath,
+      '-e',
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => process.stderr.write(\"noise\\n\"), 10)'], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] }).unref(); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '100' });
+
+    expect(result.status).toBe(9);
+    expect(Date.now() - started).toBeLessThan(1_500);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.script).toBe('noisy-helper-after-exit');
+  });
+
+  it('redacts escaped quotes inside JSON secret values', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'escaped-json-secret',
+      '--',
+      process.execPath,
+      '-e',
+      String.raw`process.stderr.write('{"password":"abc\\"def","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"password":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('abc');
+    expect(JSON.stringify(envelope)).not.toContain('def');
+  });
+
+  it('redacts multiline private-key assignment bodies', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'multiline-private-key-assignment',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stderr.write('PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\\nkey-body-line\\n-----END PRIVATE KEY-----\\nreal diagnostic'); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('PRIVATE_KEY=[REDACTED]');
+    expect(envelope.stderrTail).toContain('real diagnostic');
+    expect(JSON.stringify(envelope)).not.toContain('key-body-line');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE KEY');
+  });
+
+  it('redacts hyphen-prefixed JSON secret keys', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'hyphen-json-secret',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"x-api-key":"hyphen-secret","proxy-authorization":"Bearer bearer-secret","safe":"kept"}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"x-api-key":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"proxy-authorization":"[REDACTED]"');
+    expect(envelope.stderrTail).toContain('"safe":"kept"');
+    expect(JSON.stringify(envelope)).not.toContain('hyphen-secret');
+    expect(JSON.stringify(envelope)).not.toContain('bearer-secret');
+  });
+
+  it('redacts private-key headers split across stderr chunks', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'split-pem-header-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, '-----BEGIN PRIVATE '); fs.writeSync(2, 'KEY-----\\nsplit-header-key-body\\n-----END PRIVATE KEY-----\\nafter split header'); process.exit(9)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('[REDACTED_PRIVATE_KEY]');
+    expect(envelope.stderrTail).toContain('after split header');
+    expect(JSON.stringify(envelope)).not.toContain('split-header-key-body');
+    expect(JSON.stringify(envelope)).not.toContain('BEGIN PRIVATE');
+  });
+
   it('preserves buffered stderr for successful cron runs', () => {
     const result = runCronScriptWithEnv([
       '--name',
