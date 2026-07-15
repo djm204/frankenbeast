@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
+  buildPointInTimeBackupManifest,
   buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
   type RestorePreviewManifest,
@@ -37,6 +38,95 @@ function readMissingCronJobRecoveryFixture(): MissingCronJobRecoveryFixture {
 }
 
 describe('restore preview conflict detector', () => {
+  it('builds a deterministic point-in-time manifest with record counts for explicitly captured restore areas', () => {
+    const backup: RestorePreviewManifest = {
+      schemaVersion: 1,
+      encryption: {
+        encrypted: true,
+        algorithm: 'aes-256-gcm',
+        keyRef: 'dr/backups/prod-primary',
+        artifactDigest: 'sha256:archive',
+      },
+      tasks: [{ id: 'task-1', digest: 'task-digest', value: { nested: ['kept'] } }],
+      approvals: [{ id: 'approval-1', state: 'pending', digest: 'approval-digest' }],
+      memory: [],
+    };
+    const before = clone(backup);
+
+    const manifest = buildPointInTimeBackupManifest(backup, {
+      capturedAt: '2026-07-14T12:00:00.000Z',
+      generatedAt: '2026-07-14T12:05:00.000Z',
+      source: 'prod-primary',
+      manifestDigest: 'sha256:manifest',
+    });
+
+    expect(manifest).toEqual({
+      schemaVersion: 1,
+      generatedAt: '2026-07-14T12:05:00.000Z',
+      pointInTime: {
+        capturedAt: '2026-07-14T12:00:00.000Z',
+        generatedAt: '2026-07-14T12:05:00.000Z',
+        source: 'prod-primary',
+        includedAreas: ['tasks', 'approvals', 'memory'],
+        recordCounts: {
+          tasks: 1,
+          approvals: 1,
+          memory: 0,
+        },
+        manifestDigest: 'sha256:manifest',
+      },
+      encryption: backup.encryption,
+      tasks: backup.tasks,
+      approvals: backup.approvals,
+      memory: [],
+    });
+    expect(manifest.pointInTime.includedAreas).toEqual(['tasks', 'approvals', 'memory']);
+    expect(manifest).not.toHaveProperty('cron');
+    expect(backup).toEqual(before);
+  });
+
+  it('distinguishes explicitly captured empty areas from omitted partial-backup areas', () => {
+    const manifest = buildPointInTimeBackupManifest(
+      { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+      {
+        capturedAt: '2026-07-14T12:00:00.000Z',
+        generatedAt: '2026-07-14T12:05:00.000Z',
+      },
+    );
+
+    expect(manifest.pointInTime.includedAreas).toEqual(['tasks', 'approvals', 'memory', 'cron']);
+    expect(manifest.pointInTime.recordCounts).toEqual({ tasks: 0, approvals: 0, memory: 0, cron: 0 });
+    expect(manifest.cron).toEqual([]);
+  });
+
+  it('fails explicitly when point-in-time metadata would claim a future capture', () => {
+    expect(() =>
+      buildPointInTimeBackupManifest(
+        { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+        {
+          capturedAt: '2026-07-14T12:10:00.000Z',
+          generatedAt: '2026-07-14T12:05:00.000Z',
+        },
+      ),
+    ).toThrow('capturedAt must not be later than generatedAt');
+  });
+
+  it('fails explicitly when point-in-time timestamps are malformed or normalized by JavaScript', () => {
+    expect(() =>
+      buildPointInTimeBackupManifest(
+        { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+        { capturedAt: 'not-a-timestamp', generatedAt: '2026-07-14T12:05:00.000Z' },
+      ),
+    ).toThrow('capturedAt must be a valid canonical ISO timestamp');
+
+    expect(() =>
+      buildPointInTimeBackupManifest(
+        { schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] },
+        { capturedAt: '2026-02-30T00:00:00.000Z', generatedAt: '2026-03-02T00:00:00.000Z' },
+      ),
+    ).toThrow('capturedAt must be a valid canonical ISO timestamp');
+  });
+
   it('returns a clean no-write preview when backup manifest matches live state', () => {
     const backup: RestorePreviewManifest = {
       schemaVersion: 1,
