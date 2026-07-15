@@ -383,12 +383,29 @@ function stringifyWorkingMemoryValue(key: string, value: unknown): string {
   );
 }
 
+function workingMemoryStringField(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function isTemporaryOperationalMarker(value: unknown): boolean {
+  const normalized = workingMemoryStringField(value)?.trim().toLowerCase();
+  return normalized === 'temporary-operational' || normalized === 'transient-operational';
+}
+
 function isTemporaryOperationalWorkingMemoryValue(value: unknown): value is { expiresAt: string } {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return false;
   }
-  const record = value as { category?: unknown; expiresAt?: unknown };
-  return record.category === 'temporary-operational' && typeof record.expiresAt === 'string';
+  const record = value as { category?: unknown; kind?: unknown; type?: unknown; scope?: unknown; expiresAt?: unknown };
+  return (
+    typeof record.expiresAt === 'string'
+    && (
+      isTemporaryOperationalMarker(record.category)
+      || isTemporaryOperationalMarker(record.kind)
+      || isTemporaryOperationalMarker(record.type)
+      || isTemporaryOperationalMarker(record.scope)
+    )
+  );
 }
 
 function isExpiredWorkingMemoryValue(value: unknown, nowMs = Date.now()): boolean {
@@ -823,7 +840,16 @@ class SqliteWorkingMemory implements IWorkingMemory {
       deleteKey.run(key);
       this.persistedSerialized.delete(key);
       this.deletedKeys.delete(key);
-      this.dirtyKeys.delete(key);
+      const currentRuntimeSerialized = this.serialized.get(key);
+      if (currentRuntimeSerialized === undefined || currentRuntimeSerialized === currentSerialized) {
+        this.dirtyKeys.delete(key);
+      }
+    }
+  }
+
+  private expireRuntimeTtlKeys(): void {
+    for (const key of Array.from(this.store.keys())) {
+      this.expireRuntimeKeyIfTtlExpired(key);
     }
   }
 
@@ -852,6 +878,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   set(key: string, value: unknown): void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
     assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+    this.expireRuntimeTtlKeys();
 
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(

@@ -123,21 +123,46 @@ describe('SqliteBrain', () => {
     });
 
     it('does not expire durable working facts that only describe an expiresAt field', () => {
-      brain.working.set('cert:deadline', {
-        value: 'certificate rotation deadline',
-        category: 'asset-metadata',
+      brain.working.set('certificate', {
+        value: 'renews next year',
+        category: 'asset',
         expiresAt: '2026-01-01T00:00:00.000Z',
       });
 
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
       try {
-        expect(brain.working.get('cert:deadline')).toEqual({
-          value: 'certificate rotation deadline',
-          category: 'asset-metadata',
+        expect(brain.working.get('certificate')).toEqual({
+          value: 'renews next year',
+          category: 'asset',
           expiresAt: '2026-01-01T00:00:00.000Z',
         });
-        expect(brain.working.keys()).toEqual(['cert:deadline']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('expires temporary operational alias markers consistently', () => {
+      brain.working.set('kind:temp', {
+        value: 'short-lived kind',
+        kind: 'transient-operational',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.working.set('type:temp', {
+        value: 'short-lived type',
+        type: 'temporary-operational',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.working.set('scope:temp', {
+        value: 'short-lived scope',
+        scope: 'transient-operational',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+      try {
+        expect(brain.working.keys()).toEqual([]);
       } finally {
         vi.useRealTimers();
       }
@@ -196,7 +221,7 @@ describe('SqliteBrain', () => {
         });
       }
       originalBrain.working.set('op:active', {
-        value: 'current job output',
+        value: 'fresh',
         category: 'temporary-operational',
         expiresAt: '2099-01-01T00:10:00.000Z',
       });
@@ -212,6 +237,25 @@ describe('SqliteBrain', () => {
         hydratedBrain.close();
         vi.useRealTimers();
         rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('expires runtime temporary facts before enforcing new-entry limits', () => {
+      const limitedBrain = new SqliteBrain(':memory:', { maxEntries: 1 });
+      limitedBrain.working.set('op:expired', {
+        value: 'stale runtime entry',
+        category: 'temporary-operational',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
+      try {
+        expect(() => limitedBrain.working.set('op:new', 'fresh runtime entry')).not.toThrow();
+        expect(limitedBrain.working.keys()).toEqual(['op:new']);
+      } finally {
+        limitedBrain.close();
+        vi.useRealTimers();
       }
     });
 
@@ -279,6 +323,37 @@ describe('SqliteBrain', () => {
       } finally {
         staleBrain.close();
         vi.useRealTimers();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps dirty replacements flushable after pruning expired persisted rows', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-dirty-'));
+      const dbPath = join(dir, 'brain.db');
+      const brain = new SqliteBrain(dbPath);
+      brain.working.set('op:key', {
+        value: 'old temporary persisted value',
+        category: 'temporary-operational',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+      brain.flush();
+      brain.working.set('op:key', { value: 'new durable replacement', category: 'lesson' });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
+      try {
+        brain.rightToForget({ category: 'unrelated' });
+        brain.flush();
+      } finally {
+        brain.close();
+        vi.useRealTimers();
+      }
+
+      const rehydrated = new SqliteBrain(dbPath);
+      try {
+        expect(rehydrated.working.get('op:key')).toEqual({ value: 'new durable replacement', category: 'lesson' });
+      } finally {
+        rehydrated.close();
         rmSync(dir, { recursive: true, force: true });
       }
     });

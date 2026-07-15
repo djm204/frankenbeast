@@ -54,7 +54,7 @@ describe('TOOL_REGISTRY', () => {
     };
     const handler = TOOL_REGISTRY.get('fbeast_memory_store')!.makeHandler({ brain } as unknown as AdapterSet);
 
-    const result = await handler({ key: 'evt', value: 'durable event', type: 'episodic', ttlMs: '60000' });
+    const result = await handler({ key: 'evt', value: 'durable event', type: 'episodic', ttlMs: 60000 });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('ttlMs is only supported for working memory');
