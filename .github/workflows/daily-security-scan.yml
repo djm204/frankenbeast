@@ -124,6 +124,19 @@ jobs:
           # Reads package-lock.json directly; no install needed.
           npm audit --audit-level=high --json > "$RUNNER_TEMP/audit.json" || true
 
+      - name: Build dependency vulnerability SLA dashboard
+        run: |
+          node scripts/dependency-vulnerability-sla.mjs \
+            --audit-input "$RUNNER_TEMP/audit.json" \
+            --format human \
+            --allow-invalid-audit \
+            --no-fail-on-sla > "$RUNNER_TEMP/dependency-vulnerability-sla.md"
+          node scripts/dependency-vulnerability-sla.mjs \
+            --audit-input "$RUNNER_TEMP/audit.json" \
+            --format json \
+            --allow-invalid-audit \
+            --no-fail-on-sla > "$RUNNER_TEMP/dependency-vulnerability-sla.json"
+
       # ── Persist all raw reports ──────────────────────────────────────────
       - name: Upload scan reports
         if: always()
@@ -134,6 +147,8 @@ jobs:
             ${{ runner.temp }}/semgrep.sarif
             ${{ runner.temp }}/gitleaks.sarif
             ${{ runner.temp }}/audit.json
+            ${{ runner.temp }}/dependency-vulnerability-sla.md
+            ${{ runner.temp }}/dependency-vulnerability-sla.json
           if-no-files-found: warn
           retention-days: 30
 
