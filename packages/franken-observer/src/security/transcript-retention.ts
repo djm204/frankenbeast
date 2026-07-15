@@ -295,8 +295,13 @@ function retainMetadata(
   const seen = new WeakMap<object, unknown>()
   seen.set(metadata, retained)
   for (const [key, value] of Object.entries(metadata)) {
-    const field = classifyTranscriptField(key)
-    if (field && !policy.retainedFields[field]) continue
+    const field = classifyContextualTranscriptField(metadata, key)
+    if (field && !policy.retainedFields[field]) {
+      if (field === 'prompts' && value !== null && typeof value === 'object') {
+        setRecordValue(retained, key, redactFieldValue(value, field, policy, seen))
+      }
+      continue
+    }
     setRecordValue(retained, key, field ? redactFieldValue(value, field, policy, seen) : redactNestedTranscriptValues(value, policy, seen))
   }
   return retained
@@ -373,7 +378,11 @@ function classifyTranscriptField(key: string): TranscriptField | undefined {
     normalized === 'query' ||
     normalized.includes('toolinput') ||
     normalized.includes('toolarg') ||
-    normalized.includes('toolparam')
+    normalized.includes('toolparam') ||
+    normalized === 'inputjson' ||
+    normalized === 'argsjson' ||
+    normalized.endsWith('inputjson') ||
+    normalized.endsWith('argsjson')
   ) return 'toolInputs'
   if (
     TOOL_OUTPUT_KEYS.has(normalized) ||
@@ -413,6 +422,9 @@ function redactFieldValue(
       return retained
     }
     if (value !== null && typeof value === 'object') return redactNestedTranscriptValues(value, policy, seen)
+  }
+  if ((policy.mode === 'raw' || policy.redactionLevel === 'none') && value !== null && typeof value === 'object') {
+    return redactNestedTranscriptValues(value, policy, seen)
   }
   return redactValue(value, policy)
 }

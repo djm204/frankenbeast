@@ -325,6 +325,8 @@ describe('transcript retention controls', () => {
           promptText: 'raw prompt text',
           systemPromptAddition: 'raw system prompt',
           tool_input_json: 'raw tool input',
+          input_json: 'raw serialized input',
+          argsJson: 'raw args json',
           toolResultPayload: 'raw tool output',
           safeCounter: 1,
         },
@@ -335,6 +337,8 @@ describe('transcript retention controls', () => {
       promptText: '[REDACTED_TRANSCRIPT]',
       systemPromptAddition: '[REDACTED_TRANSCRIPT]',
       tool_input_json: '[REDACTED_TRANSCRIPT]',
+      input_json: '[REDACTED_TRANSCRIPT]',
+      argsJson: '[REDACTED_TRANSCRIPT]',
       toolResultPayload: '[REDACTED_TRANSCRIPT]',
       safeCounter: 1,
     })
@@ -708,6 +712,58 @@ describe('transcript retention controls', () => {
       type: 'tool_result',
       tool_call_id: 'call-1',
     })
+  })
+
+  it('honors tool output opt-outs for root metadata tool result envelopes', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: { role: 'tool', content: 'private root tool result', tool_call_id: 'call-1' },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolOutputs: false },
+    })
+
+    expect(retained.spans[0].metadata).toEqual({ role: 'tool', tool_call_id: 'call-1' })
+  })
+
+  it('retains allowed tool outputs inside raw message containers when prompts are disabled', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          messages: [
+            { role: 'user', content: 'private prompt' },
+            { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
+          ],
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolOutputs: true },
+    })
+
+    expect(retained.spans[0].metadata['messages']).toEqual([
+      { role: 'user' },
+      { role: 'tool', content: 'private tool result', tool_call_id: 'call-1' },
+    ])
+  })
+
+  it('filters raw object-valued transcript fields before cloning shared metadata', () => {
+    const metadata: Record<string, unknown> = { prompt: 'private prompt' }
+    metadata['toolInput'] = metadata
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({ metadata })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { prompts: false, toolInputs: true },
+    })
+
+    expect(retained.spans[0].metadata).toHaveProperty('toolInput')
+    expect(retained.spans[0].metadata).not.toHaveProperty('prompt')
+    expect(retained.spans[0].metadata['toolInput']).toBe(retained.spans[0].metadata)
   })
 
   it('walks Map and Set metadata before preserving their container types', () => {
