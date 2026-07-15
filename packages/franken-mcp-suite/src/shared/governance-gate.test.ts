@@ -70,13 +70,26 @@ describe('createGovernanceGate', () => {
       const gate = createGovernanceGate(governor);
       // Payload deliberately carries dangerous words the governor would flag if
       // it scanned the data (DROP TABLE / rm -rf / delete all files).
+      const args = tool === 'fbeast_memory_export'
+        ? { redaction: 'safe', input: 'DROP TABLE users; rm -rf /; delete all files', action: 'delete_file' }
+        : { input: 'DROP TABLE users; rm -rf /; delete all files', action: 'delete_file' };
       const result = await gate.check({
         tool,
-        args: { input: 'DROP TABLE users; rm -rf /; delete all files', action: 'delete_file' },
+        args,
       });
       expect(result.decision).toBe('approved');
       expect(seen).toHaveLength(0);
     }
+  });
+
+  it('routes unredacted memory exports through the shared governor', async () => {
+    const { governor, seen } = spyGovernor('review_recommended');
+    const gate = createGovernanceGate(governor);
+
+    const result = await gate.check({ tool: 'fbeast_memory_export', args: { redaction: 'none', readScope: 'all' } });
+
+    expect(result).toEqual({ decision: 'review_recommended', reason: 'r' });
+    expect(seen).toEqual([{ action: 'fbeast_memory_export', context: JSON.stringify({ redaction: 'none' }) }]);
   });
 
   it('still governs an unclassified tool by payload (fail-closed default)', async () => {

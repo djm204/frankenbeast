@@ -278,6 +278,7 @@ const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|au
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
   [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, "[redacted-private-key]"],
+  [/\b((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))\s*([:=])\s*([^\s,;&]+)/gi, "$1$2[redacted]"],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
   [/\b(?:sk|gho|ghp)_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],

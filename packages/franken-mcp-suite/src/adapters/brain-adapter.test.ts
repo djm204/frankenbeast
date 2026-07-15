@@ -57,6 +57,7 @@ vi.mock("@franken/brain", () => ({
             "-----BEGIN " +
             "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
             "OPENSSH PRIVATE KEY-----",
+          "status-page": "password=hunter2 session_cookie=abc123value",
           profile: {
             password: "hunter2",
             "alice@example.com": "oncall",
@@ -285,6 +286,7 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("sk_" + "secretvalue123456");
     expect(serialized).not.toContain("OPENSSH PRIVATE KEY");
     expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("abc123value");
     expect(serialized).not.toContain("alice@example.com");
     expect(serialized).not.toContain("bob@example.com");
     expect(serialized).not.toContain("apiKey");

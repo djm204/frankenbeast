@@ -10,10 +10,14 @@ function stringifyArgs(args: Record<string, unknown>): string {
 }
 
 const MEMORY_SELECTOR_KEYS = new Set(['key', 'category', 'sourceScope', 'query']);
-const MEMORY_POLICY_EVIDENCE_KEYS = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'profile', 'activeProfile', 'crossProfile'] as const;
+const MEMORY_POLICY_EVIDENCE_KEYS = ['key', 'category', 'sourceScope', 'query', 'dryRun', 'redaction', 'profile', 'activeProfile', 'crossProfile'] as const;
+
+function isUnredactedMemoryExport(tool: string, args: Record<string, unknown>): boolean {
+  return tool === 'fbeast_memory_export' && args.redaction === 'none';
+}
 
 function stringifyArgsForGovernanceLog(tool: string, args: Record<string, unknown>): string {
-  if (!['fbeast_memory_store', 'fbeast_memory_forget', 'fbeast_memory_right_to_forget'].includes(tool)) {
+  if (!['fbeast_memory_store', 'fbeast_memory_forget', 'fbeast_memory_right_to_forget', 'fbeast_memory_export'].includes(tool)) {
     return stringifyArgs(args);
   }
   const evidence: Record<string, unknown> = {};
@@ -46,7 +50,7 @@ export function createGovernanceGate(source: string | GovernorAdapter): Governan
       // Exempt non-executing tools: their payload is data to query/analyze/log,
       // not an operation to authorize, so payload-keyword governance
       // would only produce false-positive denials on legitimate risky content.
-      if (NON_EXECUTING_TOOLS.has(tool)) {
+      if (NON_EXECUTING_TOOLS.has(tool) && !isUnredactedMemoryExport(tool, args)) {
         return {
           decision: 'approved',
           reason: `Tool "${tool}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
