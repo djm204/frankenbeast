@@ -1671,6 +1671,133 @@ describe('SqliteBrain', () => {
         rmSync(dir, { recursive: true, force: true });
       }
     });
+
+    it('rechecks deletion guards before editing or recording review decisions', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.pending',
+        value: 'safe value',
+        source: 'chat:turn-safe',
+        confidence: 0.8,
+        reason: 'Pending candidate for guard regression.',
+      });
+      brain.rightToForget({ query: 'forgotten secret', sourceScope: 'blocked-source' });
+
+      expect(() => brain.memoryReview.edit(candidate.id, {
+        value: 'contains forgotten secret',
+      })).toThrow(/right-to-forget/);
+      expect(() => brain.memoryReview.edit(candidate.id, {
+        source: 'blocked-source',
+      })).toThrow(/right-to-forget/);
+      expect(() => brain.memoryReview.approve(candidate.id, {
+        note: 'decision mentions forgotten secret',
+      })).toThrow(/right-to-forget/);
+    });
+
+    it('guards and redacts nested review candidate metadata for right-to-forget selectors', () => {
+      brain.rightToForget({ category: 'pii' });
+      expect(() => brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'review.nested-category',
+        value: { category: 'pii', email: 'alice@example.test' },
+        source: 'chat:turn-16',
+        confidence: 0.9,
+        reason: 'Nested category should be guarded.',
+      })).toThrow(/right-to-forget/);
+
+      const fresh = new SqliteBrain();
+      try {
+        fresh.memoryReview.propose({
+          targetStore: 'working',
+          key: 'review.nested-category',
+          value: { category: 'pii', email: 'alice@example.test' },
+          source: 'chat:turn-16',
+          confidence: 0.9,
+          reason: 'Nested category should be redacted.',
+        });
+        const report = fresh.rightToForget({ category: 'pii' });
+        expect(report.deleted.derived).toBe(1);
+        expect(report.remainingReferences).toBe(0);
+        const db = (fresh as unknown as { db: Database.Database }).db;
+        const row = db.prepare(`SELECT memory_key, value FROM memory_review_candidates`).get() as { memory_key: string; value: string };
+        expect(row.memory_key).not.toContain('review.nested-category');
+        expect(row.value).not.toContain('alice@example.test');
+      } finally {
+        fresh.close();
+      }
+    });
+
+    it('refreshes persisted state before approved writes skip an upsert', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-stale-persist-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let concurrent: SqliteBrain | undefined;
+      let verifier: SqliteBrain | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('preference', 'approved');
+        stale.flush();
+
+        concurrent = new SqliteBrain(dbPath);
+        concurrent.working.set('preference', 'concurrent overwrite');
+        concurrent.flush();
+
+        const candidate = stale.memoryReview.propose({
+          targetStore: 'working',
+          key: 'preference',
+          value: 'approved',
+          source: 'chat:turn-17',
+          confidence: 0.9,
+          reason: 'Approved value equals stale cache.',
+        });
+        stale.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+        stale.close();
+        stale = undefined;
+
+        verifier = new SqliteBrain(dbPath);
+        expect(verifier.working.get('preference')).toBe('approved');
+      } finally {
+        stale?.close();
+        concurrent?.close();
+        verifier?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('clears stale review suppressions before hydrating snapshot working memory', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-review-hydrate-stale-suppression-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const existing = new SqliteBrain(dbPath);
+        const staleSuppression = existing.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.restore',
+          value: 'old value',
+          source: 'chat:turn-18',
+          confidence: 0.9,
+          reason: 'Stale suppression from old DB state.',
+        });
+        existing.memoryReview.neverStore(staleSuppression.id, { reviewer: 'operator' });
+        existing.close();
+
+        const hydrated = SqliteBrain.hydrate({
+          version: 1,
+          timestamp: '2026-07-15T00:00:00.000Z',
+          working: { 'user.preference.restore': 'restored safe value' },
+          episodic: [],
+          checkpoint: null,
+          metadata: { lastProvider: '', switchReason: '', totalTokensUsed: 0 },
+        }, dbPath);
+        expect(hydrated.working.get('user.preference.restore')).toBe('restored safe value');
+        const db = (hydrated as unknown as { db: Database.Database }).db;
+        expect(db.prepare(`SELECT COUNT(*) AS count FROM memory_review_suppressions`).get()).toEqual({ count: 0 });
+        hydrated.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('memory schema versioning and migrations', () => {
