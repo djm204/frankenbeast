@@ -76,6 +76,39 @@ class ThrowingDeleteAdapter extends NonDeletingAdapter {
   }
 }
 
+class SlowFlushingAdapter implements ExportAdapter {
+  private readonly inner = new InMemoryAdapter()
+  private releaseFlush: (() => void) | null = null
+  readonly flushStarted = new Promise<void>(resolve => {
+    this.releaseFlush = resolve
+  })
+
+  async flush(trace: Trace): Promise<void> {
+    await this.flushStarted
+    await this.inner.flush(trace)
+  }
+
+  release(): void {
+    this.releaseFlush?.()
+  }
+
+  queryByTraceId(traceId: string): Promise<Trace | null> {
+    return this.inner.queryByTraceId(traceId)
+  }
+
+  listTraceIds(): Promise<string[]> {
+    return this.inner.listTraceIds()
+  }
+
+  listTraceSummaries(): Promise<TraceSummary[]> {
+    return this.inner.listTraceSummaries()
+  }
+
+  deleteTrace(traceId: string): Promise<void> {
+    return this.inner.deleteTrace(traceId)
+  }
+}
+
 describe('transcript retention controls', () => {
   it('defaults to redacted retention for prompts, tool I/O, errors, and summaries', async () => {
     const inner = new InMemoryAdapter()
@@ -402,6 +435,43 @@ describe('transcript retention controls', () => {
     warn.mockRestore()
   })
 
+  it('continues deleting from later child adapters when one child delete throws', async () => {
+    let now = 10
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const throwing = new ThrowingDeleteAdapter()
+    const deletable = new InMemoryAdapter()
+    const multi = new MultiAdapter({ adapters: [throwing, deletable] })
+    const adapter = new TranscriptRetentionAdapter({ adapter: multi, ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
+    now = 16
+
+    await expect(adapter.cleanupExpired()).resolves.toEqual(['trace-1'])
+    expect(await throwing.listTraceIds()).toEqual(['trace-1'])
+    expect(await deletable.listTraceIds()).toEqual([])
+    expect(await adapter.listTraceIds()).toEqual([])
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
+  it('deletes from the inner adapter after an in-flight batch drain persists an expired trace', async () => {
+    let now = 10
+    const slow = new SlowFlushingAdapter()
+    const batch = new BatchAdapter({ adapter: slow, maxBatchSize: 10 })
+    const adapter = new TranscriptRetentionAdapter({ adapter: batch, ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
+    const drain = batch.drain()
+    now = 16
+    const cleanup = adapter.cleanupExpired()
+
+    slow.release()
+    await drain
+    await expect(cleanup).resolves.toEqual(['trace-1'])
+    expect(await slow.listTraceIds()).toEqual([])
+    expect(await adapter.listTraceIds()).toEqual([])
+  })
+
   it('retains active traces from flush time instead of expiring them by start time', async () => {
     let now = 100
     const adapter = new TranscriptRetentionAdapter({ adapter: new InMemoryAdapter(), ttlMs: 5, now: () => now })
@@ -410,6 +480,16 @@ describe('transcript retention controls', () => {
     expect(await adapter.listTraceIds()).toEqual(['trace-1'])
 
     now = 106
+    expect(await adapter.listTraceIds()).toEqual([])
+  })
+
+  it('expires restarted active traces from their original start time when no retained timestamp is available', async () => {
+    const inner = new InMemoryAdapter()
+    await inner.flush(makeTrace({ startedAt: 1, endedAt: undefined }))
+
+    const adapter = new TranscriptRetentionAdapter({ adapter: inner, ttlMs: 5, now: () => 100 })
+
+    expect(await adapter.queryByTraceId('trace-1')).toBeNull()
     expect(await adapter.listTraceIds()).toEqual([])
   })
 
@@ -513,6 +593,32 @@ describe('transcript retention controls', () => {
       { role: 'user', content: 'private prompt' },
       { role: 'tool', type: 'tool_result', tool_call_id: 'call-1' },
     ])
+  })
+
+  it('honors tool output opt-outs inside raw prompt envelopes', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          prompt: {
+            messages: [
+              { role: 'user', content: 'private prompt' },
+              { role: 'tool', type: 'tool_result', content: 'private tool result' },
+            ],
+          },
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolOutputs: false },
+    })
+
+    expect(retained.spans[0].metadata['prompt']).toEqual({
+      messages: [
+        { role: 'user', content: 'private prompt' },
+        { role: 'tool', type: 'tool_result' },
+      ],
+    })
   })
 
   it('walks Map and Set metadata before preserving their container types', () => {

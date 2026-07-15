@@ -55,6 +55,8 @@ type AdapterWrapperShape = Partial<{
   adapter: ExportAdapter
   adapters: ExportAdapter[]
   buffer: Trace[]
+  drain?: () => Promise<void>
+  drainPromise: Promise<void> | null
 }>
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000
@@ -92,7 +94,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
 
   async flush(trace: Trace): Promise<void> {
     if (this.policy.mode === 'disabled') return
-    if (this.isExpired(trace)) return
+    if (trace.endedAt !== undefined && this.isExpired(trace)) return
 
     const retainedTrace = applyRetentionPolicy(trace, this.policy)
     this.retained.set(retainedTrace.id, getTraceExpiry(retainedTrace, this.policy.ttlMs, this.now()))
@@ -107,7 +109,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
 
     const trace = await this.inner.queryByTraceId(traceId)
     if (!trace) return null
-    if (this.isExpired(trace)) {
+    if (trace.endedAt !== undefined ? this.isExpired(trace) : (!this.retained.has(traceId) && this.isExpired(trace))) {
       await this.markExpired(traceId)
       return null
     }
@@ -166,7 +168,9 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
     for (const traceId of await this.inner.listTraceIds()) {
       if (this.expiredTraceIds.has(traceId)) continue
       const trace = await this.inner.queryByTraceId(traceId)
-      if (!trace || !this.isExpired(trace)) continue
+      if (!trace) continue
+      if (trace.endedAt === undefined && this.retained.has(traceId)) continue
+      if (!this.isExpired(trace)) continue
       expired.push(traceId)
       await this.markExpired(traceId)
     }
@@ -192,7 +196,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   private isExpired(trace: Trace): boolean {
-    return getTraceExpiry(trace, this.policy.ttlMs, this.now()) <= this.now()
+    return getTraceExpiry(trace, this.policy.ttlMs) <= this.now()
   }
 
   private async expireStoredTraceIfNeeded(traceId: string): Promise<boolean> {
@@ -382,11 +386,14 @@ function redactFieldValue(
   policy: ResolvedTranscriptRetentionPolicy,
   seen: WeakMap<object, unknown>,
 ): unknown {
-  if (field === 'prompts' && Array.isArray(value) && (policy.mode === 'raw' || policy.redactionLevel === 'none')) {
-    const retained: unknown[] = []
-    seen.set(value, retained)
-    for (const item of value) retained.push(redactProviderMessageValue(item, policy, seen))
-    return retained
+  if (field === 'prompts' && (policy.mode === 'raw' || policy.redactionLevel === 'none')) {
+    if (Array.isArray(value)) {
+      const retained: unknown[] = []
+      seen.set(value, retained)
+      for (const item of value) retained.push(redactProviderMessageValue(item, policy, seen))
+      return retained
+    }
+    if (value !== null && typeof value === 'object') return redactNestedTranscriptValues(value, policy, seen)
   }
   return redactValue(value, policy)
 }
@@ -474,6 +481,7 @@ async function deleteTraceFromAdapter(
 
   const wrapper = adapter as AdapterWrapperShape
   let deleted = false
+  let firstFailure: unknown = null
 
   if (Array.isArray(wrapper.buffer)) {
     for (let i = wrapper.buffer.length - 1; i >= 0; i--) {
@@ -484,15 +492,32 @@ async function deleteTraceFromAdapter(
     }
   }
 
+  if (wrapper.drainPromise !== null && wrapper.drainPromise !== undefined) {
+    try {
+      await wrapper.drainPromise
+    } catch (error) {
+      firstFailure ??= error
+    }
+  }
+
   if (hasDeleteTrace(adapter)) {
-    await adapter.deleteTrace(traceId)
-    deleted = true
+    try {
+      await adapter.deleteTrace(traceId)
+      deleted = true
+    } catch (error) {
+      firstFailure ??= error
+    }
   }
 
   for (const child of childAdapters(wrapper)) {
-    if (await deleteTraceFromAdapter(child, traceId, seen)) deleted = true
+    try {
+      if (await deleteTraceFromAdapter(child, traceId, seen)) deleted = true
+    } catch (error) {
+      firstFailure ??= error
+    }
   }
 
+  if (firstFailure !== null) throw firstFailure instanceof Error ? firstFailure : new Error(String(firstFailure))
   return deleted
 }
 
