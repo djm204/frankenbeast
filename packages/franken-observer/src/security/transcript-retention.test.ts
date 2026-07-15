@@ -45,34 +45,28 @@ function makeTrace(overrides: Partial<Trace> = {}): Trace {
 }
 
 class NonDeletingAdapter implements ExportAdapter {
-  private readonly inner = new InMemoryAdapter()
+  private readonly traces = new Map<string, Trace>()
 
-  flush(trace: Trace): Promise<void> {
-    return this.inner.flush(trace)
+  async flush(trace: Trace): Promise<void> {
+    this.traces.set(trace.id, trace)
   }
 
-  queryByTraceId(traceId: string): Promise<Trace | null> {
-    return this.inner.queryByTraceId(traceId)
+  async queryByTraceId(traceId: string): Promise<Trace | null> {
+    return this.traces.get(traceId) ?? null
   }
 
-  listTraceIds(): Promise<string[]> {
-    return this.inner.listTraceIds()
+  async listTraceIds(): Promise<string[]> {
+    return [...this.traces.keys()]
   }
 
   async listTraceSummaries(): Promise<TraceSummary[]> {
-    const summaries: TraceSummary[] = []
-    for (const id of await this.inner.listTraceIds()) {
-      const trace = await this.inner.queryByTraceId(id)
-      if (!trace) continue
-      summaries.push({
-        id: trace.id,
-        goal: trace.goal,
-        status: trace.status,
-        spanCount: trace.spans.length,
-        startedAt: trace.startedAt,
-      })
-    }
-    return summaries
+    return [...this.traces.values()].map(trace => ({
+      id: trace.id,
+      goal: trace.goal,
+      status: trace.status,
+      spanCount: trace.spans.length,
+      startedAt: trace.startedAt,
+    }))
   }
 }
 
@@ -369,6 +363,24 @@ describe('transcript retention controls', () => {
     expect(await adapter.queryByTraceId('trace-1')).toBeNull()
   })
 
+  it('keeps partially deleted expired traces hidden across multi-adapter children', async () => {
+    let now = 10
+    const deletable = new InMemoryAdapter()
+    const nonDeleting = new NonDeletingAdapter()
+    const multi = new MultiAdapter({ adapters: [deletable, nonDeleting] })
+    const adapter = new TranscriptRetentionAdapter({ adapter: multi, ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
+    now = 16
+
+    expect(await adapter.cleanupExpired()).toEqual(['trace-1'])
+    expect(await deletable.listTraceIds()).toEqual([])
+    expect(await nonDeleting.listTraceIds()).toEqual(['trace-1'])
+    expect(await adapter.listTraceIds()).toEqual([])
+    expect(await adapter.listTraceSummaries()).toEqual([])
+    expect(await adapter.queryByTraceId('trace-1')).toBeNull()
+  })
+
   it('keeps internal-slot objects intact instead of cloning them with fake prototypes', () => {
     const url = new URL('https://example.test/path')
     const retained = applyRetentionPolicy(makeTrace({
@@ -436,6 +448,8 @@ describe('transcript retention controls', () => {
           promptTokens: 12,
           completionTokens: 3,
           messages: [{ role: 'user', content: 'private chat prompt' }],
+          transcript: ['private transcript line'],
+          stdin: 'private standard input',
         },
       })],
     }))
@@ -443,6 +457,33 @@ describe('transcript retention controls', () => {
     expect(retained.spans[0].metadata['promptTokens']).toBe(12)
     expect(retained.spans[0].metadata['completionTokens']).toBe(3)
     expect(retained.spans[0].metadata['messages']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['transcript']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['stdin']).toBe('[REDACTED_TRANSCRIPT]')
+  })
+
+  it('walks Map and Set metadata before preserving their container types', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          payload: new Map<string, unknown>([
+            ['prompt', 'private map prompt'],
+            ['safeCounter', 1],
+            ['nested', { tool_output: 'private nested output' }],
+          ]),
+          records: new Set<unknown>([{ transcript: 'private set transcript' }, { safeCounter: 2 }]),
+        },
+      })],
+    }))
+
+    const payload = retained.spans[0].metadata['payload'] as Map<string, unknown>
+    const records = retained.spans[0].metadata['records'] as Set<Record<string, unknown>>
+
+    expect(payload).toBeInstanceOf(Map)
+    expect(payload.get('prompt')).toBe('[REDACTED_TRANSCRIPT]')
+    expect(payload.get('safeCounter')).toBe(1)
+    expect(payload.get('nested')).toEqual({ tool_output: '[REDACTED_TRANSCRIPT]' })
+    expect(records).toBeInstanceOf(Set)
+    expect([...records]).toEqual([{ transcript: '[REDACTED_TRANSCRIPT]' }, { safeCounter: 2 }])
   })
 
   it('preserves own __proto__ metadata keys as data properties', () => {

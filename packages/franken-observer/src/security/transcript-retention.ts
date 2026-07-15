@@ -69,8 +69,8 @@ const DEFAULT_FIELDS: TranscriptRetainedFields = Object.freeze({
   summaries: true,
 })
 
-const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'goal', 'goals'])
-const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'input', 'inputs', 'arguments', 'args', 'parameters', 'params'])
+const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'goal', 'goals', 'transcript', 'transcripts'])
+const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'input', 'inputs', 'arguments', 'args', 'parameters', 'params', 'stdin'])
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
 const SUMMARY_KEYS = new Set(['summary', 'summaries'])
@@ -208,11 +208,8 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
 
   private async markExpired(traceId: string): Promise<void> {
     this.retained.delete(traceId)
-    if (await deleteTraceFromAdapter(this.inner, traceId)) {
-      this.expiredTraceIds.delete(traceId)
-    } else {
-      this.expiredTraceIds.add(traceId)
-    }
+    await deleteTraceFromAdapter(this.inner, traceId)
+    this.expiredTraceIds.add(traceId)
   }
 }
 
@@ -308,6 +305,22 @@ function redactNestedTranscriptValues(
     const retained: unknown[] = []
     seen.set(value, retained)
     for (const item of value) retained.push(redactNestedTranscriptValues(item, policy, seen))
+    return retained
+  }
+  if (value instanceof Map) {
+    const retained = new Map<unknown, unknown>()
+    seen.set(value, retained)
+    for (const [key, nestedValue] of value.entries()) {
+      const field = typeof key === 'string' ? classifyTranscriptField(key) : undefined
+      if (field && !policy.retainedFields[field]) continue
+      retained.set(cloneValue(key), field ? redactValue(nestedValue, policy) : redactNestedTranscriptValues(nestedValue, policy, seen))
+    }
+    return retained
+  }
+  if (value instanceof Set) {
+    const retained = new Set<unknown>()
+    seen.set(value, retained)
+    for (const nestedValue of value.values()) retained.add(redactNestedTranscriptValues(nestedValue, policy, seen))
     return retained
   }
   if (value instanceof Date) return new Date(value.getTime())
