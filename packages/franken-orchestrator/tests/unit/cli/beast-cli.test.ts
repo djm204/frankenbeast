@@ -34,6 +34,7 @@ vi.mock('../../../src/beasts/create-beast-services.js', () => ({
 
 const mockControlClient = vi.hoisted(() => ({
   createBeastControlClient: vi.fn(() => ({
+    getAgentRunId: vi.fn().mockReturnValue('run-42'),
     deleteAgent: vi.fn().mockResolvedValue({ id: 'agent-1' }),
     dispose: vi.fn(),
     resumeAgent: vi.fn().mockResolvedValue({ id: 'run-42', status: 'failed' }),
@@ -44,7 +45,7 @@ vi.mock('../../../src/cli/beast-control-client.js', () => ({
   createBeastControlClient: mockControlClient.createBeastControlClient,
 }));
 
-function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> = {}) {
+function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> = {}): Parameters<typeof handleBeastCommand>[0] {
   return {
     args: { subcommand: 'beasts' as const, beastAction: undefined, networkDetached: false, baseDir: '/tmp', budget: 10, provider: 'claude', noPr: false, verbose: false, reset: false, resume: false, cleanup: false, help: false, initVerify: false, initRepair: false, initNonInteractive: false } as CliArgs,
     io: { ask: vi.fn(), confirm: vi.fn(), choose: vi.fn(), print: vi.fn() } as any,
@@ -53,6 +54,7 @@ function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> =
     control: {
       listRuns: vi.fn(),
       getRun: vi.fn(),
+      getAgentRunId: vi.fn().mockReturnValue('run-42'),
       readLogs: vi.fn(),
       stopRun: vi.fn(),
       restartRun: vi.fn(),
@@ -348,6 +350,38 @@ describe('handleBeastCommand() spawn', () => {
       exit.mockRestore();
     }
   });
+
+  it('does not rewrite terminal run state when a signal arrives after completion', async () => {
+    mockServices.catalog.getDefinition.mockReturnValue({
+      id: 'design-interview',
+      description: 'Design interview',
+      interviewPrompts: [],
+      configSchema: { parse: vi.fn(() => ({})) },
+    });
+    mockServices.dispatch.createRun.mockResolvedValue({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      status: 'running',
+      currentAttemptId: 'attempt-1',
+    });
+    mockServices.runs.getRun.mockReturnValue({ id: 'run-1', status: 'completed' });
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
+    });
+
+    try {
+      await handleBeastCommand(deps);
+      process.emit('SIGINT');
+      await vi.waitFor(() => {
+        expect(mockServices.runs.kill).not.toHaveBeenCalled();
+        expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+        expect(exit).toHaveBeenCalledWith(130);
+      });
+    } finally {
+      exit.mockRestore();
+    }
+  });
 });
 
 describe('handleBeastCommand() status and logs', () => {
@@ -456,6 +490,35 @@ describe('handleBeastCommand() resume', () => {
     expect(deps.control.resumeAgent).toHaveBeenCalledWith('agent-1', expect.any(String));
     expect(deps.print).toHaveBeenCalledWith('Resumed run-42');
     expect(mockServices.dispose).not.toHaveBeenCalled();
+  });
+
+  it('tracks the linked run before resume finishes so SIGINT can clean it up', async () => {
+    let resolveResume: ((run: unknown) => void) | undefined;
+    const control = makeDeps().control;
+    control.getAgentRunId = vi.fn().mockReturnValue('run-42');
+    control.resumeAgent = vi.fn(async () => await new Promise((resolve) => {
+      resolveResume = resolve;
+    }));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'resume', beastTarget: 'agent-1' } as CliArgs,
+      control,
+    });
+
+    try {
+      const command = handleBeastCommand(deps);
+      await vi.waitFor(() => expect(control.resumeAgent).toHaveBeenCalledWith('agent-1', expect.any(String)));
+      process.emit('SIGINT');
+      await vi.waitFor(() => {
+        expect(mockServices.runs.kill).toHaveBeenCalledWith('run-42', expect.any(String));
+        expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+        expect(exit).toHaveBeenCalledWith(130);
+      });
+      resolveResume?.({ id: 'run-42', status: 'stopped', currentAttemptId: undefined });
+      await command;
+    } finally {
+      exit.mockRestore();
+    }
   });
 
   it('disposes services if resume returns a non-live run', async () => {

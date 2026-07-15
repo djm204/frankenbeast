@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 
 type BeastControlClient = Omit<ReturnType<typeof createBeastControlClient>, 'dispose'> & {
   dispose?: () => void;
+  getAgentRunId?: (agentId: string) => string | undefined;
 };
 
 const liveRunStatuses = new Set<BeastRun['status']>([
@@ -21,6 +22,10 @@ const liveRunStatuses = new Set<BeastRun['status']>([
 
 function shouldKeepServicesAliveForRun(run: Pick<BeastRun, 'status' | 'currentAttemptId'>): boolean {
   return Boolean(run.currentAttemptId && liveRunStatuses.has(run.status));
+}
+
+function isTerminalRun(run: Pick<BeastRun, 'status'> | undefined): boolean {
+  return Boolean(run && !liveRunStatuses.has(run.status));
 }
 
 function assertContainerRuntimeAvailable(): void {
@@ -119,7 +124,16 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
     process.off('SIGINT', onSigint);
     process.off('SIGTERM', onSigterm);
     process.off('SIGHUP', onSighup);
-    Promise.resolve(liveRunId ? services.runs.kill(liveRunId, actor) : undefined)
+    Promise.resolve((async () => {
+      if (!liveRunId) {
+        return;
+      }
+      const currentRun = services.runs.getRun(liveRunId);
+      if (isTerminalRun(currentRun)) {
+        return;
+      }
+      await services.runs.kill(liveRunId, actor);
+    })())
       .catch(() => undefined)
       .finally(() => {
         try {
@@ -235,7 +249,9 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
       }
       case 'resume': {
         if (!args.beastTarget) throw new Error('beasts resume requires an agent id');
-        const run = await getControl().resumeAgent(args.beastTarget, actor);
+        const activeControl = getControl();
+        liveRunId = activeControl.getAgentRunId?.(args.beastTarget);
+        const run = await activeControl.resumeAgent(args.beastTarget, actor);
         keepServicesAlive = shouldKeepServicesAliveForRun(run);
         liveRunId = keepServicesAlive ? run.id : undefined;
         print(`Resumed ${run.id}`);

@@ -341,6 +341,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
   private readonly stoppingAttempts = new Set<string>();
   private readonly pendingSpawnHandles = new Map<string, { pid: number }>();
+  private readonly cancelledPendingRunIds = new Set<string>();
   private readonly pendingConfigFilePaths = new Map<string, string>();
   private readonly attemptConfigFilePaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
@@ -457,6 +458,24 @@ export class ProcessBeastExecutor implements BeastExecutor {
     let attempt: BeastRunAttempt;
     try {
       const customAttemptMetadata = this.options.attemptMetadata?.(run, processSpec, spawnedSpec, handle);
+      if (this.cancelledPendingRunIds.has(run.id) || this.pendingSpawnHandles.get(run.id) !== handle) {
+        this.cancelledPendingRunIds.delete(run.id);
+        this.repository.updateRun(run.id, {
+          status: 'stopped',
+          finishedAt: startedAt,
+          currentAttemptId: null,
+          stopReason: 'operator_kill',
+        });
+        return {
+          id: `${run.id}:cancelled-before-attempt`,
+          runId: run.id,
+          attemptNumber: run.attemptCount,
+          status: 'stopped',
+          startedAt,
+          finishedAt: startedAt,
+          stopReason: 'operator_kill',
+        };
+      }
       attempt = this.repository.createAttempt(run.id, {
         status: 'running',
         pid: handle.pid,
@@ -563,6 +582,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     if (!handle) {
       return false;
     }
+    this.cancelledPendingRunIds.add(runId);
     try {
       await this.supervisor.kill(handle.pid);
     } finally {
