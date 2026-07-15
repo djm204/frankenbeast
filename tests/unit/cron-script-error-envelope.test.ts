@@ -261,6 +261,40 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('FINAL-TAIL-MARKER');
   });
 
+  it('redacts secret values before truncating the stderr tail', () => {
+    const leakedSuffix = 'secret-tail-fragment';
+    const pem = '-----BEGIN PRIVATE KEY-----\\nline-one\\nline-two\\n-----END PRIVATE KEY-----';
+    const result = runCronScriptWithEnv([
+      '--name',
+      'large-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('API_KEY=${'x'.repeat(8192)}${leakedSuffix}'); process.stderr.write('\\nPRIVATE_KEY=${pem}'); process.exit(13)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(13);
+    const envelope = parseEnvelope(result.stderr);
+    expect(JSON.stringify(envelope)).not.toContain(leakedSuffix);
+    expect(JSON.stringify(envelope)).not.toContain('line-one');
+    expect(JSON.stringify(envelope)).not.toContain('line-two');
+    expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
+  });
+
+  it('preserves buffered stderr for successful cron runs', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'successful-large-stderr',
+      '--',
+      process.execPath,
+      '-e',
+      "const fs = require('node:fs'); fs.writeSync(2, 'successful-stderr-'.repeat(8192)); fs.writeSync(2, 'SUCCESS-FINAL-TAIL'); process.exit(0)",
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('SUCCESS-FINAL-TAIL');
+  });
+
   it('does not keep successful cron runs alive for the full stderr drain window', () => {
     const started = Date.now();
     const result = runCronScriptWithEnv([
@@ -450,6 +484,36 @@ describe('cron script error envelope runner', () => {
         process.kill(helperPid, 'SIGKILL');
       }
       expect(helperAlive).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('gives descendants the configured shutdown grace period after their parent exits', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-grace-'));
+    const cleanupFile = join(tempDir, 'cleanup.done');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-grace-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); const helper = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => setTimeout(() => { require("node:fs").writeFileSync(${JSON.stringify(cleanupFile)}, "done"); process.exit(0); }, 120)); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '500' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      child.kill('SIGTERM');
+      const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+      expect(status).toBe(128 + osConstants.signals.SIGTERM);
+      expect(readFileSync(cleanupFile, 'utf8')).toBe('done');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
