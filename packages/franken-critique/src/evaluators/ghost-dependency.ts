@@ -41,7 +41,9 @@ export class GhostDependencyEvaluator implements Evaluator {
       // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
       if (isNodeBuiltinSpecifier(specifier)) continue;
 
-      const packageSpecifier = normalizePackageUrlSpecifier(specifier);
+      const packageSpecifier = stripSpecifierResourceSuffix(
+        normalizePackageUrlSpecifier(specifier),
+      );
 
       // Extract package name (handle scoped packages and subpath imports)
       const packageName = packageSpecifier.startsWith('@')
@@ -82,6 +84,11 @@ function normalizePackageUrlSpecifier(specifier: string): string {
     .replace(/^(?:npm|jsr):/, '')
     .replace(/^(@[^/]+\/[^/@]+)@[^/]+/, '$1')
     .replace(/^([^/@]+)@[^/]+/, '$1');
+}
+
+function stripSpecifierResourceSuffix(specifier: string): string {
+  const queryIndex = specifier.search(/[?#]/);
+  return queryIndex === -1 ? specifier : specifier.slice(0, queryIndex);
 }
 
 function isLocalImportSpecifier(specifier: string): boolean {
@@ -469,7 +476,10 @@ function isTypeOnlyTemplateString(content: string, templateIndex: number): boole
   const statementStart = findDynamicImportStatementStart(content, templateIndex);
   const prefix = content.slice(statementStart + 1, templateIndex);
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
+  if (/(?:^|[^.])\b(?:as|satisfies)\s*$/.test(prefix.trimEnd())) return true;
   if (/(?:^|[;{}\n])\s*(?:export\s+)?type\b[\s\S]*=\s*$/.test(prefix)) return true;
+  const previousIndex = skipTriviaBackward(content, templateIndex - 1);
+  if (previousIndex >= 0 && /[\w$)\]]/.test(content[previousIndex] ?? '')) return false;
   return (
     endsInsideNestedTypeReference(prefix) ||
     isInsideTypeDeclaration(prefix) ||
@@ -794,10 +804,46 @@ function readDynamicImportSpecifierForTypeContext(
   i = skipImportTrivia(content, i + 1);
   const specifier = readDynamicImportArgumentSpecifier(content, i);
   if (!specifier) return null;
-  const nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  let nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  if (content[nextTokenIndex] === ',') {
+    nextTokenIndex = skipDynamicImportAttributeArgument(content, nextTokenIndex + 1);
+    if (nextTokenIndex === -1) return null;
+  }
   return content[nextTokenIndex] === ')'
     ? { value: specifier.value, endIndex: nextTokenIndex }
     : null;
+}
+
+function skipDynamicImportAttributeArgument(content: string, index: number): number {
+  let i = skipImportTrivia(content, index);
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  while (i < content.length) {
+    const ch = content[i]!;
+    if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && ch === ')') return i;
+    if (content[i] === '/' && content[i + 1] === '/') {
+      i = skipImportTrivia(content, skipSingleLineComment(content, i + 2));
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i = skipImportTrivia(content, skipMultiLineComment(content, i + 2) + 1);
+      continue;
+    }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i) + 1;
+      continue;
+    }
+    if (ch === '{') braceDepth += 1;
+    else if (ch === '}' && braceDepth > 0) braceDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']' && bracketDepth > 0) bracketDepth -= 1;
+    else if (ch === '(') parenDepth += 1;
+    else if (ch === ')' && parenDepth > 0) parenDepth -= 1;
+    i += 1;
+  }
+
+  return -1;
 }
 
 function stripTrailingTrivia(content: string): string {
@@ -836,7 +882,7 @@ function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
   const suffix = prefix.slice(newlineIndex + 1);
   if (
     !/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix) &&
-    !/^\s*(?:export\s+)?(?:default\b|[!~+\-\[(@]|using\b|abstract\s+class\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*\(|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
+    !/^\s*(?:export\s+)?(?:default\b|[!~+\-\[(@]|using\b|abstract\s+class\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*(?:\(|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
       suffix,
     )
   ) {

@@ -181,7 +181,7 @@ describe('GhostDependencyEvaluator', () => {
   it('checks external package URL specifiers', async () => {
     const evaluator = new GhostDependencyEvaluator(knownPackages);
     const known = await evaluator.evaluate(
-      createInput(`await import('npm:zod@3.24.0'); import path from 'jsr:@franken/brain@1';`),
+      createInput(`await import('npm:zod@3.24.0'); import path from 'jsr:@franken/brain@1'; await import('zod?raw'); await import('@franken/brain#worker');`),
     );
     const unknown = await evaluator.evaluate(
       createInput(`import helper from 'npm:ghost-package/subpath';`),
@@ -267,6 +267,7 @@ describe('GhostDependencyEvaluator', () => {
       type SemicolonLiteral = ";" | import('ghost-package').T;
       function typeofGeneric<T extends typeof import('ghost-package')>() {}
       const typeofCall = createPlugin<typeof import('ghost-package')>();
+      const typeofImportAttributes = createPlugin<typeof import('ghost-package', { with: { 'resolution-mode': 'import' } })>();
       const ambientModule = declare module "ambient" { export type T = import('ghost-package').T };
       declare global { type GlobalGhost = import('ghost-package').T }
       declare module "nested-ambient" {
@@ -319,7 +320,7 @@ describe('GhostDependencyEvaluator', () => {
       type V = {}
       export const exported = await import('export-after-type-ghost');
       type BareDynamic = {}
-      import('bare-after-type-ghost');
+      ready && import('identifier-led-after-type-ghost');
       type SimpleAlias = string
       import('simple-type-after-ghost');
       type VoidAlias = string
@@ -440,7 +441,7 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('void-after-type-ghost'),
         expect.stringContaining('iife-after-type-ghost'),
         expect.stringContaining('export-after-type-ghost'),
-        expect.stringContaining('bare-after-type-ghost'),
+        expect.stringContaining('identifier-led-after-type-ghost'),
         expect.stringContaining('simple-type-after-ghost'),
         expect.stringContaining('void-simple-type-after-ghost'),
         expect.stringContaining('punctuation-array-after-type-ghost'),
