@@ -459,7 +459,7 @@ function hashMemoryAccessValue(
   value: string,
   encryption?: MemoryCipher,
 ): string {
-  return createHmac('sha256', readOrCreateDeletionHashKey(db, encryption))
+  return createHmac('sha256', readOrCreateAuditHashKey(db, encryption))
     .update(value, 'utf8')
     .digest('hex');
 }
@@ -1387,8 +1387,9 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           this.audit?.({
             operation: 'episodic.recordLearning',
             store: 'episodic',
+            key,
             outcome: 'success',
-            details: { key, cooldownMs, recorded: false, reason: 'cooldown' },
+            details: { cooldownMs, recorded: false, reason: 'cooldown' },
           });
           return {
             recorded: false,
@@ -1417,8 +1418,9 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       this.audit?.({
         operation: 'episodic.recordLearning',
         store: 'episodic',
+        key,
         outcome: 'success',
-        details: { key, cooldownMs, recorded: true },
+        details: { cooldownMs, recorded: true },
       });
 
       this.db.exec('COMMIT');
@@ -1894,7 +1896,20 @@ export class SqliteMemoryReviewQueue {
         );
       result = candidate;
     });
-    tx.immediate();
+    try {
+      tx.immediate();
+    } catch (error) {
+      this.audit?.({
+        operation: 'review.propose',
+        store: 'review',
+        key: proposal.key,
+        outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
+        details: {
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
     this.audit?.({
       operation: 'review.propose',
       store: 'review',
@@ -4016,11 +4031,20 @@ function normalizeRightToForgetSelector(selector: RightToForgetSelector): Normal
 }
 
 const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
+const ACCESS_AUDIT_HASH_KEY_ID = 'memory-access-audit-hmac-v1';
+
+function readHashKey(
+  db: Database.Database,
+  id: string,
+  encryption?: MemoryCipher,
+): string | undefined {
+  const row = db.prepare(`SELECT key_material FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
+    .get(id) as { key_material: string } | undefined;
+  return row ? encryption?.decrypt(row.key_material) ?? row.key_material : undefined;
+}
 
 function readDeletionHashKey(db: Database.Database, encryption?: MemoryCipher): string | undefined {
-  const row = db.prepare(`SELECT key_material FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
-    .get(DELETION_HASH_KEY_ID) as { key_material: string } | undefined;
-  return row ? encryption?.decrypt(row.key_material) ?? row.key_material : undefined;
+  return readHashKey(db, DELETION_HASH_KEY_ID, encryption);
 }
 
 function countDeletionGuards(db: Database.Database): number {
@@ -4032,9 +4056,18 @@ function countDeletionGuards(db: Database.Database): number {
   ).count;
 }
 
-function writeDeletionHashKey(db: Database.Database, key: string, encryption?: MemoryCipher): void {
+function writeHashKey(
+  db: Database.Database,
+  id: string,
+  key: string,
+  encryption?: MemoryCipher,
+): void {
   db.prepare(`INSERT OR IGNORE INTO memory_deletion_hash_keys (id, key_material, created_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`)
-    .run(DELETION_HASH_KEY_ID, encryption?.encrypt(key) ?? key, isoNow());
+    .run(id, encryption?.encrypt(key) ?? key, isoNow());
+}
+
+function writeDeletionHashKey(db: Database.Database, key: string, encryption?: MemoryCipher): void {
+  writeHashKey(db, DELETION_HASH_KEY_ID, key, encryption);
 }
 
 function readOrCreateDeletionHashKey(db: Database.Database, encryption?: MemoryCipher): string {
@@ -4048,6 +4081,20 @@ function readOrCreateDeletionHashKey(db: Database.Database, encryption?: MemoryC
   if (existing) return existing;
   const key = randomBytes(32).toString('base64url');
   writeDeletionHashKey(db, key, encryption);
+  return key;
+}
+
+function readOrCreateAuditHashKey(db: Database.Database, encryption?: MemoryCipher): string {
+  db.exec(`CREATE TABLE IF NOT EXISTS memory_deletion_hash_keys (
+    id TEXT PRIMARY KEY,
+    key_material TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+  )`);
+  const existing = readHashKey(db, ACCESS_AUDIT_HASH_KEY_ID, encryption);
+  if (existing) return existing;
+  const key = randomBytes(32).toString('base64url');
+  writeHashKey(db, ACCESS_AUDIT_HASH_KEY_ID, key, encryption);
   return key;
 }
 

@@ -1,7 +1,9 @@
 # Resolve Issues Shared Lessons
 
 ## 2026-07-15 — Memory access audit privacy
-- Memory access audit hashes should use the deletion/right-to-forget HMAC key path, not bare SHA-256, and the tests should assert same-selector stability plus raw-value absence rather than pinning an unsalted digest.
+- Memory access audit hashes should use keyed HMACs, not bare SHA-256, and the tests should assert same-selector stability plus raw-value absence rather than pinning an unsalted digest.
+- Keep audit-only HMAC key material separate from exported right-to-forget/deletion guard snapshot keys; audit-only writes must not cause `serialize()` to expose `deletionGuardHashKey`.
+- Put sensitive learning/review keys through the audit event `key` hashing field rather than plaintext `details`, and audit deletion-guard rejections before rethrowing so denied writes are visible without leaking selectors.
 - When broadening audit coverage, wire every public persisted-memory surface through a shared audit sink (working, episodic learning/recall, recovery checkpoint/clear, review queue/provenance, right-to-forget) and update schema metadata tests for the extra audit/hash-key rows.
 
 ## 2026-07-15 — Skill installer path hardening review fixes

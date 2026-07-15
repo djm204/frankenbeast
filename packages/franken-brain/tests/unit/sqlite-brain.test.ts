@@ -1716,7 +1716,7 @@ describe('SqliteBrain', () => {
         .digest('hex');
       expect(suppression.signature).not.toBe(legacySignature);
       expect(
-        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
+        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys WHERE id = 'right-to-forget-hmac-v1'`).get(),
       ).toEqual({ count: 1 });
     });
 
@@ -1727,7 +1727,7 @@ describe('SqliteBrain', () => {
       expect(indexes.some(index => index.name === 'idx_memory_review_suppressions_target_key')).toBe(true);
     });
 
-    it('does not create deletion hash keys while only checking suppressions', () => {
+    it('does not create deletion guard hash keys while only checking suppressions', () => {
       const db = (brain as unknown as { db: Database.Database }).db;
 
       brain.memoryReview.propose({
@@ -1740,9 +1740,9 @@ describe('SqliteBrain', () => {
       });
 
       expect(
-        db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
-      ).toEqual({ count: 1 });
-      expect(brain.serialize()).toHaveProperty('deletionGuardHashKey');
+        db.prepare(`SELECT id FROM memory_deletion_hash_keys ORDER BY id`).all(),
+      ).toEqual([{ id: 'memory-access-audit-hmac-v1' }]);
+      expect(brain.serialize()).not.toHaveProperty('deletionGuardHashKey');
     });
 
     it('deletes approved working memory when matching review provenance by source scope', () => {
@@ -3775,6 +3775,61 @@ describe('SqliteBrain', () => {
       expect(event.keyHash).not.toBe(
         createHash('sha256').update('api-token', 'utf8').digest('hex'),
       );
+    });
+
+    it('keeps audit-only hash keys out of exported deletion guard snapshots', () => {
+      brain.working.set('api-token', 'secret-value');
+
+      const [event] = brain.accessAudit.list({ operation: 'working.set', limit: 1 });
+      expect(event.keyHash).toBeDefined();
+      expect(brain.serialize().deletionGuardHashKey).toBeUndefined();
+      expect(brain.serialize().deletionGuards).toEqual([]);
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      expect(
+        db.prepare(`SELECT id FROM memory_deletion_hash_keys ORDER BY id`).all(),
+      ).toEqual([{ id: 'memory-access-audit-hmac-v1' }]);
+    });
+
+    it('hashes learning keys and audits denied review proposals', () => {
+      brain.episodic.recordLearning(
+        {
+          type: 'observation',
+          summary: 'Learned sensitive operator detail',
+          createdAt: '2026-07-15T00:00:00.000Z',
+        },
+        { key: 'operator@example.test', cooldownMs: 0 },
+      );
+      const [learningEvent] = brain.accessAudit.list({
+        operation: 'episodic.recordLearning',
+        limit: 1,
+      });
+      expect(learningEvent.keyHash).toBeDefined();
+      expect(JSON.stringify(learningEvent)).not.toContain('operator@example.test');
+
+      brain.rightToForget({ key: 'blocked-review-key' });
+      expect(() =>
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'blocked-review-key',
+          value: 'blocked value',
+          source: 'test',
+          confidence: 0.9,
+          reason: 'would reintroduce forgotten key',
+        }),
+      ).toThrow(/right-to-forget/);
+      const [proposalEvent] = brain.accessAudit.list({
+        operation: 'review.propose',
+        limit: 1,
+      });
+      expect(proposalEvent).toMatchObject({
+        operation: 'review.propose',
+        store: 'review',
+        outcome: 'denied',
+        details: { errorName: 'MemoryDeletionGuardError' },
+      });
+      expect(proposalEvent.keyHash).toBeDefined();
+      expect(JSON.stringify(proposalEvent)).not.toContain('blocked-review-key');
     });
 
     it('records accesses across persisted memory surfaces and right-to-forget', () => {
