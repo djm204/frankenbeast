@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
-import { createToolDefsForServer } from '../shared/tool-registry.js';
-import { createMemoryServer } from './memory.js';
+import { describe, it, expect, vi } from "vitest";
+import { createToolDefsForServer } from "../shared/tool-registry.js";
+import { createMemoryServer } from "./memory.js";
 
-describe('Memory Server', () => {
-  it('exposes 5 tools', () => {
+describe("Memory Server", () => {
+  it("exposes 5 tools", () => {
     const server = createMemoryServer({
       brain: {
         query: vi.fn(),
@@ -16,17 +16,21 @@ describe('Memory Server', () => {
 
     const names = server.tools.map((t) => t.name);
     expect(names).toEqual([
-      'fbeast_memory_store',
-      'fbeast_memory_query',
-      'fbeast_memory_frontload',
-      'fbeast_memory_forget',
-      'fbeast_memory_right_to_forget',
+      "fbeast_memory_store",
+      "fbeast_memory_query",
+      "fbeast_memory_frontload",
+      "fbeast_memory_forget",
+      "fbeast_memory_right_to_forget",
     ]);
-    const storeTool = server.tools.find((t) => t.name === 'fbeast_memory_store')!;
-    expect(storeTool.description).toBe('Store key/value in working or episodic memory');
+    const storeTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_store",
+    )!;
+    expect(storeTool.description).toBe(
+      "Store key/value in working or episodic memory",
+    );
   });
 
-  it('limits memory type enums to working and episodic', () => {
+  it("limits memory type enums to working and episodic", () => {
     const storeTool = createMemoryServer({
       brain: {
         query: vi.fn(),
@@ -35,7 +39,7 @@ describe('Memory Server', () => {
         forget: vi.fn(),
         rightToForget: vi.fn(),
       },
-    }).tools.find((t) => t.name === 'fbeast_memory_store')!;
+    }).tools.find((t) => t.name === "fbeast_memory_store")!;
 
     const queryTool = createMemoryServer({
       brain: {
@@ -45,30 +49,43 @@ describe('Memory Server', () => {
         forget: vi.fn(),
         rightToForget: vi.fn(),
       },
-    }).tools.find((t) => t.name === 'fbeast_memory_query')!;
+    }).tools.find((t) => t.name === "fbeast_memory_query")!;
+
+    expect(queryTool.inputSchema.properties?.readScope).toMatchObject({
+      enum: ["all", "shared", "agent"],
+      description: expect.stringContaining("Read scope"),
+    });
+    expect(queryTool.inputSchema.properties).toHaveProperty("agentId");
 
     expect(storeTool.inputSchema.properties?.type).toMatchObject({
-      enum: ['working', 'episodic'],
-      description: 'Memory type: working or episodic',
+      enum: ["working", "episodic"],
+      description: "Memory type: working or episodic",
     });
     expect(queryTool.inputSchema.properties?.type).toMatchObject({
-      enum: ['working', 'episodic'],
-      description: 'Filter by type: working or episodic',
+      enum: ["working", "episodic"],
+      description: "Filter by type: working or episodic",
     });
   });
 
-  it('delegates memory store/query/frontload/forget to the brain adapter', async () => {
+  it("delegates memory store/query/frontload/forget to the brain adapter", async () => {
     const brain = {
       query: vi.fn().mockResolvedValue([
-        { key: 'adr', value: 'use adapters', type: 'working', createdAt: '2026-04-10T00:00:00.000Z' },
+        {
+          key: "adr",
+          value: "use adapters",
+          type: "working",
+          createdAt: "2026-04-10T00:00:00.000Z",
+        },
       ]),
       store: vi.fn().mockResolvedValue(undefined),
-      frontload: vi.fn().mockResolvedValue([
-        { type: 'working', entries: ['adr: use adapters'] },
-      ]),
+      frontload: vi
+        .fn()
+        .mockResolvedValue([
+          { type: "working", entries: ["adr: use adapters"] },
+        ]),
       forget: vi.fn().mockResolvedValue(true),
       rightToForget: vi.fn().mockResolvedValue({
-        selectorHash: 'hashed-selector',
+        selectorHash: "hashed-selector",
         dryRun: false,
         deleted: { working: 1, episodic: 1, derived: 1 },
         remainingReferences: 0,
@@ -77,38 +94,92 @@ describe('Memory Server', () => {
     };
 
     const server = createMemoryServer({ brain });
-    const storeTool = server.tools.find((t) => t.name === 'fbeast_memory_store')!;
-    const queryTool = server.tools.find((t) => t.name === 'fbeast_memory_query')!;
-    const frontloadTool = server.tools.find((t) => t.name === 'fbeast_memory_frontload')!;
-    const forgetTool = server.tools.find((t) => t.name === 'fbeast_memory_forget')!;
-    const rightToForgetTool = server.tools.find((t) => t.name === 'fbeast_memory_right_to_forget')!;
+    const storeTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_store",
+    )!;
+    const queryTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_query",
+    )!;
+    const frontloadTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_frontload",
+    )!;
+    const forgetTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_forget",
+    )!;
+    const rightToForgetTool = server.tools.find(
+      (t) => t.name === "fbeast_memory_right_to_forget",
+    )!;
 
-    await storeTool.handler({ key: 'adr', value: 'use adapters', type: 'working' });
-    expect(brain.store).toHaveBeenCalledWith({ key: 'adr', value: 'use adapters', type: 'working' });
+    await storeTool.handler({
+      key: "adr",
+      value: "use adapters",
+      type: "working",
+      agentId: "agent-a",
+    });
+    expect(brain.store).toHaveBeenCalledWith({
+      key: "adr",
+      value: "use adapters",
+      type: "working",
+      agentId: "agent-a",
+    });
 
-    const queryResult = await queryTool.handler({ query: 'adr', type: 'working', limit: 5 });
-    expect(brain.query).toHaveBeenCalledWith({ query: 'adr', type: 'working', limit: 5 });
-    expect(queryResult.content[0]!.text).toContain('use adapters');
+    const queryResult = await queryTool.handler({
+      query: "adr",
+      type: "working",
+      limit: 5,
+      readScope: "agent",
+      agentId: "agent-a",
+    });
+    expect(brain.query).toHaveBeenCalledWith({
+      query: "adr",
+      type: "working",
+      limit: 5,
+      readScope: "agent",
+      agentId: "agent-a",
+    });
+    expect(queryResult.content[0]!.text).toContain("use adapters");
 
     expect(frontloadTool.inputSchema.required).toBeUndefined();
-    expect(frontloadTool.inputSchema.properties).toHaveProperty('projectId');
+    expect(frontloadTool.inputSchema.properties).toHaveProperty("projectId");
+    expect(frontloadTool.inputSchema.properties).toHaveProperty("readScope");
+    expect(frontloadTool.inputSchema.properties).toHaveProperty("agentId");
 
-    const frontloadResult = await frontloadTool.handler({ projectId: 'test-project' });
-    expect(brain.frontload).toHaveBeenCalledWith();
-    expect(frontloadResult.content[0]!.text).toContain('adr: use adapters');
+    const frontloadResult = await frontloadTool.handler({
+      projectId: "test-project",
+      readScope: "shared",
+    });
+    expect(brain.frontload).toHaveBeenCalledWith({ readScope: "shared" });
+    expect(frontloadResult.content[0]!.text).toContain("adr: use adapters");
 
-    const forgetResult = await forgetTool.handler({ key: 'adr' });
-    expect(brain.forget).toHaveBeenCalledWith('adr');
-    expect(forgetResult.content[0]!.text).toContain('Removed memory: adr');
+    const forgetResult = await forgetTool.handler({ key: "adr" });
+    expect(brain.forget).toHaveBeenCalledWith("adr");
+    expect(forgetResult.content[0]!.text).toContain("Removed memory: adr");
 
-    const deletionResult = await rightToForgetTool.handler({ category: 'pii', sourceScope: 'import-1', query: 'secret' });
-    expect(brain.rightToForget).toHaveBeenCalledWith({ category: 'pii', sourceScope: 'import-1', query: 'secret' });
-    expect(deletionResult.content[0]!.text).toContain('hashed-selector');
-    expect(deletionResult.content[0]!.text).not.toContain('secret');
+    const deletionResult = await rightToForgetTool.handler({
+      category: "pii",
+      sourceScope: "import-1",
+      query: "secret",
+    });
+    expect(brain.rightToForget).toHaveBeenCalledWith({
+      category: "pii",
+      sourceScope: "import-1",
+      query: "secret",
+    });
+    expect(deletionResult.content[0]!.text).toContain("hashed-selector");
+    expect(deletionResult.content[0]!.text).not.toContain("secret");
   });
 
-  it('rejects invalid query limits before calling the brain adapter', async () => {
-    for (const invalidLimit of ['abc', 'NaN', 'Infinity', '0', '-1', '1.5', '1001', '9007199254740993']) {
+  it("rejects invalid query limits before calling the brain adapter", async () => {
+    for (const invalidLimit of [
+      "abc",
+      "NaN",
+      "Infinity",
+      "0",
+      "-1",
+      "1.5",
+      "1001",
+      "9007199254740993",
+    ]) {
       const brain = {
         query: vi.fn().mockResolvedValue([]),
         store: vi.fn(),
@@ -117,15 +188,20 @@ describe('Memory Server', () => {
         rightToForget: vi.fn(),
       };
       const server = createMemoryServer({ brain });
-      const result = await server.callTool('fbeast_memory_query', { query: 'adr', limit: invalidLimit });
+      const result = await server.callTool("fbeast_memory_query", {
+        query: "adr",
+        limit: invalidLimit,
+      });
 
       expect(result.isError, invalidLimit).toBe(true);
-      expect(result.content[0]!.text).toContain('limit must be a positive integer');
+      expect(result.content[0]!.text).toContain(
+        "limit must be a positive integer",
+      );
       expect(brain.query, invalidLimit).not.toHaveBeenCalled();
     }
   });
 
-  it('applies shared registry query limit defaults and validation', async () => {
+  it("applies shared registry query limit defaults and validation", async () => {
     const brain = {
       query: vi.fn().mockResolvedValue([]),
       store: vi.fn(),
@@ -133,15 +209,48 @@ describe('Memory Server', () => {
       forget: vi.fn(),
       rightToForget: vi.fn(),
     };
-    const queryTool = createToolDefsForServer('memory', { brain }).find((t) => t.name === 'fbeast_memory_query')!;
+    const queryTool = createToolDefsForServer("memory", { brain }).find(
+      (t) => t.name === "fbeast_memory_query",
+    )!;
 
-    await queryTool.handler({ query: 'adr' });
-    await queryTool.handler({ query: 'adr', limit: '7' });
-    const invalidResult = await queryTool.handler({ query: 'adr', limit: 'NaN' });
+    await queryTool.handler({ query: "adr" });
+    await queryTool.handler({ query: "adr", limit: "7" });
+    const invalidResult = await queryTool.handler({
+      query: "adr",
+      limit: "NaN",
+    });
 
-    expect(brain.query).toHaveBeenNthCalledWith(1, { query: 'adr', limit: 20 });
-    expect(brain.query).toHaveBeenNthCalledWith(2, { query: 'adr', limit: 7 });
+    expect(brain.query).toHaveBeenNthCalledWith(1, { query: "adr", limit: 20 });
+    expect(brain.query).toHaveBeenNthCalledWith(2, { query: "adr", limit: 7 });
     expect(invalidResult.isError).toBe(true);
     expect(brain.query).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Memory Server read scope validation", () => {
+  it("rejects agent read scope without agentId before calling the adapter", async () => {
+    const brain = {
+      query: vi.fn().mockResolvedValue([]),
+      store: vi.fn(),
+      frontload: vi.fn(),
+      forget: vi.fn(),
+      rightToForget: vi.fn(),
+    };
+    const server = createMemoryServer({ brain });
+
+    const queryResult = await server.callTool("fbeast_memory_query", {
+      query: "adr",
+      readScope: "agent",
+    });
+    const frontloadResult = await server.callTool("fbeast_memory_frontload", {
+      readScope: "agent",
+    });
+
+    expect(queryResult.isError).toBe(true);
+    expect(queryResult.content[0]!.text).toContain("agentId is required");
+    expect(frontloadResult.isError).toBe(true);
+    expect(frontloadResult.content[0]!.text).toContain("agentId is required");
+    expect(brain.query).not.toHaveBeenCalled();
+    expect(brain.frontload).not.toHaveBeenCalled();
   });
 });
