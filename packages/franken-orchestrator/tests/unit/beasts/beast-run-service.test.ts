@@ -10,6 +10,7 @@ import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { PrometheusBeastMetrics } from '../../../src/beasts/telemetry/prometheus-beast-metrics.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity-reservation-policy.js';
 
 describe('BeastRunService', () => {
   let workDir: string | undefined;
@@ -324,6 +325,64 @@ describe('BeastRunService', () => {
       status: 'running',
       dispatchRunId: run.id,
     });
+  });
+
+  it('starts queued linked runs using reservation metadata from the run config snapshot', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-03-11T00:00:00.000Z');
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => repo.createAttempt(run.id, { status: 'running' })),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const capacityPolicy = new CapacityReservationPolicy({
+      totalSlots: 2,
+      reservations: [{ id: 'security-urgent', slots: 1, labels: ['security'] }],
+    });
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs, { capacityPolicy });
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs, { capacityPolicy });
+    agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { labels: ['feature'] },
+    });
+    const urgentAgent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'dashboard',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: {},
+    });
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: urgentAgent.id,
+      config: {
+        provider: 'claude',
+        objective: 'Resume urgent security work',
+        chunkDirectory: 'docs/chunks',
+        labels: ['security'],
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      startNow: false,
+    });
+
+    const started = await runs.start(run.id, 'operator');
+
+    expect(started.status).toBe('running');
+    expect(executors.process.start).toHaveBeenCalledOnce();
   });
 
   it('marks queued tracked runs failed when executor start throws', async () => {

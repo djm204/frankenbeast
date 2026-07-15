@@ -104,11 +104,14 @@ export class CapacityReservationPolicy {
       return { allowed: false, reason: 'capacity_full', reservationId: undefined };
     }
 
-    const matchingReservation = this.reservations
-      .filter((reservation) => this.matches(reservation, candidate))
-      .find((reservation) => state.reservations.some((bucket) => bucket.id === reservation.id && bucket.free > 0));
-    if (matchingReservation) {
-      return { allowed: true, reason: 'reserved_capacity_available', reservationId: matchingReservation.id };
+    const candidateIndex = activeItems.length;
+    const candidateAllocation = this.allocateReservations([...activeItems, candidate]);
+    const matchingReservationIndex = candidateAllocation.assignedBucketByItemIndex.get(candidateIndex);
+    if (matchingReservationIndex !== undefined) {
+      const reservation = this.reservations[matchingReservationIndex];
+      if (reservation) {
+        return { allowed: true, reason: 'reserved_capacity_available', reservationId: reservation.id };
+      }
     }
 
     if (state.normalSlots.free > 0) {
@@ -124,26 +127,7 @@ export class CapacityReservationPolicy {
 
   describe(activeItems: readonly CapacityReservationWorkItem[]): CapacityReservationState {
     const usedSlots = activeItems.length;
-    const buckets = this.reservations.map((reservation) => ({
-      id: reservation.id,
-      slots: reservation.slots,
-      used: 0,
-      released: this.releasedReservationIds.has(reservation.id),
-      labels: [...(reservation.labels ?? [])],
-      categories: [...(reservation.categories ?? [])],
-    }));
-
-    for (const item of activeItems) {
-      const bucket = buckets.find((candidateBucket, index) => {
-        const reservation = this.reservations[index];
-        if (!reservation) return false;
-        return candidateBucket.used < candidateBucket.slots
-          && this.matches(reservation, item);
-      });
-      if (bucket) {
-        bucket.used += 1;
-      }
-    }
+    const { buckets } = this.allocateReservations(activeItems);
 
     const bucketsWithFree = buckets.map((bucket) => ({
       ...bucket,
@@ -177,6 +161,61 @@ export class CapacityReservationPolicy {
       .filter((reservation) => reservation.released)
       .reduce((sum, reservation) => sum + reservation.free, 0);
     return Math.max(0, releasedFree - normalOverflowUsed);
+  }
+
+  private allocateReservations(activeItems: readonly CapacityReservationWorkItem[]): {
+    buckets: Array<{
+      id: string;
+      slots: number;
+      used: number;
+      released: boolean;
+      labels: string[];
+      categories: string[];
+    }>;
+    assignedBucketByItemIndex: Map<number, number>;
+  } {
+    const buckets = this.reservations.map((reservation) => ({
+      id: reservation.id,
+      slots: reservation.slots,
+      used: 0,
+      released: this.releasedReservationIds.has(reservation.id),
+      labels: [...(reservation.labels ?? [])],
+      categories: [...(reservation.categories ?? [])],
+    }));
+    const assignedBucketByItemIndex = new Map<number, number>();
+    const indexedActiveItems = activeItems
+      .map((item, activeIndex) => ({
+        activeIndex,
+        matchingIndexes: this.matchingReservationIndexes(item),
+      }))
+      .filter(({ matchingIndexes }) => matchingIndexes.length > 0)
+      .sort((left, right) => {
+        if (left.matchingIndexes.length !== right.matchingIndexes.length) {
+          return left.matchingIndexes.length - right.matchingIndexes.length;
+        }
+        return left.activeIndex - right.activeIndex;
+      });
+
+    for (const { activeIndex, matchingIndexes } of indexedActiveItems) {
+      const bucketIndex = matchingIndexes.find((index) => {
+        const bucket = buckets[index];
+        return bucket !== undefined && bucket.used < bucket.slots;
+      });
+      if (bucketIndex !== undefined) {
+        const bucket = buckets[bucketIndex];
+        if (bucket) {
+          bucket.used += 1;
+          assignedBucketByItemIndex.set(activeIndex, bucketIndex);
+        }
+      }
+    }
+    return { buckets, assignedBucketByItemIndex };
+  }
+
+  private matchingReservationIndexes(item: CapacityReservationWorkItem): number[] {
+    return this.reservations.flatMap((reservation, index) => (
+      this.matches(reservation, item) ? [index] : []
+    ));
   }
 
   private matches(reservation: CapacityReservationRule, item: CapacityReservationWorkItem): boolean {

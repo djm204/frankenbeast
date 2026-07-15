@@ -89,6 +89,27 @@ describe('CapacityReservationPolicy', () => {
     });
   });
 
+  it('allocates flexible active work away from narrower urgent reservations', () => {
+    const policy = new CapacityReservationPolicy({
+      totalSlots: 3,
+      reservations: [
+        { id: 'security-urgent', slots: 1, labels: ['security'] },
+        { id: 'availability-urgent', slots: 1, categories: ['availability'] },
+      ],
+    });
+
+    const runningItems = [
+      { id: 'normal-1', labels: ['feature'] },
+      { id: 'flexible-urgent', labels: ['security'], categories: ['availability'] },
+    ];
+
+    expect(policy.canStart({ id: 'security-only', labels: ['security'] }, runningItems)).toEqual({
+      allowed: true,
+      reason: 'reserved_capacity_available',
+      reservationId: 'security-urgent',
+    });
+  });
+
   it('renders operator-visible reservation state with used and free reserved capacity', () => {
     const policy = new CapacityReservationPolicy({
       totalSlots: 5,

@@ -35,6 +35,12 @@ const SHARED_RUNTIME_CONFIG_KEYS = [
   'maxDurationMs',
   'maxTotalTokens',
   'reflection',
+  'label',
+  'labels',
+  'issueLabels',
+  'category',
+  'categories',
+  'issue',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -96,6 +102,15 @@ function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown
       return typeof value === 'number' ? value : undefined;
     case 'reflection':
       return typeof value === 'boolean' ? value : undefined;
+    case 'label':
+    case 'category':
+      return typeof value === 'string' ? value : undefined;
+    case 'labels':
+    case 'issueLabels':
+    case 'categories':
+      return Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? value : undefined;
+    case 'issue':
+      return isRecord(value) ? value : undefined;
     default:
       return undefined;
   }
@@ -165,8 +180,11 @@ export class BeastDispatchService {
       ? { ...config, modules: moduleConfig }
       : config;
     const executionMode = request.executionMode ?? definition.executionModeDefault;
-    if (request.startNow && request.trackedAgentId) {
-      this.assertTrackedAgentCapacity(request.trackedAgentId);
+    if (request.trackedAgentId) {
+      this.assertTrackedAgentCapacity(request.trackedAgentId, {
+        ...request.config,
+        ...configSnapshot,
+      });
     }
     const createdAt = new Date(wallClockNow()).toISOString();
     const linkedAt = new Date(wallClockNow()).toISOString();
@@ -311,12 +329,14 @@ export class BeastDispatchService {
     return mode === 'container' ? this.executors.container : this.executors.process;
   }
 
-  private assertTrackedAgentCapacity(trackedAgentId: string): void {
+  private assertTrackedAgentCapacity(
+    trackedAgentId: string,
+    candidateConfig: Readonly<Record<string, unknown>>,
+  ): void {
     if (!this.options.capacityPolicy) return;
-    const trackedAgent = this.repository.requireTrackedAgent(trackedAgentId);
     const activeItems = this.activeCapacityItems(trackedAgentId);
     const decision = this.options.capacityPolicy.canStart(
-      capacityItemFromConfig(trackedAgent.id, trackedAgent.initConfig),
+      capacityItemFromConfig(trackedAgentId, candidateConfig),
       activeItems,
     );
     if (!decision.allowed) {

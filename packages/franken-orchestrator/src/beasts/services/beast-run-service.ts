@@ -331,7 +331,7 @@ export class BeastRunService {
 
     const activeItems = this.activeCapacityItems(run.trackedAgentId);
     const decision = this.serviceOptions.capacityPolicy.canStart(
-      capacityItemFromConfig(trackedAgent.id, trackedAgent.initConfig),
+      capacityItemFromConfig(trackedAgent.id, run.configSnapshot),
       activeItems,
     );
     if (!decision.allowed) {
