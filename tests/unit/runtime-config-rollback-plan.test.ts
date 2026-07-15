@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +11,7 @@ import {
   diffRuntimeConfig,
   loadRuntimeConfigSnapshot,
   loadRuntimeConfigSnapshotWithDigest,
+  writeFileNoFollow,
 } from '../../scripts/runtime-config-rollback-plan.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -147,9 +148,26 @@ describe('runtime config rollback plan dry-run helper', () => {
     const first = defaultEvidenceDir('.fbeast/.build/run-configs/run-123.json');
     const second = defaultEvidenceDir('.fbeast/.build/run-configs/run-456.json');
 
-    expect(first).toMatch(/^rollback-evidence\/runtime-config-run-123\.json-[a-f0-9]{12}$/u);
-    expect(second).toMatch(/^rollback-evidence\/runtime-config-run-456\.json-[a-f0-9]{12}$/u);
+    const firstPrefix = resolve('rollback-evidence/runtime-config-run-123.json-');
+    const secondPrefix = resolve('rollback-evidence/runtime-config-run-456.json-');
+
+    expect(first.startsWith(firstPrefix)).toBe(true);
+    expect(second.startsWith(secondPrefix)).toBe(true);
     expect(first).not.toBe(second);
+    expect(first.slice(firstPrefix.length)).toMatch(/^[a-f0-9]{12}$/u);
+    expect(second.slice(secondPrefix.length)).toMatch(/^[a-f0-9]{12}$/u);
+  });
+
+  it('rejects writes when evidence parent paths are symlinks', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-rollback-symlink-parent-'));
+    const realDir = join(workDir, 'real');
+    const linkDir = join(workDir, 'evidence-link');
+    const targetFile = join(linkDir, 'snapshot.json');
+
+    await mkdir(realDir);
+    await symlink(realDir, linkDir, 'dir');
+
+    await expect(writeFileNoFollow(targetFile, '{"x":1}\n')).rejects.toThrow(/Refusing symlinked path component/u);
   });
 
   it('loads bounded JSON object snapshots and rejects arrays or oversized files', async () => {

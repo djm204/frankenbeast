@@ -3,7 +3,7 @@
 import { chmod, chown, lstat, open, rename, stat, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, parse, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SNAPSHOT_LIMITS = Object.freeze({
@@ -30,8 +30,9 @@ export async function fileSha256(filePath) {
 }
 
 export async function writeFileNoFollow(filePath, data, mode = 0o600, owner) {
-  await assertExistingPathIsNotSymlink(filePath);
-  const tempPath = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  const resolvedFilePath = resolve(filePath);
+  await assertExistingPathIsNotSymlinkOrParent(resolvedFilePath);
+  const tempPath = join(dirname(resolvedFilePath), `.${basename(resolvedFilePath)}.${process.pid}.${Date.now()}.tmp`);
   const handle = await open(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
   try {
     await handle.writeFile(data);
@@ -40,12 +41,12 @@ export async function writeFileNoFollow(filePath, data, mode = 0o600, owner) {
     await handle.close();
   }
   await chmod(tempPath, mode);
+  if (owner && Number.isInteger(owner.uid) && Number.isInteger(owner.gid)) {
+    await chown(tempPath, owner.uid, owner.gid);
+  }
   try {
-    await rename(tempPath, filePath);
-    if (owner && Number.isInteger(owner.uid) && Number.isInteger(owner.gid)) {
-      await chown(filePath, owner.uid, owner.gid);
-    }
-    await chmod(filePath, mode);
+    await rename(tempPath, resolvedFilePath);
+    await chmod(resolvedFilePath, mode);
   } catch (error) {
     await unlink(tempPath).catch(() => undefined);
     throw error;
@@ -56,15 +57,23 @@ export async function copyFileNoFollow(sourcePath, destinationPath, mode = 0o600
   await writeFileNoFollow(destinationPath, await readFileNoFollow(sourcePath), mode);
 }
 
-async function assertExistingPathIsNotSymlink(filePath) {
-  try {
-    const info = await lstat(filePath);
-    if (info.isSymbolicLink()) {
-      throw new Error(`Refusing symlinked path: ${filePath}`);
+async function assertExistingPathIsNotSymlinkOrParent(filePath) {
+  const absolute = resolve(filePath);
+  const parsed = parse(absolute);
+  let current = parsed.root;
+  const parts = relative(parsed.root, absolute).split(sep).filter(Boolean);
+
+  for (const part of parts) {
+    current = resolve(current, part);
+    try {
+      const info = await lstat(current);
+      if (info.isSymbolicLink()) {
+        throw new Error(`Refusing symlinked path component: ${current}`);
+      }
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return;
+      throw error;
     }
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return;
-    throw error;
   }
 }
 
@@ -113,7 +122,7 @@ export function defaultEvidenceDir(targetPath) {
   assertSafePath(targetPath, 'targetPath');
   const targetName = basename(targetPath).replace(/[^A-Za-z0-9_.-]+/gu, '-').replace(/^-+/u, '') || 'runtime-config';
   const digest = createHash('sha256').update(targetPath).digest('hex').slice(0, 12);
-  return `rollback-evidence/runtime-config-${targetName}-${digest}`;
+  return resolve(`rollback-evidence/runtime-config-${targetName}-${digest}`);
 }
 
 export function buildRuntimeConfigRollbackPlan(options) {
