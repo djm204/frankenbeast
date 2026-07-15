@@ -140,7 +140,7 @@ When a wrapper or service manager starts `frankenbeast` from outside the target 
 
 ## 5. Beast dispatch system
 
-Beasts are named process-level runs managed by the dispatcher.
+Beasts are named process-level runs managed by the dispatcher. On daemon/chat-server startup, the dispatcher runs fail-closed integrity checks before it accepts Beast work. The checks verify that the catalog has uniquely named definitions, each definition has valid metadata/prompts/telemetry labels, and every default execution mode has a wired executor with `start`, `stop`, and `kill` lifecycle handlers. If a check fails, startup throws a `DispatcherStartupIntegrityError` with structured `errors[]` entries and operator guidance; fix the catalog or executor wiring before retrying instead of dispatching into a partially wired runtime.
 
 ```bash
 # See available Beast definitions
@@ -165,6 +165,22 @@ frankenbeast beasts delete <agent-id>
 ```
 
 `resume` and `delete` operate on tracked agent IDs, not run IDs. Use `resume` to continue the agent's linked run and `delete` to soft-delete the tracked agent.
+
+### Worker crash classification
+
+Every Beast worker lifecycle event now carries a structured `crashClassification` object so operators and PM/liveness tooling do not need to infer failure type from prose. The taxonomy includes:
+
+| Kind | Meaning | Operator action |
+|------|---------|-----------------|
+| `clean_exit` | Process exited with code `0`. | No crash remediation. |
+| `spawn_failure` | Command/cwd/runtime could not spawn. | Check command path, permissions, cwd containment, and installed dependencies before retrying. |
+| `operator_stop` / `operator_kill` | Human or supervisor intentionally stopped the run. | Treat as intentional unless the operator action trail says otherwise. |
+| `oom_killed` | `SIGKILL`, exit `137`, or OOM-like stderr. | Reduce concurrency or memory footprint and inspect host OOM evidence before retrying. |
+| `signal_termination` | Process ended from another signal. | Correlate with host shutdown, container runtime, or supervisor actions. |
+| `runtime_error` | Non-zero exit with exception-like stderr. | Use the redacted stderr tail as the primary debugging handle. |
+| `nonzero_exit` / `unknown_exit` | Deterministic non-zero or ambiguous exit without a stronger signal. | Preserve exit evidence in handoffs and inspect logs/run config. |
+
+The classification includes `kind`, `severity`, `retryable`, `summary`, and `operatorGuidance`. Treat `retryable` as liveness guidance, not permission to ignore the underlying failure.
 
 Available catalog entries: `design-interview`, `chunk-plan`, `martin-loop`.
 

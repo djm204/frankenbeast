@@ -23,11 +23,10 @@ function validateRecordArray(manifestPath: string, manifest: Record<string, unkn
   if (!Array.isArray(value)) {
     throw new Error(`Invalid restore manifest ${manifestPath}: ${field} must be an array when present`);
   }
-  const ids = new Set<string>();
   const allowedFields = new Set(['id', 'digest', 'state', 'updatedAt', 'value']);
   for (const [index, record] of value.entries()) {
-    if (!isRecord(record) || typeof record.id !== 'string' || record.id.length === 0) {
-      throw new Error(`Invalid restore manifest ${manifestPath}: ${field}[${index}] must include a non-empty string id`);
+    if (!isRecord(record)) {
+      throw new Error(`Invalid restore manifest ${manifestPath}: ${field}[${index}] must be an object`);
     }
     for (const recordField of Object.keys(record)) {
       if (!allowedFields.has(recordField)) {
@@ -39,10 +38,6 @@ function validateRecordArray(manifestPath: string, manifest: Record<string, unkn
         throw new Error(`Invalid restore manifest ${manifestPath}: ${field}[${index}].${stringField} must be a string when present`);
       }
     }
-    if (ids.has(record.id)) {
-      throw new Error(`Invalid restore manifest ${manifestPath}: ${field} contains duplicate id '${record.id}'`);
-    }
-    ids.add(record.id);
   }
 }
 
@@ -60,9 +55,6 @@ export async function readRestoreManifest(manifestPath: string): Promise<Restore
   }
   if (!Number.isSafeInteger(parsed.schemaVersion)) {
     throw new Error(`Invalid restore manifest ${manifestPath}: schemaVersion must be a safe integer`);
-  }
-  if (parsed.schemaVersion !== 1) {
-    throw new Error(`Invalid restore manifest ${manifestPath}: unsupported schemaVersion ${String(parsed.schemaVersion)}`);
   }
   for (const field of ['tasks', 'approvals', 'memory', 'cron']) {
     validateRecordArray(manifestPath, parsed, field);

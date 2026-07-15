@@ -47,6 +47,10 @@ export class InMemoryAdapter implements ExportAdapter {
     return Array.from(this.store.keys())
   }
 
+  async deleteTrace(traceId: string): Promise<void> {
+    this.store.delete(traceId)
+  }
+
   clear(): void {
     this.store.clear()
   }

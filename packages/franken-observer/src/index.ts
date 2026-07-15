@@ -43,6 +43,12 @@ export {
   enforceRuntimeArtifactExportPolicy,
   isHighSensitivityClassification,
 } from './security/data-classification.js'
+export {
+  TranscriptRetentionAdapter,
+  applyRetentionPolicy,
+  describeTranscriptRetentionPolicy,
+  resolveTranscriptRetentionPolicy,
+} from './security/transcript-retention.js'
 export { TraceServer } from './ui/TraceServer.js'
 export { generateGrafanaDashboard } from './grafana/GrafanaDashboard.js'
 
@@ -67,6 +73,17 @@ export type {
   RuntimeArtifactExportPolicyOptions,
   RuntimeArtifactType,
 } from './security/data-classification.js'
+export type {
+  ResolvedTranscriptRetentionPolicy,
+  TranscriptAccessLevel,
+  TranscriptField,
+  TranscriptRedactionLevel,
+  TranscriptRetainedFields,
+  TranscriptRetentionAdapterOptions,
+  TranscriptRetentionMode,
+  TranscriptRetentionPolicy,
+  TranscriptRetentionPolicyReport,
+} from './security/transcript-retention.js'
 export type { TraceServerOptions } from './ui/TraceServer.js'
 export type {
   GrafanaDashboard,

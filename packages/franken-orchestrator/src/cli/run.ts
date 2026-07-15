@@ -64,7 +64,7 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
-import { resolveProviderCatalogEntry, resolveProviderType } from '../providers/provider-config.js';
+import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
 
@@ -538,6 +538,81 @@ function resolveDashboardProviderType(nameOrType: string, fallbackType?: string)
   }
 }
 
+function findDashboardConsolidatedProvider(
+  name: string,
+  type: string,
+  config: OrchestratorConfig,
+): ProviderConfig | undefined {
+  return config.consolidatedProviders?.find((provider) => provider.name === name)
+    ?? config.consolidatedProviders?.find((provider) => provider.name === type)
+    ?? config.consolidatedProviders?.find((provider) => provider.type === name)
+    ?? config.consolidatedProviders?.find((provider) => provider.type === type);
+}
+
+function resolveDashboardProviderRegistryName(name: string, type: string): string | undefined {
+  if (name === 'aider') return 'aider';
+  try {
+    return resolveProviderCatalogEntry(name).cliRegistryName;
+  } catch {
+    try {
+      return resolveProviderCatalogEntry(type).cliRegistryName;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function resolveDashboardProviderDefaultCommand(name: string, type: string): string | undefined {
+  if (name === 'aider') return 'aider';
+  for (const key of [type, name]) {
+    try {
+      return resolveProviderCatalogEntry(key).defaultCommand;
+    } catch {
+      // Keep probing fallbacks below.
+    }
+  }
+  return undefined;
+}
+
+function firstNonEmptyEnv(...names: readonly string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function resolveDashboardProviderCommand(name: string, type: string, config: OrchestratorConfig): string | undefined {
+  const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
+  if (consolidatedProvider) {
+    return consolidatedProvider.cliPath ?? resolveDashboardProviderDefaultCommand(name, type);
+  }
+
+  const providerRegistryName = resolveDashboardProviderRegistryName(name, type);
+  const overrideCommand = config.providers.overrides?.[name]?.command
+    ?? (providerRegistryName ? config.providers.overrides?.[providerRegistryName]?.command : undefined)
+    ?? config.providers.overrides?.[type]?.command;
+  if (overrideCommand) return overrideCommand;
+
+  return resolveDashboardProviderDefaultCommand(name, type);
+}
+
+function resolveDashboardProviderAvailability(name: string, type: string, config: OrchestratorConfig): boolean {
+  if (type.endsWith('-cli')) {
+    const command = resolveDashboardProviderCommand(name, type, config);
+    return Boolean(command && isCachedCommandHealthy(command));
+  }
+
+  const consolidatedProvider = findDashboardConsolidatedProvider(name, type, config);
+  if (consolidatedProvider?.apiKey?.trim()) return true;
+
+  if (type === 'anthropic-api') return Boolean(firstNonEmptyEnv('ANTHROPIC_API_KEY'));
+  if (type === 'openai-api') return Boolean(firstNonEmptyEnv('OPENAI_API_KEY'));
+  if (type === 'gemini-api') return Boolean(firstNonEmptyEnv('GEMINI_API_KEY', 'GOOGLE_API_KEY'));
+
+  return true;
+}
+
 export function buildDashboardProviderSnapshot(
   config: OrchestratorConfig,
   providerRegistry?: LlmProviderRegistry | undefined,
@@ -547,7 +622,7 @@ export function buildDashboardProviderSnapshot(
     return config.consolidatedProviders.map((provider, index) => ({
       name: provider.name,
       type: provider.type,
-      available: true,
+      available: resolveDashboardProviderAvailability(provider.name, provider.type, config),
       failoverOrder: index,
       ...(provider.model ? { model: provider.model } : {}),
     }));
@@ -591,11 +666,51 @@ export function buildDashboardProviderSnapshot(
     return {
       name,
       type,
-      available: true,
+      available: resolveDashboardProviderAvailability(name, type, config),
       failoverOrder: index,
       ...(model ? { model } : {}),
     };
   });
+}
+
+const DASHBOARD_COMMAND_HEALTH_TTL_MS = 30_000;
+const dashboardCommandHealthCache = new Map<string, { available: boolean; checkedAt: number; checking: boolean }>();
+
+function isCachedCommandHealthy(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  const now = Date.now();
+  const cached = dashboardCommandHealthCache.get(trimmed);
+  if (!cached) {
+    const initialAvailable = isCommandAvailable(trimmed);
+    dashboardCommandHealthCache.set(trimmed, { available: initialAvailable, checkedAt: 0, checking: false });
+    scheduleDashboardCommandHealthProbe(trimmed);
+    return initialAvailable;
+  }
+  if (!cached.checking && now - cached.checkedAt > DASHBOARD_COMMAND_HEALTH_TTL_MS) {
+    scheduleDashboardCommandHealthProbe(trimmed);
+  }
+  return cached.available;
+}
+
+function scheduleDashboardCommandHealthProbe(command: string): void {
+  const cached = dashboardCommandHealthCache.get(command);
+  if (cached?.checking) return;
+  dashboardCommandHealthCache.set(command, {
+    available: cached?.available ?? false,
+    checkedAt: cached?.checkedAt ?? 0,
+    checking: true,
+  });
+  try {
+    const proc = spawn(command, ['--version'], { stdio: 'ignore', timeout: 5_000 });
+    const finish = (available: boolean) => {
+      dashboardCommandHealthCache.set(command, { available, checkedAt: Date.now(), checking: false });
+    };
+    proc.on('close', (code) => finish(code === 0));
+    proc.on('error', () => finish(false));
+  } catch {
+    dashboardCommandHealthCache.set(command, { available: false, checkedAt: Date.now(), checking: false });
+  }
 }
 
 function isCommandAvailable(command: string): boolean {
@@ -718,37 +833,46 @@ async function readLiveBeastsDaemonPid(root: string): Promise<number | undefined
   }
 }
 
-async function isHealthyBeastsDaemonEndpoint(baseUrl: string, expected: { root: string; pid: number }): Promise<boolean> {
+type BeastsDaemonEndpointState = 'attachable' | 'draining' | 'unavailable';
+
+async function getBeastsDaemonEndpointState(baseUrl: string, expected: { root: string; pid: number }): Promise<BeastsDaemonEndpointState> {
   try {
     const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
     const response = await guardedFetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
-    if (!response.ok) {
-      return false;
-    }
     const body: unknown = await response.json();
     if (!body || typeof body !== 'object') {
-      return false;
+      return 'unavailable';
     }
     const record = body as Record<string, unknown>;
-    return record.ok === true
-      && record.service === 'beasts-daemon'
+    const identifiesExpectedDaemon = record.service === 'beasts-daemon'
       && record.root === expected.root
       && record.pid === expected.pid;
+    if (!identifiesExpectedDaemon) {
+      return 'unavailable';
+    }
+    if (response.ok && record.ok === true) {
+      return 'attachable';
+    }
+    if (response.status === 503 && record.status === 'draining' && record.ok === false) {
+      return 'draining';
+    }
+    return 'unavailable';
   } catch {
-    return false;
+    return 'unavailable';
   }
 }
 
-async function waitForHealthyBeastsDaemonEndpoint(baseUrl: string, expected: { root: string; pid: number }): Promise<boolean> {
+async function waitForBeastsDaemonEndpoint(baseUrl: string, expected: { root: string; pid: number }): Promise<BeastsDaemonEndpointState> {
   for (let attempt = 1; attempt <= 8; attempt += 1) {
-    if (await isHealthyBeastsDaemonEndpoint(baseUrl, expected)) {
-      return true;
+    const state = await getBeastsDaemonEndpointState(baseUrl, expected);
+    if (state === 'attachable' || state === 'draining') {
+      return state;
     }
     if (attempt < 8) {
       await sleep(250);
     }
   }
-  return false;
+  return 'unavailable';
 }
 
 async function resolveDetectedBeastsDaemonUrl(
@@ -761,13 +885,20 @@ async function resolveDetectedBeastsDaemonUrl(
     return undefined;
   }
   const candidateUrl = localPlaintextOrSecureEndpoint(config.beastsDaemon.host, config.beastsDaemon.port);
-  if (await waitForHealthyBeastsDaemonEndpoint(candidateUrl, { root, pid })) {
+  const endpointState = await waitForBeastsDaemonEndpoint(candidateUrl, { root, pid });
+  if (endpointState === 'attachable') {
     logger.info(
       `Detected a live beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)}; `
       + `chat-server will proxy Beast control routes to ${candidateUrl}.`,
       'beasts-daemon',
     );
     return candidateUrl;
+  }
+  if (endpointState === 'draining') {
+    throw new Error(
+      `Detected a draining beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)}; `
+      + 'refusing to start chat-server until the daemon exits to avoid split-brain Beast control.',
+    );
   }
   logger.warn(
     `Ignoring live-looking beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)} because `

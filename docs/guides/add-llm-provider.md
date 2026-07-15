@@ -33,7 +33,8 @@ npm --workspace @franken/orchestrator test -- tests/unit/skills
 2. Add config schema support under `packages/franken-orchestrator/src/config/` if the provider needs new settings.
 3. Keep secrets referenced through the configured secret backend or environment variables; do not hard-code tokens in config examples.
 4. Add unit tests for request construction, error handling, config parsing, and failover audit metadata. API-provider failover through `ProviderRegistry` emits a `model-provider.failover` audit event with `from`, `to`, `reason`, `brainSnapshotHash`, `category: "availability"`, and operator guidance; keep that payload structured so dashboard/liveness tooling can correlate a provider outage with the handoff snapshot.
-5. Verify from the repo root:
+5. Keep provider-failure retries bounded. `ProviderRegistry` retries only retryable provider stream errors before failing over, defaults to one retry per provider, rejects `maxRetriesPerProvider` values outside `0..5`, and caps exponential backoff delays at `maxRetryDelayMs` (default `30000`). Use the injectable `sleep` hook in tests so retry/backoff behavior is deterministic and does not slow the suite.
+6. Verify from the repo root:
 
 ```bash
 npm --workspace @franken/orchestrator run typecheck

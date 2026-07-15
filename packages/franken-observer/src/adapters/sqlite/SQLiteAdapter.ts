@@ -12,6 +12,8 @@ import {
   SELECT_SPANS,
   SELECT_ALL_TRACE_IDS,
   SELECT_TRACE_SUMMARIES,
+  DELETE_SPANS_BY_TRACE,
+  DELETE_TRACE,
 } from './schema.js'
 
 interface TraceRow {
@@ -264,6 +266,22 @@ export class SQLiteAdapter implements ExportAdapter {
       spanCount: row.spanCount,
       startedAt: row.startedAt,
     }))
+  }
+
+  async deleteTrace(traceId: string): Promise<void> {
+    const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
+    const deleteTrace = this.db.prepare(DELETE_TRACE)
+    const transaction = this.db.transaction((id: string) => {
+      deleteSpans.run(id)
+      deleteTrace.run(id)
+    })
+
+    transaction(traceId)
+    const flushed = this.flushedSpans.get(traceId)
+    if (flushed !== undefined) {
+      this.flushedSpanSnapshotCount -= flushed.size
+      this.flushedSpans.delete(traceId)
+    }
   }
 
   /** Release the DB connection. Call when shutting down. */

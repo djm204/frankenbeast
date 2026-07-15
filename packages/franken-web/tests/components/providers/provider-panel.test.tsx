@@ -23,6 +23,28 @@ describe('ProviderPanel', () => {
     expect(screen.getByText('[unavailable]')).toBeDefined();
   });
 
+  it('shows a provider outage incident banner with deterministic failover guidance', () => {
+    render(<ProviderPanel providers={[
+      { name: 'gemini', type: 'gemini-cli', available: false, failoverOrder: 2 },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+      { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1 },
+    ]} />);
+
+    const banner = screen.getByRole('alert');
+    expect(banner.textContent).toContain('Provider outage incident:');
+    expect(banner.textContent).toContain('codex (codex-cli, failover #2), gemini (gemini-cli, failover #3) unavailable');
+    expect(banner.textContent).toContain('Use the next available failover provider');
+  });
+
+  it('does not show an outage incident banner when every configured provider is available', () => {
+    render(<ProviderPanel providers={[
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1 },
+    ]} />);
+
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('sorts by failover order', () => {
     render(<ProviderPanel providers={[
       { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 2 },

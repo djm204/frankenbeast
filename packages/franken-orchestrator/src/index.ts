@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -59,12 +59,17 @@ export type {
   IssueBackpressureSignalSource,
   IssueBackpressureThresholds,
   IssueCapacityWatermarkAlert,
+  IssueDegradedModeWorkerRoute,
+  IssueDegradedModeWorkerRouteAction,
+  IssueDegradedModeWorkerRouteInput,
   IssueDependencyCircuitBreakerConfig,
   IssueDependencyCircuitBreakerState,
   IssueDependencySignal,
   IssueDependencyStatus,
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
+  IssueWorkerCardProcessSnapshot,
+  DuplicateWorkerCardProcessFinding,
 } from './issues/index.js';
 
 // Config
@@ -171,7 +176,8 @@ export type { ICliProvider, ProviderOpts } from './skills/providers/index.js';
 export { ProviderRegistry, createDefaultRegistry } from './skills/providers/index.js';
 
 // Checkpoint
-export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
+export { FileCheckpointStore, detectCheckpointLock } from './checkpoint/file-checkpoint-store.js';
+export type { CheckpointLockDiagnostic, CheckpointLockStatus, DetectCheckpointLockOptions } from './checkpoint/file-checkpoint-store.js';
 
 // Beasts
 export type {
@@ -237,6 +243,8 @@ export type { ModuleHealth } from './resilience/module-initializer.js';
 export {
   buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
+  buildCrossFileStateConsistencyReport,
+  buildKanbanPartialWriteRecoveryReport,
   buildPointInTimeBackupManifest,
   buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
@@ -256,6 +264,16 @@ export type {
   BackupEncryptionVerificationReport,
   BackupEncryptionVerificationSeverity,
   BackupEncryptionVerificationStatus,
+  CrossFileStateConsistencyFinding,
+  CrossFileStateConsistencyFindingCode,
+  CrossFileStateConsistencyOptions,
+  CrossFileStateConsistencyReport,
+  CrossFileStateConsistencyStatus,
+  KanbanPartialWriteRecoveryFinding,
+  KanbanPartialWriteRecoveryFindingCode,
+  KanbanPartialWriteRecoveryOptions,
+  KanbanPartialWriteRecoveryReport,
+  KanbanPartialWriteRecoveryStatus,
   PointInTimeBackupManifest,
   PointInTimeBackupManifestMetadata,
   PointInTimeBackupManifestOptions,

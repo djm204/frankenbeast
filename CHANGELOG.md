@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.55.3](https://github.com/djm204/frankenbeast/compare/v0.55.2...v0.55.3) (2026-07-15)
+
+
+### Tests
+
+* **docs:** cover issue 2104 broken link regression ([6bf8543](https://github.com/djm204/frankenbeast/commit/6bf854350b5008b1c998fa7f1d69cabdd14630b5))
+
+## [0.55.2](https://github.com/djm204/frankenbeast/compare/v0.55.1...v0.55.2) (2026-07-15)
+
+
+### Tests
+
+* **orchestrator:** add flaky liveness replay fixture ([#2280](https://github.com/djm204/frankenbeast/issues/2280)) ([6df3e58](https://github.com/djm204/frankenbeast/commit/6df3e586c97be11e5773464e670e0ce5c381f2ed)), closes [#1806](https://github.com/djm204/frankenbeast/issues/1806)
+
+## [0.55.1](https://github.com/djm204/frankenbeast/compare/v0.55.0...v0.55.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **orchestrator:** bound provider failure retries ([33718ea](https://github.com/djm204/frankenbeast/commit/33718ea2484d2fe8a21dc48a1ebfb7e8fdc73ba8)), closes [#1807](https://github.com/djm204/frankenbeast/issues/1807)
+* **orchestrator:** detect duplicate worker-card processes ([#2281](https://github.com/djm204/frankenbeast/issues/2281)) ([0ef8ec6](https://github.com/djm204/frankenbeast/commit/0ef8ec64345bc33f3d5a665a04be21821018385a))
+* **stability:** classify worker crash outcomes ([#2285](https://github.com/djm204/frankenbeast/issues/2285)) ([1bbbd84](https://github.com/djm204/frankenbeast/commit/1bbbd8461d705a5ef9fc283c7705e46c6aac4175))
+
+## [0.55.0](https://github.com/djm204/frankenbeast/compare/v0.54.0...v0.55.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add degraded worker routing policy ([#2272](https://github.com/djm204/frankenbeast/issues/2272)) ([a2d8f80](https://github.com/djm204/frankenbeast/commit/a2d8f800cbc1bddd0bb04b8d6f996984eb939b68))
+
+
+### Bug Fixes
+
+* **orchestrator:** add dispatcher startup integrity checks ([#2271](https://github.com/djm204/frankenbeast/issues/2271)) ([d4c3947](https://github.com/djm204/frankenbeast/commit/d4c3947d2933276ce5ff763d5443ab86b46782d5))
+* **stability:** add stale checkpoint lock detector ([#2275](https://github.com/djm204/frankenbeast/issues/2275)) ([00e9e79](https://github.com/djm204/frankenbeast/commit/00e9e79805ef0b8c9d8db68c596fe72f53dbf1ed))
+
+
+### Tests
+
+* **brain:** add state schema migration smoke tests ([da53b03](https://github.com/djm204/frankenbeast/commit/da53b03db0cb480db12be4ef6ae9321c357d004a))
+
 ## [0.54.0](https://github.com/djm204/frankenbeast/compare/v0.53.0...v0.54.0) (2026-07-15)
 
 

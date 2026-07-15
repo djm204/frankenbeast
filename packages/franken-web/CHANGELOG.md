@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.11...franken-web-v0.3.0) (2026-07-15)
+
+
+### Features
+
+* **availability:** add provider outage incident banner ([#2270](https://github.com/djm204/frankenbeast/issues/2270)) ([3d37834](https://github.com/djm204/frankenbeast/commit/3d3783417ea57f9bea4d99c9b49cd62f42a9c160))
+
 ## [0.2.11](https://github.com/djm204/frankenbeast/compare/franken-web-v0.2.10...franken-web-v0.2.11) (2026-07-15)
 
 

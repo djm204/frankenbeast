@@ -35,16 +35,20 @@ export class GhostDependencyEvaluator implements Evaluator {
     const seen = new Set<string>();
 
     for (const specifier of extractDependencySpecifiers(input.content)) {
-      // Skip relative imports
-      if (specifier.startsWith('.')) continue;
+      const packageSpecifier = stripSpecifierResourceSuffix(
+        normalizePackageUrlSpecifier(specifier),
+      );
+
+      // Skip local imports, including absolute paths/URLs used by dynamic loaders.
+      if (isLocalImportSpecifier(packageSpecifier)) continue;
 
       // Skip Node built-ins, including node: prefixes and bare built-in subpaths.
-      if (isNodeBuiltinSpecifier(specifier)) continue;
+      if (isNodeBuiltinSpecifier(packageSpecifier)) continue;
 
       // Extract package name (handle scoped packages and subpath imports)
-      const packageName = specifier.startsWith('@')
-        ? specifier.split('/').slice(0, 2).join('/')
-        : specifier.split('/')[0]!;
+      const packageName = packageSpecifier.startsWith('@')
+        ? packageSpecifier.split('/').slice(0, 2).join('/')
+        : packageSpecifier.split('/')[0]!;
 
       if (seen.has(packageName)) continue;
       seen.add(packageName);
@@ -73,6 +77,37 @@ function isNodeBuiltinSpecifier(specifier: string): boolean {
   return isBuiltin(specifier);
 }
 
+function normalizePackageUrlSpecifier(specifier: string): string {
+  if (!/^(?:npm|jsr):/.test(specifier)) return specifier;
+
+  return specifier
+    .replace(/^(?:npm|jsr):/, '')
+    .replace(/^(@[^/]+\/[^/@]+)@[^/]+/, '$1')
+    .replace(/^([^/@]+)@[^/]+/, '$1');
+}
+
+function stripSpecifierResourceSuffix(specifier: string): string {
+  const queryIndex = specifier.indexOf('?');
+  const fragmentIndex = specifier.indexOf('#', 1);
+  const suffixIndex = [queryIndex, fragmentIndex]
+    .filter((index) => index !== -1)
+    .sort((left, right) => left - right)[0];
+  return suffixIndex === undefined ? specifier : specifier.slice(0, suffixIndex);
+}
+
+function isLocalImportSpecifier(specifier: string): boolean {
+  if (/^(?:npm|jsr):/.test(specifier)) return false;
+
+  return (
+    specifier.startsWith('.') ||
+    specifier.startsWith('/') ||
+    specifier.startsWith('#') ||
+    specifier.startsWith('file:') ||
+    (!specifier.startsWith('node:') && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(specifier)) ||
+    /^[A-Za-z]:/.test(specifier)
+  );
+}
+
 function extractDependencySpecifiers(content: string): string[] {
   const specifiers: string[] = [];
 
@@ -96,6 +131,10 @@ function extractDependencySpecifiers(content: string): string[] {
     }
 
     if (ch === '`') {
+      if (isTypeOnlyTemplateString(content, i)) {
+        i = readTemplateString(content, i).endIndex;
+        continue;
+      }
       const template = readTemplateString(content, i);
       specifiers.push(...template.specifiers);
       i = template.endIndex;
@@ -108,6 +147,21 @@ function extractDependencySpecifiers(content: string): string[] {
     }
 
     if (startsWithKeyword(content, i, 'import')) {
+      if (isInsideJsxText(content, i)) {
+        i += 'import'.length;
+        continue;
+      }
+
+      const dynamicallyImported = readDynamicImportSpecifier(
+        content,
+        i + 'import'.length,
+      );
+      if (dynamicallyImported) {
+        specifiers.push(dynamicallyImported.value);
+        i = dynamicallyImported.endIndex;
+        continue;
+      }
+
       const imported = readStaticImportSpecifier(content, i + 'import'.length);
       if (imported) {
         specifiers.push(imported.value);
@@ -151,6 +205,82 @@ function startsWithKeyword(
     (!before || !IDENTIFIER_PATTERN.test(before)) &&
     (!after || !IDENTIFIER_PATTERN.test(after))
   );
+}
+
+function isInsideJsxText(content: string, index: number): boolean {
+  const previousOpen = findPreviousJsxOpeningTag(content, index);
+  if (previousOpen === -1 || content[previousOpen + 1] === '/' || content[previousOpen + 1] === '!') return false;
+  if (isIdentifierCharacter(content[previousOpen - 1] ?? '') || content[previousOpen - 1] === ')') return false;
+
+  const previousClose = content.lastIndexOf('>', index);
+  if (previousClose <= previousOpen) return false;
+
+  const openingTag = content.slice(previousOpen, previousClose + 1);
+  const tagMatch = openingTag.match(/^<([A-Za-z][\w.:]*)(?:\s[^<>]*)?>$/);
+  if (!tagMatch) return false;
+  const nextClosingTag = content.indexOf(`</${tagMatch[1]}>`, index);
+  if (nextClosingTag === -1) return false;
+
+  return !hasUnclosedJsxExpression(content, previousClose + 1, index);
+}
+
+function findPreviousJsxOpeningTag(content: string, index: number): number {
+  let previousOpen = -1;
+  for (let i = 0; i < index; i += 1) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '/' && next === '/') {
+      i = skipSingleLineComment(content, i + 2);
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i = skipMultiLineComment(content, i + 2);
+      continue;
+    }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+
+    if (
+      ch === '<' &&
+      next !== '/' &&
+      next !== '!' &&
+      !isIdentifierCharacter(content[i - 1] ?? '') &&
+      content[i - 1] !== ')'
+    ) {
+      previousOpen = i;
+    }
+  }
+
+  return previousOpen;
+}
+
+function hasUnclosedJsxExpression(content: string, startIndex: number, endIndex: number): boolean {
+  let depth = 0;
+  for (let i = startIndex; i < endIndex; i += 1) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+
+    if (ch === '/' && next === '/') {
+      i = skipSingleLineComment(content, i + 2);
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i = skipMultiLineComment(content, i + 2);
+      continue;
+    }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+
+    if (ch === '{') depth += 1;
+    else if (ch === '}' && depth > 0) depth -= 1;
+  }
+
+  return depth > 0;
 }
 
 function readStaticImportSpecifier(
@@ -205,6 +335,1011 @@ function readStaticImportSpecifier(
   return null;
 }
 
+function readDynamicImportSpecifier(
+  content: string,
+  index: number,
+): StringLiteralRead | null {
+  let i = skipImportTrivia(content, index);
+  if (content[i] !== '(') return null;
+
+  if (!canStartNativeDynamicImport(content, index - 'import'.length)) {
+    return null;
+  }
+
+  i = skipImportTrivia(content, i + 1);
+
+  const specifier = readDynamicImportArgumentSpecifier(content, i);
+  if (!specifier) return null;
+
+  const nextTokenIndex = skipTypeScriptNonNullAssertion(
+    content,
+    skipImportTrivia(content, specifier.endIndex + 1),
+  );
+  const assertedTokenIndex = skipTypeScriptImportArgumentAssertion(
+    content,
+    nextTokenIndex,
+  );
+  if (assertedTokenIndex !== nextTokenIndex) {
+    return content[assertedTokenIndex] === ')' || content[assertedTokenIndex] === ','
+      ? { value: specifier.value, endIndex: assertedTokenIndex - 1 }
+      : null;
+  }
+
+  if (content[nextTokenIndex] !== ')' && content[nextTokenIndex] !== ',') {
+    return null;
+  }
+
+  return specifier;
+}
+
+function skipTypeScriptNonNullAssertion(content: string, index: number): number {
+  if (content[index] !== '!') return index;
+  return skipImportTrivia(content, index + 1);
+}
+
+function skipTypeScriptImportArgumentAssertion(
+  content: string,
+  index: number,
+): number {
+  const keyword = startsWithKeyword(content, index, 'as')
+    ? 'as'
+    : startsWithKeyword(content, index, 'satisfies')
+      ? 'satisfies'
+      : null;
+  if (!keyword) return index;
+
+  let i = skipImportTrivia(content, index + keyword.length);
+  let angleDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  while (i < content.length) {
+    const ch = content[i]!;
+    if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && angleDepth === 0 && (ch === ')' || ch === ',')) {
+      break;
+    }
+    if (content[i] === '/' && content[i + 1] === '/') {
+      i = skipImportTrivia(content, skipSingleLineComment(content, i + 2));
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i = skipImportTrivia(content, skipMultiLineComment(content, i + 2) + 1);
+      continue;
+    }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i) + 1;
+      continue;
+    }
+    if (ch === '<') angleDepth += 1;
+    else if (ch === '>' && angleDepth > 0) angleDepth -= 1;
+    else if (ch === '{') braceDepth += 1;
+    else if (ch === '}' && braceDepth > 0) braceDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']' && bracketDepth > 0) bracketDepth -= 1;
+    else if (ch === '(') parenDepth += 1;
+    else if (ch === ')' && parenDepth > 0) parenDepth -= 1;
+    i += 1;
+  }
+
+  return i;
+}
+
+function readDynamicImportArgumentSpecifier(
+  content: string,
+  index: number,
+): StringLiteralRead | null {
+  if (content[index] === '`') return readNoSubstitutionTemplateString(content, index);
+  if (content[index] === "'" || content[index] === '"') {
+    return readQuotedString(content, index);
+  }
+
+  if (content[index] === '<') {
+    const assertionEnd = findTypeScriptAngleAssertionEnd(content, index);
+    if (assertionEnd === -1) return null;
+    const assertedStart = skipImportTrivia(content, assertionEnd + 1);
+    return readDynamicImportArgumentSpecifier(content, assertedStart);
+  }
+
+  if (content[index] !== '(') return null;
+
+  const nestedStart = skipImportTrivia(content, index + 1);
+  const nested = readDynamicImportArgumentSpecifier(content, nestedStart);
+  if (!nested) return null;
+
+  const nextTokenIndex = skipTypeScriptNonNullAssertion(
+    content,
+    skipImportTrivia(content, nested.endIndex + 1),
+  );
+  const assertedTokenIndex = skipTypeScriptImportArgumentAssertion(
+    content,
+    nextTokenIndex,
+  );
+  const closingIndex = skipTypeScriptNonNullAssertion(content, assertedTokenIndex);
+  if (content[closingIndex] !== ')') return null;
+
+  return { value: nested.value, endIndex: closingIndex };
+}
+
+function canStartNativeDynamicImport(
+  content: string,
+  importIndex: number,
+): boolean {
+  const previousIndex = previousNonTriviaIndex(content, importIndex - 1);
+  const previous = previousIndex === null ? null : content[previousIndex]!;
+  if (
+    previous === '#' ||
+    (previous === '.' &&
+      previousIndex !== null &&
+      !isSpreadOperand(content, previousIndex))
+  ) {
+    return false;
+  }
+
+  const statementStart = findDynamicImportStatementStart(content, importIndex);
+  const prefix = content.slice(statementStart + 1, importIndex);
+  const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
+  if (isOpenTemplateAssertionKeyword(prefixWithoutTrailingTrivia)) {
+    return false;
+  }
+  const isTernaryBranch = hasTernaryBranchMarker(prefix);
+  const isObjectLiteralValue = isLikelyObjectLiteralValue(content, importIndex);
+  const isNestedTypeReference = endsInsideNestedTypeReference(
+    prefix,
+    isObjectLiteralValue,
+  );
+
+  return !(
+    isNestedTypeReference ||
+    isTypeOnlyImportReferenceUse(prefix, content, importIndex) ||
+    isInsideGenericTypeArgument(prefix, content, importIndex) ||
+    isInsideTypeDeclaration(prefix) ||
+    isInsideTypeAnnotation(prefix, content, importIndex, isTernaryBranch)
+  );
+}
+
+function isSpreadOperand(content: string, dotIndex: number): boolean {
+  return content.slice(dotIndex - 2, dotIndex + 1) === '...';
+}
+
+function findDynamicImportStatementStart(content: string, importIndex: number): number {
+  let statementStart = content.lastIndexOf(';', importIndex - 1);
+  while (
+    statementStart !== -1 &&
+    (isSemicolonInsideTypeBody(content, statementStart) ||
+      isIndexInsideStringOrComment(content, statementStart))
+  ) {
+    statementStart = content.lastIndexOf(';', statementStart - 1);
+  }
+
+  return statementStart;
+}
+
+function isIndexInsideStringOrComment(content: string, index: number): boolean {
+  let quote: string | null = null;
+  let blockComment = false;
+  let lineComment = false;
+
+  for (let i = 0; i < index; i += 1) {
+    const ch = content[i]!;
+    const next = content[i + 1];
+    if (lineComment) {
+      if (ch === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (ch === '*' && next === '/') {
+        blockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      lineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      blockComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+  }
+
+  return quote !== null || blockComment || lineComment;
+}
+
+function isTypeOnlyTemplateString(content: string, templateIndex: number): boolean {
+  const statementStart = findDynamicImportStatementStart(content, templateIndex);
+  const prefix = content.slice(statementStart + 1, templateIndex);
+  const isTernaryBranch = hasTernaryBranchMarker(prefix);
+  const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
+  if (isOpenTemplateAssertionKeyword(prefixWithoutTrailingTrivia)) return true;
+  if (/(?:^|\n)\s*(?:export\s+)?type\b[^\n]*=\s*$/.test(prefix)) return true;
+  if (/(?:^|[;{}\n])\s*(?:const|let|var)\b[\s\S]*=\s*$/.test(prefix)) return false;
+  if (/(?:^|[;{}\n])\s*(?:static\s+)?(?:accessor\s+)?[#A-Za-z_$][\w$]*\s*=\s*$/.test(prefix)) return false;
+  if (/(?:^|[;{}\n])\s*(?:export\s+)?type\b[\s\S]*=\s*$/.test(prefix)) return true;
+  if (
+    /(?:^|[^.])\b(?:in|extends|keyof)\s*$/.test(prefixWithoutTrailingTrivia) &&
+    (endsInsideNestedTypeReference(prefix) ||
+      isInsideTypeDeclaration(prefix) ||
+      isInsideTypeAnnotation(prefix, content, templateIndex, isTernaryBranch))
+  ) {
+    return true;
+  }
+  const previousIndex = skipTriviaBackward(content, templateIndex - 1);
+  if (previousIndex >= 0 && /[\w$)\]]/.test(content[previousIndex] ?? '')) return false;
+  return (
+    endsInsideNestedTypeReference(prefix) ||
+    isInsideTypeDeclaration(prefix) ||
+    isInsideTypeAnnotation(prefix, content, templateIndex, isTernaryBranch)
+  );
+}
+
+function isOpenTemplateAssertionKeyword(prefix: string): boolean {
+  const match = /(?:^|[^.])\b(as|satisfies)$/.exec(prefix);
+  if (!match || match.index === undefined) return false;
+
+  const keywordIndex = match.index + match[0].lastIndexOf(match[1]!);
+  const previousIndex = skipTriviaBackward(prefix, keywordIndex - 1);
+  return previousIndex >= 0 && /[\w$)\]}'"`]/.test(prefix[previousIndex] ?? '');
+}
+
+function findTypeScriptAngleAssertionEnd(content: string, index: number): number {
+  let depth = 0;
+  for (let i = index; i < content.length; i++) {
+    const ch = content[i]!;
+    if (ch === '<') depth += 1;
+    if (ch === '=' && content[i + 1] === '>') {
+      i += 1;
+      continue;
+    }
+    if (ch === '>') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipStringLiteral(content, i);
+    }
+  }
+
+  return -1;
+}
+
+function isSemicolonInsideTypeBody(content: string, semicolonIndex: number): boolean {
+  let searchIndex = semicolonIndex;
+  while (searchIndex > 0) {
+    const openBraceIndex = findContainingOpenBrace(content, searchIndex);
+    if (openBraceIndex === -1) return false;
+
+    const beforeBrace = content.slice(0, openBraceIndex);
+    if (
+      /(?:^|[;{}\n])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=)\b[\s\S]*$/.test(beforeBrace) ||
+      /(?:\bas\s*|\bsatisfies\s*|:)\s*$/.test(beforeBrace.trimEnd())
+    ) {
+      return true;
+    }
+
+    searchIndex = openBraceIndex;
+  }
+
+  return false;
+}
+
+function findContainingOpenBrace(content: string, index: number): number {
+  let depth = 0;
+
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const ch = content[i]!;
+    if (ch === '}') {
+      depth += 1;
+      continue;
+    }
+    if (ch !== '{') continue;
+    if (depth === 0) return i;
+    depth -= 1;
+  }
+
+  return -1;
+}
+
+function endsInsideNestedTypeReference(
+  prefix: string,
+  isObjectLiteralValue = false,
+): boolean {
+  if (hasCompletedStatementBeforeImport(prefix)) return false;
+
+  const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix);
+  if (/(?:^|[^.])(?:\bas(?:\s+|$)|\bsatisfies(?:\s+|$)|\bkeyof\s*|\bimplements\s*)\(*\s*(?:(?:keyof|typeof)\s*)?$/.test(prefixWithoutTrailingTrivia)) {
+    return true;
+  }
+  if (/(?:\bas\s+|\bsatisfies\s+)\(\s*\)\s*=>\s*$/.test(prefixWithoutTrailingTrivia)) {
+    return true;
+  }
+  if (/(?:\bas\s+|\bsatisfies\s+)(?:readonly\s*)?(?:\[\s*)?$/.test(prefixWithoutTrailingTrivia)) {
+    return true;
+  }
+
+  const trimmed = prefix.trimEnd();
+
+  if (
+    /(?:,|\bextends\b|=)$/.test(trimmed) &&
+    hasUnclosedGenericTypeArgument(trimmed)
+  ) {
+    return true;
+  }
+
+  const operator = trimmed.at(-1);
+  if (operator === '<') return /(?:[>\]])<$/.test(trimmed) || /^\s*(?:const|let|var)?\s*[A-Za-z_$][\w$]*\s*=\s*<$/.test(trimmed);
+
+  if (operator !== '|' && operator !== '&') return false;
+  if (isObjectLiteralValue) return false;
+
+  const colonIndex = trimmed.lastIndexOf(':');
+  if (colonIndex !== -1 && /[=;]/.test(trimmed.slice(colonIndex + 1))) {
+    return false;
+  }
+
+  return (
+    trimmed.at(-2) !== operator &&
+    (hasUnclosedGenericTypeArgument(trimmed) ||
+      /(?:\bas\b|\bsatisfies\b|:)\s*[\s\S]*[|&]$/.test(trimmed))
+  );
+}
+
+function hasUnclosedGenericTypeArgument(trimmed: string): boolean {
+  const lastOpen = findUnclosedAngleBracketIndex(trimmed);
+  if (lastOpen === -1) return false;
+
+  // Runtime less-than expressions such as `load(count < limit, import('x'))`
+  // also leave an earlier `<` in the prefix.  Treat it as a generic/type
+  // context only when the `<` is attached to the preceding type/callee token.
+  const typeArgumentPrefix = trimmed.slice(lastOpen + 1).trim();
+  if (/^[A-Za-z_$][\w$]*\s*,\s*$/.test(typeArgumentPrefix)) {
+    const tokenStart = findIdentifierStartBefore(trimmed, lastOpen - 1);
+    const previousIndex = tokenStart === -1 ? null : previousNonTriviaIndex(trimmed, tokenStart - 1);
+    if (previousIndex === null || /[(\[=,{;]/.test(trimmed[previousIndex]!)) return false;
+    if (/\breturn\s*$/.test(trimmed.slice(0, previousIndex + 1))) return false;
+  }
+
+  const beforeOpen = trimmed[lastOpen - 1];
+  if (beforeOpen === undefined) return false;
+  if (/\s/.test(beforeOpen)) {
+    const previousIndex = previousNonTriviaIndex(trimmed, lastOpen - 1);
+    return previousIndex !== null && /[=({[,]/.test(trimmed[previousIndex]!);
+  }
+
+  const tokenStart = findIdentifierStartBefore(trimmed, lastOpen - 1);
+  if (tokenStart === -1) return false;
+  const token = trimmed.slice(tokenStart, lastOpen);
+  if (token.length > 0) {
+    if (/^[A-Za-z_$][\w$]*\s*,[\s\S]*=\s*$/.test(typeArgumentPrefix)) {
+      return false;
+    }
+    return true;
+  }
+
+  const previousIndex = previousNonTriviaIndex(trimmed, tokenStart - 1);
+  return previousIndex !== null && /[.>\]]/.test(trimmed[previousIndex]!);
+}
+
+function findIdentifierStartBefore(content: string, index: number): number {
+  let i = index;
+  if (!isIdentifierCharacter(content[i] ?? '')) return -1;
+  while (i >= 0 && isIdentifierCharacter(content[i] ?? '')) i -= 1;
+  return i + 1;
+}
+
+function findUnclosedAngleBracketIndex(trimmed: string): number {
+  let depth = 0;
+
+  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+    const ch = trimmed[i]!;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipQuotedKeyBackward(trimmed, i);
+      continue;
+    }
+    if (ch === '/' && trimmed[i - 1] === '*') {
+      i -= 2;
+      while (i >= 1 && !(trimmed[i - 1] === '/' && trimmed[i] === '*')) i -= 1;
+      i -= 1;
+      continue;
+    }
+    if (isInsideLineCommentBackward(trimmed, i)) {
+      while (i >= 0 && trimmed[i] !== '\n') i -= 1;
+      continue;
+    }
+    if (ch === '>') {
+      if (trimmed[i - 1] === '=') continue;
+      depth += 1;
+      continue;
+    }
+    if (ch !== '<') continue;
+    if (depth === 0) return i;
+    depth -= 1;
+  }
+
+  return -1;
+}
+
+function isInsideGenericTypeArgument(
+  prefix: string,
+  content: string,
+  importIndex: number,
+): boolean {
+  const trimmed = prefix.trimEnd();
+  if (!hasUnclosedGenericTypeArgument(trimmed)) return false;
+
+  const dynamicImport = readDynamicImportSpecifierForTypeContext(
+    content,
+    importIndex + 'import'.length,
+  );
+  if (!dynamicImport) return false;
+
+  let i = skipImportTrivia(content, dynamicImport.endIndex + 1);
+  while (content[i] === '.' || content[i] === '[') {
+    if (content[i] === '.') {
+      i = skipImportTrivia(content, i + 1);
+      if (!/[A-Za-z_$]/.test(content[i] ?? '')) return false;
+      while (isIdentifierCharacter(content[i] ?? '')) i += 1;
+      i = skipImportTrivia(content, i);
+      continue;
+    }
+    const indexedAccessEnd = findBalancedBracketEnd(content, i);
+    if (indexedAccessEnd === -1) return false;
+    i = skipImportTrivia(content, indexedAccessEnd + 1);
+  }
+
+  if (content[i] !== '>' && content[i] !== ',' && content[i] !== '|' && content[i] !== '&') {
+    return false;
+  }
+
+  if (content[i] === ',') return hasGenericTypeArgumentClose(content, i + 1);
+
+  if (content[i] === '>') {
+    const afterDelimiter = skipImportTrivia(content, i + 1);
+    return !isIdentifierCharacter(content[afterDelimiter] ?? '');
+  }
+
+  return true;
+}
+
+function hasGenericTypeArgumentClose(content: string, index: number): boolean {
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  for (let i = index; i < content.length; i += 1) {
+    const ch = content[i]!;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+    if (ch === '/' && content[i + 1] === '/') break;
+    if (ch === '/' && content[i + 1] === '*') {
+      i = skipMultiLineComment(content, i + 2);
+      continue;
+    }
+    if (ch === '(') parenDepth += 1;
+    else if (ch === ')' && parenDepth > 0) parenDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']' && bracketDepth > 0) bracketDepth -= 1;
+    else if (ch === '{') braceDepth += 1;
+    else if (ch === '}' && braceDepth > 0) braceDepth -= 1;
+    else if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+      if (ch === '>') return true;
+      if (ch === ';' || ch === '\n') return false;
+    }
+  }
+
+  return false;
+}
+
+function findBalancedBracketEnd(content: string, openIndex: number): number {
+  let depth = 0;
+
+  for (let i = openIndex; i < content.length; i += 1) {
+    const ch = content[i]!;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipStringLiteral(content, i);
+      continue;
+    }
+    if (ch === '[') depth += 1;
+    if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+
+  return -1;
+}
+
+function isTypeOnlyImportReferenceUse(
+  prefix: string,
+  content: string,
+  importIndex: number,
+): boolean {
+  const dynamicImport = readDynamicImportSpecifierForTypeContext(
+    content,
+    importIndex + 'import'.length,
+  );
+  if (!dynamicImport) return false;
+
+  const afterImport = skipImportTrivia(content, dynamicImport.endIndex + 1);
+  if (
+    content[afterImport] !== '.' &&
+    content[afterImport] !== '>' &&
+    !(content[afterImport] === '[' && content[afterImport + 1] === ']')
+  ) {
+    return false;
+  }
+
+  const trimmed = prefix.trimEnd();
+  if (hasCompletedStatementBeforeImport(prefix)) return false;
+  if (/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed)) {
+    return false;
+  }
+
+  if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(trimmed)) {
+    return true;
+  }
+  if (/\b(?:declare\s+)?namespace\b[\s\S]*\{\s*(?:export\s+)?type\b[\s\S]*$/.test(trimmed)) {
+    return true;
+  }
+  if (/(?:^|[^.])(?:\bimplements\b|\bkeyof\b)\s*(?:\([^)]*)?$/.test(trimmed)) {
+    return true;
+  }
+  if (/\bimplements\b[\s\S]*,\s*$/.test(trimmed)) {
+    return true;
+  }
+  if (/(?:^|[^.])\bkeyof\s+typeof\s*(?:\([^)]*)?$/.test(trimmed)) {
+    return true;
+  }
+  if (/(?:^|[^.])\btypeof\s*(?:\([^)]*)?$/.test(trimmed)) {
+    return (
+      isInsideGenericTypeArgument(prefix, content, importIndex) ||
+      isInsideTypeDeclaration(prefix) ||
+      isInsideTypeAnnotation(prefix, content, importIndex, false)
+    );
+  }
+  if (isInsideOpenTypeAssertion(trimmed)) {
+    return true;
+  }
+
+  const colonIndex = trimmed.lastIndexOf(':');
+  if (colonIndex === -1) return false;
+  if (hasTernaryBranchMarker(prefix) && !isInsideConditionalType(prefix)) {
+    return false;
+  }
+  if (
+    isLikelyObjectLiteralValue(content, importIndex) &&
+    !/:\s*\{[\s\S]*,\s*[A-Za-z_$][\w$]*\s*:\s*$/.test(trimmed)
+  ) {
+    return false;
+  }
+  const openBraceIndex = trimmed.lastIndexOf('{');
+  const semicolonIndex = trimmed.lastIndexOf(';');
+  const annotationSuffix = trimmed.slice(colonIndex + 1);
+  if (/=\s*$/.test(trimmed)) return false;
+  if (/=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*$/.test(trimmed)) {
+    return false;
+  }
+  if (/;/.test(annotationSuffix)) return false;
+  return colonIndex > semicolonIndex && !/\{\s*(?:return|throw|void|await|yield|case|default)\b[\s\S]*$/.test(trimmed.slice(openBraceIndex));
+}
+
+function hasCompletedStatementBeforeImport(prefix: string): boolean {
+  const newlineIndex = prefix.lastIndexOf('\n');
+  if (newlineIndex === -1) return false;
+
+  const suffix = prefix.slice(newlineIndex + 1);
+  if (!/^\s*$/.test(suffix)) return false;
+
+  const previousLine = prefix.slice(0, newlineIndex).trimEnd();
+  return !/[=?:,|&<{([]$/.test(previousLine) && !/\bextends\s*$/.test(previousLine);
+}
+
+function isInsideOpenTypeAssertion(trimmedPrefix: string): boolean {
+  const assertionMatch = /(?:^|[^.])\b(?:as|satisfies)\b/g;
+  let latestAssertionIndex = -1;
+  let match: RegExpExecArray | null;
+  while ((match = assertionMatch.exec(trimmedPrefix)) !== null) {
+    const candidatePrefix = trimmedPrefix.slice(0, match.index + match[0].length).trimEnd();
+    if (isOpenTemplateAssertionKeyword(candidatePrefix)) {
+      latestAssertionIndex = match.index;
+    }
+  }
+  if (latestAssertionIndex === -1) return false;
+
+  const suffix = trimmedPrefix.slice(latestAssertionIndex);
+  if (/}\s*\)?\s*\n\s*(?:void\s+)?import\s*\($/.test(suffix)) {
+    return false;
+  }
+  const lastComma = suffix.lastIndexOf(',');
+  const lastEquals = suffix.lastIndexOf('=');
+  const lastArrow = suffix.lastIndexOf('=>');
+  if (hasUnclosedAssertionTypeContainer(suffix)) return lastArrow === -1;
+  return lastComma === -1 && lastEquals === -1 && lastArrow === -1;
+}
+
+function hasUnclosedAssertionTypeContainer(suffix: string): boolean {
+  return findUnclosedAngleBracketIndex(suffix) !== -1 || suffix.lastIndexOf('[') > suffix.lastIndexOf(']');
+}
+
+function readDynamicImportSpecifierForTypeContext(
+  content: string,
+  index: number,
+): StringLiteralRead | null {
+  let i = skipImportTrivia(content, index);
+  if (content[i] !== '(') return null;
+  i = skipImportTrivia(content, i + 1);
+  const specifier = readDynamicImportArgumentSpecifier(content, i);
+  if (!specifier) return null;
+  let nextTokenIndex = skipImportTrivia(content, specifier.endIndex + 1);
+  if (content[nextTokenIndex] === ',') {
+    nextTokenIndex = skipDynamicImportAttributeArgument(content, nextTokenIndex + 1);
+    if (nextTokenIndex === -1) return null;
+  }
+  return content[nextTokenIndex] === ')'
+    ? { value: specifier.value, endIndex: nextTokenIndex }
+    : null;
+}
+
+function skipDynamicImportAttributeArgument(content: string, index: number): number {
+  let i = skipImportTrivia(content, index);
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  while (i < content.length) {
+    const ch = content[i]!;
+    if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && ch === ')') return i;
+    if (content[i] === '/' && content[i + 1] === '/') {
+      i = skipImportTrivia(content, skipSingleLineComment(content, i + 2));
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i = skipImportTrivia(content, skipMultiLineComment(content, i + 2) + 1);
+      continue;
+    }
+    if (QUOTE_CHARS.has(ch)) {
+      i = skipStringLiteral(content, i) + 1;
+      continue;
+    }
+    if (ch === '{') braceDepth += 1;
+    else if (ch === '}' && braceDepth > 0) braceDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']' && bracketDepth > 0) bracketDepth -= 1;
+    else if (ch === '(') parenDepth += 1;
+    else if (ch === ')' && parenDepth > 0) parenDepth -= 1;
+    i += 1;
+  }
+
+  return -1;
+}
+
+function stripTrailingTrivia(content: string): string {
+  const i = skipTriviaBackward(content, content.length - 1);
+  return content.slice(0, i + 1);
+}
+
+function isInsideTypeDeclaration(prefix: string): boolean {
+  if (/(?:^|[;{}\n])\s*(?:const|let|var)\b[\s\S]*=\s*$/.test(prefix)) {
+    return false;
+  }
+
+  if (/(?:^|[;{}\n])\s*(?:type|interface)\s*[:=]\s*(?:await\b\s*)?$/.test(prefix)) {
+    return false;
+  }
+  if (isRuntimeTypeNamedObjectValue(prefix)) {
+    return false;
+  }
+  if (/}\s*(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\(|\[)|module\.exports\s*=)[\s\S]*$/.test(prefix)) {
+    return false;
+  }
+
+  return (
+    /(?:^|[;{}\n])\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
+    !hasCompletedTypeDeclarationBeforeImport(prefix) &&
+    !/\n\s*(?:export\s+)?(?:@|else\b|catch\b|finally\b|default\b|const|let|var|using|await|return|throw|new|if|for|while|do|switch|try|function|async\s+function|class|abstract\s+class|namespace|enum)\b/.test(
+      prefix,
+    ) &&
+    !/\}\s*(?:export\s+)?(?:@|else\b|catch\b|finally\b|default\b|const|let|var|using|await|return|throw|new|if|for|while|do|switch|try|function|async\s+function|class|abstract\s+class|namespace|enum)\b[\s\S]*$/.test(
+      prefix,
+    ) &&
+    !/\}\s*(?:export\s+)?$/.test(prefix) &&
+    !/\}\s*\n\s*(?:export\s+)?(?:void\s*$|[!~+\-\[(@]|using\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\()/.test(
+      prefix,
+    )
+  );
+}
+
+function isRuntimeTypeNamedObjectValue(prefix: string): boolean {
+  const match = /(?:^|[,{])\s*(?:type|interface)\s*:\s*(?:await\b\s*)?(?:\{[\s\S]*)?$/.exec(prefix);
+  if (!match || match.index === undefined) return false;
+
+  const beforeProperty = prefix.slice(0, match.index);
+  if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b[\s\S]*$/.test(beforeProperty)) {
+    return false;
+  }
+
+  return true;
+}
+
+function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
+  const newlineIndex = prefix.lastIndexOf('\n');
+  if (newlineIndex === -1) return false;
+
+  const suffix = prefix.slice(newlineIndex + 1);
+  if (
+    !/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix) &&
+    !/^\s*(?:export\s+)?(?:default\b|else\b|catch\b|finally\b|[!~+\-\[(@]|using\b|do\b|abstract\s+class\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*(?:\(|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
+      suffix,
+    )
+  ) {
+    return false;
+  }
+
+  const previousLine = prefix.slice(0, newlineIndex).trimEnd();
+  return !/[=?:,|&<{([]$/.test(previousLine) && !/\bextends\s*$/.test(previousLine);
+}
+
+function isInsideTypeAnnotation(
+  prefix: string,
+  content: string,
+  importIndex: number,
+  isTernaryBranch: boolean,
+): boolean {
+  if (isTernaryBranch && !isInsideConditionalType(prefix)) return false;
+
+  const annotationIndex = findActiveTypeAnnotationIndex(prefix);
+  if (annotationIndex === -1) return false;
+  if (hasCompletedStatementBeforeImport(prefix)) return false;
+
+  const beforeAnnotation = prefix.slice(0, annotationIndex);
+  if (/\bcase\s+[\s\S]*$/.test(beforeAnnotation)) return false;
+  if (
+    /(?:\bas|\bsatisfies)\s*\{[^}]*$/.test(beforeAnnotation) &&
+    !isLikelyObjectLiteralValue(content, importIndex) &&
+    !hasRuntimeAfterAnnotation(prefix, annotationIndex)
+  ) {
+    return true;
+  }
+  if (
+    /:\s*\{[^}]*$/.test(beforeAnnotation) &&
+    !isLikelyObjectLiteralValue(content, importIndex) &&
+    !hasRuntimeAfterAnnotation(prefix, annotationIndex)
+  ) {
+    return true;
+  }
+  if (
+    /(?:^|[;{}\n])\s*[A-Za-z_$][\w$]*$/.test(beforeAnnotation) &&
+    !/\bclass\b[\s\S]*\{[^}]*$/.test(beforeAnnotation)
+  ) {
+    return false;
+  }
+
+  const outerAnnotationIndex = beforeAnnotation.lastIndexOf(':');
+  if (outerAnnotationIndex !== -1) {
+    const outerAnnotationSuffix = beforeAnnotation.slice(outerAnnotationIndex + 1);
+    if (
+      outerAnnotationSuffix.includes('{') &&
+      !outerAnnotationSuffix.includes('}') &&
+      !/[=;]/.test(outerAnnotationSuffix) &&
+      !isLikelyObjectLiteralValue(content, importIndex)
+    ) {
+      return true;
+    }
+  }
+
+  const annotationSuffix = prefix.slice(annotationIndex + 1);
+  if (hasRuntimeAfterClosedTypeContext(annotationSuffix)) return false;
+  if (/[=;]/.test(annotationSuffix)) return false;
+  if (/=>/.test(annotationSuffix)) {
+    if (/\)\s*:\s*[^=]*=>\s*$/.test(prefix)) return false;
+    return /^\s*(?:new\s*)?(?:\([\s\S]*\)|<[^>]*>\s*\([\s\S]*\)|[A-Za-z_$][\w$]*(?:\[\])?)\s*=>\s*$/.test(
+      annotationSuffix,
+    );
+  }
+  if (/[=;]/.test(annotationSuffix)) return false;
+  if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
+  if (/\n\s*(?:void\s*)?$|\n\s*(?:[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|export\s+default\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\(|\[|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])|module\.exports\s*=|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(prefix)) {
+    return false;
+  }
+  if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {
+    return false;
+  }
+  if (/\{[\s\S]*$/.test(annotationSuffix)) {
+    return false;
+  }
+
+  return !isLikelyObjectLiteralValue(content, importIndex);
+}
+
+function findActiveTypeAnnotationIndex(prefix: string): number {
+  const annotationIndex = findLastCodeColon(prefix);
+  if (annotationIndex === -1) return -1;
+
+  const annotationSuffix = prefix.slice(annotationIndex + 1);
+  if (!/=>\s*$/.test(annotationSuffix)) return annotationIndex;
+
+  const outerAnnotationIndex = findLastCodeColon(prefix.slice(0, annotationIndex));
+  if (outerAnnotationIndex === -1) return annotationIndex;
+
+  const outerSuffix = prefix.slice(outerAnnotationIndex + 1);
+  return /=>\s*$/.test(outerSuffix) ? outerAnnotationIndex : annotationIndex;
+}
+
+function findLastCodeColon(content: string): number {
+  for (let i = content.length - 1; i >= 0; i -= 1) {
+    const ch = content[i]!;
+    if (ch === ':') return i;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = skipQuotedKeyBackward(content, i);
+      continue;
+    }
+    if (ch === '/' && content[i - 1] === '*') {
+      i -= 2;
+      while (i >= 1 && !(content[i - 1] === '/' && content[i] === '*')) i -= 1;
+      i -= 1;
+      continue;
+    }
+    if (isInsideLineCommentBackward(content, i)) {
+      while (i >= 0 && content[i] !== '\n') i -= 1;
+    }
+  }
+
+  return -1;
+}
+
+function hasRuntimeAfterAnnotation(prefix: string, annotationIndex: number): boolean {
+  return hasRuntimeAfterClosedTypeContext(prefix.slice(annotationIndex + 1));
+}
+
+function hasRuntimeAfterClosedTypeContext(annotationSuffix: string): boolean {
+  return /}\s*\)?(?:\s*(?:\{\s*(?:return|throw|void|await|yield|case|default)\b|(?:\.|\[|\(|,|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])\s*)|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|function\b|async\s+function\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\()|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
+    annotationSuffix,
+  );
+}
+
+function isInsideConditionalType(prefix: string): boolean {
+  const questionIndex = prefix.lastIndexOf('?');
+  if (questionIndex === -1) return false;
+
+  const condition = prefix.slice(0, questionIndex);
+  return /\bextends\b/.test(condition) && !/(?:={2,3}|!==?|[<>]=?)/.test(condition);
+}
+
+function hasTernaryBranchMarker(prefix: string): boolean {
+  const questionIndex = prefix.lastIndexOf('?');
+  if (questionIndex === -1) return false;
+
+  const afterQuestion = skipWhitespace(prefix, questionIndex + 1);
+  return prefix[afterQuestion] !== ':';
+}
+
+function isLikelyObjectLiteralValue(content: string, importIndex: number): boolean {
+  const colonIndex = content.lastIndexOf(':', importIndex - 1);
+  if (colonIndex === -1) return false;
+
+  let i = skipTriviaBackward(content, colonIndex - 1);
+
+  if (content[i] === "'" || content[i] === '"') {
+    i = skipQuotedKeyBackward(content, i);
+  } else if (content[i] === ']') {
+    i = skipBalancedKeyBackward(content, i);
+  } else if (/[0-9]/.test(content[i] ?? '')) {
+    while (i >= 0 && /[0-9._]/.test(content[i]!)) i -= 1;
+  } else {
+    while (i >= 0 && isIdentifierCharacter(content[i]!)) i -= 1;
+  }
+
+  i = skipTriviaBackward(content, i);
+
+  if (content[i] === '{') {
+    const beforeBrace = content.slice(0, i).trimEnd();
+    if (/(?:\bas|\bsatisfies)\s*$/.test(beforeBrace)) {
+      return false;
+    }
+    if (/(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?type\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?\s*=\s*$/.test(beforeBrace)) {
+      return false;
+    }
+    if (/\bclass\s+[A-Za-z_$][\w$]*(?:\s*<[^>{}]*)?$/.test(beforeBrace)) {
+      return false;
+    }
+  }
+
+  return content[i] === '{' || content[i] === ',';
+}
+
+function skipTriviaBackward(content: string, index: number): number {
+  let i = index;
+
+  while (i >= 0) {
+    while (i >= 0 && /\s/.test(content[i]!)) i -= 1;
+
+    if (content[i] === '/' && content[i - 1] === '*') {
+      i -= 2;
+      while (i >= 1 && !(content[i - 1] === '/' && content[i] === '*')) i -= 1;
+      i -= 2;
+      continue;
+    }
+
+    if (isInsideLineCommentBackward(content, i)) {
+      while (i >= 0 && content[i] !== '\n') i -= 1;
+      continue;
+    }
+
+    return i;
+  }
+
+  return i;
+}
+
+function isInsideLineCommentBackward(content: string, index: number): boolean {
+  const lineStart = content.lastIndexOf('\n', index) + 1;
+  let quote: string | null = null;
+
+  for (let i = lineStart; i <= index; i++) {
+    const ch = content[i]!;
+    if (quote) {
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === '/' && content[i + 1] === '/') return true;
+  }
+
+  return false;
+}
+
+function skipQuotedKeyBackward(content: string, quoteIndex: number): number {
+  const quote = content[quoteIndex]!;
+
+  for (let i = quoteIndex - 1; i >= 0; i -= 1) {
+    if (content[i] !== quote) continue;
+
+    let backslashCount = 0;
+    for (let j = i - 1; j >= 0 && content[j] === '\\'; j -= 1) {
+      backslashCount += 1;
+    }
+
+    if (backslashCount % 2 === 0) return i - 1;
+  }
+
+  return quoteIndex - 1;
+}
+
+function skipBalancedKeyBackward(content: string, closeIndex: number): number {
+  let depth = 0;
+
+  for (let i = closeIndex; i >= 0; i -= 1) {
+    const ch = content[i]!;
+    if (ch === ']') depth += 1;
+    if (ch === '[') {
+      depth -= 1;
+      if (depth === 0) return i - 1;
+    }
+  }
+
+  return closeIndex - 1;
+}
+
 function readRequireSpecifier(
   content: string,
   index: number,
@@ -224,6 +1359,34 @@ function readRequireSpecifier(
   return specifier;
 }
 
+function readNoSubstitutionTemplateString(
+  content: string,
+  startIndex: number,
+): StringLiteralRead | null {
+  let value = '';
+
+  for (let i = startIndex + 1; i < content.length; i++) {
+    const ch = content[i]!;
+
+    if (ch === '\\') {
+      const escaped = content[i + 1];
+      if (escaped) {
+        const decoded = decodeStringEscape(content, i);
+        value += decoded.value;
+        i = decoded.endIndex;
+      }
+      continue;
+    }
+
+    if (ch === '$' && content[i + 1] === '{') return null;
+    if (ch === '`') return { value, endIndex: i };
+
+    value += ch;
+  }
+
+  return null;
+}
+
 function readQuotedString(
   content: string,
   startIndex: number,
@@ -237,8 +1400,9 @@ function readQuotedString(
     if (ch === '\\') {
       const escaped = content[i + 1];
       if (escaped) {
-        value += escaped;
-        i += 1;
+        const decoded = decodeStringEscape(content, i);
+        value += decoded.value;
+        i = decoded.endIndex;
       }
       continue;
     }
@@ -251,6 +1415,56 @@ function readQuotedString(
   }
 
   return null;
+}
+
+function decodeStringEscape(content: string, slashIndex: number): { value: string; endIndex: number } {
+  const escaped = content[slashIndex + 1];
+  if (!escaped) return { value: '', endIndex: slashIndex };
+
+  if (escaped === 'u') {
+    if (content[slashIndex + 2] === '{') {
+      const closeIndex = content.indexOf('}', slashIndex + 3);
+      const hex = closeIndex === -1 ? '' : content.slice(slashIndex + 3, closeIndex);
+      if (/^[0-9A-Fa-f]{1,6}$/.test(hex)) {
+        const codePoint = parseInt(hex, 16);
+        return {
+          value: codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : content.slice(slashIndex, closeIndex + 1),
+          endIndex: closeIndex,
+        };
+      }
+    }
+    const hex = content.slice(slashIndex + 2, slashIndex + 6);
+    if (/^[0-9A-Fa-f]{4}$/.test(hex)) {
+      return { value: String.fromCharCode(parseInt(hex, 16)), endIndex: slashIndex + 5 };
+    }
+  }
+
+  if (escaped === 'x') {
+    const hex = content.slice(slashIndex + 2, slashIndex + 4);
+    if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+      return { value: String.fromCharCode(parseInt(hex, 16)), endIndex: slashIndex + 3 };
+    }
+  }
+
+  if (escaped === '\n') return { value: '', endIndex: slashIndex + 1 };
+  if (escaped === '\r') {
+    return {
+      value: '',
+      endIndex: content[slashIndex + 2] === '\n' ? slashIndex + 2 : slashIndex + 1,
+    };
+  }
+
+  const simpleEscapes: Record<string, string> = {
+    b: '\b',
+    f: '\f',
+    n: '\n',
+    r: '\r',
+    t: '\t',
+    v: '\v',
+    '0': '\0',
+  };
+
+  return { value: simpleEscapes[escaped] ?? escaped, endIndex: slashIndex + 1 };
 }
 
 function readTemplateString(content: string, startIndex: number): TemplateRead {
@@ -402,12 +1616,25 @@ function isRegexLiteralStart(content: string, index: number): boolean {
 }
 
 function previousNonWhitespace(content: string, index: number): string | null {
+  const indexOfPrevious = previousNonWhitespaceIndex(content, index);
+  return indexOfPrevious === null ? null : content[indexOfPrevious]!;
+}
+
+function previousNonWhitespaceIndex(
+  content: string,
+  index: number,
+): number | null {
   for (let i = index; i >= 0; i--) {
     const ch = content[i]!;
-    if (!/\s/.test(ch)) return ch;
+    if (!/\s/.test(ch)) return i;
   }
 
   return null;
+}
+
+function previousNonTriviaIndex(content: string, index: number): number | null {
+  const i = skipTriviaBackward(content, index);
+  return i < 0 ? null : i;
 }
 
 function readIdentifierStart(content: string, index: number): number {

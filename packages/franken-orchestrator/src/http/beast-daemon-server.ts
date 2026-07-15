@@ -5,7 +5,7 @@ import type { Hono } from 'hono';
 import { createBeastServices, type BeastServiceBundle, type BeastServicePaths } from '../beasts/create-beast-services.js';
 import { isLoopbackHost } from '../network/network-config.js';
 import { localPlaintextOrSecureEndpoint } from '../network/network-url.js';
-import { createBeastDaemonApp } from './beast-daemon-app.js';
+import { createBeastDaemonApp, type BeastDaemonDrainState } from './beast-daemon-app.js';
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 
 export interface StartBeastDaemonOptions extends BeastServicePaths {
@@ -15,6 +15,7 @@ export interface StartBeastDaemonOptions extends BeastServicePaths {
   operatorToken: string;
   pidFile?: string;
   services?: BeastServiceBundle;
+  mutationDrainTimeoutMs?: number;
 }
 
 export interface BeastDaemonHandle {
@@ -42,14 +43,88 @@ export class BeastDaemonShutdownError extends Error {
   }
 }
 
+export class BeastDaemonDrainTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Beast daemon timed out after ${timeoutMs}ms waiting for in-flight mutating requests to finish during shutdown`);
+    this.name = 'BeastDaemonDrainTimeoutError';
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4050;
+const MUTATION_DRAIN_WAIT_TIMEOUT_MS = 5000;
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'stopped']);
 const PID_FILE_DECIMAL_PATTERN = /^\d+$/;
+
+class MutableBeastDaemonDrainState implements BeastDaemonDrainState {
+  enteredAt?: string | undefined;
+  reason?: string | undefined;
+  private activeMutations = 0;
+  private mutationWaiters: Array<() => void> = [];
+
+  isDraining(): boolean {
+    return this.enteredAt !== undefined;
+  }
+
+  enter(reason: string): void {
+    if (!this.enteredAt) {
+      this.enteredAt = new Date().toISOString();
+      this.reason = reason;
+    }
+  }
+
+  beginMutation(): () => void {
+    this.activeMutations += 1;
+    let finished = false;
+    return () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      this.activeMutations -= 1;
+      if (this.activeMutations === 0) {
+        for (const waiter of this.mutationWaiters.splice(0)) {
+          waiter();
+        }
+      }
+    };
+  }
+
+  async waitForMutations(timeoutMs = MUTATION_DRAIN_WAIT_TIMEOUT_MS): Promise<boolean> {
+    if (this.activeMutations === 0) {
+      return true;
+    }
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(false);
+        }
+      }, timeoutMs);
+      this.mutationWaiters.push(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(true);
+        }
+      });
+    });
+  }
+
+  async waitForMutationCompletion(): Promise<void> {
+    if (this.activeMutations === 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.mutationWaiters.push(resolve);
+    });
+  }
+}
 
 export function defaultBeastDaemonPidFile(root: string): string {
   return join(root, '.frankenbeast', 'beasts-daemon.pid');
@@ -67,6 +142,8 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
   let services: BeastServiceBundle | undefined;
   let closed = false;
   let listening = false;
+  const drainState = new MutableBeastDaemonDrainState();
+  const mutationDrainTimeoutMs = options.mutationDrainTimeoutMs ?? MUTATION_DRAIN_WAIT_TIMEOUT_MS;
 
   try {
     services = options.services ?? createBeastServices(options);
@@ -80,6 +157,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
     operatorToken: options.operatorToken,
     root: options.root,
     pid: process.pid,
+    drainState,
   });
   const server = createServer((request, response) => {
     void handleHonoHttpRequest(app, request, response);
@@ -120,9 +198,22 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         return;
       }
       closed = true;
+      drainState.enter('shutdown');
+      const drainedMutations = await drainState.waitForMutations(mutationDrainTimeoutMs);
+      let drainTimeoutError: BeastDaemonDrainTimeoutError | undefined;
+      let httpServerClosed = false;
+      if (!drainedMutations && listening) {
+        const closedServer = closeHttpServer(server);
+        server.closeAllConnections();
+        await closedServer;
+        listening = false;
+        httpServerClosed = true;
+        drainTimeoutError = new BeastDaemonDrainTimeoutError(mutationDrainTimeoutMs);
+        await drainState.waitForMutationCompletion();
+      }
       const shutdownFailures = await stopLiveRuns(services);
       services.dispose();
-      if (listening) {
+      if (listening && !httpServerClosed) {
         const closedServer = closeHttpServer(server);
         server.closeAllConnections();
         await closedServer;
@@ -131,6 +222,9 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         throw new BeastDaemonShutdownError(shutdownFailures);
       }
       await releasePidFile(pidFile);
+      if (drainTimeoutError) {
+        throw drainTimeoutError;
+      }
     },
   };
 }

@@ -68,6 +68,16 @@ npm run test:coverage --workspace=@franken/orchestrator
 
 Integration and E2E scripts enable broader runtime paths with `INTEGRATION=true` or `E2E=true`; use them when the needed local services, credentials, and fixtures are available.
 
+## Flaky liveness fixture replay
+
+Issue-worker liveness/backpressure regressions can be reproduced with colocated JSON replay fixtures in `packages/franken-orchestrator/tests/unit/issues/fixtures/`. The `flaky-liveness-replay.json` fixture captures each liveness tick as thresholds, signals, checkpoint state, and the expected PM-visible worker route. Add new flaky liveness cases there when a capacity spike, dependency breaker, or recovery edge needs deterministic coverage, then run:
+
+```bash
+npm test --workspace=@franken/orchestrator -- tests/unit/issues/issue-runner.test.ts
+```
+
+Keep fixture snapshots narrow and deterministic: prefer structured `signals`, exact `expectedReasons`, and explicit `expectedRoute` values over wall-clock sleeps or prose-only assertions.
+
 ## Security limits
 
 Context snapshot imports are size-limited before JSON parsing to reduce resource-exhaustion risk from untrusted or corrupted resume/import files. `loadContext(filePath)` defaults to a 1 MiB cap, opens snapshots in nonblocking mode, rejects non-regular paths from the opened file descriptor, and enforces the same byte cap while reading so oversized content is rejected even if the file changes after metadata inspection. Trusted tooling that intentionally owns a larger snapshot must opt in per import with `loadContext(filePath, { maxBytes })`; invalid overrides such as `0`, negative, non-finite, or unsafe integer values fail closed.
