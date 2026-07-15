@@ -56,7 +56,7 @@ export class GeminiApiAdapter implements ILlmProvider {
   constructor(private options: GeminiApiOptions = {}) {
     this.apiKey = resolveGeminiApiKey(options);
     this.guardedFetch = createEgressGuardedFetch({
-      lane: 'implementation',
+      lane: 'provider',
       policy: options.egressPolicy,
       audit: options.egressAudit,
     });

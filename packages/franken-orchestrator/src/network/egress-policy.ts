@@ -1,4 +1,6 @@
-export type EgressLane = 'docs' | 'triage' | 'test' | 'fallback' | 'implementation' | 'operator' | 'unrestricted';
+import { isIP } from 'node:net';
+
+export type EgressLane = 'docs' | 'triage' | 'test' | 'fallback' | 'implementation' | 'provider' | 'operator' | 'unrestricted';
 export type EgressDestinationClass = 'github' | 'provider' | 'messaging' | 'local' | 'arbitrary';
 export type EgressDecisionReason =
   | 'allowed'
@@ -8,6 +10,7 @@ export type EgressDecisionReason =
   | 'destination-class-not-allowed'
   | 'domain-not-allowed'
   | 'scheme-not-allowed'
+  | 'userinfo-not-allowed'
   | 'invalid-url';
 
 export interface LaneEgressPolicy {
@@ -96,6 +99,11 @@ export const defaultLaneEgressPolicies: Readonly<Record<EgressLane, Required<Lan
     allowedDomains: [],
     allowedMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   },
+  provider: {
+    allowedDestinationClasses: ['provider'],
+    allowedDomains: [],
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  },
   operator: {
     allowedDestinationClasses: ['github', 'provider', 'messaging', 'local'],
     allowedDomains: [],
@@ -134,6 +142,10 @@ export function evaluateEgressPolicy(request: EgressPolicyRequest): EgressDecisi
 
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     return { lane: request.lane, destinationClass, host, method, allowed: false, reason: 'scheme-not-allowed' };
+  }
+
+  if (parsed.username || parsed.password) {
+    return { lane: request.lane, destinationClass, host, method, allowed: false, reason: 'userinfo-not-allowed' };
   }
 
   if (request.override?.allow) {
@@ -260,7 +272,7 @@ function enforceEgressDecision(request: EgressPolicyRequest, audit: EgressAuditS
 
 export function classifyEgressDestination(url: URL): EgressDestinationClass {
   const host = normalizeEgressHostname(url.hostname);
-  if (isLocalHost(host)) return 'local';
+  if (isPrivateNetworkHost(host)) return 'local';
   if (GITHUB_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'github';
   if (PROVIDER_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'provider';
   if (MESSAGING_DOMAINS.some((domain) => hostMatchesDomain(host, domain))) return 'messaging';
@@ -309,11 +321,56 @@ function hostMatchesDomain(host: string, domain: string): boolean {
   return host === normalizedDomain || host.endsWith(`.${normalizedDomain}`);
 }
 
-function isLocalHost(host: string): boolean {
+function isPrivateNetworkHost(host: string): boolean {
   const normalized = host.replace(/^\[|\]$/g, '').toLowerCase();
-  return normalized === 'localhost'
+  if (normalized === 'localhost'
+    || normalized === 'metadata'
+    || normalized === 'instance-data'
+    || normalized === 'metadata.google.internal'
+    || normalized.endsWith('.localhost')
+    || normalized.endsWith('.local')
+    || normalized.endsWith('.internal')
+    || normalized.endsWith('.svc')
+    || normalized.endsWith('.cluster.local')) {
+    return true;
+  }
+
+  if (isIpv4MappedHostname(normalized)) return true;
+
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) return isPrivateIpv4(normalized);
+  if (ipVersion === 6) return isPrivateIpv6(normalized);
+  return false;
+}
+
+function isIpv4MappedHostname(host: string): boolean {
+  const suffixes = ['.nip.io', '.sslip.io', '.xip.io', '.lvh.me'];
+  if (!suffixes.some((suffix) => host.endsWith(suffix))) return false;
+  return /(?:^|[-.])(?:127|10|172|192|169|0)[-.]\d{1,3}[-.]\d{1,3}[-.]\d{1,3}(?:\.|-|$)/u.test(host);
+}
+
+function isPrivateIpv4(ip: string): boolean {
+  const octets = ip.split('.').map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return false;
+  const [a, b] = octets as [number, number, number, number];
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || (a === 100 && b >= 64 && b <= 127)
+    || a >= 224;
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  return normalized === '::'
     || normalized === '::1'
-    || normalized === '0:0:0:0:0:0:0:1'
-    || /^127(?:\.\d{1,3}){3}$/.test(normalized)
-    || normalized.endsWith('.localhost');
+    || normalized.startsWith('fe80:')
+    || normalized.startsWith('fc')
+    || normalized.startsWith('fd')
+    || normalized.startsWith('ff')
+    || normalized.startsWith('0:0:0:0:0:ffff:127.')
+    || normalized.startsWith('::ffff:127.');
 }

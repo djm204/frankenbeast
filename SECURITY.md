@@ -45,6 +45,7 @@ Frankenbeast is pre-1.0 and evolves quickly. Security fixes are applied to `main
 - Keep dashboard and chat-server traffic same-origin through a trusted proxy/BFF when browser clients need protected routes.
 - Do not expose operator-token-protected endpoints directly to untrusted networks without TLS, authentication, and rate limiting.
 - Treat loopback development defaults as local-only conveniences, not production security settings.
+- Provider HTTP egress is deny-by-default for local, metadata, link-local, private-network, and malformed endpoint URLs. If an operator intentionally runs a private provider endpoint, add the exact trusted host to the provider egress-policy allowlist and treat that exception as a reviewed SSRF risk.
 
 ## Runtime hardening
 
