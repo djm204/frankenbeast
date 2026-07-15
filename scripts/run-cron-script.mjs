@@ -68,11 +68,37 @@ function processGroupAlive(pid) {
   if (!pid || process.platform === 'win32') {
     return false;
   }
+
+  let sawPermissionDenied = false;
   try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === 'EPERM';
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) {
+        continue;
+      }
+      try {
+        const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        const state = fields[0];
+        const pgrp = Number.parseInt(fields[2] ?? '', 10);
+        if (pgrp === pid && state !== 'Z') {
+          return true;
+        }
+      } catch (error) {
+        if (error?.code === 'EACCES' || error?.code === 'EPERM') {
+          sawPermissionDenied = true;
+        } else if (error?.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+    }
+    return sawPermissionDenied;
+  } catch {
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch (error) {
+      return error?.code === 'EPERM';
+    }
   }
 }
 
@@ -210,15 +236,22 @@ function isAuthScheme(value) {
   return /^(?:Bearer|Basic|Digest|ApiKey|Token)$/i.test(value);
 }
 
+function isSecretHeaderName(value) {
+  const normalized = String(value ?? '').trim().replace(/:+$/, '').replace(/_/g, '-');
+  return /(?:authorization|token|secret|password|passwd|credential|api-key|access-key|private-key|ssh-key|gpg-key|signing-key)/i.test(normalized);
+}
+
 function redactSensitiveText(value) {
   const raw = typeof value === 'string' ? value : String(value ?? '');
   return raw
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/-----BEGIN PRIVATE [\s\S]*?-----END PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)\[[^\]]*\]/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(?!["'\[])([^,}\]\s][^,}\]]*)/gi, '$1[REDACTED]')
     .replace(/(["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*["']\s*:\s*)(["'])([^"']*)$/gi, '$1$2[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*\\["'])(.*?)(\\["'])/gi, '$1[REDACTED]$3')
+    .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*)\[[^\]]*\]/gi, '$1[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*)(?!\\["']|\[)([^,}\]\s][^,}\]]*)/gi, '$1[REDACTED]')
     .replace(/(\\["'][a-z0-9_-]*(?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)[a-z0-9_-]*\\["']\s*:\s*\\["'])([\s\S]*)$/gi, '$1[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+([^\s"']+)/gi, '$1$2 [REDACTED]')
@@ -260,8 +293,8 @@ function redactCommand(command) {
       continue;
     }
 
-    if (/^authorization:\s*$/i.test(part)) {
-      redacted.push(part.endsWith(':') ? 'Authorization:' : '[REDACTED]');
+    if (/^[^:]+:\s*$/.test(part) && isSecretHeaderName(part)) {
+      redacted.push(part.endsWith(':') ? part : '[REDACTED]');
       redactNextParts = 2;
       continue;
     }
@@ -489,6 +522,7 @@ async function runCronScript({ name, recoverable, command }) {
           clearTimeout(forceKillTimer);
           forceKillTimer = null;
         }
+        child.stderr?.destroy();
         finish(parentTerminationExitCode);
         return;
       }
@@ -517,6 +551,10 @@ async function runCronScript({ name, recoverable, command }) {
       const drainMs = exitResult?.code === 0 && !exitResult?.signal ? Math.min(EXIT_STDERR_DRAIN_MS, 250) : EXIT_STDERR_DRAIN_MS;
       exitDrainTimer = setTimeout(() => {
         exitDrainTimer = null;
+        if (parentTerminationExitCode !== null) {
+          finishChildResult(exitResult.code, exitResult.signal);
+          return;
+        }
         child.stderr?.destroy();
         finishChildResult(exitResult.code, exitResult.signal);
       }, drainMs);

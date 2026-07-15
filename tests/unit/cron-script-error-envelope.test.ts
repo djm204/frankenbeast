@@ -532,6 +532,26 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).not.toContain('false');
   });
 
+  it('redacts array-valued JSON secrets in stderr envelopes', () => {
+    const result = runCronScriptWithEnv([
+      '--name',
+      'array-json-secret-stderr-tail',
+      '--',
+      process.execPath,
+      '-e',
+      `process.stderr.write('{"password":["array-secret"],"tokens":["one","two"],"safe":["kept"]}'); process.exit(9)`,
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '2000' });
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.stderrTail).toContain('"password":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"tokens":[REDACTED]');
+    expect(envelope.stderrTail).toContain('"safe":["kept"]');
+    expect(JSON.stringify(envelope)).not.toContain('array-secret');
+    expect(JSON.stringify(envelope)).not.toContain('one');
+    expect(JSON.stringify(envelope)).not.toContain('two');
+  });
+
   it('redacts split Authorization header argv tokens', () => {
     const result = runCronScript([
       '--name',
@@ -550,6 +570,31 @@ describe('cron script error envelope runner', () => {
     expect(envelope.command).toContain('Authorization:');
     expect(JSON.stringify(envelope)).not.toContain('Bearer');
     expect(JSON.stringify(envelope)).not.toContain('argv-bearer-secret');
+  });
+
+  it('redacts split secret-looking header argv tokens', () => {
+    const apiHeader = `X-${'Api'}-Key:`;
+    const result = runCronScript([
+      '--name',
+      'split-secret-header-argv',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(9)',
+      'Proxy-Authorization:',
+      'Bearer',
+      'proxy-secret',
+      apiHeader,
+      'api-key-secret',
+    ]);
+
+    expect(result.status).toBe(9);
+    const envelope = parseEnvelope(result.stderr);
+    expect(envelope.command).toContain('Proxy-Authorization:');
+    expect(envelope.command).toContain(apiHeader);
+    expect(JSON.stringify(envelope)).not.toContain('Bearer');
+    expect(JSON.stringify(envelope)).not.toContain('proxy-secret');
+    expect(JSON.stringify(envelope)).not.toContain('api-key-secret');
   });
 
   it('carries JSON escape state across stderr chunks', () => {
@@ -882,6 +927,57 @@ describe('cron script error envelope runner', () => {
     }
   });
 
+  it('keeps inherited stderr open while descendants finish shutdown cleanup', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-stderr-grace-'));
+    const readyFile = join(tempDir, 'helper.ready');
+
+    try {
+      const child = spawn(process.execPath, [
+        SCRIPT,
+        '--name',
+        'descendant-stderr-grace-test',
+        '--',
+        process.execPath,
+        '-e',
+        `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(readyFile)}, "ready"); setTimeout(() => { process.stderr.write("helper final diagnostic\\n"); process.exit(0); }, 120); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 'inherit'] }); process.stderr.write('helper-started\\n'); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);`,
+      ], {
+        cwd: ROOT,
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '500', CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '20' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      await new Promise<void>((resolve) => {
+        const deadline = Date.now() + 1_000;
+        const check = () => {
+          if (stderr.includes('helper-started') && existsSync(readyFile)) {
+            resolve();
+            return;
+          }
+          if (Date.now() > deadline) {
+            resolve();
+            return;
+          }
+          setTimeout(check, 10);
+        };
+        check();
+      });
+      child.kill('SIGTERM');
+      const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+      expect(status).toBe(128 + osConstants.signals.SIGTERM);
+      const envelope = parseEnvelope(stderr);
+      expect(envelope.stderrTail).toContain('helper final diagnostic');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('gives descendants the configured shutdown grace period after their parent exits', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'franken-cron-descendant-grace-'));
     const cleanupFile = join(tempDir, 'cleanup.done');
@@ -931,6 +1027,43 @@ describe('cron script error envelope runner', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('finishes parent shutdown promptly when only zombie process-group members remain', async () => {
+    const child = spawn(process.execPath, [
+      SCRIPT,
+      '--name',
+      'prompt-shutdown-zombie-descendant',
+      '--',
+      process.execPath,
+      '-e',
+      `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.on('SIGTERM', () => process.exit(0)); process.stderr.write('ready with zombie candidate\n'); setInterval(() => {}, 1000);`,
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    await new Promise<void>((resolve) => {
+      child.stderr.on('data', () => {
+        if (stderr.includes('ready with zombie candidate')) {
+          resolve();
+        }
+      });
+    });
+    const started = Date.now();
+    child.kill('SIGTERM');
+
+    const status = await new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+
+    expect(status).toBe(128 + osConstants.signals.SIGTERM);
+    expect(Date.now() - started).toBeLessThan(1_500);
   });
 
   it('finishes parent shutdown promptly when no process-group members remain', async () => {
