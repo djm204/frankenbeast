@@ -164,6 +164,20 @@ function contextTargetsTool(context: string, toolName: string): boolean {
   return false;
 }
 
+function contextLooksLikeMemoryReviewProposalArgs(context: string): boolean {
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    return typeof record['key'] === 'string'
+      && typeof record['value'] === 'string'
+      && typeof record['source'] === 'string'
+      && (typeof record['reason'] === 'string' || record['confidence'] !== undefined);
+  } catch {
+    return false;
+  }
+}
+
 function redactRightToForgetGovernanceContext(action: string, context: string): string {
   if (unqualifyMcpActionName(action) !== 'fbeast_memory_right_to_forget') return context;
   return '[right-to-forget-context-redacted]';
@@ -172,7 +186,9 @@ function redactRightToForgetGovernanceContext(action: string, context: string): 
 function redactMemoryReviewProposalGovernanceContext(action: string, context: string): string {
   const unqualified = unqualifyMcpActionName(action);
   if (unqualified !== 'fbeast_memory_review_propose'
-    && !(unqualified === 'execute_tool' && contextTargetsTool(context, 'fbeast_memory_review_propose'))) {
+    && !(unqualified === 'execute_tool'
+      && (contextTargetsTool(context, 'fbeast_memory_review_propose')
+        || contextLooksLikeMemoryReviewProposalArgs(context)))) {
     return context;
   }
   return MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION;

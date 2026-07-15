@@ -161,6 +161,22 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('token abc123');
   });
 
+  it('redacts proxied memory proposal args when hook context strips the target tool name', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"secret","value":"token abc123","source":"chat","reason":"remember"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('mcp__fbeast-proxy__execute_tool') as { context: string };
+    db.close();
+    expect(row.context).toBe('[memory-review-proposal-context-redacted]');
+    expect(row.context).not.toContain('token abc123');
+  });
+
   it('does not redact arbitrary execute_tool context that merely mentions the proposal tool', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     await expect(governor.check({
