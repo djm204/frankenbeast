@@ -602,6 +602,7 @@ class SqliteWorkingMemory implements IWorkingMemory {
   persistKeyAfterCommit(key: string, value: unknown): (() => void) | void {
     const { normalized, serialized, size } = this.prepareEntry(key, value);
     assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+    this.expireRuntimeTtlKeys();
 
     if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
       throw new WorkingMemoryLimitError(
@@ -771,6 +772,18 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.dirtyKeys.delete(key);
     this.deletedKeys.delete(key);
     this.deleteExpiredPersistedRows([{ key, serialized }]);
+    const persisted = this.persistedSerialized.get(key);
+    if (persisted !== undefined && persisted !== serialized) {
+      const parsed = parseStoredWorkingMemoryValue(persisted);
+      if (!isExpiredWorkingMemoryValue(parsed)) {
+        const { normalized, serialized: restoredSerialized, size } = this.prepareEntry(key, parsed);
+        this.store.set(key, normalized);
+        this.sizes.set(key, size);
+        this.serialized.set(key, restoredSerialized);
+        this.totalBytes += size;
+        return false;
+      }
+    }
     return true;
   }
 
@@ -2506,7 +2519,7 @@ export class SqliteBrain implements IBrain {
       const tx = this.db.transaction(() => {
         const workingMatches = memoryType === 'episodic'
           ? []
-          : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true });
+          : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true, expirePersistedTtlEntries: false });
         const persistedWorkingMatches = new Set(workingMatches.filter(match => match.source === 'persisted').map(match => match.key));
         runtimeWorkingKeysToDelete = new Set(workingMatches.filter(match => match.source === 'runtime').map(match => match.key));
         deletedWorkingKeys = new Set(workingMatches.map(match => match.key));

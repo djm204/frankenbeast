@@ -294,6 +294,39 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('counts expired persisted facts deleted by right-to-forget', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-delete-count-'));
+      const dbPath = join(dir, 'brain.db');
+      const originalBrain = new SqliteBrain(dbPath);
+      originalBrain.working.set('op:expired', {
+        value: 'stale job output',
+        category: 'temporary-operational',
+        sourceScope: 'delete-count-test',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+      originalBrain.flush();
+      originalBrain.close();
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
+      const deleteBrain = new SqliteBrain(dbPath, undefined, { hydrateWorkingMemoryFromDb: false });
+      try {
+        const report = deleteBrain.rightToForget({ sourceScope: 'delete-count-test' });
+        expect(report.deleted.working).toBe(1);
+        const db = new Database(dbPath, { readonly: true });
+        try {
+          const rows = db.prepare('SELECT key FROM working_memory ORDER BY key').all() as Array<{ key: string }>;
+          expect(rows).toEqual([]);
+        } finally {
+          db.close();
+        }
+      } finally {
+        deleteBrain.close();
+        vi.useRealTimers();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('does not let stale runtime TTL cleanup delete a newer persisted value for the same key', () => {
       const dir = mkdtempSync(join(tmpdir(), 'franken-memory-ttl-race-'));
       const dbPath = join(dir, 'brain.db');
@@ -313,7 +346,9 @@ describe('SqliteBrain', () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
       try {
-        expect(staleBrain.working.has('op:key')).toBe(false);
+        expect(staleBrain.working.has('op:key')).toBe(true);
+        expect(staleBrain.working.get('op:key')).toEqual({ value: 'new durable fact', category: 'lesson' });
+        staleBrain.flush();
         const verifier = new SqliteBrain(dbPath);
         try {
           expect(verifier.working.get('op:key')).toEqual({ value: 'new durable fact', category: 'lesson' });
@@ -1619,6 +1654,33 @@ describe('SqliteBrain', () => {
         reviewer: 'operator',
         note: 'Verified in repository settings.',
       });
+    });
+
+    it('prunes expired temporary facts before approved working-memory writes enforce limits', () => {
+      const limitedBrain = new SqliteBrain(':memory:', { maxEntries: 1 });
+      limitedBrain.working.set('op:expired', {
+        value: 'stale runtime entry',
+        category: 'temporary-operational',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+      const candidate = limitedBrain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2099-01-01T00:00:01.000Z'));
+      try {
+        expect(() => limitedBrain.memoryReview.approve(candidate.id, { reviewer: 'operator' })).not.toThrow();
+        expect(limitedBrain.working.keys()).toEqual(['env.repo.default-branch']);
+      } finally {
+        limitedBrain.close();
+        vi.useRealTimers();
+      }
     });
 
     it('edits a candidate before approval and writes the edited memory', () => {
