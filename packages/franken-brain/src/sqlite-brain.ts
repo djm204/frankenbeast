@@ -87,6 +87,63 @@ export interface SqliteBrainOptions {
   encryption?: MemoryEncryptionOptions;
 }
 
+export type MemoryCandidateTargetStore = 'working';
+export type MemoryCandidateStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'never_store'
+  | 'suppressed';
+export type MemorySuppressionReason = 'rejected' | 'never_store';
+
+export interface MemoryCandidateProposal {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  source: string;
+  evidenceId?: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface MemoryCandidate extends MemoryCandidateProposal {
+  id: string;
+  status: MemoryCandidateStatus;
+  suppressionReason?: MemorySuppressionReason;
+  createdAt: string;
+  updatedAt: string;
+  decidedAt?: string;
+  reviewer?: string;
+  note?: string;
+}
+
+export interface MemoryCandidateEdit {
+  value?: unknown;
+  source?: string;
+  evidenceId?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface MemoryReviewDecisionOptions {
+  reviewer?: string;
+  note?: string;
+}
+
+export interface MemoryProvenanceRecord {
+  targetStore: MemoryCandidateTargetStore;
+  key: string;
+  value: unknown;
+  candidateId: string;
+  source: string;
+  evidenceId?: string;
+  confidence: number;
+  reason: string;
+  reviewer?: string;
+  note?: string;
+  approvedAt: string;
+}
+
 export interface MemoryEncryptionMetadata {
   algorithm: 'aes-256-gcm';
   stores: Array<{ store: string; encrypted: boolean }>;
@@ -144,8 +201,22 @@ const MEMORY_STORES = [
   'working_memory',
   'episodic_events',
   'checkpoints',
+  'memory_review_candidates',
+  'memory_review_provenance',
+  'memory_review_suppressions',
+  'memory_deletion_guards',
   'memory_deletion_hash_keys',
 ] as const;
+
+const MEMORY_REVIEW_PAYLOAD_COLUMNS = [
+  'value',
+  'source',
+  'evidence_id',
+  'reason',
+  'reviewer',
+  'note',
+] as const;
+const NEVER_STORE_REDACTED_VALUE = '[never-store-redacted]';
 
 type MemoryStoreName = (typeof MEMORY_STORES)[number];
 
@@ -454,6 +525,118 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
 
     return finalizeFlush;
+  }
+
+  persistKey(key: string, value: unknown): (() => void) | void {
+    this.set(key, value);
+    const serialized = this.serialized.get(key);
+    if (serialized === undefined) return;
+    if (this.persistedSerialized.get(key) === serialized) {
+      const persistedRow = this.db
+        .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+        .get(key) as { value: string } | undefined;
+      const persistedValue = persistedRow
+        ? (this.encryption?.decrypt(persistedRow.value) ?? persistedRow.value)
+        : undefined;
+      if (persistedValue === serialized) {
+        this.dirtyKeys.delete(key);
+        return;
+      }
+    }
+    this.db
+      .prepare(
+        `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
+         WHERE working_memory.value IS NOT excluded.value`,
+      )
+      .run(key, this.encryption?.encrypt(serialized) ?? serialized, isoNow());
+    const finalize = (): void => {
+      this.persistedSerialized.set(key, serialized);
+      this.deletedKeys.delete(key);
+      this.dirtyKeys.delete(key);
+    };
+    if (!this.db.inTransaction) {
+      finalize();
+      return;
+    }
+    return finalize;
+  }
+
+  persistKeyAfterCommit(key: string, value: unknown): (() => void) | void {
+    const { normalized, serialized, size } = this.prepareEntry(key, value);
+    assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
+
+    if (!this.store.has(key) && this.store.size >= this.limits.maxEntries) {
+      throw new WorkingMemoryLimitError(
+        `Working memory is full: ${this.store.size} entries, maxEntries is ${this.limits.maxEntries}`,
+      );
+    }
+    const previousSize = this.sizes.get(key) ?? 0;
+    const newTotal = this.totalBytes - previousSize + size;
+    if (
+      !Number.isSafeInteger(newTotal) ||
+      newTotal > this.limits.maxTotalBytes
+    ) {
+      throw new WorkingMemoryLimitError(
+        `Working memory byte budget exceeded: ${newTotal} bytes, maxTotalBytes is ${this.limits.maxTotalBytes}`,
+      );
+    }
+
+    let persistedValueMatches = false;
+    if (this.persistedSerialized.get(key) === serialized) {
+      const persistedRow = this.db
+        .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+        .get(key) as { value: string } | undefined;
+      const persistedValue = persistedRow
+        ? (this.encryption?.decrypt(persistedRow.value) ?? persistedRow.value)
+        : undefined;
+      persistedValueMatches = persistedValue === serialized;
+    }
+    if (!persistedValueMatches) {
+      this.db
+        .prepare(
+          `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, schema_version = excluded.schema_version
+           WHERE working_memory.value IS NOT excluded.value`,
+        )
+        .run(key, this.encryption?.encrypt(serialized) ?? serialized, isoNow());
+    }
+    const finalize = (): void => {
+      this.store.set(key, normalized);
+      this.sizes.set(key, size);
+      this.serialized.set(key, serialized);
+      this.totalBytes = newTotal;
+      this.persistedSerialized.set(key, serialized);
+      this.deletedKeys.delete(key);
+      this.dirtyKeys.delete(key);
+    };
+    if (!this.db.inTransaction) {
+      finalize();
+      return;
+    }
+    return finalize;
+  }
+
+  purgeKey(key: string): (() => void) | void {
+    if (this.store.has(key)) {
+      this.totalBytes -= this.sizes.get(key) ?? 0;
+      this.store.delete(key);
+      this.sizes.delete(key);
+      this.serialized.delete(key);
+    }
+    this.dirtyKeys.delete(key);
+    this.deletedKeys.delete(key);
+    this.db.prepare(`DELETE FROM working_memory WHERE key = ?`).run(key);
+    const finalize = (): void => {
+      this.persistedSerialized.delete(key);
+      this.deletedKeys.delete(key);
+      this.dirtyKeys.delete(key);
+    };
+    if (!this.db.inTransaction) {
+      finalize();
+      return;
+    }
+    return finalize;
   }
 
   private refreshPreparedStateForFlush(): void {
@@ -1224,6 +1407,687 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
   }
 }
 
+// --- User-visible memory review and consent ---
+
+type MemoryCandidateRow = {
+  id: string;
+  target_store: MemoryCandidateTargetStore;
+  memory_key: string;
+  value: string;
+  source: string;
+  evidence_id: string | null;
+  confidence: number;
+  reason: string;
+  status: MemoryCandidateStatus;
+  suppression_reason: MemorySuppressionReason | null;
+  reviewer: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+};
+
+type MemoryProvenanceRow = {
+  target_store: MemoryCandidateTargetStore;
+  memory_key: string;
+  value: string;
+  candidate_id: string;
+  source: string;
+  evidence_id: string | null;
+  confidence: number;
+  reason: string;
+  reviewer: string | null;
+  note: string | null;
+  approved_at: string;
+};
+
+type ReviewPayloadRow = {
+  id?: string;
+  signature?: string;
+  target_store: MemoryCandidateTargetStore;
+  memory_key: string;
+  value: string;
+  source: string;
+  evidence_id: string | null;
+  reason: string;
+  reviewer: string | null;
+  note: string | null;
+};
+
+type ReviewPayloadMatch =
+  | { table: 'memory_review_candidates'; id: string; key: string }
+  | { table: 'memory_review_provenance'; targetStore: MemoryCandidateTargetStore; key: string }
+  | { table: 'memory_review_suppressions'; signature: string; key: string };
+
+export class SqliteMemoryReviewQueue {
+  constructor(
+    private db: Database.Database,
+    private working: SqliteWorkingMemory,
+    private dbPath: string,
+    private encryption?: MemoryCipher,
+  ) {}
+
+  propose(proposal: MemoryCandidateProposal): MemoryCandidate {
+    this.validateProposal(proposal);
+    let result: MemoryCandidate | undefined;
+    const tx = this.db.transaction(() => {
+      assertMemoryCandidateNotDeletionGuarded(this.db, proposal, this.encryption, { checkNeverStore: false });
+      const suppression = this.findCandidateSuppression(proposal);
+      if (suppression) {
+        result = this.suppressedCandidate(proposal, suppression);
+        return;
+      }
+      const now = isoNow();
+      const candidate: MemoryCandidate = {
+        ...proposal,
+        id: `memcand_${randomBytes(12).toString('base64url')}`,
+        status: 'pending',
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.db
+        .prepare(
+          `INSERT INTO memory_review_candidates (
+            id, target_store, memory_key, value, source, evidence_id, confidence,
+            reason, status, suppression_reason, reviewer, note, created_at,
+            updated_at, decided_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+        )
+        .run(
+          candidate.id,
+          candidate.targetStore,
+          candidate.key,
+          this.encodeValue(candidate.value),
+          this.encodeText(candidate.source),
+          candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
+          candidate.confidence,
+          this.encodeText(candidate.reason),
+          candidate.status,
+          candidate.createdAt,
+          candidate.updatedAt,
+        );
+      result = candidate;
+    });
+    tx.immediate();
+    return result!;
+  }
+
+  list(status: MemoryCandidateStatus = 'pending'): MemoryCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_candidates WHERE status = ? ORDER BY created_at ASC, id ASC`,
+      )
+      .all(status) as MemoryCandidateRow[];
+    return rows.map((row) => this.rowToCandidate(row));
+  }
+
+  edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
+    const candidate = this.requireCandidate(id, 'pending');
+    const updated: MemoryCandidate = {
+      ...candidate,
+      ...edit,
+      updatedAt: isoNow(),
+    };
+    this.validateProposal(updated);
+    assertMemoryCandidateNotDeletionGuarded(this.db, updated, this.encryption);
+    this.db
+      .prepare(
+        `UPDATE memory_review_candidates
+         SET value = ?, source = ?, evidence_id = ?, confidence = ?, reason = ?, updated_at = ?
+         WHERE id = ? AND status = 'pending'`,
+      )
+      .run(
+        this.encodeValue(updated.value),
+        this.encodeText(updated.source),
+        updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
+        updated.confidence,
+        this.encodeText(updated.reason),
+        updated.updatedAt,
+        id,
+      );
+    return this.requireCandidate(id, 'pending');
+  }
+
+  approve(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+  ): MemoryCandidate {
+    const now = isoNow();
+    let finalizeWorkingFlush: (() => void) | undefined;
+    let approvedCandidate: MemoryCandidate | undefined;
+    const approveTx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id);
+      if (candidate.status === 'suppressed') {
+        approvedCandidate = candidate;
+        return;
+      }
+      if (candidate.status !== 'pending') {
+        throw new Error(
+          `Memory candidate ${id} is ${candidate.status}, expected pending`,
+        );
+      }
+      this.assertDecisionOptionsNotDeletionGuarded(options);
+      const suppressionReason = this.findCandidateSuppression(candidate);
+      if (suppressionReason) {
+        this.markSuppressed(id, suppressionReason, now, options);
+        approvedCandidate = this.requireCandidate(id);
+        return;
+      }
+      finalizeWorkingFlush =
+        this.working.persistKeyAfterCommit(candidate.key, candidate.value) ?? undefined;
+      this.db
+        .prepare(
+          `INSERT INTO memory_review_provenance (
+            target_store, memory_key, value, candidate_id, source, evidence_id,
+            confidence, reason, reviewer, note, approved_at, schema_version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+          ON CONFLICT(target_store, memory_key) DO UPDATE SET
+            value = excluded.value,
+            candidate_id = excluded.candidate_id,
+            source = excluded.source,
+            evidence_id = excluded.evidence_id,
+            confidence = excluded.confidence,
+            reason = excluded.reason,
+            reviewer = excluded.reviewer,
+            note = excluded.note,
+            approved_at = excluded.approved_at,
+            schema_version = excluded.schema_version`,
+        )
+        .run(
+          candidate.targetStore,
+          candidate.key,
+          this.encodeValue(candidate.value),
+          candidate.id,
+          this.encodeText(candidate.source),
+          candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
+          candidate.confidence,
+          this.encodeText(candidate.reason),
+          options.reviewer ? this.encodeText(options.reviewer) : null,
+          options.note ? this.encodeText(options.note) : null,
+          now,
+        );
+      this.markDecision(id, 'approved', now, options);
+      approvedCandidate = this.requireCandidate(id);
+    });
+    approveTx.immediate();
+    finalizeWorkingFlush?.();
+    return approvedCandidate ?? this.requireCandidate(id);
+  }
+
+  reject(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+  ): MemoryCandidate {
+    const now = isoNow();
+    let rejectedCandidate: MemoryCandidate | undefined;
+    const tx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id, 'pending');
+      this.assertDecisionOptionsNotDeletionGuarded(options);
+      this.insertSuppression(candidate, 'rejected', now, options);
+      this.markDecision(id, 'rejected', now, options);
+      rejectedCandidate = this.requireCandidate(id);
+    });
+    tx.immediate();
+    return rejectedCandidate ?? this.requireCandidate(id, 'rejected');
+  }
+
+  neverStore(
+    id: string,
+    options: MemoryReviewDecisionOptions = {},
+  ): MemoryCandidate {
+    const now = isoNow();
+    let finalizeWorkingFlush: (() => void) | undefined;
+    let neverStoredCandidate: MemoryCandidate | undefined;
+    const tx = this.db.transaction(() => {
+      const candidate = this.requireCandidate(id, 'pending');
+      this.assertDecisionOptionsNotDeletionGuarded(options);
+      this.insertSuppression(candidate, 'never_store', now, options);
+      finalizeWorkingFlush = this.working.purgeKey(candidate.key) ?? undefined;
+      this.db
+        .prepare(
+          `DELETE FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
+        )
+        .run(candidate.targetStore, candidate.key);
+      this.markDecision(id, 'never_store', now, options, {
+        value: NEVER_STORE_REDACTED_VALUE,
+      });
+      this.redactNeverStoreRows(candidate, now);
+      neverStoredCandidate = this.requireCandidate(id);
+    });
+    tx.immediate();
+    finalizeWorkingFlush?.();
+    purgeDeletedSqliteContent(this.db, this.dbPath);
+    return neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
+  }
+
+  provenanceFor(
+    targetStore: MemoryCandidateTargetStore,
+    key: string,
+  ): MemoryProvenanceRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
+      )
+      .get(targetStore, key) as MemoryProvenanceRow | undefined;
+    return row ? this.rowToProvenance(row) : null;
+  }
+
+  private validateProposal(proposal: MemoryCandidateProposal): void {
+    if (proposal.targetStore !== 'working') {
+      throw new Error(`Unsupported memory review target store: ${proposal.targetStore}`);
+    }
+    if (proposal.key.trim().length === 0) {
+      throw new Error('Memory candidate key must not be empty');
+    }
+    if (proposal.source.trim().length === 0) {
+      throw new Error('Memory candidate source must not be empty');
+    }
+    if (proposal.reason.trim().length === 0) {
+      throw new Error('Memory candidate reason must not be empty');
+    }
+    if (
+      !Number.isFinite(proposal.confidence) ||
+      proposal.confidence < 0 ||
+      proposal.confidence > 1
+    ) {
+      throw new RangeError('Memory candidate confidence must be between 0 and 1');
+    }
+    stringifyWorkingMemoryValue(proposal.key, proposal.value);
+  }
+
+  private assertDecisionOptionsNotDeletionGuarded(
+    options: MemoryReviewDecisionOptions,
+  ): void {
+    if (!options.reviewer && !options.note) return;
+    assertNotDeletionGuarded(
+      this.db,
+      'memory-review-decision',
+      stringifyWorkingMemoryValue('memory-review-decision', {
+        reviewer: options.reviewer,
+        note: options.note,
+      }),
+      this.encryption,
+    );
+  }
+
+  private requireCandidate(
+    id: string,
+    status?: MemoryCandidateStatus,
+  ): MemoryCandidate {
+    const row = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE id = ?`)
+      .get(id) as MemoryCandidateRow | undefined;
+    if (!row) throw new Error(`Memory candidate ${id} was not found`);
+    const candidate = this.rowToCandidate(row);
+    if (status && candidate.status !== status) {
+      throw new Error(
+        `Memory candidate ${id} is ${candidate.status}, expected ${status}`,
+      );
+    }
+    return candidate;
+  }
+
+  private markDecision(
+    id: string,
+    status: Exclude<MemoryCandidateStatus, 'pending' | 'suppressed'>,
+    decidedAt: string,
+    options: MemoryReviewDecisionOptions,
+    overrides: { value?: unknown } = {},
+  ): void {
+    const result = this.db
+      .prepare(
+        `UPDATE memory_review_candidates
+         SET status = ?, value = COALESCE(?, value), reviewer = ?, note = ?, updated_at = ?, decided_at = ?
+         WHERE id = ? AND status = 'pending'`,
+      )
+      .run(
+        status,
+        overrides.value === undefined ? null : this.encodeValue(overrides.value),
+        options.reviewer ? this.encodeText(options.reviewer) : null,
+        options.note ? this.encodeText(options.note) : null,
+        decidedAt,
+        decidedAt,
+        id,
+      );
+    if (result.changes !== 1) {
+      throw new Error(`Memory candidate ${id} is no longer pending`);
+    }
+  }
+
+  private markSuppressed(
+    id: string,
+    suppressionReason: MemorySuppressionReason,
+    decidedAt: string,
+    options: MemoryReviewDecisionOptions,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE memory_review_candidates
+         SET status = 'suppressed', suppression_reason = ?, value = COALESCE(?, value), reviewer = ?, note = ?, updated_at = ?, decided_at = ?
+         WHERE id = ? AND status = 'pending'`,
+      )
+      .run(
+        suppressionReason,
+        suppressionReason === 'never_store'
+          ? this.encodeValue(NEVER_STORE_REDACTED_VALUE)
+          : null,
+        options.reviewer ? this.encodeText(options.reviewer) : null,
+        options.note ? this.encodeText(options.note) : null,
+        decidedAt,
+        decidedAt,
+        id,
+      );
+  }
+
+  private insertSuppression(
+    candidate: MemoryCandidate,
+    reason: MemorySuppressionReason,
+    createdAt: string,
+    options: MemoryReviewDecisionOptions,
+  ): void {
+    const signature =
+      reason === 'never_store'
+        ? this.neverStoreSignature(candidate)
+        : this.rejectedSignature(candidate);
+    if (!signature) {
+      throw new Error('Unable to create memory review suppression signature');
+    }
+    this.db
+      .prepare(
+        `INSERT INTO memory_review_suppressions (
+          signature, suppression_reason, target_store, memory_key, value, source,
+          evidence_id, reason, reviewer, note, created_at, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})
+        ON CONFLICT(signature) DO UPDATE SET
+          suppression_reason = excluded.suppression_reason,
+          reviewer = excluded.reviewer,
+          note = excluded.note,
+          created_at = excluded.created_at`,
+      )
+      .run(
+        signature,
+        reason,
+        candidate.targetStore,
+        candidate.key,
+        this.encodeValue(
+          reason === 'never_store' ? NEVER_STORE_REDACTED_VALUE : candidate.value,
+        ),
+        this.encodeText(candidate.source),
+        candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
+        this.encodeText(candidate.reason),
+        options.reviewer ? this.encodeText(options.reviewer) : null,
+        options.note ? this.encodeText(options.note) : null,
+        createdAt,
+      );
+    this.markMatchingPendingSuppressed(candidate, reason, createdAt, options);
+  }
+
+  private markMatchingPendingSuppressed(
+    candidate: MemoryCandidate,
+    suppressionReason: MemorySuppressionReason,
+    decidedAt: string,
+    options: MemoryReviewDecisionOptions,
+  ): void {
+    const rows = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE status = 'pending'`)
+      .all() as MemoryCandidateRow[];
+    for (const row of rows) {
+      if (row.id === candidate.id) continue;
+      const pending = this.rowToCandidate(row);
+      if (this.suppressionMatchesPending(pending, candidate, suppressionReason)) {
+        this.markSuppressed(pending.id, suppressionReason, decidedAt, options);
+      }
+    }
+  }
+
+  private redactNeverStoreRows(candidate: MemoryCandidate, redactedAt: string): void {
+    this.db
+      .prepare(
+        `UPDATE memory_review_candidates
+         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL, updated_at = ?
+         WHERE target_store = ? AND memory_key = ?`,
+      )
+      .run(
+        this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        redactedAt,
+        candidate.targetStore,
+        candidate.key,
+      );
+    this.db
+      .prepare(
+        `UPDATE memory_review_suppressions
+         SET value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+         WHERE target_store = ? AND memory_key = ?`,
+      )
+      .run(
+        this.encodeValue(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        this.encodeText(NEVER_STORE_REDACTED_VALUE),
+        candidate.targetStore,
+        candidate.key,
+      );
+  }
+
+  private suppressionMatchesPending(
+    pending: MemoryCandidate,
+    decided: MemoryCandidate,
+    suppressionReason: MemorySuppressionReason,
+  ): boolean {
+    if (pending.targetStore !== decided.targetStore || pending.key !== decided.key) {
+      return false;
+    }
+    if (suppressionReason === 'never_store') return true;
+    return this.suppressionSignature(pending, suppressionReason) ===
+      this.suppressionSignature(decided, suppressionReason);
+  }
+
+  private findCandidateSuppression(
+    candidate: MemoryCandidateProposal,
+  ): MemorySuppressionReason | null {
+    return (
+      this.findSuppression(this.neverStoreSignature(candidate, { createKey: false })) ??
+      this.findSuppression(this.rejectedSignature(candidate, { createKey: false })) ??
+      this.findMatchingSuppression(candidate)
+    );
+  }
+
+  private findMatchingSuppression(
+    candidate: MemoryCandidateProposal,
+  ): MemorySuppressionReason | null {
+    const candidateValue = stableStringify(canonicalMemoryValue(candidate.value));
+    const rows = this.db
+      .prepare(`SELECT * FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ?`)
+      .all(candidate.targetStore, candidate.key) as Array<{
+        suppression_reason: MemorySuppressionReason;
+        target_store: MemoryCandidateTargetStore;
+        memory_key: string;
+        value: string;
+        source: string;
+        evidence_id: string | null;
+      }>;
+    for (const row of rows) {
+      if (row.suppression_reason === 'never_store') return 'never_store';
+      if (stableStringify(canonicalMemoryValue(this.decodeValue(row.value))) !== candidateValue) {
+        continue;
+      }
+      if (
+        this.decodeText(row.source) === candidate.source &&
+        (row.evidence_id ? this.decodeText(row.evidence_id) : undefined) ===
+          candidate.evidenceId
+      ) {
+        return 'rejected';
+      }
+    }
+    return null;
+  }
+
+  private findSuppression(signature: string | undefined): MemorySuppressionReason | null {
+    if (!signature) return null;
+    const row = this.db
+      .prepare(
+        `SELECT suppression_reason FROM memory_review_suppressions WHERE signature = ?`,
+      )
+      .get(signature) as { suppression_reason: MemorySuppressionReason } | undefined;
+    return row?.suppression_reason ?? null;
+  }
+
+  private suppressedCandidate(
+    proposal: MemoryCandidateProposal,
+    suppressionReason: MemorySuppressionReason,
+  ): MemoryCandidate {
+    const now = isoNow();
+    const safeProposal = suppressionReason === 'never_store'
+      ? { ...proposal, value: NEVER_STORE_REDACTED_VALUE }
+      : proposal;
+    return {
+      ...safeProposal,
+      id: `memcand_suppressed_${createHash('sha256')
+        .update(this.suppressionSignature(proposal, suppressionReason) ?? '')
+        .digest('hex')
+        .slice(0, 16)}`,
+      status: 'suppressed',
+      suppressionReason,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  private rejectedSignature(
+    proposal: MemoryCandidateProposal,
+    options: { createKey?: boolean } = {},
+  ): string | undefined {
+    return this.suppressionSignature(proposal, 'rejected', options);
+  }
+
+  private neverStoreSignature(
+    proposal: MemoryCandidateProposal,
+    options: { createKey?: boolean } = {},
+  ): string | undefined {
+    return this.suppressionSignature(proposal, 'never_store', options);
+  }
+
+  private suppressionSignature(
+    proposal: MemoryCandidateProposal,
+    suppressionReason: MemorySuppressionReason,
+    options: { createKey?: boolean } = {},
+  ): string | undefined {
+    const normalizedValue = canonicalMemoryValue(proposal.value);
+    return keyedMemorySignature(
+      this.db,
+      suppressionReason === 'never_store'
+        ? [
+            'never_store',
+            proposal.targetStore,
+            proposal.key,
+          ]
+        : [
+            'rejected',
+            proposal.targetStore,
+            proposal.key,
+            proposal.source,
+            proposal.evidenceId ?? '',
+            stableStringify(normalizedValue),
+          ],
+      this.encryption,
+      options,
+    );
+  }
+
+  private rowToCandidate(row: MemoryCandidateRow): MemoryCandidate {
+    return {
+      id: row.id,
+      targetStore: row.target_store,
+      key: row.memory_key,
+      value: this.decodeValue(row.value),
+      source: this.decodeText(row.source),
+      ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
+      confidence: row.confidence,
+      reason: this.decodeText(row.reason),
+      status: row.status,
+      ...(row.suppression_reason
+        ? { suppressionReason: row.suppression_reason }
+        : {}),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      ...(row.decided_at ? { decidedAt: row.decided_at } : {}),
+      ...(row.reviewer ? { reviewer: this.decodeText(row.reviewer) } : {}),
+      ...(row.note ? { note: this.decodeText(row.note) } : {}),
+    };
+  }
+
+  private rowToProvenance(row: MemoryProvenanceRow): MemoryProvenanceRecord {
+    return {
+      targetStore: row.target_store,
+      key: row.memory_key,
+      value: this.decodeValue(row.value),
+      candidateId: row.candidate_id,
+      source: this.decodeText(row.source),
+      ...(row.evidence_id ? { evidenceId: this.decodeText(row.evidence_id) } : {}),
+      confidence: row.confidence,
+      reason: this.decodeText(row.reason),
+      ...(row.reviewer ? { reviewer: this.decodeText(row.reviewer) } : {}),
+      ...(row.note ? { note: this.decodeText(row.note) } : {}),
+      approvedAt: row.approved_at,
+    };
+  }
+
+  private encodeText(value: string): string {
+    return this.encryption?.encrypt(value) ?? value;
+  }
+
+  private decodeText(value: string): string {
+    return this.encryption?.decrypt(value) ?? value;
+  }
+
+  private encodeValue(value: unknown): string {
+    return this.encodeText(stringifyWorkingMemoryValue('memory candidate', value));
+  }
+
+  private decodeValue(value: string): unknown {
+    return parseStoredWorkingMemoryValue(this.decodeText(value));
+  }
+}
+
+function stableMemorySignature(parts: unknown[]): string {
+  return createHash('sha256').update(stableStringify(parts)).digest('hex');
+}
+
+function keyedMemorySignature(
+  db: Database.Database,
+  parts: unknown[],
+  encryption?: MemoryCipher,
+  options: { createKey?: boolean } = {},
+): string | undefined {
+  const serialized = stableStringify(parts);
+  if (options.createKey === false) {
+    return existingKeyedDeletionHash(db, serialized, encryption);
+  }
+  return keyedDeletionHash(db, serialized, encryption);
+}
+
+function canonicalMemoryValue(value: unknown): unknown {
+  return parseStoredWorkingMemoryValue(
+    stringifyWorkingMemoryValue('memory candidate', value),
+  );
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  return `{${entries
+    .map(([key, nested]) => `${JSON.stringify(key)}:${stableStringify(nested)}`)
+    .join(',')}}`;
+}
+
 // --- SqliteBrain ---
 
 const liveSqliteBrainsByPath = new Map<string, Set<SqliteBrain>>();
@@ -1236,6 +2100,7 @@ export class SqliteBrain implements IBrain {
   readonly working: SqliteWorkingMemory;
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
+  readonly memoryReview: SqliteMemoryReviewQueue;
 
   private db: Database.Database;
   private readonly dbPath: string;
@@ -1271,6 +2136,12 @@ export class SqliteBrain implements IBrain {
     this.recovery = new SqliteRecoveryMemory(
       this.db,
       () => this.working.flushToDb(),
+      encryption,
+    );
+    this.memoryReview = new SqliteMemoryReviewQueue(
+      this.db,
+      this.working,
+      this.dbPath,
       encryption,
     );
     SqliteBrain.registerLiveBrain(this.dbPath, this);
@@ -1350,6 +2221,57 @@ export class SqliteBrain implements IBrain {
         verifier TEXT,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS memory_review_candidates (
+        id TEXT PRIMARY KEY,
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        confidence REAL NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        suppression_reason TEXT,
+        reviewer TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        decided_at TEXT,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_review_candidates_status
+        ON memory_review_candidates(status, created_at);
+      CREATE TABLE IF NOT EXISTS memory_review_provenance (
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        candidate_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        confidence REAL NOT NULL,
+        reason TEXT NOT NULL,
+        reviewer TEXT,
+        note TEXT,
+        approved_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
+        PRIMARY KEY (target_store, memory_key)
+      );
+      CREATE TABLE IF NOT EXISTS memory_review_suppressions (
+        signature TEXT PRIMARY KEY,
+        suppression_reason TEXT NOT NULL,
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        reason TEXT NOT NULL,
+        reviewer TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_review_suppressions_target_key
+        ON memory_review_suppressions(target_store, memory_key);
       CREATE TABLE IF NOT EXISTS memory_deletion_guards (
         selector_hash TEXT NOT NULL,
         guard_kind TEXT NOT NULL,
@@ -1437,6 +2359,7 @@ export class SqliteBrain implements IBrain {
     let runtimeWorkingKeysToDelete = new Set<string>();
     let episodicMatchCount = 0;
     let checkpointMatchCount = 0;
+    let reviewMatchCount = 0;
     let finalizePersistedWorkingDelete: (() => void) | undefined;
 
     if (dryRun) {
@@ -1444,6 +2367,12 @@ export class SqliteBrain implements IBrain {
         ? []
         : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: false });
       deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
+      const reviewMatches = memoryType === 'episodic'
+        ? []
+        : this.matchingReviewPayloads(normalizedSelector);
+      for (const key of this.reviewWorkingKeysToDelete(reviewMatches)) {
+        deletedWorkingKeys.add(key);
+      }
       for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: false })) {
         deletedWorkingKeys.add(key);
       }
@@ -1453,12 +2382,15 @@ export class SqliteBrain implements IBrain {
       checkpointMatchCount = memoryType === 'all'
         ? this.matchingCheckpointIds(normalizedSelector).length
         : 0;
+      reviewMatchCount = memoryType === 'episodic'
+        ? 0
+        : this.matchingReviewPayloads(normalizedSelector).length;
     } else {
       const tx = this.db.transaction(() => {
         const workingMatches = memoryType === 'episodic'
           ? []
           : this.matchingWorkingKeys(normalizedSelector, { expireRuntimeGuards: true });
-        const persistedWorkingMatches = workingMatches.filter(match => match.source === 'persisted').map(match => match.key);
+        const persistedWorkingMatches = new Set(workingMatches.filter(match => match.source === 'persisted').map(match => match.key));
         runtimeWorkingKeysToDelete = new Set(workingMatches.filter(match => match.source === 'runtime').map(match => match.key));
         deletedWorkingKeys = new Set(workingMatches.map(match => match.key));
         for (const key of SqliteBrain.matchingLiveWorkingKeys(this.dbPath, normalizedSelector, { expireRuntimeGuards: true })) {
@@ -1471,9 +2403,18 @@ export class SqliteBrain implements IBrain {
         const checkpointMatches = memoryType === 'all'
           ? this.matchingCheckpointIds(normalizedSelector)
           : [];
+        const reviewMatches = memoryType === 'episodic'
+          ? []
+          : this.matchingReviewPayloads(normalizedSelector);
+        for (const key of this.reviewWorkingKeysToDelete(reviewMatches)) {
+          persistedWorkingMatches.add(key);
+          runtimeWorkingKeysToDelete.add(key);
+          deletedWorkingKeys.add(key);
+        }
         episodicMatchCount = episodicMatches.length;
         checkpointMatchCount = checkpointMatches.length;
-        finalizePersistedWorkingDelete = this.working.deletePersistedKeys(persistedWorkingMatches);
+        reviewMatchCount = reviewMatches.length;
+        finalizePersistedWorkingDelete = this.working.deletePersistedKeys(Array.from(persistedWorkingMatches));
         if (episodicMatches.length > 0) {
           const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
           for (const id of episodicMatches) {
@@ -1486,6 +2427,7 @@ export class SqliteBrain implements IBrain {
             deleteCheckpoint.run(id);
           }
         }
+        this.redactReviewPayloadMatches(reviewMatches, isoNow());
         writeDeletionGuards(this.db, normalizedSelector, selectorHash, this.encryption);
         const auditSummary = 'Right-to-forget deletion completed';
         const auditDetails = JSON.stringify({
@@ -1493,7 +2435,7 @@ export class SqliteBrain implements IBrain {
           deleted: {
             working: deletedWorkingKeys.size,
             episodic: episodicMatchCount,
-            derived: episodicMatchCount + checkpointMatchCount,
+            derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
           },
         });
         const result = this.db.prepare(
@@ -1509,7 +2451,7 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       const auditEventId = tx() as number;
-      if (deletedWorkingKeys.size > 0 || episodicMatchCount > 0 || checkpointMatchCount > 0) {
+      if (deletedWorkingKeys.size > 0 || episodicMatchCount > 0 || checkpointMatchCount > 0 || reviewMatchCount > 0) {
         finalizePersistedWorkingDelete?.();
         this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
         purgeDeletedSqliteContent(this.db, this.dbPath);
@@ -1521,7 +2463,7 @@ export class SqliteBrain implements IBrain {
         deleted: {
           working: deletedWorkingKeys.size,
           episodic: episodicMatchCount,
-          derived: episodicMatchCount + checkpointMatchCount,
+          derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
         },
         remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: true }),
         auditEventId,
@@ -1534,7 +2476,7 @@ export class SqliteBrain implements IBrain {
       deleted: {
         working: deletedWorkingKeys.size,
         episodic: episodicMatchCount,
-        derived: episodicMatchCount + checkpointMatchCount,
+        derived: episodicMatchCount + checkpointMatchCount + reviewMatchCount,
       },
       remainingReferences: this.countRemainingReferences(normalizedSelector, { expireRuntimeGuards: false }),
     };
@@ -1589,6 +2531,95 @@ export class SqliteBrain implements IBrain {
       .map(row => row.id);
   }
 
+  private matchingReviewPayloads(selector: NormalizedRightToForgetSelector): ReviewPayloadMatch[] {
+    const matches: ReviewPayloadMatch[] = [];
+    for (const row of this.db.prepare(
+      `SELECT id, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+    ).all() as ReviewPayloadRow[]) {
+      if (row.id && this.reviewPayloadRowMatchesSelector(row, selector)) {
+        matches.push({ table: 'memory_review_candidates', id: row.id, key: row.memory_key });
+      }
+    }
+    for (const row of this.db.prepare(
+      `SELECT target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
+    ).all() as ReviewPayloadRow[]) {
+      if (this.reviewPayloadRowMatchesSelector(row, selector)) {
+        matches.push({ table: 'memory_review_provenance', targetStore: row.target_store, key: row.memory_key });
+      }
+    }
+    for (const row of this.db.prepare(
+      `SELECT signature, target_store, memory_key, value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
+    ).all() as ReviewPayloadRow[]) {
+      if (row.signature && this.reviewPayloadRowMatchesSelector(row, selector)) {
+        matches.push({ table: 'memory_review_suppressions', signature: row.signature, key: row.memory_key });
+      }
+    }
+    return matches;
+  }
+
+  private reviewWorkingKeysToDelete(matches: ReviewPayloadMatch[]): string[] {
+    return Array.from(new Set(matches
+      .filter((match): match is Extract<ReviewPayloadMatch, { table: 'memory_review_provenance' }> =>
+        match.table === 'memory_review_provenance' && match.targetStore === 'working',
+      )
+      .map(match => match.key)));
+  }
+
+  private reviewPayloadRowMatchesSelector(row: ReviewPayloadRow, selector: NormalizedRightToForgetSelector): boolean {
+    return reviewPayloadMatchesSelector(
+      row.memory_key,
+      {
+        value: parseStoredWorkingMemoryValue(this.encryption?.decrypt(row.value) ?? row.value),
+        source: this.encryption?.decrypt(row.source) ?? row.source,
+        evidenceId: row.evidence_id ? this.encryption?.decrypt(row.evidence_id) ?? row.evidence_id : undefined,
+        reason: this.encryption?.decrypt(row.reason) ?? row.reason,
+        reviewer: row.reviewer ? this.encryption?.decrypt(row.reviewer) ?? row.reviewer : undefined,
+        note: row.note ? this.encryption?.decrypt(row.note) ?? row.note : undefined,
+      },
+      selector,
+    );
+  }
+
+  private redactReviewPayloadMatches(matches: ReviewPayloadMatch[], redactedAt: string): void {
+    if (matches.length === 0) return;
+    const redactCandidates = this.db.prepare(
+      `UPDATE memory_review_candidates
+       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL,
+           status = CASE WHEN status = 'pending' THEN 'suppressed' ELSE status END,
+           suppression_reason = CASE WHEN status = 'pending' THEN 'never_store' ELSE suppression_reason END,
+           decided_at = CASE WHEN status = 'pending' THEN ? ELSE decided_at END,
+           updated_at = ?
+       WHERE id = ?`,
+    );
+    const redactProvenance = this.db.prepare(
+      `UPDATE memory_review_provenance
+       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       WHERE target_store = ? AND memory_key = ?`,
+    );
+    const redactSuppression = this.db.prepare(
+      `UPDATE memory_review_suppressions
+       SET memory_key = ?, value = ?, source = ?, evidence_id = NULL, reason = ?, reviewer = NULL, note = NULL
+       WHERE signature = ?`,
+    );
+    const redactedValue = this.encryption?.encrypt(stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE)) ?? stringifyWorkingMemoryValue('memory candidate', NEVER_STORE_REDACTED_VALUE);
+    const redactedText = this.encryption?.encrypt(NEVER_STORE_REDACTED_VALUE) ?? NEVER_STORE_REDACTED_VALUE;
+    for (const match of matches) {
+      const redactedKey = this.redactedReviewKey(match.key, redactedAt);
+      if (match.table === 'memory_review_candidates') {
+        redactCandidates.run(redactedKey, redactedValue, redactedText, redactedText, redactedAt, redactedAt, match.id);
+      } else if (match.table === 'memory_review_provenance') {
+        redactProvenance.run(redactedKey, redactedValue, redactedText, redactedText, match.targetStore, match.key);
+      } else {
+        redactSuppression.run(redactedKey, redactedValue, redactedText, redactedText, match.signature);
+      }
+    }
+  }
+
+  private redactedReviewKey(_key: string, _redactedAt: string): string {
+    const suffix = randomBytes(12).toString('base64url');
+    return `${NEVER_STORE_REDACTED_VALUE}:${suffix}`;
+  }
+
   private countRemainingReferences(selector: NormalizedRightToForgetSelector, options: { expireRuntimeGuards?: boolean } = {}): number {
     const memoryType = selector.type ?? 'all';
     let count = 0;
@@ -1603,6 +2634,9 @@ export class SqliteBrain implements IBrain {
     }
     if (memoryType === 'all') {
       count += this.matchingCheckpointIds(selector).length;
+    }
+    if (memoryType !== 'episodic') {
+      count += this.matchingReviewPayloads(selector).length;
     }
     return count;
   }
@@ -1648,7 +2682,7 @@ export class SqliteBrain implements IBrain {
       const insertDeletionGuard = brain.db.prepare(
         `INSERT OR IGNORE INTO memory_deletion_guards (selector_hash, guard_kind, value_hash, created_at, schema_version) VALUES (?, ?, ?, ?, ?)`,
       );
-      const snapshotDeletionGuards = snapshot.deletionGuards ?? [];
+      const snapshotDeletionGuards: MemoryDeletionGuardSnapshot[] = snapshot.deletionGuards ?? [];
       if (!snapshot.deletionGuardHashKey && snapshotDeletionGuards.some(guard => !isLegacyDeletionGuardSnapshot(guard))) {
         throw new MemoryDeletionGuardError('Refusing to hydrate snapshot with keyed deletion guards but no right-to-forget hash key material');
       }
@@ -1685,6 +2719,10 @@ export class SqliteBrain implements IBrain {
             guard.schemaVersion,
           );
         }
+
+        brain.db.prepare(`DELETE FROM memory_review_candidates`).run();
+        brain.db.prepare(`DELETE FROM memory_review_provenance`).run();
+        brain.db.prepare(`DELETE FROM memory_review_suppressions`).run();
 
         brain.working.restore(snapshot.working);
         finalizeWorkingMemoryFlush.current =
@@ -1746,13 +2784,7 @@ function migrateMemorySchemaDatabase(
   options: MemorySchemaMigrationOptions = {},
 ): MemorySchemaMigrationResult {
   const dryRun = options.dryRun ?? false;
-  const stores = [
-    'working_memory',
-    'episodic_events',
-    'checkpoints',
-    'memory_deletion_guards',
-    'memory_deletion_hash_keys',
-  ];
+  const stores = MEMORY_STORES;
   const tableRows = db
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
     .all() as Array<{
@@ -1798,7 +2830,14 @@ function migrateMemorySchemaDatabase(
   }
 
   for (const store of stores) {
-    if (!existingTables.has(store)) continue;
+    if (!existingTables.has(store)) {
+      operations.push({
+        table: store,
+        action: `create ${store} store`,
+      });
+      fromVersion = 0;
+      continue;
+    }
     const columnRows = db
       .prepare(`PRAGMA table_info(${store})`)
       .all() as Array<{ name: string }>;
@@ -1877,9 +2916,81 @@ function migrateMemorySchemaDatabase(
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE TABLE IF NOT EXISTS working_memory (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE TABLE IF NOT EXISTS episodic_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        step TEXT,
+        summary TEXT NOT NULL,
+        details TEXT,
+        embedding BLOB,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE TABLE IF NOT EXISTS checkpoints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        state TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE TABLE IF NOT EXISTS memory_review_candidates (
+        id TEXT PRIMARY KEY,
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        confidence REAL NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        suppression_reason TEXT,
+        reviewer TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        decided_at TEXT,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_review_candidates_status
+        ON memory_review_candidates(status, created_at);
+      CREATE TABLE IF NOT EXISTS memory_review_provenance (
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        candidate_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        confidence REAL NOT NULL,
+        reason TEXT NOT NULL,
+        reviewer TEXT,
+        note TEXT,
+        approved_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION},
+        PRIMARY KEY (target_store, memory_key)
+      );
+      CREATE TABLE IF NOT EXISTS memory_review_suppressions (
+        signature TEXT PRIMARY KEY,
+        suppression_reason TEXT NOT NULL,
+        target_store TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_id TEXT,
+        reason TEXT NOT NULL,
+        reviewer TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_review_suppressions_target_key
+        ON memory_review_suppressions(target_store, memory_key);
     `);
     for (const store of stores) {
-      if (!existingTables.has(store) && store !== 'memory_deletion_guards' && store !== 'memory_deletion_hash_keys') continue;
       const columnRows = db
         .prepare(`PRAGMA table_info(${store})`)
         .all() as Array<{ name: string }>;
@@ -2129,6 +3240,21 @@ function readStorePayloads(
           state: string;
         }>
       ).map((row) => row.state);
+    case 'memory_review_candidates':
+      return readReviewPayloads(
+        db,
+        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_candidates`,
+      );
+    case 'memory_review_provenance':
+      return readReviewPayloads(
+        db,
+        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_provenance`,
+      );
+    case 'memory_review_suppressions':
+      return readReviewPayloads(
+        db,
+        `SELECT value, source, evidence_id, reason, reviewer, note FROM memory_review_suppressions`,
+      );
     case 'memory_deletion_hash_keys':
       return (
         db.prepare(`SELECT key_material FROM memory_deletion_hash_keys`).all() as Array<{
@@ -2136,6 +3262,24 @@ function readStorePayloads(
         }>
       ).map((row) => row.key_material);
   }
+  return [];
+}
+
+function readReviewPayloads(db: Database.Database, sql: string): string[] {
+  return (
+    db.prepare(sql).all() as Array<{
+      value: string;
+      source: string;
+      evidence_id: string | null;
+      reason: string;
+      reviewer: string | null;
+      note: string | null;
+    }>
+  ).flatMap((row) =>
+    [row.value, row.source, row.evidence_id, row.reason, row.reviewer, row.note].filter(
+      (value): value is string => value !== null,
+    ),
+  );
 }
 
 function isDecryptableEncryptedPayload(
@@ -2160,6 +3304,10 @@ function countStoreRows(db: Database.Database, store: MemoryStoreName): number {
   ).count;
 }
 
+function encryptIfPlaintext(value: string, cipher: MemoryCipher): string {
+  return isDecryptableEncryptedPayload(value, cipher) ? value : cipher.encrypt(value);
+}
+
 function encryptPlaintextRows(
   db: Database.Database,
   cipher: MemoryCipher,
@@ -2180,47 +3328,86 @@ function encryptPlaintextRows(
     db.prepare(
       `UPDATE episodic_events SET summary = ?, details = ? WHERE id = ?`,
     ).run(
-      isDecryptableEncryptedPayload(row.summary, cipher)
-        ? row.summary
-        : cipher.encrypt(row.summary),
-      row.details === null || isDecryptableEncryptedPayload(row.details, cipher)
-        ? row.details
-        : cipher.encrypt(row.details),
+      encryptIfPlaintext(row.summary, cipher),
+      row.details === null ? null : encryptIfPlaintext(row.details, cipher),
       row.id,
     );
   }
   for (const row of db
     .prepare(`SELECT id, state FROM checkpoints`)
     .all() as Array<{ id: number; state: string }>) {
-    if (!isDecryptableEncryptedPayload(row.state, cipher)) {
-      db.prepare(`UPDATE checkpoints SET state = ? WHERE id = ?`).run(
-        cipher.encrypt(row.state),
+    db.prepare(`UPDATE checkpoints SET state = ? WHERE id = ?`).run(
+      encryptIfPlaintext(row.state, cipher),
+      row.id,
+    );
+  }
+  encryptReviewPayloadRows(db, cipher, 'memory_review_candidates', 'id');
+  encryptReviewPayloadRows(
+    db,
+    cipher,
+    'memory_review_provenance',
+    'target_store, memory_key',
+  );
+  encryptReviewPayloadRows(
+    db,
+    cipher,
+    'memory_review_suppressions',
+    'signature',
+  );
+  encryptDeletionHashKeys(db, cipher);
+}
+
+function encryptReviewPayloadRows(
+  db: Database.Database,
+  cipher: MemoryCipher,
+  table: 'memory_review_candidates' | 'memory_review_provenance' | 'memory_review_suppressions',
+  keyColumns: 'id' | 'signature' | 'target_store, memory_key',
+): void {
+  if (!tableExists(db, table)) return;
+  const rows = db
+    .prepare(`SELECT ${keyColumns}, ${MEMORY_REVIEW_PAYLOAD_COLUMNS.join(', ')} FROM ${table}`)
+    .all() as Array<Record<string, string | null>>;
+  for (const row of rows) {
+    const assignments = MEMORY_REVIEW_PAYLOAD_COLUMNS.map(
+      (column) => `${column} = ?`,
+    ).join(', ');
+    const where =
+      keyColumns === 'target_store, memory_key'
+        ? `target_store = ? AND memory_key = ?`
+        : `${keyColumns} = ?`;
+    const payloadValues = MEMORY_REVIEW_PAYLOAD_COLUMNS.map((column) => {
+      const value = row[column];
+      return value === null || value === undefined
+        ? null
+        : encryptIfPlaintext(value, cipher);
+    });
+    const keyValues: Array<string | null> =
+      keyColumns === 'target_store, memory_key'
+        ? [row.target_store ?? null, row.memory_key ?? null]
+        : [row[keyColumns] ?? null];
+    db.prepare(`UPDATE ${table} SET ${assignments} WHERE ${where}`).run(
+      ...payloadValues,
+      ...keyValues,
+    );
+  }
+}
+
+function encryptDeletionHashKeys(db: Database.Database, cipher: MemoryCipher): void {
+  if (!tableExists(db, 'memory_deletion_hash_keys')) return;
+  for (const row of db
+    .prepare(`SELECT id, key_material FROM memory_deletion_hash_keys`)
+    .all() as Array<{ id: string; key_material: string }>) {
+    if (!isDecryptableEncryptedPayload(row.key_material, cipher)) {
+      db.prepare(`UPDATE memory_deletion_hash_keys SET key_material = ? WHERE id = ?`).run(
+        cipher.encrypt(row.key_material),
         row.id,
       );
-    }
-  }
-  if (tableExists(db, 'memory_deletion_hash_keys')) {
-    for (const row of db
-      .prepare(`SELECT id, key_material FROM memory_deletion_hash_keys`)
-      .all() as Array<{ id: string; key_material: string }>) {
-      if (!isDecryptableEncryptedPayload(row.key_material, cipher)) {
-        db.prepare(`UPDATE memory_deletion_hash_keys SET key_material = ? WHERE id = ?`).run(
-          cipher.encrypt(row.key_material),
-          row.id,
-        );
-      }
     }
   }
 }
 
 function readMemorySchemaMetadata(db: Database.Database): MemorySchemaMetadata {
-  const stores = [
-    'working_memory',
-    'episodic_events',
-    'checkpoints',
-    'memory_deletion_guards',
-    'memory_deletion_hash_keys',
-  ];
+  const stores = MEMORY_STORES;
   const rows = db
     .prepare(
       `SELECT store, version FROM memory_schema_versions ORDER BY store ASC`,
@@ -2235,11 +3422,7 @@ function readMemorySchemaMetadata(db: Database.Database): MemorySchemaMetadata {
     stores: stores.map((store) => ({
       store,
       version: versionByStore.get(store) ?? CURRENT_MEMORY_SCHEMA_VERSION,
-      recordCount: (
-        db.prepare(`SELECT COUNT(*) AS count FROM ${store}`).get() as {
-          count: number;
-        }
-      ).count,
+      recordCount: countStoreRows(db, store),
     })),
   };
 }
@@ -2267,7 +3450,7 @@ function assertSupportedMemorySchema(db: Database.Database): void {
     }
   }
 
-  for (const store of ['working_memory', 'episodic_events', 'checkpoints']) {
+  for (const store of MEMORY_STORES) {
     if (!existingTables.has(store)) continue;
     const columnRows = db
       .prepare(`PRAGMA table_info(${store})`)
@@ -2688,7 +3871,61 @@ function keyPrefixCandidates(key: string): string[] {
   return Array.from(candidates);
 }
 
-function assertNotDeletionGuarded(db: Database.Database, key: string, serializedValue: string, encryption?: MemoryCipher): void {
+function assertMemoryCandidateNotDeletionGuarded(
+  db: Database.Database,
+  proposal: MemoryCandidateProposal,
+  encryption?: MemoryCipher,
+  options: { checkNeverStore?: boolean } = {},
+): void {
+  assertNotDeletionGuarded(
+    db,
+    proposal.key,
+    stringifyWorkingMemoryValue(proposal.key, proposal.value),
+    encryption,
+    options,
+  );
+  assertNotDeletionGuarded(
+    db,
+    proposal.key,
+    stringifyWorkingMemoryValue(proposal.key, {
+      value: proposal.value,
+      source: proposal.source,
+      evidenceId: proposal.evidenceId,
+      reason: proposal.reason,
+    }),
+    encryption,
+    options,
+  );
+}
+
+function reviewPayloadMatchesSelector(
+  key: string,
+  payload: {
+    value: unknown;
+    source: string;
+    evidenceId?: string | undefined;
+    reason: string;
+    reviewer?: string | undefined;
+    note?: string | undefined;
+  },
+  selector: NormalizedRightToForgetSelector,
+): boolean {
+  return (
+    workingEntryMatchesSelector(key, payload, selector) ||
+    workingEntryMatchesSelector(key, payload.value, selector)
+  );
+}
+
+function assertNotDeletionGuarded(
+  db: Database.Database,
+  key: string,
+  serializedValue: string,
+  encryption?: MemoryCipher,
+  options: { checkNeverStore?: boolean } = {},
+): void {
+  if (options.checkNeverStore !== false && hasNeverStoreSuppressionForKey(db, 'working', key, encryption)) {
+    throw new MemoryDeletionGuardError('Refusing to store memory because it matches a prior never-store review decision');
+  }
   const parsed = safeJsonParse(serializedValue);
   const text = `${key} ${typeof parsed === 'string' ? parsed : valueToSearchText(parsed)}`;
   const keyPrefix = key.includes(':') ? key.split(':', 1)[0] : undefined;
@@ -2812,6 +4049,30 @@ function hasDeletionGuard(db: Database.Database, scope: string, kind: string, va
     : guardHashCandidates(db, value, normalize, encryption);
   const stmt = db.prepare(`SELECT 1 FROM memory_deletion_guards WHERE guard_kind = ? AND value_hash = ? LIMIT 1`);
   return hashes.some(hash => Boolean(stmt.get(`${scope}:${kind}`, hash)));
+}
+
+function hasNeverStoreSuppressionForKey(
+  db: Database.Database,
+  targetStore: MemoryCandidateTargetStore,
+  key: string,
+  encryption?: MemoryCipher,
+): boolean {
+  const parts = ['never_store', targetStore, key];
+  const signatureCandidates = Array.from(new Set([
+    existingKeyedDeletionHash(db, stableStringify(parts), encryption),
+    stableMemorySignature(parts),
+  ].filter((signature): signature is string => typeof signature === 'string')));
+  return Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM memory_review_suppressions
+         WHERE suppression_reason = 'never_store'
+           AND target_store = ?
+           AND (memory_key = ? OR signature IN (${signatureCandidates.map(() => '?').join(', ')}))
+         LIMIT 1`,
+      )
+      .get(targetStore, key, ...signatureCandidates),
+  );
 }
 
 function hasAnyDeletionQueryGuard(db: Database.Database, scope: string, values: readonly string[], encryption?: MemoryCipher): boolean {
