@@ -5,6 +5,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -158,7 +159,22 @@ export function readStateWriteTransactionJournal(filePath: string): StateWriteTr
 }
 
 function pathsReferenceSameFile(left: string, right: string): boolean {
-  return resolve(left) === resolve(right);
+  if (resolve(left) === resolve(right)) {
+    return true;
+  }
+  try {
+    const leftStat = statSync(left);
+    const rightStat = statSync(right);
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+  } catch {
+    // Fall back to comparing the canonical parent directory when the target
+    // file itself does not exist yet.
+  }
+  try {
+    return join(realpathSync.native(dirname(left)), basename(left)) === join(realpathSync.native(dirname(right)), basename(right));
+  } catch {
+    return false;
+  }
 }
 
 function journalTempPathBelongsToTarget(tempPath: string, filePath: string): boolean {
@@ -186,8 +202,9 @@ function escapeRegExp(value: string): string {
 
 function cleanupStaleJournalTempFiles(filePath: string): void {
   const journalPath = stateWriteJournalPath(filePath);
+  const uuidPattern = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
   const journalTempPattern = new RegExp(
-    `^${escapeRegExp(basename(journalPath))}\\.tmp\\.[0-9]+\\.[0-9a-f-]{8,}$`,
+    `^${escapeRegExp(basename(journalPath))}\\.tmp\\.[0-9]+\\.${uuidPattern}$`,
   );
   let removed = false;
   try {
@@ -273,7 +290,7 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
     };
   }
 
-  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath) || journalPath === stateWriteJournalPath(filePath);
+  const targetMatches = pathsReferenceSameFile(journal.targetPath, filePath);
   if (targetMatches && !journalTempPathBelongsToTarget(journal.tempPath, filePath)) {
     const quarantinePath = quarantineFile(journalPath);
     return {

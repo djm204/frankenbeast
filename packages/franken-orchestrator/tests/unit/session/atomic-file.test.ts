@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -250,13 +250,47 @@ describe('atomic-file', () => {
       const dir = makeTmpDir('state-write-journal-temp-sibling-');
       const filePath = join(dir, 'state.json');
       const siblingPath = `${stateWriteJournalPath(filePath)}.tmp.sibling.json`;
-      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(filePath, '{"real":true}');
       writeFileSync(siblingPath, '{"real":true}');
       utimesSync(siblingPath, new Date('1970-01-01T00:00:00.000Z'), new Date('1970-01-01T00:00:00.000Z'));
 
       recoverStateWriteTransaction(filePath);
 
       expect(readFileSync(siblingPath, 'utf-8')).toBe('{"real":true}');
+    });
+
+    it('matches active journals by file identity across symlinked directories', () => {
+      const dir = makeTmpDir('state-write-journal-symlink-');
+      const realDir = join(dir, 'real');
+      const symlinkDir = join(dir, 'link');
+      mkdirSync(realDir);
+      symlinkSync(realDir, symlinkDir, 'dir');
+      const realFilePath = join(realDir, 'state.json');
+      const symlinkFilePath = join(symlinkDir, 'state.json');
+      const tempPath = `${symlinkFilePath}.tmp.live`;
+      writeFileSync(realFilePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(symlinkFilePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: realFilePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+        }),
+        'utf8',
+      );
+
+      const recovery = recoverStateWriteTransaction(symlinkFilePath);
+
+      expect(recovery).toMatchObject({
+        action: 'retained-active-journal',
+        tempPath,
+      });
+      expect(existsSync(tempPath)).toBe(true);
+      expect(existsSync(stateWriteJournalPath(symlinkFilePath))).toBe(true);
     });
 
     it('retains active journals so concurrent writers do not remove live temp files', () => {
