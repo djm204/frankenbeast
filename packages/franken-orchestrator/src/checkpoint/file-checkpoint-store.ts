@@ -95,6 +95,10 @@ function formatLockAge(ageMs: number | undefined): string {
   return `${Math.max(0, Math.round(ageMs))}ms old`;
 }
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function staleDiagnostic(
   lockPath: string,
   reason: string,
@@ -111,7 +115,7 @@ function staleDiagnostic(
     ownerPid,
     ownerAlive,
     reason,
-    unlockHint: `Safe unlock hint: ${ownerText}; the lock is ${formatLockAge(ageMs)}. Remove only this lock file with: rm -- ${JSON.stringify(lockPath)}`,
+    unlockHint: `Safe unlock hint: ${ownerText}; the lock is ${formatLockAge(ageMs)}. Remove only this lock file with: rm -- ${shellSingleQuote(lockPath)}`,
   };
 }
 
@@ -180,7 +184,7 @@ export function detectCheckpointLock(
     };
   }
 
-  if (recordedStart === '0' && (ageMs ?? 0) < LIVE_LOCK_AGE_CEILING_MS) {
+  if (ownerAlive && (recordedStart === '0' || currentStart === '0') && (ageMs ?? 0) < LIVE_LOCK_AGE_CEILING_MS) {
     return {
       lockPath,
       status: 'held',

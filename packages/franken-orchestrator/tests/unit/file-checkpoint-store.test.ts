@@ -322,11 +322,9 @@ describe('FileCheckpointStore', () => {
         reason: 'recorded owner process is no longer running',
       });
       expect(stale.unlockHint).toContain('Safe unlock hint');
-      expect(stale.unlockHint).toContain(`rm -- \"${filePath}.lock\"`);
+      expect(stale.unlockHint).toContain(`rm -- '${filePath}.lock'`);
 
-      const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf-8');
-      const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
-      writeFileSync(`${filePath}.lock`, `${process.pid}:${start}:0123456789abcdef`);
+      writeFileSync(`${filePath}.lock`, `${process.pid}:0:0123456789abcdef`);
       const live = detectCheckpointLock(filePath);
       expect(live).toMatchObject({
         status: 'held',
@@ -335,6 +333,23 @@ describe('FileCheckpointStore', () => {
         ownerAlive: true,
       });
       expect(live.unlockHint).toContain('Do not remove this lock');
+    });
+
+    it('shell-quotes stale lock removal hints without allowing command substitution', async () => {
+      const unsafeCheckpoint = join(tmpDir, "checkpoint-$(touch should-not-run)'x.log");
+      const deadPid: number = await new Promise((res, rej) => {
+        const child = execFile(process.execPath, ['-e', ''], (err: unknown) =>
+          err ? rej(err) : res(child.pid!),
+        );
+      });
+      writeFileSync(`${unsafeCheckpoint}.lock`, `${deadPid}:12345:deadbeefdeadbeef`);
+
+      const stale = detectCheckpointLock(unsafeCheckpoint);
+
+      expect(stale.safeToRemove).toBe(true);
+      expect(stale.unlockHint).toContain("rm -- '");
+      expect(stale.unlockHint).toContain("'\\''x.log.lock'");
+      expect(stale.unlockHint).not.toContain('rm -- "');
     });
 
     it('keeps malformed fresh locks inside the grace window and marks old malformed locks safe', () => {
