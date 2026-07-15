@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, symlinkSync, linkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { McpConfigSchema } from '@franken/types';
@@ -58,6 +58,20 @@ describe('SkillManager', () => {
     it('ignores directories without mcp.json', () => {
       mkdirSync(join(skillsDir, 'empty-dir'), { recursive: true });
       expect(manager.listInstalled()).toEqual([]);
+    });
+
+    it('skips skills with unsafe MCP files instead of breaking the entire list', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      });
+      mkdirSync(join(skillsDir, 'poisoned'), { recursive: true });
+      symlinkSync(join(tempDir, 'outside-mcp.json'), join(skillsDir, 'poisoned', 'mcp.json'));
+
+      expect(manager.listInstalled().map((skill) => skill.name)).toEqual(['github']);
     });
   });
 
@@ -362,8 +376,12 @@ describe('SkillManager', () => {
       expect(() => manager.remove('../../tmp')).toThrow('Invalid skill name');
     });
 
-    it('rejects names with slashes', () => {
-      expect(() => manager.enable('foo/bar')).toThrow('Invalid skill name');
+    it('rejects names with slashes', async () => {
+      await expect(manager.installCustom('foo/bar', { command: 'node' })).rejects.toThrow(/Invalid skill name/);
+    });
+
+    it('rejects absolute path names', async () => {
+      await expect(manager.installCustom(join(tempDir, 'outside-skill'), { command: 'node' })).rejects.toThrow(/Invalid skill name/);
     });
 
     it('rejects names with dots only', () => {
@@ -377,6 +395,164 @@ describe('SkillManager', () => {
 
     it('exists returns false for invalid names without throwing', () => {
       expect(manager.exists('../etc')).toBe(false);
+    });
+
+    it('rejects installing into a symlinked skill directory without writing outside the skills root', async () => {
+      const outsideDir = join(tempDir, 'other-profile-skill');
+      mkdirSync(outsideDir, { recursive: true });
+      symlinkSync(outsideDir, join(skillsDir, 'escaped'), 'dir');
+
+      await expect(manager.installCustom('escaped', { command: 'node' }))
+        .rejects.toThrow(/Unsafe skill path/);
+
+      expect(existsSync(join(outsideDir, 'mcp.json'))).toBe(false);
+    });
+
+    it('rejects catalog installs when mcp.json is a symlink outside the skill directory', async () => {
+      const outsideFile = join(tempDir, 'other-profile-mcp.json');
+      mkdirSync(join(skillsDir, 'github'), { recursive: true });
+      symlinkSync(outsideFile, join(skillsDir, 'github', 'mcp.json'));
+
+      await expect(manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      })).rejects.toThrow(/Unsafe skill path/);
+
+      expect(existsSync(outsideFile)).toBe(false);
+    });
+
+    it('rejects context writes when context.md is a symlink outside the skill directory', async () => {
+      await manager.installCustom('github', { command: 'node' });
+      const outsideFile = join(tempDir, 'outside-context.md');
+      symlinkSync(outsideFile, join(skillsDir, 'github', 'context.md'));
+
+      expect(() => manager.writeContext('github', '# escaped')).toThrow(/Unsafe skill path/);
+      expect(existsSync(outsideFile)).toBe(false);
+    });
+
+    it('rejects installing when the target skill path is an existing file', async () => {
+      writeFileSync(join(skillsDir, 'file-skill'), 'not a directory');
+
+      await expect(manager.installCustom('file-skill', { command: 'node' }))
+        .rejects.toThrow(/not a directory/);
+    });
+
+    it('replaces hard-linked skill files without truncating the linked target', async () => {
+      const outsideFile = join(tempDir, 'other-profile-mcp.json');
+      writeFileSync(outsideFile, 'do not overwrite');
+      mkdirSync(join(skillsDir, 'github'), { recursive: true });
+      linkSync(outsideFile, join(skillsDir, 'github', 'mcp.json'));
+
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'npx' },
+        authFields: [],
+      });
+
+      expect(readFileSync(outsideFile, 'utf-8')).toBe('do not overwrite');
+      expect(manager.exists('github')).toBe(true);
+    });
+
+    it('rejects stale unsafe tools manifests before changing mcp.json', async () => {
+      await manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'old-server' },
+        authFields: [],
+      });
+      const before = readFileSync(join(skillsDir, 'github', 'mcp.json'), 'utf-8');
+      symlinkSync(join(tempDir, 'outside-tools.json'), join(skillsDir, 'github', 'tools.json'));
+
+      await expect(manager.install({
+        name: 'github',
+        description: 'GH',
+        provider: 'cli',
+        installConfig: { command: 'new-server' },
+        authFields: [],
+      })).rejects.toThrow(/Unsafe skill path/);
+
+      expect(readFileSync(join(skillsDir, 'github', 'mcp.json'), 'utf-8')).toBe(before);
+    });
+
+    it('removes a symlinked skill entry without deleting its target', () => {
+      const outsideDir = join(tempDir, 'other-profile-skill');
+      mkdirSync(outsideDir, { recursive: true });
+      symlinkSync(outsideDir, join(skillsDir, 'escaped'), 'dir');
+
+      expect(() => manager.remove('escaped')).not.toThrow();
+      expect(existsSync(join(skillsDir, 'escaped'))).toBe(false);
+      expect(existsSync(outsideDir)).toBe(true);
+    });
+
+    it('resolves relative skills roots once at construction time', async () => {
+      const originalCwd = process.cwd();
+      const otherCwd = mkdtempSync(join(tempDir, 'other-cwd-'));
+      try {
+        process.chdir(tempDir);
+        const relativeManager = new SkillManager('relative-skills', new Set());
+        process.chdir(otherCwd);
+
+        await relativeManager.installCustom('github', { command: 'node' });
+
+        expect(existsSync(join(tempDir, 'relative-skills', 'github', 'mcp.json'))).toBe(true);
+        expect(existsSync(join(otherCwd, 'relative-skills', 'github', 'mcp.json'))).toBe(false);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+
+    it('recreates a missing skills root before installing', async () => {
+      rmSync(skillsDir, { recursive: true, force: true });
+
+      await manager.installCustom('recreated-root', { command: 'node' });
+
+      expect(existsSync(join(skillsDir, 'recreated-root', 'mcp.json'))).toBe(true);
+    });
+
+    it('rejects installs if the skills root is replaced with a symlink before directory creation', async () => {
+      const outsideRoot = join(tempDir, 'outside-root');
+      mkdirSync(outsideRoot, { recursive: true });
+      rmSync(skillsDir, { recursive: true, force: true });
+      symlinkSync(outsideRoot, skillsDir, 'dir');
+
+      await expect(manager.installCustom('escaped-root', { command: 'node' }))
+        .rejects.toThrow(/Unsafe skill path/);
+
+      expect(existsSync(join(outsideRoot, 'escaped-root'))).toBe(false);
+    });
+
+    it('rejects recreating a missing skills root after a symlinked parent is repointed', async () => {
+      const trustedParent = join(tempDir, 'trusted-parent');
+      const attackerParent = join(tempDir, 'attacker-parent');
+      const parentLink = join(tempDir, 'parent-link');
+      mkdirSync(trustedParent, { recursive: true });
+      mkdirSync(attackerParent, { recursive: true });
+      symlinkSync(trustedParent, parentLink, 'dir');
+      const symlinkParentManager = new SkillManager(join(parentLink, 'skills'), new Set());
+
+      rmSync(join(trustedParent, 'skills'), { recursive: true, force: true });
+      rmSync(parentLink, { force: true });
+      symlinkSync(attackerParent, parentLink, 'dir');
+
+      await expect(symlinkParentManager.installCustom('escaped-root', { command: 'node' }))
+        .rejects.toThrow(/Unsafe skill path/);
+      expect(existsSync(join(attackerParent, 'skills', 'escaped-root'))).toBe(false);
+    });
+
+    it('rejects recursive removal if the skills root was replaced with a symlink', () => {
+      const outsideRoot = join(tempDir, 'outside-root');
+      mkdirSync(join(outsideRoot, 'github'), { recursive: true });
+      rmSync(skillsDir, { recursive: true, force: true });
+      symlinkSync(outsideRoot, skillsDir, 'dir');
+
+      expect(() => manager.remove('github')).toThrow(/Unsafe skill path/);
+      expect(existsSync(join(outsideRoot, 'github'))).toBe(true);
     });
   });
 });
