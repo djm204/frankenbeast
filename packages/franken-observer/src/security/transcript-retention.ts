@@ -85,6 +85,7 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   private readonly now: () => number
   private readonly retained = new Map<string, number>()
   private readonly expiredTraceIds = new Set<string>()
+  private readonly deleteFailedTraceIds = new Set<string>()
 
   constructor(options: TranscriptRetentionAdapterOptions) {
     this.inner = options.adapter
@@ -157,25 +158,26 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
   }
 
   async cleanupExpired(): Promise<string[]> {
-    const expired: string[] = []
+    const expired = new Set<string>()
     const now = this.now()
     for (const [traceId, expiresAt] of this.retained.entries()) {
       if (expiresAt > now) continue
-      expired.push(traceId)
+      expired.add(traceId)
       await this.markExpired(traceId)
     }
 
     for (const traceId of await this.inner.listTraceIds()) {
-      if (this.expiredTraceIds.has(traceId)) continue
+      if (expired.has(traceId)) continue
+      if (this.expiredTraceIds.has(traceId) && !this.deleteFailedTraceIds.has(traceId)) continue
       const trace = await this.inner.queryByTraceId(traceId)
       if (!trace) continue
       if (trace.endedAt === undefined && this.retained.has(traceId)) continue
       if (!this.isExpired(trace)) continue
-      expired.push(traceId)
+      expired.add(traceId)
       await this.markExpired(traceId)
     }
 
-    return expired
+    return [...expired]
   }
 
   private async fallbackTraceSummaries(): Promise<TraceSummary[]> {
@@ -211,8 +213,10 @@ export class TranscriptRetentionAdapter implements ExportAdapter {
     this.expiredTraceIds.add(traceId)
     try {
       await deleteTraceFromAdapter(this.inner, traceId)
+      this.deleteFailedTraceIds.delete(traceId)
     } catch (error) {
-      console.warn(`[TranscriptRetentionAdapter] Failed to delete expired trace ${traceId}; keeping it hidden`, error)
+      this.deleteFailedTraceIds.add(traceId)
+      console.warn?.(`[TranscriptRetentionAdapter] Failed to delete expired trace ${traceId}:`, error)
     }
   }
 }
@@ -241,7 +245,7 @@ export function describeTranscriptRetentionPolicy(
   const resolved = resolveTranscriptRetentionPolicy(policy)
   return Object.freeze({
     ...resolved,
-    storesRawTranscriptContent: resolved.mode === 'raw' || resolved.redactionLevel === 'none',
+    storesRawTranscriptContent: resolved.mode !== 'disabled' && (resolved.mode === 'raw' || resolved.redactionLevel === 'none'),
     ...(resolved.ttlMs > 0 ? { expiresAt: now() + resolved.ttlMs } : {}),
   })
 }
@@ -338,11 +342,18 @@ function redactNestedTranscriptValues(
   const retained: Record<string, unknown> = {}
   seen.set(value, retained)
   for (const [key, nestedValue] of Object.entries(value)) {
-    const field = classifyTranscriptField(key)
+    const field = classifyContextualTranscriptField(value, key)
     if (field && !policy.retainedFields[field]) continue
     setRecordValue(retained, key, field ? redactFieldValue(nestedValue, field, policy, seen) : redactNestedTranscriptValues(nestedValue, policy, seen))
   }
   return retained
+}
+
+function classifyContextualTranscriptField(record: Record<string, unknown>, key: string): TranscriptField | undefined {
+  const recordType = typeof record['type'] === 'string' ? record['type'].replace(/[_-]/g, '').toLowerCase() : ''
+  const recordRole = typeof record['role'] === 'string' ? record['role'].replace(/[_-]/g, '').toLowerCase() : ''
+  if ((recordType === 'toolresult' || recordRole === 'tool') && key === 'content') return 'toolOutputs'
+  return classifyTranscriptField(key)
 }
 
 function classifyTranscriptField(key: string): TranscriptField | undefined {

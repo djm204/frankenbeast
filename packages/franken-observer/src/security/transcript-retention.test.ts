@@ -3,7 +3,7 @@ import type { Span, Trace } from '../core/types.js'
 import { BatchAdapter } from '../adapters/batch/BatchAdapter.js'
 import { MultiAdapter } from '../adapters/multi/MultiAdapter.js'
 import { InMemoryAdapter } from '../export/InMemoryAdapter.js'
-import type { ExportAdapter, TraceSummary } from '../export/ExportAdapter.js'
+import type { ExportAdapter } from '../export/ExportAdapter.js'
 import {
   TranscriptRetentionAdapter,
   applyRetentionPolicy,
@@ -76,6 +76,29 @@ class ThrowingDeleteAdapter extends NonDeletingAdapter {
   }
 }
 
+class FailingOnceDeleteAdapter implements ExportAdapter {
+  private readonly traces = new Map<string, Trace>()
+  deleteAttempts = 0
+
+  async flush(trace: Trace): Promise<void> {
+    this.traces.set(trace.id, trace)
+  }
+
+  async queryByTraceId(traceId: string): Promise<Trace | null> {
+    return this.traces.get(traceId) ?? null
+  }
+
+  async listTraceIds(): Promise<string[]> {
+    return [...this.traces.keys()]
+  }
+
+  async deleteTrace(traceId: string): Promise<void> {
+    this.deleteAttempts += 1
+    if (this.deleteAttempts === 1) throw new Error('transient delete failure')
+    this.traces.delete(traceId)
+  }
+}
+
 class SlowFlushingAdapter implements ExportAdapter {
   private readonly inner = new InMemoryAdapter()
   private releaseFlush: (() => void) | null = null
@@ -98,10 +121,6 @@ class SlowFlushingAdapter implements ExportAdapter {
 
   listTraceIds(): Promise<string[]> {
     return this.inner.listTraceIds()
-  }
-
-  listTraceSummaries(): Promise<TraceSummary[]> {
-    return this.inner.listTraceSummaries()
   }
 
   deleteTrace(traceId: string): Promise<void> {
@@ -135,6 +154,12 @@ describe('transcript retention controls', () => {
 
     expect(await inner.listTraceIds()).toEqual([])
     expect(await adapter.listTraceIds()).toEqual([])
+  })
+
+  it('does not report raw transcript storage when retention is disabled', () => {
+    const report = describeTranscriptRetentionPolicy({ mode: 'disabled', redactionLevel: 'none' })
+
+    expect(report.storesRawTranscriptContent).toBe(false)
   })
 
   it('hides pre-existing backend traces and summaries when retention is disabled', async () => {
@@ -450,10 +475,31 @@ describe('transcript retention controls', () => {
     await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
     now = 16
 
-    await expect(adapter.cleanupExpired()).resolves.toEqual(['trace-1'])
+    expect(await adapter.cleanupExpired()).toEqual(['trace-1'])
     expect(await adapter.listTraceIds()).toEqual([])
     expect(await adapter.queryByTraceId('trace-1')).toBeNull()
-    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(
+      '[TranscriptRetentionAdapter] Failed to delete expired trace trace-1:',
+      expect.any(Error),
+    )
+    warn.mockRestore()
+  })
+
+  it('retries transient backend delete failures on later cleanup passes', async () => {
+    let now = 10
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const inner = new FailingOnceDeleteAdapter()
+    const adapter = new TranscriptRetentionAdapter({ adapter: inner, ttlMs: 5, now: () => now })
+
+    await adapter.flush(makeTrace({ startedAt: 8, endedAt: 10 }))
+    now = 16
+
+    expect(await adapter.cleanupExpired()).toEqual(['trace-1'])
+    expect(await adapter.queryByTraceId('trace-1')).toBeNull()
+    expect(await inner.listTraceIds()).toEqual(['trace-1'])
+    expect(await adapter.cleanupExpired()).toEqual(['trace-1'])
+    expect(await inner.listTraceIds()).toEqual([])
+    expect(inner.deleteAttempts).toBe(2)
     warn.mockRestore()
   })
 
@@ -472,7 +518,7 @@ describe('transcript retention controls', () => {
     expect(await throwing.listTraceIds()).toEqual(['trace-1'])
     expect(await deletable.listTraceIds()).toEqual([])
     expect(await adapter.listTraceIds()).toEqual([])
-    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
 
@@ -623,10 +669,10 @@ describe('transcript retention controls', () => {
     const retained = applyRetentionPolicy(makeTrace({
       spans: [makeSpan({
         metadata: {
-          prompt: {
+          llmPayload: {
             messages: [
               { role: 'user', content: 'private prompt' },
-              { role: 'tool', type: 'tool_result', content: 'private tool result' },
+              { role: 'tool', type: 'tool_result', content: 'private tool result', tool_call_id: 'call-1' },
             ],
           },
         },
@@ -637,11 +683,30 @@ describe('transcript retention controls', () => {
       retainedFields: { toolOutputs: false },
     })
 
-    expect(retained.spans[0].metadata['prompt']).toEqual({
+    expect(retained.spans[0].metadata['llmPayload']).toEqual({
       messages: [
         { role: 'user', content: 'private prompt' },
-        { role: 'tool', type: 'tool_result' },
+        { role: 'tool', type: 'tool_result', tool_call_id: 'call-1' },
       ],
+    })
+  })
+
+  it('honors tool output opt-outs for standalone raw tool result objects', () => {
+    const retained = applyRetentionPolicy(makeTrace({
+      spans: [makeSpan({
+        metadata: {
+          payload: { type: 'tool_result', content: 'private tool result', tool_call_id: 'call-1' },
+        },
+      })],
+    }), {
+      mode: 'raw',
+      redactionLevel: 'none',
+      retainedFields: { toolOutputs: false },
+    })
+
+    expect(retained.spans[0].metadata['payload']).toEqual({
+      type: 'tool_result',
+      tool_call_id: 'call-1',
     })
   })
 
