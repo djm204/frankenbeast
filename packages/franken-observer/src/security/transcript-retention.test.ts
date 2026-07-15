@@ -1138,12 +1138,16 @@ describe('transcript retention controls', () => {
         metadata: {
           messages: [{ role: 'user', text: 'private prompt' }, { role: 'assistant', text: 'private reply' }],
           opaque: { role: 'user', text: 'private opaque prompt' },
+          input_text: 'private provider prompt',
+          outputText: 'private provider completion',
         },
       })],
     }))
 
     expect(retained.spans[0].metadata['messages']).toBe('[REDACTED_TRANSCRIPT]')
     expect(retained.spans[0].metadata['opaque']).toEqual({ role: 'user', text: '[REDACTED_TRANSCRIPT]' })
+    expect(retained.spans[0].metadata['input_text']).toBe('[REDACTED_TRANSCRIPT]')
+    expect(retained.spans[0].metadata['outputText']).toBe('[REDACTED_TRANSCRIPT]')
   })
 
   it('honors tool input opt-outs for raw tool_use input blocks', () => {

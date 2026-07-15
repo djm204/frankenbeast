@@ -73,7 +73,7 @@ const DEFAULT_FIELDS: TranscriptRetainedFields = Object.freeze({
   summaries: true,
 })
 
-const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'additionalcontext', 'operatorcontext', 'context', 'goal', 'goals', 'transcript', 'transcripts', 'completion', 'completions', 'generation', 'generations', 'inlinedata'])
+const PROMPT_KEYS = new Set(['prompt', 'prompts', 'systemprompt', 'userprompt', 'developerprompt', 'instructions', 'additionalcontext', 'operatorcontext', 'context', 'goal', 'goals', 'transcript', 'transcripts', 'inputtext', 'outputtext', 'completion', 'completions', 'generation', 'generations', 'inlinedata'])
 const TOOL_INPUT_KEYS = new Set(['toolinput', 'toolinputs', 'arguments', 'args', 'parameters', 'params', 'stdin'])
 const TOOL_OUTPUT_KEYS = new Set(['tooloutput', 'tooloutputs', 'output', 'outputs', 'result', 'results', 'response', 'responses', 'stdout', 'stderr'])
 const ERROR_KEYS = new Set(['error', 'errors', 'exception', 'exceptions', 'stack', 'stacktrace', 'errormessage', 'stderr'])
