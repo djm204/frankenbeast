@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 
 const USAGE = 'Usage: node scripts/run-cron-script.mjs --name <job-name> -- <command> [args...]';
 const STDERR_TAIL_LIMIT = 4_096;
 const KILL_GRACE_MS = Number.parseInt(process.env.CRON_SCRIPT_KILL_GRACE_MS ?? '5000', 10);
+const PARENT_SIGNAL_KILL_GRACE_MS = Math.min(KILL_GRACE_MS, Number.parseInt(process.env.CRON_SCRIPT_PARENT_SIGNAL_KILL_GRACE_MS ?? '50', 10));
 const EXIT_STDERR_DRAIN_MS = Number.parseInt(process.env.CRON_SCRIPT_EXIT_STDERR_DRAIN_MS ?? '50', 10);
 
 function nowIso() {
@@ -56,22 +58,56 @@ function signalExitCode(signal) {
   return typeof signalNumber === 'number' ? 128 + signalNumber : 128;
 }
 
+function collectDescendantPids(rootPid) {
+  const childrenByParent = new Map();
+  try {
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) {
+        continue;
+      }
+      const pid = Number.parseInt(entry, 10);
+      const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
+      const endOfCommand = stat.lastIndexOf(')');
+      const fields = stat.slice(endOfCommand + 2).split(' ');
+      const parentPid = Number.parseInt(fields[1] ?? '', 10);
+      if (!Number.isFinite(parentPid)) {
+        continue;
+      }
+      const siblings = childrenByParent.get(parentPid) ?? [];
+      siblings.push(pid);
+      childrenByParent.set(parentPid, siblings);
+    }
+  } catch {
+    return [];
+  }
+
+  const descendants = [];
+  const stack = [...(childrenByParent.get(rootPid) ?? [])];
+  while (stack.length > 0) {
+    const pid = stack.pop();
+    if (!pid || descendants.includes(pid)) {
+      continue;
+    }
+    descendants.push(pid);
+    stack.push(...(childrenByParent.get(pid) ?? []));
+  }
+  return descendants;
+}
+
 function signalChildTree(child, signal) {
   if (!child.pid) {
     return;
   }
 
   if (process.platform !== 'win32') {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch (error) {
-      if (error?.code !== 'ESRCH') {
-        child.kill(signal);
-        return;
+    for (const pid of collectDescendantPids(child.pid).reverse()) {
+      try {
+        process.kill(pid, signal);
+      } catch (error) {
+        if (error?.code !== 'ESRCH') {
+          // Keep trying the rest of the tree even if one descendant refuses the signal.
+        }
       }
-      child.kill(signal);
-      return;
     }
   }
 
@@ -86,9 +122,14 @@ function redactSensitiveText(value) {
   const raw = typeof value === 'string' ? value : String(value ?? '');
   return raw
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]:[REDACTED]@')
-    .replace(/\b(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, '$1[REDACTED]')
-    .replace(/\b((?:authorization|token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)([^\s"']+)/gi, '$1[REDACTED]')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=([^\s"']+)/gi, '$1=[REDACTED]');
+    .replace(/\b(Authorization\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+(?:"[^"]*"|'[^']*'|[^\s"']+)/gi, '$1$2 [REDACTED]')
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)\\(["'])([^"'\s]+)\\\2/gi, '$1\\$2[REDACTED]\\$2')
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)(\\["'])(.*?)(\\["'])/gi, '$1$2[REDACTED]$4')
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)(["'])([^"'\s]+)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/\b((?:token|secret|password|passwd|credential|api[-_]?key|access[-_]?key)\s*[:=]\s*)([^\\\s"']+)/gi, '$1[REDACTED]')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=\\(["'])([^"'\s]+)\\\2/gi, '$1=\\$2[REDACTED]\\$2')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=(["'])([^"'\s]+)\2/gi, '$1=$2[REDACTED]$2')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|API[-_]?KEY|ACCESS[-_]?KEY)[A-Z0-9_]*)=([^\\\s"']+)/gi, '$1=[REDACTED]');
 }
 
 function redactCommand(command) {
@@ -175,6 +216,7 @@ async function runCronScript({ name, recoverable, command }) {
 
   return await new Promise((resolve) => {
     let child;
+    let exitDrainTimer;
 
     const signalHandlers = {
       SIGINT: () => handleParentSignal('SIGINT'),
@@ -192,6 +234,10 @@ async function runCronScript({ name, recoverable, command }) {
       }
       if (forceKillTimer) {
         clearTimeout(forceKillTimer);
+      }
+      if (exitDrainTimer) {
+        clearTimeout(exitDrainTimer);
+        exitDrainTimer = null;
       }
       resolve(exitCode);
     };
@@ -238,7 +284,7 @@ async function runCronScript({ name, recoverable, command }) {
           emitParentTerminationEnvelope();
           signalChildTree(child, 'SIGKILL');
           finish(parentTerminationExitCode);
-        }, KILL_GRACE_MS);
+        }, PARENT_SIGNAL_KILL_GRACE_MS);
       }
     }
 
@@ -310,10 +356,12 @@ async function runCronScript({ name, recoverable, command }) {
     };
 
     child.on('exit', (code, signal) => {
-      setTimeout(() => {
+      exitDrainTimer = setTimeout(() => {
+        exitDrainTimer = null;
         child.stderr?.destroy();
         finishChildResult(code, signal);
       }, EXIT_STDERR_DRAIN_MS);
+      exitDrainTimer.unref?.();
     });
 
     child.on('close', (code, signal) => {

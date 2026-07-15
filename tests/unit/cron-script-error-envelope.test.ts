@@ -16,6 +16,14 @@ function runCronScript(args: string[]) {
   });
 }
 
+function runCronScriptWithEnv(args: string[], env: NodeJS.ProcessEnv) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
+    cwd: ROOT,
+    env: { ...process.env, TZ: 'UTC', ...env },
+    encoding: 'utf8',
+  });
+}
+
 function parseEnvelopes(stderr: string) {
   return stderr
     .split('\n')
@@ -63,7 +71,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "process.stderr.write('API_KEY=stderr-secret Authorization: Bearer stderr-token'); process.exit(3)",
+      "process.stderr.write('API_KEY=stderr-secret QUOTED_TOKEN=\\\"quoted-value\\\" token=\\'single-quoted-value\\' Authorization: Basic basic-value Authorization: Bearer bearer-value'); process.exit(3)",
       '--',
       '--token',
       'super-secret-token',
@@ -77,12 +85,19 @@ describe('cron script error envelope runner', () => {
     expect(envelope.command).toContain('--api-key=[REDACTED]');
     expect(envelope.command).toContain('postgres://[REDACTED]:[REDACTED]@localhost:5432/db');
     expect(envelope.stderrTail).toContain('API_KEY=[REDACTED]');
-    expect(envelope.stderrTail).toContain('Authorization: [REDACTED]');
+    expect(envelope.stderrTail).toContain('QUOTED_TOKEN="[REDACTED]"');
+    expect(envelope.stderrTail).toContain("token='[REDACTED]'");
+    expect(envelope.stderrTail).toContain('Authorization: Basic [REDACTED]');
+    expect(envelope.stderrTail).toContain('Authorization: Bearer [REDACTED]');
     expect(JSON.stringify(envelope)).not.toContain('super-secret-token');
     expect(JSON.stringify(envelope)).not.toContain('abc123');
     expect(JSON.stringify(envelope)).not.toContain('db-password');
     expect(JSON.stringify(envelope)).not.toContain('stderr-secret');
     expect(JSON.stringify(envelope)).not.toContain('stderr-token');
+    expect(JSON.stringify(envelope)).not.toContain('quoted-value');
+    expect(JSON.stringify(envelope)).not.toContain('single-quoted-value');
+    expect(JSON.stringify(envelope)).not.toContain('basic-value');
+    expect(JSON.stringify(envelope)).not.toContain('bearer-value');
   });
 
   it('fails with an explicit envelope when the cron command is missing', () => {
@@ -193,7 +208,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'ignore', 'inherit'] }); process.exit(7)",
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] }).unref(); process.exit(7)",
     ]);
 
     expect(result.status).toBe(7);
@@ -204,6 +219,21 @@ describe('cron script error envelope runner', () => {
       exitCode: 7,
     });
     expect(envelope.durationMs).toBeLessThan(1_500);
+  });
+
+  it('does not keep successful cron runs alive for the full stderr drain window', () => {
+    const started = Date.now();
+    const result = runCronScriptWithEnv([
+      '--name',
+      'quick-success',
+      '--',
+      process.execPath,
+      '-e',
+      'process.exit(0)',
+    ], { CRON_SCRIPT_EXIT_STDERR_DRAIN_MS: '5000' });
+
+    expect(result.status).toBe(0);
+    expect(Date.now() - started).toBeLessThan(1_500);
   });
 
   it('keeps the cron child in the supervisor kill group', async () => {
@@ -246,7 +276,14 @@ describe('cron script error envelope runner', () => {
       const childPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
       process.kill(-supervisor.pid!, 'SIGTERM');
       await new Promise((resolve) => setTimeout(resolve, 100));
-      process.kill(-supervisor.pid!, 'SIGKILL');
+      try {
+        process.kill(-supervisor.pid!, 'SIGKILL');
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        if (code !== 'ESRCH') {
+          throw error;
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       let childAlive = true;
