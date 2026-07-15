@@ -67,6 +67,7 @@ function makeDeps(overrides: Partial<Parameters<typeof handleBeastCommand>[0]> =
 
 const baselineSigintListeners = process.listeners('SIGINT');
 const baselineSigtermListeners = process.listeners('SIGTERM');
+const baselineSighupListeners = process.listeners('SIGHUP');
 
 beforeEach(() => {
   for (const listener of process.listeners('SIGINT')) {
@@ -74,6 +75,9 @@ beforeEach(() => {
   }
   for (const listener of process.listeners('SIGTERM')) {
     if (!baselineSigtermListeners.includes(listener)) process.off('SIGTERM', listener as NodeJS.SignalsListener);
+  }
+  for (const listener of process.listeners('SIGHUP')) {
+    if (!baselineSighupListeners.includes(listener)) process.off('SIGHUP', listener as NodeJS.SignalsListener);
   }
   vi.clearAllMocks();
   vi.mocked(spawnSync).mockReturnValue({ status: 0, stderr: '' } as any);
@@ -236,6 +240,72 @@ describe('handleBeastCommand() spawn', () => {
         expect(mockServices.runs.kill).toHaveBeenCalledWith('run-1', expect.any(String));
         expect(mockServices.dispose).toHaveBeenCalledTimes(1);
         expect(exit).toHaveBeenCalledWith(130);
+      });
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
+  it('tracks a run created before start finishes so SIGINT can clean up pending spawns', async () => {
+    mockServices.catalog.getDefinition.mockReturnValue({
+      id: 'design-interview',
+      description: 'Design interview',
+      interviewPrompts: [],
+      configSchema: { parse: vi.fn(() => ({})) },
+    });
+    let resolveCreateRun: ((run: unknown) => void) | undefined;
+    mockServices.dispatch.createRun.mockImplementation(async (request: { onRunCreated?: (run: { id: string }) => void }) => {
+      request.onRunCreated?.({ id: 'run-1' });
+      return await new Promise((resolve) => {
+        resolveCreateRun = resolve;
+      });
+    });
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
+    });
+
+    try {
+      const command = handleBeastCommand(deps);
+      await vi.waitFor(() => expect(mockServices.dispatch.createRun).toHaveBeenCalled());
+      process.emit('SIGINT');
+      await vi.waitFor(() => {
+        expect(mockServices.runs.kill).toHaveBeenCalledWith('run-1', expect.any(String));
+        expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+        expect(exit).toHaveBeenCalledWith(130);
+      });
+      resolveCreateRun?.({ id: 'run-1', definitionId: 'design-interview', status: 'stopped', currentAttemptId: undefined });
+      await command;
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
+  it('forwards SIGHUP to a live direct spawn run before exiting with hangup status', async () => {
+    mockServices.catalog.getDefinition.mockReturnValue({
+      id: 'design-interview',
+      description: 'Design interview',
+      interviewPrompts: [],
+      configSchema: { parse: vi.fn(() => ({})) },
+    });
+    mockServices.dispatch.createRun.mockResolvedValue({
+      id: 'run-1',
+      definitionId: 'design-interview',
+      status: 'running',
+      currentAttemptId: 'attempt-1',
+    });
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const deps = makeDeps({
+      args: { subcommand: 'beasts', beastAction: 'spawn', beastTarget: 'design-interview' } as CliArgs,
+    });
+
+    try {
+      await handleBeastCommand(deps);
+      process.emit('SIGHUP');
+      await vi.waitFor(() => {
+        expect(mockServices.runs.kill).toHaveBeenCalledWith('run-1', expect.any(String));
+        expect(mockServices.dispose).toHaveBeenCalledTimes(1);
+        expect(exit).toHaveBeenCalledWith(129);
       });
     } finally {
       exit.mockRestore();

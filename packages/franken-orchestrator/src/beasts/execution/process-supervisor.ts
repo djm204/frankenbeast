@@ -130,10 +130,9 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       return;
     }
 
-    const timer = setTimeout(() => {
+    setTimeout(() => {
       this.sweepOrphanProcessGroup(pid, 'SIGKILL');
     }, delayMs);
-    timer.unref?.();
   }
 
   validateCwd(cwd: string | undefined): void {

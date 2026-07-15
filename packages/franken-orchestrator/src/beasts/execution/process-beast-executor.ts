@@ -274,11 +274,18 @@ function processStartTimeTicks(pid: number): string | undefined {
 function attemptOwnsProcessGroup(attempt: BeastRunAttempt): boolean {
   const expectedStartTime = attempt.executorMetadata?.processStartTimeTicks;
   const pid = attempt.pid;
-  return typeof pid === 'number'
-    && attempt.executorMetadata?.processGroupOwned === true
-    && attempt.executorMetadata?.processGroupLeaderPid === pid
-    && typeof expectedStartTime === 'string'
-    && processStartTimeTicks(pid) === expectedStartTime;
+  if (
+    typeof pid !== 'number'
+    || attempt.executorMetadata?.processGroupOwned !== true
+    || attempt.executorMetadata?.processGroupLeaderPid !== pid
+  ) {
+    return false;
+  }
+  if (typeof expectedStartTime !== 'string') {
+    return true;
+  }
+  const actualStartTime = processStartTimeTicks(pid);
+  return actualStartTime === undefined || actualStartTime === expectedStartTime;
 }
 
 function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnapshotOwner | undefined, rootDir: string): void {
@@ -333,6 +340,7 @@ function ensureSecureRunConfigDirectory(configDir: string, owner: RunConfigSnaps
 export class ProcessBeastExecutor implements BeastExecutor {
   private readonly exitPromises = new Map<string, { resolve: () => void }>();
   private readonly stoppingAttempts = new Set<string>();
+  private readonly pendingSpawnHandles = new Map<string, { pid: number }>();
   private readonly pendingConfigFilePaths = new Map<string, string>();
   private readonly attemptConfigFilePaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
@@ -437,6 +445,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       this.options.onRunStatusChange?.(run.id);
       throw error;
     }
+    this.pendingSpawnHandles.set(run.id, handle);
 
     const startedAt = new Date(wallClockNow()).toISOString();
     const processStartTime = processStartTimeTicks(handle.pid);
@@ -477,6 +486,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       }
       throw error;
     }
+    this.pendingSpawnHandles.delete(run.id);
 
     // Once an attempt owns the worktree, preserve it for PR/merge or debugging per ADR-028.
     // The pending allocation map is only for pre-attempt spawn failures.
@@ -539,6 +549,20 @@ export class ProcessBeastExecutor implements BeastExecutor {
       data: { runId: run.id, attemptId: attempt.id, stream: 'stdout', line: startLogLine, createdAt: startedAt },
     });
     return attempt;
+  }
+
+  async cleanupPendingRun(runId: string): Promise<boolean> {
+    const handle = this.pendingSpawnHandles.get(runId);
+    if (!handle) {
+      return false;
+    }
+    try {
+      await this.supervisor.kill(handle.pid);
+    } finally {
+      this.pendingSpawnHandles.delete(runId);
+      this.cleanupRunResources(runId);
+    }
+    return true;
   }
 
 

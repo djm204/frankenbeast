@@ -106,6 +106,11 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
   let keepServicesAlive = false;
   let liveRunId: string | undefined;
   let signalCleanupStarted = false;
+  const exitCodeForSignal = (signal: NodeJS.Signals): number => {
+    if (signal === 'SIGINT') return 130;
+    if (signal === 'SIGHUP') return 129;
+    return 143;
+  };
   const disposeForSignal = (signal: NodeJS.Signals): void => {
     if (signalCleanupStarted) {
       return;
@@ -113,6 +118,7 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
     signalCleanupStarted = true;
     process.off('SIGINT', onSigint);
     process.off('SIGTERM', onSigterm);
+    process.off('SIGHUP', onSighup);
     Promise.resolve(liveRunId ? services.runs.kill(liveRunId, actor) : undefined)
       .catch(() => undefined)
       .finally(() => {
@@ -122,14 +128,16 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
           if (ownsControl) {
             control?.dispose?.();
           }
-          process.exit(signal === 'SIGINT' ? 130 : 143);
+          process.exit(exitCodeForSignal(signal));
         }
       });
   };
   const onSigint = (): void => disposeForSignal('SIGINT');
   const onSigterm = (): void => disposeForSignal('SIGTERM');
+  const onSighup = (): void => disposeForSignal('SIGHUP');
   process.once('SIGINT', onSigint);
   process.once('SIGTERM', onSigterm);
+  process.once('SIGHUP', onSighup);
 
   try {
     switch (args.beastAction) {
