@@ -15,9 +15,14 @@ const MEMORY_BACKUP_TABLES = [
   'memory_deletion_hash_keys',
 ] as const;
 const JSON_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
-  working_memory: ['value'],
   episodic_events: ['details'],
   checkpoints: ['state'],
+};
+const ENCRYPTED_PAYLOAD_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
+  working_memory: ['value'],
+  episodic_events: ['summary', 'details'],
+  checkpoints: ['state'],
+  memory_deletion_hash_keys: ['key_material'],
 };
 const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   working_memory: ['key', 'value', 'updated_at'],
@@ -177,16 +182,23 @@ function countRows(db: Database.Database, table: string, tables: Set<string>): n
 function readEncryptedStores(db: Database.Database, tables: Set<string>): Set<string> {
   if (!tables.has('memory_encryption_status')) return new Set();
   const columns = readTableColumns(db, 'memory_encryption_status');
-  const missingColumns = ['store', 'encrypted'].filter((column) => !columns.has(column));
+  const missingColumns = ['store', 'encrypted', 'verifier'].filter((column) => !columns.has(column));
   if (missingColumns.length > 0) {
     throw new Error(`Memory backup table memory_encryption_status is missing required column(s): ${missingColumns.join(', ')}`);
   }
   const rows = db
-    .prepare(`SELECT store, encrypted FROM memory_encryption_status WHERE encrypted = 1`)
-    .all() as Array<{ store: string; encrypted: number }>;
-  return new Set(rows.map((row) => row.store));
+    .prepare(`SELECT store, encrypted, verifier FROM memory_encryption_status WHERE encrypted = 1`)
+    .all() as Array<{ store: string; encrypted: number; verifier: string | null }>;
+  const stores = new Set<string>();
+  for (const row of rows) {
+    if (!row.verifier) {
+      throw new Error(`Encrypted memory store ${row.store} is missing verifier metadata`);
+    }
+    validateEncryptedPayload('memory_encryption_status', 'verifier', 0, row.verifier);
+    stores.add(row.store);
+  }
+  return stores;
 }
-
 function validateEncryptedPayload(table: string, column: string, rowid: number, value: string): void {
   const parts = value.slice(ENCRYPTED_MEMORY_PREFIX.length).split(':');
   if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
@@ -194,30 +206,49 @@ function validateEncryptedPayload(table: string, column: string, rowid: number, 
   }
 }
 
-function verifyJsonColumns(db: Database.Database, table: string, columns: Set<string>, encryptedStores: Set<string>): void {
-  const jsonColumns = JSON_COLUMNS_BY_TABLE[table] ?? [];
-  for (const column of jsonColumns) {
-    if (!columns.has(column)) continue;
-    const rows = db
-      .prepare(`SELECT rowid AS rowid, ${sqliteIdentifier(column)} AS value FROM ${sqliteIdentifier(table)} WHERE ${sqliteIdentifier(column)} IS NOT NULL`)
-      .all() as Array<{ rowid: number; value: unknown }>;
-    for (const row of rows) {
-      if (typeof row.value !== 'string') continue;
-      if (row.value.startsWith(ENCRYPTED_MEMORY_PREFIX)) {
-        if (!encryptedStores.has(table)) {
-          throw new Error(`Unexpected encrypted payload marker in plaintext ${table}.${column} row ${row.rowid}`);
-        }
-        validateEncryptedPayload(table, column, row.rowid, row.value);
-        continue;
+function verifyPayloadColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  encryptedStores: Set<string>,
+  options: { readonly requireJsonWhenPlaintext: boolean },
+): void {
+  const encryptedStore = encryptedStores.has(table);
+  const rows = db
+    .prepare(`SELECT rowid AS rowid, ${sqliteIdentifier(column)} AS value FROM ${sqliteIdentifier(table)} WHERE ${sqliteIdentifier(column)} IS NOT NULL`)
+    .iterate() as Iterable<{ rowid: number; value: unknown }>;
+  for (const row of rows) {
+    if (typeof row.value !== 'string') continue;
+    if (row.value.startsWith(ENCRYPTED_MEMORY_PREFIX)) {
+      if (!encryptedStore) {
+        throw new Error(`Unexpected encrypted payload marker in plaintext ${table}.${column} row ${row.rowid}`);
       }
-      if (table === 'working_memory' && column === 'value') continue;
-      try {
-        JSON.parse(row.value) as unknown;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Invalid JSON payload in ${table}.${column} row ${row.rowid}: ${message}`);
-      }
+      validateEncryptedPayload(table, column, row.rowid, row.value);
+      continue;
     }
+    if (encryptedStore) {
+      throw new Error(`Plaintext payload in encrypted memory store ${table}.${column} row ${row.rowid}`);
+    }
+    if (!options.requireJsonWhenPlaintext) continue;
+    try {
+      JSON.parse(row.value) as unknown;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid JSON payload in ${table}.${column} row ${row.rowid}: ${message}`);
+    }
+  }
+}
+
+function verifyPayloadColumns(db: Database.Database, table: string, columns: Set<string>, encryptedStores: Set<string>): void {
+  const payloadColumns = new Set([
+    ...(JSON_COLUMNS_BY_TABLE[table] ?? []),
+    ...(ENCRYPTED_PAYLOAD_COLUMNS_BY_TABLE[table] ?? []),
+  ]);
+  for (const column of payloadColumns) {
+    if (!columns.has(column)) continue;
+    verifyPayloadColumn(db, table, column, encryptedStores, {
+      requireJsonWhenPlaintext: (JSON_COLUMNS_BY_TABLE[table] ?? []).includes(column),
+    });
   }
 }
 
@@ -330,7 +361,7 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
           );
         }
       }
-      verifyJsonColumns(db, table, columns, encryptedStores);
+      verifyPayloadColumns(db, table, columns, encryptedStores);
     }
 
     const stores = readSchemaStores(db, tables);
