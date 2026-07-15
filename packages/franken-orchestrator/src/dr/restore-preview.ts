@@ -593,17 +593,19 @@ export function buildCrossFileStateConsistencyReport(
 
   for (const area of ['approvals', 'memory', 'cron'] as const) {
     AREA_ACCESSORS[area](manifest).forEach((record, index) => {
+      const recordIdForFinding =
+        typeof record.id === 'string' && record.id.trim().length > 0 ? record.id : '<missing>';
       for (const reference of taskReferencesFor(record, area, index)) {
         if (reference.malformed) {
           findings.push({
             code: 'malformed-task-reference',
             severity: 'blocker',
             area,
-            id: record.id,
+            id: recordIdForFinding,
             ...findingContext,
             jsonPath: reference.jsonPath,
             referenceField: reference.field,
-            message: `Record '${record.id}' in ${area} has a malformed task reference in value.${reference.field}.`,
+            message: `Record '${recordIdForFinding}' in ${area} has a malformed task reference in value.${reference.field}.`,
             recommendation:
               'Quarantine or repair this state record before restore so automation does not guess which task/card the cross-file record belongs to.',
           });
@@ -615,11 +617,11 @@ export function buildCrossFileStateConsistencyReport(
             code: 'dangling-task-reference',
             severity: 'blocker',
             area,
-            id: record.id,
+            id: recordIdForFinding,
             ...findingContext,
             jsonPath: reference.jsonPath,
             referenceField: reference.field,
-            message: `Record '${record.id}' in ${area} references a task that is missing from the manifest.`,
+            message: `Record '${recordIdForFinding}' in ${area} references a task that is missing from the manifest.`,
             recommendation:
               'Do not restore this manifest blindly. Restore, recreate, or explicitly skip the referenced task/card before applying dependent approval, memory, or cron state.',
           });

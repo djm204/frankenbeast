@@ -417,6 +417,53 @@ describe('restore preview conflict detector', () => {
     expect(JSON.stringify(report)).not.toContain('secret-token');
   });
 
+  it('keeps task-reference finding ids machine-readable when the owning record id is invalid', () => {
+    const report = buildCrossFileStateConsistencyReport(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: 'task-live', digest: 'task-digest' }],
+        approvals: [{ state: 'approved', value: { taskId: { id: 'task-live' } } }],
+        memory: [{ id: 42, value: { taskIds: ['task-missing'] } }],
+        cron: [],
+      } as unknown as RestorePreviewManifest,
+      { checkedAt: '2026-07-14T12:30:00.000Z' },
+    );
+
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'malformed-record-id',
+          area: 'approvals',
+          id: '<missing>',
+          jsonPath: '$.approvals[0].id',
+        }),
+        expect.objectContaining({
+          code: 'malformed-task-reference',
+          area: 'approvals',
+          id: '<missing>',
+          jsonPath: '$.approvals[0].value.taskId',
+          message: expect.stringContaining("Record '<missing>'"),
+        }),
+        expect.objectContaining({
+          code: 'malformed-record-id',
+          area: 'memory',
+          id: '<missing>',
+          jsonPath: '$.memory[0].id',
+        }),
+        expect.objectContaining({
+          code: 'dangling-task-reference',
+          area: 'memory',
+          id: '<missing>',
+          jsonPath: '$.memory[0].value.taskIds[0]',
+          message: expect.stringContaining("Record '<missing>'"),
+        }),
+      ]),
+    );
+    expect(report.findings.every((finding) => typeof finding.id === 'string' && finding.id.length > 0)).toBe(true);
+    expect(JSON.stringify(report)).not.toContain('undefined');
+  });
+
   it('includes cross-file consistency findings in restore dry-run JSON', () => {
     const report = buildRestoreDryRunReport(
       {
