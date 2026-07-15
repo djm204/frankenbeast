@@ -132,16 +132,17 @@ const PRIVACY_REDACTION_RULES: readonly PrivacyRedactionRule[] = [
   {
     kind: 'task-state',
     label: 'task-reference',
-    pattern: /\b(?:PR|issue|ticket)\s*#?\d+\b/gi,
+    pattern:
+      /\b(?:(?:PR|pull request|issue|ticket)\s*#?\d+|(?:commit|sha)\s+[0-9a-f]{7,40}|task\s+t_[0-9a-f]{6,})\b/gi,
     replacement: '[REDACTED_TASK_REFERENCE]',
   },
 ];
 
 const CUSTOMER_DATA_PATTERNS: readonly RegExp[] = [
-  /\bcustomer\b/i,
-  /\bclient\b/i,
-  /\baccount\b/i,
-  /\btenant\b/i,
+  /\bcustomer(?:\s+account)?\b/i,
+  /\btenant\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
+  /\bclient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)\b/,
+  /\baccount\s+[A-Z0-9][A-Za-z0-9_.:-]*\b/,
 ];
 
 const TASK_STATE_PATTERNS: readonly RegExp[] = [
@@ -1848,7 +1849,7 @@ function createPrivacyDecision(
 
 function extractCustomerSegments(text: string): string[] {
   const segments = text.match(
-    /\b(?:customer|client|tenant|account)(?:\s+[A-Za-z0-9_.:-]+){0,4}\b/gi,
+    /\b[Cc]ustomer(?:\s+account)?(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b|\b[Tt]enant\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b|\b[Cc]lient\s+(?:account|tenant|[A-Z0-9][A-Za-z0-9_.:-]*)(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b|\b[Aa]ccount\s+[A-Z0-9][A-Za-z0-9_.:-]*(?:\s+[A-Z0-9][A-Za-z0-9_.:-]*){0,3}\b/g,
   );
   return segments ?? [];
 }
@@ -1925,6 +1926,9 @@ function classifyLessonCandidate(text: string): LessonCandidateCategory {
 }
 
 function containsReusableLessonSignal(text: string): boolean {
+  if (/\b(?:merged|opened|closed|pushed|committed)\b/i.test(text)) {
+    return false;
+  }
   if (PREFERENCE_PATTERNS.some((pattern) => pattern.test(text))) {
     return true;
   }
@@ -1966,7 +1970,10 @@ function redactSensitiveText(
   redactions: readonly InternalLessonPrivacyRedaction[],
 ): string {
   const longestFirst = [...redactions].sort(
-    (left, right) => right.original.length - left.original.length,
+    (left, right) =>
+      Number(left.kind === 'customer-data') -
+        Number(right.kind === 'customer-data') ||
+      right.original.length - left.original.length,
   );
   let redacted = text;
   for (const redaction of longestFirst) {
