@@ -1,12 +1,17 @@
 import { readFile } from 'node:fs/promises';
 import Database from 'better-sqlite3';
-import { BrainSnapshotSchema, type BrainSnapshot, type EpisodicEvent } from '@franken/types';
+import { BrainSnapshotSchema, ExecutionStateSchema, type BrainSnapshot, type EpisodicEvent } from '@franken/types';
 
 const CURRENT_MEMORY_SCHEMA_VERSION = 1;
 const REQUIRED_BACKUP_TABLES = [
   'working_memory',
   'episodic_events',
   'checkpoints',
+] as const;
+const CURRENT_SCHEMA_REQUIRED_TABLES = [
+  ...REQUIRED_BACKUP_TABLES,
+  'memory_deletion_guards',
+  'memory_deletion_hash_keys',
 ] as const;
 const MEMORY_BACKUP_TABLES = [
   'memory_schema_versions',
@@ -33,6 +38,7 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   memory_deletion_hash_keys: ['id', 'key_material', 'created_at'],
 };
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
+const DELETION_HASH_KEY_ID = 'right-to-forget-hmac-v1';
 
 export interface SnapshotDiff<T = unknown> {
   readonly added: Record<string, T>;
@@ -200,9 +206,20 @@ function readEncryptedStores(db: Database.Database, tables: Set<string>): Set<st
   return stores;
 }
 function validateEncryptedPayload(table: string, column: string, rowid: number, value: string): void {
+  if (!value.startsWith(ENCRYPTED_MEMORY_PREFIX)) {
+    throw new Error(`Malformed encrypted payload in ${table}.${column} row ${rowid}: missing ${ENCRYPTED_MEMORY_PREFIX} marker`);
+  }
   const parts = value.slice(ENCRYPTED_MEMORY_PREFIX.length).split(':');
   if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
     throw new Error(`Malformed encrypted payload in ${table}.${column} row ${rowid}`);
+  }
+}
+
+function verifyCheckpointStateShape(rowid: number, value: string): void {
+  const parsed = JSON.parse(value) as unknown;
+  const result = ExecutionStateSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(`Invalid checkpoint state in checkpoints.state row ${rowid}: ${result.error.issues.map((issue) => issue.path.join('.') + ' ' + issue.message).join('; ')}`);
   }
 }
 
@@ -218,7 +235,9 @@ function verifyPayloadColumn(
     .prepare(`SELECT rowid AS rowid, ${sqliteIdentifier(column)} AS value FROM ${sqliteIdentifier(table)} WHERE ${sqliteIdentifier(column)} IS NOT NULL`)
     .iterate() as Iterable<{ rowid: number; value: unknown }>;
   for (const row of rows) {
-    if (typeof row.value !== 'string') continue;
+    if (typeof row.value !== 'string') {
+      throw new Error(`Non-text payload in ${table}.${column} row ${row.rowid}`);
+    }
     if (row.value.startsWith(ENCRYPTED_MEMORY_PREFIX)) {
       if (!encryptedStore) {
         throw new Error(`Unexpected encrypted payload marker in plaintext ${table}.${column} row ${row.rowid}`);
@@ -231,7 +250,11 @@ function verifyPayloadColumn(
     }
     if (!options.requireJsonWhenPlaintext) continue;
     try {
-      JSON.parse(row.value) as unknown;
+      if (table === 'checkpoints' && column === 'state') {
+        verifyCheckpointStateShape(row.rowid, row.value);
+      } else {
+        JSON.parse(row.value) as unknown;
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Invalid JSON payload in ${table}.${column} row ${row.rowid}: ${message}`);
@@ -257,6 +280,17 @@ function verifyRequiredColumns(table: string, columns: Set<string>): void {
   const missingColumns = requiredColumns.filter((column) => !columns.has(column));
   if (missingColumns.length > 0) {
     throw new Error(`Memory backup table ${table} is missing required column(s): ${missingColumns.join(', ')}`);
+  }
+}
+
+function verifyDeletionGuardKeyLink(db: Database.Database, tables: Set<string>): void {
+  const deletionGuards = countRows(db, 'memory_deletion_guards', tables);
+  if (deletionGuards === 0) return;
+  const row = db
+    .prepare(`SELECT id FROM memory_deletion_hash_keys WHERE id = ? LIMIT 1`)
+    .get(DELETION_HASH_KEY_ID) as { id: string } | undefined;
+  if (!row) {
+    throw new Error(`Memory backup has deletion guards but is missing canonical deletion hash key ${DELETION_HASH_KEY_ID}`);
   }
 }
 
@@ -345,6 +379,12 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
     if (missingTables.length > 0) {
       throw new Error(`Memory backup is missing required table(s): ${missingTables.join(', ')}`);
     }
+    if (tables.has('memory_schema_versions')) {
+      const missingCurrentTables = CURRENT_SCHEMA_REQUIRED_TABLES.filter((table) => !tables.has(table));
+      if (missingCurrentTables.length > 0) {
+        throw new Error(`Current memory backup is missing required table(s): ${missingCurrentTables.join(', ')}`);
+      }
+    }
 
     const encryptedStores = readEncryptedStores(db, tables);
     for (const table of MEMORY_BACKUP_TABLES) {
@@ -363,6 +403,7 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       }
       verifyPayloadColumns(db, table, columns, encryptedStores);
     }
+    verifyDeletionGuardKeyLink(db, tables);
 
     const stores = readSchemaStores(db, tables);
     return {

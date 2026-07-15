@@ -38,6 +38,8 @@ const baseSnapshot: BrainSnapshot = {
   },
 };
 
+const VALID_CHECKPOINT_STATE_SQL = '{"runId":"run-1","phase":"execute","step":1,"context":{},"timestamp":"2026-07-11T00:00:02.000Z"}';
+
 describe('memory snapshot-diff CLI args', () => {
   it('parses the memory snapshot-diff command and snapshot paths', () => {
     const args = parseArgs(['memory', 'snapshot-diff', 'before.json', 'after.json']);
@@ -220,7 +222,7 @@ describe('handleMemoryCommand', () => {
       CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
       INSERT INTO working_memory (key, value, updated_at) VALUES ('legacy', 'plaintext', '2026-07-11T00:00:00.000Z');
       INSERT INTO episodic_events (type, step, summary, details, created_at) VALUES ('observation', NULL, 'legacy event', '{"source":"legacy"}', '2026-07-11T00:00:01.000Z');
-      INSERT INTO checkpoints (state, created_at) VALUES ('{"ok":true}', '2026-07-11T00:00:02.000Z');
+      INSERT INTO checkpoints (state, created_at) VALUES ('${VALID_CHECKPOINT_STATE_SQL}', '2026-07-11T00:00:02.000Z');
     `);
     db.close();
 
@@ -247,7 +249,7 @@ describe('handleMemoryCommand', () => {
       CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
       CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
       INSERT INTO episodic_events (type, step, summary, details, created_at) VALUES ('observation', NULL, 'bad marker', 'enc:v1:not-really-json', '2026-07-11T00:00:01.000Z');
-      INSERT INTO checkpoints (state, created_at) VALUES ('{"ok":true}', '2026-07-11T00:00:02.000Z');
+      INSERT INTO checkpoints (state, created_at) VALUES ('${VALID_CHECKPOINT_STATE_SQL}', '2026-07-11T00:00:02.000Z');
     `);
     db.close();
 
@@ -328,7 +330,7 @@ describe('handleMemoryCommand', () => {
       CREATE TABLE memory_encryption_status (store TEXT PRIMARY KEY, encrypted INTEGER NOT NULL, algorithm TEXT, verifier TEXT, updated_at TEXT NOT NULL);
       INSERT INTO memory_encryption_status (store, encrypted, algorithm, verifier, updated_at) VALUES ('episodic_events', 1, 'aes-256-gcm', 'enc:v1:iv:tag:ciphertext', '2026-07-11T00:00:00.000Z');
       INSERT INTO episodic_events (type, step, summary, details, created_at) VALUES ('observation', NULL, 'plaintext summary', 'enc:v1:iv:tag:ciphertext', '2026-07-11T00:00:01.000Z');
-      INSERT INTO checkpoints (state, created_at) VALUES ('{"ok":true}', '2026-07-11T00:00:02.000Z');
+      INSERT INTO checkpoints (state, created_at) VALUES ('${VALID_CHECKPOINT_STATE_SQL}', '2026-07-11T00:00:02.000Z');
     `);
     db.close();
 
@@ -345,12 +347,95 @@ describe('handleMemoryCommand', () => {
       CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE memory_encryption_status (store TEXT PRIMARY KEY, encrypted INTEGER NOT NULL, algorithm TEXT, verifier TEXT, updated_at TEXT NOT NULL);
       INSERT INTO memory_encryption_status (store, encrypted, algorithm, verifier, updated_at) VALUES ('working_memory', 1, 'aes-256-gcm', 'enc:v1:iv:tag:ciphertext', '2026-07-11T00:00:00.000Z');
-      INSERT INTO working_memory (key, value, updated_at) VALUES ('mixed', '{"ok":true}', '2026-07-11T00:00:01.000Z');
-      INSERT INTO checkpoints (state, created_at) VALUES ('{"ok":true}', '2026-07-11T00:00:02.000Z');
+      INSERT INTO working_memory (key, value, updated_at) VALUES ('mixed', '${VALID_CHECKPOINT_STATE_SQL}', '2026-07-11T00:00:01.000Z');
+      INSERT INTO checkpoints (state, created_at) VALUES ('${VALID_CHECKPOINT_STATE_SQL}', '2026-07-11T00:00:02.000Z');
     `);
     db.close();
 
     expect(() => verifyMemoryBackup(backupPath)).toThrow(/Plaintext payload in encrypted memory store working_memory\.value/);
+  });
+
+  it('rejects non-text JSON payload columns', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-blob-payload-'));
+    const backupPath = join(dir, 'blob-payload.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO checkpoints (state, created_at) VALUES (X'010203', '2026-07-11T00:00:02.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Non-text payload in checkpoints\.state/);
+  });
+
+  it('rejects malformed encryption verifier markers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-verifier-marker-'));
+    const backupPath = join(dir, 'verifier-marker.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_encryption_status (store TEXT PRIMARY KEY, encrypted INTEGER NOT NULL, algorithm TEXT, verifier TEXT, updated_at TEXT NOT NULL);
+      INSERT INTO memory_encryption_status VALUES ('working_memory', 1, 'aes-256-gcm', 'xxxxxxxiv:tag:ciphertext', '2026-07-11T00:00:00.000Z');
+      INSERT INTO working_memory (key, value, updated_at) VALUES ('secret', 'enc:v1:iv:tag:ciphertext', '2026-07-11T00:00:01.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/missing enc:v1: marker/);
+  });
+
+  it('requires current-schema deletion guard tables when schema metadata exists', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-current-tables-'));
+    const backupPath = join(dir, 'current-missing-deletion.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
+      INSERT INTO memory_schema_versions VALUES ('working_memory', 1, '2026-07-11T00:00:00.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Current memory backup is missing required table\(s\): memory_deletion_guards, memory_deletion_hash_keys/);
+  });
+
+  it('validates checkpoint state shape', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-checkpoint-shape-'));
+    const backupPath = join(dir, 'bad-checkpoint.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO checkpoints (state, created_at) VALUES ('{"ok":true}', '2026-07-11T00:00:02.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Invalid checkpoint state/);
+  });
+
+  it('requires canonical deletion hash key when deletion guards exist', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-deletion-key-'));
+    const backupPath = join(dir, 'missing-canonical-key.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_schema_versions (store TEXT PRIMARY KEY, version INTEGER NOT NULL, migrated_at TEXT NOT NULL);
+      CREATE TABLE memory_deletion_guards (selector_hash TEXT NOT NULL, guard_kind TEXT NOT NULL, value_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE memory_deletion_hash_keys (id TEXT PRIMARY KEY, key_material TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO memory_schema_versions VALUES ('working_memory', 1, '2026-07-11T00:00:00.000Z');
+      INSERT INTO memory_deletion_guards VALUES ('selector', 'working-key', 'value', '2026-07-11T00:00:01.000Z');
+      INSERT INTO memory_deletion_hash_keys VALUES ('other-key', 'material', '2026-07-11T00:00:01.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/missing canonical deletion hash key right-to-forget-hmac-v1/);
   });
 
   it('fails explicitly when a backup is missing required memory tables', async () => {
