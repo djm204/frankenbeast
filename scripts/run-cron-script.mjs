@@ -106,6 +106,14 @@ function signalChildTree(child, signal) {
 
   const signaledPids = [];
   if (process.platform !== 'win32') {
+    try {
+      process.kill(-child.pid, signal);
+      signaledPids.push(-child.pid);
+    } catch (error) {
+      if (error?.code !== 'ESRCH') {
+        // Fall back to explicit descendant signaling below.
+      }
+    }
     for (const pid of collectDescendantPids(child.pid).reverse()) {
       try {
         process.kill(pid, signal);
@@ -118,8 +126,14 @@ function signalChildTree(child, signal) {
     }
   }
 
-  child.kill(signal);
-  signaledPids.push(child.pid);
+  try {
+    child.kill(signal);
+    signaledPids.push(child.pid);
+  } catch (error) {
+    if (error?.code !== 'ESRCH') {
+      throw error;
+    }
+  }
   return signaledPids;
 }
 
@@ -134,6 +148,10 @@ function isAuthScheme(value) {
 function redactSensitiveText(value) {
   const raw = typeof value === 'string' ? value : String(value ?? '');
   return raw
+    .replace(/(["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)["']\s*:\s*)(["'])(.*?)\2/gi, '$1$2[REDACTED]$2')
+    .replace(/(\\["'](?:token|secret|password|passwd|credential|authorization|api[-_]?key|access[-_]?key|private[-_]?key|ssh[-_]?key|gpg[-_]?key|signing[-_]?key|access_token)\\["']\s*:\s*\\["'])(.*?)(\\["'])/gi, '$1[REDACTED]$3')
+    .replace(/\b([A-Z0-9_]*(?:AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+([^\s"']+)/gi, '$1$2 [REDACTED]')
+    .replace(/\b([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|PRIVATE[-_]?KEY|SSH[-_]?KEY|GPG[-_]?KEY|SIGNING[-_]?KEY)[A-Z0-9_]*\s*[:=]\s*)([^\n\r,;]+)/gi, '$1[REDACTED]')
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, '$1[REDACTED]:[REDACTED]@')
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+)@/gi, '$1[REDACTED]@')
     .replace(/\b(Authorization\s*:\s*)(Bearer|Basic|Digest|ApiKey|Token)\s+(?:"[^"]*"|'[^']*'|[^\s"']+)/gi, '$1$2 [REDACTED]')
@@ -228,10 +246,12 @@ async function runCronScript({ name, recoverable, command }) {
   let parentTerminationMessage = null;
   let parentTerminationEnvelopeEmitted = false;
   let parentTerminationPids = [];
+  let parentTerminationProcessGroup = null;
 
   return await new Promise((resolve) => {
     let child;
     let exitDrainTimer;
+    let exitResult = null;
 
     const signalHandlers = {
       SIGINT: () => handleParentSignal('SIGINT'),
@@ -284,6 +304,30 @@ async function runCronScript({ name, recoverable, command }) {
       });
     };
 
+    const killTrackedParentTerminationProcesses = (signal) => {
+      if (parentTerminationProcessGroup && process.platform !== 'win32') {
+        try {
+          process.kill(-parentTerminationProcessGroup, signal);
+        } catch (error) {
+          if (error?.code !== 'ESRCH') {
+            // Keep trying the explicitly tracked processes below.
+          }
+        }
+      }
+      for (const pid of parentTerminationPids) {
+        try {
+          process.kill(pid, signal);
+        } catch (error) {
+          if (error?.code !== 'ESRCH') {
+            // Keep trying the rest of the previously tracked process tree.
+          }
+        }
+      }
+      if (child) {
+        signalChildTree(child, signal);
+      }
+    };
+
     function handleParentSignal(signal) {
       if (settled || parentTerminationExitCode !== null) {
         return;
@@ -293,20 +337,12 @@ async function runCronScript({ name, recoverable, command }) {
       parentTerminationSignal = signal;
       parentTerminationMessage = `cron wrapper received ${signal} and terminated child script`;
       if (child && !child.killed) {
+        parentTerminationProcessGroup = child.pid ?? null;
         parentTerminationPids = signalChildTree(child, signal);
         forceKillTimer = setTimeout(() => {
           forceKillTimer = null;
           emitParentTerminationEnvelope();
-          for (const pid of parentTerminationPids) {
-            try {
-              process.kill(pid, 'SIGKILL');
-            } catch (error) {
-              if (error?.code !== 'ESRCH') {
-                // Keep trying the rest of the previously tracked process tree.
-              }
-            }
-          }
-          signalChildTree(child, 'SIGKILL');
+          killTrackedParentTerminationProcesses('SIGKILL');
           finish(parentTerminationExitCode);
         }, KILL_GRACE_MS);
       }
@@ -316,41 +352,13 @@ async function runCronScript({ name, recoverable, command }) {
       cwd: process.cwd(),
       env: process.env,
       shell: process.platform === 'win32',
-      detached: false,
+      detached: process.platform !== 'win32',
       stdio: ['inherit', 'inherit', 'pipe'],
     });
 
     for (const signal of Object.keys(signalHandlers)) {
       process.on(signal, signalHandlers[signal]);
     }
-
-    child.stderr?.on('data', (chunk) => {
-      const text = chunk.toString('utf8');
-      stderrTail = appendTail(stderrTail, text);
-      stderrNeedsBoundary = !text.endsWith('\n');
-      if (!process.stderr.write(chunk)) {
-        child.stderr.pause();
-        process.stderr.once('drain', () => {
-          child.stderr.resume();
-        });
-      }
-    });
-
-    child.on('error', (error) => {
-      const durationMs = Date.now() - started;
-      const exitCode = spawnFailureExitCode(error);
-      emitEnvelope({
-        script: name,
-        command,
-        exitCode,
-        failureKind: 'spawn',
-        message: redactMessage(error.message, command),
-        stderrTail,
-        durationMs,
-        recoverable,
-      });
-      finish(exitCode);
-    });
 
     const finishChildResult = (code, signal) => {
       if (settled) {
@@ -359,8 +367,10 @@ async function runCronScript({ name, recoverable, command }) {
       if (parentTerminationExitCode !== null) {
         emitParentTerminationEnvelope();
         if (forceKillTimer) {
-          return;
+          clearTimeout(forceKillTimer);
+          forceKillTimer = null;
         }
+        killTrackedParentTerminationProcesses('SIGKILL');
         finish(parentTerminationExitCode);
         return;
       }
@@ -382,13 +392,54 @@ async function runCronScript({ name, recoverable, command }) {
       finish(exitCode);
     };
 
-    child.on('exit', (code, signal) => {
+    const scheduleExitDrainFinish = () => {
+      if (!exitResult) {
+        return;
+      }
+      if (exitDrainTimer) {
+        clearTimeout(exitDrainTimer);
+      }
       exitDrainTimer = setTimeout(() => {
         exitDrainTimer = null;
         child.stderr?.destroy();
-        finishChildResult(code, signal);
+        finishChildResult(exitResult.code, exitResult.signal);
       }, EXIT_STDERR_DRAIN_MS);
-      exitDrainTimer.unref?.();
+    };
+
+    child.stderr?.on('data', (chunk) => {
+      const text = chunk.toString('utf8');
+      stderrTail = appendTail(stderrTail, text);
+      stderrNeedsBoundary = !text.endsWith('\n');
+      process.stderr.write(chunk);
+      if (exitResult) {
+        scheduleExitDrainFinish();
+      }
+    });
+
+    child.on('error', (error) => {
+      const durationMs = Date.now() - started;
+      const exitCode = spawnFailureExitCode(error);
+      emitEnvelope({
+        script: name,
+        command,
+        exitCode,
+        failureKind: 'spawn',
+        message: redactMessage(error.message, command),
+        stderrTail,
+        durationMs,
+        recoverable,
+      });
+      finish(exitCode);
+    });
+
+    child.on('exit', (code, signal) => {
+      if (parentTerminationExitCode === null && code === 0 && !signal) {
+        child.stderr?.destroy();
+        finishChildResult(code, signal);
+        return;
+      }
+      exitResult = { code, signal };
+      scheduleExitDrainFinish();
     });
 
     child.on('close', (code, signal) => {

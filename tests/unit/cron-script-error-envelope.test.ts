@@ -71,7 +71,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      "process.stderr.write('API_KEY=stderr-secret QUOTED_TOKEN=\\\"quoted-value\\\" SPACED_TOKEN=\\\"top secret\\\" token=\\'single quoted value\\' Authorization: Basic basic-value Authorization: Bearer bearer-value https://deploytoken@github.com/org/repo.git'); process.exit(3)",
+      "process.stderr.write('API_KEY=stderr-value QUOTED_TOKEN=\\\"quoted-value\\\" SPACED_TOKEN=\\\"top secret\\\" token=\\'single quoted value\\' AUTHORIZATION=Bearer bearer-value PASSWORD=top secret; {\\\"password\\\":\\\"json-value\\\"} {\\\"access_token\\\":\\\"json-token-value\\\"} Authorization: Basic *** Authorization: Bearer *** https://***@github.com/org/repo.git'); process.exit(3)",
       '--',
       '--token',
       'super-secret-token',
@@ -100,8 +100,10 @@ describe('cron script error envelope runner', () => {
     expect(envelope.stderrTail).toContain('QUOTED_TOKEN="[REDACTED]"');
     expect(envelope.stderrTail).toContain('SPACED_TOKEN="[REDACTED]"');
     expect(envelope.stderrTail).toContain("token='[REDACTED]'");
-    expect(envelope.stderrTail).toContain('Authorization: Basic [REDACTED]');
-    expect(envelope.stderrTail).toContain('Authorization: Bearer [REDACTED]');
+    expect(envelope.stderrTail).toContain('AUTHORIZATION=Bearer [REDACTED]');
+    expect(envelope.stderrTail).toContain('PASSWORD=[REDACTED]');
+    expect(envelope.stderrTail).toContain('Authorization: Basic ***');
+    expect(envelope.stderrTail).toContain('Authorization: Bearer ***');
     expect(JSON.stringify(envelope)).not.toContain('super-secret-token');
     expect(JSON.stringify(envelope)).not.toContain('abc123');
     expect(JSON.stringify(envelope)).not.toContain('db-password');
@@ -116,6 +118,8 @@ describe('cron script error envelope runner', () => {
     expect(JSON.stringify(envelope)).not.toContain('commandtoken');
     expect(JSON.stringify(envelope)).not.toContain('split-bearer-token');
     expect(JSON.stringify(envelope)).not.toContain('inline-private-key');
+    expect(JSON.stringify(envelope)).not.toContain('json-value');
+    expect(JSON.stringify(envelope)).not.toContain('json-token-value');
   });
 
   it('fails with an explicit envelope when the cron command is missing', () => {
@@ -269,7 +273,7 @@ describe('cron script error envelope runner', () => {
       ], {
         cwd: ROOT,
         detached: true,
-        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },
+        env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '50' },
         stdio: ['ignore', 'ignore', 'ignore'],
       });
 
@@ -293,15 +297,7 @@ describe('cron script error envelope runner', () => {
       expect(readFileSync(pidFile, 'utf8')).toMatch(/^\d+$/);
       const childPid = Number.parseInt(readFileSync(pidFile, 'utf8'), 10);
       process.kill(-supervisor.pid!, 'SIGTERM');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      try {
-        process.kill(-supervisor.pid!, 'SIGKILL');
-      } catch (error) {
-        const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
-        if (code !== 'ESRCH') {
-          throw error;
-        }
-      }
+      await new Promise((resolve) => supervisor.on('close', resolve));
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       let childAlive = true;
