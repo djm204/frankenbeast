@@ -4,12 +4,12 @@ import { BrainSnapshotSchema, type BrainSnapshot, type EpisodicEvent } from '@fr
 
 const CURRENT_MEMORY_SCHEMA_VERSION = 1;
 const REQUIRED_BACKUP_TABLES = [
-  'memory_schema_versions',
   'working_memory',
   'episodic_events',
   'checkpoints',
 ] as const;
 const MEMORY_BACKUP_TABLES = [
+  'memory_schema_versions',
   ...REQUIRED_BACKUP_TABLES,
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
@@ -18,6 +18,14 @@ const JSON_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
   working_memory: ['value'],
   episodic_events: ['details'],
   checkpoints: ['state'],
+};
+const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
+  working_memory: ['key', 'value', 'updated_at'],
+  episodic_events: ['id', 'type', 'step', 'summary', 'details', 'created_at'],
+  checkpoints: ['id', 'state', 'created_at'],
+  memory_schema_versions: ['store', 'version', 'migrated_at'],
+  memory_deletion_guards: ['selector_hash', 'guard_kind', 'value_hash', 'created_at'],
+  memory_deletion_hash_keys: ['id', 'key_material', 'created_at'],
 };
 const ENCRYPTED_MEMORY_PREFIX = 'enc:v1:';
 
@@ -166,7 +174,27 @@ function countRows(db: Database.Database, table: string, tables: Set<string>): n
   return row.count;
 }
 
-function verifyJsonColumns(db: Database.Database, table: string, columns: Set<string>): void {
+function readEncryptedStores(db: Database.Database, tables: Set<string>): Set<string> {
+  if (!tables.has('memory_encryption_status')) return new Set();
+  const columns = readTableColumns(db, 'memory_encryption_status');
+  const missingColumns = ['store', 'encrypted'].filter((column) => !columns.has(column));
+  if (missingColumns.length > 0) {
+    throw new Error(`Memory backup table memory_encryption_status is missing required column(s): ${missingColumns.join(', ')}`);
+  }
+  const rows = db
+    .prepare(`SELECT store, encrypted FROM memory_encryption_status WHERE encrypted = 1`)
+    .all() as Array<{ store: string; encrypted: number }>;
+  return new Set(rows.map((row) => row.store));
+}
+
+function validateEncryptedPayload(table: string, column: string, rowid: number, value: string): void {
+  const parts = value.slice(ENCRYPTED_MEMORY_PREFIX.length).split(':');
+  if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
+    throw new Error(`Malformed encrypted payload in ${table}.${column} row ${rowid}`);
+  }
+}
+
+function verifyJsonColumns(db: Database.Database, table: string, columns: Set<string>, encryptedStores: Set<string>): void {
   const jsonColumns = JSON_COLUMNS_BY_TABLE[table] ?? [];
   for (const column of jsonColumns) {
     if (!columns.has(column)) continue;
@@ -174,7 +202,15 @@ function verifyJsonColumns(db: Database.Database, table: string, columns: Set<st
       .prepare(`SELECT rowid AS rowid, ${sqliteIdentifier(column)} AS value FROM ${sqliteIdentifier(table)} WHERE ${sqliteIdentifier(column)} IS NOT NULL`)
       .all() as Array<{ rowid: number; value: unknown }>;
     for (const row of rows) {
-      if (typeof row.value !== 'string' || row.value.startsWith(ENCRYPTED_MEMORY_PREFIX)) continue;
+      if (typeof row.value !== 'string') continue;
+      if (row.value.startsWith(ENCRYPTED_MEMORY_PREFIX)) {
+        if (!encryptedStores.has(table)) {
+          throw new Error(`Unexpected encrypted payload marker in plaintext ${table}.${column} row ${row.rowid}`);
+        }
+        validateEncryptedPayload(table, column, row.rowid, row.value);
+        continue;
+      }
+      if (table === 'working_memory' && column === 'value') continue;
       try {
         JSON.parse(row.value) as unknown;
       } catch (error) {
@@ -185,8 +221,22 @@ function verifyJsonColumns(db: Database.Database, table: string, columns: Set<st
   }
 }
 
+function verifyRequiredColumns(table: string, columns: Set<string>): void {
+  const requiredColumns = REQUIRED_COLUMNS_BY_TABLE[table] ?? [];
+  const missingColumns = requiredColumns.filter((column) => !columns.has(column));
+  if (missingColumns.length > 0) {
+    throw new Error(`Memory backup table ${table} is missing required column(s): ${missingColumns.join(', ')}`);
+  }
+}
+
 function readSchemaStores(db: Database.Database, tables: Set<string>): MemoryBackupVerificationReport['schema']['stores'] {
-  if (!tables.has('memory_schema_versions')) return [];
+  if (!tables.has('memory_schema_versions')) {
+    return REQUIRED_BACKUP_TABLES.map((store) => ({
+      store,
+      version: 0,
+      recordCount: countRows(db, store, tables),
+    }));
+  }
   return (db
     .prepare(`SELECT store, version FROM memory_schema_versions ORDER BY store ASC`)
     .all() as Array<{ store: string; version: number }>).map((row) => {
@@ -265,12 +315,11 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
       throw new Error(`Memory backup is missing required table(s): ${missingTables.join(', ')}`);
     }
 
+    const encryptedStores = readEncryptedStores(db, tables);
     for (const table of MEMORY_BACKUP_TABLES) {
       if (!tables.has(table)) continue;
       const columns = readTableColumns(db, table);
-      if (!columns.has('schema_version') && table !== 'memory_schema_versions') {
-        throw new Error(`Memory backup table ${table} is missing schema_version column`);
-      }
+      verifyRequiredColumns(table, columns);
       if (columns.has('schema_version')) {
         const future = db
           .prepare(`SELECT schema_version FROM ${sqliteIdentifier(table)} WHERE schema_version > ? LIMIT 1`)
@@ -281,7 +330,7 @@ export function verifyMemoryBackup(path: string): MemoryBackupVerificationReport
           );
         }
       }
-      verifyJsonColumns(db, table, columns);
+      verifyJsonColumns(db, table, columns, encryptedStores);
     }
 
     const stores = readSchemaStores(db, tables);

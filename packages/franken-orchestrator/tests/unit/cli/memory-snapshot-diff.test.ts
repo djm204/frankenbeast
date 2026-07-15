@@ -210,6 +210,64 @@ describe('handleMemoryCommand', () => {
     });
   });
 
+  it('accepts legacy pre-migration backups without schema metadata or row versions', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-legacy-'));
+    const backupPath = join(dir, 'legacy.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO working_memory (key, value, updated_at) VALUES ('legacy', 'plaintext', '2026-07-11T00:00:00.000Z');
+      INSERT INTO episodic_events (type, step, summary, details, created_at) VALUES ('observation', NULL, 'legacy event', '{"source":"legacy"}', '2026-07-11T00:00:01.000Z');
+      INSERT INTO checkpoints (state, created_at) VALUES ('{"ok":true}', '2026-07-11T00:00:02.000Z');
+    `);
+    db.close();
+
+    expect(verifyMemoryBackup(backupPath)).toMatchObject({
+      schema: {
+        version: 1,
+        requiredTablesPresent: true,
+        stores: [
+          { store: 'working_memory', version: 0, recordCount: 1 },
+          { store: 'episodic_events', version: 0, recordCount: 1 },
+          { store: 'checkpoints', version: 0, recordCount: 1 },
+        ],
+      },
+      summary: { workingEntries: 1, episodicEvents: 1, checkpoints: 1 },
+    });
+  });
+
+  it('rejects encrypted-looking plaintext JSON payloads unless metadata marks the store encrypted', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-encryption-marker-'));
+    const backupPath = join(dir, 'marker.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+      INSERT INTO episodic_events (type, step, summary, details, created_at) VALUES ('observation', NULL, 'bad marker', 'enc:v1:not-really-json', '2026-07-11T00:00:01.000Z');
+      INSERT INTO checkpoints (state, created_at) VALUES ('{"ok":true}', '2026-07-11T00:00:02.000Z');
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Unexpected encrypted payload marker in plaintext episodic_events\.details/);
+  });
+
+  it('validates required columns before reporting a backup as valid', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-columns-'));
+    const backupPath = join(dir, 'malformed.sqlite');
+    const db = new Database(backupPath);
+    db.exec(`
+      CREATE TABLE working_memory (key TEXT PRIMARY KEY, updated_at TEXT NOT NULL);
+      CREATE TABLE episodic_events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, step TEXT, summary TEXT NOT NULL, details TEXT, embedding BLOB, created_at TEXT NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, created_at TEXT NOT NULL);
+    `);
+    db.close();
+
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/working_memory is missing required column\(s\): value/);
+  });
+
   it('fails explicitly when a backup is missing required memory tables', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-invalid-'));
     const backupPath = join(dir, 'partial.sqlite');
@@ -217,6 +275,6 @@ describe('handleMemoryCommand', () => {
     db.exec('CREATE TABLE working_memory (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1)');
     db.close();
 
-    expect(() => verifyMemoryBackup(backupPath)).toThrow(/missing required table\(s\): memory_schema_versions, episodic_events, checkpoints/);
+    expect(() => verifyMemoryBackup(backupPath)).toThrow(/missing required table\(s\): episodic_events, checkpoints/);
   });
 });
