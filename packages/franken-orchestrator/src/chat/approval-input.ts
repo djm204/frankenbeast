@@ -13,10 +13,10 @@ export class UnsafeApprovalCommandError extends Error {
 }
 
 function normalizePendingCommand(command: string): string {
-  if (CONTROL_CHARACTER_PATTERN.test(command)) {
+  if (command.length > MAX_PENDING_APPROVAL_COMMAND_LENGTH) {
     throw new UnsafeApprovalCommandError();
   }
-  if (command.length > MAX_PENDING_APPROVAL_COMMAND_LENGTH) {
+  if (CONTROL_CHARACTER_PATTERN.test(command)) {
     throw new UnsafeApprovalCommandError();
   }
   const normalized = command.trim();
