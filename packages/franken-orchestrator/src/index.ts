@@ -221,6 +221,7 @@ export type { ModuleHealth } from './resilience/module-initializer.js';
 export {
   buildApprovalLedgerRecoveryReport,
   buildBackupEncryptionVerificationReport,
+  buildRestoreDryRunReport,
   detectRestorePreviewConflicts,
 } from './dr/restore-preview.js';
 export type {
@@ -238,6 +239,11 @@ export type {
   BackupEncryptionVerificationReport,
   BackupEncryptionVerificationSeverity,
   BackupEncryptionVerificationStatus,
+  RestoreDryRunConflict,
+  RestoreDryRunConflictRecordSummary,
+  RestoreDryRunPreviewResult,
+  RestoreDryRunReport,
+  RestoreDryRunReportOptions,
   RestorePreviewArea,
   RestorePreviewConflict,
   RestorePreviewConflictType,

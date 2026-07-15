@@ -132,6 +132,60 @@ export interface RestorePreviewResult {
   readonly conflicts: readonly RestorePreviewConflict[];
 }
 
+export interface RestoreDryRunReportOptions {
+  /** ISO timestamp for deterministic automation/tests; defaults to the current time. */
+  readonly generatedAt?: string;
+  readonly backupPath?: string;
+  readonly livePath?: string;
+}
+
+export interface RestoreDryRunConflictRecordSummary {
+  readonly id: string;
+  readonly state?: string;
+  readonly digestPresent?: boolean;
+  readonly valuePresent?: boolean;
+  readonly updatedAt?: string;
+}
+
+export interface RestoreDryRunConflict {
+  readonly area: RestorePreviewArea;
+  readonly id: string;
+  readonly type: RestorePreviewConflictType;
+  readonly severity: RestorePreviewSeverity;
+  readonly backup?: RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number };
+  readonly live?: RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number };
+  readonly recommendation: string;
+}
+
+export interface RestoreDryRunPreviewResult {
+  readonly wouldWrite: false;
+  readonly safeToRestore: boolean;
+  readonly schema: RestorePreviewResult['schema'];
+  readonly conflicts: readonly RestoreDryRunConflict[];
+}
+
+export interface RestoreDryRunReport {
+  readonly ok: true;
+  readonly command: 'dr restore-dry-run';
+  readonly formatVersion: 1;
+  readonly generatedAt: string;
+  readonly dryRun: true;
+  readonly wouldWrite: false;
+  readonly inputs: {
+    readonly backupPath?: string;
+    readonly livePath?: string;
+  };
+  readonly summary: {
+    readonly safeToRestore: boolean;
+    readonly conflictCount: number;
+    readonly blockerCount: number;
+    readonly warningCount: number;
+    readonly infoCount: number;
+  };
+  readonly preview: RestoreDryRunPreviewResult;
+  readonly operatorGuidance: string;
+}
+
 type ComparableArea = Exclude<RestorePreviewArea, 'schema'>;
 
 const AREA_ACCESSORS = {
@@ -296,6 +350,65 @@ export function detectRestorePreviewConflicts(
       compatible: schemaCompatible,
     },
     conflicts,
+  };
+}
+
+export function buildRestoreDryRunReport(
+  backup: RestorePreviewManifest,
+  live: RestorePreviewManifest,
+  options: RestoreDryRunReportOptions = {},
+): RestoreDryRunReport {
+  const preview = detectRestorePreviewConflicts(backup, live);
+  const blockerCount = preview.conflicts.filter((conflict) => conflict.severity === 'blocker').length;
+  const warningCount = preview.conflicts.filter((conflict) => conflict.severity === 'warning').length;
+  const infoCount = preview.conflicts.filter((conflict) => conflict.severity === 'info').length;
+
+  return {
+    ok: true,
+    command: 'dr restore-dry-run',
+    formatVersion: 1,
+    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    dryRun: true,
+    wouldWrite: false,
+    inputs: {
+      ...(options.backupPath === undefined ? {} : { backupPath: options.backupPath }),
+      ...(options.livePath === undefined ? {} : { livePath: options.livePath }),
+    },
+    summary: {
+      safeToRestore: preview.safeToRestore,
+      conflictCount: preview.conflicts.length,
+      blockerCount,
+      warningCount,
+      infoCount,
+    },
+    preview: redactPreviewForDryRun(preview),
+    operatorGuidance: preview.safeToRestore
+      ? 'Dry-run only: no restore writes were performed. Review the JSON report, then execute restore separately if an operator explicitly approves it.'
+      : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts have explicit restore, merge, skip, or quarantine decisions.',
+  };
+}
+
+function redactPreviewForDryRun(preview: RestorePreviewResult): RestoreDryRunPreviewResult {
+  return {
+    ...preview,
+    conflicts: preview.conflicts.map((conflict) => ({
+      ...conflict,
+      ...(conflict.backup === undefined ? {} : { backup: redactConflictRecord(conflict.backup) }),
+      ...(conflict.live === undefined ? {} : { live: redactConflictRecord(conflict.live) }),
+    })),
+  };
+}
+
+function redactConflictRecord(
+  record: RestorePreviewRecord | { readonly schemaVersion: number },
+): RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number } {
+  if (!('id' in record)) return record;
+  return {
+    id: record.id,
+    ...(typeof record.state === 'string' ? { state: record.state } : {}),
+    ...(typeof record.digest === 'string' ? { digestPresent: true } : {}),
+    ...('value' in record && record.value !== undefined ? { valuePresent: true } : {}),
+    ...(typeof record.updatedAt === 'string' ? { updatedAt: record.updatedAt } : {}),
   };
 }
 
