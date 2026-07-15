@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
 import type { TrackedAgentEvent } from '../../lib/beast-api';
+import { SafeMarkdownText } from '../safe-markdown-text';
 import { buildLogDisplayEntries } from './log-display-entry';
 
 interface LogViewerModalProps {
@@ -112,7 +113,7 @@ export function LogViewerModal({ isOpen, onClose, logs, events }: LogViewerModal
               <div className="space-y-1 font-mono text-xs text-beast-muted">
                 {displayEntries.map((entry) => (
                   <div key={entry.key} className={entry.level === 'error' ? 'text-beast-danger' : ''}>
-                    {entry.label}
+                    <SafeMarkdownText text={entry.label} />
                   </div>
                 ))}
                 {displayEntries.length === 0 && (
