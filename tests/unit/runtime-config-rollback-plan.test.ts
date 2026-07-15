@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -204,6 +204,23 @@ describe('runtime config rollback plan dry-run helper', () => {
     });
   });
 
+  it('rejects non-regular snapshots before reading', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-non-regular-'));
+    await expect(loadRuntimeConfigSnapshot(workDir)).rejects.toThrow(/must be a regular file/u);
+  });
+
+  it('hashes snapshot bytes before UTF-8 decoding', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-raw-hash-'));
+    const snapshot = join(workDir, 'invalid-utf8-string.json');
+    const raw = Buffer.from('{"provider":"claude\xff"}', 'binary');
+    await writeFile(snapshot, raw);
+
+    await expect(loadRuntimeConfigSnapshotWithDigest(snapshot)).resolves.toMatchObject({
+      snapshot: { provider: 'claude�' },
+      sha256: createHash('sha256').update(raw).digest('hex'),
+    });
+  });
+
   it('prints JSON and markdown dry-run plans without mutating the target config', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'runtime-config-rollback-cli-'));
     const before = join(workDir, 'before.json');
@@ -296,6 +313,35 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(changes).toEqual([{ path: '/provider', type: 'changed' }]);
     await expect(readFile(join(evidence, 'rollback-config.json'), 'utf8')).resolves.toContain('claude');
     await expect(readFile(join(evidence, 'rollback-comment.md'), 'utf8')).resolves.toContain('Changed paths: "/provider"');
+  });
+
+  it('does not chmod pre-existing evidence directories', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'runtime-config-existing-evidence-'));
+    const before = join(workDir, 'before.json');
+    const after = join(workDir, 'after.json');
+    const target = join(workDir, 'current.json');
+    const evidence = join(workDir, 'evidence');
+    await mkdir(evidence);
+    await chmod(evidence, 0o755);
+    await writeFile(before, `${JSON.stringify({ provider: 'claude' }, null, 2)}\n`);
+    await writeFile(after, `${JSON.stringify({ provider: 'openai' }, null, 2)}\n`);
+    await writeFile(target, `${JSON.stringify({ provider: 'openai' }, null, 2)}\n`);
+
+    const jsonResult = spawnSync(process.execPath, [
+      SCRIPT,
+      '--dry-run',
+      '--format', 'json',
+      '--before', before,
+      '--after', after,
+      '--target', target,
+      '--evidence-dir', evidence,
+    ], { cwd: ROOT, encoding: 'utf8' });
+
+    expect(jsonResult.status).toBe(0);
+    const parsed = JSON.parse(jsonResult.stdout);
+    const result = spawnSync(parsed.readOnlyCapture[0][0], parsed.readOnlyCapture[0].slice(1), { cwd: ROOT, encoding: 'utf8' });
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect((await stat(evidence)).mode & 0o777).toBe(0o755);
   });
 
   it('emits absolute generated paths when invoked with relative CLI paths', async () => {

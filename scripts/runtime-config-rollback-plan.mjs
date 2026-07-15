@@ -40,15 +40,17 @@ export async function writeFileNoFollow(filePath, data, mode = 0o600, owner) {
   } finally {
     await handle.close();
   }
-  await chmod(tempPath, mode);
-  if (owner && Number.isInteger(owner.uid) && Number.isInteger(owner.gid)) {
-    await chown(tempPath, owner.uid, owner.gid);
-  }
+  let renamed = false;
   try {
+    await chmod(tempPath, mode);
+    if (owner && Number.isInteger(owner.uid) && Number.isInteger(owner.gid)) {
+      await chown(tempPath, owner.uid, owner.gid);
+    }
     await rename(tempPath, resolvedFilePath);
+    renamed = true;
     await chmod(resolvedFilePath, mode);
   } catch (error) {
-    await unlink(tempPath).catch(() => undefined);
+    if (!renamed) await unlink(tempPath).catch(() => undefined);
     throw error;
   }
 }
@@ -83,18 +85,22 @@ export async function loadRuntimeConfigSnapshot(filePath) {
 
 export async function loadRuntimeConfigSnapshotWithDigest(filePath) {
   const info = await stat(filePath);
+  if (!info.isFile()) {
+    throw new Error(`Runtime config snapshot ${filePath} must be a regular file`);
+  }
   if (info.size > SNAPSHOT_LIMITS.maxBytes) {
     throw new Error(`Runtime config snapshot ${filePath} exceeds maxBytes: ${info.size} > ${SNAPSHOT_LIMITS.maxBytes}`);
   }
-  const raw = await readFileNoFollow(filePath, 'utf8');
-  const rawBytes = Buffer.byteLength(raw, 'utf8');
+  const rawBuffer = await readFileNoFollow(filePath);
+  const rawBytes = rawBuffer.byteLength;
   if (rawBytes > SNAPSHOT_LIMITS.maxBytes) {
     throw new Error(`Runtime config snapshot ${filePath} exceeds maxBytes: ${rawBytes} > ${SNAPSHOT_LIMITS.maxBytes}`);
   }
+  const raw = rawBuffer.toString('utf8');
   const snapshot = parseRuntimeConfigSnapshot(raw, filePath);
   return {
     snapshot,
-    sha256: createHash('sha256').update(raw).digest('hex'),
+    sha256: createHash('sha256').update(rawBuffer).digest('hex'),
   };
 }
 
@@ -178,7 +184,7 @@ export function buildRuntimeConfigRollbackPlan(options) {
         'node',
         '--input-type=module',
         '-e',
-        'import { chmod, lstat, mkdir } from "node:fs/promises"; import { parse, relative, resolve, sep } from "node:path"; const [dir]=process.argv.slice(1); async function assertNoSymlinkExisting(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); try { const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked evidence path component: ${current}`); } catch (error) { if (error && error.code === "ENOENT") break; throw error; } } } await assertNoSymlinkExisting(dir); await mkdir(dir, { recursive: true }); await assertNoSymlinkExisting(dir); await chmod(dir, 0o700);',
+        'import { chmod, lstat, mkdir } from "node:fs/promises"; import { parse, relative, resolve, sep } from "node:path"; const [dir]=process.argv.slice(1); async function assertNoSymlinkExisting(path){ const absolute=resolve(path); const parsed=parse(absolute); let current=parsed.root; const parts=relative(parsed.root, absolute).split(sep).filter(Boolean); for (const part of parts){ current=resolve(current, part); try { const info=await lstat(current); if (info.isSymbolicLink()) throw new Error(`Refusing symlinked evidence path component: ${current}`); } catch (error) { if (error && error.code === "ENOENT") break; throw error; } } } await assertNoSymlinkExisting(dir); const created=await mkdir(dir, { recursive: true }); await assertNoSymlinkExisting(dir); const info=await lstat(dir); if (!info.isDirectory()) throw new Error(`Evidence path is not a directory: ${dir}`); if (created !== undefined) await chmod(dir, 0o700);',
         evidenceDir,
       ],
       [
@@ -217,13 +223,13 @@ export function buildRuntimeConfigRollbackPlan(options) {
         targetPath,
         beforePath,
         afterPath,
-        changedPaths.map(path => JSON.stringify(path)).join(', '),
+        changedPaths.map(formatChangedPath).join(', '),
       ],
     ],
     requiredDecisions: [
       `Confirm ${beforePath} is the last-known-good runtime config snapshot.`,
       `Confirm ${afterPath} captures the currently deployed or failed runtime config state.`,
-      `Review changed paths before rollback: ${changedPaths.map(path => JSON.stringify(path)).join(', ')}.`,
+      `Review changed paths before rollback: ${changedPaths.map(formatChangedPath).join(', ')}.`,
       `Fill ${rollbackCommentPath} with the approval-cop outcome and verification results before posting it to a PR or Kanban card.`,
     ],
     approvalGatedActions: [
