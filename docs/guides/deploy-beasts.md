@@ -215,6 +215,8 @@ From the selected agent detail panel:
 - **Resume** resumes a tracked agent's linked run when resumable state exists.
 - **Delete** soft-deletes the tracked agent from the dashboard list.
 
+Process-mode runs are spawned in their own Unix process group when the host supports it. When a supervised Beast exits, stops, or is killed, the process supervisor sends the same termination signal to that process group so background children started by the run do not remain orphaned; unsupported platforms skip the process-group sweep and fall back to direct PID signaling.
+
 Equivalent CLI controls for raw run IDs:
 
 ```bash

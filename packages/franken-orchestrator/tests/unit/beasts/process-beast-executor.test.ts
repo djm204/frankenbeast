@@ -118,6 +118,98 @@ describe('ProcessBeastExecutor', () => {
     ]);
   });
 
+  it('merges process-group ownership metadata into custom attempt metadata', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      attemptMetadata: () => ({ backend: 'container', containerName: 'beast-run-1' }),
+    });
+    const run = createTestRun(repo);
+
+    const attempt = await executor.start(run, martinLoopDefinition);
+
+    expect(attempt.executorMetadata).toMatchObject({
+      backend: 'container',
+      containerName: 'beast-run-1',
+      processGroupOwned: typeof attempt.executorMetadata?.processStartTimeTicks === 'string',
+      processGroupLeaderPid: 4242,
+    });
+  });
+
+  it('sweeps a recovered process group only when the original leader start time still matches', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = {
+      spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: process.pid })),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+    const attempt = await executor.start(run, martinLoopDefinition);
+    const processStartTimeTicks = attempt.executorMetadata?.processStartTimeTicks;
+    expect(typeof processStartTimeTicks).toBe('string');
+    repo.updateAttempt(attempt.id, {
+      executorMetadata: {
+        ...attempt.executorMetadata,
+        processGroupOwned: true,
+        processGroupLeaderPid: attempt.pid,
+        processStartTimeTicks,
+      },
+    });
+
+    await executor.kill(run.id, attempt.id);
+
+    expect(supervisor.kill).toHaveBeenCalledWith(process.pid, { processGroupOwned: true });
+  });
+
+  it('fails closed to direct PID signaling when recovered process start time is unreadable or stale', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+    const attempt = await executor.start(run, martinLoopDefinition);
+    repo.updateAttempt(attempt.id, {
+      executorMetadata: {
+        ...attempt.executorMetadata,
+        processGroupOwned: true,
+        processGroupLeaderPid: attempt.pid,
+        processStartTimeTicks: 'stale-start-time',
+      },
+    });
+
+    await executor.kill(run.id, attempt.id);
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: false });
+  });
+
+  it('fails closed when a recovered process-group leader start time is unreadable', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+    const attempt = await executor.start(run, martinLoopDefinition);
+    repo.updateAttempt(attempt.id, {
+      executorMetadata: {
+        ...attempt.executorMetadata,
+        processGroupOwned: true,
+        processGroupLeaderPid: attempt.pid,
+        processStartTimeTicks: 'known-original-start-time',
+      },
+    });
+
+    await executor.kill(run.id, attempt.id);
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242, { processGroupOwned: false });
+  });
+
   it('kills a spawned process when attempt creation fails', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
@@ -130,6 +222,66 @@ describe('ProcessBeastExecutor', () => {
     });
 
     await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('attempt insert failed');
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242);
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'queued',
+      attemptCount: 0,
+    });
+    expect(repo.getRun(run.id)?.currentAttemptId).toBeUndefined();
+  });
+
+  it('kills a process that finishes spawning after the run was cancelled before attempt creation', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let resolveSpawn: ((handle: { pid: number }) => void) | undefined;
+    const supervisor = {
+      spawn: vi.fn(() => new Promise<{ pid: number }>((resolve) => {
+        resolveSpawn = resolve;
+      })),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+    const run = createTestRun(repo);
+
+    const startPromise = executor.start(run, martinLoopDefinition);
+    repo.updateRun(run.id, {
+      status: 'stopped',
+      finishedAt: '2026-03-10T00:00:01.000Z',
+      stopReason: 'operator_kill',
+    });
+    resolveSpawn?.({ pid: 4242 });
+    const cancelledAttempt = await startPromise;
+
+    expect(supervisor.kill).toHaveBeenCalledWith(4242);
+    expect(cancelledAttempt).toMatchObject({
+      runId: run.id,
+      status: 'stopped',
+      stopReason: 'operator_kill',
+    });
+    expect(repo.listAttempts(run.id)).toEqual([]);
+    expect(repo.getRun(run.id)).toMatchObject({
+      status: 'stopped',
+      attemptCount: 0,
+    });
+    expect(repo.getRun(run.id)?.currentAttemptId).toBeUndefined();
+  });
+
+  it('kills a spawned process and cleans pending resources when custom attempt metadata fails', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const supervisor = createSupervisorMock();
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      attemptMetadata: () => {
+        throw new Error('metadata failed');
+      },
+    });
+    const run = createTestRun(repo);
+
+    await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow('metadata failed');
 
     expect(supervisor.kill).toHaveBeenCalledWith(4242);
     expect(repo.getRun(run.id)).toMatchObject({
@@ -713,7 +865,7 @@ describe('ProcessBeastExecutor', () => {
     const attempt = await executor.start(run, martinLoopDefinition);
     await executor.stop(run.id, attempt.id);
 
-    expect(supervisor.stop).toHaveBeenCalledWith(777);
+    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: false });
     expect(repo.getRun(run.id)).toMatchObject({
       status: 'stopped',
       currentAttemptId: attempt.id,
@@ -768,7 +920,7 @@ describe('ProcessBeastExecutor', () => {
     const attempt = await executor.start(run, martinLoopDefinition);
     const stoppedAttempt = await executor.stop(run.id, attempt.id);
 
-    expect(supervisor.stop).toHaveBeenCalledWith(777);
+    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: false });
     expect(supervisor.kill).not.toHaveBeenCalled();
     expect(stoppedAttempt).toMatchObject({
       id: attempt.id,

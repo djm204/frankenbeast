@@ -26,6 +26,47 @@ function makeCallbacks(overrides: Partial<ProcessCallbacks> = {}): ProcessCallba
   };
 }
 
+function isProcessGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+      return true;
+    }
+    throw error;
+  }
+}
+
+async function isProcessGoneOrZombie(pid: number): Promise<boolean> {
+  if (isProcessGone(pid)) {
+    return true;
+  }
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
+    const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+    return state === 'Z';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return true;
+    }
+    return false;
+  }
+}
+
+async function killIfRunning(pid: number): Promise<void> {
+  if (pid <= 0 || await isProcessGoneOrZombie(pid)) {
+    return;
+  }
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw error;
+    }
+  }
+}
+
 describe('ProcessSupervisor', () => {
   let supervisor: ProcessSupervisor;
   let workDir: string | undefined;
@@ -306,6 +347,121 @@ child.unref();`,
           }
         }
       }
+    });
+
+    it('sweeps background descendants in the supervised process group after parent exit', async () => {
+      workDir = await mkdtemp(join(tmpdir(), 'franken-supervisor-orphan-sweep-'));
+      const pidFile = join(workDir, 'background.pid');
+      const callbacks = makeCallbacks();
+      const spec = makeSpec({
+        command: process.execPath,
+        args: [
+          '-e',
+          `const { spawn } = require('node:child_process');
+const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+  stdio: 'ignore',
+});
+child.unref();
+require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+process.stdout.write('parent done\\n');`,
+        ],
+      });
+
+      let backgroundPid = 0;
+      try {
+        await supervisor.spawn(spec, callbacks);
+
+        await vi.waitFor(() => {
+          expect(callbacks.onExit).toHaveBeenCalledWith(0, null);
+        }, { timeout: 5000 });
+
+        backgroundPid = Number(await readFile(pidFile, 'utf8'));
+        expect(backgroundPid).toBeGreaterThan(0);
+        await vi.waitFor(async () => {
+          expect(await isProcessGoneOrZombie(backgroundPid)).toBe(true);
+        }, { timeout: 5000 });
+      } finally {
+        await killIfRunning(backgroundPid);
+      }
+    });
+
+    it('reports unsupported platforms without attempting process-group cleanup', () => {
+      const killProcess = vi.fn();
+      const windowsSupervisor = new ProcessSupervisor({
+        orphanSweeper: {
+          platform: 'win32',
+          killProcess,
+        },
+      });
+
+      expect(windowsSupervisor.sweepOrphanProcessGroup(12345)).toEqual({
+        pid: 12345,
+        signal: 'SIGTERM',
+        swept: false,
+        skippedReason: 'unsupported_platform',
+      });
+      expect(killProcess).not.toHaveBeenCalled();
+    });
+
+    it('treats process-group permission errors as skipped so exit handling remains safe', () => {
+      const permissionError = Object.assign(new Error('permission denied'), { code: 'EPERM' });
+      const killProcess = vi.fn(() => {
+        throw permissionError;
+      });
+      const restrictedSupervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      expect(restrictedSupervisor.sweepOrphanProcessGroup(12345)).toEqual({
+        pid: 12345,
+        signal: 'SIGTERM',
+        swept: false,
+        skippedReason: 'permission_denied',
+      });
+    });
+
+    it('uses direct PID signaling by default for unmarked recovered attempts', async () => {
+      const killProcess = vi.fn();
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      await supervisor.stop(12345);
+      await supervisor.kill(23456);
+
+      expect(killProcess).toHaveBeenNthCalledWith(1, 12345, 'SIGTERM');
+      expect(killProcess).toHaveBeenNthCalledWith(2, 23456, 'SIGKILL');
+    });
+
+    it('tries a process-group sweep before direct PID signaling for marked recovered attempts', async () => {
+      const killProcess = vi.fn();
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      await supervisor.stop(12345, { processGroupOwned: true });
+      await supervisor.kill(23456, { processGroupOwned: true });
+
+      expect(killProcess).toHaveBeenNthCalledWith(1, -12345, 'SIGTERM');
+      expect(killProcess).toHaveBeenNthCalledWith(2, -23456, 'SIGKILL');
+    });
+
+    it('falls back to direct PID signaling when a marked recovered process group is gone', async () => {
+      const noGroup = Object.assign(new Error('no process group'), { code: 'ESRCH' });
+      const killProcess = vi.fn((pid: number, _signal?: string | number) => {
+        if (pid < 0) {
+          throw noGroup;
+        }
+        return true as const;
+      });
+      supervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+      });
+
+      await supervisor.stop(34567, { processGroupOwned: true });
+
+      expect(killProcess).toHaveBeenCalledWith(-34567, 'SIGTERM');
+      expect(killProcess).toHaveBeenCalledWith(34567, 'SIGTERM');
     });
 
     it('strips CLAUDE env vars from spawned process environment', async () => {

@@ -235,6 +235,52 @@ describe('BeastRunService', () => {
     expect(metrics.render()).toContain('beast_run_stops_total{definition_id="martin-loop"} 1');
   });
 
+  it('preserves terminal no-attempt failures when killed after spawn failure', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+        cleanupPendingRun: vi.fn(async () => false),
+      },
+      container: {
+        start: vi.fn(),
+        stop: vi.fn(),
+        kill: vi.fn(),
+      },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      config: {
+        provider: 'claude',
+        objective: 'Preserve failed spawn status',
+        chunkDirectory: 'docs/chunks',
+      },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      executionMode: 'process',
+      startNow: false,
+    });
+    repo.updateRun(run.id, {
+      status: 'failed',
+      finishedAt: '2026-03-10T00:02:00.000Z',
+      stopReason: 'spawn_failed',
+    });
+
+    const killed = await runs.kill(run.id, 'operator');
+
+    expect(killed).toMatchObject({ status: 'failed', stopReason: 'spawn_failed' });
+    expect(repo.getRun(run.id)).toMatchObject({ status: 'failed', stopReason: 'spawn_failed' });
+    expect(executors.process.stop).not.toHaveBeenCalled();
+    expect(metrics.render()).not.toContain('beast_run_stops_total{definition_id="martin-loop"} 1');
+  });
+
   it('resumes a stopped linked run as a new attempt and syncs the tracked agent back to running', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
