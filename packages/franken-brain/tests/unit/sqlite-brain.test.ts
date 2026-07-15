@@ -1741,8 +1741,8 @@ describe('SqliteBrain', () => {
 
       expect(
         db.prepare(`SELECT COUNT(*) AS count FROM memory_deletion_hash_keys`).get(),
-      ).toEqual({ count: 0 });
-      expect(brain.serialize()).not.toHaveProperty('deletionGuardHashKey');
+      ).toEqual({ count: 1 });
+      expect(brain.serialize()).toHaveProperty('deletionGuardHashKey');
     });
 
     it('deletes approved working memory when matching review provenance by source scope', () => {
@@ -2040,7 +2040,7 @@ describe('SqliteBrain', () => {
         {
           store: 'memory_deletion_hash_keys',
           version: CURRENT_MEMORY_SCHEMA_VERSION,
-          recordCount: 0,
+          recordCount: 1,
         },
         {
           store: 'memory_access_audit_events',
@@ -2184,7 +2184,7 @@ describe('SqliteBrain', () => {
           {
             store: 'memory_deletion_hash_keys',
             version: CURRENT_MEMORY_SCHEMA_VERSION,
-            recordCount: 0,
+            recordCount: 1,
           },
           {
             store: 'memory_access_audit_events',
@@ -3801,7 +3801,7 @@ describe('SqliteBrain', () => {
         reason: 'exercise audit trail',
       });
       brain.memoryReview.list();
-      brain.rightToForget({ query: 'Audit trail event', dryRun: true });
+      brain.rightToForget({ query: 'Audit trail event' });
 
       const operations = brain.accessAudit.list({ limit: 50 }).map((event) => event.operation);
       expect(operations).toEqual(

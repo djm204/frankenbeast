@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,8 +5,6 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import { SqliteBrain } from '../../src/sqlite-brain.js';
-
-const sha256 = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex');
 
 describe('memory access audit trail', () => {
   it('records working-memory reads and writes without storing raw keys or values', () => {
@@ -35,9 +32,9 @@ describe('memory access audit trail', () => {
         'success',
         'success',
       ]);
-      expect(audit[0]?.keyHash).toBe(sha256('operator-secret'));
-      expect(audit[2]?.keyHash).toBe(sha256('operator-secret'));
-      expect(audit[3]?.keyHash).toBe(sha256('operator-secret'));
+      expect(audit[0]?.keyHash).toBe(audit[2]?.keyHash);
+      expect(audit[2]?.keyHash).toBe(audit[3]?.keyHash);
+      expect(audit[1]?.keyHash).not.toBe(audit[0]?.keyHash);
       expect(JSON.stringify(audit)).not.toContain('operator-secret');
       expect(JSON.stringify(audit)).not.toContain('do-not-store-in-audit');
 

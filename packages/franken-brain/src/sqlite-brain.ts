@@ -182,6 +182,7 @@ export type MemoryAccessAuditOperation =
   | 'working.clear'
   | 'working.flush'
   | 'episodic.record'
+  | 'episodic.recordLearning'
   | 'episodic.recall'
   | 'episodic.recent'
   | 'episodic.recentFailures'
@@ -458,10 +459,9 @@ function hashMemoryAccessValue(
   value: string,
   encryption?: MemoryCipher,
 ): string {
-  const key = readDeletionHashKey(db, encryption);
-  return key
-    ? createHmac('sha256', key).update(value, 'utf8').digest('hex')
-    : createHash('sha256').update(value, 'utf8').digest('hex');
+  return createHmac('sha256', readOrCreateDeletionHashKey(db, encryption))
+    .update(value, 'utf8')
+    .digest('hex');
 }
 
 function sanitizeMemoryAccessDetails(
@@ -1384,6 +1384,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         const existingEvent = this.findLearningCooldownEvent(key, eventTimeMs, cooldownMs);
         if (existingEvent) {
           this.db.exec('COMMIT');
+          this.audit?.({
+            operation: 'episodic.recordLearning',
+            store: 'episodic',
+            outcome: 'success',
+            details: { key, cooldownMs, recorded: false, reason: 'cooldown' },
+          });
           return {
             recorded: false,
             reason: 'cooldown',
@@ -1408,6 +1414,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       };
       assertEpisodicNotDeletionGuarded(this.db, guardedEvent, this.encryption);
       this.insertEvent(guardedEvent);
+      this.audit?.({
+        operation: 'episodic.recordLearning',
+        store: 'episodic',
+        outcome: 'success',
+        details: { key, cooldownMs, recorded: true },
+      });
 
       this.db.exec('COMMIT');
       return { recorded: true, key, cooldownMs };
@@ -1772,6 +1784,11 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
 
   clearCheckpoints(): void {
     this.db.prepare(`DELETE FROM checkpoints`).run();
+    this.audit?.({
+      operation: 'recovery.clearCheckpoints',
+      store: 'recovery',
+      outcome: 'success',
+    });
   }
 }
 
@@ -1927,7 +1944,15 @@ export class SqliteMemoryReviewQueue {
         updated.updatedAt,
         id,
       );
-    return this.requireCandidate(id, 'pending');
+    const result = this.requireCandidate(id, 'pending');
+    this.audit?.({
+      operation: 'review.edit',
+      store: 'review',
+      key: result.key,
+      outcome: 'success',
+      details: { id, targetStore: result.targetStore },
+    });
+    return result;
   }
 
   approve(
@@ -1993,7 +2018,15 @@ export class SqliteMemoryReviewQueue {
     });
     approveTx.immediate();
     finalizeWorkingFlush?.();
-    return approvedCandidate ?? this.requireCandidate(id);
+    const result = approvedCandidate ?? this.requireCandidate(id);
+    this.audit?.({
+      operation: 'review.approve',
+      store: 'review',
+      key: result.key,
+      outcome: 'success',
+      details: { id, status: result.status, targetStore: result.targetStore },
+    });
+    return result;
   }
 
   reject(
@@ -2010,7 +2043,15 @@ export class SqliteMemoryReviewQueue {
       rejectedCandidate = this.requireCandidate(id);
     });
     tx.immediate();
-    return rejectedCandidate ?? this.requireCandidate(id, 'rejected');
+    const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
+    this.audit?.({
+      operation: 'review.reject',
+      store: 'review',
+      key: result.key,
+      outcome: 'success',
+      details: { id, status: result.status, targetStore: result.targetStore },
+    });
+    return result;
   }
 
   neverStore(
@@ -2039,7 +2080,15 @@ export class SqliteMemoryReviewQueue {
     tx.immediate();
     finalizeWorkingFlush?.();
     purgeDeletedSqliteContent(this.db, this.dbPath);
-    return neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
+    const result = neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
+    this.audit?.({
+      operation: 'review.neverStore',
+      store: 'review',
+      key: result.key,
+      outcome: 'success',
+      details: { id, status: result.status, targetStore: result.targetStore },
+    });
+    return result;
   }
 
   provenanceFor(
@@ -2051,7 +2100,15 @@ export class SqliteMemoryReviewQueue {
         `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
       )
       .get(targetStore, key) as MemoryProvenanceRow | undefined;
-    return row ? this.rowToProvenance(row) : null;
+    const result = row ? this.rowToProvenance(row) : null;
+    this.audit?.({
+      operation: 'review.provenanceFor',
+      store: 'review',
+      key,
+      outcome: result ? 'success' : 'miss',
+      details: { targetStore },
+    });
+    return result;
   }
 
   private validateProposal(proposal: MemoryCandidateProposal): void {
@@ -2890,20 +2947,6 @@ export class SqliteBrain implements IBrain {
       };
     }
 
-    const accessEvent: MemoryAccessAuditInput = {
-      operation: 'privacy.rightToForget',
-      store: 'privacy',
-      outcome: 'success',
-      details: {
-        selectorHash,
-        dryRun: true,
-        deletedWorking: deletedWorkingKeys.size,
-        deletedEpisodic: episodicMatchCount,
-      },
-    };
-    if (normalizedSelector.query !== undefined) accessEvent.query = normalizedSelector.query;
-    if (normalizedSelector.key !== undefined) accessEvent.key = normalizedSelector.key;
-    this.accessAudit.record(accessEvent);
     return {
       selectorHash,
       dryRun,

@@ -68,7 +68,9 @@ describe('state schema migration smoke tests', () => {
           recordCount:
             store === 'memory_access_audit_events'
               ? 3
-              : store === 'working_memory' || store === 'episodic_events' || store === 'checkpoints'
+              : store === 'memory_deletion_hash_keys'
+                ? 1
+                : store === 'working_memory' || store === 'episodic_events' || store === 'checkpoints'
                 ? 1
                 : 0,
         })),
