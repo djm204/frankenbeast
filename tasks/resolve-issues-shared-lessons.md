@@ -1,5 +1,11 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — Graceful shutdown drain gates
+- For daemon drain modes, make one outer mutation-admission middleware own both the draining check and in-flight counter; nested route-specific re-checks can reject already-admitted requests after shutdown begins.
+- If shutdown times out waiting for in-flight mutations, do not release ownership markers such as pid files until mutations are quiesced or definitively aborted; otherwise a replacement daemon can start while the old handler still mutates shared state.
+- On drain timeout, close HTTP intake but keep shutdown ownership, wait for already-admitted mutating routes to finish, then stop live child runs, dispose services, release the PID file, and report the timeout; otherwise the CLI can exit while a just-created run is orphaned.
+- Treat draining sibling daemons as fail-fast for chat-server startup rather than proxying to a 503 daemon or starting route-less/local Beast control that will not recover without restart.
+
 ## 2026-07-15 — Issue-runner dependency circuit breaker verification
 - For availability/refill features that add dependency-specific throttles, model the dependency name in structured signals and configure named breakers so unrelated degraded dependencies do not create a global outage. Regression tests should cover the intended open condition plus an unrelated dependency and a retry/open-until edge case.
 - After `npm ci` in a fresh worktree, package-local orchestrator typecheck may fail until dependent workspaces have been built; run `npm run build` (or build the needed workspace packages) before re-running package-local `tsc --noEmit`.

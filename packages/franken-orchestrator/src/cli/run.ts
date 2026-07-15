@@ -833,37 +833,46 @@ async function readLiveBeastsDaemonPid(root: string): Promise<number | undefined
   }
 }
 
-async function isHealthyBeastsDaemonEndpoint(baseUrl: string, expected: { root: string; pid: number }): Promise<boolean> {
+type BeastsDaemonEndpointState = 'attachable' | 'draining' | 'unavailable';
+
+async function getBeastsDaemonEndpointState(baseUrl: string, expected: { root: string; pid: number }): Promise<BeastsDaemonEndpointState> {
   try {
     const guardedFetch = createEgressGuardedFetch({ lane: 'test' });
     const response = await guardedFetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
-    if (!response.ok) {
-      return false;
-    }
     const body: unknown = await response.json();
     if (!body || typeof body !== 'object') {
-      return false;
+      return 'unavailable';
     }
     const record = body as Record<string, unknown>;
-    return record.ok === true
-      && record.service === 'beasts-daemon'
+    const identifiesExpectedDaemon = record.service === 'beasts-daemon'
       && record.root === expected.root
       && record.pid === expected.pid;
+    if (!identifiesExpectedDaemon) {
+      return 'unavailable';
+    }
+    if (response.ok && record.ok === true) {
+      return 'attachable';
+    }
+    if (response.status === 503 && record.status === 'draining' && record.ok === false) {
+      return 'draining';
+    }
+    return 'unavailable';
   } catch {
-    return false;
+    return 'unavailable';
   }
 }
 
-async function waitForHealthyBeastsDaemonEndpoint(baseUrl: string, expected: { root: string; pid: number }): Promise<boolean> {
+async function waitForBeastsDaemonEndpoint(baseUrl: string, expected: { root: string; pid: number }): Promise<BeastsDaemonEndpointState> {
   for (let attempt = 1; attempt <= 8; attempt += 1) {
-    if (await isHealthyBeastsDaemonEndpoint(baseUrl, expected)) {
-      return true;
+    const state = await getBeastsDaemonEndpointState(baseUrl, expected);
+    if (state === 'attachable' || state === 'draining') {
+      return state;
     }
     if (attempt < 8) {
       await sleep(250);
     }
   }
-  return false;
+  return 'unavailable';
 }
 
 async function resolveDetectedBeastsDaemonUrl(
@@ -876,13 +885,20 @@ async function resolveDetectedBeastsDaemonUrl(
     return undefined;
   }
   const candidateUrl = localPlaintextOrSecureEndpoint(config.beastsDaemon.host, config.beastsDaemon.port);
-  if (await waitForHealthyBeastsDaemonEndpoint(candidateUrl, { root, pid })) {
+  const endpointState = await waitForBeastsDaemonEndpoint(candidateUrl, { root, pid });
+  if (endpointState === 'attachable') {
     logger.info(
       `Detected a live beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)}; `
       + `chat-server will proxy Beast control routes to ${candidateUrl}.`,
       'beasts-daemon',
     );
     return candidateUrl;
+  }
+  if (endpointState === 'draining') {
+    throw new Error(
+      `Detected a draining beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)}; `
+      + 'refusing to start chat-server until the daemon exits to avoid split-brain Beast control.',
+    );
   }
   logger.warn(
     `Ignoring live-looking beasts-daemon pid file at ${defaultBeastsDaemonPidFile(root)} because `
