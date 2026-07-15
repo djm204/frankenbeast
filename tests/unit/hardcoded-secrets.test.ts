@@ -344,6 +344,21 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).not.toContain(oversizedPayload);
   });
 
+  it('handles short unterminated secret literals with linear parsing', () => {
+    const root = makeFixtureRoot();
+    const sourceDir = join(root, 'packages', 'example', 'src');
+    mkdirSync(sourceDir, { recursive: true });
+    const redosPayload = `const jwtSecret = '${'\\\\'.repeat(40)};`;
+    writeFileSync(join(sourceDir, 'config.ts'), `${redosPayload}\n`, 'utf8');
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/example/src/config.ts:1');
+    expect(result.stderr).toContain("const jwtSecret = '<redacted>");
+    expect(result.stderr).not.toContain('\\\\\\\\\\\\\\\\');
+  });
+
   it('fails closed on oversized environment examples with parser and input-class details only', () => {
     const root = makeFixtureRoot();
     const oversizedPayload = 'b'.repeat(120);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,7 +28,6 @@ const sensitiveEnvNames = [
 ].map((parts) => parts.join('_'));
 
 const sensitiveIdentifierPattern = /\b(?:[A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY|PASSPHRASE)|[A-Z0-9_]*(?:SECRET_KEY|ACCESS_KEY)|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\b/i;
-const stringLiteralPattern = /(['"`])((?:\\.|(?!\1).)*)\1/g;
 const fallbackOperatorPattern = /(?:=|:|\?\?|\|\|)\s*$/;
 const DEFAULT_MAX_SCANNED_FILE_BYTES = 1_000_000;
 const DEFAULT_MAX_SCANNED_LINE_CHARS = 20_000;
@@ -58,8 +57,9 @@ function boundedScannerFinding(parserName, inputClass, file, lineNumber, detail)
   return `${location}: parser=${parserName} input=${inputClass} ${detail}`;
 }
 
-function boundedSplitLines(content, parserName, file, findings) {
-  if (Buffer.byteLength(content, 'utf8') > maxScannedFileBytes) {
+async function readBoundedScanFile(file, parserName, findings) {
+  const info = await stat(file);
+  if (info.size > maxScannedFileBytes) {
     findings.push(
       boundedScannerFinding(
         parserName,
@@ -71,7 +71,10 @@ function boundedSplitLines(content, parserName, file, findings) {
     );
     return null;
   }
+  return readFile(file, 'utf8');
+}
 
+function boundedSplitLines(content, parserName, file, findings) {
   const lines = content.split(/\r?\n/);
   for (const [index, line] of lines.entries()) {
     if (line.length > maxScannedLineChars) {
@@ -88,6 +91,45 @@ function boundedSplitLines(content, parserName, file, findings) {
     }
   }
   return lines;
+}
+
+function stringLiterals(line) {
+  const literals = [];
+  for (let index = 0; index < line.length; index += 1) {
+    const quote = line[index];
+    if (quote !== '"' && quote !== "'" && quote !== '`') {
+      continue;
+    }
+
+    const start = index;
+    let value = '';
+    let escaped = false;
+    let closed = false;
+    index += 1;
+
+    for (; index < line.length; index += 1) {
+      const char = line[index];
+      if (escaped) {
+        value += char;
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        value += char;
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        closed = true;
+        break;
+      }
+      value += char;
+    }
+
+    literals.push({ start, end: closed ? index + 1 : line.length, quote, value, closed });
+    if (!closed) break;
+  }
+  return literals;
 }
 
 function extensionOf(path) {
@@ -147,7 +189,19 @@ function redactEnvAssignment(name) {
 }
 
 function redactSourceLine(line) {
-  return line.replace(stringLiteralPattern, (literal, quote) => `${quote}<redacted>${quote}`);
+  const literals = stringLiterals(line);
+  if (literals.length === 0) {
+    return line;
+  }
+  let redacted = '';
+  let cursor = 0;
+  for (const literal of literals) {
+    redacted += line.slice(cursor, literal.start);
+    redacted += literal.closed ? `${literal.quote}<redacted>${literal.quote}` : `${literal.quote}<redacted>`;
+    cursor = literal.end;
+  }
+  redacted += line.slice(cursor);
+  return redacted;
 }
 
 function hardcodedSensitiveEnvFinding(line) {
@@ -229,8 +283,8 @@ function isAllowedSourceLiteral(literal) {
 }
 
 function hasHardcodedSourceLiteral(line) {
-  for (const match of line.matchAll(stringLiteralPattern)) {
-    const literal = match[2].trim();
+  for (const literalInfo of stringLiterals(line)) {
+    const literal = literalInfo.value.trim();
     if (!literal || isAllowedSourceLiteral(literal)) {
       continue;
     }
@@ -273,12 +327,12 @@ function isFormattingOnlyLine(line) {
 }
 
 function hasInlineHardcodedSensitiveSourceValue(line) {
-  for (const match of line.matchAll(stringLiteralPattern)) {
-    const literal = match[2].trim();
+  for (const literalInfo of stringLiterals(line)) {
+    const literal = literalInfo.value.trim();
     if (!literal || isAllowedSourceLiteral(literal)) {
       continue;
     }
-    const prefix = line.slice(0, match.index);
+    const prefix = line.slice(0, literalInfo.start);
     if (
       fallbackOperatorPattern.test(prefix)
       && (
@@ -300,7 +354,8 @@ function leavesSensitiveFallbackOpen(line) {
 }
 
 async function scanEnvironmentFile(file, findings) {
-  const content = await readFile(file, 'utf8');
+  const content = await readBoundedScanFile(file, 'secret-env-scanner', findings);
+  if (content === null) return;
   const lines = boundedSplitLines(content, 'secret-env-scanner', file, findings);
   if (!lines) return;
   for (const [index, line] of lines.entries()) {
@@ -312,7 +367,8 @@ async function scanEnvironmentFile(file, findings) {
 }
 
 async function scanSourceFile(file, findings) {
-  const content = await readFile(file, 'utf8');
+  const content = await readBoundedScanFile(file, 'secret-source-scanner', findings);
+  if (content === null) return;
   const lines = boundedSplitLines(content, 'secret-source-scanner', file, findings);
   if (!lines) return;
   const commentState = { inBlockComment: false };
