@@ -6,6 +6,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 
 import {
   buildRuntimeConfigRollbackPlan,
+  defaultEvidenceDir,
   diffRuntimeConfig,
   loadRuntimeConfigSnapshot,
 } from '../../scripts/runtime-config-rollback-plan.mjs';
@@ -58,11 +59,19 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(plan.summary).toBe('Dry-run runtime config rollback plan for .fbeast/.build/run-configs/run-123.json');
     expect(plan.changedPaths).toEqual(['/modules/memory', '/modules/planner', '/provider']);
     expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'mkdir -p rollback-evidence/runtime-run-123',
+      'mkdir -m 700 -p rollback-evidence/runtime-run-123',
     );
     expect(plan.readOnlyCapture.map(command => command.join(' '))).toContain(
-      'cp snapshots/run-123.before.json rollback-evidence/runtime-run-123/rollback-config.json',
+      'install -m 600 snapshots/run-123.before.json rollback-evidence/runtime-run-123/rollback-config.json',
     );
+    expect(plan.readOnlyCapture[2]).toEqual(expect.arrayContaining([
+      'rollback-evidence/runtime-run-123/runtime-config-changes.json',
+      'snapshots/run-123.before.json',
+      'snapshots/run-123.after.json',
+      '.fbeast/.build/run-configs/run-123.json',
+      'rollback-evidence/runtime-run-123',
+    ]));
+    expect(plan.readOnlyCapture[2].join(' ')).not.toContain('"provider":"openai"');
     expect(plan.approvalGatedActions).toEqual([
       [
         'approval-cop',
@@ -77,6 +86,7 @@ describe('runtime config rollback plan dry-run helper', () => {
       'cmp -s rollback-evidence/runtime-run-123/rollback-config.json .fbeast/.build/run-configs/run-123.json',
     );
     expect(plan.notes.join('\n')).toContain('dry-run only');
+    expect(plan.notes.join('\n')).toContain('Snapshot parsing is bounded');
   });
 
   it('rejects snapshots with no runtime config change', () => {
@@ -89,15 +99,27 @@ describe('runtime config rollback plan dry-run helper', () => {
     })).toThrow(/No runtime config changes/u);
   });
 
-  it('loads JSON object snapshots and rejects arrays', async () => {
+  it('uses a deterministic unique evidence directory when none is provided', () => {
+    const first = defaultEvidenceDir('.fbeast/.build/run-configs/run-123.json');
+    const second = defaultEvidenceDir('.fbeast/.build/run-configs/run-456.json');
+
+    expect(first).toMatch(/^rollback-evidence\/runtime-config-run-123\.json-[a-f0-9]{12}$/u);
+    expect(second).toMatch(/^rollback-evidence\/runtime-config-run-456\.json-[a-f0-9]{12}$/u);
+    expect(first).not.toBe(second);
+  });
+
+  it('loads bounded JSON object snapshots and rejects arrays or oversized files', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'runtime-config-rollback-'));
     const good = join(workDir, 'before.json');
     const bad = join(workDir, 'bad.json');
+    const oversized = join(workDir, 'oversized.json');
     await writeFile(good, JSON.stringify({ provider: 'claude' }));
     await writeFile(bad, JSON.stringify(['not', 'an', 'object']));
+    await writeFile(oversized, `{"payload":"${'x'.repeat(1_048_577)}"}`);
 
     await expect(loadRuntimeConfigSnapshot(good)).resolves.toEqual({ provider: 'claude' });
     await expect(loadRuntimeConfigSnapshot(bad)).rejects.toThrow(/must contain a JSON object/u);
+    await expect(loadRuntimeConfigSnapshot(oversized)).rejects.toThrow(/exceeds maxBytes/u);
   });
 
   it('prints JSON and markdown dry-run plans without mutating the target config', async () => {
@@ -122,6 +144,8 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(jsonResult.status).toBe(0);
     const parsed = JSON.parse(jsonResult.stdout);
     expect(parsed.changedPaths).toEqual(['/provider']);
+    expect(parsed.readOnlyCapture[0]).toEqual(['mkdir', '-m', '700', '-p', join(workDir, 'evidence')]);
+    expect(parsed.readOnlyCapture[1]).toEqual(['install', '-m', '600', before, join(workDir, 'evidence', 'rollback-config.json')]);
     expect(parsed.approvalGatedActions[0]).toEqual([
       'approval-cop',
       'run',
@@ -144,5 +168,6 @@ describe('runtime config rollback plan dry-run helper', () => {
     expect(markdownResult.status).toBe(0);
     expect(markdownResult.stdout).toContain('## 1. Capture read-only rollback evidence');
     expect(markdownResult.stdout).toContain('approval-cop run -- cp');
+    expect(markdownResult.stdout).toContain('mkdir -m 700 -p');
   });
 });

@@ -1,9 +1,23 @@
 #!/usr/bin/env node
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const SNAPSHOT_LIMITS = Object.freeze({
+  maxBytes: 1_048_576,
+  maxDepth: 64,
+  maxContainers: 10_000,
+  maxObjectKeys: 20_000,
+  maxArrayItems: 50_000,
+});
+
 export async function loadRuntimeConfigSnapshot(filePath) {
+  const info = await stat(filePath);
+  if (info.size > SNAPSHOT_LIMITS.maxBytes) {
+    throw new Error(`Runtime config snapshot ${filePath} exceeds maxBytes: ${info.size} > ${SNAPSHOT_LIMITS.maxBytes}`);
+  }
   const raw = await readFile(filePath, 'utf8');
   let parsed;
   try {
@@ -12,6 +26,7 @@ export async function loadRuntimeConfigSnapshot(filePath) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Runtime config snapshot ${filePath} is not valid JSON: ${reason}`);
   }
+  validateSnapshotShape(parsed, filePath);
   if (!isPlainObject(parsed)) {
     throw new Error(`Runtime config snapshot ${filePath} must contain a JSON object`);
   }
@@ -22,6 +37,13 @@ export function diffRuntimeConfig(before, after) {
   return diffValues(before, after, '').sort((left, right) => left.path.localeCompare(right.path));
 }
 
+export function defaultEvidenceDir(targetPath) {
+  assertSafePath(targetPath, 'targetPath');
+  const targetName = basename(targetPath).replace(/[^A-Za-z0-9_.-]+/gu, '-').replace(/^-+/u, '') || 'runtime-config';
+  const digest = createHash('sha256').update(targetPath).digest('hex').slice(0, 12);
+  return `rollback-evidence/runtime-config-${targetName}-${digest}`;
+}
+
 export function buildRuntimeConfigRollbackPlan(options) {
   const {
     beforePath,
@@ -29,9 +51,9 @@ export function buildRuntimeConfigRollbackPlan(options) {
     targetPath,
     before,
     after,
-    evidenceDir = 'rollback-evidence/runtime-config',
     approvalCop = 'approval-cop run --',
   } = options;
+  const evidenceDir = options.evidenceDir ?? defaultEvidenceDir(targetPath);
 
   assertSafePath(beforePath, 'beforePath');
   assertSafePath(afterPath, 'afterPath');
@@ -61,10 +83,29 @@ export function buildRuntimeConfigRollbackPlan(options) {
     changedPaths,
     changes,
     readOnlyCapture: [
-      ['mkdir', '-p', evidenceDir],
-      ['cp', beforePath, rollbackConfigPath],
-      ['node', '-e', 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify(JSON.parse(process.argv[2]), null, 2) + "\\n")', changesPath, JSON.stringify(changes)],
-      ['node', '-e', 'require("node:fs").writeFileSync(process.argv[1], `## Runtime config rollback postmortem\\n\\n- Target config: ${process.argv[2]}\\n- Before snapshot: ${process.argv[3]}\\n- After snapshot: ${process.argv[4]}\\n- Changed paths: ${process.argv[5]}\\n- Approval-cop outcome/token: <fill before posting>\\n- Verification: compare the target to rollback-config.json and rerun the affected beast/runtime config launch path before resuming.\\n`)', rollbackCommentPath, targetPath, beforePath, afterPath, changedPaths.join(', ')],
+      ['mkdir', '-m', '700', '-p', evidenceDir],
+      ['install', '-m', '600', beforePath, rollbackConfigPath],
+      [
+        'node',
+        '--input-type=module',
+        '-e',
+        'import { writeFileSync } from "node:fs"; import { buildRuntimeConfigRollbackPlan, loadRuntimeConfigSnapshot } from "./scripts/runtime-config-rollback-plan.mjs"; const [out,beforePath,afterPath,targetPath,evidenceDir]=process.argv.slice(1); const before=await loadRuntimeConfigSnapshot(beforePath); const after=await loadRuntimeConfigSnapshot(afterPath); const plan=buildRuntimeConfigRollbackPlan({ beforePath, afterPath, targetPath, evidenceDir, before, after }); writeFileSync(out, JSON.stringify(plan.changes, null, 2) + "\\n", { mode: 0o600 });',
+        changesPath,
+        beforePath,
+        afterPath,
+        targetPath,
+        evidenceDir,
+      ],
+      [
+        'node',
+        '-e',
+        'require("node:fs").writeFileSync(process.argv[1], `## Runtime config rollback postmortem\\n\\n- Target config: ${process.argv[2]}\\n- Before snapshot: ${process.argv[3]}\\n- After snapshot: ${process.argv[4]}\\n- Changed paths: ${process.argv[5]}\\n- Approval-cop outcome/token: <fill before posting>\\n- Verification: compare the target to rollback-config.json and rerun the affected beast/runtime config launch path before resuming.\\n`, { mode: 0o600 })',
+        rollbackCommentPath,
+        targetPath,
+        beforePath,
+        afterPath,
+        changedPaths.join(', '),
+      ],
     ],
     requiredDecisions: [
       `Confirm ${beforePath} is the last-known-good runtime config snapshot.`,
@@ -88,6 +129,7 @@ export function buildRuntimeConfigRollbackPlan(options) {
       'The generated rollback action copies the captured before snapshot back over the target config through approval-cop/HITL.',
       'Treat runtime config rollback as operationally risky: verify the affected run/beast launch path after approval-cop applies the copy.',
       'Use this for JSON runtime config snapshots, not arbitrary source-code rewrites or branch rollbacks.',
+      `Snapshot parsing is bounded to ${SNAPSHOT_LIMITS.maxBytes} bytes, depth ${SNAPSHOT_LIMITS.maxDepth}, ${SNAPSHOT_LIMITS.maxContainers} containers, ${SNAPSHOT_LIMITS.maxObjectKeys} object keys, and ${SNAPSHOT_LIMITS.maxArrayItems} array items.`,
     ],
   };
 }
@@ -151,6 +193,41 @@ function buildChange(path, before, after) {
   if (before === undefined) return { path: path || '/', type: 'added', after };
   if (after === undefined) return { path: path || '/', type: 'removed', before };
   return { path: path || '/', type: 'changed', before, after };
+}
+
+function validateSnapshotShape(value, filePath) {
+  const stack = [{ value, depth: 0 }];
+  let containers = 0;
+  let objectKeys = 0;
+  let arrayItems = 0;
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || !isContainer(current.value)) continue;
+    containers += 1;
+    if (containers > SNAPSHOT_LIMITS.maxContainers) {
+      throw new Error(`Runtime config snapshot ${filePath} exceeds maxContainers: ${containers} > ${SNAPSHOT_LIMITS.maxContainers}`);
+    }
+    if (current.depth > SNAPSHOT_LIMITS.maxDepth) {
+      throw new Error(`Runtime config snapshot ${filePath} exceeds maxDepth: ${current.depth} > ${SNAPSHOT_LIMITS.maxDepth}`);
+    }
+
+    if (Array.isArray(current.value)) {
+      arrayItems += current.value.length;
+      if (arrayItems > SNAPSHOT_LIMITS.maxArrayItems) {
+        throw new Error(`Runtime config snapshot ${filePath} exceeds maxArrayItems: ${arrayItems} > ${SNAPSHOT_LIMITS.maxArrayItems}`);
+      }
+      for (const item of current.value) stack.push({ value: item, depth: current.depth + 1 });
+      continue;
+    }
+
+    const values = Object.values(current.value);
+    objectKeys += values.length;
+    if (objectKeys > SNAPSHOT_LIMITS.maxObjectKeys) {
+      throw new Error(`Runtime config snapshot ${filePath} exceeds maxObjectKeys: ${objectKeys} > ${SNAPSHOT_LIMITS.maxObjectKeys}`);
+    }
+    for (const item of values) stack.push({ value: item, depth: current.depth + 1 });
+  }
 }
 
 function isContainer(value) {
