@@ -139,6 +139,30 @@ export interface RestoreDryRunReportOptions {
   readonly livePath?: string;
 }
 
+export interface RestoreDryRunConflictRecordSummary {
+  readonly id: string;
+  readonly state?: string;
+  readonly digestPresent?: boolean;
+  readonly updatedAt?: string;
+}
+
+export interface RestoreDryRunConflict {
+  readonly area: RestorePreviewArea;
+  readonly id: string;
+  readonly type: RestorePreviewConflictType;
+  readonly severity: RestorePreviewSeverity;
+  readonly backup?: RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number };
+  readonly live?: RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number };
+  readonly recommendation: string;
+}
+
+export interface RestoreDryRunPreviewResult {
+  readonly wouldWrite: false;
+  readonly safeToRestore: boolean;
+  readonly schema: RestorePreviewResult['schema'];
+  readonly conflicts: readonly RestoreDryRunConflict[];
+}
+
 export interface RestoreDryRunReport {
   readonly ok: true;
   readonly command: 'dr restore-dry-run';
@@ -157,7 +181,7 @@ export interface RestoreDryRunReport {
     readonly warningCount: number;
     readonly infoCount: number;
   };
-  readonly preview: RestorePreviewResult;
+  readonly preview: RestoreDryRunPreviewResult;
   readonly operatorGuidance: string;
 }
 
@@ -356,10 +380,34 @@ export function buildRestoreDryRunReport(
       warningCount,
       infoCount,
     },
-    preview,
+    preview: redactPreviewForDryRun(preview),
     operatorGuidance: preview.safeToRestore
       ? 'Dry-run only: no restore writes were performed. Review the JSON report, then execute restore separately if an operator explicitly approves it.'
       : 'Dry-run only: no restore writes were performed; do not execute restore until blocker/warning conflicts have explicit restore, merge, skip, or quarantine decisions.',
+  };
+}
+
+function redactPreviewForDryRun(preview: RestorePreviewResult): RestoreDryRunPreviewResult {
+  return {
+    ...preview,
+    conflicts: preview.conflicts.map((conflict) => ({
+      ...conflict,
+      ...(conflict.backup === undefined ? {} : { backup: redactConflictRecord(conflict.area, conflict.backup) }),
+      ...(conflict.live === undefined ? {} : { live: redactConflictRecord(conflict.area, conflict.live) }),
+    })),
+  };
+}
+
+function redactConflictRecord(
+  area: RestorePreviewArea,
+  record: RestorePreviewRecord | { readonly schemaVersion: number },
+): RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number } {
+  if (area !== 'approvals' || !('id' in record)) return record;
+  return {
+    id: record.id,
+    ...(record.state === undefined ? {} : { state: record.state }),
+    ...(record.digest === undefined ? {} : { digestPresent: true }),
+    ...(record.updatedAt === undefined ? {} : { updatedAt: record.updatedAt }),
   };
 }
 

@@ -83,4 +83,65 @@ describe('dr restore-dry-run CLI', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('fails closed when a manifest has duplicate record IDs', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
+    const backupPath = join(dir, 'backup.json');
+    const livePath = join(dir, 'live.json');
+    await writeFile(backupPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{ id: 'task-1', digest: 'old' }, { id: 'task-1', digest: 'new' }],
+      approvals: [],
+      memory: [],
+      cron: [],
+    }), 'utf8');
+    await writeFile(livePath, JSON.stringify({ schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
+
+    try {
+      await expect(handleDrCommand({
+        action: 'restore-dry-run',
+        backupManifestPath: backupPath,
+        liveManifestPath: livePath,
+        print: () => undefined,
+      })).rejects.toThrow(/duplicate id 'task-1'/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed for unsupported schema versions', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
+    const backupPath = join(dir, 'backup.json');
+    const livePath = join(dir, 'live.json');
+    await writeFile(backupPath, JSON.stringify({ schemaVersion: 2, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
+    await writeFile(livePath, JSON.stringify({ schemaVersion: 2, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
+
+    try {
+      await expect(handleDrCommand({
+        action: 'restore-dry-run',
+        backupManifestPath: backupPath,
+        liveManifestPath: livePath,
+        print: () => undefined,
+      })).rejects.toThrow(/unsupported schemaVersion 2/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects identical backup and live manifest paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
+    const manifestPath = join(dir, 'manifest.json');
+    await writeFile(manifestPath, JSON.stringify({ schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
+
+    try {
+      await expect(handleDrCommand({
+        action: 'restore-dry-run',
+        backupManifestPath: manifestPath,
+        liveManifestPath: manifestPath,
+        print: () => undefined,
+      })).rejects.toThrow(/requires distinct backup and live manifest files/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

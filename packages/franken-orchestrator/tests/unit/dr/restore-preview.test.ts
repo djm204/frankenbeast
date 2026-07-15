@@ -99,7 +99,7 @@ describe('restore preview conflict detector', () => {
     const backup: RestorePreviewManifest = {
       schemaVersion: 1,
       tasks: [{ id: 'task-1', digest: 'old-task', updatedAt: '2026-07-14T10:00:00.000Z' }],
-      approvals: [{ id: 'approval-1', state: 'pending', digest: 'pending-token' }],
+      approvals: [{ id: 'approval-1', state: 'pending', digest: 'pending-token', value: 'secret-token-value' }],
       memory: [],
       cron: [],
     };
@@ -135,9 +135,20 @@ describe('restore preview conflict detector', () => {
         warningCount: 1,
         infoCount: 1,
       },
-      preview: expect.objectContaining({ wouldWrite: false, safeToRestore: false }),
+      preview: expect.objectContaining({
+        wouldWrite: false,
+        safeToRestore: false,
+        conflicts: expect.arrayContaining([
+          expect.objectContaining({
+            area: 'approvals',
+            backup: { id: 'approval-1', state: 'pending', digestPresent: true },
+          }),
+        ]),
+      }),
       operatorGuidance: expect.stringContaining('do not execute restore'),
     });
+    expect(JSON.stringify(report)).not.toContain('secret-token-value');
+    expect(JSON.stringify(report)).not.toContain('pending-token');
   });
 
   it('treats backup-only approval tokens as blockers', () => {

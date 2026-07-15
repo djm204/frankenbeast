@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 
 import {
   buildRestoreDryRunReport,
@@ -23,10 +23,15 @@ function validateRecordArray(manifestPath: string, manifest: Record<string, unkn
   if (!Array.isArray(value)) {
     throw new Error(`Invalid restore manifest ${manifestPath}: ${field} must be an array when present`);
   }
+  const ids = new Set<string>();
   for (const [index, record] of value.entries()) {
     if (!isRecord(record) || typeof record.id !== 'string' || record.id.length === 0) {
       throw new Error(`Invalid restore manifest ${manifestPath}: ${field}[${index}] must include a non-empty string id`);
     }
+    if (ids.has(record.id)) {
+      throw new Error(`Invalid restore manifest ${manifestPath}: ${field} contains duplicate id '${record.id}'`);
+    }
+    ids.add(record.id);
   }
 }
 
@@ -45,6 +50,9 @@ export async function readRestoreManifest(manifestPath: string): Promise<Restore
   if (!Number.isSafeInteger(parsed.schemaVersion)) {
     throw new Error(`Invalid restore manifest ${manifestPath}: schemaVersion must be a safe integer`);
   }
+  if (parsed.schemaVersion !== 1) {
+    throw new Error(`Invalid restore manifest ${manifestPath}: unsupported schemaVersion ${String(parsed.schemaVersion)}`);
+  }
   for (const field of ['tasks', 'approvals', 'memory', 'cron']) {
     validateRecordArray(manifestPath, parsed, field);
   }
@@ -61,14 +69,22 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     throw new Error('dr restore-dry-run requires two manifest JSON files: <backup-manifest.json> <live-manifest.json>');
   }
 
+  const [resolvedBackupPath, resolvedLivePath] = await Promise.all([
+    realpath(backupManifestPath),
+    realpath(liveManifestPath),
+  ]);
+  if (resolvedBackupPath === resolvedLivePath) {
+    throw new Error('dr restore-dry-run requires distinct backup and live manifest files');
+  }
+
   const [backup, live] = await Promise.all([
-    readRestoreManifest(backupManifestPath),
-    readRestoreManifest(liveManifestPath),
+    readRestoreManifest(resolvedBackupPath),
+    readRestoreManifest(resolvedLivePath),
   ]);
 
   print(JSON.stringify(buildRestoreDryRunReport(backup, live, {
     ...(deps.generatedAt === undefined ? {} : { generatedAt: deps.generatedAt }),
-    backupPath: backupManifestPath,
-    livePath: liveManifestPath,
+    backupPath: resolvedBackupPath,
+    livePath: resolvedLivePath,
   }), null, 2));
 }
