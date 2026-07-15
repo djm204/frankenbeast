@@ -84,8 +84,8 @@ describe('atomic-file', () => {
           targetPath: filePath,
           tempPath,
           phase: 'writing-temp',
-          startedAt: '2026-07-15T00:00:00.000Z',
-          updatedAt: '2026-07-15T00:00:01.000Z',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
         }),
         'utf8',
       );
@@ -112,8 +112,8 @@ describe('atomic-file', () => {
           targetPath: filePath,
           tempPath,
           phase: 'renaming',
-          startedAt: '2026-07-15T00:00:00.000Z',
-          updatedAt: '2026-07-15T00:00:01.000Z',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
         }),
         'utf8',
       );
@@ -187,8 +187,8 @@ describe('atomic-file', () => {
           targetPath: filePath,
           tempPath: victimPath,
           phase: 'writing-temp',
-          startedAt: '2026-07-15T00:00:00.000Z',
-          updatedAt: '2026-07-15T00:00:01.000Z',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
         }),
         'utf8',
       );
@@ -214,8 +214,8 @@ describe('atomic-file', () => {
           targetPath: join(dir, '.', 'state.json'),
           tempPath,
           phase: 'writing-temp',
-          startedAt: '2026-07-15T00:00:00.000Z',
-          updatedAt: '2026-07-15T00:00:01.000Z',
+          startedAt: '1970-01-01T00:00:00.000Z',
+          updatedAt: '1970-01-01T00:00:01.000Z',
         }),
         'utf8',
       );
