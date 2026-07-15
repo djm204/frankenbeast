@@ -77,6 +77,22 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
 
   app.post('/v1/beasts/agents', async (c) => {
     const body = validateBody(CreateAgentBody, await parseJsonBody(c));
+    const shouldAutoDispatch = body.autoDispatch !== false && deps.dispatch && shouldDispatchOnCreate(body.initAction.kind);
+    if (shouldAutoDispatch) {
+      const capacityDecision = deps.agents.canStartInitConfig(body.initConfig);
+      if (!capacityDecision.allowed) {
+        return c.json({
+          error: {
+            code: 'AGENT_CAPACITY_RESERVED',
+            message: 'Agent capacity is reserved for urgent matching work',
+            details: {
+              decision: capacityDecision,
+              capacity: deps.agents.getCapacityReservationState(),
+            },
+          },
+        }, 409);
+      }
+    }
     const agent = deps.agents.createAgent({
       definitionId: body.definitionId,
       source: body.chatSessionId ? 'chat' : 'dashboard',
@@ -167,6 +183,7 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     return c.json({
       data: {
         agents: deps.agents.listAgents(),
+        capacityReservation: deps.agents.getCapacityReservationState(),
       },
     });
   });
@@ -556,6 +573,19 @@ async function dispatchDetachedAgent(
       409,
       'TRACKED_AGENT_NOT_STARTABLE',
       `Tracked agent '${agentId}' cannot be started without a linked run`,
+    );
+  }
+
+  const capacityDecision = deps.agents.canStartAgent(agent);
+  if (!capacityDecision.allowed) {
+    throw new HttpError(
+      409,
+      'AGENT_CAPACITY_RESERVED',
+      'Agent capacity is reserved for urgent matching work',
+      {
+        decision: capacityDecision,
+        capacity: deps.agents.getCapacityReservationState(),
+      },
     );
   }
 

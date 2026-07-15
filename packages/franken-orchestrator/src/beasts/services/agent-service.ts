@@ -8,6 +8,12 @@ import type {
 import { isoNow } from '@franken/types';
 import { DeletedTrackedAgentError, UnknownTrackedAgentError } from '../errors.js';
 import { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
+import type {
+  CapacityReservationDecision,
+  CapacityReservationPolicy,
+  CapacityReservationState,
+  CapacityReservationWorkItem,
+} from './capacity-reservation-policy.js';
 
 export interface CreateTrackedAgentRequest {
   readonly definitionId: string;
@@ -41,10 +47,15 @@ export interface TrackedAgentDetail {
   readonly events: TrackedAgentEvent[];
 }
 
+export interface AgentServiceOptions {
+  readonly capacityPolicy?: CapacityReservationPolicy | undefined;
+}
+
 export class AgentService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
     private readonly now: () => string = () => isoNow(),
+    private readonly options: AgentServiceOptions = {},
   ) {}
 
   createAgent(request: CreateTrackedAgentRequest): TrackedAgent {
@@ -66,6 +77,21 @@ export class AgentService {
 
   listAgents(): TrackedAgent[] {
     return this.repository.listTrackedAgents();
+  }
+
+  getCapacityReservationState(): CapacityReservationState | undefined {
+    return this.options.capacityPolicy?.describe(this.activeCapacityItems());
+  }
+
+  canStartInitConfig(initConfig: Readonly<Record<string, unknown>>): CapacityReservationDecision {
+    return this.options.capacityPolicy?.canStart(capacityItemFromConfig('candidate', initConfig), this.activeCapacityItems())
+      ?? { allowed: true, reason: 'normal_capacity_available', reservationId: undefined };
+  }
+
+  canStartAgent(agent: TrackedAgent): CapacityReservationDecision {
+    const activeItems = this.activeCapacityItems().filter((item) => item.id !== agent.id);
+    return this.options.capacityPolicy?.canStart(capacityItemFromAgent(agent), activeItems)
+      ?? { allowed: true, reason: 'normal_capacity_available', reservationId: undefined };
   }
 
   getAgent(agentId: string): TrackedAgent {
@@ -127,4 +153,49 @@ export class AgentService {
       updatedAt: this.now(),
     });
   }
+
+  private activeCapacityItems(): CapacityReservationWorkItem[] {
+    return this.listAgents()
+      .filter((agent) => agent.status === 'initializing'
+        || agent.status === 'dispatching'
+        || agent.status === 'awaiting_approval'
+        || agent.status === 'running')
+      .map(capacityItemFromAgent);
+  }
+}
+
+function capacityItemFromAgent(agent: TrackedAgent): CapacityReservationWorkItem {
+  return capacityItemFromConfig(agent.id, agent.initConfig);
+}
+
+function capacityItemFromConfig(id: string, initConfig: Readonly<Record<string, unknown>>): CapacityReservationWorkItem {
+  const issue = isRecord(initConfig.issue) ? initConfig.issue : undefined;
+  return {
+    id,
+    labels: [
+      ...stringsFromUnknown(initConfig.labels),
+      ...stringsFromUnknown(initConfig.label),
+      ...stringsFromUnknown(initConfig.issueLabels),
+      ...stringsFromUnknown(issue?.labels),
+    ],
+    categories: [
+      ...stringsFromUnknown(initConfig.categories),
+      ...stringsFromUnknown(initConfig.category),
+      ...stringsFromUnknown(issue?.category),
+    ],
+  };
+}
+
+function stringsFromUnknown(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === 'string');
+  }
+  return [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
