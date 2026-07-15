@@ -42,6 +42,48 @@ export interface BackupEncryptionVerificationOptions {
   readonly allowedAlgorithms?: readonly string[];
 }
 
+export type ApprovalLedgerRecoveryStatus = 'clean' | 'review-required' | 'blocked';
+
+export type ApprovalLedgerRecoverySeverity = 'info' | 'warning' | 'blocker';
+
+export type ApprovalLedgerRecoveryFindingCode =
+  | 'schema-mismatch'
+  | 'approval-backup-only'
+  | 'approval-live-only'
+  | 'approval-changed'
+  | 'approval-newer-live';
+
+export interface ApprovalLedgerRecordSummary {
+  readonly state?: string;
+  readonly digestPresent: boolean;
+  readonly updatedAt?: string;
+}
+
+export interface ApprovalLedgerRecoveryFinding {
+  readonly code: ApprovalLedgerRecoveryFindingCode;
+  readonly approvalId: string;
+  readonly severity: ApprovalLedgerRecoverySeverity;
+  readonly message: string;
+  readonly recommendation: string;
+  readonly backup?: ApprovalLedgerRecordSummary;
+  readonly live?: ApprovalLedgerRecordSummary;
+}
+
+export interface ApprovalLedgerRecoveryReport {
+  /** ISO timestamp for when the report was generated, supplied by callers for deterministic tests. */
+  readonly checkedAt: string;
+  /** Explicitly records that approval-ledger recovery planning is read-only and performs no restore writes. */
+  readonly wouldWrite: false;
+  readonly status: ApprovalLedgerRecoveryStatus;
+  readonly safeToApplyAutomatically: false;
+  readonly findings: readonly ApprovalLedgerRecoveryFinding[];
+  readonly operatorSummary: string;
+}
+
+export interface ApprovalLedgerRecoveryOptions {
+  readonly checkedAt?: string;
+}
+
 export type RestorePreviewConflictType =
   | 'schema-mismatch'
   | 'changed'
@@ -184,6 +226,43 @@ export function buildBackupEncryptionVerificationReport(
   };
 }
 
+export function buildApprovalLedgerRecoveryReport(
+  backup: RestorePreviewManifest,
+  live: RestorePreviewManifest,
+  options: ApprovalLedgerRecoveryOptions = {},
+): ApprovalLedgerRecoveryReport {
+  const checkedAt = options.checkedAt ?? new Date().toISOString();
+  const preview = detectRestorePreviewConflicts(backup, live);
+  const findings: ApprovalLedgerRecoveryFinding[] = [];
+
+  if (!preview.schema.compatible) {
+    findings.push({
+      code: 'schema-mismatch',
+      approvalId: 'schema-version',
+      severity: 'blocker',
+      message: `Backup schema version ${preview.schema.backupVersion} does not match live schema version ${preview.schema.liveVersion}.`,
+      recommendation:
+        'Do not recover approval ledger entries until the backup has been migrated to the live schema version or the restore is run against a compatible live store.',
+    });
+  }
+
+  for (const conflict of preview.conflicts) {
+    if (conflict.area !== 'approvals') continue;
+    findings.push(findingForApprovalConflict(conflict));
+  }
+
+  const status = statusForApprovalLedgerFindings(findings);
+
+  return {
+    checkedAt,
+    wouldWrite: false,
+    status,
+    safeToApplyAutomatically: false,
+    findings,
+    operatorSummary: operatorSummaryForApprovalLedgerReport(status, findings.length),
+  };
+}
+
 export function detectRestorePreviewConflicts(
   backup: RestorePreviewManifest,
   live: RestorePreviewManifest,
@@ -228,6 +307,77 @@ function statusForEncryptionFindings(
   return 'verified';
 }
 
+function findingForApprovalConflict(conflict: RestorePreviewConflict): ApprovalLedgerRecoveryFinding {
+  const backup = summarizeApprovalRecord(conflict.backup);
+  const live = summarizeApprovalRecord(conflict.live);
+
+  switch (conflict.type) {
+    case 'backup-only':
+      return {
+        code: 'approval-backup-only',
+        approvalId: conflict.id,
+        severity: 'blocker',
+        message: 'Backup contains an approval ledger entry that is absent from live state.',
+        recommendation:
+          'Quarantine this backup approval entry and require a fresh human re-approval before any action can reuse the approval.',
+        ...(backup === undefined ? {} : { backup }),
+      };
+    case 'live-only':
+      return {
+        code: 'approval-live-only',
+        approvalId: conflict.id,
+        severity: 'warning',
+        message: 'Live state contains an approval ledger entry that is absent from the backup.',
+        recommendation:
+          'Preserve the live approval ledger entry during recovery unless an operator explicitly expires it; do not let the backup delete live approval evidence silently.',
+        ...(live === undefined ? {} : { live }),
+      };
+    case 'newer-live':
+      return {
+        code: 'approval-newer-live',
+        approvalId: conflict.id,
+        severity: 'blocker',
+        message: 'Live approval ledger state is newer than the backup copy.',
+        recommendation:
+          'Preserve the live approval state and require fresh re-approval for any action whose approval evidence differs from the backup.',
+        ...(backup === undefined ? {} : { backup }),
+        ...(live === undefined ? {} : { live }),
+      };
+    case 'changed':
+    default:
+      return {
+        code: 'approval-changed',
+        approvalId: conflict.id,
+        severity: 'blocker',
+        message: 'Backup and live approval ledger entries differ.',
+        recommendation:
+          'Do not merge or replay this approval token automatically; require fresh re-approval and keep both ledger snapshots for audit review.',
+        ...(backup === undefined ? {} : { backup }),
+        ...(live === undefined ? {} : { live }),
+      };
+  }
+}
+
+function summarizeApprovalRecord(
+  record: RestorePreviewConflict['backup'] | RestorePreviewConflict['live'],
+): ApprovalLedgerRecordSummary | undefined {
+  if (!isRecord(record) || 'schemaVersion' in record) return undefined;
+  const summarySource = record as Record<string, unknown>;
+  return {
+    ...(typeof summarySource.state === 'string' ? { state: summarySource.state } : {}),
+    digestPresent: typeof summarySource.digest === 'string' && summarySource.digest.length > 0,
+    ...(typeof summarySource.updatedAt === 'string' ? { updatedAt: summarySource.updatedAt } : {}),
+  };
+}
+
+function statusForApprovalLedgerFindings(
+  findings: readonly ApprovalLedgerRecoveryFinding[],
+): ApprovalLedgerRecoveryStatus {
+  if (findings.some((finding) => finding.severity === 'blocker')) return 'blocked';
+  if (findings.length > 0) return 'review-required';
+  return 'clean';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -243,6 +393,15 @@ function operatorSummaryForEncryptionReport(
   if (status === 'verified') return 'Backup encryption is verified; no encryption blockers or warnings were found.';
   if (status === 'warning') return `Backup encryption is present but has ${findingCount} warning(s) requiring operator review.`;
   return `Backup encryption verification failed with ${findingCount} blocker/warning finding(s); do not restore blindly.`;
+}
+
+function operatorSummaryForApprovalLedgerReport(
+  status: ApprovalLedgerRecoveryStatus,
+  findingCount: number,
+): string {
+  if (status === 'clean') return 'Approval ledger recovery check is clean; no approval ledger drift was found.';
+  if (status === 'review-required') return `Approval ledger recovery found ${findingCount} warning(s); preserve live approval evidence unless an operator explicitly expires it.`;
+  return `Approval ledger recovery is blocked by ${findingCount} finding(s); stale or changed approvals require fresh human re-approval before restore.`;
 }
 
 function compareRecords(
