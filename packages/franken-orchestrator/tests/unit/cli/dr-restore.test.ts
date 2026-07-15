@@ -23,8 +23,8 @@ describe('dr restore-dry-run CLI', () => {
     const livePath = join(dir, 'live.json');
     const backup = {
       schemaVersion: 1,
-      tasks: [{ id: 'task-1', digest: 'old-task' }],
-      approvals: [{ id: 'approval-1', state: 'pending' }],
+      tasks: [{ id: 'task-1', digest: 'old-task', value: { title: 'secret task title' } }],
+      approvals: [{ id: 'approval-1', state: 'pending', value: 'secret approval token' }],
       memory: [],
       cron: [],
     };
@@ -50,7 +50,7 @@ describe('dr restore-dry-run CLI', () => {
       dryRun: boolean;
       wouldWrite: boolean;
       summary: { blockerCount: number; conflictCount: number };
-      preview: { conflicts: Array<{ area: string; severity: string }> };
+      preview: { conflicts: Array<{ area: string; severity: string; backup?: { valuePresent?: boolean } }> };
     };
     expect(report.command).toBe('dr restore-dry-run');
     expect(report.dryRun).toBe(true);
@@ -59,10 +59,12 @@ describe('dr restore-dry-run CLI', () => {
     expect(report.summary.blockerCount).toBe(2);
     expect(report.preview.conflicts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ area: 'tasks', severity: 'blocker' }),
-        expect.objectContaining({ area: 'approvals', severity: 'blocker' }),
+        expect.objectContaining({ area: 'tasks', severity: 'blocker', backup: expect.objectContaining({ valuePresent: true }) }),
+        expect.objectContaining({ area: 'approvals', severity: 'blocker', backup: expect.objectContaining({ valuePresent: true }) }),
       ]),
     );
+    expect(output.join('\n')).not.toContain('secret task title');
+    expect(output.join('\n')).not.toContain('secret approval token');
   });
 
   it('fails closed with an actionable message when a manifest is malformed', async () => {
@@ -123,6 +125,31 @@ describe('dr restore-dry-run CLI', () => {
         liveManifestPath: livePath,
         print: () => undefined,
       })).rejects.toThrow(/unsupported schemaVersion 2/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed for unsupported record fields and malformed summary fields', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dr-'));
+    const backupPath = join(dir, 'backup.json');
+    const livePath = join(dir, 'live.json');
+    await writeFile(backupPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{ id: 'task-1', title: 'unsupported direct field' }],
+      approvals: [{ id: 'approval-1', state: { token: 'secret' } }],
+      memory: [],
+      cron: [],
+    }), 'utf8');
+    await writeFile(livePath, JSON.stringify({ schemaVersion: 1, tasks: [], approvals: [], memory: [], cron: [] }), 'utf8');
+
+    try {
+      await expect(handleDrCommand({
+        action: 'restore-dry-run',
+        backupManifestPath: backupPath,
+        liveManifestPath: livePath,
+        print: () => undefined,
+      })).rejects.toThrow(/unsupported field 'title'/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

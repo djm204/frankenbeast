@@ -140,8 +140,12 @@ describe('restore preview conflict detector', () => {
         safeToRestore: false,
         conflicts: expect.arrayContaining([
           expect.objectContaining({
+            area: 'tasks',
+            backup: expect.objectContaining({ id: 'task-1', digestPresent: true }),
+          }),
+          expect.objectContaining({
             area: 'approvals',
-            backup: { id: 'approval-1', state: 'pending', digestPresent: true },
+            backup: { id: 'approval-1', state: 'pending', digestPresent: true, valuePresent: true },
           }),
         ]),
       }),

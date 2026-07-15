@@ -24,9 +24,20 @@ function validateRecordArray(manifestPath: string, manifest: Record<string, unkn
     throw new Error(`Invalid restore manifest ${manifestPath}: ${field} must be an array when present`);
   }
   const ids = new Set<string>();
+  const allowedFields = new Set(['id', 'digest', 'state', 'updatedAt', 'value']);
   for (const [index, record] of value.entries()) {
     if (!isRecord(record) || typeof record.id !== 'string' || record.id.length === 0) {
       throw new Error(`Invalid restore manifest ${manifestPath}: ${field}[${index}] must include a non-empty string id`);
+    }
+    for (const recordField of Object.keys(record)) {
+      if (!allowedFields.has(recordField)) {
+        throw new Error(`Invalid restore manifest ${manifestPath}: ${field}[${index}] includes unsupported field '${recordField}'`);
+      }
+    }
+    for (const stringField of ['digest', 'state', 'updatedAt']) {
+      if (record[stringField] !== undefined && typeof record[stringField] !== 'string') {
+        throw new Error(`Invalid restore manifest ${manifestPath}: ${field}[${index}].${stringField} must be a string when present`);
+      }
     }
     if (ids.has(record.id)) {
       throw new Error(`Invalid restore manifest ${manifestPath}: ${field} contains duplicate id '${record.id}'`);

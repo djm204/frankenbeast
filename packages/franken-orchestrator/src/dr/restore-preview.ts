@@ -143,6 +143,7 @@ export interface RestoreDryRunConflictRecordSummary {
   readonly id: string;
   readonly state?: string;
   readonly digestPresent?: boolean;
+  readonly valuePresent?: boolean;
   readonly updatedAt?: string;
 }
 
@@ -392,22 +393,22 @@ function redactPreviewForDryRun(preview: RestorePreviewResult): RestoreDryRunPre
     ...preview,
     conflicts: preview.conflicts.map((conflict) => ({
       ...conflict,
-      ...(conflict.backup === undefined ? {} : { backup: redactConflictRecord(conflict.area, conflict.backup) }),
-      ...(conflict.live === undefined ? {} : { live: redactConflictRecord(conflict.area, conflict.live) }),
+      ...(conflict.backup === undefined ? {} : { backup: redactConflictRecord(conflict.backup) }),
+      ...(conflict.live === undefined ? {} : { live: redactConflictRecord(conflict.live) }),
     })),
   };
 }
 
 function redactConflictRecord(
-  area: RestorePreviewArea,
   record: RestorePreviewRecord | { readonly schemaVersion: number },
-): RestorePreviewRecord | RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number } {
-  if (area !== 'approvals' || !('id' in record)) return record;
+): RestoreDryRunConflictRecordSummary | { readonly schemaVersion: number } {
+  if (!('id' in record)) return record;
   return {
     id: record.id,
-    ...(record.state === undefined ? {} : { state: record.state }),
-    ...(record.digest === undefined ? {} : { digestPresent: true }),
-    ...(record.updatedAt === undefined ? {} : { updatedAt: record.updatedAt }),
+    ...(typeof record.state === 'string' ? { state: record.state } : {}),
+    ...(typeof record.digest === 'string' ? { digestPresent: true } : {}),
+    ...('value' in record && record.value !== undefined ? { valuePresent: true } : {}),
+    ...(typeof record.updatedAt === 'string' ? { updatedAt: record.updatedAt } : {}),
   };
 }
 
