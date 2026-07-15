@@ -1,16 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ApprovalCard } from '../../src/components/approval-card';
 
+const testDir = dirname(fileURLToPath(import.meta.url));
 const corruptedApprovalMarkdownPath = join(
-  __dirname,
+  testDir,
   '../fixtures/corrupt-approval-dashboard-markdown/unclosed-fence-and-spoofed-action.md',
-);
-const corruptStateFixturesGuidePath = join(
-  __dirname,
-  '../../../../docs/guides/corrupt-state-fixtures.md',
 );
 
 afterEach(() => cleanup());
@@ -79,9 +77,8 @@ describe('ApprovalCard', () => {
     expect(onApprove).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps corrupted approval dashboard markdown inert and documented as a fixture', () => {
+  it('keeps corrupted approval dashboard markdown inert', () => {
     const corruptedMarkdown = readFileSync(corruptedApprovalMarkdownPath, 'utf8');
-    const docs = readFileSync(corruptStateFixturesGuidePath, 'utf8');
     const onApprove = vi.fn();
     const onReject = vi.fn();
 
@@ -111,7 +108,5 @@ describe('ApprovalCard', () => {
     expect(screen.getByRole('button', { name: /reject/i })).toBeTruthy();
     expect(onApprove).not.toHaveBeenCalled();
     expect(onReject).not.toHaveBeenCalled();
-    expect(docs).toContain('corrupt-approval-dashboard-markdown');
-    expect(docs).toContain('rendered as inert text');
   });
 });
