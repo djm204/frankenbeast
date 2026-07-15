@@ -284,7 +284,13 @@ describe('Codex hook scripts', () => {
 
     const result = runScript(preTool, {
       tool_name: 'fbeast_memory_right_to_forget',
-      tool_input: { query: 'alice@example.test', category: 'pii', dryRun: true },
+      tool_input: {
+        query: 'alice@example.test',
+        category: 'pii',
+        dryRun: true,
+        token: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
+        value: 'also-secret',
+      },
       session_id: 'sess-1',
     }, binDir, { FBEAST_CAPTURE_CONTEXT_FILE: contextFile });
 
@@ -296,6 +302,8 @@ describe('Codex hook scripts', () => {
       dryRun: true,
     });
     expect(context).not.toContain('alice@example.test');
+    expect(context).not.toContain('SECRET_TOKEN_SHOULD_NOT_LEAK');
+    expect(context).not.toContain('also-secret');
   });
 
   it('does not forward file-content fields, so destructive-looking content is not seen by the governor', () => {

@@ -18,9 +18,20 @@ const DESTRUCTIVE_ACTIONS = new Set([
 ]);
 
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
+  fbeast_memory_store: 'memory',
   fbeast_memory_forget: 'memory',
   fbeast_memory_right_to_forget: 'memory',
 };
+
+const HIGH_RISK_ACTION_NAME_PATTERNS: ReadonlyArray<readonly [RegExp, HighRiskActionClass]> = [
+  [/\bgit\s+push\b/i, 'git-remote-write'],
+  [/\bgh\s+(?:api|issue|pr|workflow|repo|release)\b/i, 'github-mutation'],
+  [/\b(?:curl|fetch)\b[^\n]*api\.github\.com\b/i, 'github-mutation'],
+  [/\b(?:cron|cronjob|schedule|scheduled\s+job)\b/i, 'cron'],
+  [/\b(?:profile|skill|plugin|credential|config)\b[^\n]*(?:write|edit|patch|create|delete|remove|install|set)\b/i, 'profile-write'],
+  [/\b(?:webhook|discord_webhook_url|slack_webhook_url)\b/i, 'webhook'],
+  [/\b(?:kill|pkill|killall|nohup|disown|systemctl|service|docker\s+(?:stop|kill|rm|restart)|process\s+(?:kill|start|stop))\b/i, 'shell-process-control'],
+];
 
 /**
  * fbeast tools whose payload is *data to query/analyze/store/log*, not an
@@ -38,7 +49,6 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_firewall_scan_file',
   'fbeast_governor_check',
   'fbeast_governor_budget',
-  'fbeast_memory_store',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_plan_decompose',
@@ -193,6 +203,39 @@ function memoryTarget(context: Record<string, unknown>): string | undefined {
   return selectors.length > 0 ? selectors.join(',') : undefined;
 }
 
+function contextCommand(action: string, context: string): string {
+  const parsed = parseContextObject(context);
+  for (const key of ['command', 'cmd', 'script']) {
+    const value = stringContext(parsed, key);
+    if (value !== undefined) return value;
+  }
+  for (const key of ['args', 'argv', 'commands']) {
+    const value = parsed[key];
+    if (Array.isArray(value)) return value.map(String).join(' ');
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return `${action} ${context}`.trim();
+}
+
+function extractGitPushTarget(command: string): string | undefined {
+  const match = /\bgit\s+push\b(?:\s+--[^\s]+)*(?:\s+(?<remote>[^\s]+))?(?:\s+(?<ref>[^\s]+))?/i.exec(command);
+  if (!match?.groups) return undefined;
+  const remote = match.groups.remote;
+  const ref = match.groups.ref;
+  return [remote, ref].filter((part): part is string => part !== undefined && !part.startsWith('-')).join(' ') || undefined;
+}
+
+function extractUrl(text: string): string | undefined {
+  return /https?:\/\/[^\s'"`<>]+/i.exec(text)?.[0];
+}
+
+function inferHighRiskActionClass(action: string, context: string): HighRiskActionClass | undefined {
+  const explicit = HIGH_RISK_ACTIONS[action];
+  if (explicit !== undefined) return explicit;
+  const combined = `${action} ${context}`;
+  return HIGH_RISK_ACTION_NAME_PATTERNS.find(([pattern]) => pattern.test(combined))?.[1];
+}
+
 function highRiskEvidence(action: string, context: string): HighRiskActionEvidence {
   const parsed = parseContextObject(context);
   if (action === 'fbeast_memory_store') return { operation: 'store', ...optionalTarget(memoryTarget(parsed)) };
@@ -204,11 +247,39 @@ function highRiskEvidence(action: string, context: string): HighRiskActionEviden
       ...optionalDryRun(booleanContext(parsed, 'dryRun')),
     };
   }
-  return {};
+  const command = contextCommand(action, context);
+  if (/\bgit\s+push\b/i.test(command)) {
+    return {
+      command,
+      ...optionalTarget(extractGitPushTarget(command) ?? command),
+      force: /(?:\s--force(?:-with-lease)?\b|\s-f\b)/i.test(command),
+    };
+  }
+  const operation = stringContext(parsed, 'operation') ?? action;
+  const target = stringContext(parsed, 'target') ?? extractUrl(command) ?? command;
+  const evidence: HighRiskActionEvidence = { command, operation, ...optionalTarget(target) };
+  for (const [key, value] of [
+    ['profile', stringContext(parsed, 'profile')],
+    ['activeProfile', stringContext(parsed, 'activeProfile')],
+    ['url', extractUrl(command)],
+  ] as const) {
+    if (value !== undefined) Object.assign(evidence, { [key]: value });
+  }
+  for (const [key, value] of [
+    ['allowlisted', booleanContext(parsed, 'allowlisted')],
+    ['dryRun', booleanContext(parsed, 'dryRun')],
+    ['readOnly', booleanContext(parsed, 'readOnly')],
+    ['destructive', booleanContext(parsed, 'destructive')],
+    ['force', booleanContext(parsed, 'force')],
+    ['crossProfile', booleanContext(parsed, 'crossProfile')],
+  ] as const) {
+    if (value !== undefined) Object.assign(evidence, { [key]: value });
+  }
+  return evidence;
 }
 
 function assessHighRiskAction(action: string, context: string): GovernorCheckResult | undefined {
-  const actionClass = HIGH_RISK_ACTIONS[action];
+  const actionClass = inferHighRiskActionClass(action, context);
   if (actionClass === undefined) return undefined;
   const result = evaluateHighRiskActionPolicy({ actionClass, evidence: highRiskEvidence(action, context) });
   if (result.decision === 'allow') {
@@ -231,6 +302,9 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 }
 
 function assessAction(action: string, context: string): GovernorCheckResult {
+  const highRiskResult = assessHighRiskAction(action, context);
+  if (highRiskResult !== undefined) return highRiskResult;
+
   // Non-executing tools are approved without payload governance, so this
   // exemption holds on every path that reaches the shared governor (hook,
   // public check tool, central gate) — not just the central dispatch gate.
@@ -240,9 +314,6 @@ function assessAction(action: string, context: string): GovernorCheckResult {
       reason: `Tool "${action}" is non-executing (its payload is data, not an operation); exempt from payload governance.`,
     };
   }
-
-  const highRiskResult = assessHighRiskAction(action, context);
-  if (highRiskResult !== undefined) return highRiskResult;
 
   if (action === 'fbeast_memory_right_to_forget') {
     return {

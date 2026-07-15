@@ -117,14 +117,31 @@ describe('GovernorAdapter', () => {
     expect(result.decision).toBe('denied');
   });
 
-  it('exempts ordinary memory stores from payload governance', async () => {
+  it('routes ordinary memory stores through high-risk memory policy without scanning stored payload text', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({
       action: 'fbeast_memory_store',
       context: '{"key":"notes","value":"delete drop truncate rm -rf /"}',
     });
-    expect(result.decision).toBe('approved');
-    expect(result.reason).toContain('non-executing');
+    expect(result.decision).toBe('review_recommended');
+    expect(result.reason).toContain('Memory edits persist');
+  });
+
+  it('routes non-memory high-risk action classes through policy-as-code', async () => {
+    const governor = createGovernorAdapter(tracked(tmpDbPath()));
+
+    await expect(governor.check({ action: 'git push origin main', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'gh issue edit 1704 --add-label security', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'cronjob create', context: '{"operation":"create","target":"every 10m"}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'profile config set', context: '{"operation":"config","profile":"default","activeProfile":"default"}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
+    await expect(governor.check({ action: 'send webhook', context: '{"url":"https://hooks.example.test/a","allowlisted":false}' }))
+      .resolves.toMatchObject({ decision: 'denied' });
+    await expect(governor.check({ action: 'kill process 123', context: '{}' }))
+      .resolves.toMatchObject({ decision: 'review_recommended' });
   });
 
   it('reprices zero-cost known model rows in budget status', async () => {

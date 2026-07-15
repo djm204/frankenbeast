@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-15 — High-risk governor policy review fixes
+- When adding policy-as-code for high-risk action classes, wire the class map into every shared governor path before non-executing exemptions; otherwise new classes can exist in the policy module but never gate hook/public/central checks.
+- For memory governance evidence, pass only selector/dry-run/profile fields into hook/governor context and redact selectors before logging; never serialize full memory tool payloads because schema-rejected extras or stored values can leak secrets into governor logs.
+
 ## 2026-07-15 — Beast process cleanup review fixes
 - For Beast cleanup paths, treat persisted process-group ownership as verified only when the stored start-time token matches the current `/proc` start time; missing or unreadable start times should fail closed to direct-PID signaling to avoid killing a PID-reused process group.
 - Keep cleanup ownership delegated through execution-mode wrappers: container executors must forward `cleanupPendingRun()` so queued container runs can be cancelled before an attempt exists.
