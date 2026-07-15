@@ -478,7 +478,10 @@ describe('dashboard provider snapshots', () => {
       providers: {
         default: 'claude',
         fallbackChain: ['codex'],
-        overrides: { claude: { model: 'claude-sonnet-4' }, codex: { model: 'gpt-5' } },
+        overrides: {
+          claude: { model: 'claude-sonnet-4', command: 'node' },
+          codex: { model: 'gpt-5', command: 'node' },
+        },
       },
     } as any, {
       getProviders: () => [
@@ -498,7 +501,11 @@ describe('dashboard provider snapshots', () => {
       providers: {
         default: 'gemini',
         fallbackChain: [],
-        overrides: { codex: { model: 'gpt-5-codex' } },
+        overrides: {
+          codex: { model: 'gpt-5-codex', command: 'node' },
+          claude: { command: 'node' },
+          gemini: { command: 'node' },
+        },
       },
     } as any, { getProviders: () => [] } as any, ['codex', 'claude']);
 
@@ -514,7 +521,7 @@ describe('dashboard provider snapshots', () => {
       providers: {
         default: 'aider',
         fallbackChain: [],
-        overrides: {},
+        overrides: { aider: { command: 'node' } },
       },
     } as any, {
       getProviders: () => [
@@ -524,6 +531,43 @@ describe('dashboard provider snapshots', () => {
 
     expect(providers).toEqual([
       { name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0 },
+    ]);
+  });
+
+  it('marks configured fallback CLI providers unavailable when their command cannot execute', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'claude',
+        fallbackChain: ['codex'],
+        overrides: {
+          claude: { command: 'node' },
+          codex: { command: '/definitely/missing/frankenbeast-codex' },
+        },
+      },
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
+      { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1 },
+    ]);
+  });
+
+  it('marks consolidated CLI providers unavailable from their cliPath so dashboard banners reflect real snapshots', () => {
+    const providers = buildDashboardProviderSnapshot({
+      providers: {
+        default: 'claude',
+        fallbackChain: [],
+        overrides: {},
+      },
+      consolidatedProviders: [
+        { name: 'primary-claude', type: 'claude-cli', cliPath: '/definitely/missing/frankenbeast-claude' },
+        { name: 'backup-codex', type: 'codex-cli', cliPath: 'node', model: 'gpt-5.3-codex-spark' },
+      ],
+    } as any, { getProviders: () => [] } as any);
+
+    expect(providers).toEqual([
+      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+      { name: 'backup-codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5.3-codex-spark' },
     ]);
   });
 });

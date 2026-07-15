@@ -538,6 +538,39 @@ function resolveDashboardProviderType(nameOrType: string, fallbackType?: string)
   }
 }
 
+function resolveDashboardProviderCommand(name: string, type: string, config: OrchestratorConfig): string | undefined {
+  const consolidatedProvider = config.consolidatedProviders?.find((provider) => provider.name === name || provider.type === type);
+  const overrideCommand = config.providers.overrides?.[name]?.command;
+  if (consolidatedProvider?.cliPath) return consolidatedProvider.cliPath;
+  if (overrideCommand) return overrideCommand;
+
+  try {
+    return resolveProviderCatalogEntry(type).defaultCommand;
+  } catch {
+    try {
+      return resolveProviderCatalogEntry(name).defaultCommand;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function resolveDashboardProviderAvailability(name: string, type: string, config: OrchestratorConfig): boolean {
+  if (type.endsWith('-cli')) {
+    const command = resolveDashboardProviderCommand(name, type, config);
+    return Boolean(command && isCommandAvailable(command));
+  }
+
+  const consolidatedProvider = config.consolidatedProviders?.find((provider) => provider.name === name || provider.type === type);
+  if (consolidatedProvider?.apiKey) return true;
+
+  if (type === 'anthropic-api') return Boolean(process.env['ANTHROPIC_API_KEY']);
+  if (type === 'openai-api') return Boolean(process.env['OPENAI_API_KEY']);
+  if (type === 'gemini-api') return Boolean(process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY']);
+
+  return true;
+}
+
 export function buildDashboardProviderSnapshot(
   config: OrchestratorConfig,
   providerRegistry?: LlmProviderRegistry | undefined,
@@ -547,7 +580,7 @@ export function buildDashboardProviderSnapshot(
     return config.consolidatedProviders.map((provider, index) => ({
       name: provider.name,
       type: provider.type,
-      available: true,
+      available: resolveDashboardProviderAvailability(provider.name, provider.type, config),
       failoverOrder: index,
       ...(provider.model ? { model: provider.model } : {}),
     }));
@@ -591,7 +624,7 @@ export function buildDashboardProviderSnapshot(
     return {
       name,
       type,
-      available: true,
+      available: resolveDashboardProviderAvailability(name, type, config),
       failoverOrder: index,
       ...(model ? { model } : {}),
     };
