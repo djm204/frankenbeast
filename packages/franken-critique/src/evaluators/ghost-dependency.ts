@@ -393,7 +393,7 @@ function canStartNativeDynamicImport(
   const statementStart = findDynamicImportStatementStart(content, importIndex);
   const prefix = content.slice(statementStart + 1, importIndex);
   const prefixWithoutTrailingTrivia = stripTrailingTrivia(prefix).trimEnd();
-  if (/\b(?:as|satisfies)$/.test(prefixWithoutTrailingTrivia)) {
+  if (isOpenTemplateAssertionKeyword(prefixWithoutTrailingTrivia)) {
     return false;
   }
   const isTernaryBranch = hasTernaryBranchMarker(prefix);
@@ -768,6 +768,15 @@ function isTypeOnlyImportReferenceUse(
 
   const colonIndex = trimmed.lastIndexOf(':');
   if (colonIndex === -1) return false;
+  if (hasTernaryBranchMarker(prefix) && !isInsideConditionalType(prefix)) {
+    return false;
+  }
+  if (
+    isLikelyObjectLiteralValue(content, importIndex) &&
+    !/:\s*\{[\s\S]*,\s*[A-Za-z_$][\w$]*\s*:\s*$/.test(trimmed)
+  ) {
+    return false;
+  }
   const openBraceIndex = trimmed.lastIndexOf('{');
   const semicolonIndex = trimmed.lastIndexOf(';');
   const annotationSuffix = trimmed.slice(colonIndex + 1);
@@ -791,7 +800,10 @@ function isInsideOpenTypeAssertion(trimmedPrefix: string): boolean {
   let latestAssertionIndex = -1;
   let match: RegExpExecArray | null;
   while ((match = assertionMatch.exec(trimmedPrefix)) !== null) {
-    latestAssertionIndex = match.index;
+    const candidatePrefix = trimmedPrefix.slice(0, match.index + match[0].length).trimEnd();
+    if (isOpenTemplateAssertionKeyword(candidatePrefix)) {
+      latestAssertionIndex = match.index;
+    }
   }
   if (latestAssertionIndex === -1) return false;
 
@@ -880,10 +892,10 @@ function isInsideTypeDeclaration(prefix: string): boolean {
   return (
     /(?:^|[;{}\n])\s*(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(prefix) &&
     !hasCompletedTypeDeclarationBeforeImport(prefix) &&
-    !/\n\s*(?:export\s+)?(?:@|default\b|const|let|var|using|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class|abstract\s+class|namespace|enum)\b/.test(
+    !/\n\s*(?:export\s+)?(?:@|else\b|catch\b|finally\b|default\b|const|let|var|using|await|return|throw|new|if|for|while|do|switch|try|function|async\s+function|class|abstract\s+class|namespace|enum)\b/.test(
       prefix,
     ) &&
-    !/\}\s*(?:export\s+)?(?:@|default\b|const|let|var|using|await|return|throw|new|if|for|while|switch|try|function|async\s+function|class|abstract\s+class|namespace|enum)\b[\s\S]*$/.test(
+    !/\}\s*(?:export\s+)?(?:@|else\b|catch\b|finally\b|default\b|const|let|var|using|await|return|throw|new|if|for|while|do|switch|try|function|async\s+function|class|abstract\s+class|namespace|enum)\b[\s\S]*$/.test(
       prefix,
     ) &&
     !/\}\s*(?:export\s+)?$/.test(prefix) &&
@@ -912,7 +924,7 @@ function hasCompletedTypeDeclarationBeforeImport(prefix: string): boolean {
   const suffix = prefix.slice(newlineIndex + 1);
   if (
     !/^\s*(?:export\s+)?(?:void\s*)?$/.test(suffix) &&
-    !/^\s*(?:export\s+)?(?:default\b|[!~+\-\[(@]|using\b|abstract\s+class\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*(?:\(|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
+    !/^\s*(?:export\s+)?(?:default\b|else\b|catch\b|finally\b|[!~+\-\[(@]|using\b|do\b|abstract\s+class\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*(?:\(|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])|\s*$)|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(
       suffix,
     )
   ) {
@@ -981,7 +993,7 @@ function isInsideTypeAnnotation(
   }
   if (/[=;]/.test(annotationSuffix)) return false;
   if (/^\s*(?:return|throw|void|await)\b/.test(annotationSuffix)) return false;
-  if (/\n\s*(?:void\s*)?$|\n\s*(?:[!~+\-\[(@]|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(annotationSuffix)) {
+  if (/\n\s*(?:void\s*)?$|\n\s*(?:[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*(?:=|\(|\[)|module\.exports\s*=|(?:void\s+)?import\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b)/.test(prefix)) {
     return false;
   }
   if (/\{[\s\S]*\b(?:return|throw|void|await|yield|case|default)\b/.test(annotationSuffix)) {
@@ -1013,7 +1025,7 @@ function hasRuntimeAfterAnnotation(prefix: string, annotationIndex: number): boo
 }
 
 function hasRuntimeAfterClosedTypeContext(annotationSuffix: string): boolean {
-  return /}\s*\)?(?:\s*(?:\{\s*(?:return|throw|void|await|yield|case|default)\b|(?:\.|\[|\(|,|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])\s*)|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
+  return /}\s*\)?(?:\s*(?:\{\s*(?:return|throw|void|await|yield|case|default)\b|(?:\.|\[|\(|,|&&|\|\||\?\?|[+\-*/%<>=!&|^?:])\s*)|[^\S\n]*\n\s*(?:void\s*$|[!~+\-\[(@]|else\b|catch\b|finally\b|using\b|try\b|do\b|abstract\s+class\b|namespace\b|enum\b|(?:void\s+)?import\s*\(|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(|await\b|return\b|throw\b|new\b|const\b|let\b|var\b))/.test(
     annotationSuffix,
   );
 }

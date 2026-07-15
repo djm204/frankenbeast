@@ -319,6 +319,13 @@ describe('GhostDependencyEvaluator', () => {
       type U = {}
       (async () => import('iife-after-type-ghost'))();
       type V = {}
+      else import('else-after-type-ghost');
+      type W = {}
+      do { import('do-after-type-ghost'); } while (false);
+      type X = {}
+      catch { import('catch-after-type-ghost'); }
+      type Y = {}
+      finally { import('finally-after-type-ghost'); }
       export const exported = await import('export-after-type-ghost');
       type BareDynamic = {}
       ready && import('identifier-led-after-type-ghost');
@@ -402,6 +409,10 @@ describe('GhostDependencyEvaluator', () => {
       try { import('try-after-object-assertion-ghost'); } catch {}
       const cfg9 = value satisfies { dep: string }
       do { import('do-after-object-assertion-ghost'); } while (false);
+      const cfg10 = value as { dep: string }
+      catch { import('catch-after-object-assertion-ghost'); }
+      const cfg11 = value satisfies { dep: string }
+      finally { import('finally-after-object-assertion-ghost'); }
       const annotatedArrow = (): any => import('annotated-arrow-body-ghost');
       type DefaultExportAlias = string
       export default async function defaultLoader() { return import('export-default-after-type-ghost'); }
@@ -418,6 +429,8 @@ describe('GhostDependencyEvaluator', () => {
       import('chained-after-type-alias-ghost').then(load);
       const runtimeTypeofProperty = typeof import('runtime-typeof-property-ghost').then;
       const objectTypeKey = { type: import('object-type-key-ghost') };
+      const chainedObjectValue = { plugin: import('chained-object-value-ghost').then(load) };
+      const chainedTernaryValue = ready ? fallback : import('chained-ternary-value-ghost').then(load);
       const awaitedTypeNamedObject = { type: await import('awaited-type-named-object-ghost') };
       const nestedTypeNamedObject = { type: { loader: import('nested-type-named-object-ghost') } };
       await import('zod', { with: { type: await import('nested-type-attribute-ghost') } });
@@ -431,11 +444,13 @@ describe('GhostDependencyEvaluator', () => {
       const assertedPair = value as Foo, chained = import('chained-after-assertion-ghost').then(load);
       const as = String.raw; as\`\${require('as-tagged-template-ghost')}\`;
       const satisfies = String.raw; satisfies\`\${require('satisfies-tagged-template-ghost')}\`;
+      const asIdentifier = 1; as; import('as-contextual-identifier-ghost');
+      const satisfiesIdentifier = 1; satisfies; import('satisfies-contextual-identifier-ghost');
     `;
     const result = await evaluator.evaluate(createInput(content));
 
     expect(result.verdict).toBe('fail');
-    expect(result.findings).toHaveLength(85);
+    expect(result.findings).toHaveLength(96);
     expect(result.findings.map((finding) => finding.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('typed-function-ghost'),
@@ -445,6 +460,10 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('logical-or-ghost'),
         expect.stringContaining('void-after-type-ghost'),
         expect.stringContaining('iife-after-type-ghost'),
+        expect.stringContaining('else-after-type-ghost'),
+        expect.stringContaining('do-after-type-ghost'),
+        expect.stringContaining('catch-after-type-ghost'),
+        expect.stringContaining('finally-after-type-ghost'),
         expect.stringContaining('export-after-type-ghost'),
         expect.stringContaining('identifier-led-after-type-ghost'),
         expect.stringContaining('simple-type-after-ghost'),
@@ -504,6 +523,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('comma-after-object-assertion-ghost'),
         expect.stringContaining('try-after-object-assertion-ghost'),
         expect.stringContaining('do-after-object-assertion-ghost'),
+        expect.stringContaining('catch-after-object-assertion-ghost'),
+        expect.stringContaining('finally-after-object-assertion-ghost'),
         expect.stringContaining('annotated-arrow-body-ghost'),
         expect.stringContaining('export-default-after-type-ghost'),
         expect.stringContaining('export-default-expression-after-type-ghost'),
@@ -514,6 +535,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('chained-after-type-alias-ghost'),
         expect.stringContaining('runtime-typeof-property-ghost'),
         expect.stringContaining('object-type-key-ghost'),
+        expect.stringContaining('chained-object-value-ghost'),
+        expect.stringContaining('chained-ternary-value-ghost'),
         expect.stringContaining('awaited-type-named-object-ghost'),
         expect.stringContaining('nested-type-named-object-ghost'),
         expect.stringContaining('nested-type-attribute-ghost'),
@@ -524,6 +547,8 @@ describe('GhostDependencyEvaluator', () => {
         expect.stringContaining('chained-after-assertion-ghost'),
         expect.stringContaining('as-tagged-template-ghost'),
         expect.stringContaining('satisfies-tagged-template-ghost'),
+        expect.stringContaining('as-contextual-identifier-ghost'),
+        expect.stringContaining('satisfies-contextual-identifier-ghost'),
       ]),
     );
   });
