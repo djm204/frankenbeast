@@ -1,11 +1,36 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 import {
   detectRestorePreviewConflicts,
   type RestorePreviewManifest,
 } from '../../../src/dr/restore-preview.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+interface MissingCronJobRecoveryFixture {
+  readonly description: string;
+  readonly backup: RestorePreviewManifest;
+  readonly live: RestorePreviewManifest;
+  readonly expectedConflict: {
+    readonly area: 'cron';
+    readonly id: string;
+    readonly type: 'backup-only';
+    readonly severity: 'info';
+    readonly recommendationIncludes: string;
+  };
+}
+
+function readMissingCronJobRecoveryFixture(): MissingCronJobRecoveryFixture {
+  return JSON.parse(
+    readFileSync(join(__dirname, 'fixtures', 'missing-cron-job-recovery.json'), 'utf8'),
+  ) as MissingCronJobRecoveryFixture;
 }
 
 describe('restore preview conflict detector', () => {
@@ -89,6 +114,26 @@ describe('restore preview conflict detector', () => {
         recommendation: expect.stringContaining('re-approval'),
       }),
     );
+  });
+
+  it('loads the missing cron job recovery fixture as an explicit backup-only cron conflict', () => {
+    const fixture = readMissingCronJobRecoveryFixture();
+    const preview = detectRestorePreviewConflicts(fixture.backup, fixture.live);
+
+    expect(fixture.description).toContain('missing from live state');
+    expect(preview.safeToRestore).toBe(false);
+    expect(preview.wouldWrite).toBe(false);
+    expect(preview.conflicts).toContainEqual(
+      expect.objectContaining({
+        area: fixture.expectedConflict.area,
+        id: fixture.expectedConflict.id,
+        type: fixture.expectedConflict.type,
+        severity: fixture.expectedConflict.severity,
+        backup: expect.objectContaining({ state: 'enabled' }),
+        recommendation: expect.stringContaining(fixture.expectedConflict.recommendationIncludes),
+      }),
+    );
+    expect(preview.conflicts).not.toContainEqual(expect.objectContaining({ type: 'live-only' }));
   });
 
   it('compares digest, state, and timestamps so metadata drift is not hidden', () => {
