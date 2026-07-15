@@ -7,7 +7,6 @@ import {
   renameSync,
   rmSync,
   unlinkSync,
-  writeFileSync,
   writeSync,
 } from 'node:fs';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
@@ -70,7 +69,15 @@ function writeStateWriteJournal(filePath: string, entry: Omit<StateWriteTransact
     ...entry,
     updatedAt: journalTimestamp(),
   };
-  writeFileSync(stateWriteJournalPath(filePath), JSON.stringify(updatedEntry, null, 2), 'utf8');
+  const journalPath = stateWriteJournalPath(filePath);
+  const payload = JSON.stringify(updatedEntry, null, 2);
+  const fd = openSync(journalPath, 'w', 0o600);
+  try {
+    writeAll(fd, payload);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   fsyncDir(dirname(filePath));
 }
 
