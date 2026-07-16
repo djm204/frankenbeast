@@ -137,6 +137,36 @@ describe('extractPostTaskLessonCandidates', () => {
     );
   });
 
+  it('discards raw tool failures without reusable workaround guidance', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-raw-tool-failure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      toolFailures: ['gh pr checks returned 502'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('keeps docs-related procedures on the skill promotion path', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-docs-procedure',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Always run the docs build before editing README files'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'procedure',
+        suggestedDestination: 'skill',
+      }),
+    );
+  });
+
   it('discards one-off task state instead of proposing persistent learning', () => {
     const report = extractPostTaskLessonCandidates({
       taskId: 'post-task-one-off',

@@ -1099,7 +1099,9 @@ export function extractPostTaskLessonCandidates(
     addCandidate('user-correction', correction);
   }
   for (const failure of input.toolFailures ?? []) {
-    addCandidate('tool-failure', failure);
+    addCandidate('tool-failure', failure, undefined, {
+      forceDiscard: !hasExplicitPostTaskLessonSignal(failure),
+    });
   }
   for (const verificationStep of input.verificationSteps ?? []) {
     addCandidate('verification', verificationStep, undefined, {
@@ -1139,15 +1141,13 @@ function choosePostTaskLessonDestination(
   if (kind === 'tool-failure') return 'skill';
   if (kind === 'user-correction' && category === 'preference') return 'memory';
   if (category === 'environment-fact') return 'memory';
-  if (/\b(?:docs?|readme|runbook|guide|operator)\b/i.test(text)) return 'docs';
   if (category === 'procedure') return 'skill';
+  if (/\b(?:docs?|readme|runbook|guide|operator)\b/i.test(text)) return 'docs';
   return 'memory';
 }
 
 function hasExplicitPostTaskLessonSignal(text: string): boolean {
-  return /\b(?:always|avoid|prefer|require|must|should|retry|redact|validate|verify)\b/i.test(
-    text,
-  );
+  return containsReusableLessonSignal(text);
 }
 
 function summarizePostTaskEvidence(
