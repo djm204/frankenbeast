@@ -237,8 +237,12 @@ describe("Memory Server", () => {
       now: "2026-07-15T00:00:00.000Z",
       expiryHorizonMs: "60000",
       maxEntries: "5",
+      readScope: "agent",
+      agentId: "agent-a",
     });
     expect(brain.memoryRetentionReport).toHaveBeenCalledWith({
+      readScope: "agent",
+      agentId: "agent-a",
       now: "2026-07-15T00:00:00.000Z",
       expiryHorizonMs: 60000,
       maxEntries: 5,

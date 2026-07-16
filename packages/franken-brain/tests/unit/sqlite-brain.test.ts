@@ -176,6 +176,68 @@ describe('SqliteBrain', () => {
         action: 'compact',
       });
     });
+
+    it('reports expired TTL rows without mutating memory or compacting active entries unnecessarily', () => {
+      brain.working.set('fresh.env', { value: 'node 20', memoryClass: 'environment_fact' });
+      brain.working.set('fresh.procedure', { value: 'run npm test', memoryClass: 'learned_procedure' });
+      brain.working.set('expired.one', {
+        value: 'old scratch',
+        category: 'temporary-operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+      brain.working.set('expired.two', {
+        value: 'old scratch 2',
+        category: 'temporary-operational',
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      });
+
+      const report = brain.memoryRetentionReport({
+        now: '2027-01-02T00:00:00.000Z',
+        maxEntries: 2,
+      });
+
+      expect(report.entries.filter((entry) => entry.action === 'expired').map((entry) => entry.key)).toEqual([
+        'expired.one',
+        'expired.two',
+      ]);
+      expect(report.compactionCandidates).toEqual([]);
+      expect(brain.working.snapshot()).toHaveProperty('expired.one');
+    });
+
+    it('uses persisted working-memory age for retention windows', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'retention-age-'));
+      const dbPath = join(dir, 'memory.sqlite');
+      brain.close();
+      brain = new SqliteBrain(dbPath);
+      brain.working.set('env.old-host', { value: 'linux host', memoryClass: 'environment_fact' });
+      brain.flush();
+      const db = new Database(dbPath);
+      try {
+        db.prepare(`UPDATE working_memory SET updated_at = ? WHERE key = ?`).run(
+          '2025-01-01T00:00:00.000Z',
+          'env.old-host',
+        );
+      } finally {
+        db.close();
+      }
+
+      const report = brain.memoryRetentionReport({ now: '2026-01-01T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === 'env.old-host')).toMatchObject({
+        class: 'environment_fact',
+        action: 'compact',
+      });
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('returns cloned policy objects in entries', () => {
+      brain.working.set('env.node.version', { value: '20.x', memoryClass: 'environment_fact' });
+      const report = brain.memoryRetentionReport();
+      const [entry] = report.entries;
+      entry!.policy.description = 'mutated by caller';
+
+      expect(brain.memoryRetentionReport().entries[0]!.policy.description).not.toBe('mutated by caller');
+    });
   });
 
   describe('skill evolution review gate', () => {

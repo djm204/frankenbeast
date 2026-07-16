@@ -403,6 +403,8 @@ const TOOLS: ToolFull[] = [
         now: { type: 'string', description: 'Optional report timestamp for deterministic evaluation' },
         expiryHorizonMs: { type: 'number', description: 'Report TTL entries expiring within this many milliseconds (default seven days)' },
         maxEntries: { type: 'integer', description: 'Optional entry budget used to mark overflow compaction candidates' },
+        readScope: { type: 'string', description: 'Memory visibility scope: all, shared, or agent', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Required when readScope is agent; filters report to shared plus that agent-scoped memory' },
       },
     },
     makeHandler: ({ brain }) => async (args) => {
@@ -418,7 +420,12 @@ const TOOLS: ToolFull[] = [
       if (!maxEntries.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${maxEntries.message}` }], isError: true };
       }
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${scopeArgs.message}` }], isError: true };
+      }
       const report = await brain.memoryRetentionReport({
+        ...scopeArgs.value,
         ...(now.value ? { now: now.value } : {}),
         ...(expiryHorizonMs.value === undefined ? {} : { expiryHorizonMs: expiryHorizonMs.value }),
         ...(maxEntries.value === undefined ? {} : { maxEntries: maxEntries.value }),

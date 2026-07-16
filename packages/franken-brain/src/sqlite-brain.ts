@@ -115,6 +115,7 @@ export interface MemoryRetentionPolicy {
 export interface MemoryRetentionEntryReport {
   store: 'working' | 'episodic';
   key: string;
+  agentId?: string;
   class: MemoryRetentionClass;
   action: MemoryRetentionAction;
   policy: MemoryRetentionPolicy;
@@ -1420,6 +1421,32 @@ class SqliteWorkingMemory implements IWorkingMemory {
       this.deletedKeys.delete(key);
     }
     return this.store.delete(key);
+  }
+
+  retentionEntries(nowIso = isoNow()): Array<{ key: string; value: unknown; updatedAt: string }> {
+    const rows = this.db
+      .prepare(`SELECT key, value, updated_at as updatedAt FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string; updatedAt: string }>;
+    const entries = new Map<string, { key: string; value: unknown; updatedAt: string }>();
+    for (const row of rows) {
+      const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+      entries.set(row.key, {
+        key: row.key,
+        value: parseStoredWorkingMemoryValue(serialized),
+        updatedAt: row.updatedAt,
+      });
+    }
+    for (const key of this.deletedKeys) {
+      entries.delete(key);
+    }
+    for (const [key, value] of this.store.entries()) {
+      entries.set(key, {
+        key,
+        value,
+        updatedAt: this.dirtyKeys.has(key) ? nowIso : entries.get(key)?.updatedAt ?? nowIso,
+      });
+    }
+    return Array.from(entries.values()).sort((a, b) => a.key.localeCompare(b.key));
   }
 
   snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
@@ -3899,24 +3926,29 @@ export class SqliteBrain implements IBrain {
     }
 
     const entries: MemoryRetentionEntryReport[] = [];
-    for (const [key, value] of Object.entries(this.working.snapshot())) {
+    for (const { key, value, updatedAt } of this.working.retentionEntries(now.toISOString())) {
       const className = classifyMemoryEntry({ store: 'working', key, value });
       const policy = MEMORY_RETENTION_POLICIES[className];
       const expiresAt = isTemporaryOperationalWorkingMemoryValue(value) ? value.expiresAt : undefined;
+      const observedAgeDays = ageDays(updatedAt, nowMs);
       const decision = retentionActionForEntry({
         className,
         policy,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
         ...(expiresAt ? { expiresAt } : {}),
         nowMs,
         expiryHorizonMs,
       });
+      const agentId = decodeAgentWorkingKeyScope(key);
       entries.push({
         store: 'working',
         key,
+        ...(agentId === undefined ? {} : { agentId }),
         class: className,
         action: decision.action,
-        policy,
+        policy: { ...policy },
         protected: policy.protected,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
         ...(expiresAt ? { expiresAt } : {}),
         reason: decision.reason,
       });
@@ -3940,12 +3972,14 @@ export class SqliteBrain implements IBrain {
         nowMs,
         expiryHorizonMs,
       });
+      const agentId = typeof event.details?.agentId === 'string' ? event.details.agentId : undefined;
       entries.push({
         store: 'episodic',
         key,
+        ...(agentId === undefined ? {} : { agentId }),
         class: className,
         action: decision.action,
-        policy,
+        policy: { ...policy },
         protected: policy.protected,
         ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
         reason: decision.reason,
@@ -3955,10 +3989,11 @@ export class SqliteBrain implements IBrain {
     const nonProtectedRetained = entries
       .filter((entry) => !entry.protected && entry.action === 'retain')
       .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
-    const overBudgetCount = Math.max(0, entries.length - maxEntries);
+    const activeEntryCount = entries.filter((entry) => entry.action !== 'expired').length;
+    const overBudgetCount = Math.max(0, activeEntryCount - maxEntries);
     for (const entry of nonProtectedRetained.slice(0, overBudgetCount)) {
       entry.action = 'compact';
-      entry.reason = `Memory store has ${entries.length} entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+      entry.reason = `Memory store has ${activeEntryCount} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
     }
 
     const compactionCandidates = entries
