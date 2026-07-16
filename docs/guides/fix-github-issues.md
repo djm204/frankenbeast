@@ -95,7 +95,7 @@ Resolves the GitHub `upstream` remote from the current fork checkout and uses th
 | `--search <query>` | GitHub search syntax query | — |
 | `--milestone <name>` | Filter by milestone | — |
 | `--assignee <user>` | Filter by assignee | — |
-| `--limit <n>` | Max issues to fetch | 30 |
+| `--limit <n>` | Max issues to fetch | 1000 |
 | `--repo <owner/repo>` | Target repository | auto-inferred |
 | `--target-upstream` | Use the fork upstream as the canonical target repo | false |
 | `--dry-run` | Preview triage, skip execution | false |

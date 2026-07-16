@@ -136,6 +136,33 @@ describe('IssueFetcher', () => {
       );
     });
 
+    it('falls back to simple default issue pages when advanced search is unsupported', async () => {
+      const makeIssues = (numbers: readonly number[]) => JSON.stringify(
+        numbers.map((number) => ({
+          number,
+          title: `Issue ${number}`,
+          body: 'body',
+          labels: [],
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${number}`,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeFailingExecFn('advanced issue search is not supported on this GitHub host'))
+        .mockImplementationOnce(makeExecFn(makeIssues([2])))
+        .mockImplementationOnce(makeExecFn(makeIssues([1])));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues.map((issue) => issue.number)).toEqual([1, 2]);
+      expect(execFn).toHaveBeenCalledTimes(3);
+      const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
+      expect(searches[0]).toContain('label:critical');
+      expect(searches[1]).toBe('sort:created-desc');
+      expect(searches[2]).toBe('sort:created-asc');
+    });
+
     it('caps the merged default supplemental windows at the advertised default limit', async () => {
       const makeIssues = (start: number, count: number) => JSON.stringify(
         Array.from({ length: count }, (_, index) => ({

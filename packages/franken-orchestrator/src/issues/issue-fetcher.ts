@@ -12,6 +12,17 @@ const MIN_ISSUE_FETCH_BUFFER_BYTES = 2_097_152;
 const MAX_ISSUE_FETCH_BUFFER_BYTES = 128 * 1_024 * 1_024;
 const APPROX_MAX_GITHUB_ISSUE_BODY_BYTES = 65_536;
 const DEFAULT_URGENT_ISSUE_QUERY = '(label:critical OR label:p0 OR label:p1 OR label:high OR label:"priority:p0" OR label:"priority:p1" OR label:"priority:critical" OR label:"priority:high")';
+const ISSUE_FETCH_PRIORITY_RANKS: Readonly<Record<string, number>> = {
+  p0: 0,
+  'priority:p0': 0,
+  'priority:critical': 0,
+  critical: 0,
+  p1: 1,
+  'priority:p1': 1,
+  'priority:high': 1,
+  high: 1,
+};
+const DEFAULT_ISSUE_FETCH_PRIORITY_RANK = 99;
 
 interface RawGithubIssue {
   readonly number: number;
@@ -35,15 +46,7 @@ export class IssueFetcher implements IIssueFetcher {
     const explicitLimit = options.limit !== undefined;
     const raw = explicitLimit || options.search
       ? await this.fetchIssuePage(options, options.search, options.limit ?? DEFAULT_ISSUE_FETCH_LIMIT)
-      : this.mergeIssuePages(
-          [
-            await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-desc`, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
-            await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-asc`, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
-            await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
-            await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
-          ],
-          DEFAULT_ISSUE_FETCH_LIMIT,
-        );
+      : await this.fetchDefaultIssuePages(options);
 
     return raw.map((issue) => ({
       number: issue.number,
@@ -55,6 +58,31 @@ export class IssueFetcher implements IIssueFetcher {
       createdAt: issue.createdAt,
       updatedAt: issue.updatedAt,
     }));
+  }
+
+  private async fetchDefaultIssuePages(options: IssueFetchOptions): Promise<RawGithubIssue[]> {
+    try {
+      return this.mergeIssuePages(
+        [
+          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-desc`, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
+          await this.fetchIssuePage(options, `${DEFAULT_URGENT_ISSUE_QUERY} sort:created-asc`, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
+          await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
+          await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
+        ],
+        DEFAULT_ISSUE_FETCH_LIMIT,
+      );
+    } catch (err) {
+      if (!this.isUnsupportedAdvancedSearchError(err)) {
+        throw err;
+      }
+      return this.mergeIssuePages(
+        [
+          await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
+          await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
+        ],
+        DEFAULT_ISSUE_FETCH_LIMIT,
+      );
+    }
   }
 
   private async fetchIssuePage(
@@ -113,8 +141,33 @@ export class IssueFetcher implements IIssueFetcher {
         }
       }
     }
-    const merged = [...byNumber.values()];
+    const merged = [...byNumber.values()].sort((a, b) => this.compareIssueFetchOrder(a, b));
     return limit === undefined ? merged : merged.slice(0, limit);
+  }
+
+  private compareIssueFetchOrder(a: RawGithubIssue, b: RawGithubIssue): number {
+    return this.issuePriorityRank(a) - this.issuePriorityRank(b)
+      || this.issueCreatedAtMs(a) - this.issueCreatedAtMs(b)
+      || a.number - b.number;
+  }
+
+  private issuePriorityRank(issue: RawGithubIssue): number {
+    return issue.labels.reduce((best, label) => {
+      const rank = ISSUE_FETCH_PRIORITY_RANKS[label.name.toLowerCase()] ?? DEFAULT_ISSUE_FETCH_PRIORITY_RANK;
+      return Math.min(best, rank);
+    }, DEFAULT_ISSUE_FETCH_PRIORITY_RANK);
+  }
+
+  private issueCreatedAtMs(issue: RawGithubIssue): number {
+    if (!issue.createdAt) return Number.MAX_SAFE_INTEGER;
+    const parsed = Date.parse(issue.createdAt);
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+  }
+
+  private isUnsupportedAdvancedSearchError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return message.includes('search')
+      && (message.includes('advanced') || message.includes('unsupported') || message.includes('not supported'));
   }
 
   async inferRepo(): Promise<string> {
