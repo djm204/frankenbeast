@@ -49,7 +49,7 @@ export type {
 } from './types.js';
 
 // Issues
-export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, planKanbanStateMutation } from './issues/index.js';
+export { IssueRunner, evaluateIssueBackpressure, buildIssueSchedulerFairnessReport, routeIssueWorkerForDegradedMode, detectDuplicateWorkerCardProcesses, detectWorkerHeartbeatMonotonicityAnomalies, detectStuckRunWatchdogFindings, planKanbanStateMutation } from './issues/index.js';
 export type {
   IssueRunnerConfig,
   IssueBackpressureConfig,
@@ -69,6 +69,9 @@ export type {
   IssueSchedulerFairnessBucket,
   IssueSchedulerFairnessReport,
   IssueSchedulerFairnessReportOptions,
+  IssueStuckRunBlockerCategory,
+  IssueStuckRunWatchdogFinding,
+  IssueStuckRunWatchdogOptions,
   IssueWorkerCardProcessSnapshot,
   KanbanStateMutationDecision,
   KanbanStateMutationDecisionAction,

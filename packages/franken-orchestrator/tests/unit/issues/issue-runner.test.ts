@@ -664,6 +664,37 @@ describe('stuck-run watchdog', () => {
     expect(findings).toEqual([]);
   });
 
+  it('does not treat missing optional activity signals as stale', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_heartbeat_only',
+        pid: 7405,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T11:55:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('keeps normally completed dead workers quiet', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_done',
+        pid: 7406,
+        status: 'done',
+        alive: false,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
+  });
+
   it('escalates stale provider waits after every activity signal exceeds grace', () => {
     const findings = detectStuckRunWatchdogFindings([
       {

@@ -707,7 +707,12 @@ function ageMs(value: string | number | Date | undefined, nowMs: number): number
 }
 
 function stale(age: number | undefined, threshold: number): boolean {
-  return age === undefined || age >= threshold;
+  return age !== undefined && age >= threshold;
+}
+
+function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean {
+  if (snapshot.blockerCategory === 'process-crash') return true;
+  return /crash|exit|dead|pid|process/.test(snapshot.waitingOn?.toLowerCase() ?? '');
 }
 
 function normalizeStuckRunBlockerCategory(
@@ -771,7 +776,7 @@ export function detectStuckRunWatchdogFindings(
   for (const snapshot of snapshots) {
     if (!snapshot.cardId.trim() || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) continue;
     const status = snapshot.status?.trim().toLowerCase();
-    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && snapshot.alive !== false) continue;
+    if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !explicitProcessCrash(snapshot)) continue;
 
     const category = normalizeStuckRunBlockerCategory(snapshot);
     const heartbeatAgeMs = ageMs(snapshot.lastHeartbeatAt, nowMs);
@@ -783,6 +788,8 @@ export function detectStuckRunWatchdogFindings(
     const toolStale = stale(toolActivityAgeMs, staleToolActivityMs);
     const stateStale = stale(stateTransitionAgeMs, staleStateTransitionMs);
     const staleCount = [heartbeatStale, outputStale, toolStale, stateStale].filter(Boolean).length;
+    const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
+      .some((age) => age !== undefined && age < longRunningWaitGraceMs);
     const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false
       ? 'dead'
       : snapshot.alive === true
@@ -792,9 +799,7 @@ export function detectStuckRunWatchdogFindings(
     if (
       knownLongRunningWait(category)
       && processStatus !== 'dead'
-      && staleCount < 4
-      && (heartbeatAgeMs === undefined || heartbeatAgeMs < longRunningWaitGraceMs)
-      && (outputAgeMs === undefined || outputAgeMs < longRunningWaitGraceMs)
+      && freshLongRunningWaitActivity
     ) {
       continue;
     }
