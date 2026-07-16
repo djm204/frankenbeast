@@ -792,6 +792,24 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('reports crash-only snapshots even when activity timestamps are absent', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crashed_without_activity',
+        pid: 7407,
+        status: 'failed',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_crashed_without_activity',
+      blockerCategory: 'process-crash',
+      confidence: 'medium',
+      processStatus: 'alive',
+      kanbanState: 'failed',
+    });
+  });
+
   it('reports stale heartbeat snapshots even when optional activity timestamps are absent', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -944,6 +962,66 @@ describe('stuck-run watchdog', () => {
         blockerCategory: 'unknown',
       }),
     ]));
+  });
+
+  it('prioritizes approval cues over broad provider wording', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_provider_approval',
+        pid: 7412,
+        status: 'running',
+        alive: true,
+        waitingOn: 'Codex model operation needs operator approval',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_provider_approval',
+      blockerCategory: 'approval-gate',
+    });
+  });
+
+  it('infers a specific blocker when callers provide unknown with useful waiting text', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_unknown_ci_wait',
+        pid: 7413,
+        status: 'running',
+        alive: true,
+        blockerCategory: 'unknown',
+        waitingOn: 'CI checks are queued',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_unknown_ci_wait',
+      blockerCategory: 'ci-wait',
+    });
+  });
+
+  it('suppresses watchdog findings when any provided activity signal is fresh', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_fresh_output',
+        pid: 7414,
+        status: 'running',
+        alive: true,
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T11:58:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings).toEqual([]);
   });
 
   it('escalates stale provider waits after every activity signal exceeds grace', () => {

@@ -729,10 +729,10 @@ function normalizeStuckRunBlockerCategory(
   snapshot: IssueWorkerCardProcessSnapshot,
 ): IssueStuckRunBlockerCategory {
   if (snapshot.alive === false) return 'process-crash';
-  if (snapshot.blockerCategory) return snapshot.blockerCategory;
+  if (snapshot.blockerCategory && snapshot.blockerCategory !== 'unknown') return snapshot.blockerCategory;
   const text = `${snapshot.status ?? ''} ${snapshot.waitingOn ?? ''}`.toLowerCase();
-  if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
+  if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
   if (/crash|exit|dead|pid|process|fail/.test(text)) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
@@ -806,7 +806,7 @@ export function detectStuckRunWatchdogFindings(
       toolActivityAgeMs,
       stateTransitionAgeMs,
     ].filter((age) => age !== undefined).length;
-    const minimumStaleSignals = Math.min(3, providedActivitySignalCount);
+    const minimumStaleSignals = providedActivitySignalCount;
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
     const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false
@@ -815,7 +815,7 @@ export function detectStuckRunWatchdogFindings(
         ? 'alive'
         : 'unknown';
 
-    if (processStatus !== 'dead' && providedActivitySignalCount === 0) continue;
+    if (processStatus !== 'dead' && category !== 'process-crash' && providedActivitySignalCount === 0) continue;
 
     if (
       knownLongRunningWait(category)
