@@ -1179,7 +1179,6 @@ export class IssueRunner {
     for (let i = 0; i < sorted.length; i++) {
       const issue = sorted[i]!;
       const position = `${i + 1}/${sorted.length}`;
-      const schedulingScore = evaluateIssueSchedulingScore(issue);
 
       if (budgetExceeded) {
         outcomes.push({
