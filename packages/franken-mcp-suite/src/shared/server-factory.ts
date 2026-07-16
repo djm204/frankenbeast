@@ -325,7 +325,7 @@ function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = 
       sanitized[key] = redaction;
     } else if (key === 'redaction' && !MEMORY_EXPORT_SAFE_REDACTIONS.has(String(sanitized[key]))) {
       sanitized[key] = redaction;
-    } else if (key === 'limit' && typeof sanitized[key] !== 'number') {
+    } else if (key === 'limit' && typeof sanitized[key] !== 'string' && typeof sanitized[key] !== 'number') {
       sanitized[key] = redaction;
     } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;

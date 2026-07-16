@@ -226,26 +226,6 @@ function scopedWorkingValue(
     : value;
 }
 
-function unwrapWorkingMemoryValue(value: unknown): { text: string; expiresAt?: string } {
-  if (isAgentScopedWorkingValue(value)) {
-    const record = value as unknown as Record<string, unknown>;
-    return {
-      text: value.value,
-      ...(typeof value.expiresAt === "string" && isTemporaryOperationalValue(record) ? { expiresAt: value.expiresAt } : {}),
-    };
-  }
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const record = value as Record<string, unknown> & { value?: unknown; expiresAt?: unknown };
-    if ('value' in record && typeof record.expiresAt === 'string' && isTemporaryOperationalValue(record)) {
-      return {
-        text: typeof record.value === "string" ? record.value : JSON.stringify(record.value),
-        expiresAt: record.expiresAt,
-      };
-    }
-  }
-  return { text: typeof value === "string" ? value : JSON.stringify(value) };
-}
-
 function unwrapWorkingMemoryExportValue(value: unknown): { value: unknown; expiresAt?: string } {
   if (isAgentScopedWorkingValue(value)) {
     const record = value as unknown as Record<string, unknown>;
