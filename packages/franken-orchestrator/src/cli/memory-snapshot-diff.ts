@@ -13,7 +13,6 @@ const CURRENT_SCHEMA_REQUIRED_TABLES = [
   ...REQUIRED_BACKUP_TABLES,
   'memory_deletion_guards',
   'memory_deletion_hash_keys',
-  'memory_access_audit_events',
 ] as const;
 const MEMORY_BACKUP_TABLES = [
   'memory_schema_versions',

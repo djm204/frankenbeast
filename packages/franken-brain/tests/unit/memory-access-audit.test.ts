@@ -307,9 +307,49 @@ describe('memory access audit trail', () => {
 
     expect(() => brain.episodic.recall('needle', Infinity)).toThrow();
 
-    const audit = brain.accessAudit.list({ operation: 'episodic.recall' });
-    expect(audit[0]).toMatchObject({ operation: 'episodic.recall', outcome: 'error' });
+    const audit = brain.accessAudit.list({ operation: 'episodic.recall', limit: 1 })[0];
+    expect(audit.outcome).toBe('error');
+    expect(audit.details?.errorName).toBeTruthy();
+  });
 
-    brain.close();
+  it('audits episodic counts and checkpoint write failures', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.episodic.record({ type: 'task', summary: 'count me', createdAt: new Date().toISOString() });
+
+    expect(brain.episodic.count()).toBe(1);
+    expect(brain.accessAudit.list({ operation: 'episodic.count', limit: 1 })[0].outcome).toBe('success');
+
+    const db = (brain as unknown as { db: { exec: (sql: string) => void } }).db;
+    db.exec(`
+      CREATE TRIGGER fail_checkpoint_insert
+      BEFORE INSERT ON checkpoints
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated checkpoint insert failure');
+      END;
+    `);
+
+    expect(() =>
+      brain.recovery.checkpoint({
+        runId: 'audit-run',
+        phase: 'audit',
+        step: 1,
+        context: {},
+        timestamp: new Date().toISOString(),
+      }),
+    ).toThrow('simulated checkpoint insert failure');
+
+    const audit = brain.accessAudit.list({ operation: 'recovery.checkpoint', limit: 1 })[0];
+    expect(audit.outcome).toBe('error');
+  });
+
+  it('audits attempts to approve missing review candidates', () => {
+    const brain = new SqliteBrain(':memory:');
+
+    expect(() => brain.memoryReview.approve('missing-candidate')).toThrow(/not found/);
+
+    const audit = brain.accessAudit.list({ operation: 'review.approve', limit: 1 })[0];
+    expect(audit.outcome).toBe('error');
+    expect(audit.details?.id).toBe('missing-candidate');
+    expect(audit.keyHash).toBeUndefined();
   });
 });

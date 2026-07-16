@@ -411,7 +411,7 @@ describe('handleMemoryCommand', () => {
     expect(() => verifyMemoryBackup(backupPath)).toThrow(/working_memory is missing required column\(s\): value/);
   });
 
-  it('requires current-schema backups to include the access audit table', async () => {
+  it('allows current-schema v1 backups that predate the access audit table', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'memory-backup-verify-audit-table-'));
     const backupPath = join(dir, 'missing-audit.sqlite');
     const db = new Database(backupPath);
@@ -425,7 +425,7 @@ describe('handleMemoryCommand', () => {
     `);
     db.close();
 
-    expect(() => verifyMemoryBackup(backupPath)).toThrow(/Current memory backup is missing required table\(s\): memory_access_audit_events/);
+    expect(() => verifyMemoryBackup(backupPath)).not.toThrow();
   });
 
   it('validates required access audit backup columns', async () => {

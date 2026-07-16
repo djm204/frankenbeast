@@ -206,6 +206,7 @@ export type MemoryAccessAuditOperation =
   | 'episodic.recall'
   | 'episodic.recent'
   | 'episodic.recentFailures'
+  | 'episodic.count'
   | 'recovery.checkpoint'
   | 'recovery.lastCheckpoint'
   | 'recovery.listCheckpoints'
@@ -2091,10 +2092,26 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   }
 
   count(): number {
-    const row = this.db
-      .prepare(`SELECT COUNT(*) as cnt FROM episodic_events`)
-      .get() as { cnt: number };
-    return row.cnt;
+    try {
+      const row = this.db
+        .prepare(`SELECT COUNT(*) as cnt FROM episodic_events`)
+        .get() as { cnt: number };
+      this.audit?.({
+        operation: 'episodic.count',
+        store: 'episodic',
+        outcome: 'success',
+        details: { count: row.cnt },
+      });
+      return row.cnt;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.count',
+        store: 'episodic',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 }
 
@@ -2144,15 +2161,25 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
       return { id: String(result.lastInsertRowid) };
     });
 
-    const result = tx() as { id: string };
-    finalizeWorkingMemoryFlush.current?.();
-    this.audit?.({
-      operation: 'recovery.checkpoint',
-      store: 'recovery',
-      outcome: 'success',
-      details: { checkpointId: result.id },
-    });
-    return result;
+    try {
+      const result = tx() as { id: string };
+      finalizeWorkingMemoryFlush.current?.();
+      this.audit?.({
+        operation: 'recovery.checkpoint',
+        store: 'recovery',
+        outcome: 'success',
+        details: { checkpointId: result.id },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'recovery.checkpoint',
+        store: 'recovery',
+        outcome: 'error',
+        details: { errorName: error instanceof Error ? error.name : 'Error' },
+      });
+      throw error;
+    }
   }
 
   lastCheckpoint(): ExecutionState | null {
@@ -2479,16 +2506,16 @@ export class SqliteMemoryReviewQueue {
     try {
       approveTx.immediate();
     } catch (error) {
-      const candidate = this.requireCandidate(id);
+      const candidate = this.tryCandidate(id);
       this.audit?.({
         operation: 'review.approve',
         store: 'review',
-        key: candidate.key,
+        ...(candidate ? { key: candidate.key } : {}),
         outcome: error instanceof MemoryDeletionGuardError ? 'denied' : 'error',
         details: {
           id,
-          status: candidate.status,
-          targetStore: candidate.targetStore,
+          status: candidate?.status,
+          targetStore: candidate?.targetStore,
           errorName: error instanceof Error ? error.name : 'Error',
         },
       });
@@ -2849,6 +2876,13 @@ export class SqliteMemoryReviewQueue {
       );
     }
     return candidate;
+  }
+
+  private tryCandidate(id: string): MemoryCandidate | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM memory_review_candidates WHERE id = ?`)
+      .get(id) as MemoryCandidateRow | undefined;
+    return row ? this.rowToCandidate(row) : undefined;
   }
 
   private markDecision(
