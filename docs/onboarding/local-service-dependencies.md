@@ -9,10 +9,10 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 | Capability being exercised | Local service dependency | Required? | Verification |
 | --- | --- | --- | --- |
 | Repository install, docs checks, root unit tests | None beyond Node.js and npm | No Docker required | `npm run bootstrap -- --no-docker`; `npm run test:root` |
-| Semantic-memory seed and verification scripts | ChromaDB | Yes when using local semantic memory scripts | `curl -fsS http://localhost:8000/api/v2/heartbeat` |
+| Semantic-memory seed scripts | ChromaDB | Yes when using local semantic memory scripts | `curl -fsS "${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat"` |
 | Local observability dashboards | Grafana | Yes for dashboard viewing only | `curl -fsS http://localhost:3000/api/health` |
 | Distributed trace viewing/export smoke tests | Tempo | Yes for OTLP trace export | `curl -fsS http://localhost:3200/ready` |
-| Local chat, Beast runs, dashboard chat turns | Provider CLI login or API-backed provider keys | Yes for real model calls | `command -v claude || command -v codex || command -v gemini`, or exported provider API key |
+| Local chat, Beast runs, dashboard chat turns | Provider CLI login or API-backed provider keys | Yes for real model calls | selected provider smoke call; do not rely on `command -v` alone |
 | Operator token and stored credentials | Configured secret backend | Yes when runtime resolves secret refs | `.fbeast/config.json` names the backend and required backend session/passphrase is available |
 
 ## Service details
@@ -22,13 +22,15 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 - Start only when you are using semantic memory locally:
 
   ```bash
+  set -a; [ ! -f .env ] || . ./.env; set +a
   docker compose up -d chromadb
-  export CHROMA_URL=http://localhost:8000
-  curl -fsS http://localhost:8000/api/v2/heartbeat
+  export CHROMA_URL=${CHROMA_URL:-http://localhost:8000}
+  curl -fsS "$CHROMA_URL/api/v2/heartbeat"
   ```
 
-- Required for: `npm run local:seed`, `npm run local:verify-setup`, and semantic-memory verification that talks to ChromaDB.
+- Required for: `npm run local:seed` and semantic-memory checks that talk directly to ChromaDB.
 - Not required for: repository install, root documentation tests, CLI help output, dashboard shell startup, or file-backed MCP memory tools.
+- Full-stack probe: `npm run local:verify-setup` checks ChromaDB, Grafana, and Tempo together; do not use it as a Chroma-only health check unless all optional services are intentionally running.
 - Failure symptom: memory seed/verification errors mention connection refused, an unavailable Chroma endpoint, or a missing v2 tenant/database API.
 
 ### Grafana
@@ -36,7 +38,7 @@ Structured source: `docs/onboarding/local-service-dependencies.manifest.json`.
 - Start only when you need the observability UI:
 
   ```bash
-  GRAFANA_USER=admin GRAFANA_PASSWORD=<unique-password> docker compose up -d grafana
+  GRAFANA_USER=admin GRAFANA_PASSWORD=replace-with-unique-password docker compose up -d grafana
   curl -fsS http://localhost:3000/api/health
   ```
 

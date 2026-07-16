@@ -8,7 +8,7 @@
       "requiredFor": ["semantic memory scripts", "local memory seeding", "semantic-memory verification"],
       "notRequiredFor": ["workspace install", "root unit tests", "orchestrator CLI help", "dashboard shell startup", "file-backed MCP memory"],
       "startCommand": "docker compose up -d chromadb",
-      "healthCheck": "curl -fsS http://localhost:8000/api/v2/heartbeat",
+      "healthCheck": "set -a; [ ! -f .env ] || . ./.env; set +a; curl -fsS \"${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat\"",
       "env": ["CHROMA_URL=http://localhost:8000"],
       "failureSymptom": "Semantic memory seed or verification scripts fail with connection refused, unavailable Chroma endpoint, or missing v2 tenant/database API errors.",
       "handoffNote": "Mention whether CHROMA_URL is set, whether the v2 heartbeat responded, and whether the work uses semantic-memory scripts rather than file-backed MCP memory."
@@ -18,9 +18,9 @@
       "name": "Grafana",
       "requiredFor": ["local dashboards", "operator-facing observability UI"],
       "notRequiredFor": ["trace collection", "root unit tests", "CLI planning and run commands"],
-      "startCommand": "GRAFANA_USER=admin GRAFANA_PASSWORD=<unique-password> docker compose up -d grafana",
+      "startCommand": "GRAFANA_USER=admin GRAFANA_PASSWORD=replace-with-unique-password docker compose up -d grafana",
       "healthCheck": "curl -fsS http://localhost:3000/api/health",
-      "env": ["GRAFANA_USER=admin", "GRAFANA_PASSWORD=<unique-password>"],
+      "env": ["GRAFANA_USER=admin", "GRAFANA_PASSWORD=replace-with-unique-password"],
       "failureSymptom": "Dashboard links or Grafana panels are unavailable even though application tests and traces still run.",
       "handoffNote": "Record that Grafana credentials were set to a non-default password before starting compose."
     },
@@ -41,7 +41,7 @@
       "requiredFor": ["local chat", "agent execution", "dashboard chat turns", "Beast runs against real providers"],
       "notRequiredFor": ["documentation tests", "static typecheck", "most package unit tests"],
       "startCommand": "Install and authenticate at least one configured provider CLI, or export the API key for an API-backed provider.",
-      "healthCheck": "command -v claude || command -v codex || command -v gemini || test -n \"${ANTHROPIC_API_KEY:-}${OPENAI_API_KEY:-}${GOOGLE_API_KEY:-}${GEMINI_API_KEY:-}\"",
+      "healthCheck": "Run a real smoke call through the selected configured provider; for API-backed providers require that provider's API key, and for CLI-backed providers require that provider's authenticated no-op prompt to succeed.",
       "env": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"],
       "failureSymptom": "Provider resolution fails, local chat cannot produce a turn, or Beast runs stop before model invocation.",
       "handoffNote": "Name the selected provider path and whether it is CLI-authenticated or API-key backed."
@@ -52,7 +52,7 @@
       "requiredFor": ["operator token lookup", "stored provider credentials", "Beast controls after init"],
       "notRequiredFor": ["repository bootstrap", "docs-only checks", "unit tests with injected secrets"],
       "startCommand": "node packages/franken-orchestrator/dist/cli/run.js init",
-      "healthCheck": "test -f .fbeast/config.json && (test -f .fbeast/secrets.enc || test -n \"${BW_SESSION:-}\" || op account get >/dev/null 2>&1 || security find-generic-password -s frankenbeast >/dev/null 2>&1)",
+      "healthCheck": "node -e \"const fs=require('node:fs'),cp=require('node:child_process'); const cfg=JSON.parse(fs.readFileSync('.fbeast/config.json','utf8')); const b=cfg.network?.secureBackend ?? 'local-encrypted'; if (b === 'local-encrypted') { if (!fs.existsSync('.fbeast/secrets.enc') || !process.env.FRANKENBEAST_PASSPHRASE) process.exit(1); } else if (b === 'bitwarden') { if (!process.env.BW_SESSION) process.exit(1); } else if (b === '1password') { cp.execFileSync('op',['account','get'],{stdio:'ignore'}); } else if (b === 'os-keychain') { process.exit(0); } else process.exit(1);\"",
       "env": ["FRANKENBEAST_PASSPHRASE", "BW_SESSION"],
       "failureSymptom": "Runtime config contains secret refs but commands cannot resolve operator tokens or provider credentials.",
       "handoffNote": "Record the configured network.secureBackend and the backend-specific proof: local encrypted vault plus FRANKENBEAST_PASSPHRASE, BW_SESSION, op CLI session, or OS keychain availability."

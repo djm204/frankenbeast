@@ -47,16 +47,27 @@ describe('issue #1771 local service dependency explainer', () => {
     const chromadb = manifest.services.find((service) => service.id === 'chromadb');
     expect(chromadb).toMatchObject({
       startCommand: 'docker compose up -d chromadb',
-      healthCheck: 'curl -fsS http://localhost:8000/api/v2/heartbeat',
+      healthCheck: 'set -a; [ ! -f .env ] || . ./.env; set +a; curl -fsS "${CHROMA_URL:-http://localhost:8000}/api/v2/heartbeat"',
     });
     expect(chromadb?.requiredFor).not.toContain('memory-backed MCP workflows');
     expect(chromadb?.notRequiredFor).toContain('file-backed MCP memory');
 
     const secretBackend = manifest.services.find((service) => service.id === 'secret-backend');
-    expect(secretBackend?.healthCheck).toContain('test -f .fbeast/config.json');
+    expect(secretBackend?.healthCheck).toContain("JSON.parse(fs.readFileSync('.fbeast/config.json'");
+    expect(secretBackend?.healthCheck).toContain("b === 'local-encrypted'");
     expect(secretBackend?.healthCheck).toContain('.fbeast/secrets.enc');
+    expect(secretBackend?.healthCheck).toContain('FRANKENBEAST_PASSPHRASE');
     expect(secretBackend?.healthCheck).toContain('BW_SESSION');
     expect(secretBackend?.healthCheck).not.toContain('|| true');
+
+    const grafana = manifest.services.find((service) => service.id === 'grafana');
+    expect(grafana?.startCommand).toContain('GRAFANA_PASSWORD=replace-with-unique-password');
+    expect(grafana?.startCommand).not.toContain('<unique-password>');
+
+    const provider = manifest.services.find((service) => service.id === 'provider-cli');
+    expect(provider?.healthCheck).toContain('selected configured provider');
+    expect(provider?.healthCheck).toContain('authenticated no-op prompt');
+    expect(provider?.healthCheck).not.toContain('command -v');
 
     for (const service of manifest.services) {
       expect(service.id).toMatch(/^[a-z0-9-]+$/);
@@ -96,6 +107,8 @@ describe('issue #1771 local service dependency explainer', () => {
       'Do not start the full Docker stack just because a docs test, static typecheck, or CLI help command failed.',
       'Do not assume Docker is required for onboarding.',
       'Do not overwrite a remote service URL by starting a local container on the same port.',
+      'Full-stack probe: `npm run local:verify-setup` checks ChromaDB, Grafana, and Tempo together',
+      'selected provider smoke call; do not rely on `command -v` alone',
       'Local service dependency check:',
     ]) {
       expect(guide).toContain(requiredText);
