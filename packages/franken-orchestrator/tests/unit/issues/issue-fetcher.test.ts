@@ -73,10 +73,8 @@ describe('IssueFetcher', () => {
 
       await fetcher.fetch({});
 
-      const [, args] = execFn.mock.calls[0]!;
-      const limitIdx = args.indexOf('--limit');
-      expect(limitIdx).toBeGreaterThan(-1);
-      expect(args[limitIdx + 1]).toBe('1000');
+      const limits = execFn.mock.calls.map(([, args]) => args[args.indexOf('--limit') + 1]);
+      expect(limits).toContain('1000');
     });
 
     it('adds default oldest, urgent, and recent searches so urgent issues cannot fall outside the aged window', async () => {
@@ -87,10 +85,13 @@ describe('IssueFetcher', () => {
 
       expect(execFn).toHaveBeenCalledTimes(3);
       const searches = execFn.mock.calls.map(([, args]) => args[args.indexOf('--search') + 1]);
-      expect(searches[0]).toBe('sort:created-asc');
-      expect(searches[1]).toContain('label:critical');
-      expect(searches[1]).toContain('sort:created-desc');
-      expect(searches[2]).toBe('sort:created-desc');
+      expect(searches[0]).toContain('label:critical');
+      expect(searches[0]).toContain('label:high');
+      expect(searches[0]).toContain('label:"priority:p0"');
+      expect(searches[0]).toContain('label:"priority:p1"');
+      expect(searches[0]).toContain('sort:created-desc');
+      expect(searches[1]).toBe('sort:created-desc');
+      expect(searches[2]).toBe('sort:created-asc');
     });
 
     it('deduplicates issues returned by the default supplemental fetch windows', async () => {
@@ -104,6 +105,30 @@ describe('IssueFetcher', () => {
 
       expect(issues).toHaveLength(1);
       expect(issues[0]!.number).toBe(42);
+    });
+
+    it('caps the merged default supplemental windows at the advertised default limit', async () => {
+      const makeIssues = (start: number, count: number) => JSON.stringify(
+        Array.from({ length: count }, (_, index) => ({
+          number: start + index,
+          title: `Issue ${start + index}`,
+          body: 'body',
+          labels: [],
+          state: 'OPEN',
+          url: `https://github.com/org/repo/issues/${start + index}`,
+        })),
+      );
+      const execFn = vi.fn<ExecFn>()
+        .mockImplementationOnce(makeExecFn(makeIssues(1, 200)))
+        .mockImplementationOnce(makeExecFn(makeIssues(201, 200)))
+        .mockImplementationOnce(makeExecFn(makeIssues(401, 1000)));
+      const fetcher = new IssueFetcher(execFn);
+
+      const issues = await fetcher.fetch({});
+
+      expect(issues).toHaveLength(1000);
+      expect(issues[0]!.number).toBe(1);
+      expect(issues.at(-1)!.number).toBe(1000);
     });
 
     it('uses custom --limit when provided', async () => {

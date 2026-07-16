@@ -271,9 +271,11 @@ export interface IssueRunnerConfig {
 const SEVERITY_ORDER: Record<string, number> = {
   p0: 0,
   'priority:p0': 0,
+  'priority:critical': 0,
   critical: 0,
   p1: 1,
   'priority:p1': 1,
+  'priority:high': 1,
   high: 1,
   p2: 2,
   'priority:p2': 2,
@@ -1071,10 +1073,10 @@ function checkpointEntriesHaveIssueProgress(
 function checkpointEntriesAreCompleteWithoutPlan(
   entries: ReadonlySet<string> | undefined,
   issueNumber: number,
-  issueSpecificCheckpoint: boolean,
+  _issueSpecificCheckpoint: boolean,
   complexity: TriageResult['complexity'],
 ): boolean {
-  if (!issueSpecificCheckpoint || entries === undefined || entries.size === 0) return false;
+  if (entries === undefined || entries.size === 0) return false;
   if (complexity === 'chunked') return false;
 
   const issueToken = `issue-${issueNumber}`;

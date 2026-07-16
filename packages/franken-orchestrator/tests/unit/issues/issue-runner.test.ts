@@ -704,8 +704,18 @@ describe('IssueRunner', () => {
         makeIssue({ number: 67, labels: ['critical'], createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }),
         nowMs,
       );
+      const priorityCritical = evaluateIssueSchedulingScore(
+        makeIssue({ number: 68, labels: ['priority:critical'], createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }),
+        nowMs,
+      );
+      const priorityHigh = evaluateIssueSchedulingScore(
+        makeIssue({ number: 69, labels: ['priority:high'], createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }),
+        nowMs,
+      );
       const agedMedium = evaluateIssueSchedulingScore(issues[1]!, nowMs);
       expect(freshCritical.effectivePriorityRank).toBe(0);
+      expect(priorityCritical.effectivePriorityRank).toBe(0);
+      expect(priorityHigh.effectivePriorityRank).toBe(1);
       expect(agedMedium.effectivePriorityRank).toBe(1);
       expect(freshCritical.score).toBeLessThan(agedMedium.score);
     });
@@ -1351,7 +1361,8 @@ describe('IssueRunner', () => {
       expect(mockRun).not.toHaveBeenCalled();
     });
 
-    it('preserves shared-checkpoint completions before evaluating backpressure', async () => {
+    it('preserves shared-checkpoint completions before evaluating backpressure or blocker deferral', async () => {
+      const logger = mockLogger();
       const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
       const signals = vi.fn(() => ({
         activeProcesses: 1,
@@ -1360,9 +1371,10 @@ describe('IssueRunner', () => {
         oldestQueueAgeMs: 0,
       }));
       const config = makeConfig({
-        issues: [makeIssue({ number: 15 })],
+        issues: [makeIssue({ number: 15, labels: ['blocked'] })],
         triageResults: [makeTriage(15)],
         checkpoint,
+        logger,
         backpressure: {
           thresholds: { maxActiveProcesses: 1 },
           signals,
@@ -1372,6 +1384,7 @@ describe('IssueRunner', () => {
       const outcomes = await runner.run(config);
 
       expect(outcomes[0]).toMatchObject({ issueNumber: 15, status: 'fixed' });
+      expect(logger.warn).not.toHaveBeenCalled();
       expect(signals).not.toHaveBeenCalled();
       expect(mockRun).not.toHaveBeenCalled();
     });
@@ -1546,6 +1559,12 @@ describe('IssueRunner', () => {
     });
 
 
+
+    it('classifies priority labels used by the urgent default issue fetch', () => {
+      expect(evaluateIssueSchedulingScore(makeIssue({ number: 81, labels: ['priority:critical'] })).priority).toBe('critical');
+      expect(evaluateIssueSchedulingScore(makeIssue({ number: 82, labels: ['priority:high'] })).priority).toBe('high');
+    });
+
     it('treats status-prefixed blocked labels as scheduler gates', () => {
       expect(evaluateIssueSchedulingScore(makeIssue({ number: 71, labels: ['status:blocked'] })).blockerStatus).toBe('blocked');
       expect(evaluateIssueSchedulingScore(makeIssue({ number: 72, labels: ['status:paused'] })).blockerStatus).toBe('blocked');
@@ -1682,6 +1701,27 @@ describe('IssueRunner', () => {
         graphBuilder,
         issueRuntime,
         logger,
+      });
+
+      const outcomes = await runner.run(config);
+
+      expect(outcomes[0]).toMatchObject({ issueNumber: 17, status: 'fixed', tokensUsed: 0 });
+      expect(graphBuilder.buildChunkDefinitionsForIssue).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+
+    it('preserves shared-checkpoint one-shot completions with issue chunk ids before blocked deferral', async () => {
+      const graphBuilder = mockGraphBuilder();
+      const checkpoint = mockCheckpoint(new Set([
+        'impl:01_issue-17:done',
+        'harden:01_issue-17:done',
+      ]));
+      const config = makeConfig({
+        issues: [makeIssue({ number: 17, labels: ['blocked'] })],
+        triageResults: [makeTriage(17)],
+        graphBuilder,
+        checkpoint,
       });
 
       const outcomes = await runner.run(config);

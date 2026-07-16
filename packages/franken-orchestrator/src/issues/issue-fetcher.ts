@@ -11,7 +11,7 @@ const DEFAULT_ISSUE_FETCH_RECENT_LIMIT = 200;
 const MIN_ISSUE_FETCH_BUFFER_BYTES = 2_097_152;
 const MAX_ISSUE_FETCH_BUFFER_BYTES = 128 * 1_024 * 1_024;
 const APPROX_MAX_GITHUB_ISSUE_BODY_BYTES = 65_536;
-const DEFAULT_URGENT_ISSUE_SEARCH = '(label:critical OR label:p0 OR label:p1 OR label:"priority:critical" OR label:"priority:high") sort:created-desc';
+const DEFAULT_URGENT_ISSUE_SEARCH = '(label:critical OR label:p0 OR label:p1 OR label:high OR label:"priority:p0" OR label:"priority:p1" OR label:"priority:critical" OR label:"priority:high") sort:created-desc';
 
 interface RawGithubIssue {
   readonly number: number;
@@ -35,11 +35,14 @@ export class IssueFetcher implements IIssueFetcher {
     const explicitLimit = options.limit !== undefined;
     const raw = explicitLimit || options.search
       ? await this.fetchIssuePage(options, options.search, options.limit ?? DEFAULT_ISSUE_FETCH_LIMIT)
-      : this.mergeIssuePages([
-          await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
-          await this.fetchIssuePage(options, DEFAULT_URGENT_ISSUE_SEARCH, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
-          await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
-        ]);
+      : this.mergeIssuePages(
+          [
+            await this.fetchIssuePage(options, DEFAULT_URGENT_ISSUE_SEARCH, DEFAULT_ISSUE_FETCH_URGENT_LIMIT),
+            await this.fetchIssuePage(options, 'sort:created-desc', DEFAULT_ISSUE_FETCH_RECENT_LIMIT),
+            await this.fetchIssuePage(options, 'sort:created-asc', DEFAULT_ISSUE_FETCH_LIMIT),
+          ],
+          DEFAULT_ISSUE_FETCH_LIMIT,
+        );
 
     return raw.map((issue) => ({
       number: issue.number,
@@ -100,14 +103,17 @@ export class IssueFetcher implements IIssueFetcher {
     }) as RawGithubIssue[];
   }
 
-  private mergeIssuePages(pages: readonly RawGithubIssue[][]): RawGithubIssue[] {
+  private mergeIssuePages(pages: readonly RawGithubIssue[][], limit?: number): RawGithubIssue[] {
     const byNumber = new Map<number, RawGithubIssue>();
     for (const page of pages) {
       for (const issue of page) {
-        byNumber.set(issue.number, issue);
+        if (!byNumber.has(issue.number)) {
+          byNumber.set(issue.number, issue);
+        }
       }
     }
-    return [...byNumber.values()];
+    const merged = [...byNumber.values()];
+    return limit === undefined ? merged : merged.slice(0, limit);
   }
 
   async inferRepo(): Promise<string> {
