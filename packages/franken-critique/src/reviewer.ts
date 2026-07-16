@@ -1,4 +1,9 @@
-import type { GuardrailsPort, MemoryPort, ObservabilityPort } from './types/contracts.js';
+import type {
+  GuardrailsPort,
+  LessonInjectionContext,
+  MemoryPort,
+  ObservabilityPort,
+} from './types/contracts.js';
 import type { EvaluationInput } from './types/evaluation.js';
 import type { LoopConfig, CritiqueLoopResult } from './types/loop.js';
 import { CritiquePipeline } from './pipeline/critique-pipeline.js';
@@ -24,7 +29,50 @@ export interface ReviewerConfig {
 }
 
 export interface Reviewer {
-  review(input: EvaluationInput, loopConfig: LoopConfig): Promise<CritiqueLoopResult>;
+  review(
+    input: EvaluationInput,
+    loopConfig: LoopConfig,
+  ): Promise<CritiqueLoopResult>;
+}
+
+function readMetadataString(
+  metadata: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function createLessonInjectionContextFromInput(
+  input: EvaluationInput,
+): LessonInjectionContext {
+  const context: {
+    repo?: string;
+    role?: string;
+    profile?: string;
+  } = {};
+  const repo = readMetadataString(input.metadata, ['repo', 'repository']);
+  if (repo !== undefined) {
+    context.repo = repo;
+  }
+  const role = readMetadataString(input.metadata, [
+    'role',
+    'reviewerRole',
+    'agentRole',
+  ]);
+  if (role !== undefined) {
+    context.role = role;
+  }
+  const profile = readMetadataString(input.metadata, ['profile', 'profileId']);
+  if (profile !== undefined) {
+    context.profile = profile;
+  }
+  return context;
 }
 
 export function createReviewer(config: ReviewerConfig): Reviewer {
@@ -51,9 +99,16 @@ export function createReviewer(config: ReviewerConfig): Reviewer {
   const recorder = new LessonRecorder(config.memory);
 
   return {
-    async review(input: EvaluationInput, loopConfig: LoopConfig): Promise<CritiqueLoopResult> {
+    async review(
+      input: EvaluationInput,
+      loopConfig: LoopConfig,
+    ): Promise<CritiqueLoopResult> {
       const result = await loop.run(input, loopConfig);
-      await recorder.record(result, loopConfig.taskId);
+      await recorder.record(
+        result,
+        loopConfig.taskId,
+        createLessonInjectionContextFromInput(input),
+      );
       return result;
     },
   };

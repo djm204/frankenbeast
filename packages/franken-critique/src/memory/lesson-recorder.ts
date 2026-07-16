@@ -422,12 +422,17 @@ export interface LessonHumanFeedbackRequest {
   readonly revisedCorrectionApplied?: string;
 }
 
+export type LessonScopeAllowlistDimension =
+  'repos' | 'roles' | 'profiles' | 'tasks';
+
 export interface LessonScopeReviewRequest {
   readonly scope: LessonScopeKind;
   readonly allowedRepos?: readonly string[];
   readonly allowedRoles?: readonly string[];
   readonly allowedProfiles?: readonly string[];
   readonly allowedTasks?: readonly TaskId[];
+  /** Explicit allowlist dimensions to drop during review; omitted dimensions preserve existing narrowers. */
+  readonly clearAllowlists?: readonly LessonScopeAllowlistDimension[];
   readonly provenance?: LessonScopeProvenance;
   readonly expiresAt?: string;
   readonly actor: string;
@@ -452,27 +457,27 @@ export function updateLessonScope(
     toScope: scope,
     reason,
   };
-  const isSameScope = lesson.lessonScope?.scope === scope;
-  const allowedRepos =
-    request.allowedRepos ??
-    (isSameScope || scope === 'repo'
-      ? lesson.lessonScope?.allowedRepos
-      : undefined);
-  const allowedRoles =
-    request.allowedRoles ??
-    (isSameScope || scope === 'role'
-      ? lesson.lessonScope?.allowedRoles
-      : undefined);
-  const allowedProfiles =
-    request.allowedProfiles ??
-    (isSameScope || scope === 'profile'
-      ? lesson.lessonScope?.allowedProfiles
-      : undefined);
-  const allowedTasks =
-    request.allowedTasks ??
-    (isSameScope || scope === 'task'
-      ? lesson.lessonScope?.allowedTasks
-      : undefined);
+  const clearedAllowlists = new Set(request.clearAllowlists ?? []);
+  const allowedRepos = resolveReviewedAllowlist(
+    request.allowedRepos,
+    lesson.lessonScope?.allowedRepos,
+    clearedAllowlists.has('repos'),
+  );
+  const allowedRoles = resolveReviewedAllowlist(
+    request.allowedRoles,
+    lesson.lessonScope?.allowedRoles,
+    clearedAllowlists.has('roles'),
+  );
+  const allowedProfiles = resolveReviewedAllowlist(
+    request.allowedProfiles,
+    lesson.lessonScope?.allowedProfiles,
+    clearedAllowlists.has('profiles'),
+  );
+  const allowedTasks = resolveReviewedAllowlist(
+    request.allowedTasks,
+    lesson.lessonScope?.allowedTasks,
+    clearedAllowlists.has('tasks'),
+  );
   const expiresAt = request.expiresAt ?? lesson.lessonScope?.expiresAt;
   const lessonScope = createLessonScopeMetadata({
     scope,
@@ -1068,6 +1073,7 @@ export class LessonRecorder {
   async record(
     result: CritiqueLoopResult,
     taskId: TaskId,
+    lessonInjectionContext?: LessonInjectionContext,
   ): Promise<LessonRecordingResult> {
     const recordingResult = createMutableLessonRecordingResult(this.now());
 
@@ -1091,7 +1097,11 @@ export class LessonRecorder {
         recordingResult,
       );
       for (const extractedLesson of lessons) {
-        await this.recordExtractedLesson(extractedLesson, recordingResult);
+        await this.recordExtractedLesson(
+          extractedLesson,
+          recordingResult,
+          lessonInjectionContext,
+        );
       }
     }
 
@@ -1101,6 +1111,7 @@ export class LessonRecorder {
   private async recordExtractedLesson(
     extractedLesson: CritiqueLesson,
     recordingResult: MutableLessonRecordingResult,
+    recordLessonInjectionContext: LessonInjectionContext | undefined,
   ): Promise<void> {
     await this.withBlockerPatternAdmissionLock(extractedLesson, async () => {
       let lesson = this.withCurrentBlockerPatterns(extractedLesson);
@@ -1156,8 +1167,10 @@ export class LessonRecorder {
       }
 
       try {
-        const contradictionContext =
-          await this.createContradictionContext(lesson);
+        const contradictionContext = await this.createContradictionContext(
+          lesson,
+          recordLessonInjectionContext,
+        );
         const lessonWithContradiction = {
           ...lesson,
           contradictionReport: contradictionContext.report,
@@ -1209,6 +1222,7 @@ export class LessonRecorder {
 
   private async createContradictionContext(
     lesson: CritiqueLesson,
+    recordLessonInjectionContext: LessonInjectionContext | undefined,
   ): Promise<LessonContradictionContext> {
     if (!this.memory.searchLessons) {
       return {
@@ -1223,8 +1237,9 @@ export class LessonRecorder {
       );
       const lessonInjectionContext = {
         ...this.lessonInjectionContext,
+        ...recordLessonInjectionContext,
         taskId: lesson.taskId,
-        now: this.now(),
+        now: recordLessonInjectionContext?.now ?? this.now(),
       };
       const applicablePriorLessons = priorLessons.filter((priorLesson) =>
         isLessonApplicableForKnownContext(priorLesson, lessonInjectionContext),
@@ -1756,6 +1771,17 @@ export class LessonRecorder {
   }
 }
 
+function resolveReviewedAllowlist<T extends string>(
+  requested: readonly T[] | undefined,
+  existing: readonly T[] | undefined,
+  clear: boolean,
+): readonly T[] | undefined {
+  if (requested !== undefined) {
+    return requested;
+  }
+  return clear ? undefined : existing;
+}
+
 interface LessonScopeMetadataInput {
   readonly scope: LessonScopeKind;
   readonly allowedRepos?: readonly string[];
@@ -1898,8 +1924,11 @@ function isLessonScopeAllowed(
   if (!matchesOptionalAllowlist(scope.allowedTasks, context.taskId)) {
     return false;
   }
+  if (!hasValidScopeAuditTrail(scope)) {
+    return false;
+  }
   if (scope.scope === 'global') {
-    return hasValidScopeAuditTrail(scope);
+    return true;
   }
   if (scope.scope === 'repo') {
     return matchesRequiredAllowlist(scope.allowedRepos, context.repo);

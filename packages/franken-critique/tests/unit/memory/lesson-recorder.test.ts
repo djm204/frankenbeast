@@ -1693,6 +1693,22 @@ describe('LessonRecorder', () => {
       ),
     ).toBe(false);
 
+    const importedRepoWithoutAudit = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithoutAudit, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
     const expired = updateLessonScope(baseLesson, {
       scope: 'role',
       allowedRoles: ['worker'],
@@ -1738,6 +1754,7 @@ describe('LessonRecorder', () => {
     const roleScoped = updateLessonScope(repoScoped, {
       scope: 'role',
       allowedRoles: ['reviewer'],
+      clearAllowlists: ['repos'],
       actor: 'senior-reviewer',
       reason: 'Demote to reviewer-only scope after privacy review.',
       changedAt: '2026-07-13T02:00:00.000Z',
@@ -1771,6 +1788,7 @@ describe('LessonRecorder', () => {
     const promoted = updateLessonScope(taskScoped, {
       scope: 'repo',
       allowedRepos: ['djm204/frankenbeast'],
+      clearAllowlists: ['tasks'],
       actor: 'pm-reviewer',
       reason: 'Promote after review without carrying the task allowlist.',
       changedAt: '2026-07-13T04:00:00.000Z',
@@ -1797,9 +1815,44 @@ describe('LessonRecorder', () => {
     });
     expect(metadataOnlyReview.lessonScope?.allowedRoles).toEqual(['reviewer']);
 
+    const repoScopedReviewerOnly = updateLessonScope(narrowedGlobal, {
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      actor: 'pm-reviewer',
+      reason: 'Narrow global reviewer-only guidance to one repository.',
+      changedAt: '2026-07-13T06:30:00.000Z',
+    });
+    expect(repoScopedReviewerOnly.lessonScope).toMatchObject({
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+      allowedRoles: ['reviewer'],
+    });
+    expect(
+      isLessonApplicable(repoScopedReviewerOnly, {
+        repo: 'djm204/frankenbeast',
+        role: 'reviewer',
+      }),
+    ).toBe(true);
+    expect(
+      isLessonApplicable(repoScopedReviewerOnly, {
+        repo: 'djm204/frankenbeast',
+        role: 'worker',
+      }),
+    ).toBe(false);
+
+    const clearedRoleNarrowing = updateLessonScope(repoScopedReviewerOnly, {
+      scope: 'repo',
+      clearAllowlists: ['roles'],
+      actor: 'pm-reviewer',
+      reason: 'Explicitly clear role narrowing after review.',
+      changedAt: '2026-07-13T06:45:00.000Z',
+    });
+    expect(clearedRoleNarrowing.lessonScope?.allowedRoles).toBeUndefined();
+
     const demoted = updateLessonScope(promoted, {
       scope: 'task',
       allowedTasks: ['scope-task'],
+      clearAllowlists: ['repos'],
       actor: 'pm-reviewer',
       reason: 'Demote back to task-local.',
       changedAt: '2026-07-13T07:00:00.000Z',
@@ -1865,6 +1918,59 @@ describe('LessonRecorder', () => {
         ),
       ),
     ).toBe(false);
+  });
+
+  it('uses per-review lesson injection context before filtering prior lessons', async () => {
+    const scopedPrior = updateLessonScope(
+      createLesson({
+        failureDescription: 'Cache guidance allowed unaudited stale responses',
+        correctionApplied: 'Require cache verification before reuse',
+        taskId: 'prior-task',
+        lifecycleStatus: 'active',
+      }),
+      {
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        actor: 'pm-reviewer',
+        reason: 'Prior lesson is repo-local.',
+        changedAt: '2026-07-13T01:00:00.000Z',
+      },
+    );
+    const port = {
+      ...createMockMemoryPort(),
+      searchLessons: vi.fn().mockResolvedValue([scopedPrior]),
+    };
+    const recorder = new LessonRecorder(port, {
+      now: (): Date => new Date('2026-07-13T03:00:00.000Z'),
+    });
+
+    await recorder.record(
+      {
+        verdict: 'pass',
+        iterations: [
+          createIteration(0, 'fail', 'factuality', [
+            {
+              message: 'Cache guidance allowed unaudited stale responses',
+              severity: 'warning',
+              suggestion: 'Require cache verification before reuse',
+            },
+          ]),
+          createIteration(1, 'pass'),
+        ],
+      },
+      'current-task',
+      { repo: 'djm204/frankenbeast' },
+    );
+
+    const lesson = (port.recordLesson as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as CritiqueLesson;
+    expect(
+      lesson.proposedLessonCritique?.findings.some(
+        (finding) =>
+          finding.checklistItem === 'duplication' &&
+          finding.verdict === 'needs-edit',
+      ),
+    ).toBe(true);
   });
 
   it('weights explicit human feedback higher than inferred lesson signals', async () => {
