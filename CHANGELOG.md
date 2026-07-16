@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.57.0](https://github.com/djm204/frankenbeast/compare/v0.56.0...v0.57.0) (2026-07-16)
+
+
+### Features
+
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+* **memory:** add source attribution viewer ([#2329](https://github.com/djm204/frankenbeast/issues/2329)) ([9a47d63](https://github.com/djm204/frankenbeast/commit/9a47d63ce4bed21908af873ed7588794ae19d25a))
+* **onboarding:** add local-to-PR dry run ([#2411](https://github.com/djm204/frankenbeast/issues/2411)) ([c5f2d13](https://github.com/djm204/frankenbeast/commit/c5f2d130fa2b2c696491b5e3596a1668b07b25f7))
+* **onboarding:** add profile capability self-test ([#2410](https://github.com/djm204/frankenbeast/issues/2410)) ([d576f31](https://github.com/djm204/frankenbeast/commit/d576f31fb81b90cf405e6bb6c9c3d87207813839))
+
+
+### Bug Fixes
+
+* **observer:** retry sqlite lock failures ([7723f66](https://github.com/djm204/frankenbeast/commit/7723f66f67591e6e3fafe3af97bca6a53fb2c77b))
+* **orchestrator:** bound beast run log growth ([#2404](https://github.com/djm204/frankenbeast/issues/2404)) ([c763d97](https://github.com/djm204/frankenbeast/commit/c763d97e31970a699353af6eab7ca47b75cd0f39))
+
 ## [0.56.0](https://github.com/djm204/frankenbeast/compare/v0.55.3...v0.56.0) (2026-07-16)
 
 

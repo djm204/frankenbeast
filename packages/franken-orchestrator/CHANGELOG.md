@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.51.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.50.0...@franken/orchestrator-v0.51.0) (2026-07-16)
+
+
+### Features
+
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+
+
+### Bug Fixes
+
+* **orchestrator:** bound beast run log growth ([#2404](https://github.com/djm204/frankenbeast/issues/2404)) ([c763d97](https://github.com/djm204/frankenbeast/commit/c763d97e31970a699353af6eab7ca47b75cd0f39))
+* **orchestrator:** reconcile beast queue on restart ([#2406](https://github.com/djm204/frankenbeast/issues/2406)) ([5f3077c](https://github.com/djm204/frankenbeast/commit/5f3077c6c401d032610fe4cff69fb0a4a888d1e2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.9.0 to 0.9.1
+    * @franken/governor bumped from 0.7.1 to 0.7.2
+    * @franken/types bumped from 0.12.0 to 0.13.0
+    * @franken/observer bumped from 0.9.0 to 0.10.0
+    * @franken/planner bumped from 0.4.19 to 0.4.20
+    * @franken/brain bumped from 0.11.0 to 0.12.0
+
 ## [0.50.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.49.2...@franken/orchestrator-v0.50.0) (2026-07-16)
 
 
