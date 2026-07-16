@@ -1709,6 +1709,42 @@ describe('LessonRecorder', () => {
       }),
     ).toBe(false);
 
+    const importedRepoWithWrongAuditScope = {
+      ...baseLesson,
+      lessonScope: {
+        schemaVersion: 'lesson-scope-v1',
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+        provenance: { source: 'recorded', taskId: 'scope-task' },
+        auditTrail: [
+          {
+            changedAt: reviewedAt,
+            actor: 'pm-reviewer',
+            toScope: 'task',
+            reason: 'Only attested a task-local scope.',
+          },
+        ],
+      },
+    } satisfies CritiqueLesson;
+    expect(
+      isLessonApplicable(importedRepoWithWrongAuditScope, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
+    const unknownSchemaRepoScope = {
+      ...repoScoped,
+      lessonScope: {
+        ...repoScoped.lessonScope!,
+        schemaVersion: 'lesson-scope-v2',
+      } as unknown as CritiqueLesson['lessonScope'],
+    };
+    expect(
+      isLessonApplicable(unknownSchemaRepoScope, {
+        repo: 'djm204/frankenbeast',
+      }),
+    ).toBe(false);
+
     const expired = updateLessonScope(baseLesson, {
       scope: 'role',
       allowedRoles: ['worker'],
@@ -1936,9 +1972,28 @@ describe('LessonRecorder', () => {
         changedAt: '2026-07-13T01:00:00.000Z',
       },
     );
+    const scopedOutPriors = Array.from({ length: 10 }, (_, index) =>
+      updateLessonScope(
+        createLesson({
+          failureDescription: `Scoped-out duplicate ${index}`,
+          correctionApplied: 'Require cache verification before reuse',
+          taskId: `scoped-out-${index}`,
+          lifecycleStatus: 'active',
+        }),
+        {
+          scope: 'task',
+          allowedTasks: [`scoped-out-${index}`],
+          actor: 'pm-reviewer',
+          reason: 'Scoped to another task.',
+          changedAt: '2026-07-13T01:00:00.000Z',
+        },
+      ),
+    );
     const port = {
       ...createMockMemoryPort(),
-      searchLessons: vi.fn().mockResolvedValue([scopedPrior]),
+      searchLessons: vi
+        .fn()
+        .mockResolvedValue([...scopedOutPriors, scopedPrior]),
     };
     const recorder = new LessonRecorder(port, {
       now: (): Date => new Date('2026-07-13T03:00:00.000Z'),
@@ -4613,7 +4668,7 @@ describe('LessonRecorder', () => {
       expect.stringContaining(
         'Cache guidance allowed unaudited stale responses',
       ),
-      10,
+      50,
     );
     expect(lesson.contradictionReport).toEqual({
       status: 'clear',
@@ -5988,7 +6043,7 @@ describe('LessonRecorder', () => {
       expect.stringContaining(
         'Do not reuse cache responses without provenance checks',
       ),
-      10,
+      50,
     );
   });
 

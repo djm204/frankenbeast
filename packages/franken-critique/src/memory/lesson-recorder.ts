@@ -43,6 +43,8 @@ const LESSON_CONTRADICTION_VERIFICATION_COMMAND =
 
 const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_LESSON_COOLDOWN_MS = 100 * 365 * 24 * 60 * 60 * 1000;
+const PRIOR_LESSON_SCOPE_FILTER_FETCH_LIMIT = 50;
+const PRIOR_LESSON_CONTRADICTION_LIMIT = 10;
 const PENDING_ADMISSIONS_BY_COOLDOWN_STORE = new WeakMap<
   Map<string, number>,
   Map<string, Promise<boolean>>
@@ -1233,17 +1235,25 @@ export class LessonRecorder {
     try {
       const priorLessons = await this.memory.searchLessons(
         createLessonSearchQuery(lesson),
-        10,
+        PRIOR_LESSON_SCOPE_FILTER_FETCH_LIMIT,
       );
       const lessonInjectionContext = {
         ...this.lessonInjectionContext,
         ...recordLessonInjectionContext,
         taskId: lesson.taskId,
-        now: recordLessonInjectionContext?.now ?? this.now(),
+        now:
+          recordLessonInjectionContext?.now ??
+          this.lessonInjectionContext?.now ??
+          this.now(),
       };
-      const applicablePriorLessons = priorLessons.filter((priorLesson) =>
-        isLessonApplicableForKnownContext(priorLesson, lessonInjectionContext),
-      );
+      const applicablePriorLessons = priorLessons
+        .filter((priorLesson) =>
+          isLessonApplicableForKnownContext(
+            priorLesson,
+            lessonInjectionContext,
+          ),
+        )
+        .slice(0, PRIOR_LESSON_CONTRADICTION_LIMIT);
       return {
         report: detectLessonContradictions(lesson, applicablePriorLessons),
         priorLessons: applicablePriorLessons,
@@ -1899,6 +1909,9 @@ function isLessonScopeAllowed(
   if (scope === undefined) {
     return true;
   }
+  if (scope.schemaVersion !== 'lesson-scope-v1') {
+    return false;
+  }
   if (isEmptyLessonInjectionContext(context)) {
     return false;
   }
@@ -1924,7 +1937,7 @@ function isLessonScopeAllowed(
   if (!matchesOptionalAllowlist(scope.allowedTasks, context.taskId)) {
     return false;
   }
-  if (!hasValidScopeAuditTrail(scope)) {
+  if (!hasValidScopeAuditTrail(scope, scope.scope)) {
     return false;
   }
   if (scope.scope === 'global') {
@@ -1962,10 +1975,14 @@ function isLessonApplicableForKnownContext(
   return isLessonScopeAllowed(scope, context);
 }
 
-function hasValidScopeAuditTrail(scope: LessonScopeMetadata): boolean {
+function hasValidScopeAuditTrail(
+  scope: LessonScopeMetadata,
+  currentScope: LessonScopeKind,
+): boolean {
   return scope.auditTrail.some(
     (entry) =>
       parseScopeTimestamp(entry.changedAt) !== undefined &&
+      entry.toScope === currentScope &&
       entry.actor.trim().length > 0 &&
       entry.reason.trim().length > 0,
   );
