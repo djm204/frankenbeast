@@ -287,7 +287,10 @@ function contextLooksLikeMemorySourceAttributionArgs(context: string): boolean {
         'agentId',
         'targetStore',
       ].includes(key))
-      && Object.prototype.hasOwnProperty.call(record, 'source');
+      && (Object.prototype.hasOwnProperty.call(record, 'key')
+        || Object.prototype.hasOwnProperty.call(record, 'source')
+        || Object.prototype.hasOwnProperty.call(record, 'readScope')
+        || Object.prototype.hasOwnProperty.call(record, 'agentId'));
   } catch {
     return false;
   }
