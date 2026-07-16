@@ -18,14 +18,6 @@ export interface IssueReviewOptions {
   readonly dryRun?: boolean | undefined;
 }
 
-const SEVERITY_LEVELS = ['critical', 'high', 'medium', 'low'] as const;
-const SEVERITY_RANK: Record<string, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-};
-const UNLABELLED_RANK = 4;
 const TITLE_MAX = 50;
 const DECIMAL_ISSUE_NUMBER = /^[1-9]\d*$/;
 
@@ -33,7 +25,6 @@ interface ReviewEntry {
   readonly issue: GithubIssue;
   readonly triage: TriageResult;
   readonly severity: string;
-  readonly severityRank: number;
   readonly schedulingScore: IssueSchedulingScore;
 }
 
@@ -90,9 +81,9 @@ export class IssueReview {
     for (const t of triage) {
       const issue = issueMap.get(t.issueNumber);
       if (!issue) continue;
-      const severity = this.extractSeverity(issue.labels);
-      const rank = severity !== '-' ? (SEVERITY_RANK[severity] ?? UNLABELLED_RANK) : UNLABELLED_RANK;
-      entries.push({ issue, triage: t, severity, severityRank: rank, schedulingScore: evaluateIssueSchedulingScore(issue) });
+      const schedulingScore = evaluateIssueSchedulingScore(issue);
+      const severity = schedulingScore.priority === 'unprioritized' ? '-' : schedulingScore.priority;
+      entries.push({ issue, triage: t, severity, schedulingScore });
     }
     entries.sort((a, b) => {
       if (a.schedulingScore.score !== b.schedulingScore.score) return a.schedulingScore.score - b.schedulingScore.score;
@@ -102,15 +93,6 @@ export class IssueReview {
     return entries;
   }
 
-  private extractSeverity(labels: readonly string[]): string {
-    for (const label of labels) {
-      const lower = label.toLowerCase();
-      if ((SEVERITY_LEVELS as readonly string[]).includes(lower)) {
-        return lower;
-      }
-    }
-    return '-';
-  }
 
   private truncateTitle(title: string): string {
     if (title.length <= TITLE_MAX) return title;

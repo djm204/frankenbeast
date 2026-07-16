@@ -295,6 +295,20 @@ describe('IssueReview', () => {
       expect(dataLine).not.toMatch(/critical|high|medium|low/);
     });
 
+    it('displays scheduler priority aliases as severity labels', async () => {
+      const issues = [makeIssue({ number: 1, labels: ['bug', 'priority:p1'] })];
+      const triage = [makeTriage({ issueNumber: 1 })];
+      const io = createMockIO(['Y']);
+      const review = new IssueReview(io);
+
+      await review.review(issues, triage);
+
+      const output = io.output.join('\n');
+      const dataLine = output.split('\n').find((l) => l.includes('Issue 1'));
+      expect(dataLine).toContain('high');
+      expect(dataLine).toContain('high->1');
+    });
+
     it('shows the approval prompt', async () => {
       const issues = [makeIssue({ number: 1 })];
       const triage = [makeTriage({ issueNumber: 1 })];
