@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.19](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.18...@franken/planner-v0.4.19) (2026-07-16)
+
+
+### Bug Fixes
+
+* **deps:** bump the npm-security-and-maintenance group with 7 updates ([#2306](https://github.com/djm204/frankenbeast/issues/2306)) ([a2e56b6](https://github.com/djm204/frankenbeast/commit/a2e56b68098ba4916fd6c3ad7b5d1dda212c75a0))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+
+
+### Miscellaneous
+
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+
 ## [0.4.18](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.17...@franken/planner-v0.4.18) (2026-07-15)
 
 

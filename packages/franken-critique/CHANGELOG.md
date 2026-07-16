@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.8.3...franken-critique-v0.9.0) (2026-07-16)
+
+
+### Features
+
+* **critique:** add lesson promotion critique ([#2342](https://github.com/djm204/frankenbeast/issues/2342)) ([7e6ab35](https://github.com/djm204/frankenbeast/commit/7e6ab3513dc5e074e20f18aa0791fd62635e7a8d))
+* **learning:** cluster repeated failure families ([#2341](https://github.com/djm204/frankenbeast/issues/2341)) ([659c773](https://github.com/djm204/frankenbeast/commit/659c7738ce08b72f0755f604111e4ba55d288eac))
+* **learning:** filter private lesson candidates ([9afbaa4](https://github.com/djm204/frankenbeast/commit/9afbaa4ff28347bf430b0bd1e6dc02764e0fea39))
+* **learning:** filter private lesson candidates ([1205032](https://github.com/djm204/frankenbeast/commit/1205032b5d3af78cd7926ef10700d681c41f251c))
+* **learning:** scope cross-agent lesson sharing ([#2357](https://github.com/djm204/frankenbeast/issues/2357)) ([563b8ea](https://github.com/djm204/frankenbeast/commit/563b8ea581be03f10b5f3f72aee55a4868547ddd))
+* **learning:** weight human feedback for lessons ([#2290](https://github.com/djm204/frankenbeast/issues/2290)) ([c42c64e](https://github.com/djm204/frankenbeast/commit/c42c64e2ccdb143515632c559de0f8aa22dbf987))
+
+
+### Bug Fixes
+
+* **critique:** detect dynamic import ghost dependencies ([#1400](https://github.com/djm204/frankenbeast/issues/1400)) ([ea9136a](https://github.com/djm204/frankenbeast/commit/ea9136a5363353bdcb6e84b06f30fd4150e9c7f2))
+* **deps:** bump the npm-security-and-maintenance group with 7 updates ([#2306](https://github.com/djm204/frankenbeast/issues/2306)) ([a2e56b6](https://github.com/djm204/frankenbeast/commit/a2e56b68098ba4916fd6c3ad7b5d1dda212c75a0))
+* **learning:** address final privacy review findings ([f91f880](https://github.com/djm204/frankenbeast/commit/f91f8806974d2d3e92d999451a7dd5fdc7c4610e))
+* **learning:** address privacy review gaps ([3dca18d](https://github.com/djm204/frankenbeast/commit/3dca18de4a6fb6d6ae66bf1dbceec6cdd2698999))
+* **learning:** address remaining privacy review findings ([4c5538a](https://github.com/djm204/frankenbeast/commit/4c5538a74de0b996eaed74adfc22cc61cc878785))
+* **learning:** close codex privacy redaction gaps ([5391052](https://github.com/djm204/frankenbeast/commit/5391052c3319065519b35822e974549fb37cbb96))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **learning:** tighten lesson privacy redaction ([f63bb14](https://github.com/djm204/frankenbeast/commit/f63bb14ea2e160c065f306f47ff83eb69b67149b))
+
+
+### Miscellaneous
+
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+
+
+### Documentation
+
+* **critique:** refresh ramp-up wiring status ([#2292](https://github.com/djm204/frankenbeast/issues/2292)) ([2c596d9](https://github.com/djm204/frankenbeast/commit/2c596d91544ca457a4884a4db299716c67430515))
+
 ## [0.8.3](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.8.2...franken-critique-v0.8.3) (2026-07-15)
 
 

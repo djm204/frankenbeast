@@ -22,7 +22,7 @@ export {
   extractFromHeaders,
   injectIntoHeaders,
 } from './propagation/W3CTraceContext.js'
-export { SQLiteAdapter } from './adapters/sqlite/SQLiteAdapter.js'
+export { SQLiteAdapter, SQLiteLockRetryExhaustedError } from './adapters/sqlite/SQLiteAdapter.js'
 export { EvalRunner } from './evals/EvalRunner.js'
 export { ToolCallAccuracyEval } from './evals/deterministic/ToolCallAccuracy.js'
 export { ArchitecturalAdherenceEval } from './evals/deterministic/ArchitecturalAdherence.js'
@@ -62,7 +62,7 @@ export type { LoopDetectionResult, LoopDetectorOptions } from './incident/LoopDe
 export type { InterruptSignal } from './incident/InterruptEmitter.js'
 export type { PostMortemOptions } from './incident/PostMortemGenerator.js'
 export type { LangfuseAdapterOptions, FetchFn } from './adapters/langfuse/LangfuseAdapter.js'
-export type { SQLiteAdapterOptions } from './adapters/sqlite/SQLiteAdapter.js'
+export type { SQLiteAdapterOptions, SQLiteLockRetryDiagnostic } from './adapters/sqlite/SQLiteAdapter.js'
 export type { PrometheusAdapterOptions } from './adapters/prometheus/PrometheusAdapter.js'
 export type { TempoAdapterOptions, TempoBasicAuth } from './adapters/tempo/TempoAdapter.js'
 export type {

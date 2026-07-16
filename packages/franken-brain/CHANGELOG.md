@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.10.1...@franken/brain-v0.11.0) (2026-07-16)
+
+
+### Features
+
+* **brain:** add memory conflict resolution prompts ([#2396](https://github.com/djm204/frankenbeast/issues/2396)) ([eeb9155](https://github.com/djm204/frankenbeast/commit/eeb9155ccf06a1dd9cf2872685d3ac95b8bee7bf))
+* **brain:** suggest memory candidate merge duplicates ([47d1a70](https://github.com/djm204/frankenbeast/commit/47d1a70064ea7731fc18b6376252c3a23c96524c))
+* **memory:** add confidence decay model ([#2326](https://github.com/djm204/frankenbeast/issues/2326)) ([3d59a83](https://github.com/djm204/frankenbeast/commit/3d59a83becb8d1e4f318a12f6c8f57216fa6f556))
+* **memory:** add conflict resolver ([#2320](https://github.com/djm204/frankenbeast/issues/2320)) ([6066b86](https://github.com/djm204/frankenbeast/commit/6066b861ca55505c5508f74b905362d68ef54b05))
+* **memory:** expire temporary operational facts ([a5f581a](https://github.com/djm204/frankenbeast/commit/a5f581af955a937416760779dcbaffb64a1abf6d))
+* **memory:** expire temporary operational facts ([5c46ae6](https://github.com/djm204/frankenbeast/commit/5c46ae662bbf52688d3c7afe8f8fbf3a4577fa0e))
+
+
+### Bug Fixes
+
+* **deps:** bump the npm-security-and-maintenance group with 7 updates ([#2306](https://github.com/djm204/frankenbeast/issues/2306)) ([a2e56b6](https://github.com/djm204/frankenbeast/commit/a2e56b68098ba4916fd6c3ad7b5d1dda212c75a0))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **memory:** address TTL hydration races ([102c710](https://github.com/djm204/frankenbeast/commit/102c7105bafab8afe7fb0786c1901d279c0630a2))
+* **memory:** address TTL review edge cases ([f3c1c5f](https://github.com/djm204/frankenbeast/commit/f3c1c5f9cf0c01b29f69ea2e702ac5dc746941d2))
+* **memory:** close TTL expiry race gaps ([54d3ff4](https://github.com/djm204/frankenbeast/commit/54d3ff428ad0c0370ae3d9ee3aea6caf73f15f01))
+* **memory:** handle TTL review edge cases ([57b15e8](https://github.com/djm204/frankenbeast/commit/57b15e8c9a6309c544a5b43b64438c7f8afaa7f7))
+* **memory:** preserve durable TTL edge cases ([f3bd7cc](https://github.com/djm204/frankenbeast/commit/f3bd7cc5c9b4e961f67749d3495c6b12ed9deb39))
+
+
+### Miscellaneous
+
+* **memory:** merge main into review queue branch ([f3e0a23](https://github.com/djm204/frankenbeast/commit/f3e0a23812418b82591280e03cf803658695495c))
+
 ## [0.10.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.10.0...@franken/brain-v0.10.1) (2026-07-15)
 
 

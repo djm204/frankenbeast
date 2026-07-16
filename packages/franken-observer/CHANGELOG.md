@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.8.2...franken-observer-v0.9.0) (2026-07-16)
+
+
+### Features
+
+* **observer:** add transcript retention controls ([#2237](https://github.com/djm204/frankenbeast/issues/2237)) ([465e9f0](https://github.com/djm204/frankenbeast/commit/465e9f0f85fd70d9ece5059cb4dcbb6ea85d4c4a))
+
+
+### Bug Fixes
+
+* **observer:** add idempotent webhook receipts ([#2350](https://github.com/djm204/frankenbeast/issues/2350)) ([b6ab9f1](https://github.com/djm204/frankenbeast/commit/b6ab9f145de48914adf7c318b05faa2f97235fb8))
+* **observer:** validate outbound webhook targets ([#2307](https://github.com/djm204/frankenbeast/issues/2307)) ([ed2a69c](https://github.com/djm204/frankenbeast/commit/ed2a69c90be9621b05715fb5017686a1ad5886e6))
+
 ## [0.8.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.8.1...franken-observer-v0.8.2) (2026-07-15)
 
 

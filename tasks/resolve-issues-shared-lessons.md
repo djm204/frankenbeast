@@ -2,8 +2,14 @@
 
 ## 2026-07-16 — Synthetic availability probe review fixes
 - Availability probes should fail closed for real dependencies: do not default provider checks to `node --version` or dashboard checks to a static UI health URL, require explicit provider/backend health targets, and cover missing-target behavior in tests so cron copies cannot produce false-green uptime.
-- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer <token>` argv sequences, before serializing command details or error messages.
+- For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer *** argv sequences, before serializing command details or error messages.
 - When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
+
+## 2026-07-16 — SQLite lock retry review fixes
+- When adding async retries around sync SQLite adapters, serialize all mutating operations that can overlap through one write queue; otherwise a sleeping retry can be overtaken by later flush/delete calls and reintroduce stale rows.
+- Capture mutable trace/span payloads before enqueueing delayed SQLite writes, and include statement preparation inside the retry wrapper so schema/contention locks during `prepare()` get the same diagnostics as transaction failures.
+- Validate retry/backoff options before opening a native SQLite handle; constructor validation failures should not leak a handle that can keep the database locked.
+- Retry initialization pragmas/schema creation too, make diagnostic callbacks best-effort, and defer `close()` until pending queued writes settle so shutdown cannot race an async write tail.
 
 ## 2026-07-16 — Queue priority aging
 - For issue scheduler aging, score only eligible work with age boosts; blocked/HITL work should carry a large safety penalty and zero age boost so stale unsafe cards never bypass human/dependency gates. Include priority rank, effective rank, age, blocker status, risk lane, freshness, and an explanation string in liveness/fairness output.
