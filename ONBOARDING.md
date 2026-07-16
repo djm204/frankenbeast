@@ -53,6 +53,23 @@ Use this checklist for a first local checkout or when rebuilding a development e
   ./scripts/bootstrap.sh --dry-run
   ```
 
+- [ ] New issue workers: before coding, run the environment preflight from the repository root or issue worktree:
+
+  ```bash
+  npm --silent run new-worker:preflight -- --json
+  ```
+
+  The command prints stable `[new-worker-preflight:<check>] ok|warn|fail - ...` badges by default, or a JSON object with `ok` and `checks` when `--json` is supplied. Use `npm --silent` or `node scripts/new-worker-preflight.mjs --json` for machine-parsed JSON so npm lifecycle banners do not prefix stdout. It verifies the supported Node.js/npm pin, required `git`/`gh`/`jq` commands, GitHub CLI authentication for `github.com`, the project git identity (`David Mendez <me@davidmendez.dev>`), Frankenbeast repository root, and whether the current worktree already has uncommitted files. Use `--skip-github-auth` only for offline docs/tests; run without it before opening PRs.
+
+- [ ] Generate a guided checklist when you need a smaller first-run path than the full document. Pick the persona that matches the work:
+
+  ```bash
+  npm run first-run:checklist -- --persona operator
+  npm --silent run first-run:checklist -- --persona coding-agent --json
+  ```
+
+  The generator prints deterministic Markdown by default, or JSON with `persona`, `root`, `items`, `docs`, and `nextAction` for PM/liveness tooling. It never mutates files or runs setup commands; it points each checklist item at the command and docs to run next. Valid personas are `operator`, `coding-agent`, and `contributor`; unknown personas fail closed with an explicit error instead of falling back to a misleading generic checklist.
+
 ### Progress badges and status output
 
 The bootstrap script prints deterministic status badges as it advances through onboarding:
@@ -105,6 +122,8 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
   npm test
   ```
 
+  If you are unsure which narrower command fits your change, follow the [test command decision tree](docs/onboarding/test-command-decision-tree.md) before broadening to package or CI-level gates.
+
 - [ ] Optionally link the local CLIs for iterative development:
 
   ```bash
@@ -112,6 +131,18 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
   fbeast --help
   frankenbeast --help
   ```
+
+## Repository ownership
+
+Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and PM/worker handoff notes so agents do not guess ownership from path names alone.
+
+## Coding-agent PR etiquette
+
+Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
+
+## PM-swarm runtime glossary
+
+Read the [PM-swarm runtime glossary](docs/onboarding/pm-swarm-runtime-glossary.md) before interpreting PM-swarm Kanban comments, liveness reports, doctor treatment notes, or issue-worker handoffs. It defines the runtime vocabulary used to decode liveness, refill, Codex, approval-cop, and worker handoff terms without creating duplicate branches, worktrees, or PRs.
 
 ## Architecture reading path
 

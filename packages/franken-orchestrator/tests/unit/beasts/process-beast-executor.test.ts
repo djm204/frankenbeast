@@ -865,7 +865,7 @@ describe('ProcessBeastExecutor', () => {
     const attempt = await executor.start(run, martinLoopDefinition);
     await executor.stop(run.id, attempt.id);
 
-    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: false });
+    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: attempt.executorMetadata?.processGroupOwned === true });
     expect(repo.getRun(run.id)).toMatchObject({
       status: 'stopped',
       currentAttemptId: attempt.id,
@@ -920,7 +920,7 @@ describe('ProcessBeastExecutor', () => {
     const attempt = await executor.start(run, martinLoopDefinition);
     const stoppedAttempt = await executor.stop(run.id, attempt.id);
 
-    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: false });
+    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: attempt.executorMetadata?.processGroupOwned === true });
     expect(supervisor.kill).not.toHaveBeenCalled();
     expect(stoppedAttempt).toMatchObject({
       id: attempt.id,

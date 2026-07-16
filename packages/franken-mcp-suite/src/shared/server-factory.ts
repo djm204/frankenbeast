@@ -236,6 +236,10 @@ const MEMORY_REVIEW_PROPOSE_SAFE_TYPES = new Set(['working', 'episodic']);
 const MEMORY_REVIEW_DECIDE_TOOL = 'fbeast_memory_review_decide';
 const MEMORY_SOURCE_ATTRIBUTION_TOOL = 'fbeast_memory_source_attribution';
 const MEMORY_SOURCE_ATTRIBUTION_SAFE_AUDIT_KEYS = new Set(['limit']);
+const MEMORY_EXPORT_TOOL = 'fbeast_memory_export';
+const MEMORY_EXPORT_SAFE_AUDIT_KEYS = new Set(['readScope', 'redaction', 'limit', 'projectId']);
+const MEMORY_EXPORT_SAFE_READ_SCOPES = new Set(['all', 'shared', 'agent']);
+const MEMORY_EXPORT_SAFE_REDACTIONS = new Set(['safe', 'none']);
 const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action', 'resolution']);
 const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store', 'resolve_conflict']);
 const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'reject_candidate']);
@@ -292,14 +296,6 @@ function redactMemoryReviewDecisionArgs(sanitized: Record<string, unknown>, reda
   }
   if (Object.prototype.hasOwnProperty.call(sanitized, 'id')) {
     sanitized['id'] = redaction;
-  }
-  if (Object.prototype.hasOwnProperty.call(sanitized, 'action')
-    && (typeof sanitized['action'] !== 'string' || !MEMORY_REVIEW_DECIDE_SAFE_ACTIONS.has(sanitized['action']))) {
-    sanitized['action'] = redaction;
-  }
-  if (Object.prototype.hasOwnProperty.call(sanitized, 'resolution')
-    && (typeof sanitized['resolution'] !== 'string' || !MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS.has(sanitized['resolution']))) {
-    sanitized['resolution'] = redaction;
   }
   return sanitized;
 }
@@ -363,6 +359,48 @@ function redactMemorySourceAttributionEnvelope(sanitized: Record<string, unknown
   return sanitized;
 }
 
+function redactMemoryExportArgs(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
+    sanitized['invalid'] = redaction;
+    return sanitized;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (key === 'readScope' && !MEMORY_EXPORT_SAFE_READ_SCOPES.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
+    } else if (key === 'redaction' && !MEMORY_EXPORT_SAFE_REDACTIONS.has(String(sanitized[key]))) {
+      sanitized[key] = redaction;
+    } else if (key === 'limit' && typeof sanitized[key] !== 'number') {
+      sanitized[key] = redaction;
+    } else if (key === 'projectId' && typeof sanitized[key] !== 'string') {
+      sanitized[key] = redaction;
+    } else if (!MEMORY_EXPORT_SAFE_AUDIT_KEYS.has(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'agentId')) {
+    sanitized['agentId'] = redaction;
+  }
+  return sanitized;
+}
+
+function redactMemoryExportEnvelope(sanitized: Record<string, unknown>, redaction = '[memory-export-args-redacted]'): Record<string, unknown> {
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'args')) {
+    const args = sanitized['args'];
+    sanitized['args'] = isObjectLike(args) && !Array.isArray(args)
+      ? redactMemoryExportArgs(args as Record<string, unknown>, redaction)
+      : redaction;
+  }
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+    sanitized['context'] = redaction;
+  }
+  for (const key of Object.keys(sanitized)) {
+    if (!['tool', 'action', 'args', 'context'].includes(key)) {
+      sanitized[key] = redaction;
+    }
+  }
+  return sanitized;
+}
+
 function redactMemoryStoreArgs(sanitized: Record<string, unknown>, redaction = '[memory-store-value-redacted]'): Record<string, unknown> {
   if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
     sanitized['invalid'] = redaction;
@@ -401,16 +439,29 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const sanitized = sanitizeToolArgumentsForAudit(args);
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
+  const isDirectMemoryExport = unqualifiedToolName === MEMORY_EXPORT_TOOL;
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
   const isDirectMemorySourceAttribution = unqualifiedToolName === MEMORY_SOURCE_ATTRIBUTION_TOOL;
   const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
-  const auditedTool = unqualifiedToolName === 'fbeast_memory_right_to_forget'
+  const auditedTool = isDirectMemoryExport || isDirectMemoryReviewDecide || isMemoryReviewPropose || isDirectRightToForget
     ? unqualifiedToolName
     : typeof sanitized['tool'] === 'string'
       ? unqualifyMcpToolName(sanitized['tool'])
       : unqualifiedToolName;
   const auditedAction = typeof sanitized['action'] === 'string' ? unqualifyMcpToolName(sanitized['action']) : undefined;
+  if (auditedTool === MEMORY_EXPORT_TOOL || auditedAction === MEMORY_EXPORT_TOOL) {
+    if (unqualifiedToolName === 'execute_tool') {
+      return redactMemoryExportEnvelope(sanitized);
+    }
+    if (auditedAction === MEMORY_EXPORT_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
+      sanitized['context'] = '[memory-export-args-redacted]';
+    }
+    if (unqualifiedToolName === MEMORY_EXPORT_TOOL) {
+      return redactMemoryExportArgs(sanitized);
+    }
+    return sanitized;
+  }
   if (auditedTool === MEMORY_STORE_TOOL || auditedAction === MEMORY_STORE_TOOL) {
     if (unqualifiedToolName === 'execute_tool') {
       return redactMemoryStoreEnvelope(sanitized);
@@ -418,7 +469,7 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
     if (auditedAction === MEMORY_STORE_TOOL && Object.prototype.hasOwnProperty.call(sanitized, 'context')) {
       sanitized['context'] = '[memory-store-value-redacted]';
     }
-    if (isDirectMemoryStore) {
+    if (unqualifiedToolName === MEMORY_STORE_TOOL) {
       return redactMemoryStoreArgs(sanitized);
     }
     return sanitized;

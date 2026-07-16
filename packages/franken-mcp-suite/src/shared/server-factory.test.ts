@@ -416,6 +416,62 @@ describe('createMcpServer', () => {
       });
     });
 
+    it('redacts memory export agent identifiers before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        readScope: 'agent',
+        agentId: 'alice@example.test',
+        redaction: 'safe',
+        limit: 10,
+        extra: 'sensitive detail',
+      })).toEqual({
+        readScope: 'agent',
+        agentId: '[memory-export-args-redacted]',
+        redaction: 'safe',
+        limit: 10,
+        extra: '[memory-export-args-redacted]',
+      });
+    });
+
+    it('redacts proxied memory export envelopes before recording audit args', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_export',
+        args: { readScope: 'agent', agentId: 'alice@example.test', redaction: 'safe' },
+      })).toEqual({
+        tool: 'fbeast_memory_export',
+        args: {
+          readScope: 'agent',
+          agentId: '[memory-export-args-redacted]',
+          redaction: 'safe',
+        },
+      });
+    });
+
+    it('redacts malformed memory export project ids before audit', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        projectId: { token: 'SECRET_TOKEN_SHOULD_NOT_LEAK' },
+        readScope: 'shared',
+        redaction: 'safe',
+      })).toEqual({
+        projectId: '[memory-export-args-redacted]',
+        readScope: 'shared',
+        redaction: 'safe',
+      });
+    });
+
+    it('redacts caller-controlled tool envelopes on direct memory export validation errors', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        tool: 'not_the_memory_tool',
+        agentId: 'alice@example.test',
+        password: 'secret-value-that-must-not-leak',
+        redaction: 'safe',
+      })).toEqual({
+        tool: '[memory-export-args-redacted]',
+        agentId: '[memory-export-args-redacted]',
+        password: '[memory-export-args-redacted]',
+        redaction: 'safe',
+      });
+    });
+
     it('redacts direct right-to-forget selectors even when malformed args include envelope-like properties', () => {
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_right_to_forget', {
         tool: 'not_the_memory_tool',
@@ -496,6 +552,46 @@ describe('createMcpServer', () => {
       })).toEqual({
         action: 'mcp__fbeast-memory__fbeast_memory_review_propose',
         context: '[memory-review-proposal-redacted]',
+      });
+    });
+
+    it('redacts memory export agent identifiers in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        readScope: 'agent',
+        agentId: 'alice@example.test',
+        redaction: 'safe',
+        limit: 5,
+      })).toEqual({
+        readScope: 'agent',
+        agentId: '[memory-export-args-redacted]',
+        redaction: 'safe',
+        limit: 5,
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+        tool: 'fbeast_memory_export',
+        args: { readScope: 'agent', agentId: 'alice@example.test', redaction: 'safe' },
+        value: 'outside envelope',
+      })).toEqual({
+        tool: 'fbeast_memory_export',
+        args: {
+          readScope: 'agent',
+          agentId: '[memory-export-args-redacted]',
+          redaction: 'safe',
+        },
+        value: '[memory-export-args-redacted]',
+      });
+    });
+
+    it('redacts malformed memory export project identifiers in the exported audit sanitizer', () => {
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_export', {
+        readScope: 'shared',
+        redaction: 'safe',
+        projectId: { token: 'SECRET_TOKEN_SHOULD_NOT_LEAK' },
+      })).toEqual({
+        readScope: 'shared',
+        redaction: 'safe',
+        projectId: '[memory-export-args-redacted]',
       });
     });
 

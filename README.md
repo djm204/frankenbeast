@@ -15,13 +15,13 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## 🚀 One-click onboarding
 
-Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) so you read current implementation docs before historical plans. Then run the repository bootstrap script:
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. Coding agents should also read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) so you read current implementation docs before historical plans. If a PM-swarm handoff uses runtime coordination terms, read the [PM-swarm runtime glossary](ONBOARDING.md#pm-swarm-runtime-glossary) before acting. Then run the repository bootstrap script:
 
 ```bash
 npm run bootstrap -- --no-docker
 ```
 
-The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
+The bootstrap command delegates to [`scripts/bootstrap.sh`](scripts/bootstrap.sh), which validates Node.js, npm/Corepack, `.env` defaults, dependencies, and optional Docker services. If you want persona-specific guidance before running setup commands, generate a deterministic first-run checklist with `npm run first-run:checklist -- --persona operator` or `npm --silent run first-run:checklist -- --persona coding-agent --json`. New issue workers can run `npm --silent run new-worker:preflight -- --json` before coding to verify the local Node/npm/git/gh/jq toolchain, GitHub authentication, project git identity, repository root, and worktree cleanliness with parseable structured output for PM handoffs. Pass `--services` when you want bootstrap to start the optional Docker compose stack after dependency installation. To preview the checks without changing files or installing packages, run:
 
 ```bash
 ./scripts/bootstrap.sh --dry-run
