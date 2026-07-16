@@ -27,6 +27,8 @@ interface DeadLetterQueueFile {
   readonly entries: readonly DeadLetterEntry[];
 }
 
+const appendLocks = new Map<string, Promise<void>>();
+
 export interface RecordRetryExhaustionOptions {
   readonly queuePath: string;
   readonly actionClass: string;
@@ -165,6 +167,26 @@ async function writeQueue(queuePath: string, queue: DeadLetterQueueFile): Promis
   await rename(tempPath, queuePath);
 }
 
+async function appendQueueEntry(queuePath: string, entry: DeadLetterEntry): Promise<void> {
+  const previous = appendLocks.get(queuePath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chained = previous.then(() => current, () => current);
+  appendLocks.set(queuePath, chained);
+  await previous.catch(() => undefined);
+  try {
+    const queue = await readQueue(queuePath);
+    await writeQueue(queuePath, { schemaVersion: 1, entries: [...queue.entries, entry] });
+  } finally {
+    release();
+    if (appendLocks.get(queuePath) === chained) {
+      appendLocks.delete(queuePath);
+    }
+  }
+}
+
 function entryIdFor(options: RecordRetryExhaustionOptions, createdAt: string): string {
   const digest = createHash('sha256')
     .update(JSON.stringify({
@@ -196,11 +218,17 @@ export async function inspectDeadLetterEntry(queuePath: string, entryId: string)
 export async function recordRetryExhaustionToDeadLetterQueue(
   options: RecordRetryExhaustionOptions,
 ): Promise<DeadLetterEntry> {
+  if (!Number.isSafeInteger(options.maxAttempts) || options.maxAttempts < 1) {
+    throw new Error('Cannot dead-letter automation action: maxAttempts must be at least 1');
+  }
+  if (!Number.isSafeInteger(options.attempts) || options.attempts < 0) {
+    throw new Error('Cannot dead-letter automation action: attempts must be a non-negative safe integer');
+  }
+  if (options.attempts > options.maxAttempts) {
+    throw new Error('Cannot dead-letter automation action: attempts cannot exceed maxAttempts');
+  }
   if (options.attempts < options.maxAttempts) {
     throw new Error('Cannot dead-letter automation action: retry limit has not been exhausted');
-  }
-  if (options.maxAttempts < 1) {
-    throw new Error('Cannot dead-letter automation action: maxAttempts must be at least 1');
   }
   if (!options.actionClass.trim()) throw new Error('Cannot dead-letter automation action: actionClass is required');
   if (!options.target.trim()) throw new Error('Cannot dead-letter automation action: target is required');
@@ -222,8 +250,7 @@ export async function recordRetryExhaustionToDeadLetterQueue(
     ...(options.payload === undefined ? {} : { payload: options.payload }),
   };
 
-  const queue = await readQueue(options.queuePath);
-  await writeQueue(options.queuePath, { schemaVersion: 1, entries: [...queue.entries, entry] });
+  await appendQueueEntry(options.queuePath, entry);
   return entry;
 }
 
@@ -237,6 +264,10 @@ export async function retireDeadLetterEntry(
   let updated: DeadLetterEntry | undefined;
   const entries = queue.entries.map((entry) => {
     if (entry.id !== entryId) return entry;
+    if (entry.status === 'retired') {
+      updated = entry;
+      return entry;
+    }
     updated = {
       ...entry,
       status: 'retired',

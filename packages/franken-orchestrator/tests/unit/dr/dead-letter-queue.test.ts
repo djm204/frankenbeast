@@ -73,6 +73,52 @@ describe('dead-letter queue for failed automation actions', () => {
     }
   });
 
+  it('rejects over-limit attempt counts before writing unreadable entries', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+
+    try {
+      await expect(recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'approval-cop-command',
+        target: 'pr-2342',
+        attempts: 4,
+        maxAttempts: 3,
+        lastError: 'loop incremented past cap',
+        replaySafety: 'side-effect-approval-required',
+      })).rejects.toThrow(/attempts cannot exceed maxAttempts/);
+
+      expect(await listDeadLetterEntries(queuePath)).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes concurrent dead-letter appends to preserve every exhausted action', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
+    const queuePath = join(dir, 'dead-letter.json');
+
+    try {
+      const writes = Array.from({ length: 8 }, (_, index) => recordRetryExhaustionToDeadLetterQueue({
+        queuePath,
+        actionClass: 'codex-review-trigger',
+        target: `pr-${index}`,
+        attempts: 3,
+        maxAttempts: 3,
+        lastError: `failure ${index}`,
+        replaySafety: 'safe',
+        exhaustedAt: `2026-07-16T08:0${index}:00.000Z`,
+      }));
+
+      const recorded = await Promise.all(writes);
+      const listed = await listDeadLetterEntries(queuePath);
+      expect(listed).toHaveLength(recorded.length);
+      expect(new Set(listed.map((entry) => entry.target))).toEqual(new Set(recorded.map((entry) => entry.target)));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('inspects, retires, and dry-runs replay without executing side effects', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'franken-dlq-'));
     const queuePath = join(dir, 'dead-letter.json');
@@ -118,6 +164,17 @@ describe('dead-letter queue for failed automation actions', () => {
         dryRun: true,
         wouldReplay: false,
         retired: true,
+      });
+
+      const stillRetired = await retireDeadLetterEntry(queuePath, entry.id, {
+        reason: 'second retry should not overwrite audit evidence',
+        retiredAt: '2026-07-16T08:30:00.000Z',
+      });
+      expect(stillRetired).toMatchObject({
+        id: entry.id,
+        status: 'retired',
+        retiredReason: 'operator chose to abandon stale retry',
+        retiredAt: '2026-07-16T08:20:00.000Z',
       });
     } finally {
       await rm(dir, { recursive: true, force: true });

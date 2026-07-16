@@ -16,6 +16,7 @@ import {
   listDeadLetterEntries,
   retireDeadLetterEntry,
 } from '../dr/dead-letter-queue.js';
+import { redactLogData } from '../logging/redaction.js';
 
 export interface DrCommandDeps {
   readonly action:
@@ -87,6 +88,10 @@ export async function readRestoreManifest(manifestPath: string): Promise<Restore
   return parsed as unknown as RestorePreviewManifest;
 }
 
+function printRedactedJson(print: (message: string) => void, report: unknown): void {
+  print(JSON.stringify(redactLogData(report), null, 2));
+}
+
 export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
   const { action, backupManifestPath, liveManifestPath, keyFilePath, print } = deps;
   if (action === 'dead-letter-list') {
@@ -94,7 +99,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
       throw new Error('dr dead-letter-list requires <queue-file>');
     }
     const entries = await listDeadLetterEntries(backupManifestPath);
-    print(JSON.stringify({
+    printRedactedJson(print, {
       ok: true,
       command: 'dr dead-letter-list',
       queuePath: backupManifestPath,
@@ -104,7 +109,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
         retired: entries.filter((entry) => entry.status === 'retired').length,
       },
       entries,
-    }, null, 2));
+    });
     return;
   }
 
@@ -112,12 +117,12 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     if (!backupManifestPath || !liveManifestPath) {
       throw new Error('dr dead-letter-inspect requires <queue-file> <entry-id>');
     }
-    print(JSON.stringify({
+    printRedactedJson(print, {
       ok: true,
       command: 'dr dead-letter-inspect',
       queuePath: backupManifestPath,
       entry: await inspectDeadLetterEntry(backupManifestPath, liveManifestPath),
-    }, null, 2));
+    });
     return;
   }
 
@@ -125,14 +130,16 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     if (!backupManifestPath || !liveManifestPath) {
       throw new Error('dr dead-letter-replay-dry-run requires <queue-file> <entry-id>');
     }
-    print(JSON.stringify({
+    printRedactedJson(print, {
       ok: true,
       command: 'dr dead-letter-replay-dry-run',
       queuePath: backupManifestPath,
       replay: await dryRunReplayDeadLetterEntry(backupManifestPath, liveManifestPath, {
-        ...(deps.generatedAt === undefined ? {} : { requestedAt: deps.generatedAt }),
+        ...(deps.generatedAt === undefined
+          ? {}
+          : { requestedAt: deps.generatedAt }),
       }),
-    }, null, 2));
+    });
     return;
   }
 
@@ -140,7 +147,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
     if (!backupManifestPath || !liveManifestPath) {
       throw new Error('dr dead-letter-retire requires <queue-file> <entry-id> [reason]');
     }
-    print(JSON.stringify({
+    printRedactedJson(print, {
       ok: true,
       command: 'dr dead-letter-retire',
       queuePath: backupManifestPath,
@@ -148,7 +155,7 @@ export async function handleDrCommand(deps: DrCommandDeps): Promise<void> {
         reason: keyFilePath ?? 'retired by operator',
         ...(deps.generatedAt === undefined ? {} : { retiredAt: deps.generatedAt }),
       }),
-    }, null, 2));
+    });
     return;
   }
 

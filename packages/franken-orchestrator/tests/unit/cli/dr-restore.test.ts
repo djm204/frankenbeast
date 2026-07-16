@@ -86,23 +86,31 @@ describe('dr restore-dry-run CLI', () => {
           target: 'pr-2342',
           attempts: 5,
           maxAttempts: 5,
-          lastError: 'usage limit',
+          lastError: 'usage limit for GH_TOKEN=secret-value',
           firstAttemptedAt: '2026-07-16T08:00:00.000Z',
           lastAttemptedAt: '2026-07-16T08:05:00.000Z',
           createdAt: '2026-07-16T08:05:00.000Z',
           replaySafety: 'side-effect-approval-required',
           status: 'open',
+          payload: { command: 'GH_TOKEN=secret-value gh pr comment 2342 --body @codex review' },
         }],
       }), 'utf8');
 
       await handleDrCommand({ action: 'dead-letter-list', backupManifestPath: queuePath, print: (message) => output.push(message) });
-      expect(JSON.parse(output.pop() ?? '')).toMatchObject({ command: 'dr dead-letter-list', summary: { open: 1 } });
+      const listOutput = output.pop() ?? '';
+      expect(JSON.parse(listOutput)).toMatchObject({ command: 'dr dead-letter-list', summary: { open: 1 } });
+      expect(listOutput).not.toContain('secret-value');
+      expect(listOutput).toContain('<redacted>');
 
       await handleDrCommand({ action: 'dead-letter-inspect', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', print: (message) => output.push(message) });
-      expect(JSON.parse(output.pop() ?? '')).toMatchObject({ command: 'dr dead-letter-inspect', entry: { id: 'dlq_test' } });
+      const inspectOutput = output.pop() ?? '';
+      expect(JSON.parse(inspectOutput)).toMatchObject({ command: 'dr dead-letter-inspect', entry: { id: 'dlq_test' } });
+      expect(inspectOutput).not.toContain('secret-value');
 
       await handleDrCommand({ action: 'dead-letter-replay-dry-run', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', generatedAt: '2026-07-16T08:06:00.000Z', print: (message) => output.push(message) });
-      expect(JSON.parse(output.pop() ?? '')).toMatchObject({ command: 'dr dead-letter-replay-dry-run', replay: { dryRun: true, wouldReplay: false, requiresApproval: true } });
+      const replayOutput = output.pop() ?? '';
+      expect(JSON.parse(replayOutput)).toMatchObject({ command: 'dr dead-letter-replay-dry-run', replay: { dryRun: true, wouldReplay: false, requiresApproval: true } });
+      expect(replayOutput).not.toContain('secret-value');
 
       await handleDrCommand({ action: 'dead-letter-retire', backupManifestPath: queuePath, liveManifestPath: 'dlq_test', keyFilePath: 'handled manually', generatedAt: '2026-07-16T08:07:00.000Z', print: (message) => output.push(message) });
       expect(JSON.parse(output.pop() ?? '')).toMatchObject({ command: 'dr dead-letter-retire', entry: { id: 'dlq_test', status: 'retired', retiredReason: 'handled manually' } });
