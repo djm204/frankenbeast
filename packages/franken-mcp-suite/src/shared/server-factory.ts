@@ -313,6 +313,14 @@ function redactMemoryReviewDecisionEnvelope(sanitized: Record<string, unknown>, 
   return sanitized;
 }
 
+function isSafeMemorySourceAttributionLimit(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) return false;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 1000;
+}
+
 function redactMemorySourceAttributionArgs(sanitized: Record<string, unknown>, redaction = '[memory-source-attribution-args-redacted]'): Record<string, unknown> {
   if (Object.prototype.hasOwnProperty.call(sanitized, 'invalid')) {
     sanitized['invalid'] = redaction;
@@ -321,7 +329,7 @@ function redactMemorySourceAttributionArgs(sanitized: Record<string, unknown>, r
   for (const key of Object.keys(sanitized)) {
     if (!MEMORY_SOURCE_ATTRIBUTION_SAFE_AUDIT_KEYS.has(key)) {
       sanitized[key] = redaction;
-    } else if (key === 'limit' && typeof sanitized[key] !== 'string' && typeof sanitized[key] !== 'number') {
+    } else if (key === 'limit' && !isSafeMemorySourceAttributionLimit(sanitized[key])) {
       sanitized[key] = redaction;
     }
   }

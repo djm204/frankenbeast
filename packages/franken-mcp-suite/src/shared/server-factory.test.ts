@@ -530,6 +530,24 @@ describe('createMcpServer', () => {
         limit: '5',
       });
 
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_source_attribution', {
+        key: 'user.private.email',
+        source: 'chat:turn-42',
+        limit: 'chat:turn-42 secret',
+      })).toEqual({
+        key: '[memory-source-attribution-args-redacted]',
+        source: '[memory-source-attribution-args-redacted]',
+        limit: '[memory-source-attribution-args-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_source_attribution', {
+        key: 'user.private.email',
+        limit: 1001,
+      })).toEqual({
+        key: '[memory-source-attribution-args-redacted]',
+        limit: '[memory-source-attribution-args-redacted]',
+      });
+
       expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
         tool: 'fbeast_memory_source_attribution',
         args: { key: 'user.private.email', source: 'chat:turn-42', limit: '5' },

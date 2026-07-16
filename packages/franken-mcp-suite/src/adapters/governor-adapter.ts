@@ -55,6 +55,7 @@ export const NON_EXECUTING_TOOLS: ReadonlySet<string> = new Set([
   'fbeast_governor_check',
   'fbeast_governor_budget',
   'fbeast_memory_review_propose',
+  'fbeast_memory_source_attribution',
   'fbeast_memory_query',
   'fbeast_memory_frontload',
   'fbeast_plan_decompose',
@@ -257,10 +258,23 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
   }
 }
 
+function redactMemorySourceAttributionGovernanceContext(action: string, context: string): string {
+  const unqualified = unqualifyMcpActionName(action);
+  if (unqualified !== 'fbeast_memory_source_attribution'
+    && !(unqualified === 'execute_tool'
+      && contextTargetsTool(context, 'fbeast_memory_source_attribution'))) {
+    return context;
+  }
+  return '{}';
+}
+
 function redactGovernanceContext(action: string, context: string): string {
-  return redactMemoryReviewDecisionGovernanceContext(
+  return redactMemorySourceAttributionGovernanceContext(
     action,
-    redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+    redactMemoryReviewDecisionGovernanceContext(
+      action,
+      redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+    ),
   );
 }
 

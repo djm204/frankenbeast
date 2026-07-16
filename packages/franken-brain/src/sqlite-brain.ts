@@ -1835,7 +1835,9 @@ export class SqliteMemoryReviewQueue {
         `SELECT * FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
       )
       .get(targetStore, key) as MemoryProvenanceRow | undefined;
-    return row ? this.rowToProvenance(row) : null;
+    return row && this.provenanceMatchesCurrentWorkingMemory(row)
+      ? this.rowToProvenance(row)
+      : null;
   }
 
   listProvenance(
@@ -1871,6 +1873,9 @@ export class SqliteMemoryReviewQueue {
     const sourceFilter = options.source?.trim().toLowerCase();
     const attributions: MemoryProvenanceRecord[] = [];
     for (const row of rows) {
+      if (!this.provenanceMatchesCurrentWorkingMemory(row)) {
+        continue;
+      }
       const provenance = this.rowToProvenance(row);
       if (sourceFilter && !provenance.source.toLowerCase().includes(sourceFilter)) {
         continue;
@@ -1892,6 +1897,15 @@ export class SqliteMemoryReviewQueue {
       throw new Error('Memory attribution limit must be a positive integer between 1 and 1000');
     }
     return limit;
+  }
+
+  private provenanceMatchesCurrentWorkingMemory(row: MemoryProvenanceRow): boolean {
+    if (row.target_store !== 'working') return false;
+    const workingRow = this.db
+      .prepare(`SELECT value FROM working_memory WHERE key = ?`)
+      .get(row.memory_key) as { value: string } | undefined;
+    if (!workingRow) return false;
+    return this.decodeText(workingRow.value) === this.decodeText(row.value);
   }
 
   private validateProposal(proposal: MemoryCandidateProposal): void {

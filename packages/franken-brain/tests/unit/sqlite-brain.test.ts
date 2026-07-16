@@ -1712,6 +1712,42 @@ describe('SqliteBrain', () => {
       );
     });
 
+    it('hides stale provenance after direct working-memory overwrite or deletion', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toHaveLength(1);
+
+      brain.working.set(candidate.key, 'verbose');
+      brain.serialize();
+
+      expect(brain.memoryReview.provenanceFor('working', candidate.key)).toBeNull();
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toEqual([]);
+
+      const second = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.repo.default-branch',
+        value: 'main',
+        source: 'repo-config',
+        confidence: 0.8,
+        reason: 'Observed from GitHub repository metadata.',
+      });
+      brain.memoryReview.approve(second.id, { reviewer: 'operator' });
+      expect(brain.memoryReview.listProvenance({ key: second.key })).toHaveLength(1);
+
+      brain.working.delete(second.key);
+      brain.serialize();
+
+      expect(brain.memoryReview.provenanceFor('working', second.key)).toBeNull();
+      expect(brain.memoryReview.listProvenance({ key: second.key })).toEqual([]);
+    });
+
     it('prunes expired temporary facts before approved working-memory writes enforce limits', () => {
       const limitedBrain = new SqliteBrain(':memory:', { maxEntries: 1 });
       limitedBrain.working.set('op:expired', {

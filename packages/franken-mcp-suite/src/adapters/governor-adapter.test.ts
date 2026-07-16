@@ -62,6 +62,21 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('alice@example.test');
   });
 
+  it('allows memory source attribution filters without logging their raw context', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_source_attribution',
+      context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const row = db.prepare(`SELECT context FROM governor_log WHERE action = ?`).get('fbeast_memory_source_attribution') as { context: string };
+    db.close();
+    expect(row.context).toBe('{}');
+  });
+
   it('allows right-to-forget dryRun calls while keeping selector context redacted', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);
