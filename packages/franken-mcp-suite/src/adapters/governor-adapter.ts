@@ -522,15 +522,15 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 
 function assessAction(action: string, context: string): GovernorCheckResult {
   const unqualifiedAction = unqualifyMcpActionName(action);
-  const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
-  if (highRiskResult !== undefined) return highRiskResult;
-
   if (isTrustedOperatorMemoryExport(unqualifiedAction, context)) {
     return {
       decision: 'approved',
       reason: 'Unredacted fbeast_memory_export is explicitly requested and restricted to the trusted-operator MCP path.',
     };
   }
+
+  const highRiskResult = assessHighRiskAction(unqualifiedAction, context);
+  if (highRiskResult !== undefined) return highRiskResult;
 
   const isMemoryReviewDecision = unqualifiedAction === 'fbeast_memory_review_decide'
     || (unqualifiedAction === 'execute_tool'
