@@ -208,4 +208,86 @@ describe('OutcomeAttribution', () => {
       }),
     ).toThrow(/must be one of/)
   })
+
+  it('drops authorization metadata keys and handles cycles while sanitizing', () => {
+    const attribution = new OutcomeAttribution()
+    const metadata: Record<string, unknown> = {
+      authorization: 'Bearer abc123',
+      headers: { Authorization: 'Bearer nested', safeHeader: 'ok' },
+      safe: 'kept',
+    }
+    metadata.self = metadata
+
+    attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'metadata-safety',
+      contextSummary: 'Copied span metadata includes headers',
+      chosenAction: 'sanitize recursively',
+      metadata,
+    })
+
+    expect(attribution.decisions()[0]!.metadata).toEqual({
+      headers: { safeHeader: 'ok' },
+      safe: 'kept',
+      self: '[Circular]',
+    })
+    expect(JSON.stringify(attribution.decisions())).not.toContain('Bearer')
+  })
+
+  it('rejects malformed optional outcome fields from JavaScript callers', () => {
+    const attribution = new OutcomeAttribution()
+    const decision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'runtime-validation',
+      contextSummary: 'Validate optional fields',
+      chosenAction: 'reject malformed optionals',
+    })
+
+    expect(() =>
+      attribution.recordOutcome({
+        decisionId: decision.decisionId,
+        workflowId: 'issue-1693',
+        verification: 'bad blockers',
+        prState: 'open',
+        issueState: 'open',
+        elapsedMs: 1,
+        blockers: 'codex-usage-limit' as never,
+      }),
+    ).toThrow(/blockers must be an array/)
+
+    expect(() =>
+      attribution.recordOutcome({
+        decisionId: decision.decisionId,
+        workflowId: 'issue-1693',
+        verification: 'bad failure flag',
+        prState: 'open',
+        issueState: 'open',
+        elapsedMs: 1,
+        failure: 'false' as never,
+      }),
+    ).toThrow(/failure must be a boolean/)
+  })
+
+  it('rejects outcomes that predate their decision timestamp', () => {
+    const attribution = new OutcomeAttribution()
+    const decision = attribution.recordDecision({
+      workflowId: 'issue-1693',
+      decisionType: 'ordering',
+      contextSummary: 'Outcome must happen after decision',
+      chosenAction: 'compare timestamps',
+      timestamp: '2026-07-16T18:00:00.000Z',
+    })
+
+    expect(() =>
+      attribution.recordOutcome({
+        decisionId: decision.decisionId,
+        workflowId: 'issue-1693',
+        verification: 'impossible ordering',
+        prState: 'merged',
+        issueState: 'closed',
+        elapsedMs: 1,
+        timestamp: '2026-07-16T17:59:59.999Z',
+      }),
+    ).toThrow(/outcome timestamp must be greater than or equal to decision timestamp/)
+  })
 })

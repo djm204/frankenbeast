@@ -82,7 +82,7 @@ export interface WorkflowOutcomeAttributionReport {
   totalElapsedMs: number
 }
 
-const SENSITIVE_METADATA_KEY_PATTERN = /(raw.*prompt|prompt|input|secret|token|password|credential|api[-_]?key)/i
+const SENSITIVE_METADATA_KEY_PATTERN = /(raw.*prompt|prompt|input|secret|token|password|credential|api[-_]?key|authorization|auth[-_]?header|bearer)/i
 const VALID_PR_STATES = ['none', 'draft', 'open', 'merged', 'closed'] as const
 const VALID_ISSUE_STATES = ['open', 'closed', 'not-planned', 'unknown'] as const
 
@@ -111,6 +111,18 @@ function assertOneOf(value: string, field: string, allowed: readonly string[]): 
   }
 }
 
+function assertOptionalBoolean(value: boolean | undefined, field: string): void {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new Error(`OutcomeAttribution: ${field} must be a boolean when present`)
+  }
+}
+
+function assertOptionalStringArray(value: readonly string[] | undefined, field: string): void {
+  if (value !== undefined && (!Array.isArray(value) || value.some(item => typeof item !== 'string'))) {
+    throw new Error(`OutcomeAttribution: ${field} must be an array of strings when present`)
+  }
+}
+
 function defaultTimestamp(): string {
   return new Date().toISOString()
 }
@@ -119,19 +131,24 @@ function freezeRecord<T extends Record<string, unknown>>(value: T): Readonly<T> 
   return Object.freeze({ ...value })
 }
 
-function sanitizeMetadataValue(value: unknown): unknown {
+function sanitizeMetadataValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (Array.isArray(value)) {
-    return Object.freeze(value.map(item => sanitizeMetadataValue(item)))
+    if (seen.has(value)) return '[Circular]'
+    seen.add(value)
+    return Object.freeze(value.map(item => sanitizeMetadataValue(item, seen)))
   }
 
   if (typeof value !== 'object' || value === null) {
     return value
   }
 
+  if (seen.has(value)) return '[Circular]'
+  seen.add(value)
+
   const sanitized: Record<string, unknown> = {}
   for (const [key, nestedValue] of Object.entries(value)) {
     if (SENSITIVE_METADATA_KEY_PATTERN.test(key)) continue
-    sanitized[key] = sanitizeMetadataValue(nestedValue)
+    sanitized[key] = sanitizeMetadataValue(nestedValue, seen)
   }
 
   return freezeRecord(sanitized)
@@ -193,6 +210,9 @@ export class OutcomeAttribution {
     assertElapsedMs(input.elapsedMs)
     assertOneOf(input.prState, 'prState', VALID_PR_STATES)
     assertOneOf(input.issueState, 'issueState', VALID_ISSUE_STATES)
+    assertOptionalStringArray(input.blockers, 'blockers')
+    assertOptionalBoolean(input.rollback, 'rollback')
+    assertOptionalBoolean(input.failure, 'failure')
     const timestamp = input.timestamp ?? defaultTimestamp()
     assertIsoTimestamp(timestamp, 'timestamp')
 
@@ -204,6 +224,9 @@ export class OutcomeAttribution {
       throw new Error(
         `OutcomeAttribution: workflowId ${input.workflowId} does not match decision workflowId ${decision.workflowId}`,
       )
+    }
+    if (Date.parse(timestamp) < Date.parse(decision.timestamp)) {
+      throw new Error('OutcomeAttribution: outcome timestamp must be greater than or equal to decision timestamp')
     }
 
     const record: DecisionOutcomeRecord = Object.freeze({
