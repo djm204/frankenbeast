@@ -300,3 +300,6 @@
 
 ## 2026-07-16 — Orchestrator focused test command
 - In the root workspace, `npm test -- --run ...` passes `--run` to Turbo and fails. For one orchestrator test file, run `npm run test --workspace @franken/orchestrator -- tests/unit/path.test.ts`; run `npm run build` first if package-local typecheck cannot resolve internal `@franken/*` workspace declarations.
+
+## 2026-07-16 — DR point-in-time export review fixes
+- Incident exports must summarize the real `.fbeast/beast.db` and `kanban.db` SQLite tables, include chat `pendingApproval` session state as approval evidence, stream/hash large logs instead of buffering them, and apply the same redaction to the serialized artifact that the terminal preview uses.
