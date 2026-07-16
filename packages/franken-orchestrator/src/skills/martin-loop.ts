@@ -750,8 +750,6 @@ export class MartinLoop {
       };
     }
 
-    config.sessionStore?.save(nextSession);
-
     if (
       config.contextUsage &&
       config.snapshotStore &&
@@ -760,8 +758,16 @@ export class MartinLoop {
     ) {
       config.snapshotStore.writeSnapshot(nextSession, 'pre-compaction');
       nextSession = await config.compactor.compact(nextSession);
-      config.sessionStore?.save(nextSession);
+      if (config.abortSignal?.aborted) {
+        throw abortError(config.abortSignal.reason);
+      }
     }
+
+    if (config.abortSignal?.aborted) {
+      throw abortError(config.abortSignal.reason);
+    }
+
+    config.sessionStore?.save(nextSession);
 
     return nextSession;
   }

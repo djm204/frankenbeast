@@ -19,6 +19,10 @@ function abortReasonError(reason?: unknown): Error {
   return error;
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 // ── Iteration progress display ──
 
 export function formatIterationProgress(opts: {
@@ -403,6 +407,10 @@ export class CliSkillExecutor {
         });
         this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: 'budget-exceeded' });
         throw budgetError;
+      }
+      if (isAbortError(err)) {
+        this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
+        throw err;
       }
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
       throw new Error(

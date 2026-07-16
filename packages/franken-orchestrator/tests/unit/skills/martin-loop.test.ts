@@ -845,6 +845,10 @@ describe('MartinLoop', () => {
           shouldCompact: true,
         }),
       }))).rejects.toThrow('compaction cancelled');
+
+      const stored = sessionStore.load('compact-cancel-plan', 'compact_cancel');
+      expect(stored?.transcript).toHaveLength(1);
+      expect(stored?.transcript[0]?.kind).toBe('objective');
     });
   });
 });
