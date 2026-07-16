@@ -64,6 +64,7 @@ export interface MemoryExportWorkingEntry {
   key: string;
   value: unknown;
   agentId?: string;
+  expiresAt?: string;
 }
 
 export interface MemoryExportEpisodicEntry {
@@ -372,12 +373,13 @@ function resolveExportLimit(limit: number | undefined): number {
 
 const SENSITIVE_EXPORT_KEY = /(?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session|cookie)/i;
 const SECRET_EXPORT_VALUES: Array<[RegExp, string]> = [
-  [/\bAuthorization\s*:\s*Basic\s+\S+/gi, "Authorization: Basic [redacted]"],
+  [/\bAuthorization\s*:\s*Basic\s+\S+/gi, "Authorization: Basic ***"],
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
   [/\bBasic\s+[A-Za-z0-9._~+/-]+=*/gi, "Basic [redacted]"],
   [/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)\S+@/g, "$1[redacted]@"],
   [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, "[redacted-private-key]"],
-  [/\b((?:password|passphrase|secret|token|api[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie))\s*([:=])\s*([^\s,;&]+)/gi, "$1$2[redacted]"],
+  [/\b([A-Z][A-Z0-9_]*(?:PASSWORD|PASS(?:PHRASE)?|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|AUTH(?:ORIZATION)?|CREDENTIAL|PRIVATE_?KEY|SESSION(?:_?COOKIE)?|COOKIE)[A-Z0-9_]*\s*[=:]\s*)[^\s,;&]+/g, "$1[redacted]"],
+  [/\b([A-Za-z0-9_]*(?:password|passphrase|secret|token|api[_-]?key|access[_-]?key|authorization|credential|private[_-]?key|session(?:[_-]?cookie)?|cookie)[A-Za-z0-9_]*)\s*([:=])\s*([^\s,;&]+)/gi, "$1$2[redacted]"],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[redacted-secret]"],
   [/\b(?:sk|gh[opusr])_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
   [/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[redacted-secret]"],
@@ -650,6 +652,9 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
               redaction,
               "agentId",
             ) as string;
+          }
+          if (entry.expiresAt !== undefined) {
+            exported.expiresAt = entry.expiresAt;
           }
           return exported;
         });

@@ -64,7 +64,8 @@ vi.mock("@franken/brain", () => ({
             "OPENSSH PRIVATE KEY-----\nsecret\n-----END " +
             "OPENSSH PRIVATE KEY-----",
           "status-page": "password=hunter2 session_cookie=abc123value",
-          "basic-auth": "Authorization: Basic dXNlcjpwYXNz",
+          "env-snippet": "AWS_SECRET_ACCESS_KEY=AKIA" + "supersecretvalue123456 REGION=us-east-1",
+          "basic-auth": "Authorization: Basic " + "dXNlcjpwYXNz",
           "database-url": "postgres://alice:hunter2@db.internal/app",
           "json-literal-secrets": '{"password":123456,"token":true,"authToken":{"raw":"ghs_secretvalue123456"},"accessKey":["secretvalue123456"],"safe":"ok"}',
           profile: {
@@ -75,6 +76,12 @@ vi.mock("@franken/brain", () => ({
             password: "hunter2",
             nested: { token: 987654 },
             "alice@example.com": "oncall",
+          },
+          "temporary-operational": {
+            value: "rotate release key",
+            category: "temporary-operational",
+            sourceScope: "mcp-memory-store",
+            expiresAt: "2026-07-16T06:00:00.000Z",
           },
           "__fbeast_agent_memory__/alpha/private-task": {
             __fbeastMemoryScope: "fbeast:agent-memory",
@@ -356,7 +363,7 @@ describe("createBrainAdapter", () => {
 
     const exported = await brain.exportProjectMemory({
       readScope: "shared",
-      limit: 10,
+      limit: 20,
     });
     const serialized = JSON.stringify(exported);
 
@@ -385,8 +392,16 @@ describe("createBrainAdapter", () => {
     expect(serialized).not.toContain("postgres://alice:hunter2");
     expect(serialized).not.toContain("ghs_secretvalue123456");
     expect(serialized).not.toContain("secretvalue123456");
+    expect(serialized).not.toContain("AKIA" + "supersecretvalue123456");
     expect(serialized).not.toContain("123456");
     expect(serialized).not.toContain('"token":true');
+    expect(exported.working).toContainEqual(
+      expect.objectContaining({
+        key: "temporary-operational",
+        value: "rotate release key",
+        expiresAt: "2026-07-16T06:00:00.000Z",
+      }),
+    );
   });
 
   it("redacts agent export scope identifiers in safe mode", async () => {

@@ -392,7 +392,6 @@ export function sanitizeToolArgumentsForAuditTrail(toolName: string, args: unkno
   const unqualifiedToolName = unqualifyMcpToolName(toolName);
   const isMemoryReviewPropose = unqualifiedToolName === MEMORY_REVIEW_PROPOSE_TOOL;
   const isDirectMemoryReviewDecide = unqualifiedToolName === MEMORY_REVIEW_DECIDE_TOOL;
-  const isDirectMemoryStore = unqualifiedToolName === MEMORY_STORE_TOOL;
   const isDirectRightToForget = unqualifiedToolName === 'fbeast_memory_right_to_forget';
   const auditedTool = unqualifiedToolName === 'fbeast_memory_right_to_forget'
     ? unqualifiedToolName

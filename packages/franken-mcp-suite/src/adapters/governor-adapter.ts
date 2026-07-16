@@ -17,6 +17,7 @@ const DESTRUCTIVE_ACTIONS = new Set([
   'fbeast_memory_right_to_forget',
 ]);
 const MEMORY_REVIEW_PROPOSE_CONTEXT_REDACTION = '[memory-review-proposal-context-redacted]';
+const MEMORY_EXPORT_CONTEXT_REDACTION = '[memory-export-context-redacted]';
 
 const HIGH_RISK_ACTIONS: Readonly<Record<string, HighRiskActionClass>> = {
   fbeast_memory_store: 'memory',
@@ -258,10 +259,61 @@ function redactMemoryReviewDecisionGovernanceContext(action: string, context: st
   }
 }
 
+function sanitizeMemoryExportGovernanceArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const safe: Record<string, unknown> = {};
+  if (typeof args['readScope'] === 'string' && ['all', 'shared', 'agent'].includes(args['readScope'])) {
+    safe['readScope'] = args['readScope'];
+  }
+  if (typeof args['redaction'] === 'string' && ['safe', 'none'].includes(args['redaction'])) {
+    safe['redaction'] = args['redaction'];
+  }
+  if (typeof args['limit'] === 'number') {
+    safe['limit'] = args['limit'];
+  }
+  if (typeof args['projectId'] === 'string') {
+    safe['projectId'] = args['projectId'];
+  }
+  if (Object.prototype.hasOwnProperty.call(args, 'agentId')) {
+    safe['agentId'] = MEMORY_EXPORT_CONTEXT_REDACTION;
+  }
+  return safe;
+}
+
+function redactMemoryExportGovernanceContext(action: string, context: string): string {
+  const unqualified = unqualifyMcpActionName(action);
+  const directExport = unqualified === 'fbeast_memory_export';
+  const proxiedExport = unqualified === 'execute_tool' && contextTargetsTool(context, 'fbeast_memory_export');
+  if (!directExport && !proxiedExport) return context;
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return MEMORY_EXPORT_CONTEXT_REDACTION;
+    const record = parsed as Record<string, unknown>;
+    if (proxiedExport) {
+      const directArgs = record['args'];
+      const toolInput = record['tool_input'];
+      const nestedArgs = toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)
+        ? (toolInput as Record<string, unknown>)['args']
+        : undefined;
+      const args = directArgs !== null && typeof directArgs === 'object' && !Array.isArray(directArgs)
+        ? directArgs as Record<string, unknown>
+        : nestedArgs !== null && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)
+          ? nestedArgs as Record<string, unknown>
+          : undefined;
+      return JSON.stringify({ tool: 'fbeast_memory_export', args: args === undefined ? MEMORY_EXPORT_CONTEXT_REDACTION : sanitizeMemoryExportGovernanceArgs(args) });
+    }
+    return JSON.stringify(sanitizeMemoryExportGovernanceArgs(record));
+  } catch {
+    return MEMORY_EXPORT_CONTEXT_REDACTION;
+  }
+}
+
 function redactGovernanceContext(action: string, context: string): string {
-  return redactMemoryReviewDecisionGovernanceContext(
+  return redactMemoryExportGovernanceContext(
     action,
-    redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+    redactMemoryReviewDecisionGovernanceContext(
+      action,
+      redactMemoryReviewProposalGovernanceContext(action, redactRightToForgetGovernanceContext(action, context)),
+    ),
   );
 }
 

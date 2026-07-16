@@ -94,6 +94,30 @@ describe('GovernorAdapter', () => {
     expect(row.context).not.toContain('alice@example.test');
   });
 
+  it('redacts memory export context before shared governor logging', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'fbeast_memory_export',
+      context: '{"readScope":"agent","agentId":"alice@example.test","redaction":"safe","limit":5,"legacy":"secret"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    await expect(governor.check({
+      action: 'execute_tool',
+      context: '{"tool":"fbeast_memory_export","args":{"readScope":"agent","agentId":"bob@example.test","redaction":"safe","limit":3,"legacy":"secret"}}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+
+    const db = new Database(dbPath);
+    const rows = db.prepare(`SELECT context FROM governor_log ORDER BY id ASC`).all() as Array<{ context: string }>;
+    db.close();
+    expect(rows[0]!.context).toBe('{"readScope":"agent","redaction":"safe","limit":5,"agentId":"[memory-export-context-redacted]"}');
+    expect(rows[1]!.context).toBe('{"tool":"fbeast_memory_export","args":{"readScope":"agent","redaction":"safe","limit":3,"agentId":"[memory-export-context-redacted]"}}');
+    expect(rows.map((row) => row.context).join('\n')).not.toContain('alice@example.test');
+    expect(rows.map((row) => row.context).join('\n')).not.toContain('bob@example.test');
+    expect(rows.map((row) => row.context).join('\n')).not.toContain('secret');
+  });
+
   it('denies raw destructive patterns (rm -rf)', async () => {
     const governor = createGovernorAdapter(tracked(tmpDbPath()));
     const result = await governor.check({ action: 'rm -rf /data', context: '{}' });
