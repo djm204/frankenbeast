@@ -99,4 +99,43 @@ describe('profile capability self-test', () => {
     expect(ghCalls).toContain('repo view djm204/frankenbeast --json viewerPermission');
     expect(ghCalls).not.toMatch(/\b(issue|pr|repo)\s+(create|edit|delete|merge|close)|\bapi\s+-X\s+(POST|PUT|PATCH|DELETE)/u);
   });
+
+  it('verifies the local checkout package identity before passing repository-root', () => {
+    const checkout = mkdtempSync(join(tmpdir(), 'profile-self-test-other-repo-'));
+    spawnSync('git', ['init'], { cwd: checkout, encoding: 'utf8' });
+    writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: 'not-frankenbeast' }));
+
+    const result = runSelfTest(['--json', '--root', checkout, '--skip-github-auth'], {
+      HERMES_ENABLED_TOOLSETS: '',
+      HERMES_DELIVER_TARGETS: '',
+    });
+
+    expect(result.status).toBe(1);
+    const report = parseJson(result.stdout);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'repository-root', status: 'fail' })]),
+    );
+  });
+
+  it('parses approval-cop routes with arguments before appending --help', () => {
+    const binDir = mkdtempSync(join(tmpdir(), 'profile-self-test-bin-'));
+    const callsPath = join(binDir, 'approval-cop-calls.log');
+    writeFileSync(join(binDir, 'approval-cop'), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}\nif [ "$1 $2 $3" = "run -- --help" ]; then exit 0; fi\nexit 9\n`, { mode: 0o755 });
+
+    const result = runSelfTest([
+      '--json',
+      '--approval-cop', 'approval-cop run --',
+      '--skip-github-auth',
+    ], {
+      PATH: `${binDir}:/usr/bin:/bin`,
+      HERMES_ENABLED_TOOLSETS: '',
+      HERMES_DELIVER_TARGETS: '',
+    });
+
+    const report = parseJson(result.stdout);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'approval-cop-route', status: 'ok' })]),
+    );
+    expect(readFileSync(callsPath, 'utf8')).toContain('run -- --help');
+  });
 });

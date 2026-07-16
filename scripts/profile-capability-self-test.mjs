@@ -170,6 +170,45 @@ function run(command, args = [], options = {}) {
   };
 }
 
+function splitCommand(value) {
+  const tokens = [];
+  let current = '';
+  let quote;
+  let escaped = false;
+  for (const char of String(value).trim()) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+    } else if (char === '\\') {
+      escaped = true;
+    } else if (quote) {
+      if (char === quote) quote = undefined;
+      else current += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (/\s/u.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+    } else {
+      current += char;
+    }
+  }
+  if (escaped) current += '\\';
+  if (quote) throw new Error(`unterminated quote in command route: ${value}`);
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function rootManifest(root) {
+  try {
+    return JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
 function checkLabel(id, label, expected, actual, envName) {
   if (!expected) {
     return { id, status: 'warn', detail: `no expected ${label} configured`, action: `Pass --${label} or include ${label} in the expectation schema.` };
@@ -201,9 +240,9 @@ function checkRepositoryRoot(root) {
   if (!repoRoot.ok) {
     return { id: 'repository-root', status: 'fail', detail: 'not inside a git checkout', action: 'Run from a Frankenbeast checkout or pass --root.' };
   }
-  return existsSync(resolve(repoRoot.stdout, 'package.json'))
+  return existsSync(resolve(repoRoot.stdout, 'package.json')) && rootManifest(repoRoot.stdout)?.name === 'frankenbeast'
     ? { id: 'repository-root', status: 'ok', detail: repoRoot.stdout }
-    : { id: 'repository-root', status: 'fail', detail: `${repoRoot.stdout} has no package.json`, action: 'Run from the repository root or an isolated issue worktree.' };
+    : { id: 'repository-root', status: 'fail', detail: `${repoRoot.stdout} is not the Frankenbeast repository root`, action: 'Run from the Frankenbeast repository root or an isolated issue worktree.' };
 }
 
 function checkGitIdentity(root, expectedUser, expectedEmail) {
@@ -249,7 +288,11 @@ function checkApprovalCop(command) {
   if (!command) {
     return { id: 'approval-cop-route', status: 'warn', detail: 'no approval-cop route required by schema', action: 'Pass --approval-cop for profiles that need approval-gated side effects.' };
   }
-  const result = run(command, ['--help']);
+  const [executable, ...args] = splitCommand(command);
+  if (!executable) {
+    return { id: 'approval-cop-route', status: 'fail', detail: 'approval-cop route is empty', action: 'Pass an executable approval-cop route such as approval-cop or approval-cop run --.' };
+  }
+  const result = run(executable, [...args, '--help']);
   return result.ok
     ? { id: 'approval-cop-route', status: 'ok', detail: `${command} is available` }
     : { id: 'approval-cop-route', status: 'fail', detail: `${command} is not available`, action: `Install or expose ${command} on PATH for this profile. ${result.detail}` };
