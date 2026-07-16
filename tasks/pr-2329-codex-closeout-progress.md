@@ -6,7 +6,8 @@
 - [x] Inspect affected source/tests for the six current-head findings.
 - [x] Apply focused fixes for real findings.
 - [x] Run targeted tests/lint and `git diff --check`.
-- [ ] Commit and push to PR branch if code changed.
-- [ ] Reply to and resolve Codex review threads.
-- [ ] Trigger and poll a fresh Codex review, respecting invocation cap.
+- [x] Commit and push to PR branch if code changed.
+- [x] Reply to and resolve Codex review threads.
+- [x] Confirm CI is green on pushed head.
+- [ ] Trigger and poll a fresh Codex review, respecting invocation cap. Blocked: invocation cap reached (10/5).
 - [ ] Merge PR #2329 after green CI, clean Codex, and zero unresolved Codex threads, or block with exact blocker.
