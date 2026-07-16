@@ -550,6 +550,9 @@ function sqliteTableExists(db: Database.Database, tableName: string): boolean {
   return row?.name === tableName;
 }
 
+const CENTRAL_AUDIT_SOURCE = "central-dispatch";
+const GOVERNANCE_SOURCE_KEY = "__fbeastGovernanceSource";
+
 const SAFE_AUDIT_DECISIONS = new Set([
   "approved",
   "denied",
@@ -1118,6 +1121,7 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           : [];
         for (const row of governorRows) {
           const context = parseAuditContext(row.context);
+          if (context[GOVERNANCE_SOURCE_KEY] !== CENTRAL_AUDIT_SOURCE) continue;
           if (!includeMemoryAuditTool(row.action, context)) continue;
           const access = inferMemoryAccess(row.action, context);
           const accessArgs = auditToolArgs(context);
@@ -1149,14 +1153,17 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           SELECT event_type AS eventType, payload, created_at AS createdAt
           FROM audit_trail
           WHERE event_type = 'tool_call'
+            AND json_valid(payload)
+            AND json_extract(payload, '$.source') = ?
             AND (payload LIKE '%fbeast_memory%' OR payload LIKE '%execute_tool%')
             ${auditTimeCondition}
           ORDER BY id DESC
           ${sqlLimitClause(scanLimit)}
-        `).all(...auditTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
+        `).all(CENTRAL_AUDIT_SOURCE, ...auditTimeFilter.params, ...sqlLimitParams(scanLimit)) as Array<{ eventType: string; payload: string; createdAt: string }>
           : [];
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
+          if (payload["source"] !== CENTRAL_AUDIT_SOURCE) continue;
           const toolName = stringAuditField(payload, "toolName") ?? stringAuditField(payload, "tool") ?? "unknown";
           if (!includeMemoryAuditTool(toolName, payload)) continue;
           const access = inferMemoryAccess(toolName, payload);
