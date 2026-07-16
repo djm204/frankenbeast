@@ -104,6 +104,12 @@ Resolves the GitHub `upstream` remote from the current fork checkout and uses th
 | `--provider <name>` | CLI agent provider | claude |
 | `--providers <list>` | Fallback chain for rate limits | — |
 
+## Complexity routing
+
+Before assigning or executing an issue, classify it with the [issue complexity rubric](../onboarding/issue-complexity-rubric.md). The rubric maps labels such as `docs`, `security`, `availability`, and priority tags to complexity/risk levels, allowed toolsets, recommended model lanes, verification depth, and escalation triggers.
+
+Use the rubric result in the review table and handoff so PMs can keep C0/C1 work in low-risk lanes while routing C3-C5 cross-package, security, disaster-recovery, or PM-swarm policy work to senior or PM-supervised lanes.
+
 ## Review Flow
 
 After triage, you see a table:
