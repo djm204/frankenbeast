@@ -15,7 +15,7 @@ Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's 
 
 ## 🚀 One-click onboarding
 
-Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) so you read current implementation docs before historical plans. Then run the repository bootstrap script:
+Starting from a fresh checkout? Use the [Frankenbeast onboarding checklist](ONBOARDING.md) for prerequisites, environment setup, and first-run validation. Coding agents should also read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging PRs. If you are trying to understand the system before changing it, follow the [Architecture reading path](ONBOARDING.md#architecture-reading-path) so you read current implementation docs before historical plans. Then run the repository bootstrap script:
 
 ```bash
 npm run bootstrap -- --no-docker

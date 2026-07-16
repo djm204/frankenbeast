@@ -117,6 +117,10 @@ Read each badge as `[onboarding:<current>/<total>:<stage>] <state> - <detail>`. 
 
 Read the [repository ownership manifest](docs/onboarding/repository-ownership.md) before assigning repository-wide or cross-package work. It maps current package and documentation surfaces to primary owners, escalation owners, verification commands, and PM/worker handoff notes so agents do not guess ownership from path names alone.
 
+## Coding-agent PR etiquette
+
+Read the [coding-agent PR etiquette guide](docs/onboarding/coding-agent-pr-etiquette.md) before opening, updating, or merging agent-authored pull requests. It defines one-issue/one-PR scope, required PR body evidence, current-head CI/Codex expectations, negative cases that prevent duplicate work, and handoff fields for blocked PRs.
+
 ## Architecture reading path
 
 Use this path when you are new to Frankenbeast or when an agent handoff says "read the architecture docs first." It is intentionally ordered from current implementation to deeper historical context.
