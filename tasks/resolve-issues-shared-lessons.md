@@ -5,6 +5,11 @@
 - For cron/CI probe JSON logs, redact both `key=value` and whitespace-separated secret forms, including split `Authorization: Bearer <token>` argv sequences, before serializing command details or error messages.
 - When Codex reaches the normal five-trigger cap but posts new valid findings, fix/reply/resolve them and stop for explicit approval before issuing another `@codex review`; zero unresolved threads plus green CI is not a substitute for a fresh current-head clean.
 
+## 2026-07-16 — Queue priority aging
+- For issue scheduler aging, score only eligible work with age boosts; blocked/HITL work should carry a large safety penalty and zero age boost so stale unsafe cards never bypass human/dependency gates. Include priority rank, effective rank, age, blocker status, risk lane, freshness, and an explanation string in liveness/fairness output.
+- For issue-runner queue-depth/backpressure, count only startable eligible issues; blocked/HITL cards should not inflate queue depth. Defer gated issues before any plan decomposition when no plan chunks already exist, but preserve zero-token completion only for exact one-shot issue checkpoints (`impl:issue-N:done` and `harden:issue-N:done`); chunk-shaped checkpoint keys require plan coverage before completion.
+- Issue backlog aging depends on fetching old backlog rows before local score sorting. `gh issue list` must use a backlog-safe high limit and oldest-first search sort by default so stale medium/low issues are not excluded by the GitHub CLI's recent-item window before aging runs.
+
 ## 2026-07-16 — Dead-letter queue Codex closeout
 - DLQ/DR restore output redaction must cover provider token literals (for example `sk-*`, `xox*`) and credentialed database URLs even when they appear inside free-text fields such as `target`, `lastError`, or nested payload strings; test fixtures should prove output does not leak the original secret substrings.
 - For DLQ file locks, treat unparseable lock timestamps as malformed stale-lock candidates and fall back to mtime-based reaping; otherwise a syntactically valid lock JSON with `acquiredAt: not-a-date` can wedge writers forever.
@@ -278,3 +283,6 @@
 - For JSON cache stores, validate both schemaVersion and the runtime shape (`content` type) before returning entries, otherwise stale/malformed files can be reused as cache hits.
 - Add regression tests that write an explicitly mismatched schema version and a wrong-shaped payload to prove stale cache entries are rejected.
 - Keep Codex review follow-ups separate from CI: CI green + no fresh Codex findings is not sufficient when Codex usage-limited responses occur; treat limits as blocked merge gates and retry only after credits reset.
+
+## 2026-07-16 — DR process cleanup closeout
+- DR process cleanup planners should ignore terminal attempts before PID counting and orphan scans, treat missing-PID live attempts as possible owners of matching processes, and include process-start tokens on executable orphan actions so signal-time consumers can revalidate PID identity before termination.

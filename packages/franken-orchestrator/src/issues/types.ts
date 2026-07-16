@@ -6,6 +6,12 @@ export interface GithubIssue {
   readonly labels: string[];
   readonly state: string;
   readonly url: string;
+  /** ISO timestamp from GitHub, used to age eligible queued work for fair scheduling. */
+  readonly createdAt?: string | undefined;
+  /** ISO timestamp from GitHub, used to explain freshness/staleness in scheduling output. */
+  readonly updatedAt?: string | undefined;
+  /** Optional external queue/card status when issue scheduling is backed by a PM/Kanban queue. */
+  readonly status?: string | undefined;
 }
 
 /** Options for fetching GitHub issues. */

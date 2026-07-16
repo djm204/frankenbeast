@@ -19,16 +19,11 @@ describe('CI retry command wrapper', () => {
   it('retries a failing command until it succeeds and logs retry attempts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'franken-ci-retry-'));
     const counter = join(dir, 'counter.txt');
-    const childScript = `
-const { existsSync, readFileSync, writeFileSync } = require('node:fs');
-const file = process.argv[1];
-const count = existsSync(file) ? Number(readFileSync(file, 'utf8')) + 1 : 1;
-writeFileSync(file, String(count));
-process.exit(count < 2 ? 7 : 0);
-`;
-
     try {
-      const result = runRetryCommand([process.execPath, '-e', childScript, counter], { CI_TEST_RETRIES: '2' });
+      const result = runRetryCommand(['npm', 'run', 'test:ci-retry-fixture'], {
+        CI_TEST_RETRIES: '2',
+        CI_RETRY_FIXTURE_COUNTER: counter,
+      });
 
       expect(result.status).toBe(0);
       expect(readFileSync(counter, 'utf8')).toBe('2');
@@ -42,7 +37,7 @@ process.exit(count < 2 ? 7 : 0);
   });
 
   it('preserves the final failure exit code after retries are exhausted', () => {
-    const result = runRetryCommand([process.execPath, '-e', 'process.exit(9)'], { CI_TEST_RETRIES: '1' });
+    const result = runRetryCommand(['npm', 'run', 'test:ci-retry-fail-fixture'], { CI_TEST_RETRIES: '1' });
 
     expect(result.status).toBe(9);
     expect(result.stderr).toContain('[ci-retry] attempt 1/2');

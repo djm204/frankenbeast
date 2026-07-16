@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { IssueReview } from '../../../src/issues/issue-review.js';
 import type { ReviewIO } from '../../../src/issues/issue-review.js';
 import type { GithubIssue, TriageResult } from '../../../src/issues/types.js';
@@ -295,6 +295,20 @@ describe('IssueReview', () => {
       expect(dataLine).not.toMatch(/critical|high|medium|low/);
     });
 
+    it('displays scheduler priority aliases as severity labels', async () => {
+      const issues = [makeIssue({ number: 1, labels: ['bug', 'priority:p1'] })];
+      const triage = [makeTriage({ issueNumber: 1 })];
+      const io = createMockIO(['Y']);
+      const review = new IssueReview(io);
+
+      await review.review(issues, triage);
+
+      const output = io.output.join('\n');
+      const dataLine = output.split('\n').find((l) => l.includes('Issue 1'));
+      expect(dataLine).toContain('high');
+      expect(dataLine).toContain('high->1');
+    });
+
     it('shows the approval prompt', async () => {
       const issues = [makeIssue({ number: 1 })];
       const triage = [makeTriage({ issueNumber: 1 })];
@@ -309,7 +323,7 @@ describe('IssueReview', () => {
   });
 
   describe('sort order', () => {
-    it('sorts by severity priority then issue number', async () => {
+    it('sorts by scheduler score then issue number', async () => {
       const issues = [
         makeIssue({ number: 5, labels: ['low'] }),
         makeIssue({ number: 1, labels: ['high'] }),
@@ -339,6 +353,29 @@ describe('IssueReview', () => {
       });
       // Expected order: 3 (critical), 1 (high), 2 (high), 5 (low), 4 (unlabelled)
       expect(issueNumbers).toEqual([3, 1, 2, 5, 4]);
+    });
+
+    it('shows aged execution order before approval', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-16T00:00:00.000Z'));
+      const issues = [
+        makeIssue({ number: 10, labels: ['high'], createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }),
+        makeIssue({ number: 20, labels: ['medium'], createdAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-01T00:00:00.000Z' }),
+      ];
+      const triage = [makeTriage({ issueNumber: 10 }), makeTriage({ issueNumber: 20 })];
+      const io = createMockIO(['Y']);
+      const review = new IssueReview(io);
+
+      try {
+        const result = await review.review(issues, triage);
+
+        expect(result.approved.map(t => t.issueNumber)).toEqual([20, 10]);
+        const output = io.output.join('\n');
+        expect(output).toContain('Effective');
+        expect(output.indexOf('Issue 20')).toBeLessThan(output.indexOf('Issue 10'));
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
