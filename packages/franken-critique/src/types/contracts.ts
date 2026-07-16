@@ -239,6 +239,45 @@ export interface FailedTestSkillCandidate {
   readonly operatorGuidance: string;
 }
 
+export type LessonCritiqueVerdict = 'accepted' | 'needs-edit' | 'rejected';
+
+export type LessonCritiqueChecklistItem =
+  | 'correctness'
+  | 'scope'
+  | 'privacy'
+  | 'security'
+  | 'duplication'
+  | 'conflict';
+
+export interface LessonCritiqueAgentFinding {
+  /** Deterministic agent/reviewer persona that produced this finding. */
+  readonly agentName: string;
+  /** Checklist item this finding evaluates. */
+  readonly checklistItem: LessonCritiqueChecklistItem;
+  /** Local verdict from this critic before aggregation. */
+  readonly verdict: 'pass' | 'needs-edit' | 'reject';
+  readonly severity: 'info' | 'warning' | 'critical';
+  readonly message: string;
+  /** Stable evidence identifiers only; never raw candidate text or secrets. */
+  readonly evidenceRefs: readonly string[];
+  readonly suggestion?: string;
+}
+
+/** Multi-agent critique attached before a proposed lesson can be promoted. */
+export interface LessonMultiAgentCritique {
+  readonly schemaVersion: 'lesson-multi-agent-critique-v1';
+  readonly generatedAt: string;
+  readonly verdict: LessonCritiqueVerdict;
+  readonly checklist: readonly LessonCritiqueChecklistItem[];
+  readonly criticAgents: readonly string[];
+  readonly findings: readonly LessonCritiqueAgentFinding[];
+  readonly highRisk: boolean;
+  readonly manualReviewRequired: boolean;
+  /** Redacted/stable evidence identifiers suitable for PM handoffs. */
+  readonly evidenceRefs: readonly string[];
+  readonly guidance: string;
+}
+
 /** LLM-friendly template PM/worker handoffs can use after a PR closes to extract reusable lessons. */
 export interface PostPrLessonExtractionTemplate {
   /** Stable template identifier for downstream liveness tooling and prompt selection. */
@@ -462,6 +501,8 @@ export interface CritiqueLesson {
   readonly privacyFilter?: LessonPrivacyFilterDecision;
   /** Human/inferred feedback weighting used for promotion, demotion, retirement, and quarantine decisions. */
   readonly feedbackWeighting?: LessonFeedbackWeighting;
+  /** Multi-agent critique of the proposed lesson before promotion. */
+  readonly proposedLessonCritique?: LessonMultiAgentCritique;
 }
 
 /** Escalation request sent to MOD-07 (Governor). */

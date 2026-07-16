@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   LessonRecorder,
   applyHumanFeedbackToLesson,
+  critiqueProposedLesson,
   detectLessonContradictions,
   isLessonApplicable,
   quarantineLesson,
@@ -3316,6 +3317,167 @@ describe('LessonRecorder', () => {
     await recorder.record(result, 'sandbox-task');
 
     expect(port.recordLesson).not.toHaveBeenCalled();
+  });
+
+  it('accepts low-risk proposed lessons after every critique checklist item passes', () => {
+    const lesson = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'lesson-task:factuality:iteration-0',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance lacked provenance checks'],
+          testId: 'lesson-task:factuality:iteration-0:regression',
+          verificationCommand:
+            'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts',
+        },
+      ],
+      privacyFilter: {
+        schemaVersion: 'lesson-privacy-filter-v1',
+        category: 'procedure',
+        action: 'admit',
+        sensitive: false,
+        approvalRequired: false,
+        flags: [],
+        redactions: [],
+        originalHash: 'safe-hash',
+        reason: 'safe candidate',
+      },
+      contradictionReport: {
+        status: 'clear',
+        guidance: 'No deterministic lesson contradiction was detected among comparable prior lessons.',
+        verificationCommand: 'npm run test --workspace @franken/critique',
+        contradictions: [],
+      },
+      reviewerFeedback: {
+        summary: 'Cache guidance lacked provenance checks',
+        suggestionsComplete: true,
+        findings: [
+          {
+            sourceIteration: 0,
+            evaluatorName: 'factuality',
+            message: 'Cache guidance lacked provenance checks',
+            severity: 'warning',
+            suggestion: 'Require provenance checks before cache reuse.',
+          },
+        ],
+      },
+    });
+
+    const critique = critiqueProposedLesson(lesson, [], '2026-07-12T00:00:00.000Z');
+
+    expect(critique).toMatchObject({
+      schemaVersion: 'lesson-multi-agent-critique-v1',
+      verdict: 'accepted',
+      highRisk: false,
+      manualReviewRequired: false,
+      checklist: ['correctness', 'scope', 'privacy', 'security', 'duplication', 'conflict'],
+      criticAgents: [
+        'correctness-scope-critic',
+        'privacy-security-critic',
+        'duplication-conflict-critic',
+      ],
+    });
+    expect(critique.findings.every((finding) => finding.verdict === 'pass')).toBe(true);
+    expect(critique.evidenceRefs).toEqual(
+      expect.arrayContaining([
+        'traceability:lesson-task:factuality:iteration-0',
+        'privacy:safe-hash',
+        'contradiction:clear',
+      ]),
+    );
+  });
+
+  it('rejects proposed lessons that fail the privacy critique without dumping secrets', () => {
+    const critique = critiqueProposedLesson(
+      createLesson({
+        privacyFilter: {
+          schemaVersion: 'lesson-privacy-filter-v1',
+          category: 'task-state',
+          action: 'reject',
+          sensitive: true,
+          approvalRequired: false,
+          flags: ['task-state'],
+          redactions: [{ kind: 'secret', label: 'github-token', replacement: '[REDACTED_GITHUB_TOKEN]' }],
+          originalHash: 'secret-hash',
+          reason: 'rejected before durable learning',
+        },
+      }),
+    );
+
+    expect(critique.verdict).toBe('rejected');
+    expect(critique.manualReviewRequired).toBe(true);
+    expect(JSON.stringify(critique)).not.toContain('ghp_');
+    expect(critique.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentName: 'privacy-security-critic',
+          checklistItem: 'privacy',
+          verdict: 'reject',
+          evidenceRefs: ['privacy:secret-hash'],
+        }),
+      ]),
+    );
+  });
+
+  it('marks high-risk or conflicting proposed lessons as needs-edit/manual-review', () => {
+    const current = createLesson({
+      correctionApplied: 'Do not reuse cache responses without provenance checks',
+      testTraceability: [
+        {
+          lessonId: 'current-cache-lesson',
+          taskId: 'lesson-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance allowed unaudited stale responses'],
+          testId: 'current-cache-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      privacyFilter: {
+        schemaVersion: 'lesson-privacy-filter-v1',
+        category: 'procedure',
+        action: 'admit',
+        sensitive: true,
+        approvalRequired: true,
+        flags: ['secret'],
+        redactions: [{ kind: 'secret', label: 'bearer-token', replacement: 'Bearer [REDACTED_TOKEN]' }],
+        originalHash: 'redacted-hash',
+        reason: 'sensitive candidate was redacted before durable learning',
+      },
+    });
+    const prior = createLesson({
+      testTraceability: [
+        {
+          lessonId: 'prior-cache-lesson',
+          taskId: 'prior-task',
+          evaluatorName: 'factuality',
+          failingIteration: 0,
+          resolvedIteration: 1,
+          sourceFindingMessages: ['Cache guidance allowed unaudited stale responses'],
+          testId: 'prior-cache-lesson:regression',
+          verificationCommand: 'npm run test --workspace @franken/critique',
+        },
+      ],
+      correctionApplied: 'Reuse cache responses',
+    });
+
+    const critique = critiqueProposedLesson(current, [prior]);
+
+    expect(critique.verdict).toBe('needs-edit');
+    expect(critique.highRisk).toBe(true);
+    expect(critique.manualReviewRequired).toBe(true);
+    expect(critique.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ checklistItem: 'privacy', verdict: 'pass' }),
+        expect.objectContaining({ checklistItem: 'conflict', verdict: 'needs-edit' }),
+        expect.objectContaining({ checklistItem: 'duplication', verdict: 'needs-edit' }),
+      ]),
+    );
+    expect(JSON.stringify(critique)).not.toContain('Bearer token');
   });
 
   it('attaches a not-checked contradiction report when lesson search is unavailable', async () => {
