@@ -225,6 +225,38 @@ describe('createMcpServer', () => {
     ]);
   });
 
+  it('redacts memory store values from direct and proxy audit records', () => {
+    expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_store', {
+      key: 'OPENAI_API_KEY',
+      value: 'example value that must not be echoed',
+      type: 'working',
+      agentId: 'worker-alpha',
+    })).toEqual({
+      key: 'OPENAI_API_KEY',
+      value: '[memory-store-value-redacted]',
+      type: 'working',
+      agentId: 'worker-alpha',
+    });
+
+    expect(sanitizeToolArgumentsForAuditTrail('execute_tool', {
+      tool: 'fbeast_memory_store',
+      args: {
+        key: 'OPENAI_API_KEY',
+        value: 'example value that must not be echoed',
+        type: 'working',
+      },
+      context: 'contains value',
+    })).toEqual({
+      tool: 'fbeast_memory_store',
+      args: {
+        key: 'OPENAI_API_KEY',
+        value: '[memory-store-value-redacted]',
+        type: 'working',
+      },
+      context: '[memory-store-value-redacted]',
+    });
+  });
+
   it('rejects non-finite number arguments before invoking the handler', async () => {
     const calls: unknown[] = [];
     const tool: ToolDef = {

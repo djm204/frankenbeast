@@ -1404,6 +1404,7 @@ export async function main(): Promise<void> {
         beforePath: args.memorySnapshotBefore,
         afterPath: args.memorySnapshotAfter,
         backupPath: args.memoryBackupPath,
+        snapshotPath: args.memoryDuplicateReportPath,
         print: printLine,
       });
     } catch (err) {

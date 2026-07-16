@@ -1680,6 +1680,51 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('aligns hydrated clean runtime cache with refreshed persisted conflicts before flush', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-stale-cache-'));
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const seed = new SqliteBrain(dbPath);
+        seed.working.set('user.preference.concurrent-color', 'red');
+        seed.flush();
+        seed.close();
+
+        const staleReviewer = new SqliteBrain(dbPath);
+        expect(staleReviewer.working.get('user.preference.concurrent-color')).toBe('red');
+
+        const writer = new SqliteBrain(dbPath);
+        writer.working.set('user.preference.concurrent-color', 'green');
+        writer.flush();
+        writer.close();
+
+        const contradictory = staleReviewer.memoryReview.propose({
+          targetStore: 'working',
+          key: 'user.preference.concurrent-color',
+          value: 'blue',
+          source: 'chat:turn-7bb',
+          confidence: 0.8,
+          reason: 'Stale reviewer inferred a conflicting color.',
+        });
+
+        expect(staleReviewer.memoryReview.conflictsFor(contradictory.id)).toEqual([
+          expect.objectContaining({
+            existingValue: 'green',
+            proposedValue: 'blue',
+          }),
+        ]);
+        expect(staleReviewer.working.get('user.preference.concurrent-color')).toBe('green');
+        staleReviewer.flush();
+        staleReviewer.close();
+
+        const verifier = new SqliteBrain(dbPath);
+        expect(verifier.working.get('user.preference.concurrent-color')).toBe('green');
+        verifier.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('ignores expired persisted working memory during conflict approval checks', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-conflict-expired-persisted-'));
       const dbPath = join(dir, 'brain.db');
