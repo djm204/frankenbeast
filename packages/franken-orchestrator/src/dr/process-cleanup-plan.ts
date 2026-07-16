@@ -53,6 +53,7 @@ export interface ProcessCleanupAction {
   readonly runId: string;
   readonly attemptId: string;
   readonly pid?: number | undefined;
+  readonly startTimeTicks?: string | undefined;
   readonly requiresApproval: boolean;
   readonly wouldExecute: boolean;
   readonly reason: string;
@@ -132,6 +133,20 @@ function isMatchingOrphanCandidate(
     && processEntry.startTimeTicks.length > 0;
 }
 
+const TERMINAL_ATTEMPT_STATUSES = new Set([
+  'completed',
+  'complete',
+  'failed',
+  'stopped',
+  'cancelled',
+  'canceled',
+  'crashed',
+]);
+
+function isTerminalAttempt(attempt: ProcessCleanupAttemptSnapshot): boolean {
+  return TERMINAL_ATTEMPT_STATUSES.has(attempt.status.toLowerCase());
+}
+
 function finding(input: ProcessCleanupFinding): ProcessCleanupFinding {
   return input;
 }
@@ -167,16 +182,19 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
   const findings: ProcessCleanupFinding[] = [];
   const actions: ProcessCleanupAction[] = [];
   const processByPid = new Map(options.processes.map((entry) => [entry.pid, entry] as const));
+  const activeAttempts = options.attempts.filter((attempt) => !isTerminalAttempt(attempt));
   const recordedPidCounts = new Map<number, number>();
-  for (const attempt of options.attempts) {
+  for (const attempt of activeAttempts) {
     if (typeof attempt.pid === 'number' && attempt.pid > 0) {
       recordedPidCounts.set(attempt.pid, (recordedPidCounts.get(attempt.pid) ?? 0) + 1);
     }
   }
   const claimedPids = new Set<number>();
+  const missingPidAttempts: ProcessCleanupAttemptSnapshot[] = [];
 
-  for (const attempt of options.attempts) {
+  for (const attempt of activeAttempts) {
     if (typeof attempt.pid !== 'number' || attempt.pid <= 0) {
+      missingPidAttempts.push(attempt);
       findings.push(finding({
         code: 'missing-pid',
         severity: 'warning',
@@ -394,7 +412,7 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
   }
 
   const orphanPids = new Set<number>();
-  for (const attempt of options.attempts) {
+  for (const attempt of activeAttempts) {
     if (!attempt.expectedCommand || !attempt.expectedCwd) continue;
     if (typeof attempt.pid === 'number' && (recordedPidCounts.get(attempt.pid) ?? 0) > 1) continue;
     const recordedProcess = typeof attempt.pid === 'number' ? processByPid.get(attempt.pid) : undefined;
@@ -402,6 +420,9 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
     for (const processEntry of options.processes) {
       if (claimedPids.has(processEntry.pid) || orphanPids.has(processEntry.pid)) continue;
       if (!isMatchingOrphanCandidate(attempt, processEntry, options.currentUid)) continue;
+      if (missingPidAttempts.some((missingAttempt) => isMatchingOrphanCandidate(missingAttempt, processEntry, options.currentUid))) {
+        continue;
+      }
       orphanPids.add(processEntry.pid);
       findings.push(finding({
         code: 'orphan-duplicate-process',
@@ -420,9 +441,10 @@ export function buildProcessCleanupPlan(options: ProcessCleanupPlanOptions): Pro
         runId: attempt.runId,
         attemptId: attempt.attemptId,
         pid: processEntry.pid,
+        startTimeTicks: processEntry.startTimeTicks,
         requiresApproval: true,
         wouldExecute: !dryRun && options.approveTermination === true,
-        reason: 'Duplicate orphan termination requires matching uid, cwd, and command evidence plus explicit operator approval.',
+        reason: 'Duplicate orphan termination requires matching uid, cwd, command, args, and process-start evidence plus explicit operator approval.',
       });
     }
   }
@@ -461,7 +483,8 @@ export function renderProcessCleanupDryRunPlan(report: ProcessCleanupPlanReport)
         const pid = action.pid === undefined ? 'none' : String(action.pid);
         const approval = action.requiresApproval ? 'required' : 'not-required';
         const mode = action.wouldExecute ? 'execute' : 'dry-run';
-        return `- ${action.action} pid=${pid} approval=${approval} ${mode} run=${action.runId} attempt=${action.attemptId}: ${action.reason}`;
+        const start = action.startTimeTicks ? ` startTimeTicks=${action.startTimeTicks}` : '';
+        return `- ${action.action} pid=${pid}${start} approval=${approval} ${mode} run=${action.runId} attempt=${action.attemptId}: ${action.reason}`;
       }),
   ];
   if (report.actions.every((action) => action.action === 'none')) {
