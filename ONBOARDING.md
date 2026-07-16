@@ -232,6 +232,8 @@ Edge case: many older diagrams and `docs/plans/` files describe target or histor
 
 ## Troubleshooting
 
+If a PM, liveness monitor, or operator reports a stalled worker, use the dedicated [troubleshooting guide for stalled workers](docs/guides/troubleshooting-stalled-workers.md) before respawning or deleting worktrees. It walks through live task/PR evidence, active versus blocked versus stale classifications, safe recovery actions, and the handoff fields future workers need.
+
 - [ ] `npm install` fails with an engine error:
   - Check `node --version` against the root `engines.node` range.
   - Re-run the Corepack commands in the prerequisites section and `npm run check:package-manager`.
