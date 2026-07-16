@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 function usage() {
@@ -70,7 +70,24 @@ function stateDir(id, path, purpose, createdBy) {
 }
 
 function afterDependencyBuild(packageName, command) {
-  return `npx turbo run build --filter=...${packageName} && ${command}`;
+  return `npx turbo run build --filter=${packageName} && ${command}`;
+}
+
+function workspacePackagePaths(root, manifest) {
+  const workspaces = Array.isArray(manifest.workspaces) ? manifest.workspaces : [];
+  const packagePaths = new Set();
+  for (const workspace of workspaces) {
+    if (typeof workspace !== 'string' || !workspace.endsWith('/*')) continue;
+    const base = workspace.slice(0, -2);
+    const absoluteBase = resolve(root, base);
+    if (!existsSync(absoluteBase)) continue;
+    for (const entry of readdirSync(absoluteBase, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const path = `${base}/${entry.name}`;
+      if (existsSync(resolve(root, path, 'package.json'))) packagePaths.add(path);
+    }
+  }
+  return [...packagePaths].sort();
 }
 
 function buildTour(root) {
@@ -146,10 +163,14 @@ function buildTour(root) {
     ...keyDocs.map((entry) => entry.path),
   ];
 
+  const expectedPackagePaths = new Set(packageMap.map((entry) => entry.path));
+  const actualPackagePaths = workspacePackagePaths(root, manifest);
   const docsDrift = expectedPaths.map((path) => ({
     path,
     status: existsSync(resolve(root, path)) ? 'ok' : 'missing',
-  }));
+  })).concat(actualPackagePaths
+    .filter((path) => !expectedPackagePaths.has(path))
+    .map((path) => ({ path, status: 'unmapped-package' })));
 
   return {
     root,
@@ -202,7 +223,7 @@ function renderHuman(tour) {
   if (missing.length === 0) {
     lines.push('- ok: all expected package/doc/script/test paths exist.');
   } else {
-    for (const entry of missing) lines.push(`- missing: ${entry.path}`);
+    for (const entry of missing) lines.push(`- ${entry.status}: ${entry.path}`);
   }
 
   return lines.join('\n');

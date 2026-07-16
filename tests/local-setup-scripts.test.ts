@@ -254,7 +254,7 @@ describe('local setup scripts', () => {
         id: 'orchestrator',
         path: 'packages/franken-orchestrator',
         packageName: '@franken/orchestrator',
-        testCommand: expect.stringContaining('npx turbo run build --filter=...@franken/orchestrator && npm run build --workspace @franken/orchestrator && npm run typecheck --workspace @franken/orchestrator && npm test --workspace @franken/orchestrator'),
+        testCommand: expect.stringContaining('npx turbo run build --filter=@franken/orchestrator && npm run build --workspace @franken/orchestrator && npm run typecheck --workspace @franken/orchestrator && npm test --workspace @franken/orchestrator'),
       }),
       expect.objectContaining({ id: 'mcp-suite', packageName: '@franken/mcp-suite' }),
       expect.objectContaining({ id: 'web', packageName: '@franken/web' }),
@@ -299,7 +299,9 @@ describe('local setup scripts', () => {
 
     const fixture = mkdtempSync(join(tmpdir(), 'frankenbeast-workspace-tour-drift-'));
     try {
-      writeFileSync(join(fixture, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1' }));
+      writeFileSync(join(fixture, 'package.json'), JSON.stringify({ name: 'frankenbeast', packageManager: 'npm@11.5.1', workspaces: ['packages/*'] }));
+      mkdirSync(join(fixture, 'packages', 'franken-new'), { recursive: true });
+      writeFileSync(join(fixture, 'packages', 'franken-new', 'package.json'), JSON.stringify({ name: '@franken/new' }));
       const drift = spawnSync(process.execPath, [join(ROOT, 'scripts/workspace-tour.mjs'), '--json', '--root', fixture], {
         cwd: ROOT,
         encoding: 'utf8',
@@ -309,6 +311,7 @@ describe('local setup scripts', () => {
       expect(report.ok).toBe(false);
       expect(report.docsDrift).toContainEqual(expect.objectContaining({ path: 'ONBOARDING.md', status: 'missing' }));
       expect(report.docsDrift).toContainEqual(expect.objectContaining({ path: 'packages/franken-orchestrator', status: 'missing' }));
+      expect(report.docsDrift).toContainEqual(expect.objectContaining({ path: 'packages/franken-new', status: 'unmapped-package' }));
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
