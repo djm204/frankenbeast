@@ -198,7 +198,7 @@ export class SQLiteAdapter implements ExportAdapter {
   private readonly filePath: string
   private readonly flushedSpans = new Map<string, Map<string, FlushedSpanState>>()
   private flushedSpanSnapshotCount = 0
-  private flushTail: Promise<void> = Promise.resolve()
+  private writeTail: Promise<unknown> = Promise.resolve()
 
   constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
     mkdirSync(dirname(filePath), { recursive: true })
@@ -216,9 +216,7 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
-    const flush = this.flushTail.then(() => this.flushNow(trace))
-    this.flushTail = flush.catch(() => undefined)
-    return flush
+    return this.enqueueSqliteWrite(() => this.flushNow(trace))
   }
 
   private async flushNow(trace: Trace): Promise<void> {
@@ -381,19 +379,31 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   async deleteTrace(traceId: string): Promise<void> {
-    const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
-    const deleteTrace = this.db.prepare(DELETE_TRACE)
-    const transaction = this.db.transaction((id: string) => {
-      deleteSpans.run(id)
-      deleteTrace.run(id)
-    })
+    return this.enqueueSqliteWrite(() => this.deleteTraceNow(traceId))
+  }
 
-    await this.withSqliteLockRetry('delete trace transaction', () => transaction(traceId))
+  private async deleteTraceNow(traceId: string): Promise<void> {
+    await this.withSqliteLockRetry('delete trace transaction', () => {
+      const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
+      const deleteTrace = this.db.prepare(DELETE_TRACE)
+      const transaction = this.db.transaction((id: string) => {
+        deleteSpans.run(id)
+        deleteTrace.run(id)
+      })
+
+      transaction(traceId)
+    })
     const flushed = this.flushedSpans.get(traceId)
     if (flushed !== undefined) {
       this.flushedSpanSnapshotCount -= flushed.size
       this.flushedSpans.delete(traceId)
     }
+  }
+
+  private enqueueSqliteWrite<T>(action: () => Promise<T>): Promise<T> {
+    const queued = this.writeTail.then(action)
+    this.writeTail = queued.catch(() => undefined)
+    return queued
   }
 
   private async withSqliteLockRetry<T>(operationClass: string, action: () => T): Promise<T> {
