@@ -131,5 +131,49 @@ describe('external helper allowlist', () => {
       repoRoot: workDir,
       allowlistPath,
     })).rejects.toThrow(/not allowed to invoke/u);
+
+    await expect(verifyExternalHelperInvocation({
+      helperId: 'safe-helper',
+      command: ['git', 'branch', '-D', 'main'],
+      repoRoot: workDir,
+      allowlistPath,
+    })).rejects.toThrow(/not allowed to invoke/u);
+  });
+
+  it('normalizes CRLF helper line endings before comparing checksums', async () => {
+    const { allowlistPath, scriptPath, sha256 } = await makeFixture();
+    await writeFile(scriptPath, '#!/usr/bin/env node\r\nconsole.log("safe helper");\r\n', 'utf8');
+
+    await expect(verifyExternalHelperFile({
+      helperId: 'safe-helper',
+      helperPath: scriptPath,
+      repoRoot: workDir,
+      allowlistPath,
+    })).resolves.toMatchObject({ sha256 });
+  });
+
+  it('binds helper ids to the invoking helper path', async () => {
+    const { allowlistPath } = await makeFixture();
+    const impostorPath = resolve(workDir!, 'scripts/impostor.mjs');
+    await writeFile(impostorPath, '#!/usr/bin/env node\nconsole.log("impostor");\n', 'utf8');
+
+    await expect(verifyExternalHelperInvocation({
+      helperId: 'safe-helper',
+      helperPath: impostorPath,
+      command: ['npm', 'run', 'test:root'],
+      repoRoot: workDir,
+      allowlistPath,
+    })).rejects.toThrow(/is bound to/u);
+  });
+
+  it('restricts npm runner classes to reviewed test scripts', async () => {
+    const { allowlistPath } = await makeFixture();
+
+    await expect(verifyExternalHelperInvocation({
+      helperId: 'safe-helper',
+      command: ['npm', 'run', 'create:project'],
+      repoRoot: workDir,
+      allowlistPath,
+    })).rejects.toThrow(/not allowed to invoke/u);
   });
 });

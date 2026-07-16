@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { verifyExternalHelperInvocation } from './lib/external-helper-allowlist.mjs';
+
+const THIS_HELPER = fileURLToPath(import.meta.url);
 
 const RETRY_ENV = 'CI_TEST_RETRIES';
 const DEFAULT_RETRIES = 0;
@@ -61,8 +64,8 @@ async function main() {
 
   await verifyExternalHelperInvocation({
     helperId: 'ci-retry-command',
+    helperPath: THIS_HELPER,
     command: [command, ...args],
-    repoRoot: process.cwd(),
   });
 
   let lastExitCode = 1;

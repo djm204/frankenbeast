@@ -7,19 +7,32 @@ const DEFAULT_ALLOWLIST_URL = new URL('../external-helper-allowlist.json', impor
 const SHA256_RE = /^[a-f0-9]{64}$/u;
 const HELPER_ID_RE = /^[a-z0-9][a-z0-9_.:-]{0,127}$/u;
 const ARG_CLASS_RE = /^[a-z][a-z0-9:-]{0,63}$/u;
+const ALLOWED_NPM_TEST_SCRIPTS = new Set([
+  'test:root',
+  'test:integration',
+  'test:eval',
+  'test:e2e',
+  'test:ci-retry-fixture',
+  'test:ci-retry-fail-fixture',
+]);
 
 const KNOWN_ARGUMENT_CLASS_VALIDATORS = Object.freeze({
   'git-readonly': (command) => {
     if (command[0] !== 'git') return false;
     const subcommand = command[1] === '-C' ? command[3] : command[1];
-    return new Set(['rev-parse', 'fetch', 'branch', 'status']).has(subcommand);
+    if (subcommand === 'branch') {
+      const branchArgs = command.slice(command[1] === '-C' ? 4 : 2);
+      return branchArgs.every((arg) => ['--all', '--list'].includes(arg) || !arg.startsWith('-'))
+        && branchArgs.some((arg) => ['--all', '--list'].includes(arg));
+    }
+    return new Set(['rev-parse', 'fetch', 'status']).has(subcommand);
   },
   'git-worktree-create': (command) => command[0] === 'git' && command[1] === 'worktree' && command[2] === 'add',
   'git-worktree-config': (command) => command[0] === 'git' && command[1] === '-C' && command[3] === 'config'
     && (command.includes('user.email') || command.includes('user.name') || command.includes('extensions.worktreeConfig')),
   'gh-pr-readonly': (command) => command[0] === 'gh' && command[1] === 'pr' && ['list', 'view', 'checks'].includes(command[2]),
-  'npm-test-runner': (command) => command[0] === 'npm' && command[1] === 'run' && typeof command[2] === 'string',
-  'npx-turbo-test-runner': (command) => command[0] === 'npx' && command[1] === 'turbo',
+  'npm-test-runner': (command) => command[0] === 'npm' && command[1] === 'run' && ALLOWED_NPM_TEST_SCRIPTS.has(command[2]),
+  'npx-turbo-test-runner': (command) => command[0] === 'npx' && command[1] === 'turbo' && command[2] === 'run' && command[3] === 'test',
 });
 
 function normalizeRepoRelativePath(filePath, repoRoot) {
@@ -32,7 +45,8 @@ function normalizeRepoRelativePath(filePath, repoRoot) {
 }
 
 async function sha256File(filePath) {
-  return createHash('sha256').update(await readFile(filePath)).digest('hex');
+  const content = await readFile(filePath, 'utf8');
+  return createHash('sha256').update(content.replace(/\r\n/gu, '\n'), 'utf8').digest('hex');
 }
 
 export async function loadExternalHelperAllowlist(allowlistPath = fileURLToPath(DEFAULT_ALLOWLIST_URL)) {
@@ -110,6 +124,12 @@ export async function verifyExternalHelperFile({ helperId, helperPath, repoRoot,
   const helper = findAllowlistedHelper(allowlist, helperId ?? helperPath, resolvedRepoRoot);
   if (!helper) {
     throw new Error(`External helper is not allowlisted: ${helperId ?? helperPath}`);
+  }
+  if (helperPath) {
+    const invokingPath = normalizeRepoRelativePath(helperPath, resolvedRepoRoot);
+    if (invokingPath !== helper.path) {
+      throw new Error(`External helper id ${helper.id} is bound to ${helper.path}, not ${invokingPath}`);
+    }
   }
   const absolutePath = resolve(resolvedRepoRoot, helper.path);
   const info = await stat(absolutePath).catch((error) => {

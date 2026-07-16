@@ -3,8 +3,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import { verifyExternalHelperInvocation } from './lib/external-helper-allowlist.mjs';
+
+const THIS_HELPER = fileURLToPath(import.meta.url);
 
 const DEFAULT_REPO = 'djm204/frankenbeast';
 const DEFAULT_REMOTE = 'origin';
@@ -108,6 +111,7 @@ function formatCommand(command) {
 async function runCommand(command, cwd) {
   await verifyExternalHelperInvocation({
     helperId: 'issue-worktree-bootstrap',
+    helperPath: THIS_HELPER,
     command,
     repoRoot: cwd,
   });
