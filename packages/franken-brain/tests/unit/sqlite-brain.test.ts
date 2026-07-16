@@ -2174,6 +2174,125 @@ describe('SqliteBrain', () => {
       expect(brain.working.has('env.secret.api-token')).toBe(false);
     });
 
+    it('adds high-confidence merge suggestions for exact duplicate memory values and preserves provenance', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.reply-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'chat:turn-20',
+        evidenceId: 'msg-20',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise respectful communication.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const duplicate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.answer-style',
+        value: 'User prefers concise, respectful replies.',
+        source: 'chat:turn-21',
+        evidenceId: 'msg-21',
+        confidence: 0.85,
+        reason: 'User repeated the same communication preference.',
+      });
+
+      expect(duplicate.status).toBe('pending');
+      expect(duplicate.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          targetStore: 'working',
+          key: 'user.preference.reply-style',
+          matchType: 'exact',
+          confidence: 'high',
+          requiresReview: false,
+          similarity: 1,
+          provenance: [
+            expect.objectContaining({
+              candidateId: approved.id,
+              source: 'chat:turn-20',
+              evidenceId: 'msg-20',
+              reason: 'User explicitly requested concise respectful communication.',
+            }),
+          ],
+        }),
+      ]);
+    });
+
+    it('adds review-required semantic merge suggestions for paraphrased memory candidates', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.progress-updates',
+        value: 'User wants short status updates with only the most relevant details.',
+        source: 'chat:turn-22',
+        confidence: 0.88,
+        reason: 'User asked for terse progress updates.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const paraphrase = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.status-style',
+        value: 'Keep progress reports brief and include only relevant details.',
+        source: 'chat:turn-23',
+        confidence: 0.7,
+        reason: 'User repeated a similar status-reporting preference.',
+      });
+
+      expect(paraphrase.mergeSuggestions).toEqual([
+        expect.objectContaining({
+          key: 'user.preference.progress-updates',
+          matchType: 'semantic',
+          confidence: 'low',
+          requiresReview: true,
+        }),
+      ]);
+    });
+
+    it('does not suggest related but distinct memories as duplicates', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.short-status',
+        value: 'User prefers short status updates.',
+        source: 'chat:turn-24',
+        confidence: 0.9,
+        reason: 'User asked for concise progress reports.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const distinct = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.short-examples',
+        value: 'User prefers short runnable code examples.',
+        source: 'chat:turn-25',
+        confidence: 0.82,
+        reason: 'User asked for compact code samples.',
+      });
+
+      expect(distinct.mergeSuggestions).toEqual([]);
+    });
+
+    it('avoids semantic false positives for memories that share generic wording only', () => {
+      const approved = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.test-runner',
+        value: 'Project uses Vitest for package unit tests.',
+        source: 'repo:test-config',
+        confidence: 0.9,
+        reason: 'Detected Vitest config files.',
+      });
+      brain.memoryReview.approve(approved.id, { reviewer: 'operator' });
+
+      const unrelated = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'env.project.package-manager',
+        value: 'Project uses npm workspaces for packages.',
+        source: 'repo:package-json',
+        confidence: 0.9,
+        reason: 'Detected workspaces in package.json.',
+      });
+
+      expect(unrelated.mergeSuggestions).toEqual([]);
+    });
+
     it('purges approved working memory and provenance when a key is marked never-store', () => {
       const approved = brain.memoryReview.propose({
         targetStore: 'working',
