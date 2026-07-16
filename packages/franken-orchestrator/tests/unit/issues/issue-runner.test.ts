@@ -584,19 +584,28 @@ describe('IssueRunner', () => {
       const outcomes = await runner.run(config);
       vi.useRealTimers();
 
-      expect(report.scheduledIssueNumbers).toEqual([62, 63, 61, 66, 64, 65]);
-      expect(outcomes.map(outcome => outcome.issueNumber)).toEqual([62, 63, 61, 66, 64, 65]);
+      expect(report.scheduledIssueNumbers).toEqual([63, 62, 61, 66, 64, 65]);
+      expect(outcomes.map(outcome => outcome.issueNumber)).toEqual([63, 62, 61, 66, 64, 65]);
       expect(outcomes.find(outcome => outcome.issueNumber === 64)).toMatchObject({ status: 'skipped', error: expect.stringContaining('deferred by scheduler') });
       expect(outcomes.find(outcome => outcome.issueNumber === 65)).toMatchObject({ status: 'skipped', error: expect.stringContaining('deferred by scheduler') });
       expect(report.effectivePriorities).toEqual([
-        expect.objectContaining({ issueNumber: 62, priority: 'medium', ageDays: 36, ageBoost: 2, effectivePriorityRank: 0, blockerStatus: 'eligible', riskLane: 'orchestrator', freshness: 'stale' }),
         expect.objectContaining({ issueNumber: 63, priority: 'low', ageDays: 76, ageBoost: 2, effectivePriorityRank: 1, blockerStatus: 'eligible', riskLane: 'standard', freshness: 'stale' }),
+        expect.objectContaining({ issueNumber: 62, priority: 'medium', ageDays: 36, ageBoost: 2, effectivePriorityRank: 1, blockerStatus: 'eligible', riskLane: 'orchestrator', freshness: 'stale' }),
         expect.objectContaining({ issueNumber: 61, priority: 'high', ageDays: 1, ageBoost: 0, effectivePriorityRank: 1, blockerStatus: 'eligible', riskLane: 'standard', freshness: 'fresh' }),
         expect.objectContaining({ issueNumber: 66, priority: 'unprioritized', ageBoost: 0, effectivePriorityRank: 4, blockerStatus: 'eligible' }),
         expect.objectContaining({ issueNumber: 64, priority: 'medium', ageBoost: 0, blockerStatus: 'blocked' }),
         expect.objectContaining({ issueNumber: 65, priority: 'medium', ageBoost: 0, blockerStatus: 'hitl' }),
       ]);
       expect(evaluateIssueSchedulingScore(issues[4]!, nowMs).explanation).toContain('blocker=blocked');
+
+      const freshCritical = evaluateIssueSchedulingScore(
+        makeIssue({ number: 67, labels: ['critical'], createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' }),
+        nowMs,
+      );
+      const agedMedium = evaluateIssueSchedulingScore(issues[1]!, nowMs);
+      expect(freshCritical.effectivePriorityRank).toBe(0);
+      expect(agedMedium.effectivePriorityRank).toBe(1);
+      expect(freshCritical.score).toBeLessThan(agedMedium.score);
     });
 
     it('reports missing triage as an explicit scheduler fairness edge case', () => {
@@ -1139,7 +1148,7 @@ describe('IssueRunner', () => {
       expect(logger.warn).not.toHaveBeenCalled();
     });
 
-    it('preserves checkpoint-complete outcomes before evaluating backpressure', async () => {
+    it('preserves checkpoint-complete outcomes before evaluating backpressure or blocker deferral', async () => {
       const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
       const issueRuntime = makeIssueRuntimeSupport();
       vi.mocked(issueRuntime.checkpointForIssue).mockReturnValue(checkpoint);
@@ -1156,7 +1165,7 @@ describe('IssueRunner', () => {
         oldestQueueAgeMs: 0,
       }));
       const config = makeConfig({
-        issues: [makeIssue({ number: 15 })],
+        issues: [makeIssue({ number: 15, labels: ['blocked'] })],
         triageResults: [makeTriage(15)],
         checkpoint,
         issueRuntime,

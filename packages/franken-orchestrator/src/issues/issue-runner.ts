@@ -758,7 +758,8 @@ export function evaluateIssueSchedulingScore(issue: GithubIssue, nowMs: number =
   const ageBoost = blockerStatus === 'eligible' && priorityRank < NO_SEVERITY
     ? Math.min(MAX_PRIORITY_AGE_BOOST, Math.floor(age / PRIORITY_AGING_DAYS_PER_RANK))
     : 0;
-  const effectivePriorityRank = Math.max(0, priorityRank - ageBoost);
+  const agedPriorityRank = Math.max(0, priorityRank - ageBoost);
+  const effectivePriorityRank = priorityRank === 0 ? 0 : Math.max(1, agedPriorityRank);
   const riskLane = issueRiskLane(issue);
   const freshness = issueFreshness(issue, nowMs);
   const unsafePenalty = blockerStatus === 'eligible' ? 0 : 100;
@@ -1107,23 +1108,6 @@ export class IssueRunner {
         continue;
       }
 
-      if (schedulingScore.blockerStatus !== 'eligible') {
-        const reason = `deferred by scheduler: ${schedulingScore.blockerStatus} issue is waiting on human/dependency gate`;
-        logger?.warn(
-          `[issues] Deferred issue #${issue.number} (${position}): ${reason}`,
-          { issueNumber: issue.number, schedulingScore },
-          'issues',
-        );
-        outcomes.push({
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          status: 'skipped',
-          tokensUsed: 0,
-          error: reason,
-        });
-        continue;
-      }
-
       logger?.info(`[issues] Starting issue #${issue.number} (${position})`, undefined, 'issues');
 
       const triage = findTriage(triageResults, issue.number);
@@ -1202,6 +1186,23 @@ export class IssueRunner {
       planDir,
     );
     const checkpointedPlanChunkPaths = checkpointHasIssueProgress ? listPlanChunkPaths(planDir) : [];
+    const schedulingScore = evaluateIssueSchedulingScore(issue);
+
+    if (schedulingScore.blockerStatus !== 'eligible' && !checkpointHasIssueProgress) {
+      const reason = `deferred by scheduler: ${schedulingScore.blockerStatus} issue is waiting on human/dependency gate`;
+      logger?.warn(
+        `[issues] Deferred issue #${issue.number}: ${reason}`,
+        { issueNumber: issue.number, schedulingScore },
+        'issues',
+      );
+      return {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        status: 'skipped',
+        tokensUsed: 0,
+        error: reason,
+      };
+    }
 
     const logDegradedRoute = (route: IssueDegradedModeWorkerRoute): void => {
       logger?.warn(
