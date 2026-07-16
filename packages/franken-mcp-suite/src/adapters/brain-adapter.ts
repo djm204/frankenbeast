@@ -79,6 +79,7 @@ export interface MemoryAccessAuditEvent {
   cardId?: string;
   profile?: string;
   repo?: string;
+  source: "governor_log" | "audit_trail";
   tool: string;
   operation: string;
   targetStore: string;
@@ -472,7 +473,7 @@ function stringAuditField(record: Record<string, unknown>, key: string): string 
 function inferMemoryAccess(toolName: string, context: Record<string, unknown>): { operation: string; targetStore: string; targetClass: string } {
   const unqualified = unqualifyToolName(toolName);
   const defaults = MEMORY_ACCESS_TOOL_OPERATIONS[unqualified] ?? { operation: "unknown", targetStore: "memory", targetClass: "memory-access" };
-  const nestedTool = stringAuditField(context, "tool");
+  const nestedTool = stringAuditField(context, "tool") ?? stringAuditField(context, "toolName");
   if (unqualified === "execute_tool" && nestedTool) {
     const nestedArgs = context["args"] !== null && typeof context["args"] === "object" && !Array.isArray(context["args"])
       ? context["args"] as Record<string, unknown>
@@ -489,10 +490,54 @@ function inferMemoryAccess(toolName: string, context: Record<string, unknown>): 
   };
 }
 
-function includeMemoryAuditTool(toolName: string): boolean {
+function memoryAuditToolName(toolName: string, context: Record<string, unknown> = {}): string | undefined {
   const unqualified = unqualifyToolName(toolName);
-  if (unqualified === "execute_tool") return true;
-  return Object.prototype.hasOwnProperty.call(MEMORY_ACCESS_TOOL_OPERATIONS, unqualified);
+  if (Object.prototype.hasOwnProperty.call(MEMORY_ACCESS_TOOL_OPERATIONS, unqualified)) return unqualified;
+  if (unqualified !== "execute_tool") return undefined;
+  const nestedTool = stringAuditField(context, "tool") ?? stringAuditField(context, "toolName");
+  if (!nestedTool) return undefined;
+  return memoryAuditToolName(nestedTool, context["args"] !== null && typeof context["args"] === "object" && !Array.isArray(context["args"])
+    ? context["args"] as Record<string, unknown>
+    : {});
+}
+
+function includeMemoryAuditTool(toolName: string, context: Record<string, unknown> = {}): boolean {
+  return memoryAuditToolName(toolName, context) !== undefined;
+}
+
+function normalizeAuditTimestamp(timestamp: string): string {
+  const trimmed = timestamp.trim();
+  if (trimmed.length === 0) return trimmed;
+  const normalized = trimmed.includes("T") ? trimmed : `${trimmed.replace(" ", "T")}Z`;
+  const ms = Date.parse(normalized);
+  return Number.isNaN(ms) ? trimmed : new Date(ms).toISOString();
+}
+
+function auditTimestampMs(timestamp: string): number {
+  const ms = Date.parse(normalizeAuditTimestamp(timestamp));
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+function auditDecisionFromPayload(payload: Record<string, unknown>): string {
+  const explicitDecision = stringAuditField(payload, "decision");
+  if (explicitDecision) return explicitDecision;
+  const ok = payload["ok"];
+  if (ok === false) return stringAuditField(payload, "error") ? "error" : "denied";
+  if (ok === true) return "approved";
+  return "unknown";
+}
+
+function dedupeMemoryAccessEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditEvent[] {
+  const governorEvents = events.filter((event) => event.source === "governor_log");
+  return events.filter((event) => {
+    if (event.source !== "audit_trail") return true;
+    const eventTime = auditTimestampMs(event.timestamp);
+    return !governorEvents.some((governorEvent) => {
+      if (governorEvent.tool !== event.tool || governorEvent.agentId !== event.agentId || governorEvent.profile !== event.profile || governorEvent.repo !== event.repo || governorEvent.operation !== event.operation) return false;
+      const governorTime = auditTimestampMs(governorEvent.timestamp);
+      return Math.abs(governorTime - eventTime) <= 10_000;
+    });
+  });
 }
 
 function summarizeAuditEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAuditReport["summary"] {
@@ -506,14 +551,17 @@ function summarizeAuditEvents(events: MemoryAccessAuditEvent[]): MemoryAccessAud
 }
 
 function filterMemoryAccessEvents(events: MemoryAccessAuditEvent[], input: MemoryAccessAuditReportInput): MemoryAccessAuditEvent[] {
+  const sinceMs = input.since === undefined ? undefined : auditTimestampMs(input.since);
+  const untilMs = input.until === undefined ? undefined : auditTimestampMs(input.until);
   return events.filter((event) => {
     if (input.agentId !== undefined && event.agentId !== input.agentId) return false;
     if (input.profile !== undefined && event.profile !== input.profile) return false;
     if (input.repo !== undefined && event.repo !== input.repo) return false;
     if (input.operation !== undefined && event.operation !== input.operation) return false;
     if (input.decision !== undefined && event.decision !== input.decision) return false;
-    if (input.since !== undefined && event.timestamp < input.since) return false;
-    if (input.until !== undefined && event.timestamp > input.until) return false;
+    const eventMs = auditTimestampMs(event.timestamp);
+    if (sinceMs !== undefined && eventMs < sinceMs) return false;
+    if (untilMs !== undefined && eventMs > untilMs) return false;
     return true;
   });
 }
@@ -866,22 +914,22 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           SELECT action, context, decision, reason, created_at AS createdAt
           FROM governor_log
           ORDER BY id DESC
-          LIMIT ?
-        `).all(limit) as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>;
+        `).all() as Array<{ action: string; context: string; decision: string; reason: string | null; createdAt: string }>;
         for (const row of governorRows) {
-          if (!includeMemoryAuditTool(row.action)) continue;
           const context = parseAuditContext(row.context);
+          if (!includeMemoryAuditTool(row.action, context)) continue;
           const access = inferMemoryAccess(row.action, context);
           const profile = stringAuditField(context, "profile") ?? stringAuditField(context, "activeProfile");
           const agentId = stringAuditField(context, "agentId");
           const cardId = stringAuditField(context, "cardId") ?? stringAuditField(context, "taskId");
           const repo = stringAuditField(context, "repo");
           events.push({
-            timestamp: row.createdAt,
+            timestamp: normalizeAuditTimestamp(row.createdAt),
             ...(agentId ? { agentId } : {}),
             ...(cardId ? { cardId } : {}),
             ...(profile ? { profile } : {}),
             ...(repo ? { repo } : {}),
+            source: "governor_log" as const,
             tool: unqualifyToolName(row.action),
             operation: access.operation,
             targetStore: access.targetStore,
@@ -896,34 +944,34 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
           FROM audit_trail
           WHERE event_type = 'tool_call'
           ORDER BY id DESC
-          LIMIT ?
-        `).all(limit) as Array<{ eventType: string; payload: string; createdAt: string }>;
+        `).all() as Array<{ eventType: string; payload: string; createdAt: string }>;
         for (const row of auditRows) {
           const payload = parseAuditContext(row.payload);
-          const toolName = stringAuditField(payload, "toolName") ?? "unknown";
-          if (!includeMemoryAuditTool(toolName)) continue;
+          const toolName = stringAuditField(payload, "toolName") ?? stringAuditField(payload, "tool") ?? "unknown";
+          if (!includeMemoryAuditTool(toolName, payload)) continue;
           const access = inferMemoryAccess(toolName, payload);
           const agentId = stringAuditField(payload, "agentId");
           const cardId = stringAuditField(payload, "cardId") ?? stringAuditField(payload, "taskId");
           const profile = stringAuditField(payload, "profile");
           const repo = stringAuditField(payload, "repo");
           events.push({
-            timestamp: row.createdAt,
+            timestamp: normalizeAuditTimestamp(row.createdAt),
             ...(agentId ? { agentId } : {}),
             ...(cardId ? { cardId } : {}),
             ...(profile ? { profile } : {}),
             ...(repo ? { repo } : {}),
+            source: "audit_trail" as const,
             tool: unqualifyToolName(toolName),
             operation: access.operation,
             targetStore: access.targetStore,
             targetClass: access.targetClass,
-            decision: "approved",
-            reason: "post-tool audit event",
+            decision: auditDecisionFromPayload(payload),
+            reason: redactExportString(stringAuditField(payload, "error") ?? "post-tool audit event"),
           });
         }
 
-        const filtered = filterMemoryAccessEvents(events, input)
-          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        const filtered = filterMemoryAccessEvents(dedupeMemoryAccessEvents(events), input)
+          .sort((a, b) => auditTimestampMs(b.timestamp) - auditTimestampMs(a.timestamp))
           .slice(0, limit);
         return {
           generatedAt: isoNow(),

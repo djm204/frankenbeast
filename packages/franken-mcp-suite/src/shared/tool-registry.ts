@@ -876,7 +876,7 @@ const TOOLS: ToolFull[] = [
       if (!parsedArgs.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${parsedArgs.message}` }], isError: true };
       }
-      const { sessionId, model, promptTokens, completionTokens } = parsedArgs.value;
+      const { model, promptTokens, completionTokens } = parsedArgs.value;
       const result = await observer.logCost(parsedArgs.value);
       const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
       return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };

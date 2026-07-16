@@ -78,7 +78,7 @@ vi.mock("better-sqlite3", () => ({
             return [
               {
                 eventType: "tool_call",
-                payload: JSON.stringify({ toolName: "fbeast_memory_export", profile: "default", repo: "djm204/frankenbeast" }),
+                payload: JSON.stringify({ toolName: "fbeast_memory_export", ok: true, profile: "default", repo: "djm204/frankenbeast" }),
                 createdAt: "2026-07-16T09:00:00.000Z",
               },
             ];
