@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
@@ -84,5 +84,21 @@ describe('restore rehearsal fixture', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('must be an isolated scratch directory');
     }
+  });
+
+  it('refuses symlinked repository descendants as rehearsal roots', async () => {
+    const linkParent = await mkdtemp(join(tmpdir(), 'restore-rehearsal-link-'));
+    keepRoot = linkParent;
+    const repoLink = join(linkParent, 'repo-link');
+    await symlink(ROOT, repoLink, 'dir');
+
+    const result = spawnSync('npx', ['tsx', SCRIPT, '--root', join(repoLink, 'scripts')], {
+      cwd: tmpdir(),
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must be an isolated scratch directory');
+    expect(existsSync(resolve(ROOT, 'scripts', 'restore-rehearsal.mjs'))).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import Database from 'better-sqlite3';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, parse, resolve, sep } from 'node:path';
@@ -28,23 +28,41 @@ function isSameOrParent(candidate, child) {
   return target === parent || target.startsWith(`${parent}${sep}`);
 }
 
-function assertSafeIsolatedRoot(path, label) {
+async function resolveExistingOrParent(path) {
   const target = resolve(path);
+  if (await pathExists(target)) {
+    return realpath(target);
+  }
+  return join(await realpath(dirname(target)), parse(target).base);
+}
+
+async function assertSafeIsolatedRoot(path, label) {
+  const target = resolve(path);
+  const realTarget = await resolveExistingOrParent(target);
   const home = process.env.HOME ? resolve(process.env.HOME) : undefined;
+  const realHome = home && await pathExists(home) ? await realpath(home) : undefined;
   const root = parse(target).root;
+  const realRepoRoot = await realpath(REPO_ROOT);
   const unsafeExact = new Set([
     root,
     home,
+    realHome,
     process.cwd(),
     dirname(process.cwd()),
     REPO_ROOT,
     dirname(REPO_ROOT),
+    realRepoRoot,
+    dirname(realRepoRoot),
   ].filter(Boolean));
   if (
     unsafeExact.has(target)
+    || unsafeExact.has(realTarget)
     || target.split(sep).filter(Boolean).length < 2
+    || realTarget.split(sep).filter(Boolean).length < 2
     || isSameOrParent(target, REPO_ROOT)
     || isSameOrParent(REPO_ROOT, target)
+    || isSameOrParent(realTarget, realRepoRoot)
+    || isSameOrParent(realRepoRoot, realTarget)
   ) {
     throw new Error(`${label} must be an isolated scratch directory, not a home, repository, or filesystem root`);
   }
@@ -249,7 +267,7 @@ export async function runRestoreRehearsal(options = {}) {
     ? resolve(options.root)
     : await mkdtemp(join(tmpdir(), 'frankenbeast-restore-rehearsal-'));
   if (options.root) {
-    assertSafeIsolatedRoot(root, 'restore rehearsal root');
+    await assertSafeIsolatedRoot(root, 'restore rehearsal root');
     await rm(root, { recursive: true, force: true });
     await mkdir(root, { recursive: true });
   }
