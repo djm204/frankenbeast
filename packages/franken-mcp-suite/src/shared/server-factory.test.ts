@@ -624,6 +624,22 @@ describe('createMcpServer', () => {
 
       expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
         id: 'memcand_123',
+        action: 'resolve_conflict',
+        resolution: 'keep_both_scoped',
+        scopedKey: 'user.preference.secret.scope.docs',
+        reviewer: 'alice@example.test',
+        note: 'Looks like token abc123',
+      })).toEqual({
+        id: '[memory-review-decision-metadata-redacted]',
+        action: 'resolve_conflict',
+        resolution: 'keep_both_scoped',
+        scopedKey: '[memory-review-decision-metadata-redacted]',
+        reviewer: '[memory-review-decision-metadata-redacted]',
+        note: '[memory-review-decision-metadata-redacted]',
+      });
+
+      expect(sanitizeToolArgumentsForAuditTrail('fbeast_memory_review_decide', {
+        id: 'memcand_123',
         action: 'token abc123',
         note: 'Looks like token abc123',
       })).toEqual({

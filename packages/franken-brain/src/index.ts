@@ -29,6 +29,8 @@ export {
   type MemoryProvenanceRecord,
   type MemoryConflictResolution,
   type MemoryConflict,
+  type MemoryConflictEvidence,
+  type MemoryResolutionPrompt,
   type MemoryConflictResolutionOptions,
   type MemorySchemaMetadata,
   type MemorySchemaStoreMetadata,

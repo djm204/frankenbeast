@@ -240,7 +240,7 @@ const MEMORY_EXPORT_SAFE_READ_SCOPES = new Set(['all', 'shared', 'agent']);
 const MEMORY_EXPORT_SAFE_REDACTIONS = new Set(['safe', 'none']);
 const MEMORY_REVIEW_DECIDE_SAFE_AUDIT_KEYS = new Set(['id', 'action', 'resolution']);
 const MEMORY_REVIEW_DECIDE_SAFE_ACTIONS = new Set(['approve', 'reject', 'never_store', 'resolve_conflict']);
-const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'reject_candidate']);
+const MEMORY_REVIEW_DECIDE_SAFE_RESOLUTIONS = new Set(['keep_existing', 'replace_existing', 'keep_both_scoped', 'reject_candidate', 'expire_existing']);
 const MEMORY_STORE_TOOL = 'fbeast_memory_store';
 const MEMORY_STORE_SAFE_AUDIT_KEYS = new Set(['key', 'type', 'agentId', 'ttlMs']);
 
