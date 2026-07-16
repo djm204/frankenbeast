@@ -85,7 +85,7 @@ export interface BrainAdapter {
     resolution?: MemoryConflictResolution;
     options?: MemoryReviewDecisionOptions;
   }): Promise<MemoryCandidate>;
-  memoryAttribution(input?: MemoryAttributionListOptions): Promise<MemoryProvenanceRecord[]>;
+  memoryAttribution(input?: MemoryAttributionListOptions & MemoryScopeInput): Promise<MemoryProvenanceRecord[]>;
 }
 
 const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
@@ -538,7 +538,30 @@ export function createBrainAdapter(dbPath: string): BrainAdapter {
     },
 
     async memoryAttribution(input = {}) {
-      return brain.memoryReview.listProvenance(input);
+      const readScope = resolveMemoryReadScope(input);
+      const requestedLimit = resolveQueryLimit(input.limit);
+      const lookupKey = input.key === undefined
+        ? undefined
+        : scopedWorkingKey(input.key, readScope.readScope === "agent" ? readScope.agentId : undefined);
+      const attributions = brain.memoryReview.listProvenance({
+        ...(input.targetStore !== undefined ? { targetStore: input.targetStore } : {}),
+        ...(lookupKey !== undefined ? { key: lookupKey } : {}),
+        ...(input.source !== undefined ? { source: input.source } : {}),
+        limit: readScope.readScope === "all" ? requestedLimit : MAX_QUERY_LIMIT,
+      });
+
+      return attributions
+        .map((attribution) => {
+          const entry = parseScopedWorkingEntry(attribution.key, attribution.value);
+          return { attribution, entry };
+        })
+        .filter(({ entry }) => canReadMemoryEntry(entry.agentId, readScope))
+        .slice(0, requestedLimit)
+        .map(({ attribution, entry }) => ({
+          ...attribution,
+          key: entry.key,
+          value: entry.value,
+        }));
     },
   };
 }

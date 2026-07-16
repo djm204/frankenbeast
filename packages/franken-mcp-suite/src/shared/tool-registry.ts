@@ -472,6 +472,8 @@ const TOOLS: ToolFull[] = [
         key: { type: 'string', description: 'Optional exact working-memory key to inspect' },
         source: { type: 'string', description: 'Optional case-insensitive substring filter for attribution source' },
         limit: { type: 'string', description: 'Max attribution records (default 50, max 1000)' },
+        readScope: { type: 'string', description: 'Read scope: all (legacy), shared (hide agent-scoped entries), or agent (shared plus entries for agentId)', enum: ['all', 'shared', 'agent'] },
+        agentId: { type: 'string', description: 'Agent id required when readScope is agent' },
       },
     },
     makeHandler: ({ brain }) => async (args) => {
@@ -487,11 +489,16 @@ const TOOLS: ToolFull[] = [
       if (parsedLimit && !parsedLimit.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_source_attribution ${parsedLimit.message}` }], isError: true };
       }
+      const scopeArgs = parseMemoryReadScopeArgs(args);
+      if (!scopeArgs.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_source_attribution ${scopeArgs.message}` }], isError: true };
+      }
       const attributions = await brain.memoryAttribution({
         targetStore: 'working',
         ...(key?.value ? { key: key.value } : {}),
         ...(source?.value ? { source: source.value } : {}),
         ...(parsedLimit?.value ? { limit: parsedLimit.value } : {}),
+        ...scopeArgs.value,
       });
       return { content: [{ type: 'text', text: JSON.stringify({ count: attributions.length, attributions }, null, 2) }] };
     },

@@ -1462,6 +1462,29 @@ describe('SqliteBrain', () => {
       expect(brain.memoryReview.listProvenance({ key: second.key })).toEqual([]);
     });
 
+    it('preserves provenance when direct working-memory set repeats the approved value', () => {
+      const candidate = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'user.preference.response-style',
+        value: 'concise',
+        source: 'chat:turn-42',
+        confidence: 0.92,
+        reason: 'User explicitly requested concise responses.',
+      });
+      brain.memoryReview.approve(candidate.id, { reviewer: 'operator' });
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toHaveLength(1);
+
+      brain.working.set(candidate.key, 'concise');
+      brain.serialize();
+
+      expect(brain.memoryReview.provenanceFor('working', candidate.key)).toMatchObject({
+        candidateId: candidate.id,
+        key: candidate.key,
+        value: 'concise',
+      });
+      expect(brain.memoryReview.listProvenance({ key: candidate.key })).toHaveLength(1);
+    });
+
     it('surfaces contradictory working-memory candidates before approval', () => {
       const initial = brain.memoryReview.propose({
         targetStore: 'working',

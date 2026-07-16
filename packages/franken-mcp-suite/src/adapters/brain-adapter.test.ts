@@ -26,6 +26,9 @@ const { databaseInstances, brainInstances } = vi.hoisted(() => {
       approve: ReturnType<typeof vi.fn>;
       reject: ReturnType<typeof vi.fn>;
       neverStore: ReturnType<typeof vi.fn>;
+      listProvenance: ReturnType<typeof vi.fn>;
+      conflictsFor: ReturnType<typeof vi.fn>;
+      resolveConflict: ReturnType<typeof vi.fn>;
     };
     flush: ReturnType<typeof vi.fn>;
   }> = [];
@@ -124,6 +127,53 @@ vi.mock("@franken/brain", () => ({
         approve: vi.fn(() => ({ id: "memcand_1", status: "approved" })),
         reject: vi.fn(() => ({ id: "memcand_1", status: "rejected" })),
         neverStore: vi.fn(() => ({ id: "memcand_1", status: "never_store" })),
+        listProvenance: vi.fn((options?: { key?: string }) => {
+          const rows = [
+            {
+              targetStore: "working",
+              key: "task-1",
+              value: "working entry",
+              candidateId: "memcand_shared",
+              source: "shared-source",
+              confidence: 0.9,
+              reason: "shared",
+              approvedAt: "2026-07-16T00:00:00.000Z",
+            },
+            {
+              targetStore: "working",
+              key: "__fbeast_agent_memory__/alpha/private-task",
+              value: {
+                __fbeastMemoryScope: "fbeast:agent-memory",
+                agentId: "alpha",
+                value: "alpha entry",
+              },
+              candidateId: "memcand_alpha",
+              source: "alpha-source",
+              confidence: 0.9,
+              reason: "alpha",
+              approvedAt: "2026-07-16T00:01:00.000Z",
+            },
+            {
+              targetStore: "working",
+              key: "__fbeast_agent_memory__/beta/private-task",
+              value: {
+                __fbeastMemoryScope: "fbeast:agent-memory",
+                agentId: "beta",
+                value: "beta entry",
+              },
+              candidateId: "memcand_beta",
+              source: "beta-source",
+              confidence: 0.9,
+              reason: "beta",
+              approvedAt: "2026-07-16T00:02:00.000Z",
+            },
+          ];
+          return options?.key === undefined
+            ? rows
+            : rows.filter((row) => row.key === options.key);
+        }),
+        conflictsFor: vi.fn(() => []),
+        resolveConflict: vi.fn(() => ({ id: "memcand_1", status: "approved" })),
       },
       flush: vi.fn(),
     };
@@ -445,6 +495,26 @@ describe("createBrainAdapter", () => {
 
     expect(sharedSections.flatMap((section) => section.entries).join("\n")).not.toContain("approved scoped value");
     expect(alphaSections.flatMap((section) => section.entries).join("\n")).toContain("approved-secret: approved scoped value");
+  });
+
+  it("filters memory attribution by read scope and redacts internal scoped keys", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+
+    const sharedAttribution = await brain.memoryAttribution({ readScope: "shared", limit: 10 });
+    const alphaAttribution = await brain.memoryAttribution({ readScope: "agent", agentId: "alpha", limit: 10 });
+    const alphaExactAttribution = await brain.memoryAttribution({ key: "private-task", readScope: "agent", agentId: "alpha", limit: 10 });
+
+    expect(sharedAttribution.map((row) => row.key)).toEqual(["task-1"]);
+    expect(sharedAttribution.map((row) => row.value)).not.toContain("alpha entry");
+    expect(alphaAttribution.map((row) => row.key)).toEqual(["task-1", "private-task"]);
+    expect(alphaAttribution.map((row) => row.value)).toEqual(["working entry", "alpha entry"]);
+    expect(alphaAttribution.map((row) => row.key).join("\n")).not.toContain("__fbeast_agent_memory__");
+    expect(alphaExactAttribution.map((row) => row.key)).toEqual(["private-task"]);
+    expect(mockBrain.memoryReview.listProvenance).toHaveBeenLastCalledWith({
+      key: "__fbeast_agent_memory__/alpha/private-task",
+      limit: 1000,
+    });
   });
 
   it("fails closed for unsupported memory review actions at the adapter boundary", async () => {

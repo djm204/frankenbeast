@@ -77,6 +77,26 @@ describe('GovernorAdapter', () => {
     expect(row.context).toBe('{}');
   });
 
+  it('redacts stripped proxy memory source attribution filters without hiding generic execute_tool payloads', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","source":"chat:turn-42 secret","readScope":"agent","agentId":"agent-1"}',
+    })).resolves.toMatchObject({ decision: 'approved' });
+    await expect(governor.check({
+      action: 'mcp__fbeast-proxy__execute_tool',
+      context: '{"key":"profile.delete-policy","value":"rm -rf /","source":"chat:turn-42 secret"}',
+    })).resolves.toMatchObject({ decision: 'denied' });
+
+    const db = new Database(dbPath);
+    const rows = db.prepare(`SELECT context FROM governor_log WHERE action = ? ORDER BY id ASC`).all('mcp__fbeast-proxy__execute_tool') as Array<{ context: string }>;
+    db.close();
+    expect(rows[0]?.context).toBe('{}');
+    expect(rows[1]?.context).toContain('profile.delete-policy');
+  });
+
   it('allows right-to-forget dryRun calls while keeping selector context redacted', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);

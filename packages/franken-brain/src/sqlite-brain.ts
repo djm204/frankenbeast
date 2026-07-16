@@ -1064,10 +1064,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
     this.sizes.set(key, size);
     this.serialized.set(key, serialized);
     this.totalBytes = newTotal;
-    this.clearWorkingMemoryProvenance(key);
     if (this.persistedSerialized.get(key) === serialized) {
       this.dirtyKeys.delete(key);
     } else {
+      this.clearWorkingMemoryProvenance(key);
       this.dirtyKeys.add(key);
     }
     this.deletedKeys.delete(key);

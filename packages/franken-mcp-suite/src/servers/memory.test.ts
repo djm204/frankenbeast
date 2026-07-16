@@ -507,6 +507,8 @@ describe("Memory Server", () => {
       key: "user.preference.response-style",
       source: "chat:",
       limit: "5",
+      readScope: "agent",
+      agentId: "agent-1",
     });
 
     expect(brain.memoryAttribution).toHaveBeenCalledWith({
@@ -514,6 +516,8 @@ describe("Memory Server", () => {
       key: "user.preference.response-style",
       source: "chat:",
       limit: 5,
+      readScope: "agent",
+      agentId: "agent-1",
     });
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({
       count: 1,
@@ -551,6 +555,12 @@ describe("Memory Server", () => {
     });
     expect(badLimit.isError).toBe(true);
     expect(badLimit.content[0]!.text).toContain("limit must be a positive integer");
+
+    const missingAgent = await server.callTool("fbeast_memory_source_attribution", {
+      readScope: "agent",
+    });
+    expect(missingAgent.isError).toBe(true);
+    expect(missingAgent.content[0]!.text).toContain("agentId is required");
     expect(brain.memoryAttribution).not.toHaveBeenCalled();
   });
 
