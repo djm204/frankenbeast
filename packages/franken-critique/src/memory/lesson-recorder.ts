@@ -1203,6 +1203,9 @@ function recategorizePostTaskPrivacyDecision(
 }
 
 function isRawUserPreferenceCorrection(text: string): boolean {
+  if (/^(?:i\s+prefer|i'd\s+prefer|my\s+preference\s+is|i\s+like|i\s+don'?t\s+want)\b/i.test(text)) {
+    return true;
+  }
   if (
     /^(?:please\s+)?(?:keep|avoid|do\s+not|don't|never|prefer)\b/i.test(
       text,
@@ -1241,9 +1244,17 @@ function hasExplicitPostTaskLessonSignal(text: string): boolean {
 }
 
 function isOneOffPostTaskProgress(text: string): boolean {
-  return /\b(?:updated|implemented|fixed|merged|reviewed|pushed|opened|addressed|completed)\b/i.test(
-    text,
-  ) && /\b(?:pr|pull\s+request|issue|ticket|task|commit|review)\b/i.test(text);
+  if (/^(?:updated|implemented|fixed|added|changed|refactored|wrote|created|removed|completed)\b/i.test(text)) {
+    return true;
+  }
+  return (
+    /\b(?:updated|implemented|fixed|merged|reviewed|pushed|opened|addressed|completed|blocked|failed)\b/i.test(
+      text,
+    ) &&
+    (/\b(?:pr|pull\s+request|issue|ticket|task|commit|review)\b/i.test(
+      text,
+    ) || ENVIRONMENT_FACT_PATTERNS.some((pattern) => pattern.test(text)))
+  );
 }
 
 interface PostTaskVerificationEvidenceItem {

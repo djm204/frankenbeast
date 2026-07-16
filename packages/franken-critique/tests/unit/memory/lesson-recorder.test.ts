@@ -413,6 +413,51 @@ describe('extractPostTaskLessonCandidates', () => {
       }),
     );
   });
+
+  it('discards repo-named issue state without progress verbs', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-repo-issue-state',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      notes: ['Frankenbeast PR #123 is blocked'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
+
+  it('classifies first-person preferences as memory lessons', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-first-person-preference',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      userCorrections: ['I prefer concise summaries'],
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        category: 'preference',
+        suggestedDestination: 'memory',
+      }),
+    );
+  });
+
+  it('discards implementation summaries with reusable verbs', () => {
+    const report = extractPostTaskLessonCandidates({
+      taskId: 'post-task-implementation-summary',
+      completedAt: '2026-07-16T00:00:00.000Z',
+      summary: 'Updated tests to verify the parser rejects bad input',
+    });
+
+    expect(report.candidates[0]).toEqual(
+      expect.objectContaining({
+        suggestedDestination: 'discard',
+        privacyFilter: expect.objectContaining({ action: 'reject' }),
+      }),
+    );
+  });
 });
 
 describe('LessonRecorder', () => {
