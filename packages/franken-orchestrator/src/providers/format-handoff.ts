@@ -181,7 +181,7 @@ export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateR
       guidance:
         'Add a section that makes blockers, owner, and the next action explicit.',
       requiredContentPatterns: [
-        /\b(blocker|blockers|blocked|risk|none)\b/i,
+        /(?:\b(blocker|blockers|blocked|risk|risks)\b|\b(?:no|none)\s+(?:blocker|blockers|risk|risks)\b|\b(?:blocker|blockers|risk|risks)\s*[:=-]?\s*(?:none|no)\b)/i,
         /\b(owner|assignee|responsible)\b/i,
         /\b(next action|next step|next steps|follow[- ]?up|continue)\b/i,
       ],
@@ -502,11 +502,12 @@ function sectionSatisfiesRequirement(
   section: MarkdownSection,
   requirement: AgentHandoffTemplateRequirement,
 ): boolean {
+  const contentWithoutChildHeadingLabels = stripChildHeadingLabels(section.content);
   const searchableContent = normalizeEvidence(
-    stripPlaceholderOnlyTemplateFields(section.content),
+    stripPlaceholderOnlyTemplateFields(contentWithoutChildHeadingLabels),
   );
   return (
-    hasSubstantiveTemplateGuidance(section.content) &&
+    hasSubstantiveTemplateGuidance(contentWithoutChildHeadingLabels) &&
     requirement.requiredContentPatterns.every((pattern) =>
       pattern.test(searchableContent),
     )
@@ -524,9 +525,11 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
     const line = lines[index] ?? '';
     const fence = /^\s*(`{3,}|~{3,})/.exec(line);
     if (fence) {
+      const activeSectionIndex =
+        openSectionIndexes[openSectionIndexes.length - 1] ?? -1;
       for (const sectionIndex of openSectionIndexes) {
         const section = sections[sectionIndex];
-        if (section && section.level > 1) {
+        if (section && (section.level > 1 || sectionIndex === activeSectionIndex)) {
           section.content.push(line);
         }
       }
@@ -604,9 +607,11 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
       continue;
     }
 
+    const activeSectionIndex =
+      openSectionIndexes[openSectionIndexes.length - 1] ?? -1;
     for (const sectionIndex of openSectionIndexes) {
       const section = sections[sectionIndex];
-      if (section && section.level > 1) {
+      if (section && (section.level > 1 || sectionIndex === activeSectionIndex)) {
         section.content.push(line);
       }
     }
@@ -620,16 +625,20 @@ function extractMarkdownSections(template: string): MarkdownSection[] {
 }
 
 function hasSubstantiveTemplateGuidance(content: string): boolean {
-  const contentWithoutChildHeadingLabels = content.replace(
-    new RegExp(`^${escapeRegExp(CHILD_HEADING_LABEL_PREFIX)}.*$`, 'gim'),
-    ' ',
-  );
+  const contentWithoutChildHeadingLabels = stripChildHeadingLabels(content);
   const normalized = normalizeEvidence(
     stripPlaceholderOnlyTemplateFields(contentWithoutChildHeadingLabels),
   );
   return (
     /[A-Za-z0-9]/.test(normalized) &&
     normalized.split(' ').some((token) => token.length >= 4)
+  );
+}
+
+function stripChildHeadingLabels(content: string): string {
+  return content.replace(
+    new RegExp(`^${escapeRegExp(CHILD_HEADING_LABEL_PREFIX)}.*$`, 'gim'),
+    ' ',
   );
 }
 
@@ -711,20 +720,43 @@ function stripPlaceholderOnlyTemplateFields(content: string): string {
   return stripped.join('\n');
 }
 
+function normalizeTemplateLabelKey(value: string): string {
+  return normalizeEvidence(
+    value
+      .replace(/^\s*[-*]\s*/, '')
+      .replace(/\[[ x-]\]/gi, ' ')
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\b(?:required|optional)\b/gi, ' ')
+      .replace(/[^A-Za-z0-9 /_:-]/g, ' ')
+      .replace(/[\/_:-]+/g, ' '),
+  ).toLowerCase();
+}
+
+function isKnownTemplateLabel(label: string): boolean {
+  return /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|completed work|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/.test(
+    normalizeTemplateLabelKey(label),
+  );
+}
+
+function isKnownTemplateLabelCombination(label: string): boolean {
+  const parts = normalizeEvidence(label)
+    .split(/\s*(?:,|\/|\band\b)\s*/i)
+    .map((part) => normalizeTemplateLabelKey(part))
+    .filter((part) => part.length > 0);
+  return parts.length > 1 && parts.every(isKnownTemplateLabel);
+}
+
 function isEmptyTemplateLabel(line: string): boolean {
   const normalizedLabel = line
     .replace(/\[[ x-]\]/gi, ' ')
     .replace(/\([^)]*\)/g, ' ')
     .replace(/\b(?:required|optional)\b/gi, ' ')
-    .replace(/[^A-Za-z0-9 /_:-]/g, ' ');
-  const normalizedLabelKey = normalizeEvidence(
-    normalizedLabel.replace(/[\/_-]+/g, ' '),
-  );
+    .replace(/[^A-Za-z0-9 ,/_:-]/g, ' ');
+  const normalizedLabelKey = normalizeTemplateLabelKey(normalizedLabel);
   return (
     /^\s*(?:[-*]\s*)?[A-Za-z0-9 /_-]+:\s*$/.test(normalizedLabel) ||
-    /^(?:issue(?: details)?|issue task|task|business goal|business objective|goal|objective|out of scope boundaries|boundary notes|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
-      normalizedLabelKey,
-    )
+    isKnownTemplateLabel(normalizedLabelKey) ||
+    isKnownTemplateLabelCombination(normalizedLabel)
   );
 }
 
@@ -811,15 +843,14 @@ function isEmptyTableRow(line: string): boolean {
   }
   const cells = line
     .split('|')
-    .map((cell) => normalizeEvidence(cell))
+    .map((cell) => normalizeTemplateLabelKey(cell))
     .filter((cell) => cell.length > 0);
   return (
     cells.length === 0 ||
     cells.every(
       (cell) =>
-        /^(?:issue|issue task|task|business goal|goal|out of scope boundaries|boundaries|status|current status|decisions|remaining work|command|commands|test command|test commands|outcome|result|owner|next action|artifact|artifacts|link|links|lesson|lessons)$/i.test(
-          cell,
-        ) ||
+        isKnownTemplateLabel(cell) ||
+        isKnownTemplateLabelCombination(cell) ||
         /^(?:tbd|todo|n\/?a|unknown|placeholder|please\s+fill\s+in|fill\s+in|to\s+be\s+decided|[-–—]+)$/i.test(
           cell,
         ),

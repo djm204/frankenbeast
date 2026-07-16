@@ -516,7 +516,7 @@ Record npm test passed or failed.
     const validation = validateAgentHandoffTemplate(
       completeTemplate.replace(
         'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
-        '### Issue/task\n#1775\n### Business goal\nImprove handoff onboarding.\n### Out-of-scope boundaries\nNo unrelated refactors.',
+        '### Issue/task\nIssue #1775\n### Business goal\nBusiness goal: improve handoff onboarding.\n### Out-of-scope boundaries\nOut-of-scope boundaries: no unrelated refactors.',
       ),
     );
 
@@ -918,6 +918,93 @@ ${completeTemplate}`);
     );
 
     expect(validation.valid).toBe(true);
+  });
+
+  it('rejects generic filler plus empty child headings as scope guidance', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        'Please complete this.\n\n### Issue/task\n### Business goal\n### Out-of-scope boundaries',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('accepts required sections written as populated H1 headings', () => {
+    const validation = validateAgentHandoffTemplate(`# Scope and objective
+Name issue #1775, business goal, and out-of-scope boundaries.
+
+# Current state and decisions
+Completed validation change; decisions are documented; remaining work is review.
+
+# Verification evidence
+Run npm test and record passed outcome.
+
+# Blockers and next action
+Blockers: none. Owner: PM. Next action: continue.
+
+# Artifacts and links
+PR #2331 and branch resolve/issue-1775 are artifact links.
+
+# Learning and reuse
+Lesson: codex review feedback is reusable.
+`);
+
+    expect(validation.valid).toBe(true);
+  });
+
+  it('requires none to appear in a blocker or risk context', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'State blockers, owner, exact next action, and when the receiving worker should stop.',
+        'Owner: none. Next action: continue.',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'blockers'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects table rows that repeat field labels as values', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.',
+        '| Field | Value |\n| --- | --- |\n| Issue/task | Issue/task |\n| Business goal | Business goal |\n| Out-of-scope boundaries | Out-of-scope boundaries |',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'scope'),
+    ).toMatchObject({ status: 'placeholder' });
+  });
+
+  it('rejects combined label-only skeleton lines', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate
+        .replace(
+          'Summarize completed work, current phase, key decisions, and remaining work.',
+          'Completed work, decisions, remaining work',
+        )
+        .replace(
+          'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+          'Test command / outcome',
+        ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(
+      validation.findings.find((finding) => finding.id === 'state'),
+    ).toMatchObject({ status: 'placeholder' });
+    expect(
+      validation.findings.find((finding) => finding.id === 'verification'),
+    ).toMatchObject({ status: 'placeholder' });
   });
 });
 
