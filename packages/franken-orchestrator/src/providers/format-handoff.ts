@@ -30,6 +30,34 @@ export interface PmHandoffQualityAssessment {
   readonly operatorGuidance: string;
 }
 
+export type AgentHandoffTemplateSectionId = 'scope' | 'state' | 'verification' | 'blockers' | 'artifacts' | 'learning';
+
+export type AgentHandoffTemplateFindingStatus = 'pass' | 'missing' | 'placeholder';
+
+export interface AgentHandoffTemplateRequirement {
+  readonly id: AgentHandoffTemplateSectionId;
+  readonly label: string;
+  readonly headingPatterns: readonly RegExp[];
+  readonly guidance: string;
+}
+
+export interface AgentHandoffTemplateFinding {
+  readonly id: AgentHandoffTemplateSectionId;
+  readonly label: string;
+  readonly status: AgentHandoffTemplateFindingStatus;
+  readonly guidance: string;
+  readonly matchedHeading?: string;
+}
+
+export interface AgentHandoffTemplateValidation {
+  readonly valid: boolean;
+  readonly passed: number;
+  readonly total: number;
+  readonly missingSections: readonly AgentHandoffTemplateSectionId[];
+  readonly findings: readonly AgentHandoffTemplateFinding[];
+  readonly operatorGuidance: string;
+}
+
 interface HandoffEvidenceEntry {
   readonly searchable: string;
   readonly display: string;
@@ -80,6 +108,45 @@ export const PM_HANDOFF_QUALITY_RUBRIC: readonly PmHandoffRubricCriterion[] = [
     label: 'Learning and reuse',
     guidance: 'Capture reusable lessons, retrospective notes, Codex/CI feedback, or promotion/retirement rationale without one-off noise.',
     evidencePatterns: [/\b(lesson|learning|retrospective|retro|rubric|codex|ci feedback|reuse|promot(?:e|ion)|retir(?:e|ement))\b/i],
+  },
+];
+
+export const AGENT_HANDOFF_TEMPLATE_REQUIREMENTS: readonly AgentHandoffTemplateRequirement[] = [
+  {
+    id: 'scope',
+    label: 'Scope and objective',
+    headingPatterns: [/\bscope\b/i, /\bobjective\b/i, /\bgoal\b/i],
+    guidance: 'Add a section that names the issue/task, business goal, and out-of-scope boundaries.',
+  },
+  {
+    id: 'state',
+    label: 'Current state and decisions',
+    headingPatterns: [/\bcurrent state\b/i, /\bstatus\b/i, /\bdecisions?\b/i],
+    guidance: 'Add a section for completed work, current phase, key decisions, and remaining work.',
+  },
+  {
+    id: 'verification',
+    label: 'Verification evidence',
+    headingPatterns: [/\bverification\b/i, /\btests?\b/i, /\bvalidation\b/i],
+    guidance: 'Add a section for deterministic test, lint, build, or verifier commands and outcomes.',
+  },
+  {
+    id: 'blockers',
+    label: 'Blockers and next action',
+    headingPatterns: [/\bblockers?\b/i, /\bnext action\b/i, /\bnext steps?\b/i],
+    guidance: 'Add a section that makes blockers, owner, and the next action explicit.',
+  },
+  {
+    id: 'artifacts',
+    label: 'Artifacts and links',
+    headingPatterns: [/\bartifacts?\b/i, /\blinks?\b/i, /\bbranches?\b/i, /\bpull requests?\b/i],
+    guidance: 'Add a section for concrete artifacts such as branch, PR, worktree, docs, or telemetry links.',
+  },
+  {
+    id: 'learning',
+    label: 'Learning and reuse',
+    headingPatterns: [/\blearnings?\b/i, /\blessons?\b/i, /\bretrospective\b/i, /\breuse\b/i],
+    guidance: 'Add a section for durable lessons, review feedback, and reusable follow-up guidance.',
   },
 ];
 
@@ -175,6 +242,62 @@ export function assessPmHandoffQuality(
   };
 }
 
+/**
+ * Validate a markdown handoff template before it is promoted to PM/worker use.
+ * The validator checks for the same durable handoff dimensions as the runtime
+ * rubric while keeping output structured for liveness/onboarding tooling.
+ */
+export function validateAgentHandoffTemplate(
+  template: string,
+): AgentHandoffTemplateValidation {
+  const sections = extractMarkdownSections(template);
+  const findings = AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.map((requirement) => {
+    const section = sections.find((candidate) =>
+      requirement.headingPatterns.some((pattern) => pattern.test(candidate.heading)),
+    );
+    if (!section) {
+      return {
+        id: requirement.id,
+        label: requirement.label,
+        status: 'missing',
+        guidance: requirement.guidance,
+      } satisfies AgentHandoffTemplateFinding;
+    }
+    if (!hasSubstantiveTemplateGuidance(section.content)) {
+      return {
+        id: requirement.id,
+        label: requirement.label,
+        status: 'placeholder',
+        guidance: `${requirement.guidance} The section exists but only contains placeholders or empty guidance.`,
+        matchedHeading: section.heading,
+      } satisfies AgentHandoffTemplateFinding;
+    }
+    return {
+      id: requirement.id,
+      label: requirement.label,
+      status: 'pass',
+      guidance: requirement.guidance,
+      matchedHeading: section.heading,
+    } satisfies AgentHandoffTemplateFinding;
+  });
+  const passed = findings.filter((finding) => finding.status === 'pass').length;
+  const missingSections = findings
+    .filter((finding) => finding.status !== 'pass')
+    .map((finding) => finding.id);
+  const valid = missingSections.length === 0;
+
+  return {
+    valid,
+    passed,
+    total: AGENT_HANDOFF_TEMPLATE_REQUIREMENTS.length,
+    missingSections,
+    findings,
+    operatorGuidance: valid
+      ? 'Agent handoff template includes actionable guidance for every required section.'
+      : `Agent handoff template is missing or underspecifies: ${missingSections.join(', ')}.`,
+  };
+}
+
 function criterionPasses(
   criterion: PmHandoffRubricCriterion,
   evidenceCorpus: readonly HandoffEvidenceEntry[],
@@ -206,7 +329,7 @@ export function formatHandoff(snapshot: BrainSnapshot): string {
     '',
     `Recent events (${snapshot.episodic.length}):`,
     ...snapshot.episodic.slice(-10).map(
-      (e) => `  [${e.type}] ${e.summary}`,
+      (event: EpisodicEvent) => `  [${event.type}] ${event.summary}`,
     ),
     '',
     formatPmHandoffQualityRubric(assessPmHandoffQuality(snapshot)),
@@ -266,6 +389,38 @@ function buildHandoffEvidenceCorpus(
   }
 
   return entries;
+}
+
+function extractMarkdownSections(template: string): Array<{ heading: string; content: string }> {
+  const sections: Array<{ heading: string; content: string[] }> = [];
+  let current: { heading: string; content: string[] } | null = null;
+  for (const line of template.split(/\r?\n/)) {
+    const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      current = { heading: normalizeEvidence(heading[1] ?? ''), content: [] };
+      sections.push(current);
+      continue;
+    }
+    current?.content.push(line);
+  }
+  return sections.map((section) => ({
+    heading: section.heading,
+    content: section.content.join('\n'),
+  }));
+}
+
+function hasSubstantiveTemplateGuidance(content: string): boolean {
+  const withoutFences = content.replace(/```[\s\S]*?```/g, ' ');
+  const normalized = normalizeEvidence(
+    withoutFences
+      .replace(/`[^`]*`/g, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/[{}]/g, ' ')
+      .replace(/\b(?:tbd|todo|n\/?a|none|unknown|placeholder|fill in|to be decided)\b/gi, ' ')
+      .replace(/[_.-]{2,}/g, ' '),
+  );
+  return /[A-Za-z0-9]/.test(normalized) && normalized.split(' ').some((token) => token.length >= 4);
 }
 
 function formatWorkingEvidence(

@@ -4,6 +4,7 @@ import {
   assessPmHandoffQuality,
   formatHandoff,
   truncateSnapshot,
+  validateAgentHandoffTemplate,
 } from '../../../src/providers/format-handoff.js';
 
 function makeSnapshot(overrides: Partial<BrainSnapshot> = {}): BrainSnapshot {
@@ -251,6 +252,69 @@ describe('assessPmHandoffQuality', () => {
     expect(checkpointEvidence).toBeTruthy();
     expect(checkpointEvidence!.length).toBeLessThan(360);
     expect(checkpointEvidence).toContain('…');
+  });
+});
+
+describe('validateAgentHandoffTemplate', () => {
+  const completeTemplate = `# Agent handoff
+
+## Scope and objective
+Name the issue, business goal, and out-of-scope boundaries so the next worker does not rediscover intent.
+
+## Current state and decisions
+Summarize completed work, current phase, key decisions, and remaining work.
+
+## Verification evidence
+List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.
+
+## Blockers and next action
+State blockers, owner, exact next action, and when the receiving worker should stop.
+
+## Artifacts and links
+Point to branch, PR, worktree, diff, docs, telemetry, or other concrete artifacts.
+
+## Learning and reuse
+Capture durable lessons, Codex or CI feedback, and reusable notes for future handoffs.
+`;
+
+  it('accepts a complete markdown handoff template with actionable guidance', () => {
+    const validation = validateAgentHandoffTemplate(completeTemplate);
+
+    expect(validation.valid).toBe(true);
+    expect(validation.passed).toBe(6);
+    expect(validation.missingSections).toEqual([]);
+    expect(validation.findings.every((finding) => finding.status === 'pass')).toBe(true);
+    expect(validation.operatorGuidance).toContain('every required section');
+  });
+
+  it('returns structured missing-section findings for incomplete templates', () => {
+    const validation = validateAgentHandoffTemplate(`## Scope
+Describe the issue and goal.
+
+## Verification
+Record npm test passed or failed.
+`);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.missingSections).toEqual(['state', 'blockers', 'artifacts', 'learning']);
+    expect(validation.findings.find((finding) => finding.id === 'state')?.status).toBe('missing');
+    expect(validation.operatorGuidance).toContain('state, blockers, artifacts, learning');
+  });
+
+  it('flags placeholder-only sections as explicit failures', () => {
+    const validation = validateAgentHandoffTemplate(
+      completeTemplate.replace(
+        'List deterministic commands such as tests, lint, typecheck, or build plus their pass/fail outcomes.',
+        '<TBD>',
+      ),
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(validation.missingSections).toContain('verification');
+    expect(validation.findings.find((finding) => finding.id === 'verification')).toMatchObject({
+      status: 'placeholder',
+      matchedHeading: 'Verification evidence',
+    });
   });
 });
 

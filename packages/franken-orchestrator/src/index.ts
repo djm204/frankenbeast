@@ -141,9 +141,11 @@ export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from
 // LLM helpers
 export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
 export {
+  AGENT_HANDOFF_TEMPLATE_REQUIREMENTS,
   PM_HANDOFF_QUALITY_RUBRIC,
   assessPmHandoffQuality,
   formatHandoff,
+  validateAgentHandoffTemplate,
 } from './providers/format-handoff.js';
 export {
   createModelProviderFailoverAuditPayload,
@@ -155,6 +157,11 @@ export type {
   ProviderSwitchEvent,
 } from './providers/provider-registry.js';
 export type {
+  AgentHandoffTemplateFinding,
+  AgentHandoffTemplateFindingStatus,
+  AgentHandoffTemplateRequirement,
+  AgentHandoffTemplateSectionId,
+  AgentHandoffTemplateValidation,
   PmHandoffQualityAssessment,
   PmHandoffRubricCriterion,
   PmHandoffRubricResult,

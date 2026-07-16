@@ -115,6 +115,21 @@ Use this path when you are new to Frankenbeast or when an agent handoff says "re
 
 Edge case: many older diagrams and `docs/plans/` files describe target or historical architecture. Do not start with `docs/plans/` when onboarding, and do not treat a plan diagram as live behavior until you verify it against the current package inventory in `docs/RAMP_UP.md` and `docs/ARCHITECTURE.md`.
 
+## Agent handoff template validator
+
+Use `validateAgentHandoffTemplate(markdown)` from `@franken/orchestrator` before promoting a PM, worker, or liveness handoff template into onboarding material. The validator returns structured output with `valid`, `passed`, `total`, `missingSections`, `findings`, and `operatorGuidance` so automation can block ambiguous templates instead of relying on prose review.
+
+A valid template needs actionable markdown sections for:
+
+- Scope and objective, including the issue/task, business goal, and out-of-scope boundaries.
+- Current state and decisions, including completed work, phase, decisions, and remaining work.
+- Verification evidence, including deterministic test/lint/typecheck/build commands and outcomes.
+- Blockers and next action, including blocker state, owner, and the exact next step.
+- Artifacts and links, including branch, PR, worktree, diff, docs, telemetry, or other inspectable records.
+- Learning and reuse, including durable lessons, Codex/CI feedback, and reusable handoff notes.
+
+Placeholder-only sections such as `<TBD>`, `TODO`, `N/A`, or empty headings fail explicitly with a `placeholder` finding. Missing headings fail with `missing`, and `operatorGuidance` names the sections to repair before the template is used in an agent handoff.
+
 ## Run UI
 
 ### Dashboard chat against the local backend
