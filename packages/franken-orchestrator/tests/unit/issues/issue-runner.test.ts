@@ -1368,7 +1368,7 @@ describe('IssueRunner', () => {
 
     it('preserves shared-checkpoint completions before evaluating backpressure or blocker deferral', async () => {
       const logger = mockLogger();
-      const checkpoint = mockCheckpoint(new Set(['impl:01_issue-15:done', 'harden:01_issue-15:done']));
+      const checkpoint = mockCheckpoint(new Set(['impl:issue-15:done', 'harden:issue-15:done']));
       const signals = vi.fn(() => ({
         activeProcesses: 1,
         failedStarts: 0,

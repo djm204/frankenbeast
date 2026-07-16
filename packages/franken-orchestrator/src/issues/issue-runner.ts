@@ -1292,7 +1292,6 @@ export class IssueRunner {
 
     if (
       schedulingScore.blockerStatus !== 'eligible'
-      && checkpointedPlanChunkPaths.length === 0
       && checkpointEntriesAreCompleteWithoutPlan(
         checkpointEntries,
         issue.number,
