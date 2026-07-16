@@ -109,7 +109,7 @@ packages/franken-orchestrator/src/
   - `--search <query>` GitHub search syntax (e.g. `"label:bug label:high"`)
   - `--milestone <name>` filter by milestone
   - `--assignee <user>` filter by assignee
-  - `--limit <n>` max issues to fetch (default: 30)
+  - `--limit <n>` max issues to fetch (default: 1000)
   - `--repo <owner/repo>` target repository (auto-inferred from `gh repo view` if omitted)
   - `--target-upstream` derive the canonical target repository from the checkout's GitHub `upstream` remote; mutually exclusive with `--repo`
   - `--dry-run` preview triage without executing

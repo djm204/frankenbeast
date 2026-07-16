@@ -1,4 +1,5 @@
 import type { GithubIssue, TriageResult } from './types.js';
+import { evaluateIssueSchedulingScore, type IssueSchedulingScore } from './issue-runner.js';
 
 /** IO abstraction for user interaction during review. */
 export interface ReviewIO {
@@ -17,14 +18,6 @@ export interface IssueReviewOptions {
   readonly dryRun?: boolean | undefined;
 }
 
-const SEVERITY_LEVELS = ['critical', 'high', 'medium', 'low'] as const;
-const SEVERITY_RANK: Record<string, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-};
-const UNLABELLED_RANK = 4;
 const TITLE_MAX = 50;
 const DECIMAL_ISSUE_NUMBER = /^[1-9]\d*$/;
 
@@ -32,7 +25,7 @@ interface ReviewEntry {
   readonly issue: GithubIssue;
   readonly triage: TriageResult;
   readonly severity: string;
-  readonly severityRank: number;
+  readonly schedulingScore: IssueSchedulingScore;
 }
 
 export class IssueReview {
@@ -88,26 +81,18 @@ export class IssueReview {
     for (const t of triage) {
       const issue = issueMap.get(t.issueNumber);
       if (!issue) continue;
-      const severity = this.extractSeverity(issue.labels);
-      const rank = severity !== '-' ? (SEVERITY_RANK[severity] ?? UNLABELLED_RANK) : UNLABELLED_RANK;
-      entries.push({ issue, triage: t, severity, severityRank: rank });
+      const schedulingScore = evaluateIssueSchedulingScore(issue);
+      const severity = schedulingScore.priority === 'unprioritized' ? '-' : schedulingScore.priority;
+      entries.push({ issue, triage: t, severity, schedulingScore });
     }
     entries.sort((a, b) => {
-      if (a.severityRank !== b.severityRank) return a.severityRank - b.severityRank;
+      if (a.schedulingScore.score !== b.schedulingScore.score) return a.schedulingScore.score - b.schedulingScore.score;
+      if (a.schedulingScore.ageDays !== b.schedulingScore.ageDays) return b.schedulingScore.ageDays - a.schedulingScore.ageDays;
       return a.issue.number - b.issue.number;
     });
     return entries;
   }
 
-  private extractSeverity(labels: readonly string[]): string {
-    for (const label of labels) {
-      const lower = label.toLowerCase();
-      if ((SEVERITY_LEVELS as readonly string[]).includes(lower)) {
-        return lower;
-      }
-    }
-    return '-';
-  }
 
   private truncateTitle(title: string): string {
     if (title.length <= TITLE_MAX) return title;
@@ -127,6 +112,14 @@ export class IssueReview {
       10,
       ...entries.map((e) => e.triage.complexity.length),
     );
+    const effWidth = Math.max(
+      9,
+      ...entries.map((e) => `${e.schedulingScore.priority}->${e.schedulingScore.effectivePriorityRank}`.length),
+    );
+    const blockerWidth = Math.max(
+      7,
+      ...entries.map((e) => e.schedulingScore.blockerStatus.length),
+    );
 
     const header =
       '#'.padStart(numWidth) +
@@ -134,6 +127,12 @@ export class IssueReview {
       'Title'.padEnd(TITLE_MAX) +
       '  ' +
       'Severity'.padEnd(sevWidth) +
+      '  ' +
+      'Effective'.padEnd(effWidth) +
+      '  ' +
+      'Age(d)'.padEnd(6) +
+      '  ' +
+      'Blocker'.padEnd(blockerWidth) +
       '  ' +
       'Complexity'.padEnd(cplxWidth) +
       '  ' +
@@ -151,6 +150,12 @@ export class IssueReview {
         this.truncateTitle(entry.issue.title).padEnd(TITLE_MAX) +
         '  ' +
         entry.severity.padEnd(sevWidth) +
+        '  ' +
+        `${entry.schedulingScore.priority}->${entry.schedulingScore.effectivePriorityRank}`.padEnd(effWidth) +
+        '  ' +
+        String(entry.schedulingScore.ageDays).padEnd(6) +
+        '  ' +
+        entry.schedulingScore.blockerStatus.padEnd(blockerWidth) +
         '  ' +
         entry.triage.complexity.padEnd(cplxWidth) +
         '  ' +

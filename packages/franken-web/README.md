@@ -125,6 +125,12 @@ Path-style fields entered in the dashboard are normalized client-side before sub
 
 Execution controls (`start`, `stop`, `restart`, `kill`) still target Beast runs after a tracked agent has dispatched.
 
+### Read-only degraded mode
+
+When Beast daemon health detects dependency read failures, or when an operator manually enters degraded mode with `POST /v1/beasts/availability/degraded`, the daemon reports `status: "degraded"` and an `availability` object from `/health`. Read-only diagnostics such as `/health`, `/v1/beasts/catalog`, `/v1/beasts/runs`, `/v1/beasts/agents`, run events/logs, dashboard snapshots, and SSE tickets remain available so operators can inspect state during partial outages.
+
+Mutating Beast control routes fail closed with `503 READ_ONLY_DEGRADED_MODE` and structured details that include the degraded-mode reason/source. Operators can leave manual degraded mode with `DELETE /v1/beasts/availability/degraded` after the dependency outage is resolved.
+
 ## Environment Variables
 
 Preferred: set shared local values in the repo root `.env` so the backend and the Vite dev proxy can read the same server-side token. Do not define a `VITE_*` operator token; Vite exposes `VITE_*` values to browser code.

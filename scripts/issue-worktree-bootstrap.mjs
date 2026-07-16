@@ -3,6 +3,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+import { verifyExternalHelperInvocation } from './lib/external-helper-allowlist.mjs';
+
+const THIS_HELPER = fileURLToPath(import.meta.url);
 
 const DEFAULT_REPO = 'djm204/frankenbeast';
 const DEFAULT_REMOTE = 'origin';
@@ -103,7 +108,13 @@ function formatCommand(command) {
   return command.map((arg) => quote(String(arg))).join(' ');
 }
 
-function runCommand(command, cwd) {
+async function runCommand(command, cwd) {
+  await verifyExternalHelperInvocation({
+    helperId: 'issue-worktree-bootstrap',
+    helperPath: THIS_HELPER,
+    command,
+    repoRoot: cwd,
+  });
   const result = spawnSync(command[0], command.slice(1), { cwd, encoding: 'utf8' });
   if (result.status !== 0) {
     const detail = (result.stderr || result.stdout || '').trim();
@@ -119,9 +130,9 @@ export function findConflictingIssuePrs(plan, openPrs) {
     : openPrs;
 }
 
-function assertNoDuplicateIssueWork(plan) {
+async function assertNoDuplicateIssueWork(plan) {
   const [openPrCommand, branchCommand] = plan.commands.duplicateChecks;
-  const openPrOutput = runCommand(openPrCommand, process.cwd());
+  const openPrOutput = await runCommand(openPrCommand, process.cwd());
   const openPrs = JSON.parse(openPrOutput || '[]');
   const conflictingPrs = findConflictingIssuePrs(plan, openPrs);
   if (conflictingPrs.length > 0) {
@@ -131,7 +142,7 @@ function assertNoDuplicateIssueWork(plan) {
     throw new Error(`Issue #${plan.issue} already appears in an open PR: ${summary}`);
   }
 
-  const existingBranches = runCommand(branchCommand, process.cwd());
+  const existingBranches = await runCommand(branchCommand, process.cwd());
   if (existingBranches && !plan.reuse) {
     throw new Error(`Branch already exists for issue #${plan.issue}: ${plan.branch}. Use --reuse to attach a worktree to it.`);
   }
@@ -190,7 +201,7 @@ function usage() {
   return `Usage: node scripts/issue-worktree-bootstrap.mjs --issue <number> --title <issue title> [options]\n\nCreates a deterministic issue branch/worktree for one-issue/one-PR workers.\n\nOptions:\n  --dry-run               Print planned commands without executing them.\n  --json                  Print structured JSON instead of human text.\n  --repo OWNER/REPO       Repository used for duplicate-PR checks (default: ${DEFAULT_REPO}).\n  --branch NAME           Override generated branch name.\n  --base REF              Base ref for new worktrees (default: <remote>/${DEFAULT_BASE_BRANCH}).\n  --remote NAME           Git remote to fetch (default: ${DEFAULT_REMOTE}).\n  --worktree-root PATH    Directory that receives issue-<number> (default: ${DEFAULT_WORKTREE_ROOT}).\n  --reuse                 Add a worktree for an existing local branch instead of creating a branch.\n  -h, --help              Show this help.\n`;
 }
 
-function main() {
+async function main() {
   try {
     const options = parseArgs(process.argv.slice(2));
     if (options.help) {
@@ -215,10 +226,10 @@ function main() {
     }
     mkdirSync(resolve(plan.worktreePath, '..'), { recursive: true });
 
-    for (const command of plan.commands.preflight) runCommand(command, process.cwd());
-    assertNoDuplicateIssueWork(plan);
-    for (const command of plan.commands.create) runCommand(command, process.cwd());
-    for (const command of plan.commands.verify) runCommand(command, process.cwd());
+    for (const command of plan.commands.preflight) await runCommand(command, process.cwd());
+    await assertNoDuplicateIssueWork(plan);
+    for (const command of plan.commands.create) await runCommand(command, process.cwd());
+    for (const command of plan.commands.verify) await runCommand(command, process.cwd());
     if (options.json) {
       console.log(JSON.stringify({ status: 'ready', dryRun: false, ...plan }, null, 2));
     } else {
@@ -232,5 +243,5 @@ function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
+  await main();
 }

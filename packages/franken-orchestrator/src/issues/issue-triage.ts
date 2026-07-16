@@ -11,6 +11,7 @@ type CacheAwareCompleteFn = (prompt: string, hint?: {
 
 const VALID_COMPLEXITIES = new Set<string>(['one-shot', 'chunked']);
 const MAX_BODY_LENGTH = 2000;
+const DEFAULT_TRIAGE_BATCH_SIZE = 50;
 
 export class IssueTriage implements IIssueTriage {
   private readonly complete: CacheAwareCompleteFn;
@@ -20,13 +21,22 @@ export class IssueTriage implements IIssueTriage {
   }
 
   async triage(issues: GithubIssue[]): Promise<TriageResult[]> {
+    const results: TriageResult[] = [];
+    for (let start = 0; start < issues.length; start += DEFAULT_TRIAGE_BATCH_SIZE) {
+      const batch = issues.slice(start, start + DEFAULT_TRIAGE_BATCH_SIZE);
+      results.push(...await this.triageBatch(batch, start / DEFAULT_TRIAGE_BATCH_SIZE));
+    }
+    return results.sort((a, b) => a.issueNumber - b.issueNumber);
+  }
+
+  private async triageBatch(issues: GithubIssue[], batchIndex: number): Promise<TriageResult[]> {
     const prompt = this.buildPrompt(issues);
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const raw = await this.complete(prompt, {
         operation: 'issue-triage',
-        workId: `issues:${issues.map((issue) => issue.number).sort((a, b) => a - b).join('-')}`,
+        workId: `issues:${issues.map((issue) => issue.number).sort((a, b) => a - b).join('-')}:batch-${batchIndex + 1}`,
         stablePrefix: 'surface:issues:triage',
         workPrefix: issues.map((issue) => `#${issue.number}:${issue.title}`).join('\n'),
       });

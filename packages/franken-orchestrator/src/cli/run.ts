@@ -857,6 +857,9 @@ async function getBeastsDaemonEndpointState(baseUrl: string, expected: { root: s
     if (response.ok && record.ok === true) {
       return 'attachable';
     }
+    if (response.status === 503 && record.status === 'degraded' && record.ok === false) {
+      return 'attachable';
+    }
     if (response.status === 503 && record.status === 'draining' && record.ok === false) {
       return 'draining';
     }
