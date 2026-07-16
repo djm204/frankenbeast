@@ -715,7 +715,16 @@ function explicitProcessCrash(snapshot: IssueWorkerCardProcessSnapshot): boolean
   const status = snapshot.status?.trim().toLowerCase() ?? '';
   const waitingOn = snapshot.waitingOn?.toLowerCase() ?? '';
   if (/crash|exit|dead|pid|process|fail/.test(waitingOn)) return true;
-  return snapshot.alive === false && /crash|exit|fail/.test(status);
+  return /crash|exit|fail/.test(status);
+}
+
+function redactStuckRunEvidenceText(value: string): string {
+  return value
+    .replace(/\b(gh[opsu]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, '[REDACTED_TOKEN]')
+    .replace(/\b(sk|xox[baprs]?|hf|glpat)-[A-Za-z0-9._/-]+\b/g, '$1-[REDACTED]')
+    .replace(/\b([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\.([A-Za-z0-9_-]{20,})\b/g, '[REDACTED_JWT]')
+    .replace(/\b((?:approval|session|access|refresh|api)[-_ ]?token)\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
+    .replace(/\b(token)\s*[:=]\s*\S+/gi, '$1=[REDACTED]');
 }
 
 function normalizeStuckRunBlockerCategory(
@@ -726,7 +735,7 @@ function normalizeStuckRunBlockerCategory(
   if (/provider|codex|rate limit|quota|llm|model/.test(text)) return 'provider-wait';
   if (/\bapproval\b|\bhitl\b|\bhuman\b|approval[- ]?token|pending approval|operator approval|approval-cop|approve/.test(text)) return 'approval-gate';
   if (/\bci\b|ci[- ]?check|status check|check run|workflow|merge queue|github actions?/.test(text)) return 'ci-wait';
-  if (/crash|exit|dead|pid|process/.test(text) || snapshot.alive === false) return 'process-crash';
+  if (/crash|exit|dead|pid|process|fail/.test(text) || snapshot.alive === false) return 'process-crash';
   if (/dispatcher|kanban|current_run|current run|respawn|heartbeat/.test(text)) return 'dispatcher-bug';
   return 'unknown';
 }
@@ -777,7 +786,8 @@ export function detectStuckRunWatchdogFindings(
   const findings: IssueStuckRunWatchdogFinding[] = [];
 
   for (const snapshot of snapshots) {
-    if (!snapshot.cardId.trim() || !Number.isSafeInteger(snapshot.pid) || snapshot.pid <= 0) continue;
+    if (!snapshot.cardId.trim()) continue;
+    const hasPositivePid = Number.isSafeInteger(snapshot.pid) && snapshot.pid > 0;
     const status = snapshot.status?.trim().toLowerCase();
     if (status && TERMINAL_WORKER_CARD_STATUSES.has(status) && !explicitProcessCrash(snapshot)) continue;
 
@@ -791,15 +801,18 @@ export function detectStuckRunWatchdogFindings(
     const toolStale = stale(toolActivityAgeMs, staleToolActivityMs);
     const stateStale = stale(stateTransitionAgeMs, staleStateTransitionMs);
     const staleCount = [heartbeatStale, outputStale, toolStale, stateStale].filter(Boolean).length;
-    const optionalActivitySignalsProvided = outputAgeMs !== undefined || toolActivityAgeMs !== undefined;
-    const minimumStaleSignals = optionalActivitySignalsProvided ? 3 : 2;
+    const providedActivitySignalCount = [
+      heartbeatAgeMs,
+      outputAgeMs,
+      toolActivityAgeMs,
+      stateTransitionAgeMs,
+    ].filter((age) => age !== undefined).length;
+    const minimumStaleSignals = Math.max(2, Math.min(3, providedActivitySignalCount));
     const freshLongRunningWaitActivity = [heartbeatAgeMs, outputAgeMs, toolActivityAgeMs, stateTransitionAgeMs]
       .some((age) => age !== undefined && age < longRunningWaitGraceMs);
-    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false
+    const processStatus: IssueStuckRunWatchdogFinding['processStatus'] = snapshot.alive === false || !hasPositivePid
       ? 'dead'
-      : snapshot.alive === true
-        ? 'alive'
-        : 'unknown';
+      : 'alive';
 
     if (
       knownLongRunningWait(category)
@@ -820,7 +833,7 @@ export function detectStuckRunWatchdogFindings(
       `kanbanState=${status ?? 'unknown'}`,
       `blockerCategory=${category}`,
     ];
-    if (snapshot.waitingOn) evidence.push(`waitingOn=${snapshot.waitingOn}`);
+    if (snapshot.waitingOn) evidence.push(`waitingOn=${redactStuckRunEvidenceText(snapshot.waitingOn)}`);
 
     const recommendedAction = remediationForStuckRun(category, processStatus);
     const confidence = confidenceForStuckRun(category, staleCount, processStatus);

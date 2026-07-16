@@ -716,6 +716,26 @@ describe('stuck-run watchdog', () => {
     });
   });
 
+  it('reports terminal crash statuses even when liveness probes are omitted', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_crashed_without_probe',
+        pid: 7407,
+        status: 'failed',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_crashed_without_probe',
+      blockerCategory: 'process-crash',
+      confidence: 'medium',
+      processStatus: 'alive',
+      kanbanState: 'failed',
+    });
+  });
+
   it('reports stale heartbeat snapshots even when optional activity timestamps are absent', () => {
     const findings = detectStuckRunWatchdogFindings([
       {
@@ -736,6 +756,66 @@ describe('stuck-run watchdog', () => {
       stateTransitionAgeMs: 16_200_000,
       processStatus: 'alive',
     });
+  });
+
+  it('reports partial stale snapshots when all provided activity signals are stale', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_heartbeat_output_only',
+        pid: 7408,
+        status: 'running',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:05:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_heartbeat_output_only',
+      blockerCategory: 'unknown',
+      confidence: 'low',
+      heartbeatAgeMs: 14_400_000,
+      outputAgeMs: 14_100_000,
+      processStatus: 'alive',
+    });
+  });
+
+  it('keeps stale cards visible when the PID is missing or unreadable', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_missing_pid',
+        pid: 0,
+        status: 'running',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0]).toMatchObject({
+      cardId: 't_missing_pid',
+      pid: 0,
+      processStatus: 'dead',
+      confidence: 'high',
+    });
+  });
+
+  it('redacts token-like values from waitingOn evidence', () => {
+    const findings = detectStuckRunWatchdogFindings([
+      {
+        cardId: 't_secret_wait',
+        pid: 7411,
+        status: 'running',
+        alive: true,
+        waitingOn: 'approval token=ghp_abcdEFGHijklMNOPqrstUVWX1234567890 and api token: sk-testsecretvalue123',
+        lastHeartbeatAt: '2026-07-16T08:00:00.000Z',
+        lastOutputAt: '2026-07-16T08:00:00.000Z',
+        lastToolActivityAt: '2026-07-16T08:00:00.000Z',
+        lastStateTransitionAt: '2026-07-16T08:00:00.000Z',
+      },
+    ], { nowMs });
+
+    expect(findings[0].evidence).toContain('waitingOn=approval token=[REDACTED] and api token=[REDACTED]');
+    expect(findings[0].evidence.join('\n')).not.toContain('ghp_abcd');
+    expect(findings[0].evidence.join('\n')).not.toContain('sk-testsecretvalue123');
   });
 
   it('keeps provider token and checkpoint text out of approval and CI buckets', () => {
