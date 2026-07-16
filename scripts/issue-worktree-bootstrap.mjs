@@ -60,6 +60,7 @@ export function buildIssueWorktreePlan(options) {
   const preflight = [
     ['git', 'rev-parse', '--is-inside-work-tree'],
     ['git', 'fetch', remote, base.replace(new RegExp(`^${remote}/`, 'u'), '')],
+    ['git', 'fetch', remote, `+refs/heads/*:refs/remotes/${remote}/*`],
   ];
   const duplicateChecks = [
     ['gh', 'pr', 'list', '--repo', repo, '--state', 'open', '--search', `${issue} in:body`, '--json', 'number,title,headRefName,url'],
@@ -111,12 +112,20 @@ function runCommand(command, cwd) {
   return result.stdout.trim();
 }
 
+export function findConflictingIssuePrs(plan, openPrs) {
+  if (!Array.isArray(openPrs)) return [];
+  return plan.reuse
+    ? openPrs.filter((pr) => pr.headRefName !== plan.branch)
+    : openPrs;
+}
+
 function assertNoDuplicateIssueWork(plan) {
   const [openPrCommand, branchCommand] = plan.commands.duplicateChecks;
   const openPrOutput = runCommand(openPrCommand, process.cwd());
   const openPrs = JSON.parse(openPrOutput || '[]');
-  if (Array.isArray(openPrs) && openPrs.length > 0) {
-    const summary = openPrs
+  const conflictingPrs = findConflictingIssuePrs(plan, openPrs);
+  if (conflictingPrs.length > 0) {
+    const summary = conflictingPrs
       .map((pr) => `#${pr.number ?? '?'} ${pr.headRefName ?? ''} ${pr.url ?? ''}`.trim())
       .join('; ');
     throw new Error(`Issue #${plan.issue} already appears in an open PR: ${summary}`);

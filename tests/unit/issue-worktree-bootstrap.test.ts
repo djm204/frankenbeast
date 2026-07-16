@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildIssueWorktreePlan,
+  findConflictingIssuePrs,
   parseIssueNumber,
   renderPlan,
   slugifyTitle,
@@ -31,6 +32,12 @@ describe('issue-to-worktree bootstrap helper', () => {
     expect(plan.commands.duplicateChecks.map((command) => command.join(' '))).toContain(
       'git branch --all --list resolve/issue-1769-feat-onboarding-add-issue-to-worktree-bootstrap-helper remotes/origin/resolve/issue-1769-feat-onboarding-add-issue-to-worktree-bootstrap-helper',
     );
+    expect(plan.commands.preflight).toContainEqual([
+      'git',
+      'fetch',
+      'origin',
+      '+refs/heads/*:refs/remotes/origin/*',
+    ]);
     expect(plan.commands.create).toEqual([
       [
         'git',
@@ -66,6 +73,14 @@ describe('issue-to-worktree bootstrap helper', () => {
     expect(plan.worktreePath).toBe('/repo/.worktrees/issue-1769');
     expect(plan.commands.create).toEqual([
       ['git', 'worktree', 'add', '/repo/.worktrees/issue-1769', 'resolve/issue-1769-custom'],
+    ]);
+    expect(findConflictingIssuePrs(plan, [
+      { number: 2337, headRefName: 'resolve/issue-1769-custom', url: 'https://example.test/pr/2337' },
+    ])).toEqual([]);
+    expect(findConflictingIssuePrs(plan, [
+      { number: 2338, headRefName: 'resolve/issue-1769-other', url: 'https://example.test/pr/2338' },
+    ])).toEqual([
+      { number: 2338, headRefName: 'resolve/issue-1769-other', url: 'https://example.test/pr/2338' },
     ]);
   });
 
