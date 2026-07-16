@@ -175,7 +175,7 @@ describe('synthetic availability probes', () => {
       readFile: vi.fn(async () => '{}'),
     });
 
-    const dashboardProbe = (report.probes as Array<Record<string, string>>).find((probe) => probe.name === 'dashboard_health');
+    const dashboardProbe = (report.probes as Array<any>).find((probe) => probe.name === 'dashboard_health');
     expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3737/health', expect.objectContaining({ redirect: 'manual' }));
     expect(dashboardProbe?.status).toBe('unavailable');
     expect(dashboardProbe?.error).toContain('redirected');
@@ -183,6 +183,7 @@ describe('synthetic availability probes', () => {
 
   it('redacts credentials from dashboard health URLs in successful reports', async () => {
     const { runSyntheticAvailabilityProbes } = await loadScript();
+    const fetch = vi.fn(async () => ({ ok: true, status: 200 }));
 
     const report = await runSyntheticAvailabilityProbes({
       config: {
@@ -192,12 +193,15 @@ describe('synthetic availability probes', () => {
         timeoutMs: 100,
       },
       execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
-      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      fetch,
       openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
       readFile: vi.fn(async () => '{}'),
     });
 
-    const dashboardProbe = (report.probes as Array<Record<string, Record<string, string>>>).find((probe) => probe.name === 'dashboard_health');
+    const dashboardProbe = (report.probes as Array<any>).find((probe) => probe.name === 'dashboard_health');
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:3737/health?token=secret-token&api_key=secret-key#frag', expect.objectContaining({
+      headers: { Authorization: 'Basic dXNlcjpwYXNz' },
+    }));
     expect(dashboardProbe?.detail.url).toBe('http://127.0.0.1:3737/health');
     expect(JSON.stringify(dashboardProbe)).not.toContain('secret-token');
     expect(JSON.stringify(dashboardProbe)).not.toContain('secret-key');
@@ -220,10 +224,53 @@ describe('synthetic availability probes', () => {
       readFile: vi.fn(async () => 'opaque-approval-token-value'),
     });
 
-    const ledgerProbe = (report.probes as Array<Record<string, string>>).find((probe) => probe.name === 'approval_ledger_parse');
+    const ledgerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'approval_ledger_parse');
     expect(ledgerProbe?.status).toBe('unavailable');
     expect(ledgerProbe?.error).toBe('approval ledger contains invalid JSON');
     expect(JSON.stringify(ledgerProbe)).not.toContain('opaque-approval-token-value');
+  });
+
+  it('redacts suffixed secret labels from provider failure output', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: 'provider status',
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => {
+        if (file === 'gh') return '[]';
+        throw new Error('provider failed: GITHUB_TOKEN_VALUE ghp_secret AWS_ACCESS_KEY_ID AKIASECRET');
+      }),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.error).toContain('[REDACTED]');
+    expect(providerProbe?.error).not.toContain('ghp_secret');
+    expect(providerProbe?.error).not.toContain('AKIASECRET');
+  });
+
+  it('redacts basic-auth provider command details', async () => {
+    const { runSyntheticAvailabilityProbes } = await loadScript();
+    const report = await runSyntheticAvailabilityProbes({
+      config: {
+        repo: 'djm204/frankenbeast',
+        providerCommand: ['curl', '-u', 'user:pass', 'http://user:pass@127.0.0.1/health?token=secret-token'],
+        timeoutMs: 100,
+      },
+      execFile: vi.fn(async (file: string) => (file === 'gh' ? '[]' : 'provider ok')),
+      fetch: vi.fn(async () => ({ ok: true, status: 200 })),
+      openSqliteReadOnly: vi.fn(() => ({ prepare: () => ({ get: () => ({ count: 1 }) }), close: vi.fn() })),
+      readFile: vi.fn(async () => '{}'),
+    });
+
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
+    expect(providerProbe?.detail.command).toContain('-u [REDACTED] http://127.0.0.1/health');
+    expect(providerProbe?.detail.command).not.toContain('user:pass');
+    expect(providerProbe?.detail.command).not.toContain('secret-token');
   });
 
   it('emits compact one-line JSON for JSONL-friendly cron logs', () => {
@@ -266,7 +313,7 @@ describe('synthetic availability probes', () => {
       readFile: vi.fn(async () => '{}'),
     });
 
-    const providerProbe = (report.probes as Array<Record<string, Record<string, string>>>).find((probe) => probe.name === 'provider_status');
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
     expect(providerProbe?.detail.command).toContain('[REDACTED]');
     expect(providerProbe?.detail.command).not.toContain('secret-token');
     expect(providerProbe?.detail.command).not.toContain('super-secret');
@@ -286,7 +333,7 @@ describe('synthetic availability probes', () => {
       readFile: vi.fn(async () => '{}'),
     });
 
-    const providerProbe = (report.probes as Array<Record<string, Record<string, string>>>).find((probe) => probe.name === 'provider_status');
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
     expect(providerProbe?.detail.command).toContain('[REDACTED]');
     expect(providerProbe?.detail.command).not.toContain('bearer-token-value');
   });
@@ -308,7 +355,7 @@ describe('synthetic availability probes', () => {
       readFile: vi.fn(async () => '{}'),
     });
 
-    const providerProbe = (report.probes as Array<Record<string, string>>).find((probe) => probe.name === 'provider_status');
+    const providerProbe = (report.probes as Array<any>).find((probe) => probe.name === 'provider_status');
     expect(providerProbe?.error).toContain('[REDACTED]');
     expect(providerProbe?.error).not.toContain('super-secret');
     expect(providerProbe?.error).not.toContain('another-secret');

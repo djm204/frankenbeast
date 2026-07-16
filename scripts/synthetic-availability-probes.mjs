@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 const DEFAULT_TIMEOUT_MS = 5_000;
 const OUTPUT_LIMIT_BYTES = 1024 * 1024;
 const SECRET_ARG_PATTERN = /(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)/iu;
+const BASIC_AUTH_FLAGS = new Set(['-u', '--user', '--proxy-user']);
 function parseCommandLine(value) {
   if (!value) return undefined;
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
@@ -176,7 +177,7 @@ function redactText(value) {
   return String(value)
     .replace(/Bearer\s+\S+/giu, 'Bearer [REDACTED]')
     .replace(/((?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*\s*[=:]\s*)\S+/giu, '$1[REDACTED]')
-    .replace(/((?:--?[\w-]*(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w-]*|token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)\s+)\S+/giu, '$1[REDACTED]');
+    .replace(/((?:--?[\w-]*(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w-]*|(?:token|secret|password|passwd|authorization|api[-_]?key|access[-_]?key|credential)[\w.-]*)\s+)\S+/giu, '$1[REDACTED]');
 }
 
 function redactUrl(value) {
@@ -191,11 +192,15 @@ function redactUrl(value) {
     return redactText(value);
   }
 }
-
 function redactCommand(command) {
   return command.map((part, index) => {
     const previous = command[index - 1] ?? '';
+    const basicAuthAssignment = part.match(/^(--(?:proxy-)?user=).+/iu);
+    if (basicAuthAssignment) return `${basicAuthAssignment[1]}[REDACTED]`;
+    if (BASIC_AUTH_FLAGS.has(previous)) return '[REDACTED]';
     if (part.startsWith('Bearer ') || /^Bearer$/iu.test(previous) || SECRET_ARG_PATTERN.test(previous)) return '[REDACTED]';
+    const redactedUrl = redactUrl(part);
+    if (redactedUrl !== part) return redactedUrl;
     if (SECRET_ARG_PATTERN.test(part)) {
       const separator = part.includes('=') ? '=' : part.includes(':') ? ':' : null;
       if (separator) return `${part.slice(0, part.indexOf(separator) + 1)}[REDACTED]`;
@@ -204,6 +209,19 @@ function redactCommand(command) {
     }
     return part;
   });
+}
+
+function dashboardHealthRequest(value) {
+  const url = new URL(String(value));
+  const headers = {};
+  if (url.username || url.password) {
+    const username = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    headers.Authorization = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+    url.username = '';
+    url.password = '';
+  }
+  return { url: url.toString(), headers };
 }
 
 async function defaultOpenSqliteReadOnly(path) {
@@ -242,10 +260,12 @@ async function probeProviderStatus(config, deps) {
 
 async function probeDashboardHealth(config, deps) {
   if (!config.dashboardHealthUrl) throw new Error('missing dashboard health URL');
-  const response = await deps.fetch(config.dashboardHealthUrl, {
+  const request = dashboardHealthRequest(config.dashboardHealthUrl);
+  const response = await deps.fetch(request.url, {
     method: 'GET',
     redirect: 'manual',
     signal: AbortSignal.timeout(config.timeoutMs),
+    ...(Object.keys(request.headers).length > 0 ? { headers: request.headers } : {}),
   });
   if (response?.redirected || (Number(response?.status) >= 300 && Number(response?.status) < 400)) {
     throw new Error(`dashboard health redirected with HTTP ${response?.status ?? 'unknown'}`);
