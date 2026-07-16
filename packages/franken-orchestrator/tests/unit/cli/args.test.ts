@@ -356,9 +356,9 @@ describe('parseArgs', () => {
       expect(args.subcommand).toBe('issues');
     });
 
-    it('defaults issueLimit to 30 for issues subcommand', () => {
+    it('leaves issueLimit undefined for issues subcommand so the fetcher backlog-safe default applies', () => {
       const args = parseArgs(['issues']);
-      expect(args.issueLimit).toBe(30);
+      expect(args.issueLimit).toBeUndefined();
     });
 
     it('does not default issueLimit for other subcommands', () => {
