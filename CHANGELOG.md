@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.58.0](https://github.com/djm204/frankenbeast/compare/v0.57.0...v0.58.0) (2026-07-16)
+
+
+### Features
+
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+
+
+### Bug Fixes
+
+* **orchestrator:** make kanban updates idempotent ([#2549](https://github.com/djm204/frankenbeast/issues/2549)) ([9523167](https://github.com/djm204/frankenbeast/commit/95231673319fca0ebbd9a94dd3d1b42d3ce715ce))
+
+
+### Tests
+
+* **availability:** simulate provider outage fallback paths ([#2545](https://github.com/djm204/frankenbeast/issues/2545)) ([4b86f20](https://github.com/djm204/frankenbeast/commit/4b86f20ca109dad07edabfcb785c7df3b9fd3722))
+* **dr:** add restore rehearsal CI job ([#2546](https://github.com/djm204/frankenbeast/issues/2546)) ([8838488](https://github.com/djm204/frankenbeast/commit/883848837eaafd195f4a81b10b9c832d45f12cd8))
+
 ## [0.57.0](https://github.com/djm204/frankenbeast/compare/v0.56.0...v0.57.0) (2026-07-16)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.12.0...@franken/brain-v0.13.0) (2026-07-16)
+
+
+### Features
+
+* **memory:** add memory access audit trail ([#2317](https://github.com/djm204/frankenbeast/issues/2317)) ([ef889da](https://github.com/djm204/frankenbeast/commit/ef889dae092d996a6ca463e5abcaf5ed4d296158))
+
 ## [0.12.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.11.0...@franken/brain-v0.12.0) (2026-07-16)
 
 
