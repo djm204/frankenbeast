@@ -46,7 +46,8 @@ function extractPromiseTags(output: string): string[] {
     .filter((tag): tag is string => Boolean(tag && tag.length > 0));
 }
 
-function abortError(): Error {
+function abortError(reason?: unknown): Error {
+  if (reason instanceof Error) return reason;
   const error = new Error('MartinLoop sleep aborted');
   error.name = 'AbortError';
   return error;
@@ -63,14 +64,14 @@ export function sleepWithAbort(
   signal?: AbortSignal,
 ): Promise<void> {
   if (!signal) return sleepFn(ms);
-  if (signal.aborted) return Promise.reject(abortError());
+  if (signal.aborted) return Promise.reject(abortError(signal.reason));
 
   if (sleepFn === defaultSleep) {
     return new Promise((resolve, reject) => {
       const onAbort = (): void => {
         clearTimeout(timer);
         signal.removeEventListener('abort', onAbort);
-        reject(abortError());
+        reject(abortError(signal.reason));
       };
 
       const timer = setTimeout(() => {
@@ -85,7 +86,7 @@ export function sleepWithAbort(
   return new Promise((resolve, reject) => {
     const onAbort = (): void => {
       signal.removeEventListener('abort', onAbort);
-      reject(abortError());
+      reject(abortError(signal.reason));
     };
 
     signal.addEventListener('abort', onAbort, { once: true });
@@ -273,7 +274,7 @@ function spawnIteration(
 ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
     if (config.abortSignal?.aborted) {
-      reject(abortError());
+      reject(abortError(config.abortSignal.reason));
       return;
     }
 
@@ -313,7 +314,7 @@ function spawnIteration(
       settled = true;
       config.abortSignal?.removeEventListener('abort', onAbort);
       if (aborted) {
-        reject(abortError());
+        reject(abortError(config.abortSignal?.reason));
         return;
       }
       resolve(result);
@@ -628,6 +629,10 @@ export class MartinLoop {
       pendingSleepMs = 0;
 
       config.onIteration?.(iteration, iterResult);
+
+      if (config.abortSignal?.aborted) {
+        throw config.abortSignal.reason instanceof Error ? config.abortSignal.reason : abortError();
+      }
 
       chunkSession = await this.persistIterationSession({
         chunkSession,
